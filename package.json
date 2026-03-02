@@ -22,7 +22,9 @@
     "chatgpt",
     "chatgpt-connector",
     "openai",
-    "deep-research"
+    "deep-research",
+    "qualixar",
+    "agent-development-platform"
   ],
   "author": {
     "name": "Varun Pratap Bhardwaj",

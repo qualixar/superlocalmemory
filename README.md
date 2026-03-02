@@ -38,7 +38,7 @@
 </p>
 
 <p align="center">
-  <b>Created by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a></b> •
+  <b>A <a href="https://github.com/varun369">Qualixar</a> Product</b> · Created by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a> •
   <a href="https://github.com/sponsors/varun369">💖 Sponsor</a> •
   <a href="LICENSE">📜 MIT License</a>
 </p>
@@ -544,11 +544,21 @@ MIT License — use freely, even commercially. Just include the license.
 
 ## 👨‍💻 Author
 
-**Varun Pratap Bhardwaj** — Solution Architect
+**Varun Pratap Bhardwaj** — Founder, Qualixar · Solution Architect
 
 [![GitHub](https://img.shields.io/badge/GitHub-@varun369-181717?style=flat-square&logo=github)](https://github.com/varun369)
 
-Building tools that make AI actually useful for developers.
+Building the complete agent development platform at Qualixar — memory, testing, contracts, and security for AI agents.
+
+### Part of the Qualixar Agent Development Platform
+
+SuperLocalMemory is part of **Qualixar**, a suite of open-source tools for building reliable AI agents:
+
+| Product | What It Does |
+|---------|-------------|
+| **SuperLocalMemory** | Local-first AI agent memory |
+| **AgentAssert** | Behavioral contracts for AI agents |
+| **SkillFortify** | Agent skill supply chain security |
 
 ---
 
