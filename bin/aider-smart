@@ -35,11 +35,11 @@ echo ""
 if command -v slm &> /dev/null; then
     # Use slm command if available
     slm context > "$CONTEXT_FILE" 2>/dev/null || {
-        "$SLM_DIR/bin/superlocalmemoryv2:recall" "$project" --limit 5 > "$CONTEXT_FILE" 2>/dev/null || true
+        "$SLM_DIR/bin/superlocalmemoryv2-recall" "$project" --limit 5 > "$CONTEXT_FILE" 2>/dev/null || true
     }
 else
     # Fallback to direct command
-    "$SLM_DIR/bin/superlocalmemoryv2:recall" "$project" --limit 5 > "$CONTEXT_FILE" 2>/dev/null || true
+    "$SLM_DIR/bin/superlocalmemoryv2-recall" "$project" --limit 5 > "$CONTEXT_FILE" 2>/dev/null || true
 fi
 
 # Get coding patterns if available

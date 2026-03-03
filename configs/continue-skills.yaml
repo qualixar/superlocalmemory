@@ -5,19 +5,19 @@
 slashCommands:
   - name: "slm-remember"
     description: "Save to SuperLocalMemory"
-    run: "~/.claude-memory/bin/superlocalmemoryv2:remember \"{{input}}\""
+    run: "~/.claude-memory/bin/superlocalmemoryv2-remember \"{{input}}\""
 
   - name: "slm-recall"
     description: "Search SuperLocalMemory"
-    run: "~/.claude-memory/bin/superlocalmemoryv2:recall \"{{input}}\""
+    run: "~/.claude-memory/bin/superlocalmemoryv2-recall \"{{input}}\""
 
   - name: "slm-list"
     description: "List recent memories"
-    run: "~/.claude-memory/bin/superlocalmemoryv2:list"
+    run: "~/.claude-memory/bin/superlocalmemoryv2-list"
 
   - name: "slm-status"
     description: "SuperLocalMemory system status"
-    run: "~/.claude-memory/bin/superlocalmemoryv2:status"
+    run: "~/.claude-memory/bin/superlocalmemoryv2-status"
 
 # Usage in Continue.dev:
 #   /slm-remember Use FastAPI for REST APIs

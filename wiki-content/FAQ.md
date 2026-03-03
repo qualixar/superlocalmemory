@@ -103,10 +103,10 @@ You can feed this to Claude to get personalized suggestions.
 Yes! Create isolated contexts:
 
 ```bash
-superlocalmemoryv2:profile create work
-superlocalmemoryv2:profile create personal
-superlocalmemoryv2:profile create client-acme
-superlocalmemoryv2:profile switch work
+superlocalmemoryv2-profile create work
+superlocalmemoryv2-profile create personal
+superlocalmemoryv2-profile create client-acme
+superlocalmemoryv2-profile switch work
 ```
 
 Each profile has completely separate memories, graphs, and patterns.
@@ -405,7 +405,7 @@ pip install scikit-learn
 
 ### Memories not showing up in search
 
-1. Check if memory was added: `superlocalmemoryv2:list`
+1. Check if memory was added: `superlocalmemoryv2-list`
 2. Try exact phrase search
 3. Rebuild FTS index (rare): restart the app
 

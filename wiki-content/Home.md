@@ -161,10 +161,10 @@ You: *sighs and re-explains everything*
 
 ```bash
 # Save once
-superlocalmemoryv2:remember "Fixed auth bug - JWT tokens expiring too fast"
+superlocalmemoryv2-remember "Fixed auth bug - JWT tokens expiring too fast"
 
 # Recall forever
-superlocalmemoryv2:recall "auth bug"
+superlocalmemoryv2-recall "auth bug"
 # ✓ Found: "Fixed auth bug - JWT tokens expiring too fast"
 ```
 

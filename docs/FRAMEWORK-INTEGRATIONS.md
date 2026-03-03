@@ -240,7 +240,7 @@ history.clear()
 chat_store.delete_messages("user-1")
 
 # CLI: Reset entire profile
-# superlocalmemoryv2:reset soft --profile customer-support
+# superlocalmemoryv2-reset soft --profile customer-support
 ```
 
 ---
@@ -265,7 +265,7 @@ If you see "database is locked" errors:
 
 ```bash
 # Check if SuperLocalMemory is running correctly
-superlocalmemoryv2:status
+superlocalmemoryv2-status
 
 # Restart any MCP servers
 # (Close and reopen Cursor/Windsurf)
@@ -277,10 +277,10 @@ If a profile doesn't exist:
 
 ```bash
 # List available profiles
-superlocalmemoryv2:profile list
+superlocalmemoryv2-profile list
 
 # Create the profile
-superlocalmemoryv2:profile create work
+superlocalmemoryv2-profile create work
 ```
 
 ---

@@ -471,7 +471,7 @@ class TestNullFields:
             "tags": None,
         }
         features = extractor.extract_features(memory, "test")
-        assert len(features) == 10
+        assert len(features) == 20
         # All features should be in [0, 1] range
         for i, f in enumerate(features):
             assert 0.0 <= f <= 1.0, (
@@ -603,7 +603,7 @@ class TestCorruptJsonTags:
             "tags": "{invalid json[",  # corrupt
         }
         features = extractor.extract_features(memory, "python")
-        assert len(features) == 10
+        assert len(features) == 20
         # Should not crash, all features should be valid floats
         for f in features:
             assert isinstance(f, float)
@@ -866,6 +866,8 @@ class TestFeedbackCollectorNoDb:
         from src.learning.feedback_collector import FeedbackCollector
 
         collector = FeedbackCollector(learning_db=None)
+        # Force no DB (constructor auto-creates LearningDB when None passed)
+        collector.learning_db = None
 
         result = collector.record_memory_used(
             memory_id=1,
@@ -879,6 +881,7 @@ class TestFeedbackCollectorNoDb:
         from src.learning.feedback_collector import FeedbackCollector
 
         collector = FeedbackCollector(learning_db=None)
+        collector.learning_db = None
         summary = collector.get_feedback_summary()
         assert "error" in summary
         assert summary["total_signals"] == 0
@@ -888,9 +891,9 @@ class TestFeedbackCollectorNoDb:
         from src.learning.feedback_collector import FeedbackCollector
 
         collector = FeedbackCollector(learning_db=None)
-        # _has_positive_feedback returns True when no DB (safe default)
+        collector.learning_db = None
+        # _has_positive_feedback returns False when no DB
         assert collector._has_positive_feedback(1) is False
-        # Actually with None learning_db, it returns False as per the code
 
 
 class TestInvalidUsefulnessLevel:

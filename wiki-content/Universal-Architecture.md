@@ -109,13 +109,13 @@ Skills are slash commands that work inside AI coding assistants — Claude Code,
 
 | Skill | What It Does |
 |-------|-------------|
-| `/superlocalmemoryv2:remember` | Save a memory with optional tags and importance |
-| `/superlocalmemoryv2:recall` | Search your memories |
-| `/superlocalmemoryv2:list` | View recent memories |
-| `/superlocalmemoryv2:status` | Check system health |
-| `/superlocalmemoryv2:profile` | Switch active profile |
-| `/superlocalmemoryv2:reset` | Reset the current session |
-| `/superlocalmemoryv2:learning` | View learned patterns |
+| `/superlocalmemoryv2-remember` | Save a memory with optional tags and importance |
+| `/superlocalmemoryv2-recall` | Search your memories |
+| `/superlocalmemoryv2-list` | View recent memories |
+| `/superlocalmemoryv2-status` | Check system health |
+| `/superlocalmemoryv2-profile` | Switch active profile |
+| `/superlocalmemoryv2-reset` | Reset the current session |
+| `/superlocalmemoryv2-learning` | View learned patterns |
 
 [[Full guide: Universal Skills →|Universal-Skills]]
 

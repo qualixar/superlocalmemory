@@ -6,7 +6,7 @@
 # Licensed under MIT License
 #
 # This is a CONVENIENCE wrapper. Original commands still work:
-#   superlocalmemoryv2:remember, superlocalmemoryv2:recall, etc.
+#   superlocalmemoryv2-remember, superlocalmemoryv2-recall, etc.
 
 set -e
 
@@ -24,13 +24,13 @@ case "$1" in
     remember|save|store)
         shift
         # Calls existing command - no duplicate logic
-        "$SLM_DIR/bin/superlocalmemoryv2:remember" "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-remember" "$@"
         ;;
 
     recall|search|find)
         shift
         # Calls existing command - no duplicate logic
-        "$SLM_DIR/bin/superlocalmemoryv2:recall" "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-recall" "$@"
         ;;
 
     list|ls)
@@ -38,44 +38,44 @@ case "$1" in
         # Convert positional number to --limit flag
         # e.g., "slm list 5" becomes "--limit 5"
         if [ -n "$1" ] && [[ "$1" =~ ^[0-9]+$ ]]; then
-            "$SLM_DIR/bin/superlocalmemoryv2:list" --limit "$1"
+            "$SLM_DIR/bin/superlocalmemoryv2-list" --limit "$1"
         else
-            "$SLM_DIR/bin/superlocalmemoryv2:list" "$@"
+            "$SLM_DIR/bin/superlocalmemoryv2-list" "$@"
         fi
         ;;
 
     status|info|stats)
         # Calls existing command - no duplicate logic
-        "$SLM_DIR/bin/superlocalmemoryv2:status"
+        "$SLM_DIR/bin/superlocalmemoryv2-status"
         ;;
 
     profile)
         shift
         # Calls existing command - no duplicate logic
-        "$SLM_DIR/bin/superlocalmemoryv2:profile" "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-profile" "$@"
         ;;
 
     switch-profile)
         shift
         # Convenience alias: "slm switch-profile <name>" -> "slm profile switch <name>"
-        "$SLM_DIR/bin/superlocalmemoryv2:profile" switch "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-profile" switch "$@"
         ;;
 
     list-profiles)
         # Convenience alias: "slm list-profiles" -> "slm profile list"
-        "$SLM_DIR/bin/superlocalmemoryv2:profile" list
+        "$SLM_DIR/bin/superlocalmemoryv2-profile" list
         ;;
 
     create-profile)
         shift
         # Convenience alias: "slm create-profile <name>" -> "slm profile create <name>"
-        "$SLM_DIR/bin/superlocalmemoryv2:profile" create "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-profile" create "$@"
         ;;
 
     reset)
         shift
         # Calls existing command - no duplicate logic
-        "$SLM_DIR/bin/superlocalmemoryv2:reset" "$@"
+        "$SLM_DIR/bin/superlocalmemoryv2-reset" "$@"
         ;;
 
     ui|dashboard)
@@ -103,7 +103,7 @@ case "$1" in
     context)
         # NEW: Get context for current directory/project
         project=$(basename "$PWD")
-        "$SLM_DIR/bin/superlocalmemoryv2:recall" "$project" --limit 5
+        "$SLM_DIR/bin/superlocalmemoryv2-recall" "$project" --limit 5
         ;;
 
     graph)
@@ -361,12 +361,12 @@ ADVANCED:
   slm reset hard --confirm Hard reset (nuclear option)
 
 ORIGINAL COMMANDS (still work):
-  superlocalmemoryv2:remember <content>
-  superlocalmemoryv2:recall <query>
-  superlocalmemoryv2:list [N]
-  superlocalmemoryv2:status
-  superlocalmemoryv2:profile <command>
-  superlocalmemoryv2:reset <type>
+  superlocalmemoryv2-remember <content>
+  superlocalmemoryv2-recall <query>
+  superlocalmemoryv2-list [N]
+  superlocalmemoryv2-status
+  superlocalmemoryv2-profile <command>
+  superlocalmemoryv2-reset <type>
 
 EXAMPLES:
   slm remember "Use FastAPI for REST APIs" --tags python,backend

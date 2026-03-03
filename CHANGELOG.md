@@ -16,6 +16,14 @@ SuperLocalMemory V2 - Intelligent local memory system for AI coding assistants.
 
 ---
 
+## [2.8.2] - 2026-03-04
+
+### Fixed
+- Windows compatibility for repository cloning (#7)
+- Updated test assertions for v2.8 behavioral feature dimensions
+
+---
+
 ## [2.8.0] - 2026-02-26
 
 **Release Type:** Major Feature Release — "Memory That Manages Itself"

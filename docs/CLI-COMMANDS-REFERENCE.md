@@ -6,7 +6,7 @@
 
 SuperLocalMemory V2 offers three access methods:
 1. **Universal CLI** - Simple `slm` commands (NEW in v2.1.0)
-2. **Original CLI** - Full `superlocalmemoryv2:*` commands
+2. **Original CLI** - Full `superlocalmemoryv2-*` commands
 3. **MCP/Skills** - IDE-specific integration (auto-configured)
 
 All methods use the same local SQLite database.
@@ -105,9 +105,9 @@ All original commands continue to work unchanged. Use these if you prefer explic
 
 ### Check System Status
 ```bash
-superlocalmemoryv2:status
+superlocalmemoryv2-status
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:status
+~/.claude-memory/bin/superlocalmemoryv2-status
 ```
 Shows: total memories, graph stats, clusters, patterns, database size
 
@@ -119,38 +119,38 @@ Shows: total memories, graph stats, clusters, patterns, database size
 
 ### List All Profiles
 ```bash
-superlocalmemoryv2:profile list
+superlocalmemoryv2-profile list
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:profile list
+~/.claude-memory/bin/superlocalmemoryv2-profile list
 ```
 Shows all profiles with active marker (→)
 
 ### Show Current Active Profile
 ```bash
-superlocalmemoryv2:profile current
+superlocalmemoryv2-profile current
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:profile current
+~/.claude-memory/bin/superlocalmemoryv2-profile current
 ```
 Shows current profile details and memory count
 
 ### Create New Profile
 ```bash
 # Empty profile
-superlocalmemoryv2:profile create work --description "Work projects"
+superlocalmemoryv2-profile create work --description "Work projects"
 
 # Copy from current profile
-superlocalmemoryv2:profile create personal --from-current
+superlocalmemoryv2-profile create personal --from-current
 ```
 
 ### Switch Profile
 ```bash
-superlocalmemoryv2:profile switch work
+superlocalmemoryv2-profile switch work
 ```
 **⚠️ Restart your IDE after switching if using MCP integration.**
 
 ### Delete Profile
 ```bash
-superlocalmemoryv2:profile delete old-project
+superlocalmemoryv2-profile delete old-project
 ```
 - Cannot delete "default" profile
 - Cannot delete currently active profile
@@ -165,15 +165,15 @@ superlocalmemoryv2:profile delete old-project
 ```bash
 slm status
 # OR
-superlocalmemoryv2:status
+superlocalmemoryv2-status
 ```
 **Always check status before any reset operation!**
 
 ### Soft Reset
 ```bash
-superlocalmemoryv2:reset soft
+superlocalmemoryv2-reset soft
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:reset soft
+~/.claude-memory/bin/superlocalmemoryv2-reset soft
 ```
 - Clears all memories from current profile
 - Clears graph, patterns, tree structure
@@ -183,9 +183,9 @@ superlocalmemoryv2:reset soft
 
 ### Hard Reset
 ```bash
-superlocalmemoryv2:reset hard --confirm
+superlocalmemoryv2-reset hard --confirm
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:reset hard --confirm
+~/.claude-memory/bin/superlocalmemoryv2-reset hard --confirm
 ```
 - ⚠️ **NUCLEAR OPTION** ⚠️
 - Deletes entire database file
@@ -195,9 +195,9 @@ superlocalmemoryv2:reset hard --confirm
 
 ### Layer Reset (Surgical)
 ```bash
-superlocalmemoryv2:reset layer --layers graph patterns
+superlocalmemoryv2-reset layer --layers graph patterns
 # OR
-~/.claude-memory/bin/superlocalmemoryv2:reset layer --layers graph patterns
+~/.claude-memory/bin/superlocalmemoryv2-reset layer --layers graph patterns
 ```
 Available layers:
 - `graph` - Clear graph nodes, edges, clusters

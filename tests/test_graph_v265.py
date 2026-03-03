@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-async def test_graph_interactions():
+async def run_graph_interactions():
     """Test SuperLocalMemory graph visualization and interactions"""
     from playwright.async_api import async_playwright
 
@@ -268,7 +268,7 @@ async def main():
     print("  • Graph responsiveness")
     print("=" * 70 + "\n")
 
-    success = await test_graph_interactions()
+    success = await run_graph_interactions()
 
     if success:
         print("\n" + "=" * 70)

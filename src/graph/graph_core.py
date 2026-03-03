@@ -80,7 +80,7 @@ class GraphEngine:
                 logger.error(f"Missing required tables: {missing}")
                 return {'success': False, 'error': 'database_not_initialized',
                         'message': f"Database not initialized. Missing tables: {', '.join(missing)}",
-                        'fix': "Run 'superlocalmemoryv2:status' first to initialize the database, or add some memories."}
+                        'fix': "Run 'superlocalmemoryv2-status' first to initialize the database, or add some memories."}
 
             active_profile = self._get_active_profile()
             logger.info(f"Building graph for profile: {active_profile}")
@@ -91,12 +91,12 @@ class GraphEngine:
             if len(memories) == 0:
                 return {'success': False, 'error': 'no_memories',
                         'message': 'No memories found in database.',
-                        'fix': "Add some memories first: superlocalmemoryv2:remember 'Your content here'"}
+                        'fix': "Add some memories first: superlocalmemoryv2-remember 'Your content here'"}
             if len(memories) < 2:
                 return {'success': False, 'error': 'insufficient_memories',
                         'message': 'Need at least 2 memories to build knowledge graph.',
                         'memories': len(memories),
-                        'fix': "Add more memories: superlocalmemoryv2:remember 'Your content here'"}
+                        'fix': "Add more memories: superlocalmemoryv2-remember 'Your content here'"}
 
             memories = apply_sampling(cursor, memories, active_profile)
             clear_profile_graph_data(cursor, conn, memories, active_profile)

@@ -61,7 +61,7 @@ Simple Storage → Intelligent Organization → Adaptive Learning
 │  • Continue.dev - MCP context providers                    │
 ├─────────────────────────────────────────────────────────────┤
 │ TIER 2: Skills & Commands                                  │
-│  • Claude Code - /superlocalmemoryv2:*                     │
+│  • Claude Code - /superlocalmemoryv2-*                     │
 │  • Continue.dev - /slm-* slash commands                    │
 │  • Cody - Custom commands via settings                     │
 ├─────────────────────────────────────────────────────────────┤
@@ -148,8 +148,8 @@ Installation automatically detects and configures:
 Provides simple syntax for all operations:
 
 ```bash
-slm remember "content"    # Calls superlocalmemoryv2:remember
-slm recall "query"        # Calls superlocalmemoryv2:recall
+slm remember "content"    # Calls superlocalmemoryv2-remember
+slm recall "query"        # Calls superlocalmemoryv2-recall
 slm list                  # Recent memories
 slm status                # System health
 slm profile list          # Profile management

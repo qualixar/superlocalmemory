@@ -33,7 +33,7 @@ After installation, restart any IDE you want to use SuperLocalMemory with.
 
 ### Step 3: Start Using It
 - **In Cursor/Windsurf:** Just talk naturally - "Remember that we use FastAPI for APIs"
-- **In Claude Code:** Use `/superlocalmemoryv2:remember` or the new `slm` commands
+- **In Claude Code:** Use `/superlocalmemoryv2-remember` or the new `slm` commands
 - **In Terminal:** Use `slm remember "content"`
 
 ---
@@ -48,11 +48,11 @@ After installation, restart any IDE you want to use SuperLocalMemory with.
 
 **Usage:**
 ```
-/superlocalmemoryv2:remember "Use FastAPI for REST APIs"
-/superlocalmemoryv2:recall "FastAPI"
-/superlocalmemoryv2:list
-/superlocalmemoryv2:status
-/superlocalmemoryv2:profile list
+/superlocalmemoryv2-remember "Use FastAPI for REST APIs"
+/superlocalmemoryv2-recall "FastAPI"
+/superlocalmemoryv2-list
+/superlocalmemoryv2-status
+/superlocalmemoryv2-profile list
 ```
 
 **OR use the simpler CLI:**
@@ -169,7 +169,7 @@ Continue's AI can also call memory tools directly.
 slashCommands:
   - name: "slm-remember"
     description: "Save to SuperLocalMemory"
-    run: "~/.claude-memory/bin/superlocalmemoryv2:remember \"{{input}}\""
+    run: "~/.claude-memory/bin/superlocalmemoryv2-remember \"{{input}}\""
 
 # For MCP tools
 contextProviders:
@@ -293,7 +293,7 @@ ChatGPT: [calls fetch(42)]
 
 **Commands Installed:**
 - `slm` - Main command
-- All original `superlocalmemoryv2:*` commands still work
+- All original `superlocalmemoryv2-*` commands still work
 
 **Usage:**
 ```bash
@@ -335,7 +335,7 @@ All access methods use the **SAME local SQLite database**:
 │            ACCESS METHODS                   │
 ├─────────────────────────────────────────────┤
 │ TIER 1: Skills                              │
-│  • Claude Code: /superlocalmemoryv2:*       │
+│  • Claude Code: /superlocalmemoryv2-*       │
 │  • Continue: /slm-*                         │
 │  • Cody: /slm-*                            │
 ├─────────────────────────────────────────────┤
@@ -359,7 +359,7 @@ All access methods use the **SAME local SQLite database**:
          └───────────────────┘
 ```
 
-**Key Point:** No matter which method you use, all data goes to the same place. You can use `/superlocalmemoryv2:remember` in Claude Code, then `slm recall` in terminal, and see the same memories.
+**Key Point:** No matter which method you use, all data goes to the same place. You can use `/superlocalmemoryv2-remember` in Claude Code, then `slm recall` in terminal, and see the same memories.
 
 ---
 
@@ -453,11 +453,11 @@ python3 ~/.claude-memory/mcp_server.py --transport http --port 8001
 
 | Old Command | Still Works? | New Alternative |
 |-------------|--------------|-----------------|
-| `superlocalmemoryv2:remember` | ✅ Yes | `slm remember` |
-| `superlocalmemoryv2:recall` | ✅ Yes | `slm recall` |
-| `superlocalmemoryv2:list` | ✅ Yes | `slm list` |
-| `superlocalmemoryv2:status` | ✅ Yes | `slm status` |
-| `superlocalmemoryv2:profile` | ✅ Yes | `slm profile` |
+| `superlocalmemoryv2-remember` | ✅ Yes | `slm remember` |
+| `superlocalmemoryv2-recall` | ✅ Yes | `slm recall` |
+| `superlocalmemoryv2-list` | ✅ Yes | `slm list` |
+| `superlocalmemoryv2-status` | ✅ Yes | `slm status` |
+| `superlocalmemoryv2-profile` | ✅ Yes | `slm profile` |
 
 **Nothing breaks. Everything gains new capabilities.**
 

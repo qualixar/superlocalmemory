@@ -7,7 +7,7 @@ name: Build Windows Installer
 
 on:
   # Auto-trigger disabled — Windows cannot checkout files with ':' in filename
-  # (bin/superlocalmemoryv2:list etc.) — Fix planned for v2.4.0 (rename bin files)
+  # (bin/superlocalmemoryv2-list etc.) — Fix planned for v2.4.0 (rename bin files)
   # push:
   #   tags:
   #     - 'v*-installer'
