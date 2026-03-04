@@ -260,56 +260,55 @@ class CrossProjectAggregator:
 
         try:
             conn = sqlite3.connect(str(self.memory_db_path), timeout=10)
-            conn.execute("PRAGMA busy_timeout=5000")
-            cursor = conn.cursor()
+            try:
+                conn.execute("PRAGMA busy_timeout=5000")
+                cursor = conn.cursor()
 
-            # Get distinct profiles
-            cursor.execute(
-                "SELECT DISTINCT profile FROM memories "
-                "WHERE profile IS NOT NULL ORDER BY profile"
-            )
-            profiles = [row[0] for row in cursor.fetchall()]
+                # Get distinct profiles
+                cursor.execute(
+                    "SELECT DISTINCT profile FROM memories "
+                    "WHERE profile IS NOT NULL ORDER BY profile"
+                )
+                profiles = [row[0] for row in cursor.fetchall()]
 
-            if not profiles:
-                # Fallback: if no profile column or all NULL, treat as 'default'
-                cursor.execute("SELECT id FROM memories ORDER BY created_at")
-                all_ids = [row[0] for row in cursor.fetchall()]
-                if all_ids:
-                    # Get the latest timestamp
+                if not profiles:
+                    # Fallback: if no profile column or all NULL, treat as 'default'
+                    cursor.execute("SELECT id FROM memories ORDER BY created_at")
+                    all_ids = [row[0] for row in cursor.fetchall()]
+                    if all_ids:
+                        # Get the latest timestamp
+                        cursor.execute(
+                            "SELECT MAX(created_at) FROM memories"
+                        )
+                        latest = cursor.fetchone()[0] or datetime.now().isoformat()
+                        results.append({
+                            "profile": "default",
+                            "memory_ids": all_ids,
+                            "latest_timestamp": latest,
+                        })
+
+                # For each profile, get memory IDs and latest timestamp
+                for profile in profiles:
                     cursor.execute(
-                        "SELECT MAX(created_at) FROM memories"
+                        "SELECT id FROM memories WHERE profile = ? ORDER BY created_at",
+                        (profile,),
+                    )
+                    memory_ids = [row[0] for row in cursor.fetchall()]
+
+                    cursor.execute(
+                        "SELECT MAX(created_at) FROM memories WHERE profile = ?",
+                        (profile,),
                     )
                     latest = cursor.fetchone()[0] or datetime.now().isoformat()
-                    results.append({
-                        "profile": "default",
-                        "memory_ids": all_ids,
-                        "latest_timestamp": latest,
-                    })
+
+                    if memory_ids:
+                        results.append({
+                            "profile": profile,
+                            "memory_ids": memory_ids,
+                            "latest_timestamp": latest,
+                        })
+            finally:
                 conn.close()
-                return results
-
-            # For each profile, get memory IDs and latest timestamp
-            for profile in profiles:
-                cursor.execute(
-                    "SELECT id FROM memories WHERE profile = ? ORDER BY created_at",
-                    (profile,),
-                )
-                memory_ids = [row[0] for row in cursor.fetchall()]
-
-                cursor.execute(
-                    "SELECT MAX(created_at) FROM memories WHERE profile = ?",
-                    (profile,),
-                )
-                latest = cursor.fetchone()[0] or datetime.now().isoformat()
-
-                if memory_ids:
-                    results.append({
-                        "profile": profile,
-                        "memory_ids": memory_ids,
-                        "latest_timestamp": latest,
-                    })
-
-            conn.close()
 
         except sqlite3.OperationalError as e:
             # Handle case where 'profile' column doesn't exist
@@ -320,18 +319,20 @@ class CrossProjectAggregator:
             )
             try:
                 conn = sqlite3.connect(str(self.memory_db_path), timeout=10)
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM memories ORDER BY created_at")
-                all_ids = [row[0] for row in cursor.fetchall()]
-                if all_ids:
-                    cursor.execute("SELECT MAX(created_at) FROM memories")
-                    latest = cursor.fetchone()[0] or datetime.now().isoformat()
-                    results.append({
-                        "profile": "default",
-                        "memory_ids": all_ids,
-                        "latest_timestamp": latest,
-                    })
-                conn.close()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT id FROM memories ORDER BY created_at")
+                    all_ids = [row[0] for row in cursor.fetchall()]
+                    if all_ids:
+                        cursor.execute("SELECT MAX(created_at) FROM memories")
+                        latest = cursor.fetchone()[0] or datetime.now().isoformat()
+                        results.append({
+                            "profile": "default",
+                            "memory_ids": all_ids,
+                            "latest_timestamp": latest,
+                        })
+                finally:
+                    conn.close()
             except Exception as inner_e:
                 logger.error("Failed to read memory.db: %s", inner_e)
 

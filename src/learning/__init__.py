@@ -18,6 +18,7 @@ Dependencies (all optional):
 
 import logging
 from pathlib import Path
+from typing import Any, Optional
 
 logger = logging.getLogger("superlocalmemory.learning")
 
@@ -85,7 +86,7 @@ _feedback_collector = None
 _engagement_tracker = None
 
 
-def get_learning_db():
+def get_learning_db() -> Any:
     """Get or create the LearningDB singleton."""
     global _learning_db
     if _learning_db is None:
@@ -98,7 +99,7 @@ def get_learning_db():
     return _learning_db
 
 
-def get_adaptive_ranker():
+def get_adaptive_ranker() -> Any:
     """Get or create the AdaptiveRanker singleton."""
     global _adaptive_ranker
     if _adaptive_ranker is None:
@@ -111,7 +112,7 @@ def get_adaptive_ranker():
     return _adaptive_ranker
 
 
-def get_feedback_collector():
+def get_feedback_collector() -> Any:
     """Get or create the FeedbackCollector singleton."""
     global _feedback_collector
     if _feedback_collector is None:
@@ -124,7 +125,7 @@ def get_feedback_collector():
     return _feedback_collector
 
 
-def get_engagement_tracker():
+def get_engagement_tracker() -> Any:
     """Get or create the EngagementTracker singleton."""
     global _engagement_tracker
     if _engagement_tracker is None:

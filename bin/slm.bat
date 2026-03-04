@@ -49,7 +49,7 @@ exit /b 1
 
 REM Parse command
 if "%1"=="" (
-    echo SuperLocalMemory V2.1.0 - Universal AI Memory System
+    echo SuperLocalMemory - Universal AI Memory System
     echo.
     echo Usage: slm [command] [options]
     echo.
@@ -145,7 +145,7 @@ if exist "%INSTALL_DIR%\memory-profiles.py" (
 exit /b %ERRORLEVEL%
 
 :show_help
-echo SuperLocalMemory V2.1.0 - Universal AI Memory System
+echo SuperLocalMemory - Universal AI Memory System
 echo.
 echo Usage: slm [command] [options]
 echo.
@@ -188,7 +188,7 @@ echo Report issues: https://github.com/varun369/SuperLocalMemoryV2/issues
 exit /b 0
 
 :show_version
-echo SuperLocalMemory V2.1.0-universal
+echo SuperLocalMemory V2.8.3
 echo Copyright (c) 2026 Varun Pratap Bhardwaj
 echo Licensed under MIT License
 echo Repository: https://github.com/varun369/SuperLocalMemoryV2

@@ -45,7 +45,7 @@ class CompressionConfig:
                 return json.load(f)
         return {}
 
-    def save(self):
+    def save(self) -> None:
         """Save configuration back to config.json."""
         with open(CONFIG_PATH, 'w') as f:
             json.dump(self.config, f, indent=2)
@@ -74,7 +74,7 @@ class CompressionConfig:
     def preserve_recently_accessed(self) -> bool:
         return self.compression_settings.get('preserve_recently_accessed', True)
 
-    def initialize_defaults(self):
+    def initialize_defaults(self) -> None:
         """Initialize compression settings in config if not present."""
         if 'compression' not in self.config:
             self.config['compression'] = {

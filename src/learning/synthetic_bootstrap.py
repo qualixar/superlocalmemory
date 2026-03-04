@@ -36,9 +36,6 @@ Research Backing:
 
 import hashlib
 import logging
-import re
-import sqlite3
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -59,78 +56,26 @@ except ImportError:
     HAS_NUMPY = False
 
 from .feature_extractor import FeatureExtractor, FEATURE_NAMES, NUM_FEATURES
+from .bootstrap import (
+    MEMORY_DB_PATH,
+    MODELS_DIR,
+    MODEL_PATH,
+    MIN_MEMORIES_FOR_BOOTSTRAP,
+    BOOTSTRAP_CONFIG,
+    BOOTSTRAP_PARAMS,
+    extract_keywords,
+    get_memory_count,
+    get_memories_by_access,
+    get_memories_by_importance,
+    get_recent_memories,
+    get_learned_patterns,
+    search_memories,
+    find_negative_memories,
+    diverse_sample,
+    count_sources,
+)
 
 logger = logging.getLogger("superlocalmemory.learning.synthetic_bootstrap")
-
-# ============================================================================
-# Constants
-# ============================================================================
-
-MEMORY_DB_PATH = Path.home() / ".claude-memory" / "memory.db"
-MODELS_DIR = Path.home() / ".claude-memory" / "models"
-MODEL_PATH = MODELS_DIR / "ranker.txt"
-
-# Minimum memories needed before bootstrap makes sense
-MIN_MEMORIES_FOR_BOOTSTRAP = 50
-
-# Tiered config — bootstrap model complexity scales with data size
-BOOTSTRAP_CONFIG = {
-    'small': {
-        'min_memories': 50,
-        'max_memories': 499,
-        'target_samples': 200,
-        'n_estimators': 30,
-        'max_depth': 3,
-    },
-    'medium': {
-        'min_memories': 500,
-        'max_memories': 4999,
-        'target_samples': 1000,
-        'n_estimators': 50,
-        'max_depth': 4,
-    },
-    'large': {
-        'min_memories': 5000,
-        'max_memories': float('inf'),
-        'target_samples': 2000,
-        'n_estimators': 100,
-        'max_depth': 6,
-    },
-}
-
-# LightGBM bootstrap parameters — MORE aggressive regularization than
-# real training because synthetic data has systematic biases
-BOOTSTRAP_PARAMS = {
-    'objective': 'lambdarank',
-    'metric': 'ndcg',
-    'ndcg_eval_at': [5, 10],
-    'learning_rate': 0.1,
-    'num_leaves': 8,
-    'max_depth': 3,
-    'min_child_samples': 5,
-    'subsample': 0.7,
-    'reg_alpha': 0.5,
-    'reg_lambda': 2.0,
-    'boosting_type': 'dart',
-    'verbose': -1,
-}
-
-# English stopwords for keyword extraction (no external deps)
-_STOPWORDS = frozenset({
-    'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-    'of', 'with', 'by', 'from', 'is', 'it', 'this', 'that', 'was', 'are',
-    'be', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would',
-    'could', 'should', 'may', 'might', 'can', 'not', 'no', 'if', 'then',
-    'so', 'as', 'up', 'out', 'about', 'into', 'over', 'after', 'before',
-    'when', 'where', 'how', 'what', 'which', 'who', 'whom', 'why',
-    'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
-    'some', 'such', 'than', 'too', 'very', 'just', 'also', 'now',
-    'here', 'there', 'use', 'used', 'using', 'make', 'made',
-    'need', 'needed', 'get', 'got', 'set', 'new', 'old', 'one', 'two',
-})
-
-# Minimum word length for keyword extraction
-_MIN_KEYWORD_LENGTH = 3
 
 
 class SyntheticBootstrapper:
@@ -232,18 +177,7 @@ class SyntheticBootstrapper:
 
     def _get_memory_count(self) -> int:
         """Count total memories in memory.db."""
-        if not self._memory_db.exists():
-            return 0
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM memories')
-            count = cursor.fetchone()[0]
-            conn.close()
-            return count
-        except Exception as e:
-            logger.warning("Failed to count memories: %s", e)
-            return 0
+        return get_memory_count(self._memory_db)
 
     # ========================================================================
     # Synthetic Data Generation
@@ -699,26 +633,7 @@ class SyntheticBootstrapper:
 
         These are memories the user keeps coming back to — strong positive signal.
         """
-        if not self._memory_db.exists():
-            return []
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, content, summary, project_name, tags,
-                       category, importance, created_at, access_count
-                FROM memories
-                WHERE access_count >= ?
-                ORDER BY access_count DESC
-                LIMIT 100
-            ''', (min_access,))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.warning("Failed to fetch high-access memories: %s", e)
-            return []
+        return get_memories_by_access(self._memory_db, min_access)
 
     def _get_memories_by_importance(self, min_importance: int = 8) -> List[dict]:
         """
@@ -726,48 +641,11 @@ class SyntheticBootstrapper:
 
         High importance = user explicitly rated these as valuable.
         """
-        if not self._memory_db.exists():
-            return []
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, content, summary, project_name, tags,
-                       category, importance, created_at, access_count
-                FROM memories
-                WHERE importance >= ?
-                ORDER BY importance DESC
-                LIMIT 100
-            ''', (min_importance,))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.warning("Failed to fetch high-importance memories: %s", e)
-            return []
+        return get_memories_by_importance(self._memory_db, min_importance)
 
     def _get_recent_memories(self, limit: int = 30) -> List[dict]:
         """Fetch the N most recently created memories."""
-        if not self._memory_db.exists():
-            return []
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, content, summary, project_name, tags,
-                       category, importance, created_at, access_count
-                FROM memories
-                ORDER BY created_at DESC
-                LIMIT ?
-            ''', (limit,))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.warning("Failed to fetch recent memories: %s", e)
-            return []
+        return get_recent_memories(self._memory_db, limit)
 
     def _get_learned_patterns(
         self,
@@ -782,36 +660,7 @@ class SyntheticBootstrapper:
         Returns empty list if identity_patterns table doesn't exist
         (backward compatible with pre-v2.3 databases).
         """
-        if not self._memory_db.exists():
-            return []
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            # Check if table exists (backward compatibility)
-            cursor.execute('''
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='identity_patterns'
-            ''')
-            if cursor.fetchone() is None:
-                conn.close()
-                return []
-
-            cursor.execute('''
-                SELECT id, pattern_type, key, value, confidence,
-                       evidence_count, category
-                FROM identity_patterns
-                WHERE confidence >= ?
-                ORDER BY confidence DESC
-                LIMIT 50
-            ''', (min_confidence,))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.warning("Failed to fetch learned patterns: %s", e)
-            return []
+        return get_learned_patterns(self._memory_db, min_confidence)
 
     def _search_memories(self, query: str, limit: int = 20) -> List[dict]:
         """
@@ -820,38 +669,7 @@ class SyntheticBootstrapper:
         Used to find memories matching synthetic query terms.
         This is a lightweight search — no TF-IDF, no HNSW, just FTS5.
         """
-        if not self._memory_db.exists():
-            return []
-        if not query or not query.strip():
-            return []
-
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            # Clean query for FTS5 (same approach as memory_store_v2.search)
-            fts_tokens = re.findall(r'\w+', query)
-            if not fts_tokens:
-                conn.close()
-                return []
-            fts_query = ' OR '.join(fts_tokens)
-
-            cursor.execute('''
-                SELECT m.id, m.content, m.summary, m.project_name, m.tags,
-                       m.category, m.importance, m.created_at, m.access_count
-                FROM memories m
-                JOIN memories_fts fts ON m.id = fts.rowid
-                WHERE memories_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-            ''', (fts_query, limit))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.debug("FTS5 search failed (may not exist yet): %s", e)
-            return []
+        return search_memories(self._memory_db, query, limit)
 
     def _find_negative_memories(
         self,
@@ -865,51 +683,7 @@ class SyntheticBootstrapper:
         Simple heuristic: pick memories from a different category or project.
         Falls back to random sample if no structured differences available.
         """
-        if not self._memory_db.exists():
-            return []
-        exclude_ids = exclude_ids or set()
-
-        try:
-            conn = sqlite3.connect(str(self._memory_db), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            anchor_project = anchor_memory.get('project_name', '')
-            anchor_category = anchor_memory.get('category', '')
-
-            # Try to find memories from different project or category
-            conditions = []
-            params: list = []
-
-            if anchor_project:
-                conditions.append('project_name != ?')
-                params.append(anchor_project)
-            if anchor_category:
-                conditions.append('category != ?')
-                params.append(anchor_category)
-
-            # Exclude specified IDs
-            if exclude_ids:
-                placeholders = ','.join('?' for _ in exclude_ids)
-                conditions.append(f'id NOT IN ({placeholders})')
-                params.extend(exclude_ids)
-
-            where_clause = ' AND '.join(conditions) if conditions else '1=1'
-
-            cursor.execute(f'''
-                SELECT id, content, summary, project_name, tags,
-                       category, importance, created_at, access_count
-                FROM memories
-                WHERE {where_clause}
-                ORDER BY RANDOM()
-                LIMIT ?
-            ''', (*params, limit))
-            results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            return results
-        except Exception as e:
-            logger.debug("Failed to find negative memories: %s", e)
-            return []
+        return find_negative_memories(self._memory_db, anchor_memory, exclude_ids, limit)
 
     # ========================================================================
     # Text Processing
@@ -926,24 +700,7 @@ class SyntheticBootstrapper:
 
         No external NLP dependencies — just regex + counter.
         """
-        if not content:
-            return []
-
-        # Tokenize: extract alphanumeric words
-        words = re.findall(r'[a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9]|[a-zA-Z]', content.lower())
-
-        # Filter stopwords and short words
-        meaningful = [
-            w for w in words
-            if w not in _STOPWORDS and len(w) >= _MIN_KEYWORD_LENGTH
-        ]
-
-        if not meaningful:
-            return []
-
-        # Count and return top N
-        counter = Counter(meaningful)
-        return [word for word, _count in counter.most_common(top_n)]
+        return extract_keywords(content, top_n)
 
     # ========================================================================
     # Utility
@@ -960,50 +717,11 @@ class SyntheticBootstrapper:
         Takes proportional samples from each source strategy to ensure
         the training data isn't dominated by one strategy.
         """
-        if len(records) <= target:
-            return records
-
-        # Group by source
-        by_source: Dict[str, List[dict]] = {}
-        for r in records:
-            src = r.get('source', 'unknown')
-            if src not in by_source:
-                by_source[src] = []
-            by_source[src].append(r)
-
-        # Proportional allocation
-        n_sources = len(by_source)
-        if n_sources == 0:
-            return records[:target]
-
-        per_source = max(1, target // n_sources)
-        sampled = []
-
-        for source, source_records in by_source.items():
-            # Take up to per_source from each, or all if fewer
-            take = min(len(source_records), per_source)
-            sampled.extend(source_records[:take])
-
-        # If under target, fill from remaining
-        if len(sampled) < target:
-            used_ids = {(r['query_hash'], r['memory_id']) for r in sampled}
-            for r in records:
-                if len(sampled) >= target:
-                    break
-                key = (r['query_hash'], r['memory_id'])
-                if key not in used_ids:
-                    sampled.append(r)
-                    used_ids.add(key)
-
-        return sampled[:target]
+        return diverse_sample(records, target)
 
     def _count_sources(self, records: List[dict]) -> Dict[str, int]:
         """Count records by source strategy."""
-        counts: Dict[str, int] = {}
-        for r in records:
-            src = r.get('source', 'unknown')
-            counts[src] = counts.get(src, 0) + 1
-        return counts
+        return count_sources(records)
 
 
 # ============================================================================

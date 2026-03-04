@@ -53,7 +53,7 @@ class ProvenanceTracker:
             return cls._instances[key]
 
     @classmethod
-    def reset_instance(cls, db_path: Optional[Path] = None):
+    def reset_instance(cls, db_path: Optional[Path] = None) -> None:
         """Remove singleton. Used for testing."""
         with cls._instances_lock:
             if db_path is None:
@@ -154,7 +154,7 @@ class ProvenanceTracker:
         source_protocol: str = "cli",
         trust_score: float = 1.0,
         derived_from: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Record provenance metadata for a memory.
 

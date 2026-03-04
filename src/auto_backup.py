@@ -157,8 +157,10 @@ class AutoBackup:
             # Use SQLite backup API for consistency (safe even during writes)
             source_conn = sqlite3.connect(self.db_path)
             backup_conn = sqlite3.connect(backup_path)
-            source_conn.backup(backup_conn)
-            backup_conn.close()
+            try:
+                source_conn.backup(backup_conn)
+            finally:
+                backup_conn.close()
             source_conn.close()
 
             # Get backup size
@@ -179,8 +181,10 @@ class AutoBackup:
                     learning_backup_path = self.backup_dir / learning_backup_name
                     l_source = sqlite3.connect(learning_db)
                     l_backup = sqlite3.connect(learning_backup_path)
-                    l_source.backup(l_backup)
-                    l_backup.close()
+                    try:
+                        l_source.backup(l_backup)
+                    finally:
+                        l_backup.close()
                     l_source.close()
                     l_size = learning_backup_path.stat().st_size / (1024 * 1024)
                     logger.info(f"Learning backup created: {learning_backup_name} ({l_size:.1f} MB)")
@@ -281,8 +285,10 @@ class AutoBackup:
             # Restore using SQLite backup API
             source_conn = sqlite3.connect(backup_path)
             target_conn = sqlite3.connect(target_db)
-            source_conn.backup(target_conn)
-            target_conn.close()
+            try:
+                source_conn.backup(target_conn)
+            finally:
+                target_conn.close()
             source_conn.close()
 
             logger.info(f"Restored from backup: {filename} → {target_db.name}")

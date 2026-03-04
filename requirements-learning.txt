@@ -1,12 +1,12 @@
-# SuperLocalMemory v2.7 - Learning Dependencies
+# SuperLocalMemory - Learning Dependencies
 # ============================================================================
-# Optional but recommended. Enables intelligent pattern learning and
-# personalized recall ranking.
+# Optional but recommended. Enables intelligent pattern learning
+# and personalized recall ranking.
 #
-# If installation fails, core features work normally (v2.6 behavior).
-# To install: pip3 install -r requirements-learning.txt
-#
+# If installation fails, core features work normally.
+# Install: pip3 install -r requirements-learning.txt
 # Download size: ~30MB
 # ============================================================================
-lightgbm>=4.0.0
-scipy>=1.9.0
+
+lightgbm>=4.0.0,<5.0.0
+scipy>=1.9.0,<2.0.0

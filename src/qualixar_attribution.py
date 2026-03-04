@@ -45,7 +45,7 @@ class QualixarSigner:
 
     Example::
 
-        signer = QualixarSigner("superlocalmemory", "2.8.1")
+        signer = QualixarSigner("superlocalmemory", "2.8.3")
         signed = signer.sign({"memories": [...]})
         assert QualixarSigner.verify(signed) is True
     """

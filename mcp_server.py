@@ -203,7 +203,7 @@ _agent_registry = None
 _provenance_tracker = None
 
 
-def get_agent_registry():
+def get_agent_registry() -> Optional[Any]:
     """Get shared AgentRegistry singleton (v2.5+). Returns None if unavailable."""
     global _agent_registry
     if not PROVENANCE_AVAILABLE:
@@ -213,7 +213,7 @@ def get_agent_registry():
     return _agent_registry
 
 
-def get_provenance_tracker():
+def get_provenance_tracker() -> Optional[Any]:
     """Get shared ProvenanceTracker singleton (v2.5+). Returns None if unavailable."""
     global _provenance_tracker
     if not PROVENANCE_AVAILABLE:
@@ -226,7 +226,7 @@ def get_provenance_tracker():
 _trust_scorer = None
 
 
-def get_trust_scorer():
+def get_trust_scorer() -> Optional[Any]:
     """Get shared TrustScorer singleton (v2.6+). Returns None if unavailable."""
     global _trust_scorer
     if not TRUST_AVAILABLE:

@@ -114,6 +114,77 @@ We use the following severity classification:
 
 SuperLocalMemory V2 is designed with security and privacy as foundational principles.
 
+### Web Dashboard Security (v2.8.2+)
+
+The FastAPI-based web dashboard implements multiple layers of XSS protection and security headers.
+
+#### Security Headers Middleware
+
+All HTTP responses include comprehensive security headers via `security_middleware.py`:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| X-Content-Type-Options | nosniff | Prevents MIME type sniffing attacks |
+| X-Frame-Options | DENY | Prevents clickjacking attacks |
+| X-XSS-Protection | 1; mode=block | Enables browser XSS filters (legacy browsers) |
+| Content-Security-Policy | Restrictive policy | Restricts resource loading to prevent XSS |
+| Referrer-Policy | strict-origin-when-cross-origin | Controls referrer information leakage |
+| Cache-Control (API only) | no-store, no-cache | Prevents caching of sensitive data |
+
+**Content Security Policy includes:**
+- default-src 'self'
+- script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net
+- style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net
+- connect-src 'self' ws://localhost:* ws://127.0.0.1:*
+- frame-ancestors 'none'
+
+#### CORS Configuration
+
+CORS is configured with explicit origin allowlist (NOT wildcard):
+- http://localhost:8765 (Dashboard)
+- http://127.0.0.1:8765
+- http://localhost:8417 (MCP)
+- http://127.0.0.1:8417
+
+**Allowed Methods:** GET, POST, PUT, DELETE, PATCH, OPTIONS
+**Allowed Headers:** Content-Type, Authorization, X-SLM-API-Key
+
+#### Client-Side XSS Protection
+
+All user-generated content is escaped before rendering via escapeHtml() function in ui/app.js. This function uses DOM text nodes to safely escape HTML special characters.
+
+**Safe Patterns:**
+- Use element.textContent for plain text (automatically safe)
+- Use escapeHtml() wrapper before DOM insertion for mixed content
+- NEVER insert user content directly without escaping
+
+#### JSON API Security
+
+JSON APIs are safe from XSS because:
+1. Content-Type Enforcement: All JSON responses have explicit application/json type
+2. Browser Protection: Browsers do NOT execute scripts in JSON responses
+3. MIME Sniffing Prevention: X-Content-Type-Options header prevents misinterpretation
+
+#### Common Attack Vectors — Mitigated
+
+| Attack Type | Mitigation | Status |
+|-------------|------------|--------|
+| Stored XSS | Client-side escaping + CSP + X-XSS-Protection | Protected |
+| Reflected XSS | FastAPI auto-escaping + CSP | Protected |
+| DOM-based XSS | All dynamic content uses safe DOM methods | Protected |
+| Clickjacking | X-Frame-Options: DENY | Protected |
+| MIME Sniffing | X-Content-Type-Options: nosniff | Protected |
+| CSRF | CORS allowlist + localhost binding | Protected |
+
+#### Security Testing
+
+Automated tests verify security headers in tests/test_security_headers.py:
+```bash
+python3 -m pytest tests/test_security_headers.py -v
+```
+
+All 340 tests pass including 5 new security header tests.
+
 ### Core Security Principles
 
 #### 1. Zero External Communication

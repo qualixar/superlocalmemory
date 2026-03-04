@@ -1,5 +1,5 @@
 # ============================================================================
-# SuperLocalMemory V2.2.0 - Installation Verification Script (PowerShell)
+# SuperLocalMemory - Installation Verification Script (PowerShell)
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # Licensed under MIT License
 # ============================================================================
@@ -11,7 +11,7 @@ $INSTALL_DIR = Join-Path $env:USERPROFILE ".claude-memory"
 # Print banner
 Write-Host ""
 Write-Host "=================================================================="
-Write-Host "  SuperLocalMemory V2.2.0 - Installation Verification            "
+Write-Host "  SuperLocalMemory - Installation Verification            "
 Write-Host "  by Varun Pratap Bhardwaj                                       "
 Write-Host "=================================================================="
 Write-Host ""

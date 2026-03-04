@@ -144,7 +144,7 @@ def check_database() -> Tuple[bool, str, List[str]]:
         try:
             cursor.execute("SELECT COUNT(*) FROM memories")
             memory_count = cursor.fetchone()[0]
-        except:
+        except Exception:
             memory_count = 0
 
         conn.close()
@@ -192,163 +192,165 @@ def initialize_database() -> Tuple[bool, str]:
         MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Create memories table (core)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT NOT NULL,
-                summary TEXT,
-                project_path TEXT,
-                project_name TEXT,
-                tags TEXT DEFAULT '[]',
-                category TEXT,
-                parent_id INTEGER,
-                tree_path TEXT DEFAULT '/',
-                depth INTEGER DEFAULT 0,
-                memory_type TEXT DEFAULT 'session',
-                importance INTEGER DEFAULT 5,
-                content_hash TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_accessed TIMESTAMP,
-                access_count INTEGER DEFAULT 0,
-                compressed_at TIMESTAMP,
-                tier INTEGER DEFAULT 1,
-                cluster_id INTEGER,
-                FOREIGN KEY (parent_id) REFERENCES memories(id)
-            )
-        ''')
+            # Create memories table (core)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    summary TEXT,
+                    project_path TEXT,
+                    project_name TEXT,
+                    tags TEXT DEFAULT '[]',
+                    category TEXT,
+                    parent_id INTEGER,
+                    tree_path TEXT DEFAULT '/',
+                    depth INTEGER DEFAULT 0,
+                    memory_type TEXT DEFAULT 'session',
+                    importance INTEGER DEFAULT 5,
+                    content_hash TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed TIMESTAMP,
+                    access_count INTEGER DEFAULT 0,
+                    compressed_at TIMESTAMP,
+                    tier INTEGER DEFAULT 1,
+                    cluster_id INTEGER,
+                    FOREIGN KEY (parent_id) REFERENCES memories(id)
+                )
+            ''')
 
-        # Create graph tables
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_nodes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                memory_id INTEGER UNIQUE NOT NULL,
-                entities TEXT DEFAULT '[]',
-                embedding_vector BLOB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (memory_id) REFERENCES memories(id)
-            )
-        ''')
+            # Create graph tables
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    memory_id INTEGER UNIQUE NOT NULL,
+                    entities TEXT DEFAULT '[]',
+                    embedding_vector BLOB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (memory_id) REFERENCES memories(id)
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_memory_id INTEGER NOT NULL,
-                target_memory_id INTEGER NOT NULL,
-                similarity REAL NOT NULL,
-                relationship_type TEXT,
-                shared_entities TEXT DEFAULT '[]',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (source_memory_id) REFERENCES memories(id),
-                FOREIGN KEY (target_memory_id) REFERENCES memories(id),
-                UNIQUE(source_memory_id, target_memory_id)
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_memory_id INTEGER NOT NULL,
+                    target_memory_id INTEGER NOT NULL,
+                    similarity REAL NOT NULL,
+                    relationship_type TEXT,
+                    shared_entities TEXT DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (source_memory_id) REFERENCES memories(id),
+                    FOREIGN KEY (target_memory_id) REFERENCES memories(id),
+                    UNIQUE(source_memory_id, target_memory_id)
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_clusters (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_name TEXT,
-                name TEXT,
-                description TEXT,
-                summary TEXT,
-                memory_count INTEGER DEFAULT 0,
-                member_count INTEGER DEFAULT 0,
-                avg_importance REAL DEFAULT 5.0,
-                top_entities TEXT DEFAULT '[]',
-                parent_cluster_id INTEGER,
-                depth INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (parent_cluster_id) REFERENCES graph_clusters(id) ON DELETE SET NULL
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_clusters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cluster_name TEXT,
+                    name TEXT,
+                    description TEXT,
+                    summary TEXT,
+                    memory_count INTEGER DEFAULT 0,
+                    member_count INTEGER DEFAULT 0,
+                    avg_importance REAL DEFAULT 5.0,
+                    top_entities TEXT DEFAULT '[]',
+                    parent_cluster_id INTEGER,
+                    depth INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (parent_cluster_id) REFERENCES graph_clusters(id) ON DELETE SET NULL
+                )
+            ''')
 
-        # Create pattern learning tables
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS identity_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_type TEXT NOT NULL,
-                pattern_key TEXT NOT NULL,
-                pattern_value TEXT,
-                confidence REAL DEFAULT 0.0,
-                frequency INTEGER DEFAULT 1,
-                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(pattern_type, pattern_key)
-            )
-        ''')
+            # Create pattern learning tables
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS identity_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_type TEXT NOT NULL,
+                    pattern_key TEXT NOT NULL,
+                    pattern_value TEXT,
+                    confidence REAL DEFAULT 0.0,
+                    frequency INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(pattern_type, pattern_key)
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pattern_examples (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_id INTEGER NOT NULL,
-                memory_id INTEGER NOT NULL,
-                context TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (pattern_id) REFERENCES identity_patterns(id),
-                FOREIGN KEY (memory_id) REFERENCES memories(id)
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pattern_examples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_id INTEGER NOT NULL,
+                    memory_id INTEGER NOT NULL,
+                    context TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (pattern_id) REFERENCES identity_patterns(id),
+                    FOREIGN KEY (memory_id) REFERENCES memories(id)
+                )
+            ''')
 
-        # Create tree table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memory_tree (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_type TEXT NOT NULL,
-                name TEXT NOT NULL,
-                parent_id INTEGER,
-                tree_path TEXT DEFAULT '/',
-                depth INTEGER DEFAULT 0,
-                memory_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (parent_id) REFERENCES memory_tree(id)
-            )
-        ''')
+            # Create tree table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memory_tree (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    parent_id INTEGER,
+                    tree_path TEXT DEFAULT '/',
+                    depth INTEGER DEFAULT 0,
+                    memory_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (parent_id) REFERENCES memory_tree(id)
+                )
+            ''')
 
-        # Create archive table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memory_archive (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                original_memory_id INTEGER,
-                compressed_content TEXT NOT NULL,
-                compression_type TEXT DEFAULT 'tier2',
-                original_size INTEGER,
-                compressed_size INTEGER,
-                archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+            # Create archive table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memory_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_memory_id INTEGER,
+                    compressed_content TEXT NOT NULL,
+                    compression_type TEXT DEFAULT 'tier2',
+                    original_size INTEGER,
+                    compressed_size INTEGER,
+                    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
 
-        # Create system metadata table for watermarking
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        ''')
+            # Create system metadata table for watermarking
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS system_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            ''')
 
-        # Add system watermark
-        cursor.execute('''
-            INSERT OR REPLACE INTO system_metadata (key, value) VALUES
-            ('product', 'SuperLocalMemory'),
-            ('website', 'https://superlocalmemory.com'),
-            ('repository', 'https://github.com/varun369/SuperLocalMemoryV2'),
-            ('license', 'MIT'),
-            ('schema_version', '2.0.0')
-        ''')
+            # Add system watermark
+            cursor.execute('''
+                INSERT OR REPLACE INTO system_metadata (key, value) VALUES
+                ('product', 'SuperLocalMemory'),
+                ('website', 'https://superlocalmemory.com'),
+                ('repository', 'https://github.com/varun369/SuperLocalMemoryV2'),
+                ('license', 'MIT'),
+                ('schema_version', '2.0.0')
+            ''')
 
-        # Create indexes for performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_name)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_cluster ON memories(cluster_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_memory_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_memory_id)')
+            # Create indexes for performance
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_name)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_cluster ON memories(cluster_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_memory_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_memory_id)')
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
         return True, "Database initialized successfully"
 

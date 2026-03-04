@@ -1,20 +1,12 @@
-# SuperLocalMemory V2.2.0 - Web Dashboard Only
+# SuperLocalMemory - Web Dashboard Dependencies
 # ============================================================================
-# This file includes ONLY the web dashboard dependencies
-# Use this if you only want the UI, not advanced search features
+# Install for the web dashboard only (no ML/search features).
 #
-# Download size: ~50MB
-# Installation time: 1-2 minutes
-#
-# Install with: pip3 install -r requirements-ui.txt
-# Then start: python3 ~/.claude-memory/api_server.py
+# Download size: ~50MB | Install time: 1-2 minutes
+# Install: pip3 install -r requirements-ui.txt
+# Start:   python3 ~/.claude-memory/api_server.py
 # ============================================================================
 
-# FastAPI Framework - Web server
-fastapi>=0.109.0
-
-# Uvicorn - ASGI server with production features
-uvicorn[standard]>=0.27.0
-
-# Multipart - File upload support
-python-multipart>=0.0.6
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+python-multipart>=0.0.6,<1.0.0

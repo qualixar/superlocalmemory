@@ -202,7 +202,7 @@ class HNSWIndex:
         except Exception as e:
             logger.error(f"Failed to save HNSW index: {e}")
 
-    def build(self, vectors: np.ndarray, memory_ids: List[int]):
+    def build(self, vectors: np.ndarray, memory_ids: List[int]) -> None:
         """
         Build HNSW index from vectors.
 
@@ -276,7 +276,7 @@ class HNSWIndex:
         self.id_to_idx = {mem_id: idx for idx, mem_id in enumerate(memory_ids)}
         logger.info(f"Built fallback index with {len(vectors)} vectors (linear search)")
 
-    def add(self, vector: np.ndarray, memory_id: int):
+    def add(self, vector: np.ndarray, memory_id: int) -> None:
         """
         Add single vector to index (incremental update).
 
@@ -416,7 +416,7 @@ class HNSWIndex:
         logger.warning("No search method available (HNSW and sklearn both unavailable)")
         return []
 
-    def update(self, memory_id: int, vector: np.ndarray):
+    def update(self, memory_id: int, vector: np.ndarray) -> None:
         """
         Update vector for existing memory.
 

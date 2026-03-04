@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# SuperLocalMemory V2.2.0 - Installation Verification Script
+# SuperLocalMemory - Installation Verification Script
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # Licensed under MIT License
 # Repository: https://github.com/varun369/SuperLocalMemoryV2
@@ -13,7 +13,7 @@ INSTALL_DIR="${HOME}/.claude-memory"
 # Print banner
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  SuperLocalMemory V2.2.0 - Installation Verification         ║"
+echo "║  SuperLocalMemory - Installation Verification         ║"
 echo "║  by Varun Pratap Bhardwaj                                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""

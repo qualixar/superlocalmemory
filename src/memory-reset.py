@@ -46,7 +46,7 @@ class MemoryReset:
             print("⚠ No database found to backup")
             return None
 
-    def soft_reset(self):
+    def soft_reset(self) -> None:
         """Clear all memories but keep V2 schema structure."""
         print("\n" + "="*60)
         print("SOFT RESET - Clear Memories, Keep Schema")
@@ -94,7 +94,7 @@ class MemoryReset:
         print("   Schema preserved, all memories cleared")
         print("   You can now add new memories to clean system")
 
-    def hard_reset(self):
+    def hard_reset(self) -> None:
         """Delete database completely and reinitialize with V2 schema."""
         print("\n" + "="*60)
         print("HARD RESET - Delete Everything & Reinitialize")
@@ -116,7 +116,7 @@ class MemoryReset:
         print("   Fresh V2 database created")
         print("   Ready for new memories")
 
-    def layer_reset(self, layers: list):
+    def layer_reset(self, layers: list) -> None:
         """Reset specific layers only."""
         print("\n" + "="*60)
         print(f"LAYER RESET - Clearing Layers: {', '.join(layers)}")
@@ -170,188 +170,190 @@ class MemoryReset:
     def _initialize_v2_schema(self):
         """Initialize fresh V2 database schema."""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Layer 1: Memories table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT NOT NULL,
-                summary TEXT,
-                project_path TEXT,
-                project_name TEXT,
-                tags TEXT,
-                category TEXT,
-                memory_type TEXT DEFAULT 'session',
-                importance INTEGER DEFAULT 5,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_accessed TIMESTAMP,
-                access_count INTEGER DEFAULT 0,
-                content_hash TEXT UNIQUE,
-                parent_id INTEGER,
-                tree_path TEXT,
-                depth INTEGER DEFAULT 0,
-                cluster_id INTEGER,
-                tier INTEGER DEFAULT 1,
-                FOREIGN KEY (parent_id) REFERENCES memories(id) ON DELETE CASCADE
-            )
-        ''')
-        print("    ✓ Created memories table")
+            # Layer 1: Memories table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    summary TEXT,
+                    project_path TEXT,
+                    project_name TEXT,
+                    tags TEXT,
+                    category TEXT,
+                    memory_type TEXT DEFAULT 'session',
+                    importance INTEGER DEFAULT 5,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed TIMESTAMP,
+                    access_count INTEGER DEFAULT 0,
+                    content_hash TEXT UNIQUE,
+                    parent_id INTEGER,
+                    tree_path TEXT,
+                    depth INTEGER DEFAULT 0,
+                    cluster_id INTEGER,
+                    tier INTEGER DEFAULT 1,
+                    FOREIGN KEY (parent_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            ''')
+            print("    ✓ Created memories table")
 
-        # FTS5 index
-        cursor.execute('''
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(content, summary, tags, content='memories', content_rowid='id')
-        ''')
-        print("    ✓ Created FTS index")
+            # FTS5 index
+            cursor.execute('''
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                USING fts5(content, summary, tags, content='memories', content_rowid='id')
+            ''')
+            print("    ✓ Created FTS index")
 
-        # Layer 2: Tree
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memory_tree (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_type TEXT NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                parent_id INTEGER,
-                tree_path TEXT NOT NULL,
-                depth INTEGER DEFAULT 0,
-                memory_count INTEGER DEFAULT 0,
-                total_size INTEGER DEFAULT 0,
-                last_updated TIMESTAMP,
-                memory_id INTEGER,
-                FOREIGN KEY (parent_id) REFERENCES memory_tree(id) ON DELETE CASCADE,
-                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-            )
-        ''')
-        print("    ✓ Created memory_tree table")
+            # Layer 2: Tree
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memory_tree (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    parent_id INTEGER,
+                    tree_path TEXT NOT NULL,
+                    depth INTEGER DEFAULT 0,
+                    memory_count INTEGER DEFAULT 0,
+                    total_size INTEGER DEFAULT 0,
+                    last_updated TIMESTAMP,
+                    memory_id INTEGER,
+                    FOREIGN KEY (parent_id) REFERENCES memory_tree(id) ON DELETE CASCADE,
+                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            ''')
+            print("    ✓ Created memory_tree table")
 
-        # Layer 3: Graph
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_nodes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                memory_id INTEGER UNIQUE NOT NULL,
-                entities TEXT,
-                embedding_vector TEXT,
-                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-            )
-        ''')
+            # Layer 3: Graph
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    memory_id INTEGER UNIQUE NOT NULL,
+                    entities TEXT,
+                    embedding_vector TEXT,
+                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_memory_id INTEGER NOT NULL,
-                target_memory_id INTEGER NOT NULL,
-                relationship_type TEXT,
-                weight REAL DEFAULT 1.0,
-                shared_entities TEXT,
-                similarity_score REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
-                FOREIGN KEY (target_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
-                UNIQUE(source_memory_id, target_memory_id)
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_memory_id INTEGER NOT NULL,
+                    target_memory_id INTEGER NOT NULL,
+                    relationship_type TEXT,
+                    weight REAL DEFAULT 1.0,
+                    shared_entities TEXT,
+                    similarity_score REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+                    FOREIGN KEY (target_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+                    UNIQUE(source_memory_id, target_memory_id)
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS graph_clusters (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT,
-                member_count INTEGER DEFAULT 0,
-                avg_importance REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        print("    ✓ Created graph tables")
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS graph_clusters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    member_count INTEGER DEFAULT 0,
+                    avg_importance REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("    ✓ Created graph tables")
 
-        # Layer 4: Patterns
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS identity_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_type TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                confidence REAL DEFAULT 0.5,
-                evidence_count INTEGER DEFAULT 1,
-                memory_ids TEXT,
-                category TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(pattern_type, key, category)
-            )
-        ''')
+            # Layer 4: Patterns
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS identity_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_type TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    confidence REAL DEFAULT 0.5,
+                    evidence_count INTEGER DEFAULT 1,
+                    memory_ids TEXT,
+                    category TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(pattern_type, key, category)
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pattern_examples (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_id INTEGER NOT NULL,
-                memory_id INTEGER NOT NULL,
-                example_text TEXT,
-                FOREIGN KEY (pattern_id) REFERENCES identity_patterns(id) ON DELETE CASCADE,
-                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-            )
-        ''')
-        print("    ✓ Created pattern tables")
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pattern_examples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_id INTEGER NOT NULL,
+                    memory_id INTEGER NOT NULL,
+                    example_text TEXT,
+                    FOREIGN KEY (pattern_id) REFERENCES identity_patterns(id) ON DELETE CASCADE,
+                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            ''')
+            print("    ✓ Created pattern tables")
 
-        # Archive table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS memory_archive (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                memory_id INTEGER UNIQUE NOT NULL,
-                full_content TEXT NOT NULL,
-                archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-            )
-        ''')
-        print("    ✓ Created archive table")
+            # Archive table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS memory_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    memory_id INTEGER UNIQUE NOT NULL,
+                    full_content TEXT NOT NULL,
+                    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            ''')
+            print("    ✓ Created archive table")
 
-        # Sessions table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT UNIQUE,
-                project_path TEXT,
-                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ended_at TIMESTAMP,
-                summary TEXT
-            )
-        ''')
-        print("    ✓ Created sessions table")
+            # Sessions table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT UNIQUE,
+                    project_path TEXT,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ended_at TIMESTAMP,
+                    summary TEXT
+                )
+            ''')
+            print("    ✓ Created sessions table")
 
-        # System metadata
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+            # System metadata
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS system_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
 
-        cursor.execute('''
-            INSERT OR REPLACE INTO system_metadata (key, value)
-            VALUES ('schema_version', '2.0.0')
-        ''')
-        print("    ✓ Created metadata table")
+            cursor.execute('''
+                INSERT OR REPLACE INTO system_metadata (key, value)
+                VALUES ('schema_version', '2.0.0')
+            ''')
+            print("    ✓ Created metadata table")
 
-        # Create indexes
-        indexes = [
-            'CREATE INDEX IF NOT EXISTS idx_project ON memories(project_path)',
-            'CREATE INDEX IF NOT EXISTS idx_category ON memories(category)',
-            'CREATE INDEX IF NOT EXISTS idx_cluster ON memories(cluster_id)',
-            'CREATE INDEX IF NOT EXISTS idx_tree_path ON memories(tree_path)',
-            'CREATE INDEX IF NOT EXISTS idx_tier ON memories(tier)',
-            'CREATE INDEX IF NOT EXISTS idx_graph_source ON graph_edges(source_memory_id)',
-            'CREATE INDEX IF NOT EXISTS idx_graph_target ON graph_edges(target_memory_id)',
-        ]
+            # Create indexes
+            indexes = [
+                'CREATE INDEX IF NOT EXISTS idx_project ON memories(project_path)',
+                'CREATE INDEX IF NOT EXISTS idx_category ON memories(category)',
+                'CREATE INDEX IF NOT EXISTS idx_cluster ON memories(cluster_id)',
+                'CREATE INDEX IF NOT EXISTS idx_tree_path ON memories(tree_path)',
+                'CREATE INDEX IF NOT EXISTS idx_tier ON memories(tier)',
+                'CREATE INDEX IF NOT EXISTS idx_graph_source ON graph_edges(source_memory_id)',
+                'CREATE INDEX IF NOT EXISTS idx_graph_target ON graph_edges(target_memory_id)',
+            ]
 
-        for idx_sql in indexes:
-            cursor.execute(idx_sql)
-        print("    ✓ Created indexes")
+            for idx_sql in indexes:
+                cursor.execute(idx_sql)
+            print("    ✓ Created indexes")
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     def show_stats(self):
         """Show current database statistics."""

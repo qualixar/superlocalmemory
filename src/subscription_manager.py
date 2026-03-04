@@ -53,7 +53,7 @@ class SubscriptionManager:
             return cls._instances[key]
 
     @classmethod
-    def reset_instance(cls, db_path: Optional[Path] = None):
+    def reset_instance(cls, db_path: Optional[Path] = None) -> None:
         """Remove singleton. Used for testing."""
         with cls._instances_lock:
             if db_path is None:
@@ -103,22 +103,24 @@ class SubscriptionManager:
         except ImportError:
             import sqlite3
             conn = sqlite3.connect(str(self.db_path))
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    subscriber_id TEXT NOT NULL UNIQUE,
-                    channel TEXT NOT NULL,
-                    filter TEXT NOT NULL DEFAULT '{}',
-                    webhook_url TEXT,
-                    durable INTEGER DEFAULT 1,
-                    last_event_id INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_subs_channel ON subscriptions(channel)')
-            conn.commit()
-            conn.close()
+            try:
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS subscriptions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        subscriber_id TEXT NOT NULL UNIQUE,
+                        channel TEXT NOT NULL,
+                        filter TEXT NOT NULL DEFAULT '{}',
+                        webhook_url TEXT,
+                        durable INTEGER DEFAULT 1,
+                        last_event_id INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_subs_channel ON subscriptions(channel)')
+                conn.commit()
+            finally:
+                conn.close()
 
     # =========================================================================
     # Subscribe / Unsubscribe
@@ -244,7 +246,7 @@ class SubscriptionManager:
 
         return removed
 
-    def update_last_event_id(self, subscriber_id: str, event_id: int):
+    def update_last_event_id(self, subscriber_id: str, event_id: int) -> None:
         """Update the last event ID received by a durable subscriber (for replay)."""
         try:
             from db_connection_manager import DbConnectionManager

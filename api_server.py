@@ -18,6 +18,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
+from security_middleware import SecurityHeadersMiddleware
+
 # Import local modules
 import sys
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -36,6 +38,9 @@ app = FastAPI(
     description="Knowledge Graph Visualization for Local Memory System",
     version="2.0.0"
 )
+
+# Security middleware (add first for proper header application)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Mount static files
 UI_DIR.mkdir(exist_ok=True)

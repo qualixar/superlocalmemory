@@ -241,7 +241,7 @@ create_dmg_background() {
         convert -size 640x480 xc:white \
             -font Helvetica -pointsize 20 \
             -fill black -gravity north \
-            -annotate +0+50 "SuperLocalMemory V2.1.0" \
+            -annotate +0+50 "SuperLocalMemory" \
             -pointsize 14 -gravity center \
             -annotate +0+0 "Drag to Applications folder\nor double-click INSTALL to begin" \
             "${BUILD_DIR}/.background.png" 2>/dev/null || true

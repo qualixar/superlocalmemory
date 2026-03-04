@@ -1,5 +1,5 @@
 # ============================================================================
-# SuperLocalMemory V2.2.0 - Dashboard Startup Script (PowerShell)
+# SuperLocalMemory - Dashboard Startup Script (PowerShell)
 # Starts the web dashboard on http://localhost:8765
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # ============================================================================
@@ -10,7 +10,7 @@ $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $SCRIPT_DIR
 
 Write-Host "=================================================================="
-Write-Host "  SuperLocalMemory V2.2.0 - Dashboard                            "
+Write-Host "  SuperLocalMemory - Dashboard                            "
 Write-Host "  by Varun Pratap Bhardwaj                                       "
 Write-Host "=================================================================="
 Write-Host ""

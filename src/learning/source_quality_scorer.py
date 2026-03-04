@@ -274,38 +274,39 @@ class SourceQualityScorer:
 
         try:
             conn = sqlite3.connect(str(self.memory_db_path), timeout=10)
-            conn.execute("PRAGMA busy_timeout=5000")
-            cursor = conn.cursor()
+            try:
+                conn.execute("PRAGMA busy_timeout=5000")
+                cursor = conn.cursor()
 
-            # Check if created_by column exists
-            cursor.execute("PRAGMA table_info(memories)")
-            columns = {row[1] for row in cursor.fetchall()}
+                # Check if created_by column exists
+                cursor.execute("PRAGMA table_info(memories)")
+                columns = {row[1] for row in cursor.fetchall()}
 
-            if "created_by" in columns:
-                cursor.execute("""
-                    SELECT
-                        COALESCE(created_by, 'unknown') AS source,
-                        COUNT(*) AS cnt
-                    FROM memories
-                    GROUP BY source
-                    ORDER BY cnt DESC
-                """)
-                for row in cursor.fetchall():
-                    source_id = row[0] if row[0] else "unknown"
-                    counts[source_id] = row[1]
-            else:
-                # Column doesn't exist — count all as 'unknown'
-                cursor.execute("SELECT COUNT(*) FROM memories")
-                total = cursor.fetchone()[0]
-                if total > 0:
-                    counts["unknown"] = total
-                logger.debug(
-                    "created_by column not in memory.db — "
-                    "all %d memories grouped as 'unknown'.",
-                    total,
-                )
-
-            conn.close()
+                if "created_by" in columns:
+                    cursor.execute("""
+                        SELECT
+                            COALESCE(created_by, 'unknown') AS source,
+                            COUNT(*) AS cnt
+                        FROM memories
+                        GROUP BY source
+                        ORDER BY cnt DESC
+                    """)
+                    for row in cursor.fetchall():
+                        source_id = row[0] if row[0] else "unknown"
+                        counts[source_id] = row[1]
+                else:
+                    # Column doesn't exist — count all as 'unknown'
+                    cursor.execute("SELECT COUNT(*) FROM memories")
+                    total = cursor.fetchone()[0]
+                    if total > 0:
+                        counts["unknown"] = total
+                    logger.debug(
+                        "created_by column not in memory.db — "
+                        "all %d memories grouped as 'unknown'.",
+                        total,
+                    )
+            finally:
+                conn.close()
 
         except sqlite3.OperationalError as e:
             logger.warning("Error reading memory counts by source: %s", e)
@@ -361,40 +362,40 @@ class SourceQualityScorer:
         # Step 2: Look up created_by for each feedback memory_id in memory.db
         try:
             conn = sqlite3.connect(str(self.memory_db_path), timeout=10)
-            conn.execute("PRAGMA busy_timeout=5000")
-            cursor = conn.cursor()
+            try:
+                conn.execute("PRAGMA busy_timeout=5000")
+                cursor = conn.cursor()
 
-            # Check if created_by column exists
-            cursor.execute("PRAGMA table_info(memories)")
-            columns = {row[1] for row in cursor.fetchall()}
+                # Check if created_by column exists
+                cursor.execute("PRAGMA table_info(memories)")
+                columns = {row[1] for row in cursor.fetchall()}
 
-            if "created_by" not in columns:
-                # All positives go to 'unknown'
-                total_positives = sum(feedback_memory_ids.values())
-                if total_positives > 0:
-                    positives["unknown"] = total_positives
+                if "created_by" not in columns:
+                    # All positives go to 'unknown'
+                    total_positives = sum(feedback_memory_ids.values())
+                    if total_positives > 0:
+                        positives["unknown"] = total_positives
+                    return positives
+
+                # Batch lookup in chunks to avoid SQLite variable limit
+                mem_ids = list(feedback_memory_ids.keys())
+                chunk_size = 500  # SQLite max variables is 999
+
+                for i in range(0, len(mem_ids), chunk_size):
+                    chunk = mem_ids[i:i + chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    cursor.execute(
+                        "SELECT id, COALESCE(created_by, 'unknown') "
+                        "FROM memories WHERE id IN (%s)" % placeholders,
+                        chunk,
+                    )
+                    for row in cursor.fetchall():
+                        mem_id = row[0]
+                        source_id = row[1] if row[1] else "unknown"
+                        count = feedback_memory_ids.get(mem_id, 0)
+                        positives[source_id] = positives.get(source_id, 0) + count
+            finally:
                 conn.close()
-                return positives
-
-            # Batch lookup in chunks to avoid SQLite variable limit
-            mem_ids = list(feedback_memory_ids.keys())
-            chunk_size = 500  # SQLite max variables is 999
-
-            for i in range(0, len(mem_ids), chunk_size):
-                chunk = mem_ids[i:i + chunk_size]
-                placeholders = ",".join("?" * len(chunk))
-                cursor.execute(
-                    "SELECT id, COALESCE(created_by, 'unknown') "
-                    "FROM memories WHERE id IN (%s)" % placeholders,
-                    chunk,
-                )
-                for row in cursor.fetchall():
-                    mem_id = row[0]
-                    source_id = row[1] if row[1] else "unknown"
-                    count = feedback_memory_ids.get(mem_id, 0)
-                    positives[source_id] = positives.get(source_id, 0) + count
-
-            conn.close()
 
         except sqlite3.OperationalError as e:
             logger.warning("Error looking up memory sources: %s", e)

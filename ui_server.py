@@ -33,6 +33,8 @@ except ImportError:
         "Install with: pip install 'fastapi[all]' uvicorn websockets"
     )
 
+from security_middleware import SecurityHeadersMiddleware
+
 # Add src/ and routes/ to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -51,7 +53,9 @@ app = FastAPI(
     redoc_url="/api/redoc"
 )
 
-# Middleware
+# Middleware (order matters: security headers should be outermost)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -61,10 +65,9 @@ app.add_middleware(
         "http://127.0.0.1:8417",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-SLM-API-Key"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Rate limiting (v2.6)
 try:

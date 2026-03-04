@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# SuperLocalMemory V2.2.0 - Dashboard Startup Script
+# SuperLocalMemory - Dashboard Startup Script
 # Starts the web dashboard on http://localhost:8765
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # ============================================================================
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  SuperLocalMemory V2.2.0 - Dashboard                         ║"
+echo "║  SuperLocalMemory - Dashboard                         ║"
 echo "║  by Varun Pratap Bhardwaj                                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""

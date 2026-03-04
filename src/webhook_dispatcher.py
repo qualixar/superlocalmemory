@@ -73,7 +73,7 @@ class WebhookDispatcher:
             return cls._instances[name]
 
     @classmethod
-    def reset_instance(cls, name: Optional[str] = None):
+    def reset_instance(cls, name: Optional[str] = None) -> None:
         """Remove singleton(s). Used for testing."""
         with cls._instances_lock:
             if name is None:
@@ -104,7 +104,7 @@ class WebhookDispatcher:
         self._worker.start()
         logger.info("WebhookDispatcher started")
 
-    def dispatch(self, event: dict, webhook_url: str):
+    def dispatch(self, event: dict, webhook_url: str) -> None:
         """
         Enqueue a webhook delivery.
 
@@ -217,7 +217,7 @@ class WebhookDispatcher:
         with self._stats_lock:
             return dict(self._stats)
 
-    def close(self):
+    def close(self) -> None:
         """Shut down the dispatcher. Drains remaining items."""
         if self._closed:
             return

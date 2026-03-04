@@ -59,9 +59,19 @@ except ImportError:
 import logging
 logger = logging.getLogger(__name__)
 
-MEMORY_DIR = Path.home() / ".claude-memory"
-DB_PATH = MEMORY_DIR / "memory.db"
-VECTORS_PATH = MEMORY_DIR / "vectors"
+# Import constants and utilities from memory package
+from memory.constants import (
+    MEMORY_DIR, DB_PATH, VECTORS_PATH,
+    MAX_CONTENT_SIZE, MAX_SUMMARY_SIZE, MAX_TAG_LENGTH, MAX_TAGS,
+    CREATOR_METADATA
+)
+from memory.schema import (
+    V2_COLUMNS, V28_MIGRATIONS, V2_INDEXES,
+    get_memories_table_sql, get_sessions_table_sql, get_fts_table_sql,
+    get_fts_trigger_insert_sql, get_fts_trigger_delete_sql, get_fts_trigger_update_sql,
+    get_creator_metadata_table_sql
+)
+from memory.helpers import format_content
 
 
 class MemoryStoreV2:
@@ -247,62 +257,11 @@ class MemoryStoreV2:
             existing_columns = {row[1] for row in cursor.fetchall()}
 
             # Main memories table (V1 compatible + V2 extensions)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    summary TEXT,
-
-                    -- Organization
-                    project_path TEXT,
-                    project_name TEXT,
-                    tags TEXT,
-                    category TEXT,
-
-                    -- Hierarchy (Layer 2 link)
-                    parent_id INTEGER,
-                    tree_path TEXT,
-                    depth INTEGER DEFAULT 0,
-
-                    -- Metadata
-                    memory_type TEXT DEFAULT 'session',
-                    importance INTEGER DEFAULT 5,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_accessed TIMESTAMP,
-                    access_count INTEGER DEFAULT 0,
-
-                    -- Deduplication
-                    content_hash TEXT UNIQUE,
-
-                    -- Graph (Layer 3 link)
-                    cluster_id INTEGER,
-
-                    FOREIGN KEY (parent_id) REFERENCES memories(id) ON DELETE CASCADE
-                )
-            ''')
+            cursor.execute(get_memories_table_sql())
 
             # Add missing V2 columns to existing table (migration support)
             # This handles upgrades from very old databases that might be missing columns
-            v2_columns = {
-                'summary': 'TEXT',
-                'project_path': 'TEXT',
-                'project_name': 'TEXT',
-                'category': 'TEXT',
-                'parent_id': 'INTEGER',
-                'tree_path': 'TEXT',
-                'depth': 'INTEGER DEFAULT 0',
-                'memory_type': 'TEXT DEFAULT "session"',
-                'importance': 'INTEGER DEFAULT 5',
-                'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
-                'last_accessed': 'TIMESTAMP',
-                'access_count': 'INTEGER DEFAULT 0',
-                'content_hash': 'TEXT',
-                'cluster_id': 'INTEGER',
-                'profile': 'TEXT DEFAULT "default"'
-            }
-
-            for col_name, col_type in v2_columns.items():
+            for col_name, col_type in V2_COLUMNS.items():
                 if col_name not in existing_columns:
                     try:
                         cursor.execute(f'ALTER TABLE memories ADD COLUMN {col_name} {col_type}')
@@ -311,73 +270,25 @@ class MemoryStoreV2:
                         pass
 
             # v2.8.0 schema migration — lifecycle + access control columns
-            _v28_migrations = [
-                ("lifecycle_state", "TEXT DEFAULT 'active'"),
-                ("lifecycle_updated_at", "TIMESTAMP"),
-                ("lifecycle_history", "TEXT DEFAULT '[]'"),
-                ("access_level", "TEXT DEFAULT 'public'"),
-            ]
-            for col_name, col_type in _v28_migrations:
+            for col_name, col_type in V28_MIGRATIONS:
                 try:
                     cursor.execute(f"ALTER TABLE memories ADD COLUMN {col_name} {col_type}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
 
             # Sessions table (V1 compatible)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT UNIQUE,
-                    project_path TEXT,
-                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ended_at TIMESTAMP,
-                    summary TEXT
-                )
-            ''')
+            cursor.execute(get_sessions_table_sql())
 
             # Full-text search index (V1 compatible)
-            cursor.execute('''
-                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-                USING fts5(content, summary, tags, content='memories', content_rowid='id')
-            ''')
+            cursor.execute(get_fts_table_sql())
 
             # FTS Triggers (V1 compatible)
-            cursor.execute('''
-                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                    INSERT INTO memories_fts(rowid, content, summary, tags)
-                    VALUES (new.id, new.content, new.summary, new.tags);
-                END
-            ''')
-
-            cursor.execute('''
-                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
-                    VALUES('delete', old.id, old.content, old.summary, old.tags);
-                END
-            ''')
-
-            cursor.execute('''
-                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
-                    VALUES('delete', old.id, old.content, old.summary, old.tags);
-                    INSERT INTO memories_fts(rowid, content, summary, tags)
-                    VALUES (new.id, new.content, new.summary, new.tags);
-                END
-            ''')
+            cursor.execute(get_fts_trigger_insert_sql())
+            cursor.execute(get_fts_trigger_delete_sql())
+            cursor.execute(get_fts_trigger_update_sql())
 
             # Create indexes for V2 fields (safe for old databases without V2 columns)
-            v2_indexes = [
-                ('idx_project', 'project_path'),
-                ('idx_tags', 'tags'),
-                ('idx_category', 'category'),
-                ('idx_tree_path', 'tree_path'),
-                ('idx_cluster', 'cluster_id'),
-                ('idx_last_accessed', 'last_accessed'),
-                ('idx_parent_id', 'parent_id'),
-                ('idx_profile', 'profile')
-            ]
-
-            for idx_name, col_name in v2_indexes:
+            for idx_name, col_name in V2_INDEXES:
                 try:
                     cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON memories({col_name})')
                 except sqlite3.OperationalError:
@@ -394,31 +305,10 @@ class MemoryStoreV2:
 
             # Creator Attribution Metadata Table (REQUIRED by MIT License)
             # This table embeds creator information directly in the database
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS creator_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+            cursor.execute(get_creator_metadata_table_sql())
 
             # Insert creator attribution (embedded in database body)
-            creator_data = {
-                'creator_name': 'Varun Pratap Bhardwaj',
-                'creator_role': 'Solution Architect & Original Creator',
-                'creator_github': 'varun369',
-                'project_name': 'SuperLocalMemory V2',
-                'project_url': 'https://github.com/varun369/SuperLocalMemoryV2',
-                'license': 'MIT',
-                'attribution_required': 'yes',
-                'version': '2.5.0',
-                'architecture_date': '2026-01-15',
-                'release_date': '2026-02-07',
-                'signature': 'VBPB-SLM-V2-2026-ARCHITECT',
-                'verification_hash': 'sha256:c9f3d1a8b5e2f4c6d8a9b3e7f1c4d6a8b9c3e7f2d5a8c1b4e6f9d2a7c5b8e1'
-            }
-
-            for key, value in creator_data.items():
+            for key, value in CREATOR_METADATA.items():
                 cursor.execute('''
                     INSERT OR IGNORE INTO creator_metadata (key, value)
                     VALUES (?, ?)
@@ -431,12 +321,6 @@ class MemoryStoreV2:
     def _content_hash(self, content: str) -> str:
         """Generate hash for deduplication."""
         return hashlib.sha256(content.encode()).hexdigest()[:32]
-
-    # SECURITY: Input validation limits
-    MAX_CONTENT_SIZE = 1_000_000    # 1MB max content
-    MAX_SUMMARY_SIZE = 10_000       # 10KB max summary
-    MAX_TAG_LENGTH = 50             # 50 chars per tag
-    MAX_TAGS = 20                   # 20 tags max
 
     def add_memory(
         self,
@@ -478,18 +362,18 @@ class MemoryStoreV2:
         if not content:
             raise ValueError("Content cannot be empty")
 
-        if len(content) > self.MAX_CONTENT_SIZE:
-            raise ValueError(f"Content exceeds maximum size of {self.MAX_CONTENT_SIZE} bytes")
+        if len(content) > MAX_CONTENT_SIZE:
+            raise ValueError(f"Content exceeds maximum size of {MAX_CONTENT_SIZE} bytes")
 
-        if summary and len(summary) > self.MAX_SUMMARY_SIZE:
-            raise ValueError(f"Summary exceeds maximum size of {self.MAX_SUMMARY_SIZE} bytes")
+        if summary and len(summary) > MAX_SUMMARY_SIZE:
+            raise ValueError(f"Summary exceeds maximum size of {MAX_SUMMARY_SIZE} bytes")
 
         if tags:
-            if len(tags) > self.MAX_TAGS:
-                raise ValueError(f"Too many tags (max {self.MAX_TAGS})")
+            if len(tags) > MAX_TAGS:
+                raise ValueError(f"Too many tags (max {MAX_TAGS})")
             for tag in tags:
-                if len(tag) > self.MAX_TAG_LENGTH:
-                    raise ValueError(f"Tag '{tag[:20]}...' exceeds max length of {self.MAX_TAG_LENGTH}")
+                if len(tag) > MAX_TAG_LENGTH:
+                    raise ValueError(f"Tag '{tag[:20]}...' exceeds max length of {MAX_TAG_LENGTH}")
 
         if importance < 1 or importance > 10:
             importance = max(1, min(10, importance))  # Clamp to valid range
@@ -1255,211 +1139,7 @@ class MemoryStoreV2:
         return ''.join(output)
 
 
-def format_content(content: str, full: bool = False, threshold: int = 5000, preview_len: int = 2000) -> str:
-    """
-    Smart content formatting with optional truncation.
-
-    Args:
-        content: Content to format
-        full: If True, always show full content
-        threshold: Max length before truncation (default 5000)
-        preview_len: Preview length when truncating (default 2000)
-
-    Returns:
-        Formatted content string
-    """
-    if full or len(content) < threshold:
-        return content
-    else:
-        return f"{content[:preview_len]}..."
-
-
 # CLI interface (V1 compatible + V2 extensions)
 if __name__ == "__main__":
-    import sys
-
-    store = MemoryStoreV2()
-
-    if len(sys.argv) < 2:
-        print("MemoryStore V2 CLI")
-        print("\nV1 Compatible Commands:")
-        print("  python memory_store_v2.py add <content> [--project <path>] [--tags tag1,tag2]")
-        print("  python memory_store_v2.py search <query> [--full]")
-        print("  python memory_store_v2.py list [limit] [--full]")
-        print("  python memory_store_v2.py get <id>")
-        print("  python memory_store_v2.py recent [limit] [--full]")
-        print("  python memory_store_v2.py stats")
-        print("  python memory_store_v2.py context <query>")
-        print("  python memory_store_v2.py delete <id>")
-        print("\nV2 Extensions:")
-        print("  python memory_store_v2.py tree [parent_id]")
-        print("  python memory_store_v2.py cluster <cluster_id> [--full]")
-        print("\nOptions:")
-        print("  --full    Show complete content (default: smart truncation at 5000 chars)")
-        sys.exit(0)
-
-    command = sys.argv[1]
-
-    if command == "tree":
-        parent_id = int(sys.argv[2]) if len(sys.argv) > 2 else None
-        results = store.get_tree(parent_id)
-
-        if not results:
-            print("No memories in tree.")
-        else:
-            for r in results:
-                indent = "  " * r['depth']
-                print(f"{indent}[{r['id']}] {r['content'][:50]}...")
-                if r.get('category'):
-                    print(f"{indent}    Category: {r['category']}")
-
-    elif command == "cluster" and len(sys.argv) >= 3:
-        cluster_id = int(sys.argv[2])
-        show_full = '--full' in sys.argv
-        results = store.get_by_cluster(cluster_id)
-
-        if not results:
-            print(f"No memories in cluster {cluster_id}.")
-        else:
-            print(f"Cluster {cluster_id} - {len(results)} memories:")
-            for r in results:
-                print(f"\n[{r['id']}] Importance: {r['importance']}")
-                print(f"  {format_content(r['content'], full=show_full)}")
-
-    elif command == "stats":
-        stats = store.get_stats()
-        print(json.dumps(stats, indent=2))
-
-    elif command == "add":
-        # Parse content and options
-        if len(sys.argv) < 3:
-            print("Error: Content required")
-            print("Usage: python memory_store_v2.py add <content> [--project <path>] [--tags tag1,tag2]")
-            sys.exit(1)
-
-        content = sys.argv[2]
-        project_path = None
-        tags = []
-
-        i = 3
-        while i < len(sys.argv):
-            if sys.argv[i] == '--project' and i + 1 < len(sys.argv):
-                project_path = sys.argv[i + 1]
-                i += 2
-            elif sys.argv[i] == '--tags' and i + 1 < len(sys.argv):
-                tags = [t.strip() for t in sys.argv[i + 1].split(',')]
-                i += 2
-            else:
-                i += 1
-
-        mem_id = store.add_memory(content, project_path=project_path, tags=tags)
-        print(f"Memory added with ID: {mem_id}")
-
-    elif command == "search":
-        if len(sys.argv) < 3:
-            print("Error: Search query required")
-            print("Usage: python memory_store_v2.py search <query> [--full]")
-            sys.exit(1)
-
-        query = sys.argv[2]
-        show_full = '--full' in sys.argv
-        results = store.search(query, limit=5)
-
-        if not results:
-            print("No results found.")
-        else:
-            for r in results:
-                print(f"\n[{r['id']}] Score: {r['score']:.2f}")
-                if r.get('project_name'):
-                    print(f"Project: {r['project_name']}")
-                if r.get('tags'):
-                    print(f"Tags: {', '.join(r['tags'])}")
-                print(f"Content: {format_content(r['content'], full=show_full)}")
-                print(f"Created: {r['created_at']}")
-
-    elif command == "recent":
-        show_full = '--full' in sys.argv
-        # Parse limit (skip --full flag)
-        limit = 10
-        for i, arg in enumerate(sys.argv[2:], start=2):
-            if arg != '--full' and arg.isdigit():
-                limit = int(arg)
-                break
-
-        results = store.get_recent(limit)
-
-        if not results:
-            print("No memories found.")
-        else:
-            for r in results:
-                print(f"\n[{r['id']}] {r['created_at']}")
-                if r.get('project_name'):
-                    print(f"Project: {r['project_name']}")
-                if r.get('tags'):
-                    print(f"Tags: {', '.join(r['tags'])}")
-                print(f"Content: {format_content(r['content'], full=show_full)}")
-
-    elif command == "list":
-        show_full = '--full' in sys.argv
-        # Parse limit (skip --full flag)
-        limit = 10
-        for i, arg in enumerate(sys.argv[2:], start=2):
-            if arg != '--full' and arg.isdigit():
-                limit = int(arg)
-                break
-
-        results = store.get_recent(limit)
-
-        if not results:
-            print("No memories found.")
-        else:
-            for r in results:
-                print(f"[{r['id']}] {format_content(r['content'], full=show_full)}")
-
-    elif command == "get":
-        if len(sys.argv) < 3:
-            print("Error: Memory ID required")
-            print("Usage: python memory_store_v2.py get <id>")
-            sys.exit(1)
-
-        mem_id = int(sys.argv[2])
-        memory = store.get_by_id(mem_id)
-
-        if not memory:
-            print(f"Memory {mem_id} not found.")
-        else:
-            print(f"\nID: {memory['id']}")
-            print(f"Content: {memory['content']}")
-            if memory.get('summary'):
-                print(f"Summary: {memory['summary']}")
-            if memory.get('project_name'):
-                print(f"Project: {memory['project_name']}")
-            if memory.get('tags'):
-                print(f"Tags: {', '.join(memory['tags'])}")
-            print(f"Created: {memory['created_at']}")
-            print(f"Importance: {memory['importance']}")
-            print(f"Access Count: {memory['access_count']}")
-
-    elif command == "context":
-        if len(sys.argv) < 3:
-            print("Error: Query required")
-            print("Usage: python memory_store_v2.py context <query>")
-            sys.exit(1)
-
-        query = sys.argv[2]
-        context = store.export_for_context(query)
-        print(context)
-
-    elif command == "delete":
-        if len(sys.argv) < 3:
-            print("Error: Memory ID required")
-            print("Usage: python memory_store_v2.py delete <id>")
-            sys.exit(1)
-
-        mem_id = int(sys.argv[2])
-        store.delete_memory(mem_id)
-        print(f"Memory {mem_id} deleted.")
-
-    else:
-        print(f"Unknown command: {command}")
-        print("Run without arguments to see available commands.")
+    from memory.cli import run_cli
+    run_cli()

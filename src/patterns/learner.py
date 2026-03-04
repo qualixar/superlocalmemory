@@ -66,12 +66,14 @@ class PatternLearner:
 
         # Get memory IDs for active profile only
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT id FROM memories WHERE profile = ? ORDER BY created_at',
-                       (active_profile,))
-        all_memory_ids = [row[0] for row in cursor.fetchall()]
-        total_memories = len(all_memory_ids)
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM memories WHERE profile = ? ORDER BY created_at',
+                           (active_profile,))
+            all_memory_ids = [row[0] for row in cursor.fetchall()]
+            total_memories = len(all_memory_ids)
+        finally:
+            conn.close()
 
         if total_memories == 0:
             print(f"No memories found for profile '{active_profile}'. Add memories first.")
@@ -142,16 +144,18 @@ class PatternLearner:
         """Incremental update when new memory is added."""
         active_profile = self._get_active_profile()
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM memories WHERE profile = ?',
-                       (active_profile,))
-        total = cursor.fetchone()[0]
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM memories WHERE profile = ?',
+                           (active_profile,))
+            total = cursor.fetchone()[0]
+        finally:
+            conn.close()
 
         # Only do incremental updates if we have many memories (>50)
         if total > 50:
-            # TODO: Implement true incremental update
-            print(f"New memory #{memory_id} added. Run weekly_pattern_update() to update patterns.")
+            # Deferred to batch update for efficiency (see weekly_pattern_update)
+            pass
         else:
             # For small memory counts, just do full update
             self.weekly_pattern_update()

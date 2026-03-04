@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "2.8.2",
+  "version": "2.8.3",
   "description": "Your AI Finally Remembers You - Local-first intelligent memory system for AI assistants. Works with Claude, Cursor, Windsurf, VS Code/Copilot, Codex, and 17+ AI tools. 100% local, zero cloud dependencies.",
   "keywords": [
     "ai-memory",
@@ -46,7 +46,7 @@
     "superlocalmemory": "./bin/slm-npm"
   },
   "scripts": {
-    "prepack": "find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; find . -name '*.pyc' -delete 2>/dev/null; true",
+    "prepack": "node scripts/prepack.js",
     "postinstall": "node scripts/postinstall.js",
     "preuninstall": "node scripts/preuninstall.js",
     "test": "echo \"Run: npm install -g . && slm status\" && exit 0"

@@ -1,24 +1,22 @@
-# SuperLocalMemory V2.2.0 - Core Required Dependencies
+# SuperLocalMemory - Core Feature Dependencies
 # ============================================================================
-# These packages are REQUIRED for core features (graph & patterns)
-# Install automatically during setup for smooth user experience
+# Required for knowledge graph and web dashboard.
+# Core memory operations work without these (stdlib only).
 #
-# Download size: ~50MB
-# Installation time: 1-2 minutes
-#
-# Install with: pip3 install -r requirements-core.txt
+# Download size: ~50MB | Install time: 1-2 minutes
+# Install: pip3 install -r requirements-core.txt
 # ============================================================================
 
-# Knowledge Graph - Required for graph_engine.py
-python-igraph>=0.10.0
-leidenalg>=0.9.0
-scikit-learn>=1.3.0  # Required for TF-IDF vectorization
+# Knowledge Graph
+python-igraph>=0.10.0,<2.0.0
+leidenalg>=0.9.0,<1.0.0
+scikit-learn>=1.3.0,<2.0.0
 
-# Web Dashboard - Required for ui_server.py
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.6
+# Web Dashboard
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+python-multipart>=0.0.6,<1.0.0
 
-# Performance - JSON and caching
-orjson>=3.9.0
-diskcache>=5.6.0
+# Performance
+orjson>=3.9.0,<4.0.0
+diskcache>=5.6.0,<6.0.0

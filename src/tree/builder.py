@@ -22,70 +22,72 @@ class TreeBuilderMixin:
         5. Update aggregated counts
         """
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Clear existing tree (keep root)
-        cursor.execute('DELETE FROM memory_tree WHERE node_type != ?', ('root',))
+            # Clear existing tree (keep root)
+            cursor.execute('DELETE FROM memory_tree WHERE node_type != ?', ('root',))
 
-        # Step 1: Create project nodes
-        cursor.execute('''
-            SELECT DISTINCT project_path, project_name
-            FROM memories
-            WHERE project_path IS NOT NULL
-            ORDER BY project_path
-        ''')
-        projects = cursor.fetchall()
+            # Step 1: Create project nodes
+            cursor.execute('''
+                SELECT DISTINCT project_path, project_name
+                FROM memories
+                WHERE project_path IS NOT NULL
+                ORDER BY project_path
+            ''')
+            projects = cursor.fetchall()
 
-        project_map = {}  # project_path -> node_id
+            project_map = {}  # project_path -> node_id
 
-        for project_path, project_name in projects:
-            name = project_name or project_path.split('/')[-1]
-            node_id = self.add_node('project', name, self.root_id, description=project_path)
-            project_map[project_path] = node_id
+            for project_path, project_name in projects:
+                name = project_name or project_path.split('/')[-1]
+                node_id = self.add_node('project', name, self.root_id, description=project_path)
+                project_map[project_path] = node_id
 
-        # Step 2: Create category nodes within projects
-        cursor.execute('''
-            SELECT DISTINCT project_path, category
-            FROM memories
-            WHERE project_path IS NOT NULL AND category IS NOT NULL
-            ORDER BY project_path, category
-        ''')
-        categories = cursor.fetchall()
+            # Step 2: Create category nodes within projects
+            cursor.execute('''
+                SELECT DISTINCT project_path, category
+                FROM memories
+                WHERE project_path IS NOT NULL AND category IS NOT NULL
+                ORDER BY project_path, category
+            ''')
+            categories = cursor.fetchall()
 
-        category_map = {}  # (project_path, category) -> node_id
+            category_map = {}  # (project_path, category) -> node_id
 
-        for project_path, category in categories:
-            parent_id = project_map.get(project_path)
-            if parent_id:
-                node_id = self.add_node('category', category, parent_id)
-                category_map[(project_path, category)] = node_id
+            for project_path, category in categories:
+                parent_id = project_map.get(project_path)
+                if parent_id:
+                    node_id = self.add_node('category', category, parent_id)
+                    category_map[(project_path, category)] = node_id
 
-        # Step 3: Link memories as leaf nodes
-        cursor.execute('''
-            SELECT id, content, summary, project_path, category, importance, created_at
-            FROM memories
-            ORDER BY created_at DESC
-        ''')
-        memories = cursor.fetchall()
+            # Step 3: Link memories as leaf nodes
+            cursor.execute('''
+                SELECT id, content, summary, project_path, category, importance, created_at
+                FROM memories
+                ORDER BY created_at DESC
+            ''')
+            memories = cursor.fetchall()
 
-        for mem_id, content, summary, project_path, category, importance, created_at in memories:
-            # Determine parent node
-            if project_path and category and (project_path, category) in category_map:
-                parent_id = category_map[(project_path, category)]
-            elif project_path and project_path in project_map:
-                parent_id = project_map[project_path]
-            else:
-                parent_id = self.root_id
+            for mem_id, content, summary, project_path, category, importance, created_at in memories:
+                # Determine parent node
+                if project_path and category and (project_path, category) in category_map:
+                    parent_id = category_map[(project_path, category)]
+                elif project_path and project_path in project_map:
+                    parent_id = project_map[project_path]
+                else:
+                    parent_id = self.root_id
 
-            # Create memory node
-            name = summary or content[:60].replace('\n', ' ')
-            self.add_node('memory', name, parent_id, memory_id=mem_id, description=content[:200])
+                # Create memory node
+                name = summary or content[:60].replace('\n', ' ')
+                self.add_node('memory', name, parent_id, memory_id=mem_id, description=content[:200])
 
-        # Step 4: Update aggregated counts
-        self._update_all_counts()
+            # Step 4: Update aggregated counts
+            self._update_all_counts()
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def run_cli():

@@ -36,57 +36,59 @@ class TerminologyLearner:
         patterns = {}
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        for term in self.ambiguous_terms:
-            contexts = []
+            for term in self.ambiguous_terms:
+                contexts = []
 
-            # Find all contexts where term appears
-            for memory_id in memory_ids:
-                cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
-                row = cursor.fetchone()
+                # Find all contexts where term appears
+                for memory_id in memory_ids:
+                    cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
+                    row = cursor.fetchone()
 
-                if not row:
-                    continue
+                    if not row:
+                        continue
 
-                content = row[0]
+                    content = row[0]
 
-                # Find term in content (case-insensitive)
-                pattern = r'\b' + re.escape(term) + r'\b'
-                for match in re.finditer(pattern, content, re.IGNORECASE):
-                    term_idx = match.start()
+                    # Find term in content (case-insensitive)
+                    pattern = r'\b' + re.escape(term) + r'\b'
+                    for match in re.finditer(pattern, content, re.IGNORECASE):
+                        term_idx = match.start()
 
-                    # Extract 100-char window around term
-                    start = max(0, term_idx - 100)
-                    end = min(len(content), term_idx + len(term) + 100)
-                    context_window = content[start:end]
+                        # Extract 100-char window around term
+                        start = max(0, term_idx - 100)
+                        end = min(len(content), term_idx + len(term) + 100)
+                        context_window = content[start:end]
 
-                    contexts.append({
-                        'memory_id': memory_id,
-                        'context': context_window
-                    })
+                        contexts.append({
+                            'memory_id': memory_id,
+                            'context': context_window
+                        })
 
-            # Analyze contexts to extract meaning (need at least 3 examples)
-            if len(contexts) >= 3:
-                definition = self._extract_definition(term, contexts)
+                # Analyze contexts to extract meaning (need at least 3 examples)
+                if len(contexts) >= 3:
+                    definition = self._extract_definition(term, contexts)
 
-                if definition:
-                    evidence_list = list(set([ctx['memory_id'] for ctx in contexts]))
+                    if definition:
+                        evidence_list = list(set([ctx['memory_id'] for ctx in contexts]))
 
-                    # Confidence increases with more examples, capped at 0.95
-                    confidence = min(0.95, 0.6 + (len(contexts) * 0.05))
+                        # Confidence increases with more examples, capped at 0.95
+                        confidence = min(0.95, 0.6 + (len(contexts) * 0.05))
 
-                    patterns[term] = {
-                        'pattern_type': 'terminology',
-                        'key': term,
-                        'value': definition,
-                        'confidence': round(confidence, 2),
-                        'evidence_count': len(evidence_list),
-                        'memory_ids': evidence_list,
-                        'category': 'general'
-                    }
+                        patterns[term] = {
+                            'pattern_type': 'terminology',
+                            'key': term,
+                            'value': definition,
+                            'confidence': round(confidence, 2),
+                            'evidence_count': len(evidence_list),
+                            'memory_ids': evidence_list,
+                            'category': 'general'
+                        }
 
-        conn.close()
+        finally:
+            conn.close()
         return patterns
 
     def _extract_definition(self, term: str, contexts: List[Dict]) -> Optional[str]:

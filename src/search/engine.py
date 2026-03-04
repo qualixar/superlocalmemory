@@ -172,20 +172,22 @@ class HybridSearchEngine(IndexLoaderMixin, SearchMethodsMixin, FusionMixin):
         id_to_score = {mem_id: score for mem_id, score in raw_results}
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Fetch memories
-        placeholders = ','.join(['?'] * len(memory_ids))
-        cursor.execute(f'''
-            SELECT id, content, summary, project_path, project_name, tags,
-                   category, parent_id, tree_path, depth, memory_type,
-                   importance, created_at, cluster_id, last_accessed, access_count
-            FROM memories
-            WHERE id IN ({placeholders})
-        ''', memory_ids)
+            # Fetch memories
+            placeholders = ','.join(['?'] * len(memory_ids))
+            cursor.execute(f'''
+                SELECT id, content, summary, project_path, project_name, tags,
+                       category, parent_id, tree_path, depth, memory_type,
+                       importance, created_at, cluster_id, last_accessed, access_count
+                FROM memories
+                WHERE id IN ({placeholders})
+            ''', memory_ids)
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         # Build result dictionaries
         results = []

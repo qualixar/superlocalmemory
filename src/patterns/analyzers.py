@@ -41,59 +41,61 @@ class FrequencyAnalyzer:
         patterns = {}
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        for category, keywords in self.tech_categories.items():
-            keyword_counts = Counter()
-            evidence_memories = {}  # {keyword: [memory_ids]}
+            for category, keywords in self.tech_categories.items():
+                keyword_counts = Counter()
+                evidence_memories = {}  # {keyword: [memory_ids]}
 
-            for memory_id in memory_ids:
-                cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
-                row = cursor.fetchone()
+                for memory_id in memory_ids:
+                    cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
+                    row = cursor.fetchone()
 
-                if not row:
-                    continue
+                    if not row:
+                        continue
 
-                content = row[0].lower()
+                    content = row[0].lower()
 
-                for keyword in keywords:
-                    # Count occurrences with word boundaries
-                    pattern = r'\b' + re.escape(keyword.replace('.', r'\.')) + r'\b'
-                    matches = re.findall(pattern, content, re.IGNORECASE)
-                    count = len(matches)
+                    for keyword in keywords:
+                        # Count occurrences with word boundaries
+                        pattern = r'\b' + re.escape(keyword.replace('.', r'\.')) + r'\b'
+                        matches = re.findall(pattern, content, re.IGNORECASE)
+                        count = len(matches)
 
-                    if count > 0:
-                        keyword_counts[keyword] += count
+                        if count > 0:
+                            keyword_counts[keyword] += count
 
-                        if keyword not in evidence_memories:
-                            evidence_memories[keyword] = []
-                        evidence_memories[keyword].append(memory_id)
+                            if keyword not in evidence_memories:
+                                evidence_memories[keyword] = []
+                            evidence_memories[keyword].append(memory_id)
 
-            # Determine preference (most mentioned)
-            if keyword_counts:
-                top_keyword = keyword_counts.most_common(1)[0][0]
-                total_mentions = sum(keyword_counts.values())
-                top_count = keyword_counts[top_keyword]
+                # Determine preference (most mentioned)
+                if keyword_counts:
+                    top_keyword = keyword_counts.most_common(1)[0][0]
+                    total_mentions = sum(keyword_counts.values())
+                    top_count = keyword_counts[top_keyword]
 
-                # Calculate confidence (% of mentions)
-                confidence = top_count / total_mentions if total_mentions > 0 else 0
+                    # Calculate confidence (% of mentions)
+                    confidence = top_count / total_mentions if total_mentions > 0 else 0
 
-                # Only create pattern if confidence > 0.6 and at least 3 mentions
-                if confidence > 0.6 and top_count >= 3:
-                    value = self._format_preference(top_keyword, keyword_counts)
-                    evidence_list = list(set(evidence_memories.get(top_keyword, [])))
+                    # Only create pattern if confidence > 0.6 and at least 3 mentions
+                    if confidence > 0.6 and top_count >= 3:
+                        value = self._format_preference(top_keyword, keyword_counts)
+                        evidence_list = list(set(evidence_memories.get(top_keyword, [])))
 
-                    patterns[category] = {
-                        'pattern_type': 'preference',
-                        'key': category,
-                        'value': value,
-                        'confidence': round(confidence, 2),
-                        'evidence_count': len(evidence_list),
-                        'memory_ids': evidence_list,
-                        'category': self._categorize_pattern(category)
-                    }
+                        patterns[category] = {
+                            'pattern_type': 'preference',
+                            'key': category,
+                            'value': value,
+                            'confidence': round(confidence, 2),
+                            'evidence_count': len(evidence_list),
+                            'memory_ids': evidence_list,
+                            'category': self._categorize_pattern(category)
+                        }
 
-        conn.close()
+        finally:
+            conn.close()
         return patterns
 
     def _format_preference(self, top_keyword: str, all_counts: Counter) -> str:
@@ -171,53 +173,55 @@ class ContextAnalyzer:
         patterns = {}
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        for pattern_key, indicators in self.style_indicators.items():
-            indicator_counts = Counter()
-            evidence_memories = {}  # {style_type: [memory_ids]}
+            for pattern_key, indicators in self.style_indicators.items():
+                indicator_counts = Counter()
+                evidence_memories = {}  # {style_type: [memory_ids]}
 
-            for memory_id in memory_ids:
-                cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
-                row = cursor.fetchone()
+                for memory_id in memory_ids:
+                    cursor.execute('SELECT content FROM memories WHERE id = ?', (memory_id,))
+                    row = cursor.fetchone()
 
-                if not row:
-                    continue
+                    if not row:
+                        continue
 
-                content = row[0].lower()
+                    content = row[0].lower()
 
-                for style_type, keywords in indicators.items():
-                    for keyword in keywords:
-                        if keyword in content:
-                            indicator_counts[style_type] += 1
+                    for style_type, keywords in indicators.items():
+                        for keyword in keywords:
+                            if keyword in content:
+                                indicator_counts[style_type] += 1
 
-                            if style_type not in evidence_memories:
-                                evidence_memories[style_type] = []
-                            evidence_memories[style_type].append(memory_id)
+                                if style_type not in evidence_memories:
+                                    evidence_memories[style_type] = []
+                                evidence_memories[style_type].append(memory_id)
 
-            # Determine dominant style
-            if indicator_counts:
-                top_style = indicator_counts.most_common(1)[0][0]
-                total = sum(indicator_counts.values())
-                top_count = indicator_counts[top_style]
-                confidence = top_count / total if total > 0 else 0
+                # Determine dominant style
+                if indicator_counts:
+                    top_style = indicator_counts.most_common(1)[0][0]
+                    total = sum(indicator_counts.values())
+                    top_count = indicator_counts[top_style]
+                    confidence = top_count / total if total > 0 else 0
 
-                # Only create pattern if confidence > 0.65 and at least 3 mentions
-                if confidence > 0.65 and top_count >= 3:
-                    value = self._format_style_value(pattern_key, top_style, indicator_counts)
-                    evidence_list = list(set(evidence_memories.get(top_style, [])))
+                    # Only create pattern if confidence > 0.65 and at least 3 mentions
+                    if confidence > 0.65 and top_count >= 3:
+                        value = self._format_style_value(pattern_key, top_style, indicator_counts)
+                        evidence_list = list(set(evidence_memories.get(top_style, [])))
 
-                    patterns[pattern_key] = {
-                        'pattern_type': 'style',
-                        'key': pattern_key,
-                        'value': value,
-                        'confidence': round(confidence, 2),
-                        'evidence_count': len(evidence_list),
-                        'memory_ids': evidence_list,
-                        'category': 'general'
-                    }
+                        patterns[pattern_key] = {
+                            'pattern_type': 'style',
+                            'key': pattern_key,
+                            'value': value,
+                            'confidence': round(confidence, 2),
+                            'evidence_count': len(evidence_list),
+                            'memory_ids': evidence_list,
+                            'category': 'general'
+                        }
 
-        conn.close()
+        finally:
+            conn.close()
         return patterns
 
     def _format_style_value(self, pattern_key: str, top_style: str, all_counts: Counter) -> str:

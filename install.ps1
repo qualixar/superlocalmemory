@@ -1,9 +1,17 @@
 # ============================================================================
-# SuperLocalMemory V2.2.0 - Windows Installation Script (PowerShell)
+# SuperLocalMemory V2.8.3 - Windows Installation Script (PowerShell)
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # Licensed under MIT License
 # Repository: https://github.com/varun369/SuperLocalMemoryV2
 # ============================================================================
+
+# IMPORTANT: param() must be the FIRST executable statement in PowerShell
+param(
+    [switch]$NonInteractive,
+    [switch]$Auto,
+    [switch]$Yes,
+    [switch]$y
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -16,14 +24,6 @@ if (-not [Environment]::UserInteractive) {
     $NON_INTERACTIVE = $true
 }
 
-# Parse command line arguments
-param(
-    [switch]$NonInteractive,
-    [switch]$Auto,
-    [switch]$Yes,
-    [switch]$y
-)
-
 if ($NonInteractive -or $Auto -or $Yes -or $y) {
     $NON_INTERACTIVE = $true
 }
@@ -31,7 +31,7 @@ if ($NonInteractive -or $Auto -or $Yes -or $y) {
 # Print banner
 Write-Host ""
 Write-Host "=================================================================="
-Write-Host "  SuperLocalMemory V2.2.0 - Windows Installation                 "
+Write-Host "  SuperLocalMemory V2.8.3 - Windows Installation                 "
 Write-Host "  by Varun Pratap Bhardwaj                                       "
 Write-Host "  https://github.com/varun369/SuperLocalMemoryV2                 "
 Write-Host "=================================================================="
@@ -552,7 +552,7 @@ Write-Host "=================================================================="
 Write-Host "  Optional Features Available                                    "
 Write-Host "=================================================================="
 Write-Host ""
-Write-Host "SuperLocalMemory V2.2.0 includes optional features:"
+Write-Host "SuperLocalMemory includes optional features:"
 Write-Host ""
 Write-Host "  1) Advanced Search (~1.5GB, 5-10 min)"
 Write-Host "     - Semantic search with sentence transformers"

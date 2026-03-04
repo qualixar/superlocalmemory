@@ -109,7 +109,7 @@ class DbConnectionManager:
             return cls._instances[key]
 
     @classmethod
-    def reset_instance(cls, db_path: Optional[Path] = None):
+    def reset_instance(cls, db_path: Optional[Path] = None) -> None:
         """
         Remove and close a singleton instance. Used for testing and cleanup.
 
@@ -265,7 +265,7 @@ class DbConnectionManager:
 
         return conn
 
-    def release_read_connection(self, conn: sqlite3.Connection):
+    def release_read_connection(self, conn: sqlite3.Connection) -> None:
         """
         Release a read connection back to the pool.
 
@@ -401,7 +401,7 @@ class DbConnectionManager:
     # Post-write hooks (Event Bus integration point)
     # =========================================================================
 
-    def register_post_write_hook(self, hook: Callable[[], None]):
+    def register_post_write_hook(self, hook: Callable[[], None]) -> None:
         """
         Register a callback that fires after every successful write commit.
 
@@ -415,7 +415,7 @@ class DbConnectionManager:
         with self._post_write_hooks_lock:
             self._post_write_hooks.append(hook)
 
-    def unregister_post_write_hook(self, hook: Callable[[], None]):
+    def unregister_post_write_hook(self, hook: Callable[[], None]) -> None:
         """
         Remove a previously registered post-write hook.
 
@@ -463,7 +463,7 @@ class DbConnectionManager:
     # Lifecycle management
     # =========================================================================
 
-    def close(self):
+    def close(self) -> None:
         """
         Shut down the connection manager. Drains the write queue and closes
         all connections.

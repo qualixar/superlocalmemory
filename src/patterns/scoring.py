@@ -83,18 +83,20 @@ class ConfidenceScorer:
     def _calculate_recency_bonus(self, memory_ids: List[int]) -> float:
         """Give bonus to patterns with recent evidence."""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Get timestamps
-        placeholders = ','.join('?' * len(memory_ids))
-        cursor.execute(f'''
-            SELECT created_at FROM memories
-            WHERE id IN ({placeholders})
-            ORDER BY created_at DESC
-        ''', memory_ids)
+            # Get timestamps
+            placeholders = ','.join('?' * len(memory_ids))
+            cursor.execute(f'''
+                SELECT created_at FROM memories
+                WHERE id IN ({placeholders})
+                ORDER BY created_at DESC
+            ''', memory_ids)
 
-        timestamps = cursor.fetchall()
-        conn.close()
+            timestamps = cursor.fetchall()
+        finally:
+            conn.close()
 
         if not timestamps:
             return 1.0
@@ -124,17 +126,19 @@ class ConfidenceScorer:
             return 0.8  # Penalize low sample size
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        placeholders = ','.join('?' * len(memory_ids))
-        cursor.execute(f'''
-            SELECT created_at FROM memories
-            WHERE id IN ({placeholders})
-            ORDER BY created_at
-        ''', memory_ids)
+            placeholders = ','.join('?' * len(memory_ids))
+            cursor.execute(f'''
+                SELECT created_at FROM memories
+                WHERE id IN ({placeholders})
+                ORDER BY created_at
+            ''', memory_ids)
 
-        timestamps = [row[0] for row in cursor.fetchall()]
-        conn.close()
+            timestamps = [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
         if len(timestamps) < 2:
             return 0.8

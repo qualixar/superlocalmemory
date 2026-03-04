@@ -94,7 +94,7 @@ class EventBus:
             return cls._instances[key]
 
     @classmethod
-    def reset_instance(cls, db_path: Optional[Path] = None):
+    def reset_instance(cls, db_path: Optional[Path] = None) -> None:
         """Remove and close a singleton instance. Used for testing."""
         with cls._instances_lock:
             if db_path is None:
@@ -171,25 +171,27 @@ class EventBus:
             # Fallback: direct connection
             import sqlite3
             conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS memory_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_type TEXT NOT NULL,
-                    memory_id INTEGER,
-                    source_agent TEXT DEFAULT 'user',
-                    source_protocol TEXT DEFAULT 'internal',
-                    payload TEXT,
-                    importance INTEGER DEFAULT 5,
-                    tier TEXT DEFAULT 'hot',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_type ON memory_events(event_type)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_created ON memory_events(created_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_tier ON memory_events(tier)')
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS memory_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT NOT NULL,
+                        memory_id INTEGER,
+                        source_agent TEXT DEFAULT 'user',
+                        source_protocol TEXT DEFAULT 'internal',
+                        payload TEXT,
+                        importance INTEGER DEFAULT 5,
+                        tier TEXT DEFAULT 'hot',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_type ON memory_events(event_type)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_created ON memory_events(created_at)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_tier ON memory_events(tier)')
+                conn.commit()
+            finally:
+                conn.close()
 
     # =========================================================================
     # Event Emission
@@ -309,7 +311,7 @@ class EventBus:
     # Listener Management
     # =========================================================================
 
-    def add_listener(self, callback: Callable[[dict], None]):
+    def add_listener(self, callback: Callable[[dict], None]) -> None:
         """
         Register a listener that receives every emitted event.
 
@@ -322,7 +324,7 @@ class EventBus:
         with self._listeners_lock:
             self._listeners.append(callback)
 
-    def remove_listener(self, callback: Callable[[dict], None]):
+    def remove_listener(self, callback: Callable[[dict], None]) -> None:
         """Remove a previously registered listener."""
         with self._listeners_lock:
             try:

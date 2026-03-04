@@ -63,67 +63,17 @@ from .feature_extractor import FeatureExtractor, FEATURE_NAMES, NUM_FEATURES
 
 logger = logging.getLogger("superlocalmemory.learning.adaptive_ranker")
 
-# ============================================================================
-# Constants
-# ============================================================================
-
-MODELS_DIR = Path.home() / ".claude-memory" / "models"
-MODEL_PATH = MODELS_DIR / "ranker.txt"
-
-# Phase thresholds — how many feedback signals to trigger each phase
-PHASE_THRESHOLDS = {
-    'baseline': 0,       # 0 feedback samples -> no re-ranking
-    'rule_based': 20,    # 20+ feedback -> rule-based boosting
-    'ml_model': 200,     # 200+ feedback across 50+ unique queries -> ML
-}
-
-# Minimum unique queries required for ML phase (prevents overfitting
-# to a small number of repeated queries)
-MIN_UNIQUE_QUERIES_FOR_ML = 50
-
-# Rule-based boost multipliers (Phase 1)
-# These are conservative — they nudge the ranking without flipping order
-_RULE_BOOST = {
-    'tech_match_strong': 1.3,      # Memory matches 2+ preferred techs
-    'tech_match_weak': 1.1,        # Memory matches 1 preferred tech
-    'project_match': 1.5,          # Memory from current project
-    'project_unknown': 1.0,        # No project context — no boost
-    'project_mismatch': 0.9,       # Memory from different project
-    'source_quality_high': 1.2,    # Source quality > 0.7
-    'source_quality_low': 0.85,    # Source quality < 0.3
-    'recency_boost_max': 1.2,      # Recent memory (< 7 days)
-    'recency_penalty_max': 0.8,    # Old memory (> 365 days)
-    'high_importance': 1.15,       # Importance >= 8
-    'high_access': 1.1,            # Accessed 5+ times
-    # v2.8: Lifecycle + behavioral boosts
-    'lifecycle_active': 1.0,
-    'lifecycle_warm': 0.85,
-    'lifecycle_cold': 0.6,
-    'outcome_success_high': 1.3,
-    'outcome_failure_high': 0.7,
-    'behavioral_match_strong': 1.25,
-    'cross_project_boost': 1.15,
-    'high_trust_creator': 1.1,
-    'low_trust_creator': 0.8,
-}
-
-# LightGBM training parameters — tuned for small, personal datasets
-# Aggressive regularization prevents overfitting on < 10K samples
-TRAINING_PARAMS = {
-    'objective': 'lambdarank',
-    'metric': 'ndcg',
-    'ndcg_eval_at': [5, 10],
-    'learning_rate': 0.05,
-    'num_leaves': 16,
-    'max_depth': 4,
-    'min_child_samples': 10,
-    'subsample': 0.8,
-    'reg_alpha': 0.1,
-    'reg_lambda': 1.0,
-    'boosting_type': 'dart',
-    'n_estimators': 50,
-    'verbose': -1,
-}
+# Import constants and helpers from ranking subpackage
+from .ranking import (
+    MODELS_DIR,
+    MODEL_PATH,
+    PHASE_THRESHOLDS,
+    MIN_UNIQUE_QUERIES_FOR_ML,
+    RULE_BOOST,
+    TRAINING_PARAMS,
+    calculate_rule_boost,
+    prepare_training_data_internal,
+)
 
 
 class AdaptiveRanker:
@@ -373,102 +323,7 @@ class AdaptiveRanker:
                 continue
 
             features = feature_vectors[i]
-            boost = 1.0
-
-            # Feature [2]: tech_match
-            tech_match = features[2]
-            if tech_match >= 0.8:
-                boost *= _RULE_BOOST['tech_match_strong']
-            elif tech_match >= 0.4:
-                boost *= _RULE_BOOST['tech_match_weak']
-
-            # Feature [3]: project_match
-            project_match = features[3]
-            if project_match >= 0.9:
-                boost *= _RULE_BOOST['project_match']
-            elif project_match <= 0.35:
-                boost *= _RULE_BOOST['project_mismatch']
-
-            # Feature [5]: source_quality
-            source_quality = features[5]
-            if source_quality >= 0.7:
-                boost *= _RULE_BOOST['source_quality_high']
-            elif source_quality < 0.3:
-                boost *= _RULE_BOOST['source_quality_low']
-
-            # Feature [7]: recency_score (exponential decay)
-            recency = features[7]
-            # Linear interpolation between penalty and boost
-            recency_factor = (
-                _RULE_BOOST['recency_penalty_max']
-                + recency * (
-                    _RULE_BOOST['recency_boost_max']
-                    - _RULE_BOOST['recency_penalty_max']
-                )
-            )
-            boost *= recency_factor
-
-            # Feature [6]: importance_norm
-            importance_norm = features[6]
-            if importance_norm >= 0.8:
-                boost *= _RULE_BOOST['high_importance']
-
-            # Feature [8]: access_frequency
-            access_freq = features[8]
-            if access_freq >= 0.5:
-                boost *= _RULE_BOOST['high_access']
-
-            # Feature [10]: signal_count (v2.7.4 — feedback volume)
-            if len(features) > 10:
-                signal_count = features[10]
-                if signal_count >= 0.3:  # 3+ signals
-                    boost *= 1.1  # Mild boost for well-known memories
-
-            # Feature [11]: avg_signal_value (v2.7.4 — feedback quality)
-            if len(features) > 11:
-                avg_signal = features[11]
-                if avg_signal >= 0.7:
-                    boost *= 1.15  # Boost memories with positive feedback
-                elif avg_signal < 0.3 and avg_signal > 0.0:
-                    boost *= 0.85  # Penalize memories with negative feedback
-
-            # Feature [12]: lifecycle_state (v2.8)
-            if len(features) > 12:
-                lifecycle_state = features[12]
-                if lifecycle_state >= 0.9:
-                    boost *= _RULE_BOOST.get('lifecycle_active', 1.0)
-                elif lifecycle_state >= 0.6:
-                    boost *= _RULE_BOOST.get('lifecycle_warm', 0.85)
-                elif lifecycle_state >= 0.3:
-                    boost *= _RULE_BOOST.get('lifecycle_cold', 0.6)
-
-            # Feature [13]: outcome_success_rate (v2.8)
-            if len(features) > 13:
-                success_rate = features[13]
-                if success_rate >= 0.8:
-                    boost *= _RULE_BOOST.get('outcome_success_high', 1.3)
-                elif success_rate <= 0.2:
-                    boost *= _RULE_BOOST.get('outcome_failure_high', 0.7)
-
-            # Feature [15]: behavioral_match (v2.8)
-            if len(features) > 15:
-                behavioral = features[15]
-                if behavioral >= 0.7:
-                    boost *= _RULE_BOOST.get('behavioral_match_strong', 1.25)
-
-            # Feature [16]: cross_project_score (v2.8)
-            if len(features) > 16:
-                cross_project = features[16]
-                if cross_project >= 0.5:
-                    boost *= _RULE_BOOST.get('cross_project_boost', 1.15)
-
-            # Feature [18]: trust_at_creation (v2.8)
-            if len(features) > 18:
-                trust = features[18]
-                if trust >= 0.9:
-                    boost *= _RULE_BOOST.get('high_trust_creator', 1.1)
-                elif trust <= 0.3:
-                    boost *= _RULE_BOOST.get('low_trust_creator', 0.8)
+            boost = calculate_rule_boost(features)
 
             # Apply boost to score
             result['score'] = base_score * boost
@@ -799,12 +654,10 @@ class AdaptiveRanker:
 
         Returns:
             Tuple of (X, y, groups) for LGBMRanker, or None if insufficient.
-            X: numpy array (n_samples, 9)
+            X: numpy array (n_samples, NUM_FEATURES)
             y: numpy array (n_samples,) — relevance labels
             groups: list of ints — samples per query group
         """
-        import sqlite3
-
         ldb = self._get_learning_db()
         if ldb is None:
             return None
@@ -813,111 +666,7 @@ class AdaptiveRanker:
         if not feedback:
             return None
 
-        # Group feedback by query_hash
-        query_groups: Dict[str, List[dict]] = {}
-        for entry in feedback:
-            qh = entry['query_hash']
-            if qh not in query_groups:
-                query_groups[qh] = []
-            query_groups[qh].append(entry)
-
-        # Filter: only keep groups with 2+ items (ranking requires pairs)
-        query_groups = {
-            qh: entries for qh, entries in query_groups.items()
-            if len(entries) >= 2
-        }
-
-        if not query_groups:
-            logger.info("No query groups with 2+ feedback entries")
-            return None
-
-        # Collect memory IDs we need to look up
-        memory_ids_needed = set()
-        for entries in query_groups.values():
-            for entry in entries:
-                memory_ids_needed.add(entry['memory_id'])
-
-        # Fetch memories from memory.db
-        memory_db_path = Path.home() / ".claude-memory" / "memory.db"
-        if not memory_db_path.exists():
-            logger.warning("memory.db not found at %s", memory_db_path)
-            return None
-
-        memories_by_id = {}
-        try:
-            conn = sqlite3.connect(str(memory_db_path), timeout=5)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            # Batch fetch memories (in chunks to avoid SQLite variable limit)
-            id_list = list(memory_ids_needed)
-            chunk_size = 500
-            for i in range(0, len(id_list), chunk_size):
-                chunk = id_list[i:i + chunk_size]
-                placeholders = ','.join('?' for _ in chunk)
-                cursor.execute(f'''
-                    SELECT id, content, summary, project_path, project_name,
-                           tags, category, memory_type, importance, created_at,
-                           last_accessed, access_count
-                    FROM memories
-                    WHERE id IN ({placeholders})
-                ''', chunk)
-                for row in cursor.fetchall():
-                    memories_by_id[row['id']] = dict(row)
-            conn.close()
-        except Exception as e:
-            logger.error("Failed to fetch memories for training: %s", e)
-            return None
-
-        # Build feature matrix and labels
-        all_features = []
-        all_labels = []
-        groups = []
-
-        # Set a neutral context for training (we don't have query-time context)
-        self._feature_extractor.set_context()
-
-        for qh, entries in query_groups.items():
-            group_features = []
-            group_labels = []
-
-            for entry in entries:
-                mid = entry['memory_id']
-                memory = memories_by_id.get(mid)
-                if memory is None:
-                    continue  # Memory may have been deleted
-
-                # Use query_keywords as proxy for query text
-                query_text = entry.get('query_keywords', '') or ''
-
-                features = self._feature_extractor.extract_features(
-                    memory, query_text
-                )
-                group_features.append(features)
-                group_labels.append(float(entry['signal_value']))
-
-            # Only include groups with 2+ valid entries
-            if len(group_features) >= 2:
-                all_features.extend(group_features)
-                all_labels.extend(group_labels)
-                groups.append(len(group_features))
-
-        if not groups or len(all_features) < 4:
-            logger.info(
-                "Insufficient valid training data: %d features, %d groups",
-                len(all_features), len(groups)
-            )
-            return None
-
-        X = np.array(all_features, dtype=np.float64)
-        y = np.array(all_labels, dtype=np.float64)
-
-        logger.info(
-            "Prepared training data: %d samples, %d groups, %d features",
-            X.shape[0], len(groups), X.shape[1]
-        )
-
-        return X, y, groups
+        return prepare_training_data_internal(feedback, self._feature_extractor)
 
 
 # ============================================================================

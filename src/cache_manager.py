@@ -88,7 +88,7 @@ class CacheEntry:
         age = time.time() - self.timestamp
         return age > ttl_seconds
 
-    def mark_accessed(self):
+    def mark_accessed(self) -> None:
         """Mark entry as accessed (increment counter)."""
         self.access_count += 1
 
@@ -425,7 +425,7 @@ if __name__ == "__main__":
     ]
 
     # Mock search results
-    def mock_search(query: str):
+    def mock_search(query: str) -> None:
         """Simulate search result."""
         return [
             (f"doc_{i}", random.random())

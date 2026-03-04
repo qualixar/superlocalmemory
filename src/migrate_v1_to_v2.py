@@ -25,12 +25,13 @@ from pathlib import Path
 from datetime import datetime
 import sys
 import traceback
+from typing import Tuple, Dict, Any
 
 DB_PATH = Path.home() / '.claude-memory' / 'memory.db'
 BACKUP_PATH = Path.home() / '.claude-memory' / 'backups' / f'pre-v2-{datetime.now().strftime("%Y%m%d-%H%M%S")}.db'
 
 
-def create_backup():
+def create_backup() -> None:
     """Create a backup of the database before migration."""
     print("=" * 60)
     print("CREATING BACKUP")
@@ -49,7 +50,7 @@ def create_backup():
     print()
 
 
-def check_schema_version(conn):
+def check_schema_version(conn: sqlite3.Connection) -> bool:
     """Check if migration has already been completed."""
     cursor = conn.cursor()
 
@@ -67,7 +68,7 @@ def check_schema_version(conn):
     return False
 
 
-def add_new_columns(conn):
+def add_new_columns(conn: sqlite3.Connection) -> None:
     """Add new columns to the memories table."""
     print("=" * 60)
     print("ADDING NEW COLUMNS TO MEMORIES TABLE")
@@ -99,7 +100,7 @@ def add_new_columns(conn):
     print()
 
 
-def create_new_tables(conn):
+def create_new_tables(conn: sqlite3.Connection) -> None:
     """Create all new tables for V2 architecture."""
     print("=" * 60)
     print("CREATING NEW TABLES")
@@ -223,7 +224,7 @@ def create_new_tables(conn):
     print()
 
 
-def create_indexes(conn):
+def create_indexes(conn: sqlite3.Connection) -> None:
     """Create all indexes for performance optimization."""
     print("=" * 60)
     print("CREATING INDEXES")
@@ -259,7 +260,7 @@ def create_indexes(conn):
     print()
 
 
-def migrate_to_tree_structure(conn):
+def migrate_to_tree_structure(conn: sqlite3.Connection) -> None:
     """Migrate existing memories to tree structure."""
     print("=" * 60)
     print("MIGRATING MEMORIES TO TREE STRUCTURE")
@@ -384,7 +385,7 @@ def migrate_to_tree_structure(conn):
     print()
 
 
-def update_metadata(conn):
+def update_metadata(conn: sqlite3.Connection) -> None:
     """Update system metadata with migration info."""
     print("=" * 60)
     print("UPDATING SYSTEM METADATA")
@@ -417,7 +418,7 @@ def update_metadata(conn):
     print()
 
 
-def verify_migration(conn):
+def verify_migration(conn: sqlite3.Connection) -> Tuple[bool, Dict[str, Any]]:
     """Verify that migration completed successfully."""
     print("=" * 60)
     print("VERIFYING MIGRATION")
@@ -477,7 +478,7 @@ def verify_migration(conn):
     return True
 
 
-def print_summary(conn):
+def print_summary(conn: sqlite3.Connection) -> None:
     """Print migration summary statistics."""
     print("=" * 60)
     print("MIGRATION SUMMARY")
@@ -519,7 +520,7 @@ def print_summary(conn):
     print()
 
 
-def migrate():
+def migrate() -> None:
     """Main migration function."""
     print()
     print("╔" + "═" * 58 + "╗")

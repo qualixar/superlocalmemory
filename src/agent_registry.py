@@ -105,24 +105,26 @@ class AgentRegistry:
         except ImportError:
             import sqlite3
             conn = sqlite3.connect(str(self.db_path))
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS agent_registry (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    agent_id TEXT NOT NULL UNIQUE,
-                    agent_name TEXT,
-                    protocol TEXT NOT NULL,
-                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    memories_written INTEGER DEFAULT 0,
-                    memories_recalled INTEGER DEFAULT 0,
-                    trust_score REAL DEFAULT 0.667,
-                    metadata TEXT DEFAULT '{}'
-                )
-            ''')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_agent_protocol ON agent_registry(protocol)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_agent_last_seen ON agent_registry(last_seen)')
-            conn.commit()
-            conn.close()
+            try:
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS agent_registry (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        agent_id TEXT NOT NULL UNIQUE,
+                        agent_name TEXT,
+                        protocol TEXT NOT NULL,
+                        first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        memories_written INTEGER DEFAULT 0,
+                        memories_recalled INTEGER DEFAULT 0,
+                        trust_score REAL DEFAULT 0.667,
+                        metadata TEXT DEFAULT '{}'
+                    )
+                ''')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_agent_protocol ON agent_registry(protocol)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_agent_last_seen ON agent_registry(last_seen)')
+                conn.commit()
+            finally:
+                conn.close()
 
     # =========================================================================
     # Agent Registration
@@ -179,16 +181,18 @@ class AgentRegistry:
         except ImportError:
             import sqlite3
             conn = sqlite3.connect(str(self.db_path))
-            conn.execute('''
-                INSERT INTO agent_registry (agent_id, agent_name, protocol, first_seen, last_seen, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(agent_id) DO UPDATE SET
-                    last_seen = excluded.last_seen,
-                    metadata = excluded.metadata,
-                    agent_name = COALESCE(excluded.agent_name, agent_registry.agent_name)
-            ''', (agent_id, agent_name, protocol, now, now, meta_json))
-            conn.commit()
-            conn.close()
+            try:
+                conn.execute('''
+                    INSERT INTO agent_registry (agent_id, agent_name, protocol, first_seen, last_seen, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(agent_id) DO UPDATE SET
+                        last_seen = excluded.last_seen,
+                        metadata = excluded.metadata,
+                        agent_name = COALESCE(excluded.agent_name, agent_registry.agent_name)
+                ''', (agent_id, agent_name, protocol, now, now, meta_json))
+                conn.commit()
+            finally:
+                conn.close()
 
         # Emit agent.connected event
         try:

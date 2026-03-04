@@ -28,10 +28,10 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 
-logger = logging.getLogger("superlocalmemory.learning.db")
+from .db.constants import MEMORY_DIR, LEARNING_DB_PATH, DEFAULT_PROFILE
+from .db.schema import initialize_schema
 
-MEMORY_DIR = Path.home() / ".claude-memory"
-LEARNING_DB_PATH = MEMORY_DIR / "learning.db"
+logger = logging.getLogger("superlocalmemory.learning.db")
 
 
 class LearningDB:
@@ -108,227 +108,8 @@ class LearningDB:
     def _init_schema(self):
         """Create all learning tables if they don't exist."""
         conn = self._get_connection()
-        cursor = conn.cursor()
-
         try:
-            # ------------------------------------------------------------------
-            # Layer 1: Cross-project transferable patterns
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS transferable_patterns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    pattern_type TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    confidence REAL DEFAULT 0.0,
-                    evidence_count INTEGER DEFAULT 0,
-                    profiles_seen INTEGER DEFAULT 0,
-                    first_seen TIMESTAMP,
-                    last_seen TIMESTAMP,
-                    decay_factor REAL DEFAULT 1.0,
-                    contradictions TEXT DEFAULT '[]',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(pattern_type, key)
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Layer 3: Workflow patterns (sequences + temporal + style)
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS workflow_patterns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    pattern_type TEXT NOT NULL,
-                    pattern_key TEXT NOT NULL,
-                    pattern_value TEXT NOT NULL,
-                    confidence REAL DEFAULT 0.0,
-                    evidence_count INTEGER DEFAULT 0,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    metadata TEXT DEFAULT '{}'
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Feedback from all channels
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS ranking_feedback (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    query_hash TEXT NOT NULL,
-                    query_keywords TEXT,
-                    memory_id INTEGER NOT NULL,
-                    rank_position INTEGER,
-                    signal_type TEXT NOT NULL,
-                    signal_value REAL DEFAULT 1.0,
-                    channel TEXT NOT NULL,
-                    source_tool TEXT,
-                    dwell_time REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Model metadata
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS ranking_models (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    model_version TEXT NOT NULL,
-                    training_samples INTEGER,
-                    synthetic_samples INTEGER DEFAULT 0,
-                    real_samples INTEGER DEFAULT 0,
-                    ndcg_at_10 REAL,
-                    model_path TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Source quality scores (per-source learning)
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS source_quality (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source_id TEXT NOT NULL UNIQUE,
-                    positive_signals INTEGER DEFAULT 0,
-                    total_memories INTEGER DEFAULT 0,
-                    quality_score REAL DEFAULT 0.5,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Engagement metrics (local only, never transmitted)
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS engagement_metrics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    metric_date DATE NOT NULL UNIQUE,
-                    memories_created INTEGER DEFAULT 0,
-                    recalls_performed INTEGER DEFAULT 0,
-                    feedback_signals INTEGER DEFAULT 0,
-                    patterns_updated INTEGER DEFAULT 0,
-                    active_sources TEXT DEFAULT '[]',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            # ------------------------------------------------------------------
-            # Indexes for performance
-            # ------------------------------------------------------------------
-            # v2.7.4: Add profile columns for per-profile learning
-            for table in ['ranking_feedback', 'transferable_patterns', 'workflow_patterns', 'source_quality']:
-                try:
-                    cursor.execute(f'ALTER TABLE {table} ADD COLUMN profile TEXT DEFAULT "default"')
-                except Exception:
-                    pass  # Column already exists
-
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_feedback_profile '
-                'ON ranking_feedback(profile)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_patterns_profile '
-                'ON transferable_patterns(profile)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_workflow_profile '
-                'ON workflow_patterns(profile)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_feedback_query '
-                'ON ranking_feedback(query_hash)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_feedback_memory '
-                'ON ranking_feedback(memory_id)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_feedback_channel '
-                'ON ranking_feedback(channel)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_feedback_created '
-                'ON ranking_feedback(created_at)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_patterns_type '
-                'ON transferable_patterns(pattern_type)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_workflow_type '
-                'ON workflow_patterns(pattern_type)'
-            )
-            cursor.execute(
-                'CREATE INDEX IF NOT EXISTS idx_engagement_date '
-                'ON engagement_metrics(metric_date)'
-            )
-
-            # ------------------------------------------------------------------
-            # v2.8.0: Behavioral learning tables
-            # ------------------------------------------------------------------
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS action_outcomes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    memory_ids TEXT NOT NULL,
-                    outcome TEXT NOT NULL,
-                    action_type TEXT DEFAULT 'other',
-                    context TEXT DEFAULT '{}',
-                    confidence REAL DEFAULT 1.0,
-                    agent_id TEXT DEFAULT 'user',
-                    project TEXT,
-                    profile TEXT DEFAULT 'default',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS behavioral_patterns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    pattern_type TEXT NOT NULL,
-                    pattern_key TEXT NOT NULL,
-                    success_rate REAL DEFAULT 0.0,
-                    evidence_count INTEGER DEFAULT 0,
-                    confidence REAL DEFAULT 0.0,
-                    metadata TEXT DEFAULT '{}',
-                    project TEXT,
-                    profile TEXT DEFAULT 'default',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS cross_project_behaviors (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source_project TEXT NOT NULL,
-                    target_project TEXT NOT NULL,
-                    pattern_id INTEGER NOT NULL,
-                    transfer_type TEXT DEFAULT 'metadata',
-                    confidence REAL DEFAULT 0.0,
-                    profile TEXT DEFAULT 'default',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (pattern_id) REFERENCES behavioral_patterns(id)
-                )
-            ''')
-
-            # v2.8.0 indexes
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_outcomes_memory ON action_outcomes(memory_ids)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_outcomes_project ON action_outcomes(project)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_outcomes_profile ON action_outcomes(profile)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_bpatterns_type ON behavioral_patterns(pattern_type)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_bpatterns_project ON behavioral_patterns(project)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_xproject_source ON cross_project_behaviors(source_project)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_xproject_target ON cross_project_behaviors(target_project)')
-
-            conn.commit()
-            logger.info("Learning schema initialized successfully")
-
-        except Exception as e:
-            logger.error("Failed to initialize learning schema: %s", e)
-            conn.rollback()
-            raise
+            initialize_schema(conn)
         finally:
             conn.close()
 
@@ -682,7 +463,7 @@ class LearningDB:
         finally:
             conn.close()
 
-    def clear_workflow_patterns(self, pattern_type: Optional[str] = None):
+    def clear_workflow_patterns(self, pattern_type: Optional[str] = None) -> None:
         """Clear workflow patterns (used before re-mining)."""
         with self._write_lock:
             conn = self._get_connection()
@@ -712,7 +493,7 @@ class LearningDB:
         source_id: str,
         positive_signals: int,
         total_memories: int,
-    ):
+    ) -> None:
         """Update quality score for a memory source."""
         # Beta-Binomial smoothing: (alpha + pos) / (alpha + beta + total)
         quality_score = (1.0 + positive_signals) / (2.0 + total_memories)
@@ -820,7 +601,7 @@ class LearningDB:
         metric_type: str,
         count: int = 1,
         source: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Increment a daily engagement metric.
 
@@ -966,7 +747,7 @@ class LearningDB:
     # v2.8.0: Action Outcomes CRUD
     # ======================================================================
 
-    def store_outcome(self, memory_ids, outcome, action_type="other", context=None, confidence=1.0, agent_id="user", project=None, profile="default"):
+    def store_outcome(self, memory_ids: Any, outcome: str, action_type: str = "other", context: Optional[Dict] = None, confidence: float = 1.0, agent_id: str = "user", project: Optional[str] = None, profile: str = "default") -> int:
         """Store an action outcome for behavioral learning."""
         memory_ids_str = json.dumps(memory_ids if isinstance(memory_ids, list) else [memory_ids])
         context_str = json.dumps(context or {})
@@ -982,7 +763,7 @@ class LearningDB:
         finally:
             conn.close()
 
-    def get_outcomes(self, memory_id=None, project=None, profile="default", limit=100):
+    def get_outcomes(self, memory_id: Optional[int] = None, project: Optional[str] = None, profile: str = "default", limit: int = 100) -> List[Dict[str, Any]]:
         """Get action outcomes, optionally filtered."""
         conn = self._get_connection()
         try:
@@ -1010,7 +791,7 @@ class LearningDB:
     # v2.8.0: Behavioral Patterns CRUD
     # ======================================================================
 
-    def store_behavioral_pattern(self, pattern_type, pattern_key, success_rate=0.0, evidence_count=0, confidence=0.0, metadata=None, project=None, profile="default"):
+    def store_behavioral_pattern(self, pattern_type: str, pattern_key: str, success_rate: float = 0.0, evidence_count: int = 0, confidence: float = 0.0, metadata: Optional[Dict] = None, project: Optional[str] = None, profile: str = "default") -> int:
         """Store or update a behavioral pattern."""
         metadata_str = json.dumps(metadata or {})
         conn = self._get_connection()
@@ -1025,7 +806,7 @@ class LearningDB:
         finally:
             conn.close()
 
-    def get_behavioral_patterns(self, pattern_type=None, project=None, min_confidence=0.0, profile="default"):
+    def get_behavioral_patterns(self, pattern_type: Optional[str] = None, project: Optional[str] = None, min_confidence: float = 0.0, profile: str = "default") -> List[Dict[str, Any]]:
         """Get behavioral patterns, optionally filtered."""
         conn = self._get_connection()
         try:
@@ -1052,7 +833,7 @@ class LearningDB:
     # v2.8.0: Cross-Project CRUD
     # ======================================================================
 
-    def store_cross_project(self, source_project, target_project, pattern_id, transfer_type="metadata", confidence=0.0, profile="default"):
+    def store_cross_project(self, source_project: str, target_project: str, pattern_id: int, transfer_type: str = "metadata", confidence: float = 0.0, profile: str = "default") -> int:
         """Record a cross-project behavioral transfer."""
         conn = self._get_connection()
         try:
@@ -1066,7 +847,7 @@ class LearningDB:
         finally:
             conn.close()
 
-    def get_cross_project_transfers(self, source_project=None, target_project=None, profile="default"):
+    def get_cross_project_transfers(self, source_project: Optional[str] = None, target_project: Optional[str] = None, profile: str = "default") -> List[Dict[str, Any]]:
         """Get cross-project transfer records."""
         conn = self._get_connection()
         try:
@@ -1087,7 +868,7 @@ class LearningDB:
     # Reset / Cleanup
     # ======================================================================
 
-    def reset(self):
+    def reset(self) -> None:
         """
         Delete all learning data. Memories in memory.db are preserved.
 
@@ -1115,7 +896,7 @@ class LearningDB:
             finally:
                 conn.close()
 
-    def delete_database(self):
+    def delete_database(self) -> None:
         """
         Completely delete learning.db file.
         More aggressive than reset() — removes the file entirely.

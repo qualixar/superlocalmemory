@@ -31,17 +31,19 @@ class IndexLoaderMixin:
         Load documents from database and build search indexes.
         """
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Fetch all memories
-        cursor.execute('''
-            SELECT id, content, summary, tags
-            FROM memories
-            ORDER BY id
-        ''')
+            # Fetch all memories
+            cursor.execute('''
+                SELECT id, content, summary, tags
+                FROM memories
+                ORDER BY id
+            ''')
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         if not rows:
             return

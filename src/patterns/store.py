@@ -181,43 +181,45 @@ class PatternStore:
                      profile: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get patterns above confidence threshold, optionally filtered by profile."""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Build query with optional filters
-        conditions = ['confidence >= ?']
-        params = [min_confidence]
+            # Build query with optional filters
+            conditions = ['confidence >= ?']
+            params = [min_confidence]
 
-        if pattern_type:
-            conditions.append('pattern_type = ?')
-            params.append(pattern_type)
+            if pattern_type:
+                conditions.append('pattern_type = ?')
+                params.append(pattern_type)
 
-        if profile:
-            conditions.append('profile = ?')
-            params.append(profile)
+            if profile:
+                conditions.append('profile = ?')
+                params.append(profile)
 
-        where_clause = ' AND '.join(conditions)
-        cursor.execute(f'''
-            SELECT id, pattern_type, key, value, confidence, evidence_count,
-                   updated_at, created_at, category
-            FROM identity_patterns
-            WHERE {where_clause}
-            ORDER BY confidence DESC, evidence_count DESC
-        ''', params)
+            where_clause = ' AND '.join(conditions)
+            cursor.execute(f'''
+                SELECT id, pattern_type, key, value, confidence, evidence_count,
+                       updated_at, created_at, category
+                FROM identity_patterns
+                WHERE {where_clause}
+                ORDER BY confidence DESC, evidence_count DESC
+            ''', params)
 
-        patterns = []
-        for row in cursor.fetchall():
-            patterns.append({
-                'id': row[0],
-                'pattern_type': row[1],
-                'key': row[2],
-                'value': row[3],
-                'confidence': row[4],
-                'evidence_count': row[5],
-                'frequency': row[5],
-                'last_seen': row[6],
-                'created_at': row[7],
-                'category': row[8]
-            })
+            patterns = []
+            for row in cursor.fetchall():
+                patterns.append({
+                    'id': row[0],
+                    'pattern_type': row[1],
+                    'key': row[2],
+                    'value': row[3],
+                    'confidence': row[4],
+                    'evidence_count': row[5],
+                    'frequency': row[5],
+                    'last_seen': row[6],
+                    'created_at': row[7],
+                    'category': row[8]
+                })
 
-        conn.close()
+        finally:
+            conn.close()
         return patterns
