@@ -10,7 +10,7 @@
 
 set -e
 
-SLM_DIR="${HOME}/.claude-memory"
+SLM_DIR="${SL_MEMORY_PATH:-${HOME}/.claude-memory}"
 
 # Check if SuperLocalMemory is installed
 if [ ! -d "$SLM_DIR" ]; then

@@ -9,7 +9,9 @@ REM ATTRIBUTION REQUIRED: This notice must be preserved in all copies.
 setlocal enabledelayedexpansion
 
 REM Determine installation location
-if exist "%USERPROFILE%\.claude-memory\memory_store_v2.py" (
+if defined SL_MEMORY_PATH (
+    set INSTALL_DIR=%SL_MEMORY_PATH%
+) else if exist "%USERPROFILE%\.claude-memory\memory_store_v2.py" (
     set INSTALL_DIR=%USERPROFILE%\.claude-memory
 ) else if exist "%~dp0..\src\memory_store_v2.py" (
     set INSTALL_DIR=%~dp0..\src
