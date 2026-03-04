@@ -140,5 +140,5 @@ class TestBinSlmPaths:
         src = (REPO_DIR / "bin" / "slm.bat").read_text(encoding="utf-8")
         assert (
             "if defined SL_MEMORY_PATH" in src
-            or "if defined SL_MEMORY_PATH" in src.lower()
+            or "if defined sl_memory_path" in src.lower()
         )

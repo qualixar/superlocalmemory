@@ -171,7 +171,7 @@ if (Test-Path $setupValidatorPath) {
 import sqlite3
 import os
 from pathlib import Path
-db_path = Path(os.environ.get('SL_MEMORY_PATH', str(Path.home() / '.claude-memory'))) / 'memory.db'
+db_path = Path(os.environ.get('SL_MEMORY_PATH') or str(Path.home() / '.claude-memory')) / 'memory.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS memories (
@@ -231,7 +231,7 @@ $memoryCount = & python -c @"
 import sqlite3
 import os
 from pathlib import Path
-db_path = Path(os.environ.get('SL_MEMORY_PATH', str(Path.home() / '.claude-memory'))) / 'memory.db'
+db_path = Path(os.environ.get('SL_MEMORY_PATH') or str(Path.home() / '.claude-memory')) / 'memory.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 cursor.execute('SELECT COUNT(*) FROM memories')
@@ -265,7 +265,7 @@ try {
 import sqlite3
 import os
 from pathlib import Path
-db_path = Path(os.environ.get('SL_MEMORY_PATH', str(Path.home() / '.claude-memory'))) / 'memory.db'
+db_path = Path(os.environ.get('SL_MEMORY_PATH') or str(Path.home() / '.claude-memory')) / 'memory.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 cursor.execute('SELECT COUNT(*) FROM identity_patterns')

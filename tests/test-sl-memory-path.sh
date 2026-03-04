@@ -5,7 +5,7 @@
 # Run with:
 #   bash tests/test-sl-memory-path.sh
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}"}/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
