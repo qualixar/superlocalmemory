@@ -37,8 +37,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # For production, consider moving inline scripts to separate files
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://d3js.org",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
             "font-src 'self' https://cdn.jsdelivr.net",
             "img-src 'self' data: https:",
             "connect-src 'self' ws://localhost:* ws://127.0.0.1:*",
