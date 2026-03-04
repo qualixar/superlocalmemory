@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 # Add src directory to path (use existing code!)
-MEMORY_DIR = Path.home() / ".claude-memory"
+MEMORY_DIR = Path(os.environ.get("SL_MEMORY_PATH", str(Path.home() / ".claude-memory")))
 sys.path.insert(0, str(MEMORY_DIR))
 
 # Import existing core modules (zero duplicate logic)
@@ -597,12 +597,12 @@ def _eager_init():
         pass
     try:
         from behavioral.outcome_tracker import OutcomeTracker
-        OutcomeTracker(str(Path.home() / ".claude-memory" / "learning.db"))
+        OutcomeTracker(str(MEMORY_DIR / "learning.db"))
     except Exception:
         pass
     try:
         from compliance.audit_db import AuditDB
-        AuditDB(str(Path.home() / ".claude-memory" / "audit.db"))
+        AuditDB(str(MEMORY_DIR / "audit.db"))
     except Exception:
         pass
 

@@ -15,7 +15,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$INSTALL_DIR = Join-Path $env:USERPROFILE ".claude-memory"
+$INSTALL_DIR = if ($env:SL_MEMORY_PATH) { $env:SL_MEMORY_PATH } else { Join-Path $env:USERPROFILE ".claude-memory" }
 $REPO_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Auto-detect non-interactive environment

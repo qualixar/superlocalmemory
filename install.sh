@@ -8,7 +8,7 @@
 
 set -e
 
-INSTALL_DIR="${HOME}/.claude-memory"
+INSTALL_DIR="${SL_MEMORY_PATH:-${HOME}/.claude-memory}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # Parse command line arguments
