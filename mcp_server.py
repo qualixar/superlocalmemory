@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 # Add src directory to path (use existing code!)
-MEMORY_DIR = Path(os.environ.get("SL_MEMORY_PATH", str(Path.home() / ".claude-memory")))
+MEMORY_DIR = Path(os.environ.get("SL_MEMORY_PATH") or str(Path.home() / ".claude-memory"))
 sys.path.insert(0, str(MEMORY_DIR))
 
 # Import existing core modules (zero duplicate logic)
