@@ -302,6 +302,33 @@ class V2Migrator:
                 conn.commit()
             except Exception:
                 pass  # Schema handles this on engine init
+            # Step 4b: Convert V2 memories → V3 atomic_facts
+            try:
+                now = datetime.now(UTC).isoformat()
+                rows = conn.execute("SELECT memory_id, profile_id, content, created_at FROM memories").fetchall()
+                converted = 0
+                for row in rows:
+                    mid, pid, content, created = row[0], row[1], row[2], row[3]
+                    if not content or not content.strip():
+                        continue
+                    fid = f"v2_fact_{mid}"
+                    conn.execute(
+                        "INSERT OR IGNORE INTO atomic_facts "
+                        "(fact_id, memory_id, profile_id, content, fact_type, "
+                        " entities_json, canonical_entities_json, confidence, importance, "
+                        " evidence_count, access_count, source_turn_ids_json, session_id, "
+                        " lifecycle, emotional_valence, emotional_arousal, signal_type, created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (fid, mid, pid or "default", content, "factual",
+                         "[]", "[]", 0.8, 0.5, 1, 0, "[]", "",
+                         "active", 0.0, 0.0, "factual", created or now),
+                    )
+                    converted += 1
+                conn.commit()
+                stats["steps"].append(f"Converted {converted} V2 memories to V3 facts")
+            except Exception as exc:
+                stats["steps"].append(f"V2 conversion partial: {exc}")
+
             conn.close()
             stats["steps"].append("Created V3 schema")
 

@@ -198,7 +198,7 @@ class EmbeddingService:
             self._available = False
             return
         model = SentenceTransformer(
-            self._config.model_name, trust_remote_code=False,
+            self._config.model_name, trust_remote_code=True,
         )
         actual_dim = model.get_sentence_embedding_dimension()
         if actual_dim != self._config.dimension:
