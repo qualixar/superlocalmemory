@@ -178,6 +178,23 @@ Add to your IDE's MCP config:
 slm dashboard    # Opens at http://localhost:8765
 ```
 
+<p align="center">
+  <img src="docs/screenshots/01-dashboard-main.png" alt="V3 Dashboard — Mode A, 528 memories, Math Layers Active" width="800"/>
+</p>
+
+<details>
+<summary><strong>More screenshots</strong> (click to expand)</summary>
+
+| Knowledge Graph | Math Health | Recall Lab |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/02-knowledge-graph.png" alt="Knowledge Graph" width="280"/> | <img src="docs/screenshots/03-math-health.png" alt="Math Health" width="280"/> | <img src="docs/screenshots/04-recall-lab.png" alt="Recall Lab" width="280"/> |
+
+| Trust Dashboard | Settings | Memory Browser |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/05-trust-dashboard.png" alt="Trust Dashboard" width="280"/> | <img src="docs/screenshots/06-settings.png" alt="Settings" width="280"/> | <img src="docs/screenshots/07-memories-blurred.png" alt="Memories" width="280"/> |
+
+</details>
+
 The V3 dashboard provides real-time visibility into your memory system:
 
 - **Dashboard** — Mode switcher, health score, quick store/recall

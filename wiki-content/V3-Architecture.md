@@ -135,6 +135,14 @@ superlocalmemory/
 
 ---
 
+## Dashboard
+
+![V3 Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+
+| Recall Lab | Math Health |
+|:---:|:---:|
+| ![Recall Lab](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/04-recall-lab.png) | ![Math Health](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png) |
+
 ## Benchmarks
 
 Evaluated on the LoCoMo conversational memory benchmark:

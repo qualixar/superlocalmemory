@@ -21,6 +21,14 @@ That's it. Your AI now remembers you.
 | **B: Smart Local** | Local LLM via Ollama for answer synthesis. Still fully private. | No |
 | **C: Full Power** | Cloud LLM for maximum accuracy (87.7% on LoCoMo benchmark). | Yes |
 
+## Dashboard
+
+![V3 Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+
+| Knowledge Graph | Math Health | Trust Dashboard |
+|:---:|:---:|:---:|
+| ![Knowledge Graph](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/02-knowledge-graph.png) | ![Math Health](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png) | ![Trust](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/05-trust-dashboard.png) |
+
 ## Key Features
 
 - **Works in 17+ IDEs** — Claude Code, Cursor, VS Code, Windsurf, Gemini CLI, JetBrains, and more
