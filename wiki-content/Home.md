@@ -23,11 +23,18 @@ That's it. Your AI now remembers you.
 
 ## Dashboard
 
-![V3 Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+<details open>
+<summary><strong>V3 Dashboard Screenshots</strong></summary>
 
-| Knowledge Graph | Math Health | Trust Dashboard |
-|:---:|:---:|:---:|
-| ![Knowledge Graph](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/02-knowledge-graph.png) | ![Math Health](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png) | ![Trust](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/05-trust-dashboard.png) |
+![Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+
+<table><tr>
+<td><img src="https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/02-knowledge-graph.png" width="200"/></td>
+<td><img src="https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png" width="200"/></td>
+<td><img src="https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/05-trust-dashboard.png" width="200"/></td>
+</tr></table>
+
+</details>
 
 ## Key Features
 

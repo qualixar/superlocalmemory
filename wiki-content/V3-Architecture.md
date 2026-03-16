@@ -137,11 +137,17 @@ superlocalmemory/
 
 ## Dashboard
 
-![V3 Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+<details open>
+<summary><strong>V3 Dashboard</strong></summary>
 
-| Recall Lab | Math Health |
-|:---:|:---:|
-| ![Recall Lab](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/04-recall-lab.png) | ![Math Health](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png) |
+![Dashboard](https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/01-dashboard-main.png)
+
+<table><tr>
+<td><img src="https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/04-recall-lab.png" width="280"/></td>
+<td><img src="https://raw.githubusercontent.com/qualixar/superlocalmemory/main/docs/screenshots/03-math-health.png" width="280"/></td>
+</tr></table>
+
+</details>
 
 ## Benchmarks
 
