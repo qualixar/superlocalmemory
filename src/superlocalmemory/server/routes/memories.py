@@ -202,7 +202,7 @@ async def get_memories(
 
         if use_v3:
             query = """
-                SELECT fact_id as id, content, fact_type as category,
+                SELECT fact_id as id, memory_id, content, fact_type as category,
                        confidence as importance, access_count,
                        created_at, created_at as updated_at,
                        session_id as project_name
@@ -417,8 +417,41 @@ async def get_cluster_detail(request: Request, cluster_id: int, limit: int = Que
         conn.close()
         if not members:
             raise HTTPException(status_code=404, detail="Cluster not found")
-        return {"cluster_info": {"cluster_id": cluster_id, "total_members": len(members)}, "members": members, "connections": []}
+        # Generate cluster summary
+        summary = ""
+        try:
+            from superlocalmemory.core.worker_pool import WorkerPool
+            pool = WorkerPool.shared()
+            texts = [m.get("content", "")[:200] for m in members[:10] if m.get("content")]
+            if texts:
+                result = pool.summarize(texts)
+                summary = result.get("summary", "") if result.get("ok") else ""
+        except Exception:
+            pass
+
+        return {
+            "cluster_info": {"cluster_id": cluster_id, "total_members": len(members)},
+            "summary": summary,
+            "members": members,
+            "connections": [],
+        }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cluster detail error: {str(e)}")
+
+
+@router.get("/api/memories/{memory_id}/facts")
+async def get_memory_facts(request: Request, memory_id: str):
+    """Get original memory text with all its child atomic facts."""
+    try:
+        from superlocalmemory.core.worker_pool import WorkerPool
+        pool = WorkerPool.shared()
+        result = pool.get_memory_facts(memory_id)
+        if result.get("ok"):
+            return result
+        raise HTTPException(status_code=404, detail="Memory not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")

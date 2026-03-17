@@ -1569,30 +1569,86 @@
                         <h6 class="mb-0"><i class="bi bi-gear-wide-connected"></i> V3 Configuration</h6>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Operating Mode</label>
-                                <select id="settings-mode" class="form-select">
-                                    <option value="a">Mode A — Local Guardian (Zero Cloud)</option>
-                                    <option value="b">Mode B — Smart Local (Ollama)</option>
-                                    <option value="c">Mode C — Full Power (Cloud LLM)</option>
-                                </select>
-                                <button class="btn btn-sm btn-primary mt-2" id="settings-mode-save">Save Mode</button>
+                        <!-- Current Mode Banner -->
+                        <div id="settings-current-banner" class="alert alert-info mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>Active: <strong id="settings-current-mode">Loading...</strong></span>
+                                <span id="settings-current-detail" class="small"></span>
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">LLM Provider</label>
-                                <select id="settings-provider" class="form-select">
-                                    <option value="none">None (Mode A)</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="anthropic">Anthropic</option>
-                                    <option value="ollama">Ollama (Local)</option>
-                                    <option value="openrouter">OpenRouter</option>
-                                </select>
-                                <div class="mt-2">
-                                    <input type="password" id="settings-api-key" class="form-control form-control-sm" placeholder="API Key">
+                        </div>
+
+                        <!-- Step 1: Mode -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Step 1: Operating Mode</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="settings-mode-radio" id="mode-a-radio" value="a" checked>
+                                <label class="btn btn-outline-success" for="mode-a-radio">
+                                    <strong>Mode A</strong><br><small>Zero Cloud — EU AI Act</small>
+                                </label>
+                                <input type="radio" class="btn-check" name="settings-mode-radio" id="mode-b-radio" value="b">
+                                <label class="btn btn-outline-info" for="mode-b-radio">
+                                    <strong>Mode B</strong><br><small>Local Ollama LLM</small>
+                                </label>
+                                <input type="radio" class="btn-check" name="settings-mode-radio" id="mode-c-radio" value="c">
+                                <label class="btn btn-outline-warning" for="mode-c-radio">
+                                    <strong>Mode C</strong><br><small>Cloud LLM (Best Accuracy)</small>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Step 2: Provider Config (Mode B/C only) -->
+                        <div id="settings-provider-panel" style="display:none;" class="card p-3 mb-3 border-primary">
+                            <h6 class="mb-2">Step 2: LLM Configuration</h6>
+
+                            <!-- Provider select -->
+                            <div class="row mb-2">
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-bold">Provider</label>
+                                    <select id="settings-provider" class="form-select form-select-sm">
+                                        <option value="">-- Select --</option>
+                                        <option value="ollama">Ollama (Local)</option>
+                                        <option value="openrouter">OpenRouter</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="anthropic">Anthropic</option>
+                                    </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary mt-2" id="settings-provider-save">Save Provider</button>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-bold">Model <span class="text-danger">*</span></label>
+                                    <select id="settings-model" class="form-select form-select-sm">
+                                        <option value="">Select provider first</option>
+                                    </select>
+                                    <small id="settings-model-hint" class="text-muted"></small>
+                                </div>
+                                <div class="col-md-4" id="settings-key-col" style="display:none;">
+                                    <label class="form-label small fw-bold">API Key <span class="text-danger">*</span></label>
+                                    <input type="password" id="settings-api-key" class="form-control form-control-sm" placeholder="sk-... or your key">
+                                    <small class="text-muted">Saved locally in ~/.superlocalmemory/</small>
+                                </div>
                             </div>
+
+                            <!-- Endpoint (advanced) -->
+                            <div class="row mb-2" id="settings-endpoint-row" style="display:none;">
+                                <div class="col-md-8">
+                                    <label class="form-label small">API Endpoint (advanced)</label>
+                                    <input type="text" id="settings-endpoint" class="form-control form-control-sm" placeholder="https://...">
+                                </div>
+                            </div>
+
+                            <!-- Connection test -->
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary" id="settings-test-btn">
+                                    <i class="bi bi-lightning"></i> Test Connection
+                                </button>
+                                <span id="settings-test-result" class="ms-2 small"></span>
+                            </div>
+                        </div>
+
+                        <!-- Save button -->
+                        <div class="mt-2">
+                            <button class="btn btn-primary" id="settings-save-all">
+                                <i class="bi bi-check-circle"></i> Save Configuration
+                            </button>
+                            <span id="settings-save-status" class="ms-2" style="display:none;"></span>
                         </div>
                         <hr>
                         <div class="row">

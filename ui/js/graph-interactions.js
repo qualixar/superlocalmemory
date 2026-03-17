@@ -32,7 +32,7 @@ function addCytoscapeInteractions() {
         cy.elements().removeClass('highlighted').removeClass('dimmed');
     });
 
-    // Single click: Open modal preview
+    // Single click: Open modal preview (source='graph' for context-aware buttons)
     cy.on('tap', 'node', function(evt) {
         const node = evt.target;
         openMemoryModal(node);
@@ -136,11 +136,8 @@ function openMemoryModal(node) {
         created_at: node.data('created_at')
     };
 
-    // Call existing openMemoryDetail function from modal.js
     if (typeof openMemoryDetail === 'function') {
-        openMemoryDetail(memoryData);
-    } else {
-        console.error('openMemoryDetail function not found. Is modal.js loaded?');
+        openMemoryDetail(memoryData, 'graph'); // source='graph': show Expand Neighbors, hide View Original
     }
 }
 

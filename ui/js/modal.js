@@ -6,8 +6,11 @@
 
 var currentMemoryDetail = null;
 
-function openMemoryDetail(mem) {
+function openMemoryDetail(mem, source) {
+    // source: 'graph', 'recall', 'memories', or undefined
     currentMemoryDetail = mem;
+    var fromGraph = source === 'graph';
+    var fromRecall = source === 'recall';
     var body = document.getElementById('memory-detail-body');
     if (!mem) {
         body.textContent = 'No memory data';
@@ -62,55 +65,89 @@ function openMemoryDetail(mem) {
 
     body.appendChild(dl);
 
-    // Graph action buttons (v2.6.5)
-    if (mem.cluster_id || mem.id) {
+    // Context-aware action buttons
+    if (mem.id) {
         body.appendChild(document.createElement('hr'));
 
         var actionsDiv = document.createElement('div');
         actionsDiv.className = 'memory-detail-graph-actions';
         actionsDiv.style.cssText = 'display:flex; gap:10px; flex-wrap:wrap;';
 
-        // Button 1: View Full Memory (navigate to Memories tab)
-        var viewBtn = document.createElement('button');
-        viewBtn.className = 'btn btn-primary btn-sm';
-        var viewIcon = document.createElement('i');
-        viewIcon.className = 'bi bi-journal-text';
-        viewBtn.appendChild(viewIcon);
-        viewBtn.appendChild(document.createTextNode(' View Full Memory'));
-        viewBtn.onclick = function() {
-            modal.hide();
-            if (typeof navigateToMemoryTab === 'function') {
-                navigateToMemoryTab(mem.id);
-            } else {
-                // Fallback: just switch tab
-                const memoriesTab = document.querySelector('a[href="#memories"]');
-                if (memoriesTab) memoriesTab.click();
-            }
-        };
-        actionsDiv.appendChild(viewBtn);
+        // "View Original Memory" — shown on Recall Lab + Memories, hidden on Graph
+        // (On Graph the node IS the memory; on Recall Lab we have a fact, not the original)
+        if (!fromGraph) {
+            var viewBtn = document.createElement('button');
+            viewBtn.className = 'btn btn-primary btn-sm';
+            viewBtn.innerHTML = '<i class="bi bi-journal-text"></i> View Original Memory';
+            viewBtn.onclick = function() {
+                var mid = mem.memory_id || mem.id;
+                viewBtn.disabled = true;
+                viewBtn.textContent = 'Loading...';
+                fetch('/api/memories/' + encodeURIComponent(mid) + '/facts')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.ok && data.original_content) {
+                            contentDiv.textContent = '';
+                            var origLabel = document.createElement('small');
+                            origLabel.className = 'text-muted d-block mb-1';
+                            origLabel.textContent = 'Original memory (' + (data.fact_count || 0) + ' atomic facts extracted):';
+                            contentDiv.appendChild(origLabel);
+                            var origText = document.createElement('div');
+                            origText.style.cssText = 'white-space:pre-wrap;background:#f8f9fa;padding:10px;border-radius:6px;margin-bottom:8px;';
+                            origText.textContent = data.original_content;
+                            contentDiv.appendChild(origText);
+                            if (data.facts && data.facts.length > 0) {
+                                var toggle = document.createElement('button');
+                                toggle.className = 'btn btn-sm btn-outline-secondary mb-2';
+                                toggle.textContent = 'Show atomic facts (' + data.facts.length + ')';
+                                var factsDiv = document.createElement('div');
+                                factsDiv.style.display = 'none';
+                                data.facts.forEach(function(f) {
+                                    var fDiv = document.createElement('div');
+                                    fDiv.className = 'small py-1 border-bottom';
+                                    var badge = document.createElement('span');
+                                    badge.className = 'badge bg-secondary me-1';
+                                    badge.style.fontSize = '0.6rem';
+                                    badge.textContent = f.fact_type;
+                                    fDiv.appendChild(badge);
+                                    fDiv.appendChild(document.createTextNode(f.content));
+                                    factsDiv.appendChild(fDiv);
+                                });
+                                toggle.onclick = function() {
+                                    var hidden = factsDiv.style.display === 'none';
+                                    factsDiv.style.display = hidden ? 'block' : 'none';
+                                    toggle.textContent = hidden ? 'Hide atomic facts' : 'Show atomic facts (' + data.facts.length + ')';
+                                };
+                                contentDiv.appendChild(toggle);
+                                contentDiv.appendChild(factsDiv);
+                            }
+                            viewBtn.textContent = 'Showing original';
+                        } else {
+                            viewBtn.textContent = 'Not available';
+                        }
+                    }).catch(function() {
+                        viewBtn.textContent = 'Failed to load';
+                        viewBtn.disabled = false;
+                    });
+            };
+            actionsDiv.appendChild(viewBtn);
+        }
 
-        // Button 2: Expand Neighbors (show connected nodes in graph)
-        var expandBtn = document.createElement('button');
-        expandBtn.className = 'btn btn-outline-secondary btn-sm';
-        var expandIcon = document.createElement('i');
-        expandIcon.className = 'bi bi-diagram-3';
-        expandBtn.appendChild(expandIcon);
-        expandBtn.appendChild(document.createTextNode(' Expand Neighbors'));
-        expandBtn.onclick = function() {
-            modal.hide();
-            // Switch to Graph tab
-            const graphTab = document.querySelector('a[href="#graph"]');
-            if (graphTab) graphTab.click();
-            // Expand neighbors after a delay
-            setTimeout(function() {
-                if (typeof expandNeighbors === 'function') {
-                    expandNeighbors(mem.id);
-                }
-            }, 500);
-        };
-        actionsDiv.appendChild(expandBtn);
+        // "Expand Neighbors" — shown on Graph, hidden elsewhere (no graph context)
+        if (fromGraph) {
+            var expandBtn = document.createElement('button');
+            expandBtn.className = 'btn btn-outline-secondary btn-sm';
+            expandBtn.innerHTML = '<i class="bi bi-diagram-3"></i> Expand Neighbors';
+            expandBtn.onclick = function() {
+                modal.hide();
+                setTimeout(function() {
+                    if (typeof expandNeighbors === 'function') expandNeighbors(mem.id);
+                }, 300);
+            };
+            actionsDiv.appendChild(expandBtn);
+        }
 
-        // Button 3: Filter to Cluster (show only this cluster in graph)
+        // "Filter to Cluster" — always available if cluster exists
         if (mem.cluster_id) {
             var filterBtn = document.createElement('button');
             filterBtn.className = 'btn btn-outline-info btn-sm';

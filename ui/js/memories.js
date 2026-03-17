@@ -55,11 +55,14 @@ function renderMemoriesTable(memories, showScores) {
                 + '</div></div></td>';
         }
 
+        var memId = mem.memory_id || mem.id;
+        var expandBtnHtml = '<button class="btn btn-sm btn-outline-secondary expand-facts-btn ms-1" data-memory-id="' + escapeHtml(String(memId)) + '" title="View atomic facts">&#9660;</button>';
+
         rows += '<tr data-mem-idx="' + idx + '">'
             + '<td>' + escapeHtml(String(mem.id)) + '</td>'
             + '<td><span class="badge bg-primary">' + escapeHtml(mem.category || 'None') + '</span></td>'
             + '<td><small>' + escapeHtml(mem.project_name || '-') + '</small></td>'
-            + '<td class="memory-content" title="' + escapeHtml(content) + '">' + escapeHtml(contentPreview) + '</td>'
+            + '<td class="memory-content" title="' + escapeHtml(content) + '">' + escapeHtml(contentPreview) + expandBtnHtml + '</td>'
             + scoreCell
             + '<td><span class="badge bg-' + importanceClass + ' badge-importance">' + escapeHtml(String(importance)) + '</span></td>'
             + '<td>' + escapeHtml(String(mem.cluster_id || '-')) + '</td>'
@@ -87,8 +90,18 @@ function renderMemoriesTable(memories, showScores) {
         table.addEventListener('click', function(e) {
             var th = e.target.closest('th.sortable');
             if (th) { handleSort(th); return; }
+
+            // Expand facts button
+            var expandBtn = e.target.closest('.expand-facts-btn');
+            if (expandBtn) {
+                e.stopPropagation();
+                var memId = expandBtn.getAttribute('data-memory-id');
+                toggleFactsExpansion(expandBtn, memId);
+                return;
+            }
+
             var row = e.target.closest('tr[data-mem-idx]');
-            if (row) {
+            if (row && !e.target.closest('.expand-facts-btn')) {
                 var idx = parseInt(row.getAttribute('data-mem-idx'), 10);
                 if (window._slmMemories && window._slmMemories[idx]) {
                     openMemoryDetail(window._slmMemories[idx]);
@@ -167,6 +180,56 @@ function scrollToMemory(memoryId) {
     }
 
     scrollToMemoryInTable(memoryId);
+}
+
+async function toggleFactsExpansion(btn, memoryId) {
+    var row = btn.closest('tr');
+    if (!row) return;
+    var existingExpansion = row.nextElementSibling;
+    if (existingExpansion && existingExpansion.classList.contains('facts-expansion-row')) {
+        existingExpansion.remove();
+        btn.innerHTML = '&#9660;';
+        return;
+    }
+
+    btn.innerHTML = '&#8987;';
+    try {
+        var resp = await fetch('/api/memories/' + encodeURIComponent(memoryId) + '/facts');
+        var data = await resp.json();
+        var expRow = document.createElement('tr');
+        expRow.className = 'facts-expansion-row';
+        var expCell = document.createElement('td');
+        expCell.colSpan = 8;
+        expCell.style.cssText = 'background:#f8f9fa; padding:8px 16px;';
+
+        if (data.facts && data.facts.length > 0) {
+            var label = document.createElement('small');
+            label.className = 'text-muted';
+            label.textContent = data.fact_count + ' atomic facts:';
+            expCell.appendChild(label);
+
+            data.facts.forEach(function(f, i) {
+                var fDiv = document.createElement('div');
+                fDiv.className = 'small py-1' + (i < data.facts.length - 1 ? ' border-bottom' : '');
+                var badge = document.createElement('span');
+                badge.className = 'badge bg-secondary me-1';
+                badge.style.fontSize = '0.65rem';
+                badge.textContent = f.fact_type;
+                fDiv.appendChild(badge);
+                fDiv.appendChild(document.createTextNode(f.content.substring(0, 200)));
+                expCell.appendChild(fDiv);
+            });
+        } else {
+            expCell.textContent = 'No atomic facts found for this memory.';
+        }
+
+        expRow.appendChild(expCell);
+        row.parentNode.insertBefore(expRow, row.nextSibling);
+        btn.innerHTML = '&#9650;';
+    } catch (err) {
+        btn.innerHTML = '&#9660;';
+        console.error('Failed to load facts:', err);
+    }
 }
 
 function scrollToMemoryInTable(memoryId) {

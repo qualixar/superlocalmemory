@@ -108,6 +108,17 @@ async function loadClusterMembers(clusterId, container) {
         var data = await response.json();
         container.textContent = '';
 
+        // Show cluster summary if available
+        if (data.summary) {
+            var summaryDiv = document.createElement('div');
+            summaryDiv.className = 'alert alert-light border-start border-3 border-primary py-2 px-3 mb-2 small';
+            var summaryLabel = document.createElement('strong');
+            summaryLabel.textContent = 'Summary: ';
+            summaryDiv.appendChild(summaryLabel);
+            summaryDiv.appendChild(document.createTextNode(data.summary));
+            container.appendChild(summaryDiv);
+        }
+
         if (!data.members || data.members.length === 0) {
             var empty = document.createElement('div');
             empty.className = 'text-muted small';

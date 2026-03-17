@@ -73,6 +73,18 @@ class WorkerPool:
             "metadata": metadata or {},
         })
 
+    def get_memory_facts(self, memory_id: str) -> dict:
+        """Get original memory text + child atomic facts."""
+        return self._send({"cmd": "get_memory_facts", "memory_id": memory_id})
+
+    def summarize(self, texts: list[str]) -> dict:
+        """Generate summary from texts (heuristic in A, LLM in B/C)."""
+        return self._send({"cmd": "summarize", "texts": texts})
+
+    def synthesize(self, query: str, facts: list[dict]) -> dict:
+        """Generate synthesized answer from query + facts."""
+        return self._send({"cmd": "synthesize", "query": query, "facts": facts})
+
     def status(self) -> dict:
         """Get engine status from worker."""
         return self._send({"cmd": "status"})

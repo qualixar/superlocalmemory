@@ -45,11 +45,18 @@ def _get_engine():
 def _handle_recall(query: str, limit: int) -> dict:
     engine = _get_engine()
     response = engine.recall(query, limit=limit)
+
+    # Batch-fetch original memory text for all results
+    memory_ids = list({r.fact.memory_id for r in response.results[:limit] if r.fact.memory_id})
+    memory_map = engine._db.get_memory_content_batch(memory_ids) if memory_ids else {}
+
     results = []
     for r in response.results[:limit]:
         results.append({
             "fact_id": r.fact.fact_id,
+            "memory_id": r.fact.memory_id,
             "content": r.fact.content[:300],
+            "source_content": memory_map.get(r.fact.memory_id, ""),
             "score": round(r.score, 4),
             "confidence": round(r.confidence, 4),
             "trust_score": round(r.trust_score, 4),
@@ -72,6 +79,52 @@ def _handle_store(content: str, metadata: dict) -> dict:
     session_id = metadata.pop("session_id", "")
     fact_ids = engine.store(content, session_id=session_id, metadata=metadata)
     return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
+
+
+def _handle_get_memory_facts(memory_id: str) -> dict:
+    engine = _get_engine()
+    pid = engine.profile_id
+    # Get original memory content
+    mem_map = engine._db.get_memory_content_batch([memory_id])
+    original = mem_map.get(memory_id, "")
+    # Get child facts
+    facts = engine._db.get_facts_by_memory_id(memory_id, pid)
+    fact_list = []
+    for f in facts:
+        fact_list.append({
+            "fact_id": f.fact_id,
+            "content": f.content,
+            "fact_type": f.fact_type.value if hasattr(f.fact_type, 'value') else str(f.fact_type),
+            "confidence": round(f.confidence, 3),
+            "created_at": f.created_at,
+        })
+    return {
+        "ok": True,
+        "memory_id": memory_id,
+        "original_content": original,
+        "facts": fact_list,
+        "fact_count": len(fact_list),
+    }
+
+
+def _handle_summarize(texts: list[str], mode: str) -> dict:
+    """Generate summary using heuristic (A) or LLM (B/C)."""
+    from superlocalmemory.core.summarizer import Summarizer
+    engine = _get_engine()
+    summarizer = Summarizer(engine._config)
+    summary = summarizer.summarize_cluster(
+        [{"content": t} for t in texts],
+    )
+    return {"ok": True, "summary": summary}
+
+
+def _handle_synthesize(query: str, facts: list[dict]) -> dict:
+    """Generate synthesized answer from query + facts."""
+    from superlocalmemory.core.summarizer import Summarizer
+    engine = _get_engine()
+    summarizer = Summarizer(engine._config)
+    synthesis = summarizer.synthesize_answer(query, facts)
+    return {"ok": True, "synthesis": synthesis}
 
 
 def _handle_status() -> dict:
@@ -113,6 +166,15 @@ def _worker_main() -> None:
                 _respond(result)
             elif cmd == "store":
                 result = _handle_store(req.get("content", ""), req.get("metadata", {}))
+                _respond(result)
+            elif cmd == "get_memory_facts":
+                result = _handle_get_memory_facts(req.get("memory_id", ""))
+                _respond(result)
+            elif cmd == "summarize":
+                result = _handle_summarize(req.get("texts", []), req.get("mode", "a"))
+                _respond(result)
+            elif cmd == "synthesize":
+                result = _handle_synthesize(req.get("query", ""), req.get("facts", []))
                 _respond(result)
             elif cmd == "status":
                 _respond(_handle_status())

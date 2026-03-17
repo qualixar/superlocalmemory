@@ -300,6 +300,29 @@ class DatabaseManager:
             for r in rows
         ]
 
+    def get_memory_content_batch(self, memory_ids: list[str]) -> dict[str, str]:
+        """Batch-fetch original memory text. Returns {memory_id: content}."""
+        if not memory_ids:
+            return {}
+        unique_ids = list(set(memory_ids))
+        ph = ','.join('?' * len(unique_ids))
+        rows = self.execute(
+            f"SELECT memory_id, content FROM memories WHERE memory_id IN ({ph})",
+            tuple(unique_ids),
+        )
+        return {dict(r)["memory_id"]: dict(r)["content"] for r in rows}
+
+    def get_facts_by_memory_id(
+        self, memory_id: str, profile_id: str,
+    ) -> list[AtomicFact]:
+        """Get all atomic facts for a given memory_id."""
+        rows = self.execute(
+            "SELECT * FROM atomic_facts WHERE memory_id = ? AND profile_id = ? "
+            "ORDER BY confidence DESC",
+            (memory_id, profile_id),
+        )
+        return [self._row_to_fact(r) for r in rows]
+
     def store_edge(self, edge: GraphEdge) -> str:
         """Persist a graph edge. Returns edge_id."""
         self.execute(

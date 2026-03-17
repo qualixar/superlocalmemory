@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -63,17 +64,22 @@ async def dashboard(request: Request):
 
 @router.get("/mode")
 async def get_mode():
-    """Get current operating mode."""
+    """Get current mode, provider, model — single source of truth for UI."""
     try:
         from superlocalmemory.core.config import SLMConfig
         config = SLMConfig.load()
-        modes = {
-            "a": {"name": "Local Guardian", "description": "Zero cloud. Your data never leaves your machine.", "llm": False, "eu_compliant": True},
-            "b": {"name": "Smart Local", "description": "Local LLM via Ollama. Still fully private.", "llm": "local", "eu_compliant": True},
-            "c": {"name": "Full Power", "description": "Cloud LLM for maximum accuracy.", "llm": "cloud", "eu_compliant": False},
-        }
         current = config.mode.value
-        return {"current": current, "details": modes.get(current, {}), "all_modes": modes}
+        return {
+            "mode": current,
+            "provider": config.llm.provider or "none",
+            "model": config.llm.model or "",
+            "has_key": bool(config.llm.api_key),
+            "endpoint": config.llm.api_base or "",
+            "capabilities": {
+                "llm_available": bool(config.llm.provider),
+                "cross_encoder": config.retrieval.use_cross_encoder if hasattr(config, 'retrieval') else False,
+            },
+        }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -107,6 +113,127 @@ async def set_mode(request: Request):
         return {"success": True, "mode": new_mode}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/mode/set")
+async def set_full_config(request: Request):
+    """Save mode + provider + model + API key together."""
+    try:
+        body = await request.json()
+        new_mode = body.get("mode", "a").lower()
+        provider = body.get("provider", "none")
+        model = body.get("model", "")
+        api_key = body.get("api_key", "")
+
+        if new_mode not in ("a", "b", "c"):
+            return JSONResponse({"error": "Invalid mode"}, status_code=400)
+
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.storage.models import Mode
+        config = SLMConfig.for_mode(
+            Mode(new_mode),
+            llm_provider=provider if provider != "none" else "",
+            llm_model=model,
+            llm_api_key=api_key,
+            llm_api_base="http://localhost:11434" if provider == "ollama" else "",
+        )
+        old = SLMConfig.load()
+        config.active_profile = old.active_profile
+        config.save()
+
+        # Kill existing worker so next request uses new config
+        try:
+            from superlocalmemory.core.worker_pool import WorkerPool
+            WorkerPool.shared().shutdown()
+        except Exception:
+            pass
+
+        if hasattr(request.app.state, "engine"):
+            request.app.state.engine = None
+
+        return {
+            "success": True,
+            "mode": new_mode,
+            "provider": provider,
+            "model": model,
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/provider/test")
+async def test_provider(request: Request):
+    """Test connectivity to an LLM provider."""
+    try:
+        import httpx
+        body = await request.json()
+        provider = body.get("provider", "")
+        model = body.get("model", "")
+        api_key = body.get("api_key", "")
+
+        if provider == "ollama":
+            endpoint = body.get("endpoint", "http://localhost:11434")
+            with httpx.Client(timeout=httpx.Timeout(5.0)) as c:
+                resp = c.get(f"{endpoint}/api/tags")
+                resp.raise_for_status()
+                models = [m["name"] for m in resp.json().get("models", [])]
+                found = model in models if model else len(models) > 0
+                return {
+                    "success": found,
+                    "message": f"Ollama OK, {len(models)} models" + (f", '{model}' available" if found and model else ""),
+                }
+
+        if provider == "openrouter":
+            if not api_key:
+                api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            if not api_key:
+                return {"success": False, "error": "API key required"}
+            with httpx.Client(timeout=httpx.Timeout(10.0)) as c:
+                resp = c.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+                resp.raise_for_status()
+                return {"success": True, "message": "OpenRouter connected, key valid"}
+
+        if provider == "openai":
+            if not api_key:
+                return {"success": False, "error": "API key required"}
+            with httpx.Client(timeout=httpx.Timeout(10.0)) as c:
+                resp = c.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+                resp.raise_for_status()
+                return {"success": True, "message": "OpenAI connected, key valid"}
+
+        if provider == "anthropic":
+            if not api_key:
+                return {"success": False, "error": "API key required"}
+            # Anthropic doesn't have a models list endpoint, just verify key format
+            if api_key.startswith("sk-ant-"):
+                return {"success": True, "message": "Anthropic key format valid"}
+            return {"success": False, "error": "Key should start with sk-ant-"}
+
+        return {"success": False, "error": f"Unknown provider: {provider}"}
+    except httpx.ConnectError:
+        return {"success": False, "error": "Cannot connect — is the service running?"}
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP {e.response.status_code}: Invalid key or endpoint"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/ollama/status")
+async def ollama_status():
+    """Check if Ollama is running and list available models."""
+    try:
+        import httpx
+        with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
+            resp = client.get("http://localhost:11434/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [
+                {"name": m["name"], "size": m.get("size", 0)}
+                for m in data.get("models", [])
+            ]
+            return {"running": True, "models": models, "count": len(models)}
+    except Exception:
+        return {"running": False, "models": [], "count": 0}
 
 
 # ── Provider ─────────────────────────────────────────────────
@@ -196,12 +323,23 @@ async def recall_trace(request: Request):
                 {"error": result.get("error", "Recall failed")},
                 status_code=503,
             )
+
+        # Optional: synthesize answer from results (Mode B/C only)
+        synthesis = ""
+        if body.get("synthesize") and result.get("results"):
+            try:
+                syn_result = pool.synthesize(query, result["results"][:5])
+                synthesis = syn_result.get("synthesis", "") if syn_result.get("ok") else ""
+            except Exception:
+                pass
+
         return {
             "query": query,
             "query_type": result.get("query_type", "unknown"),
             "result_count": result.get("result_count", 0),
             "retrieval_time_ms": result.get("retrieval_time_ms", 0),
             "results": result.get("results", []),
+            "synthesis": synthesis,
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -211,29 +349,50 @@ async def recall_trace(request: Request):
 
 @router.get("/trust/dashboard")
 async def trust_dashboard(request: Request):
-    """Trust overview: per-agent scores, alerts."""
+    """Trust overview: per-agent scores, alerts. Queries DB directly."""
     try:
-        engine = getattr(request.app.state, "engine", None)
-        if not engine or not engine._trust_scorer:
-            return {"agents": [], "alerts": [], "message": "Trust scorer not available"}
-
         from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.storage.database import DatabaseManager
+        from superlocalmemory.storage import schema as _schema
         config = SLMConfig.load()
-        scores = engine._trust_scorer.get_all_scores(config.active_profile)
+        pid = config.active_profile
 
+        db_path = config.db_path
+        db = DatabaseManager(db_path)
+        db.initialize(_schema)
+
+        # Query trust scores from DB
         agents = []
-        for s in scores:
-            if isinstance(s, dict):
-                agents.append(s)
-            else:
+        try:
+            rows = db.execute(
+                "SELECT target_id, target_type, trust_score, evidence_count, "
+                "last_updated FROM trust_scores WHERE profile_id = ? "
+                "ORDER BY trust_score DESC",
+                (pid,),
+            )
+            for r in rows:
+                d = dict(r)
                 agents.append({
-                    "target_id": s.target_id,
-                    "target_type": s.target_type,
-                    "trust_score": round(s.trust_score, 3),
-                    "evidence_count": s.evidence_count,
+                    "target_id": d.get("target_id", ""),
+                    "target_type": d.get("target_type", ""),
+                    "trust_score": round(float(d.get("trust_score", 0.5)), 3),
+                    "evidence_count": d.get("evidence_count", 0),
+                    "last_updated": d.get("last_updated", ""),
                 })
+        except Exception:
+            pass
 
-        return {"agents": agents, "alerts": [], "profile": config.active_profile}
+        # Aggregate stats
+        avg = round(sum(a["trust_score"] for a in agents) / len(agents), 3) if agents else 0.5
+        alerts = [a for a in agents if a["trust_score"] < 0.3]
+
+        return {
+            "agents": agents,
+            "avg_trust": avg,
+            "alerts": alerts,
+            "total": len(agents),
+            "profile": pid,
+        }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -242,9 +401,9 @@ async def trust_dashboard(request: Request):
 
 @router.get("/math/health")
 async def math_health(request: Request):
-    """Mathematical layer health: Fisher, sheaf, Langevin status."""
+    """Mathematical layer health: Fisher, sheaf, Langevin status. Queries DB directly."""
     try:
-        engine = getattr(request.app.state, "engine", None)
+        engine = None  # Engine runs in subprocess; query DB directly below
 
         health = {
             "fisher": {"status": "active", "description": "Fisher-Rao information geometry for similarity"},
