@@ -11,6 +11,16 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+# CRITICAL: Set BEFORE any torch/transformers import to prevent Metal/MPS
+# GPU memory reservation on Apple Silicon. Without this, macOS Activity
+# Monitor shows 3-6 GB for what is actually a 40 MB process.
+import os as _os
+_os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
+_os.environ.setdefault('PYTORCH_MPS_MEM_LIMIT', '0')
+_os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+_os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+_os.environ.setdefault('TORCH_DEVICE', 'cpu')
+
 import argparse
 import sys
 

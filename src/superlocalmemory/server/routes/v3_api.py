@@ -187,7 +187,8 @@ async def recall_trace(request: Request):
         query = body.get("query", "")
         limit = body.get("limit", 10)
 
-        engine = getattr(request.app.state, "engine", None)
+        from .helpers import get_engine_lazy
+        engine = get_engine_lazy(request.app.state)
         if not engine:
             return JSONResponse({"error": "Engine not initialized"}, status_code=503)
 

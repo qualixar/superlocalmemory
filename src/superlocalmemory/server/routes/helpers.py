@@ -23,6 +23,27 @@ UI_DIR = Path(__file__).parent.parent / "ui"
 PROFILES_DIR = MEMORY_DIR / "profiles"
 
 
+def get_engine_lazy(app_state):
+    """Get or lazily initialize the V3 engine. Returns engine or None."""
+    engine = getattr(app_state, "engine", None)
+    if engine is not None:
+        return engine
+    if getattr(app_state, "_engine_init_attempted", False):
+        return None
+    try:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.engine import MemoryEngine
+        config = SLMConfig.load()
+        engine = MemoryEngine(config)
+        engine.initialize()
+        app_state.engine = engine
+        app_state._engine_init_attempted = True
+        return engine
+    except Exception:
+        app_state._engine_init_attempted = True
+        return None
+
+
 def get_db_connection() -> sqlite3.Connection:
     """Get database connection."""
     if not DB_PATH.exists():

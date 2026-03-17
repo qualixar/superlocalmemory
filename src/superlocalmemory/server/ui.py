@@ -196,20 +196,13 @@ def create_app() -> FastAPI:
 
     @application.on_event("startup")
     async def startup_event():
-        """Initialize V3 engine and event bus on startup."""
-        # Initialize V3 engine for dashboard API routes
-        try:
-            from superlocalmemory.core.config import SLMConfig
-            from superlocalmemory.core.engine import MemoryEngine
-            config = SLMConfig.load()
-            engine = MemoryEngine(config)
-            engine.initialize()
-            application.state.engine = engine
-            logger.info("V3 engine initialized for dashboard")
-        except Exception as exc:
-            logger.warning("V3 engine init failed: %s (V3 API routes will be unavailable)", exc)
-            application.state.engine = None
-
+        """Initialize event bus on startup. Engine loads lazily on first API call."""
+        # Engine is NOT loaded here — it loads on first API call that needs it.
+        # This keeps the dashboard process lightweight (~30 MB) at startup.
+        # The embedding model (~500 MB) only loads when someone does a search.
+        application.state.engine = None
+        application.state._engine_init_attempted = False
+        logger.info("Dashboard started (engine loads on first API call)")
         register_event_listener()
 
     return application

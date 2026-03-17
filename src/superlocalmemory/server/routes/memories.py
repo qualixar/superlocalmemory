@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .helpers import (
-    get_db_connection, dict_factory, get_active_profile,
+    get_db_connection, dict_factory, get_active_profile, get_engine_lazy,
     SearchRequest, DB_PATH, MEMORY_DIR,
 )
 
@@ -21,8 +21,8 @@ router = APIRouter()
 
 
 def _get_engine(request: Request):
-    """Get V3 engine from app state, or None."""
-    return getattr(request.app.state, "engine", None)
+    """Get V3 engine from app state, initializing lazily on first call."""
+    return get_engine_lazy(request.app.state)
 
 
 def _preview(content: str | None) -> str:
