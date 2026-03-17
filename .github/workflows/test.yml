@@ -5,24 +5,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.10", "3.12"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest scikit-learn numpy
-          pip install python-igraph leidenalg || true
-      - name: Run Python syntax check
-        run: |
-          python -m py_compile mcp_server.py
-          python -m py_compile src/memory_store_v2.py
-          python -m py_compile src/graph_engine.py
-          python -m py_compile src/pattern_learner.py
-      - name: Run system tests
-        run: |
-          chmod +x tests/test-system.sh
-          bash tests/test-system.sh || true
+
+      - name: Install package
+        run: pip install -e ".[dev]" 2>/dev/null || pip install -e .
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -q --tb=short --ignore=tests/test_integration/test_mode_b_ollama.py -x
