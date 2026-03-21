@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.0.29"
+version = "3.0.30"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,6 +23,9 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "vadersentiment>=3.3.2",
     "einops>=0.8.2",
+    "fastapi[all]>=0.135.1",
+    "uvicorn>=0.42.0",
+    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]

@@ -120,28 +120,29 @@ def ensure_profile_in_json(name: str, description: str = "") -> None:
 def sync_profiles() -> list[dict]:
     """Reconcile SQLite and profiles.json. Returns merged profile list.
 
-    SQLite is the source of truth. Any profile in profiles.json
-    that's missing from SQLite is added to SQLite. Any profile in
-    SQLite that's missing from profiles.json is added to profiles.json.
+    SQLite is the source of truth. Uses ``profile_id`` (not ``name``)
+    as the canonical key because profile_id is the PK referenced by
+    every FK in the database.
     """
     db_profiles = _get_db_profiles()
     json_config = _load_profiles_json()
     json_profiles = json_config.get('profiles', {})
 
-    db_names = {p['name'] for p in db_profiles}
-    json_names = set(json_profiles.keys())
+    # profile_id is the canonical key (PK in SQLite, FK target everywhere)
+    db_ids = {p['profile_id'] for p in db_profiles}
+    json_keys = set(json_profiles.keys())
 
     changed = False
 
     # JSON-only → add to SQLite (fixes Dashboard-created profiles)
-    for name in json_names - db_names:
-        ensure_profile_in_db(name, json_profiles[name].get('description', ''))
+    for key in json_keys - db_ids:
+        ensure_profile_in_db(key, json_profiles[key].get('description', ''))
 
     # SQLite-only → add to profiles.json (fixes CLI-created profiles)
-    for name in db_names - json_names:
-        db_entry = next(p for p in db_profiles if p['name'] == name)
-        json_profiles[name] = {
-            'name': name,
+    for pid in db_ids - json_keys:
+        db_entry = next(p for p in db_profiles if p['profile_id'] == pid)
+        json_profiles[pid] = {
+            'name': pid,
             'description': db_entry.get('description', ''),
             'created_at': db_entry.get('created_at', ''),
             'last_used': db_entry.get('last_used'),

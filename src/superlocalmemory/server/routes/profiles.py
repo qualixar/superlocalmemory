@@ -61,15 +61,16 @@ async def list_profiles():
 
         profiles = []
         for p in merged:
-            name = p.get('name', p.get('profile_id', ''))
-            count = _get_memory_count(name)
+            # profile_id is the canonical key (PK, FK target, used by engine)
+            pid = p.get('profile_id', p.get('name', ''))
+            count = _get_memory_count(pid)
             profiles.append({
-                "name": name,
+                "name": pid,
                 "description": p.get('description', ''),
                 "memory_count": count,
                 "created_at": p.get('created_at', ''),
                 "last_used": p.get('last_used', ''),
-                "is_active": name == active,
+                "is_active": pid == active,
             })
 
         return {
@@ -90,10 +91,10 @@ async def switch_profile(name: str):
             raise HTTPException(status_code=400, detail="Invalid profile name.")
 
         merged = sync_profiles()
-        merged_names = {p.get('name', p.get('profile_id', '')) for p in merged}
+        merged_ids = {p.get('profile_id', p.get('name', '')) for p in merged}
 
-        if name not in merged_names:
-            available = ', '.join(sorted(merged_names))
+        if name not in merged_ids:
+            available = ', '.join(sorted(merged_ids))
             raise HTTPException(
                 status_code=404,
                 detail=f"Profile '{name}' not found. Available: {available}",
@@ -139,8 +140,8 @@ async def create_profile(body: ProfileSwitch):
 
         # Check both stores for duplicates
         merged = sync_profiles()
-        merged_names = {p.get('name', p.get('profile_id', '')) for p in merged}
-        if name in merged_names:
+        merged_ids = {p.get('profile_id', p.get('name', '')) for p in merged}
+        if name in merged_ids:
             raise HTTPException(status_code=409, detail=f"Profile '{name}' already exists")
 
         # Write to BOTH stores atomically
@@ -164,8 +165,8 @@ async def delete_profile(name: str):
             raise HTTPException(status_code=400, detail="Cannot delete 'default' profile")
 
         merged = sync_profiles()
-        merged_names = {p.get('name', p.get('profile_id', '')) for p in merged}
-        if name not in merged_names:
+        merged_ids = {p.get('profile_id', p.get('name', '')) for p in merged}
+        if name not in merged_ids:
             raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
 
         json_config = _load_profiles_json()
