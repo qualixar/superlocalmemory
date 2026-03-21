@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from superlocalmemory.server.ui import SLM_VERSION
+from superlocalmemory.server.routes.helpers import SLM_VERSION
 
 logger = logging.getLogger(__name__)
 

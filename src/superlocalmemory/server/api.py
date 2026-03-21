@@ -23,7 +23,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
-from superlocalmemory.server.ui import SLM_VERSION
+from superlocalmemory.server.routes.helpers import SLM_VERSION
 
 logger = logging.getLogger("superlocalmemory.api_server")
 

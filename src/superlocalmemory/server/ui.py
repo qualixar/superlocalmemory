@@ -25,39 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-def _get_version() -> str:
-    """Read version from package.json (npm), pyproject.toml, or metadata."""
-    import json as _json
-    pkg_root = Path(__file__).resolve().parent.parent.parent.parent
-    # 1. Try package.json FIRST (source of truth for npm installs)
-    try:
-        pkg_json = pkg_root / "package.json"
-        if pkg_json.exists():
-            with open(pkg_json) as f:
-                v = _json.load(f).get("version", "")
-                if v:
-                    return v
-    except Exception:
-        pass
-    # 2. Try pyproject.toml (source of truth for pip installs)
-    try:
-        import tomllib
-        toml_path = pkg_root / "pyproject.toml"
-        if toml_path.exists():
-            with open(toml_path, "rb") as f:
-                return tomllib.load(f)["project"]["version"]
-    except Exception:
-        pass
-    # 3. Fallback to importlib.metadata
-    try:
-        from importlib.metadata import version
-        return version("superlocalmemory")
-    except Exception:
-        pass
-    return "unknown"
-
-
-SLM_VERSION = _get_version()
+from superlocalmemory.server.routes.helpers import SLM_VERSION  # noqa: E402
 
 _script_dir = str(Path(__file__).parent.resolve())
 sys.path = [p for p in sys.path if p not in ("", _script_dir)]

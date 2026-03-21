@@ -16,6 +16,42 @@ from typing import Optional
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+
+# ---------------------------------------------------------------------------
+# Version detection (shared — avoids circular import between ui.py ↔ v3_api.py)
+# ---------------------------------------------------------------------------
+
+def _get_version() -> str:
+    """Read version from package.json / pyproject.toml / importlib."""
+    try:
+        import json as _json
+        pkg_root = Path(__file__).resolve().parent.parent.parent.parent
+        pkg_json = pkg_root / "package.json"
+        if pkg_json.exists():
+            with open(pkg_json) as f:
+                v = _json.load(f).get("version", "")
+                if v:
+                    return v
+    except Exception:
+        pass
+    try:
+        import tomllib
+        toml_path = Path(__file__).resolve().parent.parent.parent.parent / "pyproject.toml"
+        if toml_path.exists():
+            with open(toml_path, "rb") as f:
+                return tomllib.load(f)["project"]["version"]
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+        return version("superlocalmemory")
+    except Exception:
+        pass
+    return "unknown"
+
+
+SLM_VERSION = _get_version()
+
 # V3 paths (migrated from ~/.claude-memory to ~/.superlocalmemory)
 MEMORY_DIR = Path.home() / ".superlocalmemory"
 DB_PATH = MEMORY_DIR / "memory.db"
