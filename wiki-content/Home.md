@@ -4,6 +4,9 @@
 
 SuperLocalMemory gives AI assistants persistent memory across sessions. Install once, and your AI remembers your projects, preferences, decisions, and debugging history — forever.
 
+### V3.1: Active Memory — Memory That Learns
+SLM now **learns from your usage patterns** and gets smarter over time — at zero token cost. Every recall generates learning signals. After 20+ signals, the system starts optimizing retrieval for YOUR specific patterns. After 200+, a full ML model trains on your data. No other memory system learns without spending LLM tokens. [Read more →](Active-Memory)
+
 ## Quick Start
 
 ```bash

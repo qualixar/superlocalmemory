@@ -1,6 +1,8 @@
 # MCP Tools
 
-SuperLocalMemory exposes 24 tools and 6 resources via the Model Context Protocol (MCP). These are what your IDE uses to interact with the memory system.
+SuperLocalMemory exposes 27 tools and 7 resources via the Model Context Protocol (MCP). These are what your IDE uses to interact with the memory system.
+
+> **V3.1 New:** 3 Active Memory tools (`session_init`, `observe`, `report_feedback`) and 1 resource (`slm://context`) for automatic learning and context injection.
 
 ## Starting the MCP Server
 
@@ -39,6 +41,14 @@ Your IDE config should look like:
 | `memory_used` | — | Storage usage statistics |
 | `backup_status` | — | Backup and database health |
 | `audit_trail` | `limit?` | Recent operations log |
+
+## Active Memory Tools (V3.1)
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `session_init` | `project_path?`, `query?` | Auto-recall project context at session start. Returns relevant memories + learning status. Call once at the beginning of every session. |
+| `observe` | `content` | Send conversation content for auto-capture. Detects decisions, bug fixes, and preferences. Stores automatically when confidence > 0.5. |
+| `report_feedback` | `fact_id`, `feedback`, `query?` | Report whether a recalled memory was useful. Feedback: "relevant", "irrelevant", or "partial". Trains the adaptive ranker. |
 
 ## Management Tools
 

@@ -2,7 +2,7 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-Get your AI's memory system running in under 5 minutes.
+Get your AI's memory system running in under 5 minutes. **V3.1: Now with Active Memory — your memory learns from your usage and gets smarter over time, at zero token cost.**
 
 ---
 

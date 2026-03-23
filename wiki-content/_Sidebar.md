@@ -14,6 +14,7 @@
 * [CLI Commands](CLI-Reference)
 * [MCP Tools](MCP-Tools)
 * [Auto-Memory](Auto-Memory)
+* [Active Memory (V3.1)](Active-Memory)
 
 **Architecture**
 * [Architecture Overview](V3-Architecture)

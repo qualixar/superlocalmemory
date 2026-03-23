@@ -84,7 +84,7 @@ slm status
 }
 ```
 
-24 MCP tools available. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and 17+ AI tools.
+27 MCP tools + 7 resources available. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and 17+ AI tools. **V3.1: Active Memory tools auto-learn your patterns.**
 
 ### Dual Interface: MCP + CLI
 
@@ -244,6 +244,42 @@ slm dashboard    # Opens at http://localhost:8765
 </details>
 
 17 tabs: Dashboard, Recall Lab, Knowledge Graph, Memories, Trust Scores, Math Health, Compliance, Learning, IDE Connections, Settings, and more. Runs locally — no data leaves your machine.
+
+---
+
+## Active Memory (V3.1) — Memory That Learns
+
+Most AI memory systems are passive databases — you store, you search, you get results. **SuperLocalMemory learns.**
+
+Every recall you make generates learning signals. Over time, the system adapts to your patterns:
+
+| Phase | Signals | What Happens |
+|-------|---------|-------------|
+| **Baseline** | 0-19 | Cross-encoder ranking (default behavior) |
+| **Rule-Based** | 20+ | Heuristic boosts: recency, access count, trust score |
+| **ML Model** | 200+ | LightGBM model trained on YOUR usage patterns |
+
+### Zero-Cost Learning Signals
+No LLM tokens spent. Four mathematical signals computed locally:
+- **Co-Retrieval** — memories retrieved together strengthen their connections
+- **Confidence Lifecycle** — accessed facts get boosted, unused facts decay
+- **Channel Performance** — tracks which retrieval channel works best for your queries
+- **Entropy Gap** — surprising content gets prioritized for deeper indexing
+
+### Auto-Capture & Auto-Recall
+```bash
+slm hooks install     # Install Claude Code hooks for invisible injection
+slm observe "We decided to use PostgreSQL"  # Auto-detects decisions, bugs, preferences
+slm session-context   # Get relevant context at session start
+```
+
+### MCP Active Memory Tools
+Three new tools for AI assistants:
+- `session_init` — call at session start, get relevant project context automatically
+- `observe` — send conversation content, auto-captures decisions/bugs/preferences
+- `report_feedback` — explicit feedback for faster learning
+
+**No competitor learns at zero token cost.** Mem0, Zep, and Letta all require cloud LLM calls for their learning loops. SLM learns through mathematics.
 
 ---
 
