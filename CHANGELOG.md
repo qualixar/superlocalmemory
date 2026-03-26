@@ -16,6 +16,22 @@ SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
 
 ---
 
+## [3.2.0] - 2026-03-26
+
+### Added
+- **`slm doctor` command** — comprehensive pre-flight check: Python version, all dependency groups, embedding worker functional test, Ollama connectivity, API key validation, disk space, database integrity. Supports `--json` for agent-native output.
+- **`slm hooks install`** listed in CLI reference and README.
+- Dashboard, learning (lightgbm), and performance (diskcache, orjson) dependencies now install automatically during `npm install`.
+
+### Fixed
+- **Warmup reliability** — increased subprocess timeout from 60s to 180s for first-time model download. Added step-by-step progress output and direct in-process import diagnostics when worker fails.
+- **Mode B default model** — changed from `phi3:mini` to `llama3.2` to match `provider_presets()` and reduce first-time setup friction.
+- **postinstall.js** — now installs all 5 dependency groups (core, search, dashboard, learning, performance) with clear status messages per group.
+- **Error messages** — all embedding worker failures, engine fallbacks, and dashboard errors now suggest `slm doctor` for diagnosis.
+- **pyproject.toml** — added `diskcache` and `orjson` to core dependencies; aligned optional dependency versions with core.
+
+---
+
 ## [3.0.31] - 2026-03-21
 
 ### Fixed

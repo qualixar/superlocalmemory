@@ -54,6 +54,7 @@ Mathematical layers contribute **+12.7 percentage points** on average across 6 c
 ```bash
 npm install -g superlocalmemory
 slm setup     # Choose mode (A/B/C)
+slm doctor    # Verify everything is working
 slm warmup    # Pre-download embedding model (~500MB, optional)
 ```
 
@@ -323,13 +324,15 @@ Three new tools for AI assistants:
 | `slm trace "..."` | Recall with per-channel score breakdown |
 | `slm status` | System status |
 | `slm health` | Math layer health (Fisher, Sheaf, Langevin) |
+| `slm doctor` | Pre-flight check (deps, worker, Ollama, database) |
 | `slm mode a/b/c` | Switch operating mode |
 | `slm setup` | Interactive first-time wizard |
 | `slm warmup` | Pre-download embedding model |
 | `slm migrate` | V2 to V3 migration |
-| `slm dashboard` | Launch web dashboard |
+| `slm dashboard` | Launch 17-tab web dashboard |
 | `slm mcp` | Start MCP server (for IDE integration) |
 | `slm connect` | Configure IDE integrations |
+| `slm hooks install` | Wire auto-memory into Claude Code hooks |
 | `slm profile list/create/switch` | Profile management |
 
 ---
@@ -367,13 +370,16 @@ Three new tools for AI assistants:
 | **Node.js** | 14+ | npm package manager |
 | **Python** | 3.11+ | V3 engine runtime |
 
-All Python dependencies install automatically during `npm install`. If anything fails, the installer shows exact fix commands. BM25 keyword search works even without embeddings — you're never fully blocked.
+All Python dependencies install automatically during `npm install` — core math, dashboard server, learning engine, and performance optimizations. If anything fails, the installer shows exact fix commands. Run `slm doctor` after install to verify everything works. BM25 keyword search works even without embeddings — you're never fully blocked.
 
 | Component | Size | When |
 |:----------|:-----|:-----|
 | Core libraries (numpy, scipy, networkx) | ~50MB | During install |
+| Dashboard & MCP server (fastapi, uvicorn) | ~20MB | During install |
+| Learning engine (lightgbm) | ~10MB | During install |
 | Search engine (sentence-transformers, torch) | ~200MB | During install |
 | Embedding model (nomic-embed-text-v1.5, 768d) | ~500MB | First use or `slm warmup` |
+| **Mode B** requires [Ollama](https://ollama.com) + a model (`ollama pull llama3.2`) | ~2GB | Manual |
 
 ---
 
