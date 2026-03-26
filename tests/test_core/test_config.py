@@ -151,7 +151,7 @@ class TestSLMConfigForMode:
         assert cfg.mode == Mode.B
         assert cfg.llm.is_available is True
         assert cfg.llm.provider == "ollama"
-        assert cfg.llm.model == "phi3:mini"
+        assert cfg.llm.model == "llama3.2"
         assert cfg.embedding.is_cloud is False
 
     def test_mode_c_cloud_everything(self) -> None:
