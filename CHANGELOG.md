@@ -16,6 +16,18 @@ SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
 
 ---
 
+## [3.2.1] - 2026-03-26
+
+### Fixed
+- **Windows `slm --version` / `slm -v`** — `.bat` and `.cmd` wrappers now intercept `--version`/`-v` directly (fast path, no Python needed) and set `PYTHONPATH` to the npm package's `src/` directory before launching Python. Previously, Windows users hitting `slm.bat` instead of the Node.js wrapper got `unrecognized arguments: --version` because Python resolved an older pip-installed version without the flag.
+- **Unix bash wrapper** (`bin/slm`) — now sets `PYTHONPATH` and intercepts `--version`/`-v`, matching the Node.js wrapper's behavior. Previously relied on npm's shim always routing to `slm-npm`.
+- **`postinstall.js`** — now runs `pip install .` to install the `superlocalmemory` Python package itself (not just dependencies). Prevents stale pip-installed versions from shadowing the npm-distributed source. Falls back to `--user` for PEP 668 environments.
+- **`preuninstall.js`** — corrected version string from "V2" to "V3".
+- **Windows Python detection** — added `py -3` (Python Launcher for Windows) as a fallback candidate in `slm.bat`.
+- **Environment parity** — all three entry points (`slm-npm`, `slm`, `slm.bat`) now set identical PyTorch memory-prevention env vars (`PYTORCH_MPS_HIGH_WATERMARK_RATIO`, `TORCH_DEVICE`, etc.).
+
+---
+
 ## [3.2.0] - 2026-03-26
 
 ### Added

@@ -1,5 +1,5 @@
 @echo off
 REM SuperLocalMemory V3 - Windows CLI (CMD variant)
-REM Calls slm.bat for compatibility
+REM Delegates to slm.bat which handles PYTHONPATH and --version
 call "%~dp0slm.bat" %*
 exit /b %ERRORLEVEL%

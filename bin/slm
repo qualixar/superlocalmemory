@@ -2,6 +2,19 @@
 # SuperLocalMemory V3 CLI
 # Part of Qualixar | https://superlocalmemory.com
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PKG_ROOT="$(dirname "$SCRIPT_DIR")"
+SRC_DIR="$PKG_ROOT/src"
+
+# Handle --version / -v directly (fast path)
+for arg in "$@"; do
+    if [ "$arg" = "--version" ] || [ "$arg" = "-v" ]; then
+        VER=$(grep '"version"' "$PKG_ROOT/package.json" 2>/dev/null | head -1 | sed 's/.*"\([0-9][0-9.]*\)".*/\1/')
+        echo "superlocalmemory ${VER:-unknown}"
+        exit 0
+    fi
+done
+
 # Find Python
 PYTHON=""
 for cmd in python3 python; do
@@ -12,9 +25,24 @@ for cmd in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-    echo "Error: Python 3 not found. Install Python 3.10+ from python.org"
+    echo "Error: Python 3 not found. Install Python 3.11+ from python.org"
     exit 1
 fi
+
+# Set PYTHONPATH so Python finds the npm package's src/ directory
+if [ -n "$PYTHONPATH" ]; then
+    export PYTHONPATH="$SRC_DIR:$PYTHONPATH"
+else
+    export PYTHONPATH="$SRC_DIR"
+fi
+
+# Prevent PyTorch Metal/MPS GPU memory reservation
+export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+export PYTORCH_MPS_MEM_LIMIT=0
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+export TOKENIZERS_PARALLELISM=false
+export TORCH_DEVICE=cpu
+export CUDA_VISIBLE_DEVICES=""
 
 # Run V3 CLI
 exec "$PYTHON" -m superlocalmemory.cli.main "$@"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SuperLocalMemory V2 - NPM Preuninstall Script
+ * SuperLocalMemory V3 - NPM Preuninstall Script
  *
  * Copyright (c) 2026 Varun Pratap Bhardwaj
  * Solution Architect & Original Creator
@@ -16,7 +16,7 @@ const os = require('os');
 const fs = require('fs');
 
 console.log('\n════════════════════════════════════════════════════════════');
-console.log('  SuperLocalMemory V2 - Uninstalling');
+console.log('  SuperLocalMemory V3 - Uninstalling');
 console.log('════════════════════════════════════════════════════════════\n');
 
 const SLM_DIR = path.join(os.homedir(), '.superlocalmemory');

@@ -157,6 +157,39 @@ if (pipInstall(perfDeps, 'performance')) {
     console.log('⚠ Performance deps skipped (system works fine without them).');
 }
 
+// --- Step 3b: Install the superlocalmemory package itself ---
+// This ensures `python -m superlocalmemory.cli.main` always resolves the
+// correct version, even when invoked outside the Node.js wrapper (e.g.,
+// via slm.bat on Windows or direct Python invocation).
+console.log('\nInstalling superlocalmemory Python package...');
+const pkgRoot = path.join(__dirname, '..');
+const pipInstallPkg = spawnSync(pythonParts[0], [
+    ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+    pkgRoot,
+], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
+
+if (pipInstallPkg.status === 0) {
+    console.log('✓ SuperLocalMemory Python package installed');
+} else {
+    // Try with --user if PEP 668
+    const stderr = (pipInstallPkg.stderr || '').toString();
+    if (stderr.includes('externally-managed') || stderr.includes('PEP 668')) {
+        const retryResult = spawnSync(pythonParts[0], [
+            ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+            '--user', pkgRoot,
+        ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
+        if (retryResult.status === 0) {
+            console.log('✓ SuperLocalMemory Python package installed (--user)');
+        } else {
+            console.log('⚠ Could not pip install the package. The Node.js wrapper (slm-npm)');
+            console.log('  sets PYTHONPATH automatically, so CLI will still work.');
+        }
+    } else {
+        console.log('⚠ Could not pip install the package. The Node.js wrapper (slm-npm)');
+        console.log('  sets PYTHONPATH automatically, so CLI will still work.');
+    }
+}
+
 // --- Step 4: Detect V2 installation ---
 const V2_HOME = path.join(os.homedir(), '.claude-memory');
 if (fs.existsSync(V2_HOME) && fs.existsSync(path.join(V2_HOME, 'memory.db'))) {
