@@ -24,6 +24,7 @@ import pytest
 
 from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
 from superlocalmemory.core.embeddings import EmbeddingService
+from superlocalmemory.core.engine_wiring import init_embedder
 from superlocalmemory.storage.models import Mode
 
 
@@ -114,7 +115,7 @@ class TestEngineEmbedderAutoDetect:
         """When LLM=ollama and Ollama has embed model → use OllamaEmbedder."""
         from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(tmp_path=tmp_path)
-        embedder = engine._init_embedder()
+        embedder = init_embedder(engine._config)
         assert isinstance(embedder, OllamaEmbedder)
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
@@ -127,7 +128,7 @@ class TestEngineEmbedderAutoDetect:
             mock_instance = MagicMock()
             mock_instance.is_available = True
             MockES.return_value = mock_instance
-            embedder = engine._init_embedder()
+            embedder = init_embedder(engine._config)
         assert embedder is mock_instance
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
@@ -138,7 +139,7 @@ class TestEngineEmbedderAutoDetect:
             mock_instance = MagicMock()
             mock_instance.is_available = False
             MockES.return_value = mock_instance
-            embedder = engine._init_embedder()
+            embedder = init_embedder(engine._config)
         assert embedder is None
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
@@ -148,7 +149,7 @@ class TestEngineEmbedderAutoDetect:
         engine = self._make_engine(
             llm_provider="", emb_provider="ollama", tmp_path=tmp_path,
         )
-        embedder = engine._init_embedder()
+        embedder = init_embedder(engine._config)
         assert isinstance(embedder, OllamaEmbedder)
 
     def test_explicit_st_provider_skips_ollama(self, tmp_path: Path) -> None:
@@ -160,7 +161,7 @@ class TestEngineEmbedderAutoDetect:
             mock_instance = MagicMock()
             mock_instance.is_available = True
             MockES.return_value = mock_instance
-            embedder = engine._init_embedder()
+            embedder = init_embedder(engine._config)
         assert embedder is mock_instance
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
@@ -170,7 +171,7 @@ class TestEngineEmbedderAutoDetect:
         engine = self._make_engine(
             mode=Mode.A, llm_provider="", emb_provider="", tmp_path=tmp_path,
         )
-        embedder = engine._init_embedder()
+        embedder = init_embedder(engine._config)
         assert isinstance(embedder, OllamaEmbedder)
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
@@ -183,7 +184,7 @@ class TestEngineEmbedderAutoDetect:
             mock_instance = MagicMock()
             mock_instance.is_available = True
             MockES.return_value = mock_instance
-            embedder = engine._init_embedder()
+            embedder = init_embedder(engine._config)
         assert embedder is mock_instance
 
 

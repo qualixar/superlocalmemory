@@ -674,3 +674,291 @@ class DatabaseManager:
             )
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Phase 2: fact_context CRUD (Auto-Invoke Engine)
+    # ------------------------------------------------------------------
+
+    def store_fact_context(
+        self,
+        fact_id: str,
+        profile_id: str,
+        contextual_description: str,
+        keywords: str,
+        generated_by: str = "rules",
+    ) -> None:
+        """Store or replace contextual description for a fact."""
+        self.execute(
+            "INSERT OR REPLACE INTO fact_context "
+            "(fact_id, profile_id, contextual_description, keywords, generated_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (fact_id, profile_id, contextual_description, keywords, generated_by),
+        )
+
+    def get_fact_context(self, fact_id: str) -> dict | None:
+        """Get contextual description for a fact."""
+        rows = self.execute(
+            "SELECT * FROM fact_context WHERE fact_id = ?", (fact_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    def get_all_fact_contexts(self, profile_id: str) -> list[dict]:
+        """Get all contextual descriptions for a profile."""
+        rows = self.execute(
+            "SELECT * FROM fact_context WHERE profile_id = ?", (profile_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def delete_fact_context(self, fact_id: str) -> None:
+        """Delete contextual description for a fact."""
+        self.execute("DELETE FROM fact_context WHERE fact_id = ?", (fact_id,))
+
+    # ------------------------------------------------------------------
+    # Phase 3: Association Graph CRUD (Rule 15)
+    # ------------------------------------------------------------------
+
+    def store_association_edge(self, edge: dict) -> None:
+        """Persist an association edge."""
+        self.execute(
+            "INSERT OR IGNORE INTO association_edges "
+            "(edge_id, profile_id, source_fact_id, target_fact_id, "
+            " association_type, weight, co_access_count, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (edge["edge_id"], edge["profile_id"],
+             edge["source_fact_id"], edge["target_fact_id"],
+             edge["association_type"], edge["weight"],
+             edge.get("co_access_count", 0)),
+        )
+
+    def get_association_edges(
+        self, fact_id: str, profile_id: str,
+    ) -> list[dict]:
+        """All association edges where fact_id is source or target."""
+        rows = self.execute(
+            "SELECT * FROM association_edges WHERE profile_id = ? "
+            "AND (source_fact_id = ? OR target_fact_id = ?)",
+            (profile_id, fact_id, fact_id),
+        )
+        return [dict(r) for r in rows]
+
+    def get_all_association_edges(self, profile_id: str) -> list[dict]:
+        """All association edges for a profile."""
+        rows = self.execute(
+            "SELECT * FROM association_edges WHERE profile_id = ?",
+            (profile_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def delete_association_edges(self, profile_id: str) -> int:
+        """Delete all association edges for a profile. Returns count."""
+        before = self.execute(
+            "SELECT COUNT(*) AS c FROM association_edges WHERE profile_id = ?",
+            (profile_id,),
+        )
+        count = int(before[0]["c"]) if before else 0
+        self.execute(
+            "DELETE FROM association_edges WHERE profile_id = ?",
+            (profile_id,),
+        )
+        return count
+
+    def store_activation_cache(self, entry: dict) -> None:
+        """Persist an activation cache entry."""
+        self.execute(
+            "INSERT OR REPLACE INTO activation_cache "
+            "(cache_id, profile_id, query_hash, node_id, activation_value, "
+            " iteration, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+1 hour'))",
+            (entry["cache_id"], entry["profile_id"],
+             entry["query_hash"], entry["node_id"],
+             entry["activation_value"], entry["iteration"]),
+        )
+
+    def get_activation_cache(
+        self, query_hash: str, profile_id: str,
+    ) -> list[dict]:
+        """Get cached activation results (non-expired)."""
+        rows = self.execute(
+            "SELECT node_id, activation_value FROM activation_cache "
+            "WHERE profile_id = ? AND query_hash = ? "
+            "AND expires_at > datetime('now') "
+            "ORDER BY activation_value DESC",
+            (profile_id, query_hash),
+        )
+        return [dict(r) for r in rows]
+
+    def cleanup_activation_cache(self) -> int:
+        """Delete expired cache entries. Returns count deleted."""
+        before = self.execute(
+            "SELECT COUNT(*) AS c FROM activation_cache "
+            "WHERE expires_at < datetime('now')"
+        )
+        count = int(before[0]["c"]) if before else 0
+        self.execute(
+            "DELETE FROM activation_cache WHERE expires_at < datetime('now')"
+        )
+        return count
+
+    def store_fact_importance(self, entry: dict) -> None:
+        """Persist fact importance scores."""
+        self.execute(
+            "INSERT OR REPLACE INTO fact_importance "
+            "(fact_id, profile_id, pagerank_score, community_id, "
+            " degree_centrality, computed_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (entry["fact_id"], entry["profile_id"],
+             entry["pagerank_score"], entry.get("community_id"),
+             entry.get("degree_centrality", 0.0)),
+        )
+
+    def get_fact_importance(
+        self, fact_id: str, profile_id: str,
+    ) -> dict | None:
+        """Get importance scores for a fact."""
+        rows = self.execute(
+            "SELECT * FROM fact_importance "
+            "WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, profile_id),
+        )
+        return dict(rows[0]) if rows else None
+
+    def get_top_facts_by_pagerank(
+        self, profile_id: str, top_k: int = 20,
+    ) -> list[dict]:
+        """Top facts by PageRank score."""
+        rows = self.execute(
+            "SELECT * FROM fact_importance "
+            "WHERE profile_id = ? "
+            "ORDER BY pagerank_score DESC LIMIT ?",
+            (profile_id, top_k),
+        )
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Phase 4: Temporal Intelligence CRUD (Rule 15)
+    # ------------------------------------------------------------------
+
+    def store_temporal_validity(
+        self, fact_id: str, profile_id: str,
+        valid_from: str | None = None,
+        valid_until: str | None = None,
+    ) -> None:
+        """Create temporal validity record for a fact."""
+        self.execute(
+            "INSERT OR IGNORE INTO fact_temporal_validity "
+            "(fact_id, profile_id, valid_from, valid_until) "
+            "VALUES (?, ?, ?, ?)",
+            (fact_id, profile_id, valid_from, valid_until),
+        )
+
+    def get_temporal_validity(self, fact_id: str) -> dict | None:
+        """Get temporal validity record for a fact."""
+        rows = self.execute(
+            "SELECT * FROM fact_temporal_validity WHERE fact_id = ?",
+            (fact_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    def get_all_temporal_validity(self, profile_id: str) -> list[dict]:
+        """Get all temporal validity records for a profile."""
+        rows = self.execute(
+            "SELECT * FROM fact_temporal_validity WHERE profile_id = ?",
+            (profile_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def invalidate_fact_temporal(
+        self, fact_id: str, invalidated_by: str,
+        invalidation_reason: str,
+    ) -> None:
+        """Set valid_until and system_expired_at for a fact.
+
+        BOTH timestamps set atomically (BI-TEMPORAL INTEGRITY).
+        Never deletes the fact (Rule 17: immutability).
+        """
+        from datetime import UTC, datetime as _dt
+        now = _dt.now(UTC).isoformat()
+        self.execute(
+            "UPDATE fact_temporal_validity "
+            "SET valid_until = ?, system_expired_at = ?, "
+            "    invalidated_by = ?, invalidation_reason = ? "
+            "WHERE fact_id = ?",
+            (now, now, invalidated_by, invalidation_reason, fact_id),
+        )
+
+    def get_valid_facts(self, profile_id: str) -> list[str]:
+        """Get fact_ids that are currently valid (not expired).
+
+        Returns facts that either have no temporal record (assumed valid)
+        or have valid_until IS NULL and system_expired_at IS NULL.
+        """
+        rows = self.execute(
+            "SELECT f.fact_id FROM atomic_facts f "
+            "LEFT JOIN fact_temporal_validity tv ON f.fact_id = tv.fact_id "
+            "WHERE f.profile_id = ? "
+            "  AND (tv.fact_id IS NULL OR tv.valid_until IS NULL) "
+            "  AND (tv.fact_id IS NULL OR tv.system_expired_at IS NULL)",
+            (profile_id,),
+        )
+        return [dict(r)["fact_id"] for r in rows]
+
+    def delete_temporal_validity(self, fact_id: str) -> None:
+        """Delete temporal validity record (for testing/rollback only)."""
+        self.execute(
+            "DELETE FROM fact_temporal_validity WHERE fact_id = ?",
+            (fact_id,),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 5: Core Memory Blocks CRUD (Rule 15)
+    # ------------------------------------------------------------------
+
+    def store_core_block(
+        self,
+        block_id: str,
+        profile_id: str,
+        block_type: str,
+        content: str,
+        source_fact_ids: str = "[]",
+        char_count: int = 0,
+        version: int = 1,
+        compiled_by: str = "rules",
+    ) -> None:
+        """Store or replace a Core Memory block.
+
+        Uses INSERT OR REPLACE on UNIQUE(profile_id, block_type)
+        to guarantee idempotency (L18).
+        """
+        self.execute(
+            "INSERT OR REPLACE INTO core_memory_blocks "
+            "(block_id, profile_id, block_type, content, source_fact_ids, "
+            " char_count, version, compiled_by, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (block_id, profile_id, block_type, content,
+             source_fact_ids, char_count, version, compiled_by),
+        )
+
+    def get_core_blocks(self, profile_id: str) -> list[dict]:
+        """Get all Core Memory blocks for a profile."""
+        rows = self.execute(
+            "SELECT * FROM core_memory_blocks "
+            "WHERE profile_id = ? ORDER BY block_type",
+            (profile_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def get_core_block(self, profile_id: str, block_type: str) -> dict | None:
+        """Get a single Core Memory block by profile and type."""
+        rows = self.execute(
+            "SELECT * FROM core_memory_blocks "
+            "WHERE profile_id = ? AND block_type = ?",
+            (profile_id, block_type),
+        )
+        return dict(rows[0]) if rows else None
+
+    def delete_core_blocks(self, profile_id: str) -> None:
+        """Delete all Core Memory blocks for a profile."""
+        self.execute(
+            "DELETE FROM core_memory_blocks WHERE profile_id = ?",
+            (profile_id,),
+        )

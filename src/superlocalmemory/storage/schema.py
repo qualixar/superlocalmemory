@@ -705,6 +705,11 @@ def create_all_tables(conn: sqlite3.Connection) -> None:
     for ddl in _DDL_ORDERED:
         conn.executescript(ddl)
 
+    # --- V3.2 schema extension (additive only) ---
+    from superlocalmemory.storage.schema_v32 import V32_DDL
+    for ddl in V32_DDL:
+        conn.executescript(ddl)
+
     # Seed schema version on first run.
     existing = conn.execute(
         "SELECT COUNT(*) AS n FROM schema_version"
@@ -728,6 +733,11 @@ def drop_all_tables(conn: sqlite3.Connection) -> None:
     Args:
         conn: An open SQLite connection. Caller manages commit.
     """
+    # V32 tables first (they may FK to base tables)
+    from superlocalmemory.storage.schema_v32 import V32_ROLLBACK
+    for sql in V32_ROLLBACK:
+        conn.execute(sql)
+
     # FTS + triggers first (depend on atomic_facts).
     for fts in _FTS_TABLES:
         conn.execute(f"DROP TABLE IF EXISTS {fts}")

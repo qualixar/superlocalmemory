@@ -16,12 +16,12 @@ import re
 from dataclasses import dataclass, field
 
 STRATEGY_PRESETS: dict[str, dict[str, float]] = {
-    "temporal": {"semantic": 0.8, "bm25": 1.5, "entity_graph": 0.8, "temporal": 2.0},
-    "multi_hop": {"semantic": 1.0, "bm25": 0.8, "entity_graph": 2.0, "temporal": 0.5},
-    "aggregation": {"semantic": 1.2, "bm25": 1.5, "entity_graph": 1.0, "temporal": 0.5},
-    "opinion": {"semantic": 1.8, "bm25": 0.6, "entity_graph": 0.8, "temporal": 0.3},
-    "factual": {"semantic": 1.2, "bm25": 1.4, "entity_graph": 1.0, "temporal": 0.6},
-    "entity": {"semantic": 1.0, "bm25": 1.5, "entity_graph": 1.2, "temporal": 0.5},
+    "temporal": {"semantic": 0.8, "bm25": 1.5, "entity_graph": 0.8, "temporal": 2.0, "spreading_activation": 0.5},
+    "multi_hop": {"semantic": 1.0, "bm25": 0.8, "entity_graph": 2.0, "temporal": 0.5, "spreading_activation": 2.0},
+    "aggregation": {"semantic": 1.2, "bm25": 1.5, "entity_graph": 1.0, "temporal": 0.5, "spreading_activation": 0.8},
+    "opinion": {"semantic": 1.8, "bm25": 0.6, "entity_graph": 0.8, "temporal": 0.3, "spreading_activation": 0.5},
+    "factual": {"semantic": 1.2, "bm25": 1.4, "entity_graph": 1.0, "temporal": 0.6, "spreading_activation": 0.8},
+    "entity": {"semantic": 1.0, "bm25": 1.5, "entity_graph": 1.2, "temporal": 0.5, "spreading_activation": 1.0},
     "general": {},
 }
 

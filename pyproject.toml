@@ -78,6 +78,31 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.coverage.run]
+source = ["superlocalmemory"]
+omit = [
+    "*/tests/*",
+    "*/ui/*",
+    "*/cli/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ ==",
+    "@overload",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.ruff]
 target-version = "py311"

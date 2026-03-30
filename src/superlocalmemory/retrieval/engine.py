@@ -79,6 +79,18 @@ class RetrievalEngine:
         self._bridge = bridge_discovery
         self._trust_scorer = trust_scorer
 
+        # V3.2: ChannelRegistry for self-registration (Phase 0.5)
+        from superlocalmemory.retrieval.channel_registry import ChannelRegistry
+        self._registry = ChannelRegistry()
+        if self._semantic is not None:
+            self._registry.register_channel("semantic", self._semantic, needs_embedding=True)
+        if self._bm25 is not None:
+            self._registry.register_channel("bm25", self._bm25)
+        if self._entity is not None:
+            self._registry.register_channel("entity_graph", self._entity)
+        if self._temporal is not None:
+            self._registry.register_channel("temporal", self._temporal)
+
     def recall(
         self, query: str, profile_id: str,
         mode: Mode = Mode.A, limit: int = 20,

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -71,6 +71,8 @@ class SemanticChannel:
     fresh facts (low access_count) use cosine, frequently-accessed facts
     transition to Fisher-Rao distance for uncertainty-aware similarity.
 
+    V3.2: VectorStore KNN fast path when available, falls back to full scan.
+
     Graduated ramp: weight = min(1.2, access_count / 10 * 1.2)
     Final sim = fisher_weight * fisher_sim + (1 - fisher_weight) * cosine_sim
     """
@@ -81,6 +83,7 @@ class SemanticChannel:
         fisher_temperature: float = 15.0,
         embedder: object | None = None,
         fisher_mode: str = "simplified",
+        vector_store: Any | None = None,
     ) -> None:
         self._db = db
         self._temperature = fisher_temperature
@@ -88,6 +91,7 @@ class SemanticChannel:
         self._fisher_mode = fisher_mode if fisher_mode in ("simplified", "full") else "simplified"
         # Lazily instantiated full metric (avoids import cost when not needed)
         self._full_metric: object | None = None
+        self._vector_store = vector_store
 
     def search(
         self,
@@ -97,8 +101,8 @@ class SemanticChannel:
     ) -> list[tuple[str, float]]:
         """Search for semantically similar facts.
 
-        Uses graduated Fisher-Rao ramp: access_count < 1 = pure cosine,
-        access_count >= 10 = full Fisher-Rao (1.2x weight).
+        Uses VectorStore KNN if available, otherwise full-table scan.
+        Fisher-Rao scoring preserved as post-KNN secondary signal.
 
         Args:
             query_embedding: Dense vector for the query.
@@ -114,6 +118,86 @@ class SemanticChannel:
 
         q_vec = np.array(query_embedding, dtype=np.float32)
 
+        # --- FAST PATH: sqlite-vec KNN ---
+        if self._vector_store and self._vector_store.available:
+            results = self._search_via_vector_store(
+                query_embedding, q_vec, profile_id, top_k,
+            )
+            if results:  # If vec0 returned results, use them
+                return results
+            # If vec0 is empty (cold start), fall through to full scan
+
+        # --- FALLBACK: full-table scan (original code, unchanged) ---
+        return self._search_full_scan(query_embedding, q_vec, profile_id, top_k)
+
+    def _search_via_vector_store(
+        self,
+        query_embedding: list[float],
+        q_vec: np.ndarray,
+        profile_id: str,
+        top_k: int,
+    ) -> list[tuple[str, float]]:
+        """KNN via VectorStore, then Fisher-Rao re-scoring on top-K subset."""
+        # Step 1: Fast KNN -- get 2x top_k candidates for Fisher re-ranking
+        knn_results = self._vector_store.search(
+            query_embedding, top_k=top_k * 2, profile_id=profile_id,
+        )
+        if not knn_results:
+            return []  # Caller falls through to full scan
+
+        # Step 2: Load only the candidate facts (NOT all facts)
+        candidate_ids = [fid for fid, _ in knn_results]
+        knn_scores = {fid: score for fid, score in knn_results}
+        facts = self._db.get_facts_by_ids(candidate_ids, profile_id)
+
+        if not facts:
+            return [(fid, score) for fid, score in knn_results[:top_k]]
+
+        # Step 3: Fisher-Rao re-scoring on the subset
+        q_mean: np.ndarray | None = None
+        q_var: np.ndarray | None = None
+        if self._embedder and hasattr(self._embedder, 'compute_fisher_params'):
+            qm, qv = self._embedder.compute_fisher_params(query_embedding)
+            q_mean = np.array(qm, dtype=np.float32)
+            q_var = np.array(qv, dtype=np.float32)
+
+        scored: list[tuple[str, float]] = []
+        for fact in facts:
+            cos_sim = knn_scores.get(fact.fact_id, 0.0)
+
+            # Graduated Fisher-Rao ramp (preserved from original)
+            fisher_weight = min(1.2, (fact.access_count or 0) / 10.0 * 1.2)
+
+            if (fisher_weight > 0.01
+                    and fact.fisher_variance is not None
+                    and fact.embedding is not None
+                    and len(fact.fisher_variance) == len(q_vec)):
+                f_vec = np.array(fact.embedding, dtype=np.float32)
+                var_vec = np.array(fact.fisher_variance, dtype=np.float32)
+                f_sim = self._compute_fisher_sim(
+                    q_vec, f_vec, var_vec, fact, q_mean, q_var,
+                )
+                capped_w = min(1.0, fisher_weight)
+                sim = capped_w * f_sim + (1.0 - capped_w) * cos_sim
+            else:
+                sim = cos_sim
+
+            if sim > 0.3:
+                scored.append((fact.fact_id, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+    def _search_full_scan(
+        self,
+        query_embedding: list[float],
+        q_vec: np.ndarray,
+        profile_id: str,
+        top_k: int,
+    ) -> list[tuple[str, float]]:
+        """Original full-table-scan search. Used as fallback when VectorStore
+        is unavailable or empty (cold start).
+        """
         # Compute query Fisher params for Bayesian comparison (F45 fix)
         q_mean: np.ndarray | None = None
         q_var: np.ndarray | None = None

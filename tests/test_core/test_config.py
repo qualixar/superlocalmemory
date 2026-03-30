@@ -106,7 +106,7 @@ class TestChannelWeights:
         d = cw.as_dict()
         assert d["semantic"] == 2.0
         assert d["bm25"] == 1.5
-        assert set(d.keys()) == {"semantic", "bm25", "entity_graph", "temporal"}
+        assert set(d.keys()) == {"semantic", "bm25", "entity_graph", "temporal", "spreading_activation"}
 
 
 # ---------------------------------------------------------------------------

@@ -84,13 +84,14 @@ class LLMConfig:
 
 @dataclass
 class ChannelWeights:
-    """Retrieval channel weights — 4 channels, query-adaptive."""
+    """Retrieval channel weights — 5 channels, query-adaptive."""
 
     # Entity-linked facts are high-precision matches that rank above BM25.
     semantic: float = 1.2
     bm25: float = 1.0
     entity_graph: float = 1.3
     temporal: float = 1.0
+    spreading_activation: float = 1.0  # Phase 3: 5th channel (BC-08: default value)
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -98,6 +99,7 @@ class ChannelWeights:
             "bm25": self.bm25,
             "entity_graph": self.entity_graph,
             "temporal": self.temporal,
+            "spreading_activation": self.spreading_activation,
         }
 
 
@@ -211,6 +213,109 @@ class MathConfig:
 # Master Config
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class ConsolidationConfig:
+    """Configuration for sleep-time consolidation (Phase 5).
+
+    Feature-flagged: starts enabled=False (Rule 12).
+    """
+
+    enabled: bool = False                   # Feature flag (Rule 12)
+    step_count_trigger: int = 50            # Lightweight consolidation every N stores (L7)
+    session_trigger: bool = True            # Run on session end
+    idle_timeout_seconds: int = 300         # 5 min inactivity
+    scheduled_sessions: int = 5             # Full consolidation every N sessions
+    core_memory_char_limit: int = 2000      # Total chars across all blocks
+    block_char_limit: int = 500             # Per-block character limit
+    compression_similarity: float = 0.85    # Dedup threshold for compression
+    promotion_min_access: int = 3           # Min access count for promotion
+    promotion_min_trust: float = 0.5        # Min trust for promotion
+    decay_days_threshold: int = 30          # Edge decay after N days
+
+
+@dataclass(frozen=True)
+class TemporalValidatorConfig:
+    """Configuration for temporal intelligence (Phase 4).
+
+    Feature-flagged: starts enabled=False (Rule 12).
+    """
+
+    enabled: bool = False
+    mode: str = "a"                              # "a" (sheaf), "b"/"c" (LLM)
+
+    # Sheaf contradiction threshold
+    contradiction_threshold: float = 0.45        # Mode A threshold (768d)
+
+    # LLM pre-filter threshold (lower to catch more candidates)
+    llm_prefilter_threshold: float = 0.30
+
+    # Max LLM checks per new fact (cost control)
+    max_llm_checks: int = 5
+
+    # Trust penalty for expired facts
+    expiration_trust_penalty: float = -0.2
+
+    # Include expired facts in historical queries
+    include_expired_in_history: bool = True
+
+
+@dataclass(frozen=True)
+class AutoInvokeConfig:
+    """Configuration for the Auto-Invoke Engine (Phase 2).
+
+    Feature-flagged: starts enabled=False, graduated to default on
+    after MRR validation passes (Rule 12).
+
+    References:
+      - SYNAPSE: FOK gating (fok_threshold = 0.12)
+      - ACT-R: base-level activation (act_r_decay = 0.5)
+      - Zep/Hindsight: multi-signal ranking consensus
+    """
+
+    enabled: bool = False                      # Feature flag (Rule 12)
+    profile_id: str = "default"
+
+    # Scoring weights (4-signal default) -- must sum to 1.0
+    weights: dict = field(default_factory=lambda: {
+        "similarity": 0.40,
+        "recency": 0.25,
+        "frequency": 0.20,
+        "trust": 0.15,
+    })
+
+    # ACT-R mode (3-signal alternative) -- must sum to 1.0
+    use_act_r: bool = False
+    act_r_weights: dict = field(default_factory=lambda: {
+        "similarity": 0.40,
+        "base_level": 0.35,
+        "trust": 0.25,
+    })
+    act_r_decay: float = 0.5                   # Power-law decay exponent
+
+    # FOK gating (Feeling-of-Knowing)
+    fok_threshold: float = 0.12                # SYNAPSE minimum score gate
+
+    # Retrieval limits
+    max_memories_injected: int = 10
+    candidate_multiplier: int = 3              # candidates = limit * multiplier
+
+    # Mode A degradation weights -- must sum to 1.0
+    mode_a_weights: dict = field(default_factory=lambda: {
+        "similarity": 0.00,
+        "recency": 0.40,
+        "frequency": 0.35,
+        "trust": 0.25,
+    })
+
+    # Behavioral
+    include_archived: bool = False
+    relevance_threshold: float = 0.3           # Legacy compat with AutoRecall
+
+
+# ---------------------------------------------------------------------------
+# Master Config
+# ---------------------------------------------------------------------------
+
 @dataclass
 class SLMConfig:
     """Master configuration for SuperLocalMemory V3.
@@ -229,6 +334,13 @@ class SLMConfig:
     encoding: EncodingConfig = field(default_factory=EncodingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     math: MathConfig = field(default_factory=MathConfig)
+    temporal_validator: TemporalValidatorConfig = field(
+        default_factory=TemporalValidatorConfig,
+    )
+    auto_invoke: AutoInvokeConfig = field(default_factory=AutoInvokeConfig)
+    consolidation: ConsolidationConfig = field(
+        default_factory=ConsolidationConfig,
+    )
 
     def __post_init__(self) -> None:
         if self.db_path is None:
@@ -395,6 +507,7 @@ class SLMConfig:
                 bm25=1.2,
                 entity_graph=1.3,
                 temporal=1.0,
+                spreading_activation=1.2,  # Phase 3: SA boost in Mode C
             ),
             retrieval=RetrievalConfig(
                 use_cross_encoder=True,
