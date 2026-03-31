@@ -1129,27 +1129,122 @@ def cmd_hooks(args: Namespace) -> None:
 
 
 def cmd_session_context(args: Namespace) -> None:
-    """Print session context (for hook scripts and piping)."""
-    from superlocalmemory.hooks.auto_recall import AutoRecall
-    from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.core.engine import MemoryEngine
+    """Print session context (for hook scripts and piping).
 
+    Uses a FAST PATH that queries SQLite directly (no engine/Ollama needed).
+    This ensures the SessionStart hook completes within its 15s timeout even
+    when Ollama requires a 60s+ cold start.  The fast path returns:
+      - Core Memory blocks (always-on context)
+      - Recent high-importance memories (last 7 days)
+      - Session summary from last session
+    Falls back to the full engine path only if --full is passed explicitly.
+    """
+    import sqlite3
+    from pathlib import Path
+    from superlocalmemory.core.config import SLMConfig
+
+    use_full = getattr(args, "full", False)
+
+    if use_full:
+        # Full engine path (slow, requires Ollama) — for explicit CLI use
+        try:
+            from superlocalmemory.hooks.auto_recall import AutoRecall
+            from superlocalmemory.core.engine import MemoryEngine
+            config = SLMConfig.load()
+            engine = MemoryEngine(config)
+            engine.initialize()
+            auto = AutoRecall(
+                engine=engine,
+                config={"enabled": True, "max_memories_injected": 10, "relevance_threshold": 0.3},
+            )
+            context = auto.get_session_context(
+                query=getattr(args, "query", "") or "recent decisions and important context",
+            )
+            if context:
+                print(context)
+        except Exception as exc:
+            logger.debug("session-context (full) failed: %s", exc)
+        return
+
+    # ── FAST PATH: direct SQLite, no engine, <500ms ──────────────
     try:
         config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
+        db_path = config.base_dir / "memory.db"
+        if not db_path.exists():
+            return
 
-        auto = AutoRecall(
-            engine=engine,
-            config={"enabled": True, "max_memories_injected": 10, "relevance_threshold": 0.3},
-        )
-        context = auto.get_session_context(
-            query=getattr(args, "query", "") or "recent decisions and important context",
-        )
-        if context:
-            print(context)
+        pid = config.active_profile
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        sections = []
+
+        # 1. Core Memory blocks (compiled high-value context)
+        try:
+            rows = conn.execute(
+                "SELECT block_type, content FROM core_memory_blocks "
+                "WHERE profile_id = ? ORDER BY block_type",
+                (pid,),
+            ).fetchall()
+            if rows:
+                blocks = [f"[{r['block_type']}] {r['content']}" for r in rows]
+                sections.append("## Core Memory\n" + "\n".join(blocks))
+        except sqlite3.OperationalError:
+            pass
+
+        # 2. Recent important memories (last 7 days, top 10 by importance)
+        try:
+            rows = conn.execute(
+                "SELECT content, fact_type, created_at FROM atomic_facts "
+                "WHERE profile_id = ? "
+                "AND created_at >= datetime('now', '-7 days') "
+                "AND lifecycle = 'active' "
+                "ORDER BY importance DESC, created_at DESC LIMIT 10",
+                (pid,),
+            ).fetchall()
+            if rows:
+                items = []
+                for r in rows:
+                    content = r["content"][:200]
+                    items.append(f"- [{r['fact_type'] or 'fact'}] {content}")
+                sections.append("## Recent Context (7 days)\n" + "\n".join(items))
+        except sqlite3.OperationalError:
+            pass
+
+        # 3. Session markers (last session summary)
+        try:
+            rows = conn.execute(
+                "SELECT content, created_at FROM atomic_facts "
+                "WHERE profile_id = ? AND content LIKE 'Session%' "
+                "ORDER BY created_at DESC LIMIT 3",
+                (pid,),
+            ).fetchall()
+            if rows:
+                items = [f"- {r['content'][:150]}" for r in rows]
+                sections.append("## Recent Sessions\n" + "\n".join(items))
+        except sqlite3.OperationalError:
+            pass
+
+        # 4. V3.3 Soft prompts (auto-learned patterns)
+        try:
+            rows = conn.execute(
+                "SELECT category, content FROM soft_prompt_templates "
+                "WHERE profile_id = ? AND active = 1 "
+                "ORDER BY confidence DESC LIMIT 5",
+                (pid,),
+            ).fetchall()
+            if rows:
+                items = [f"- [{r['category']}] {r['content'][:150]}" for r in rows]
+                sections.append("## Learned Patterns\n" + "\n".join(items))
+        except sqlite3.OperationalError:
+            pass
+
+        conn.close()
+
+        if sections:
+            header = f"# SLM Session Context — {config.active_profile}"
+            print(header + "\n\n" + "\n\n".join(sections))
     except Exception as exc:
-        logger.debug("session-context failed: %s", exc)
+        logger.debug("session-context (fast) failed: %s", exc)
 
 
 def cmd_observe(args: Namespace) -> None:
