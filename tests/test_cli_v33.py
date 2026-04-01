@@ -367,7 +367,7 @@ class TestCmdConsolidate:
         captured = capsys.readouterr()
         envelope = json.loads(captured.out)
         assert envelope["success"] is True
-        assert envelope["data"]["clusters_found"] == 3
+        assert envelope["data"]["clusters_processed"] == 3
 
 
 # ---------------------------------------------------------------------------
