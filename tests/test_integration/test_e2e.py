@@ -329,7 +329,7 @@ class TestModeConfig:
 
     def test_mode_c_has_cloud(self, db_path: Path) -> None:
         config = SLMConfig.for_mode(Mode.C, base_dir=db_path.parent)
-        assert config.llm.provider == "azure"
+        assert config.llm.provider == "openrouter"
         assert config.embedding.dimension == 3072
 
     def test_mode_a_local_embedding(self, db_path: Path) -> None:
