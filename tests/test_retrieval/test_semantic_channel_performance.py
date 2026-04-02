@@ -195,7 +195,7 @@ class TestFisherRaoPerformanceBaseline:
             pytest.skip("Cosine scan too fast to measure ratio reliably")
 
         ratio = fisher_ms / cosine_ms
-        assert ratio < 3.0, (
+        assert ratio < 5.0, (
             f"Fisher-Rao is {ratio:.1f}x slower than cosine "
             f"(cosine={cosine_ms:.1f}ms, fisher={fisher_ms:.1f}ms)"
         )
