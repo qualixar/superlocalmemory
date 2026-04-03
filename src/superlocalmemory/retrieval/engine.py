@@ -301,11 +301,16 @@ class RetrievalEngine:
     def _load_facts(
         self, fused: list[FusionResult], profile_id: str,
     ) -> dict[str, AtomicFact]:
-        needed = {fr.fact_id for fr in fused}
+        """Load facts by ID — targeted query, not full-table scan.
+
+        V3.3.13: Was loading ALL facts (O(n) memory) then filtering.
+        Now uses get_facts_by_ids() for O(k) where k = pool size (~60).
+        """
+        needed = [fr.fact_id for fr in fused]
         if not needed:
             return {}
-        all_facts = self._db.get_all_facts(profile_id)
-        return {f.fact_id: f for f in all_facts if f.fact_id in needed}
+        facts = self._db.get_facts_by_ids(needed, profile_id)
+        return {f.fact_id: f for f in facts}
 
     # -- Cross-encoder rerank -----------------------------------------------
 

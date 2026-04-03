@@ -49,7 +49,10 @@ def _make_fact(fact_id: str, content: str = "") -> AtomicFact:
 
 def _mock_db(facts: list[AtomicFact] | None = None) -> MagicMock:
     db = MagicMock()
-    db.get_all_facts.return_value = facts or []
+    _facts = facts or []
+    db.get_all_facts.return_value = _facts
+    db.get_facts_by_ids.side_effect = lambda ids, pid: [f for f in _facts if f.fact_id in ids]
+    db.get_scenes_for_fact.return_value = []
     return db
 
 

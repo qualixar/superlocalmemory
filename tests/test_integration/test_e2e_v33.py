@@ -718,6 +718,7 @@ class TestFullPipelineSmoke:
 
         db = MagicMock()
         db.get_all_facts.return_value = [fact]
+        db.get_facts_by_ids.side_effect = lambda ids, pid: [fact] if fact.fact_id in ids else []
         db.get_scenes_for_fact.return_value = []
 
         config = RetrievalConfig(use_cross_encoder=False)

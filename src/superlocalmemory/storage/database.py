@@ -250,12 +250,20 @@ class DatabaseManager:
         )
         return [self._row_to_fact(r) for r in rows]
 
+    _MAX_FACTS_PER_ENTITY_LOOKUP: int = 100
+
     def get_facts_by_entity(self, entity_id: str, profile_id: str) -> list[AtomicFact]:
-        """Facts whose canonical_entities JSON array contains *entity_id*."""
+        """Facts whose canonical_entities JSON array contains *entity_id*.
+
+        V3.3.14: LIMIT to _MAX_FACTS_PER_ENTITY_LOOKUP (100) to prevent
+        unbounded memory growth during ingestion. Previously loaded ALL
+        facts for popular entities (500+) causing 17GB+ memory usage.
+        Ordered by created_at DESC so newest facts are always included.
+        """
         rows = self.execute(
             "SELECT * FROM atomic_facts WHERE profile_id = ? AND canonical_entities_json LIKE ? "
-            "ORDER BY created_at DESC",
-            (profile_id, f'%"{entity_id}"%'),
+            "ORDER BY created_at DESC LIMIT ?",
+            (profile_id, f'%"{entity_id}"%', self._MAX_FACTS_PER_ENTITY_LOOKUP),
         )
         return [self._row_to_fact(r) for r in rows]
 
