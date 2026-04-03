@@ -25,6 +25,32 @@ import numpy as np
 import pytest
 
 
+# V3.3.14: Windows CI fix — KeyboardInterrupt during daemon thread teardown.
+# On Windows, when pytest exits, daemon threads (reranker warmup, maintenance
+# scheduler, parent watchdog) trigger KeyboardInterrupt that kills the process.
+# This hook runs BEFORE pytest's thread cleanup and terminates workers cleanly.
+def pytest_sessionfinish(session, exitstatus):
+    """Clean up all SLM subprocess workers before pytest exits."""
+    try:
+        from superlocalmemory.core.embeddings import _cleanup_all_embedding_services
+        _cleanup_all_embedding_services()
+    except Exception:
+        pass
+    try:
+        from superlocalmemory.retrieval.reranker import _cleanup_all_rerankers
+        _cleanup_all_rerankers()
+    except Exception:
+        pass
+    # Join any SLM daemon threads to prevent Windows KeyboardInterrupt on exit
+    import threading
+    for t in threading.enumerate():
+        if t.daemon and t.name in ("ce-warmup", "ce-init-warmup", "parent-watchdog"):
+            try:
+                t.join(timeout=2)
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped worker cleanup (prevents orphaned subprocess leak)
 # ---------------------------------------------------------------------------
@@ -64,9 +90,16 @@ def cleanup_slm_workers_at_end():
 
     Session-scoped + autouse = runs once at session start (yields),
     then cleans up after ALL tests complete or crash.
+
+    V3.3.14: Wraps cleanup in KeyboardInterrupt handler for Windows CI.
+    On Windows, daemon thread teardown during pytest exit can raise
+    KeyboardInterrupt (pre-existing since v3.3.7).
     """
     yield
-    _kill_orphaned_slm_workers()
+    try:
+        _kill_orphaned_slm_workers()
+    except KeyboardInterrupt:
+        pass
 
 
 @pytest.fixture(autouse=True)
