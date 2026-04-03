@@ -118,10 +118,31 @@ def _worker_main() -> None:
             name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-12-v2")
             backend = req.get("backend", "onnx")
             model, active_backend, model_name = _load_model(name, backend)
+            # V3.3.16: Run real inference to trigger ONNX CoreML JIT compilation.
+            # Without this, first real rerank call triggers 30-60s compilation
+            # that exceeds the caller's timeout, killing the worker.
+            warmup_ok = False
+            if model is not None:
+                try:
+                    dummy_pairs = [
+                        ("What is the capital of France?", "Paris is the capital of France."),
+                        ("Who wrote Hamlet?", "Shakespeare wrote many plays."),
+                        ("What color is the sky?", "The sky is blue on a clear day."),
+                    ]
+                    try:
+                        import torch
+                        with torch.inference_mode():
+                            _scores = model.predict(dummy_pairs)
+                    except ImportError:
+                        _scores = model.predict(dummy_pairs)
+                    warmup_ok = True
+                except Exception:
+                    pass
             _respond({
                 "ok": model is not None,
                 "backend": active_backend,
                 "model": model_name,
+                "warmup_inference": warmup_ok,
             })
             continue
 

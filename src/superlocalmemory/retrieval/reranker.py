@@ -321,13 +321,14 @@ class CrossEncoderReranker:
 
         documents = [fact.content for fact, _ in candidates]
 
-        # V3.3.12: Increased timeout 10s→60s — L-12-v2 needs PyTorch + ONNX load.
-        # Critical: Paper 2 ablation showed -30.7pp without reranking.
+        # V3.3.16: Timeout 180s — ONNX CoreML compilation can take 30-60s on
+        # first inference even after model load. The warmup_inference in the
+        # worker should prevent this, but 180s is a safety net.
         resp = self._send_request({
             "cmd": "rerank",
             "query": query,
             "documents": documents,
-        }, timeout=60.0)
+        }, timeout=180.0)
 
         if resp is None or not resp.get("ok"):
             # Fallback: return by existing score

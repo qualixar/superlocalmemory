@@ -338,31 +338,27 @@ class RetrievalEngine:
         if not candidates:
             return fused
 
-        # Bug 3 fix: strip speaker tags from content before CE scoring
-        clean_candidates: list[tuple[AtomicFact, float]] = []
-        for fact, score in candidates:
-            cleaned_content = re.sub(r'^\[[A-Za-z]+\]:\s*', '', fact.content)
-            clean_fact = AtomicFact(
-                fact_id=fact.fact_id, memory_id=fact.memory_id,
-                profile_id=fact.profile_id, content=cleaned_content,
-                fact_type=fact.fact_type, entities=fact.entities,
-                canonical_entities=fact.canonical_entities,
-                observation_date=fact.observation_date,
-                referenced_date=fact.referenced_date,
-                confidence=fact.confidence, importance=fact.importance,
-                evidence_count=fact.evidence_count,
-                access_count=fact.access_count,
-                embedding=fact.embedding, created_at=fact.created_at,
-            )
-            clean_candidates.append((clean_fact, score))
+        # V3.3.16: Strip speaker tags WITHOUT copying full AtomicFact objects.
+        # Previously created full copies including 768-dim embeddings (~6KB each),
+        # which over 304 recalls caused pymalloc arena fragmentation → 25GB.
+        # Now: temporarily patch .content on originals, rerank, then restore.
+        originals: list[tuple[AtomicFact, str]] = []  # (fact, original_content)
+        for fact, _ in candidates:
+            orig = fact.content
+            fact.content = re.sub(r'^\[[A-Za-z]+\]:\s*', '', orig)
+            originals.append((fact, orig))
 
         try:
             scored = self._reranker.rerank(  # type: ignore[union-attr]
-                query, clean_candidates, top_k=len(clean_candidates),
+                query, candidates, top_k=len(candidates),
             )
         except Exception as exc:
             logger.warning("Cross-encoder rerank failed: %s", exc)
             return fused
+        finally:
+            # Restore original content (with speaker tags)
+            for fact, orig_content in originals:
+                fact.content = orig_content
 
         score_map = {fact.fact_id: score for fact, score in scored}
 

@@ -25,6 +25,36 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# V3.3.16: Module-level singletons for recall hot-path objects.
+# Prevents creating new BehavioralTracker / ForgettingScheduler per recall
+# (304 recalls = 304 objects that fragment pymalloc arenas → 25GB).
+# ---------------------------------------------------------------------------
+
+_behavioral_tracker_cache: dict[int, object] = {}
+_forgetting_scheduler_cache: dict[int, object] = {}
+
+
+def _get_behavioral_tracker(db: Any) -> Any:
+    """Get or create a cached BehavioralTracker for this DB instance."""
+    key = id(db)
+    if key not in _behavioral_tracker_cache:
+        from superlocalmemory.learning.behavioral import BehavioralTracker
+        _behavioral_tracker_cache[key] = BehavioralTracker(db)
+    return _behavioral_tracker_cache[key]
+
+
+def _get_forgetting_scheduler(db: Any, config: Any) -> Any:
+    """Get or create a cached ForgettingScheduler for this DB instance."""
+    key = id(db)
+    if key not in _forgetting_scheduler_cache:
+        from superlocalmemory.learning.forgetting_scheduler import ForgettingScheduler
+        from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+        ebbinghaus = EbbinghausCurve(config.forgetting)
+        _forgetting_scheduler_cache[key] = ForgettingScheduler(db, ebbinghaus, config.forgetting)
+    return _forgetting_scheduler_cache[key]
+
+
+# ---------------------------------------------------------------------------
 # apply_adaptive_ranking  (was MemoryEngine._apply_adaptive_ranking)
 # ---------------------------------------------------------------------------
 
@@ -192,11 +222,11 @@ def run_recall(
         except Exception as exc:
             logger.debug("Access log batch store failed: %s", exc)
 
-    # V3.3.12: Wire BehavioralTracker.record_query() into live recall pipeline
+    # V3.3.16: Behavioral tracking + spaced repetition use module-level
+    # singletons to avoid creating new objects per recall (was causing
+    # object accumulation across 304 benchmark recalls).
     try:
-        from superlocalmemory.learning.behavioral import BehavioralTracker
-        _tracker = BehavioralTracker(db)
-        _tracker.record_query(
+        _get_behavioral_tracker(db).record_query(
             profile_id=profile_id, query=query,
             query_type=response.query_type,
             result_count=len(response.results),
@@ -204,15 +234,11 @@ def run_recall(
     except Exception as exc:
         logger.debug("Behavioral tracking: %s", exc)
 
-    # V3.3.12: Spaced repetition update on recall (Ebbinghaus on_access_event)
     if response.results:
         try:
-            from superlocalmemory.learning.forgetting_scheduler import ForgettingScheduler
-            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
-            _ebbinghaus = EbbinghausCurve(config.forgetting)
-            _fsched = ForgettingScheduler(db, _ebbinghaus, config.forgetting)
+            fsched = _get_forgetting_scheduler(db, config)
             for r in response.results[:10]:
-                _fsched.on_access_event(r.fact.fact_id, profile_id)
+                fsched.on_access_event(r.fact.fact_id, profile_id)
         except Exception as exc:
             logger.debug("Spaced repetition update: %s", exc)
 
@@ -237,31 +263,16 @@ def run_recall(
         for r in response.results:
             trust_scorer.update_on_access("fact", r.fact.fact_id, profile_id)
 
-    # Fisher Bayesian update on recall
-    q_emb = embedder.embed(query) if embedder else None
-    q_var_arr = None
-    if embedder and q_emb:
-        _, q_var_list = embedder.compute_fisher_params(q_emb)
-        import numpy as _np
-        q_var_arr = _np.array(q_var_list, dtype=_np.float64)
-
+    # V3.3.16: Access count update only — no redundant embedding call.
+    # Fisher Bayesian variance update moved to store_pipeline (write-time)
+    # to avoid per-recall memory pressure from numpy array creation.
+    # Previously: embedder.embed(query) here duplicated the embed call
+    # already done in retrieval engine, creating 768-dim numpy arrays
+    # 304 times during benchmark → pymalloc arena fragmentation → 25GB.
     for r in response.results:
-        updates: dict[str, object] = {
+        db.update_fact(r.fact.fact_id, {
             "access_count": r.fact.access_count + 1,
-        }
-        # Bayesian variance narrowing after 3+ accesses
-        if (q_var_arr is not None
-                and r.fact.fisher_variance
-                and len(r.fact.fisher_variance) == len(q_var_arr)
-                and r.fact.access_count >= 3):
-            import numpy as _np
-            f_var = _np.array(r.fact.fisher_variance, dtype=_np.float64)
-            # Conjugate Gaussian update: 1/new_var = 1/f_var + 1/q_var
-            new_var = 1.0 / (1.0 / _np.maximum(f_var, 0.05) + 1.0 / _np.maximum(q_var_arr, 0.05))
-            new_var = _np.clip(new_var, 0.05, 2.0)
-            updates["fisher_variance"] = new_var.tolist()
-
-        db.update_fact(r.fact.fact_id, updates)
+        })
 
     # Post-operation hooks (audit, trust signal, learning)
     hook_ctx["result_count"] = len(response.results)
