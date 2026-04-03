@@ -619,7 +619,7 @@ class SLMConfig:
             # The user's explicit choice always wins.
             if "cross_encoder_backend" not in rt:
                 rt.setdefault("cross_encoder_model", "cross-encoder/ms-marco-MiniLM-L-12-v2")
-                rt["cross_encoder_backend"] = "onnx"
+                rt["cross_encoder_backend"] = ""  # V3.3.18: PyTorch (ONNX CoreML leaks on ARM64)
                 # Only auto-enable if user didn't explicitly set the field
                 rt.setdefault("use_cross_encoder", True)
             config.retrieval = RetrievalConfig(**{

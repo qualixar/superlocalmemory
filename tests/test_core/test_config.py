@@ -125,7 +125,7 @@ class TestSubConfigs:
         assert rc.top_k == 20
         assert rc.use_cross_encoder is True
         assert rc.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
-        assert rc.cross_encoder_backend == "onnx"
+        assert rc.cross_encoder_backend == ""
         assert rc.agentic_max_rounds == 3
 
     def test_math_defaults(self) -> None:
@@ -222,13 +222,13 @@ class TestV332OnnxCrossEncoderConfig:
     def test_mode_a_cross_encoder_enabled(self) -> None:
         cfg = SLMConfig.for_mode(Mode.A)
         assert cfg.retrieval.use_cross_encoder is True
-        assert cfg.retrieval.cross_encoder_backend == "onnx"
+        assert cfg.retrieval.cross_encoder_backend == ""
         assert cfg.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
     def test_mode_b_cross_encoder_enabled(self) -> None:
         cfg = SLMConfig.for_mode(Mode.B)
         assert cfg.retrieval.use_cross_encoder is True
-        assert cfg.retrieval.cross_encoder_backend == "onnx"
+        assert cfg.retrieval.cross_encoder_backend == ""
 
     def test_mode_c_cross_encoder_unchanged(self) -> None:
         cfg = SLMConfig.for_mode(Mode.C)
@@ -241,7 +241,7 @@ class TestV332OnnxCrossEncoderConfig:
         cfg.save(cfg_path)
         data = json.loads(cfg_path.read_text())
         assert data["retrieval"]["cross_encoder_model"] == "cross-encoder/ms-marco-MiniLM-L-12-v2"
-        assert data["retrieval"]["cross_encoder_backend"] == "onnx"
+        assert data["retrieval"]["cross_encoder_backend"] == ""
 
     def test_load_migrates_pre_332_config_respects_explicit_false(self, tmp_path: Path) -> None:
         """Pre-3.3.2 configs with explicit use_cross_encoder=False keep it.
@@ -270,7 +270,7 @@ class TestV332OnnxCrossEncoderConfig:
         # Explicit False is RESPECTED — not overwritten
         assert loaded.retrieval.use_cross_encoder is False
         # Backend field still added so migration won't trigger again
-        assert loaded.retrieval.cross_encoder_backend == "onnx"
+        assert loaded.retrieval.cross_encoder_backend == ""
         # Migration preserves old default for backward compat (new installs get BGE)
         assert loaded.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
@@ -293,7 +293,7 @@ class TestV332OnnxCrossEncoderConfig:
         loaded = SLMConfig.load(cfg_path)
         # When use_cross_encoder is absent, setdefault enables it
         assert loaded.retrieval.use_cross_encoder is True
-        assert loaded.retrieval.cross_encoder_backend == "onnx"
+        assert loaded.retrieval.cross_encoder_backend == ""
 
     def test_load_respects_post_332_config(self, tmp_path: Path) -> None:
         """Post-3.3.2 configs with explicit backend are respected."""
