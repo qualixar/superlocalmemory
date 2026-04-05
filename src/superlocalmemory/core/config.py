@@ -259,6 +259,8 @@ class ForgettingConfig:
     learning_rate: float = 1.0      # eta in spaced repetition update
     # Coupling
     forgetting_drift_scale: float = 0.5  # How strongly forgetting affects Langevin drift
+    # Trust-weighted forgetting (Paper 3, Section 5.5)
+    trust_kappa: float = 2.0  # Sensitivity: lambda_eff = lambda * (1 + trust_kappa * (1 - tau))
     # Scheduler
     scheduler_interval_minutes: int = 30  # How often to recompute retentions
     # Immunity

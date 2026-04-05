@@ -78,6 +78,7 @@ class FactRetentionInput(TypedDict):
     confirmation_count: int        # Mapped from atomic_facts.evidence_count
     emotional_salience: float      # Mapped from atomic_facts.emotional_valence
     last_accessed_at: str          # ISO 8601 datetime string
+    trust_score: float             # Source trust in [0, 1]. Default 1.0.
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +141,47 @@ class EbbinghausCurve:
             return 0.0
 
         # HR-02: Clamp to [0.0, 1.0]
+        return max(0.0, min(1.0, r))
+
+    def trust_modulated_retention(
+        self,
+        hours_since_access: float,
+        strength: float,
+        trust_score: float = 1.0,
+    ) -> float:
+        """Compute trust-weighted Ebbinghaus retention.
+
+        lambda_eff = lambda * (1 + kappa * (1 - trust))
+
+        Low-trust memories decay faster. When trust=1.0, identical to
+        standard retention. When trust=0.0, decay rate is (1+kappa)x faster.
+
+        Paper 3, Section 5.5: Trust-Weighted Forgetting.
+
+        Args:
+            hours_since_access: Hours since last access.
+            strength: Memory strength S.
+            trust_score: Source trust in [0, 1]. Default 1.0 (fully trusted).
+
+        Returns:
+            Retention score in [0.0, 1.0].
+        """
+        if hours_since_access < 0:
+            return 1.0
+
+        s = max(self._config.min_strength, strength)
+        tau = max(0.0, min(1.0, trust_score))
+        kappa = self._config.trust_kappa
+
+        # Trust-modulated decay rate
+        lambda_base = 1.0 / s
+        lambda_eff = lambda_base * (1.0 + kappa * (1.0 - tau))
+
+        r = math.exp(-lambda_eff * hours_since_access)
+
+        if math.isnan(r) or math.isinf(r):
+            return 0.0
+
         return max(0.0, min(1.0, r))
 
     def memory_strength(
@@ -294,7 +336,8 @@ class EbbinghausCurve:
             strength = self.memory_strength(
                 access_count, importance, confirmation_count, emotional_salience,
             )
-            ret = self.retention(hours_since, strength)
+            trust = fact.get("trust_score", 1.0)
+            ret = self.trust_modulated_retention(hours_since, strength, trust)
             zone = self.lifecycle_zone(ret)
 
             results.append({

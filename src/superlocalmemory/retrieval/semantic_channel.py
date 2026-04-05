@@ -92,6 +92,8 @@ class SemanticChannel:
         self._fisher_mode = fisher_mode if fisher_mode in ("simplified", "full") else "simplified"
         # Lazily instantiated full metric (avoids import cost when not needed)
         self._full_metric: object | None = None
+        # V3.3.26: Lazily instantiated FRQAD metric for mixed-precision scoring
+        self._frqad_metric: object | None = None
         self._vector_store = vector_store
         # V3.3.19: TurboQuant 3-tier search (stateless, optional)
         self._qas = quantization_aware_search
@@ -276,20 +278,67 @@ class SemanticChannel:
         q_mean: np.ndarray | None,
         q_var: np.ndarray | None,
     ) -> float:
-        """Compute Fisher-Rao similarity using simplified or full metric.
+        """Compute Fisher-Rao similarity using simplified, full, or FRQAD metric.
 
         Simplified (default): Mahalanobis-like distance using only fact variance.
-        Full: Atkinson-Mitchell geodesic via FisherRaoMetric.similarity(),
-              requires both query and fact (mean, variance) pairs.
+        Full: Atkinson-Mitchell geodesic via FisherRaoMetric.similarity().
+        FRQAD: V3.3.26 — quantization-aware distance via FRQADMetric when
+               the fact has a non-32-bit embedding (mixed precision).
 
-        Falls back to simplified if full metric cannot be applied (e.g.
-        missing fisher_mean on the fact, or missing query variance).
+        Falls back to simplified if full/FRQAD cannot be applied.
         """
+        # V3.3.26: FRQAD for mixed-precision facts
+        fact_bw = getattr(fact, "bit_width", 32) or 32
+        if fact_bw < 32 and q_mean is not None and q_var is not None:
+            return self._compute_frqad_sim(
+                q_mean, q_var, 32, f_vec, var_vec, fact_bw, fact,
+            )
+
         if self._fisher_mode == "full":
             return self._compute_full_fisher_sim(
                 q_vec, f_vec, var_vec, fact, q_mean, q_var,
             )
         return _fisher_rao_similarity(q_vec, f_vec, var_vec, self._temperature)
+
+    def _compute_frqad_sim(
+        self,
+        q_mean: np.ndarray,
+        q_var: np.ndarray,
+        q_bw: int,
+        f_mean: np.ndarray,
+        f_var: np.ndarray,
+        f_bw: int,
+        fact: AtomicFact,
+    ) -> float:
+        """FRQAD: quantization-aware Fisher-Rao similarity (Paper 3, C1).
+
+        Uses variance inflation: sigma_eff = sigma * (32/bw)^kappa
+        to penalize lower-precision embeddings on the statistical manifold.
+        """
+        frqad = self._get_frqad_metric()
+        if frqad is None:
+            return _fisher_rao_similarity(q_mean, f_mean, f_var, self._temperature)
+        try:
+            return frqad.similarity(
+                q_mean, q_var, q_bw,
+                f_mean, f_var, f_bw,
+            )
+        except (ValueError, FloatingPointError):
+            logger.debug("FRQAD raised; falling back to simplified Fisher-Rao")
+            return _fisher_rao_similarity(q_mean, f_mean, f_var, self._temperature)
+
+    def _get_frqad_metric(self) -> object | None:
+        """Lazy-load FRQADMetric to avoid import-time cost."""
+        if self._frqad_metric is None:
+            try:
+                from superlocalmemory.math.fisher import FisherRaoMetric
+                from superlocalmemory.math.fisher_quantized import FRQADConfig, FRQADMetric
+                base = FisherRaoMetric(temperature=self._temperature)
+                self._frqad_metric = FRQADMetric(base, FRQADConfig())
+            except Exception:
+                logger.debug("FRQAD metric unavailable; mixed-precision scoring disabled")
+                return None
+        return self._frqad_metric
 
     def _compute_full_fisher_sim(
         self,

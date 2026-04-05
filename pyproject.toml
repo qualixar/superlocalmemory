@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.3.25"
+version = "3.3.26"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "Elastic-2.0"}

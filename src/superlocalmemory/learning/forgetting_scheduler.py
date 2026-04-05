@@ -202,31 +202,69 @@ class ForgettingScheduler:
         - confirmation_count mapped from atomic_facts.evidence_count
         - emotional_salience from atomic_facts.emotional_valence
         """
-        rows = self._db.execute(
-            "SELECT f.fact_id, "
-            "  COALESCE(al.access_count, 0) as access_count, "
-            "  COALESCE(fi.pagerank_score, 0.0) as importance, "
-            "  COALESCE(f.evidence_count, 0) as confirmation_count, "
-            "  f.created_at, "
-            "  COALESCE(r.last_accessed_at, f.created_at) as last_accessed_at, "
-            "  COALESCE(f.emotional_valence, 0.0) as emotional_salience "
-            "FROM atomic_facts f "
-            "LEFT JOIN ("
-            "  SELECT fact_id, COUNT(*) as access_count "
-            "  FROM fact_access_log WHERE profile_id = ? GROUP BY fact_id"
-            ") al ON f.fact_id = al.fact_id "
-            "LEFT JOIN fact_importance fi "
-            "  ON f.fact_id = fi.fact_id AND fi.profile_id = ? "
-            "LEFT JOIN fact_retention r "
-            "  ON f.fact_id = r.fact_id AND r.profile_id = ? "
-            "WHERE f.profile_id = ? "
-            "AND f.fact_id NOT IN ("
-            "  SELECT json_each.value "
-            "  FROM core_memory_blocks, json_each(core_memory_blocks.source_fact_ids) "
-            "  WHERE core_memory_blocks.profile_id = ?"
-            ")",
-            (profile_id, profile_id, profile_id, profile_id, profile_id),
-        )
+        # V3.3.26: Trust-weighted forgetting — look up trust score for
+        # the agent that created each fact. Falls back to 1.0 if trust_scores
+        # table or created_by column is unavailable.
+        trust_available = self._has_trust_tables()
+        if trust_available:
+            sql = (
+                "SELECT f.fact_id, "
+                "  COALESCE(al.access_count, 0) as access_count, "
+                "  COALESCE(fi.pagerank_score, 0.0) as importance, "
+                "  COALESCE(f.evidence_count, 0) as confirmation_count, "
+                "  f.created_at, "
+                "  COALESCE(r.last_accessed_at, f.created_at) as last_accessed_at, "
+                "  COALESCE(f.emotional_valence, 0.0) as emotional_salience, "
+                "  COALESCE(ts.trust_score, 1.0) as trust_score "
+                "FROM atomic_facts f "
+                "LEFT JOIN ("
+                "  SELECT fact_id, COUNT(*) as access_count "
+                "  FROM fact_access_log WHERE profile_id = ? GROUP BY fact_id"
+                ") al ON f.fact_id = al.fact_id "
+                "LEFT JOIN fact_importance fi "
+                "  ON f.fact_id = fi.fact_id AND fi.profile_id = ? "
+                "LEFT JOIN fact_retention r "
+                "  ON f.fact_id = r.fact_id AND r.profile_id = ? "
+                "LEFT JOIN trust_scores ts "
+                "  ON ts.target_id = f.created_by "
+                "  AND ts.target_type = 'agent' "
+                "  AND ts.profile_id = ? "
+                "WHERE f.profile_id = ? "
+                "AND f.fact_id NOT IN ("
+                "  SELECT json_each.value "
+                "  FROM core_memory_blocks, json_each(core_memory_blocks.source_fact_ids) "
+                "  WHERE core_memory_blocks.profile_id = ?"
+                ")"
+            )
+            params = (profile_id,) * 6
+        else:
+            sql = (
+                "SELECT f.fact_id, "
+                "  COALESCE(al.access_count, 0) as access_count, "
+                "  COALESCE(fi.pagerank_score, 0.0) as importance, "
+                "  COALESCE(f.evidence_count, 0) as confirmation_count, "
+                "  f.created_at, "
+                "  COALESCE(r.last_accessed_at, f.created_at) as last_accessed_at, "
+                "  COALESCE(f.emotional_valence, 0.0) as emotional_salience "
+                "FROM atomic_facts f "
+                "LEFT JOIN ("
+                "  SELECT fact_id, COUNT(*) as access_count "
+                "  FROM fact_access_log WHERE profile_id = ? GROUP BY fact_id"
+                ") al ON f.fact_id = al.fact_id "
+                "LEFT JOIN fact_importance fi "
+                "  ON f.fact_id = fi.fact_id AND fi.profile_id = ? "
+                "LEFT JOIN fact_retention r "
+                "  ON f.fact_id = r.fact_id AND r.profile_id = ? "
+                "WHERE f.profile_id = ? "
+                "AND f.fact_id NOT IN ("
+                "  SELECT json_each.value "
+                "  FROM core_memory_blocks, json_each(core_memory_blocks.source_fact_ids) "
+                "  WHERE core_memory_blocks.profile_id = ?"
+                ")"
+            )
+            params = (profile_id,) * 5
+
+        rows = self._db.execute(sql, params)
 
         facts: list[dict] = []
         for row in rows:
@@ -238,6 +276,7 @@ class ForgettingScheduler:
                 "confirmation_count": int(d["confirmation_count"]),
                 "emotional_salience": float(d["emotional_salience"]),
                 "last_accessed_at": str(d["last_accessed_at"]),
+                "trust_score": float(d.get("trust_score", 1.0)),
             })
         return facts
 
@@ -250,6 +289,19 @@ class ForgettingScheduler:
             return {}
         retention_rows = self._db.batch_get_retention(fact_ids, profile_id)
         return {r["fact_id"]: r["lifecycle_zone"] for r in retention_rows}
+
+    def _has_trust_tables(self) -> bool:
+        """Check if trust_scores table and created_by column exist."""
+        try:
+            self._db.execute(
+                "SELECT 1 FROM trust_scores LIMIT 0", (),
+            )
+            self._db.execute(
+                "SELECT created_by FROM atomic_facts LIMIT 0", (),
+            )
+            return True
+        except Exception:
+            return False
 
     def _soft_delete_with_audit(self, fact_id: str, profile_id: str) -> None:
         """Soft-delete a forgotten fact with compliance audit trail.

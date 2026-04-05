@@ -145,14 +145,14 @@ class FRQADMetric:
         if bit_width >= 32:
             return np.array(base_variance, dtype=np.float64)
 
-        # V3.3.12: Paper-correct ADDITIVE variance combination (was multiplicative).
-        # sigma²_total = sigma²_obs + sigma²_quant
-        # sigma²_quant = Delta²/12 where Delta = 2/2^b (uniform quantization step)
-        delta = 2.0 / (2 ** bit_width)  # Quantization step size
-        sigma_q_sq = (delta ** 2) / 12.0  # Uniform quantization noise variance
-        sigma_total = np.asarray(base_variance, dtype=np.float64) + sigma_q_sq
+        # V3.3.26: MULTIPLICATIVE variance inflation (Paper 3, Equation 2).
+        # sigma²_eff = sigma²_obs * (32 / bit_width) ^ kappa
+        # When bw=32: scale=1.0 (no change). When bw=4: scale=2.83x (kappa=0.5).
+        # This is MORE novel and MORE aggressive than additive Delta²/12.
+        scale = (32.0 / bit_width) ** self._config.kappa
+        sigma_inflated = np.asarray(base_variance, dtype=np.float64) * scale
 
-        return np.clip(sigma_total, self._config.variance_floor, self._config.variance_ceiling)
+        return np.clip(sigma_inflated, self._config.variance_floor, self._config.variance_ceiling)
 
     # ------------------------------------------------------------------
     # Core distance (THE novel contribution)

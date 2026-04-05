@@ -152,12 +152,12 @@ class TestQuantizationVariance:
         assert np.all(var_2 >= var_4)
 
     def test_quantization_variance_scale_factor(self, frqad: FRQADMetric) -> None:
-        """V3.3.12: Verify additive variance = base + Delta²/12."""
+        """V3.3.26: Verify multiplicative variance = base * (32/bw)^kappa."""
         base_var = np.full(8, 1.0)
 
         var_4 = frqad.quantization_variance(base_var, 4)
-        delta = 2.0 / (2 ** 4)  # 0.125
-        expected = base_var + (delta ** 2) / 12.0  # 1.0 + 0.001302
+        # kappa=0.5: scale = (32/4)^0.5 = sqrt(8) = 2.8284
+        expected = np.clip(base_var * (32.0 / 4) ** 0.5, 0.05, 10.0)
         np.testing.assert_allclose(var_4, expected, rtol=1e-10)
 
     def test_quantization_variance_clamped(self, frqad: FRQADMetric) -> None:
