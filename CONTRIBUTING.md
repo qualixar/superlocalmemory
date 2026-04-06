@@ -128,10 +128,15 @@ flake8 src/
 black --check src/
 
 # Run installation
+# On macOS/Linux:
 ./install.sh
+# Activate virtual environment
+
+# On Windows:
+./install.ps1
 
 # Test basic functionality
-memory-status
+slm status
 ```
 
 ### Step 5: Create Feature Branch
@@ -150,45 +155,50 @@ git checkout -b feature/your-feature-name
 ## Project Structure
 
 ```
-superlocalmemory-repo/
+superlocalmemory/
 │
-├── src/                          # Core source code
-│   ├── engine.py                    # V3 Memory Engine
-│   ├── graph_engine.py           # Knowledge graph
-│   ├── pattern_learner.py        # Pattern learning
-│   ├── tree_manager.py           # Hierarchical index
-│   ├── memory_compression.py     # Compression system
-│   ├── memory-reset.py           # Reset utilities
-│   └── memory-profiles.py        # Profile management
+├── src/superlocalmemory/           # Python package source
+│   ├── cli/                        # CLI commands
+│   │   ├── commands.py                # All CLI commands
+│   │   ├── main.py                   # CLI entry point
+│   │   ├── daemon.py                 # Daemon serve mode
+│   │   ├── setup_wizard.py           # Interactive setup
+│   │   └── migrate_cmd.py            # V2→V3 migration
+│   ├── core/                       # Core engine + config
+│   ├── storage/                    # Database layer (SQLite + sqlite-vec)
+│   ├── retrieval/                  # 7-channel retrieval
+│   ├── dynamics/                   # EAP scheduler, SAGQ
+│   ├── math/                       # Fisher-Rao, FRQAD, Ebbinghaus, Hopfield, TurboQuant
+│   ├── encoding/                   # Embeddings, fact extraction, CCQ consolidation
+│   ├── trust/                      # Bayesian trust scoring
+│   ├── compliance/                 # EU AI Act, GDPR tools
+│   ├── learning/                   # LightGBM adaptive re-ranking
+│   ├── parameterization/           # Soft prompt generation
+│   ├── hooks/                      # Claude Code hooks
+│   ├── mcp/                        # MCP server & 60 tools
+│   ├── server/                     # Dashboard API server
+│   ├── code_graph/                 # Code knowledge graph (rustworkx)
+│   └── ui/                        # Dashboard frontend
 │
-├── bin/                          # CLI wrapper scripts
-│   ├── memory-status
-│   ├── memory-reset
-│   └── memory-profile
+├── bin/                          # CLI wrappers
+│   ├── slm                         # Unix bash wrapper
+│   ├── slm-npm                     # Node.js wrapper
+│   ├── slm.bat                     # Windows batch
+│   └── slm.cmd                    # Windows cmd
 │
-├── tests/                        # Test suite
-│   ├── test_memory_store.py
-│   ├── test_graph_engine.py
-│   └── test_pattern_learner.py
+├── tests/                        # Test suite (3000+ tests)
 │
 ├── docs/                         # Documentation
-│   ├── CLI-COMMANDS-REFERENCE.md
-│   ├── GRAPH_ENGINE_README.md
-│   └── [other guides]
-│
-├── hooks/                        # Git hooks
-│   └── pre-commit
-│
-├── install.sh                    # Installation script
-├── config.json                   # Default configuration
+├── ui/                           # Dashboard UI
+├── ide/                          # IDE integrations
+├── scripts/                      # Build & install scripts
+├── package.json                  # npm package config
+├── pyproject.toml                # Python package config
 ├── README.md                     # Project overview
-├── INSTALL.md                    # Installation guide
-├── QUICKSTART.md                 # Quick start guide
-├── ARCHITECTURE.md               # Technical architecture
 ├── CONTRIBUTING.md               # This file
-├── SECURITY.md                   # Security policy
 ├── CHANGELOG.md                  # Version history
-└── LICENSE                       # Elastic License 2.0
+├── LICENSE                       # Elastic License 2.0
+└── SECURITY.md                   # Security policy
 ```
 
 ---
