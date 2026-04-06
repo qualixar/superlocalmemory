@@ -4,7 +4,7 @@
 
 <h1 align="center">SuperLocalMemory V3.3</h1>
 <p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.</em></p>
-<p align="center"><code>v3.3.6</code> — Install once. Every session remembers the last. Automatically.</p>
+<p align="center"><code>v3.3.15</code> — Install once. Every session remembers the last. Automatically.</p>
 
 <p align="center">
   <code>+16pp vs Mem0 (zero cloud)</code> &nbsp;·&nbsp; <code>85% Open-Domain (best of any system)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
@@ -133,6 +133,33 @@ slm config set v33_features.all true
 ```
 
 **Fully backward compatible.** All existing MCP tools, CLI commands, and configs work unchanged. New tables are created automatically on first run. No migration needed.
+
+---
+
+## What's New in V3.3.7–3.3.15 — Stability & Performance
+
+> Nine maintenance releases fixing memory safety, subprocess leaks, vector quantization, and CI reliability — plus TurboQuant for better compression.
+
+### Fixes
+
+| Version | Fix |
+|:--------|:----|
+| **3.3.15** | Windows CI `KeyboardInterrupt` handling — prevents false interrupts during process cleanup |
+| **3.3.14** | Memory safety for entity lookups + targeted fact loading |
+| **3.3.13** | ONNX reranker reliability, L-12-v2 embedding model upgrade, 6 additional fixes |
+| **3.3.12** | Retrieval quality improvements, MCP tool fixes, memory stability |
+| **3.3.11** | Store verbatim content alongside extracted facts |
+| **3.3.9** | Codebook range now covers full unit-sphere coordinates |
+| **3.3.8** | TurboQuant near-optimal vector quantization |
+| **3.3.7** | Prevent orphaned subprocess workers from leaking memory |
+| **3.3.6** | Zero-friction hooks with auto-install |
+
+### Performance
+
+| Fix | Impact |
+|:----|:-------|
+| In-memory adjacency cache for entity graph channel | **31s → 500ms** |
+| Fisher-Rao perf test threshold relaxed for CI | 3x → 5x margin |
 
 ---
 
