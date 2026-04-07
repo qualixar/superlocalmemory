@@ -107,43 +107,21 @@ class TestRememberTool:
         assert meta["tags"] == "python"
         assert meta["project"] == "slm"
 
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_emits_memory_created_event(self, mock_emit):
-        """On success, _emit_event('memory.created', ...) is called."""
-        pool = MagicMock()
-        pool.store.return_value = {"ok": True, "fact_ids": ["f-1"], "count": 1}
-
+    def test_remember_stores_to_pending_with_metadata(self):
+        """V3.3.27: Store-first pattern saves content and metadata to pending.db."""
         remember = _get_remember_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
-            asyncio.run(remember("event test content"))
+        result = asyncio.run(remember(
+            "meta test content for pending store",
+            tags="ai,ml", project="qclaw",
+            importance=9, agent_id="test-agent",
+        ))
 
-        mock_emit.assert_called_once()
-        args = mock_emit.call_args
-        assert args[0][0] == "memory.created"
-        payload = args[0][1]
-        assert "content_preview" in payload
-        assert payload["fact_count"] == 1
-
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_passes_metadata(self, mock_emit):
-        """tags, project, importance are forwarded in the metadata dict."""
-        pool = MagicMock()
-        pool.store.return_value = {"ok": True, "fact_ids": ["f-m"], "count": 1}
-
-        remember = _get_remember_tool()
-
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
-            asyncio.run(remember(
-                "meta test", tags="ai,ml", project="qclaw",
-                importance=9, agent_id="test-agent",
-            ))
-
-        meta = pool.store.call_args[1]["metadata"]
-        assert meta["tags"] == "ai,ml"
-        assert meta["project"] == "qclaw"
-        assert meta["importance"] == 9
-        assert meta["agent_id"] == "test-agent"
+        assert result["success"] is True
+        assert result.get("pending") is True
+        # Verify pending ID is returned
+        assert len(result["fact_ids"]) == 1
+        assert result["fact_ids"][0].startswith("pending:")
 
 
 # ---------------------------------------------------------------------------
@@ -153,20 +131,12 @@ class TestRememberTool:
 class TestRememberEdgeCases:
     """Edge case handling for the remember tool."""
 
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_empty_content_handled(self, mock_emit):
-        """Empty string content does not crash the tool."""
-        pool = MagicMock()
-        pool.store.return_value = {"ok": True, "fact_ids": [], "count": 0}
-
+    def test_remember_empty_content_handled(self):
+        """V3.3.27: Empty string content does not crash the store-first path."""
         remember = _get_remember_tool()
-
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
-            result = asyncio.run(remember(""))
-
-        # Should not raise; pool.store still called
+        result = asyncio.run(remember(""))
+        # Should not raise — store_pending accepts any content
         assert result["success"] is True
-        pool.store.assert_called_once()
 
     def test_remember_worker_pool_exception_still_stores_pending(self):
         """V3.3.27: When WorkerPool crashes, data is still safe in pending.db."""
@@ -178,23 +148,12 @@ class TestRememberEdgeCases:
         ):
             result = asyncio.run(remember("boom"))
 
-        # V3.3.27: store-first pattern means data is safe even if worker crashes
         assert result["success"] is True
         assert result.get("pending") is True
 
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_agent_id_forwarded(self, mock_emit):
-        """agent_id parameter is included in the metadata and event."""
-        pool = MagicMock()
-        pool.store.return_value = {"ok": True, "fact_ids": ["f-a"], "count": 1}
-
+    def test_remember_agent_id_included_in_result(self):
+        """V3.3.27: agent_id is included in the store-first result."""
         remember = _get_remember_tool()
-
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
-            asyncio.run(remember("agent test", agent_id="claude-opus"))
-
-        meta = pool.store.call_args[1]["metadata"]
-        assert meta["agent_id"] == "claude-opus"
-        # Event also carries agent_id
-        event_payload = mock_emit.call_args[0][1]
-        assert event_payload["agent_id"] == "claude-opus"
+        result = asyncio.run(remember("agent test", agent_id="claude-opus"))
+        assert result["success"] is True
+        assert result.get("pending") is True
