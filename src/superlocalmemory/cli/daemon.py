@@ -37,6 +37,7 @@ import sys
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+import threading
 from threading import Thread
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,73 @@ def stop_daemon() -> bool:
 
 _engine = None
 _last_activity = time.monotonic()
+
+# ---------------------------------------------------------------------------
+# V3.3.28: Observation debounce buffer.
+#
+# When 20+ file edits arrive in quick succession (from parallel AI agents,
+# git checkout, or batch sed), we buffer observations for _OBSERVE_DEBOUNCE_SEC
+# seconds and deduplicate by content hash. This reduces 20 observations → 1-3
+# batches, each processed by the singleton engine (1 embedding worker).
+# ---------------------------------------------------------------------------
+
+_OBSERVE_DEBOUNCE_SEC = float(os.environ.get("SLM_OBSERVE_DEBOUNCE_SEC", "3.0"))
+_observe_buffer: list[str] = []
+_observe_seen: set[str] = set()  # content hashes for dedup within window
+_observe_lock = threading.Lock()
+_observe_timer: threading.Timer | None = None
+
+
+def _flush_observe_buffer() -> None:
+    """Process all buffered observations as a single batch."""
+    global _observe_timer
+    with _observe_lock:
+        if not _observe_buffer:
+            return
+        batch = list(_observe_buffer)
+        _observe_buffer.clear()
+        _observe_seen.clear()
+        _observe_timer = None
+
+    # Process each unique observation (already deduped)
+    engine = _get_engine()
+    from superlocalmemory.hooks.auto_capture import AutoCapture
+    auto = AutoCapture(engine=engine)
+
+    for content in batch:
+        try:
+            decision = auto.evaluate(content)
+            if decision.capture:
+                auto.capture(content, category=decision.category)
+        except Exception:
+            pass  # Don't let one bad observation kill the batch
+
+    logger.info("Observe debounce: processed %d observations (from buffer)", len(batch))
+
+
+def _enqueue_observation(content: str) -> dict:
+    """Add an observation to the debounce buffer. Returns immediate response."""
+    global _observe_timer
+    import hashlib
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+
+    with _observe_lock:
+        if content_hash in _observe_seen:
+            return {"captured": False, "reason": "duplicate within debounce window"}
+
+        _observe_seen.add(content_hash)
+        _observe_buffer.append(content)
+        buf_size = len(_observe_buffer)
+
+        # Reset debounce timer
+        if _observe_timer is not None:
+            _observe_timer.cancel()
+        _observe_timer = threading.Timer(_OBSERVE_DEBOUNCE_SEC, _flush_observe_buffer)
+        _observe_timer.daemon = True
+        _observe_timer.start()
+
+    return {"captured": True, "queued": True, "buffer_size": buf_size,
+            "debounce_sec": _OBSERVE_DEBOUNCE_SEC}
 
 
 def _get_engine():
@@ -276,6 +344,24 @@ class DaemonHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(exc)})
             return
 
+        if self.path == "/observe":
+            try:
+                body = self._read_body()
+                content = body.get("content", "")
+                if not content:
+                    self._send_json(400, {"error": "content required"})
+                    return
+
+                # V3.3.28: Debounced observation processing.
+                # Buffers observations for 3s, deduplicates, processes as batch.
+                # Returns immediately — the actual capture happens asynchronously
+                # via the debounce timer, using the singleton engine.
+                result = _enqueue_observation(content)
+                self._send_json(200, result)
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+            return
+
         if self.path == "/stop":
             self._send_json(200, {"status": "stopping"})
             Thread(target=_shutdown_server, daemon=True).start()
@@ -294,6 +380,11 @@ _server_start_time = time.monotonic()
 
 def _shutdown_server() -> None:
     global _engine, _server
+    # V3.3.28: Flush any buffered observations before shutdown
+    try:
+        _flush_observe_buffer()
+    except Exception:
+        pass
     time.sleep(0.5)
     if _engine is not None:
         try:

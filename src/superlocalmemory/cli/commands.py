@@ -1554,11 +1554,14 @@ def cmd_session_context(args: Namespace) -> None:
 
 
 def cmd_observe(args: Namespace) -> None:
-    """Evaluate and auto-capture content from stdin or argument."""
+    """Evaluate and auto-capture content from stdin or argument.
+
+    V3.3.28: Routes through daemon to prevent embedding worker memory blast.
+    Previously each `slm observe` spawned its own MemoryEngine + embedding
+    worker (~1.4 GB each). With 20 parallel edits = 28+ GB = system crash.
+    Now uses the daemon's singleton engine (1 worker total).
+    """
     import sys
-    from superlocalmemory.hooks.auto_capture import AutoCapture
-    from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.core.engine import MemoryEngine
 
     content = getattr(args, "content", "") or ""
     if not content and not sys.stdin.isatty():
@@ -1568,22 +1571,56 @@ def cmd_observe(args: Namespace) -> None:
         print("No content to observe.")
         return
 
+    # V3.3.28: Route through daemon (singleton engine, single embedding worker).
+    # This is the P0 fix for the memory blast incident of April 7, 2026.
     try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
+        from superlocalmemory.cli.daemon import is_daemon_running, daemon_request, ensure_daemon
+        if is_daemon_running() or ensure_daemon():
+            result = daemon_request("POST", "/observe", {"content": content})
+            if result is not None:
+                if result.get("captured"):
+                    cat = result.get("category", "unknown")
+                    conf = result.get("confidence", 0)
+                    print(f"Auto-captured: {cat} (confidence: {conf:.2f}) (via daemon)")
+                else:
+                    reason = result.get("reason", "no patterns matched")
+                    print(f"Not captured: {reason}")
+                return
+    except Exception:
+        pass  # Fall through to direct engine
 
-        auto = AutoCapture(engine=engine)
-        decision = auto.evaluate(content)
+    # Fallback: direct engine (only if daemon unavailable).
+    # Acquires a system-wide file lock to prevent concurrent worker spawns.
+    try:
+        from superlocalmemory.hooks.auto_capture import AutoCapture
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.engine import MemoryEngine
+        from superlocalmemory.core.embeddings import acquire_embedding_lock
 
-        if decision.capture:
-            stored = auto.capture(content, category=decision.category)
-            if stored:
-                print(f"Auto-captured: {decision.category} (confidence: {decision.confidence:.2f})")
+        if not acquire_embedding_lock():
+            logger.debug("observe: another embedding worker active, skipping")
+            print("Not captured: system busy (another embedding in progress)")
+            return
+
+        try:
+            config = SLMConfig.load()
+            engine = MemoryEngine(config)
+            engine.initialize()
+
+            auto = AutoCapture(engine=engine)
+            decision = auto.evaluate(content)
+
+            if decision.capture:
+                stored = auto.capture(content, category=decision.category)
+                if stored:
+                    print(f"Auto-captured: {decision.category} (confidence: {decision.confidence:.2f})")
+                else:
+                    print(f"Detected {decision.category} but store failed.")
             else:
-                print(f"Detected {decision.category} but store failed.")
-        else:
-            print(f"Not captured: {decision.reason}")
+                print(f"Not captured: {decision.reason}")
+        finally:
+            from superlocalmemory.core.embeddings import release_embedding_lock
+            release_embedding_lock()
     except Exception as exc:
         logger.debug("observe failed: %s", exc)
 

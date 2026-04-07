@@ -16,6 +16,21 @@ SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
 
 ---
 
+## [3.3.28] - 2026-04-07 — Stability Hotfix
+
+### Fixed
+- **Excessive memory usage during rapid file edits** — auto-observe now reuses a single background process instead of spawning one per edit. Rapid multi-file operations (parallel agents, branch switching, batch edits) no longer risk high memory usage.
+- **Observation debounce** — rapid-fire observations are batched and deduplicated within a short window, reducing redundant work.
+- **Memory-aware worker management** — new safety check skips heavy processing when system memory is low.
+
+### New Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SLM_OBSERVE_DEBOUNCE_SEC` | `3.0` | Observation batching window |
+| `SLM_MIN_AVAILABLE_MEMORY_GB` | `2.0` | Min free RAM for background processing |
+
+---
+
 ## [3.3.3] - 2026-04-01 — Langevin Awakening
 
 ### Fixed

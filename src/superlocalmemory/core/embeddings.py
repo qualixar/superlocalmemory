@@ -49,6 +49,66 @@ class DimensionMismatchError(RuntimeError):
     """Raised when the actual embedding dimension differs from config."""
 
 
+# ---------------------------------------------------------------------------
+# V3.3.28: System-wide concurrency guard for embedding workers.
+#
+# The memory blast incident (April 7, 2026) was caused by 20+ concurrent
+# `slm observe` CLI processes each spawning their own embedding_worker
+# subprocess (1.4 GB each). This file lock ensures only MAX_CONCURRENT
+# embedding workers can exist across ALL processes on the machine.
+#
+# Primary defense: daemon routing (cmd_observe → daemon → singleton engine).
+# This lock is the secondary safety net for when the daemon isn't available.
+# ---------------------------------------------------------------------------
+
+_EMBEDDING_LOCK_FILE = Path.home() / ".superlocalmemory" / ".embedding.lock"
+_MAX_CONCURRENT_WORKERS = int(os.environ.get("SLM_MAX_EMBEDDING_WORKERS", 2))
+_embedding_lock_fd: int | None = None
+
+
+def acquire_embedding_lock(timeout: float = 5.0) -> bool:
+    """Acquire system-wide embedding worker lock.
+
+    Uses fcntl.flock on Unix. On Windows, falls back to allowing (no lock).
+    Returns True if lock acquired, False if timed out (another worker active).
+    """
+    global _embedding_lock_fd
+    if sys.platform == "win32":
+        return True  # No file locking on Windows — daemon routing is primary defense
+
+    import fcntl
+    _EMBEDDING_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        _embedding_lock_fd = os.open(str(_EMBEDDING_LOCK_FILE), os.O_CREAT | os.O_RDWR)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                fcntl.flock(_embedding_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except (BlockingIOError, OSError):
+                time.sleep(0.2)
+        # Timeout — another worker holds the lock
+        os.close(_embedding_lock_fd)
+        _embedding_lock_fd = None
+        return False
+    except Exception:
+        return True  # On error, allow through (don't block functionality)
+
+
+def release_embedding_lock() -> None:
+    """Release system-wide embedding worker lock."""
+    global _embedding_lock_fd
+    if _embedding_lock_fd is not None:
+        try:
+            import fcntl
+            fcntl.flock(_embedding_lock_fd, fcntl.LOCK_UN)
+            os.close(_embedding_lock_fd)
+        except Exception:
+            pass
+        _embedding_lock_fd = None
+
+
 _IDLE_TIMEOUT_SECONDS = 120  # 2 minutes — kill worker after idle
 # V3.3.12: Configurable via SLM_EMBED_IDLE_TIMEOUT env var (seconds)
 _IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_EMBED_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
@@ -270,11 +330,76 @@ class EmbeddingService:
             raise error_container[0]
         return result_container[0] if result_container else ""
 
+    @staticmethod
+    def _check_memory_pressure() -> bool:
+        """Check if system has enough memory to spawn a worker.
+
+        V3.3.28: Prevents spawning embedding workers (1.4 GB each) when
+        the system is already under memory pressure. Returns True if safe.
+        """
+        min_available_gb = float(os.environ.get("SLM_MIN_AVAILABLE_MEMORY_GB", "2.0"))
+        try:
+            if sys.platform == "darwin":
+                # macOS: use vm_stat to get free + inactive pages
+                import subprocess as _sp
+                result = _sp.run(["vm_stat"], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    lines = result.stdout.split("\n")
+                    page_size = 16384  # default on Apple Silicon
+                    free_pages = 0
+                    for line in lines:
+                        if "page size of" in line:
+                            try:
+                                page_size = int(line.split()[-2])
+                            except (ValueError, IndexError):
+                                pass
+                        if "Pages free" in line or "Pages inactive" in line:
+                            try:
+                                free_pages += int(line.split()[-1].rstrip("."))
+                            except (ValueError, IndexError):
+                                pass
+                    available_gb = (free_pages * page_size) / (1024 ** 3)
+                    if available_gb < min_available_gb:
+                        logger.warning(
+                            "Low memory (%.1f GB available, need %.1f GB) — "
+                            "deferring embedding worker spawn",
+                            available_gb, min_available_gb,
+                        )
+                        return False
+            else:
+                # Linux/other: use /proc/meminfo or psutil
+                try:
+                    with open("/proc/meminfo") as f:
+                        for line in f:
+                            if line.startswith("MemAvailable:"):
+                                available_kb = int(line.split()[1])
+                                available_gb = available_kb / (1024 * 1024)
+                                if available_gb < min_available_gb:
+                                    logger.warning(
+                                        "Low memory (%.1f GB available) — "
+                                        "deferring embedding worker spawn",
+                                        available_gb,
+                                    )
+                                    return False
+                                break
+                except FileNotFoundError:
+                    pass  # Not Linux, allow through
+        except Exception:
+            pass  # On error, allow through (don't block functionality)
+        return True
+
     def _ensure_worker(self) -> None:
         """Spawn worker subprocess if not running."""
         if self._worker_proc is not None and self._worker_proc.poll() is None:
             return
         self._worker_proc = None
+
+        # V3.3.28: Check memory pressure before spawning
+        if not self._check_memory_pressure():
+            logger.warning("Skipping embedding worker spawn due to memory pressure")
+            self._available = False
+            return
+
         worker_module = "superlocalmemory.core.embedding_worker"
         try:
             env = {
