@@ -77,7 +77,6 @@ def register_v33_tools(server, get_engine: Callable) -> None:
 
             if dry_run:
                 # Dry run: compute retention stats without applying changes
-                from superlocalmemory.math.ebbinghaus import EbbinghausCurve as _EC
                 facts = engine._db.get_all_facts(pid)
                 zones = {"active": 0, "warm": 0, "cold": 0, "archive": 0, "forgotten": 0}
                 for f in facts:
