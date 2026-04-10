@@ -624,6 +624,7 @@ class TestRunMaintenanceTool:
         tool, engine = self._get_tool()
 
         with (
+            patch("superlocalmemory.learning.consolidation_worker.ConsolidationWorker", autospec=True) as MockCW,
             patch(
                 "superlocalmemory.core.maintenance.run_maintenance",
                 return_value={"updated": 0},
@@ -631,7 +632,7 @@ class TestRunMaintenanceTool:
             patch(
                 "superlocalmemory.learning.forgetting_scheduler.ForgettingScheduler"
             ) as MockSched,
-            patch("superlocalmemory.learning.consolidation_worker.ConsolidationWorker", autospec=True) as MockCW,
+            patch("superlocalmemory.math.ebbinghaus.EbbinghausCurve"),
         ):
             MockSched.return_value.run_decay_cycle.return_value = {
                 "total": 0,
@@ -647,6 +648,7 @@ class TestRunMaintenanceTool:
 
         assert result["success"] is True
         assert result["behavioral"]["patterns_mined"] == 7
+        init_args = MockCW.call_args[0]
         expected_memory = engine._db.db_path
         expected_learning = engine._db.db_path.parent / "learning.db"
         MockCW.assert_called_once_with(expected_memory, expected_learning)
