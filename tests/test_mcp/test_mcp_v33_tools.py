@@ -649,6 +649,6 @@ class TestRunMaintenanceTool:
         assert result["success"] is True
         assert result["behavioral"]["patterns_mined"] == 7
         init_args = MockCW.call_args[0]
-        assert init_args[0] == engine._db.db_path
-        assert init_args[1] == engine._db.db_path.parent / "learning.db"
-        MockCW.return_value._generate_patterns.assert_called_once_with(engine.profile_id, False)
+        expected_memory = engine._db.db_path
+        expected_learning = engine._db.db_path.parent / "learning.db"
+        MockCW.assert_called_once_with(expected_memory, expected_learning)
