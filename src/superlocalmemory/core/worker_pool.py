@@ -236,6 +236,12 @@ class WorkerPool:
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
             }
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            else:
+                kwargs["start_new_session"] = True
+
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "superlocalmemory.core.recall_worker"],
                 stdin=subprocess.PIPE,
@@ -244,7 +250,7 @@ class WorkerPool:
                 text=True,
                 bufsize=1,
                 env=env,
-                start_new_session=True,  # Prevent terminal signals bleeding to worker
+                **kwargs
             )
             logger.info("Recall worker spawned (PID %d)", self._proc.pid)
         except Exception as exc:

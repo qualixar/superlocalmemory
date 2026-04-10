@@ -411,6 +411,12 @@ class EmbeddingService:
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
             }
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            else:
+                kwargs["start_new_session"] = True
+
             self._worker_proc = subprocess.Popen(
                 [sys.executable, "-m", worker_module],
                 stdin=subprocess.PIPE,
@@ -419,7 +425,7 @@ class EmbeddingService:
                 text=True,
                 bufsize=1,
                 env=env,
-                start_new_session=True,  # Prevent terminal signals bleeding to worker
+                **kwargs
             )
             logger.info("Embedding worker spawned (PID %d)", self._worker_proc.pid)
             self._worker_ready = True

@@ -111,10 +111,16 @@ def ensure_daemon() -> bool:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "daemon.log"
 
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+
     with open(log_file, "a") as lf:
         subprocess.Popen(
             cmd, stdout=lf, stderr=lf,
-            start_new_session=True,
+            **kwargs
         )
 
     # Wait for daemon to become ready (max 30s for cold start)
@@ -132,12 +138,26 @@ def stop_daemon() -> bool:
         return True
     try:
         pid = int(_PID_FILE.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.call(['taskkill', '/F', '/T', '/PID', str(pid)])
+        else:
+            os.kill(pid, signal.SIGTERM)
+
         # Wait for cleanup
         for _ in range(20):
             time.sleep(0.5)
             try:
-                os.kill(pid, 0)
+                if sys.platform == "win32":
+                    import ctypes
+                    # Using OpenProcess to check if PID is alive on Windows
+                    # PROCESS_QUERY_INFORMATION = 0x0400
+                    handle = ctypes.windll.kernel32.OpenProcess(0x0400, False, pid)
+                    if handle == 0:
+                        break
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                else:
+                    os.kill(pid, 0)
             except ProcessLookupError:
                 break
         _PID_FILE.unlink(missing_ok=True)
@@ -424,7 +444,12 @@ def start_server(port: int = _DEFAULT_PORT, idle_timeout: int | None = None) -> 
     _PORT_FILE.write_text(str(port))
 
     # Handle SIGTERM for graceful shutdown
-    signal.signal(signal.SIGTERM, lambda *_: _shutdown_server() or os._exit(0))
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda *_: _shutdown_server() or os._exit(0))
+    else:
+        # On Windows, we can use SIGBREAK if available
+        if hasattr(signal, 'SIGBREAK'):
+            signal.signal(signal.SIGBREAK, lambda *_: _shutdown_server() or os._exit(0))
 
     # Pre-warm engine (this is the cold start — daemon absorbs it once)
     logger.info("Daemon starting — warming engine...")

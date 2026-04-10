@@ -348,10 +348,17 @@ def cmd_remember(args: Namespace) -> None:
         log_dir = __import__("pathlib").Path.home() / ".superlocalmemory" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "async-remember.log"
+
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["start_new_session"] = True
+
         with open(log_file, "a") as lf:
             subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=lf,
-                start_new_session=True,
+                **kwargs
             )
 
         if use_json:
@@ -1201,7 +1208,10 @@ def cmd_dashboard(args: Namespace) -> None:
                     )
                     cmd = ps_result.stdout.strip().lower()
                     if "superlocalmemory" in cmd or "slm" in cmd or "uvicorn" in cmd:
-                        os.kill(pid, signal.SIGTERM)
+                        if sys.platform == "win32":
+                            subprocess.call(['taskkill', '/F', '/T', '/PID', str(pid)])
+                        else:
+                            os.kill(pid, signal.SIGTERM)
                         print(f"  Stopped previous dashboard (PID {pid})")
                         import time
                         time.sleep(1)
