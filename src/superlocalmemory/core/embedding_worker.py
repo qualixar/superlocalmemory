@@ -37,6 +37,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TORCH_DEVICE"] = "cpu"
 # V3.3.17: Disable CoreML EP for ONNX Runtime — uses 3-5GB on ARM64 Mac.
 os.environ["ORT_DISABLE_COREML"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TQDM_DISABLE"] = "1"
 
 # SIGTERM bridge: Docker/systemd send SIGTERM to stop processes.
 # Without this, the worker ignores SIGTERM and becomes a zombie.
@@ -97,7 +99,8 @@ def _load_embedding_model(name: str) -> tuple:
 
 def _worker_main() -> None:
     """Main loop: read JSON requests from stdin, write responses to stdout."""
-    _start_parent_watchdog()  # V3.3.7: self-terminate if parent dies
+    if sys.platform != "win32":
+        _start_parent_watchdog()  # V3.3.7: self-terminate if parent dies
 
     import numpy as np
 
@@ -169,10 +172,19 @@ def _worker_main() -> None:
             # a worker that started at 300MB grows to 17GB+. Parent auto-respawns
             # a fresh worker on next request (existing mechanism in embeddings.py).
             # V3.3.21: Configurable via SLM_EMBED_WORKER_RSS_LIMIT_MB (default 2500MB).
-            import resource
             _rss_limit = int(os.environ.get("SLM_EMBED_WORKER_RSS_LIMIT_MB", 2500))
-            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
-            if rss_mb > _rss_limit:
+            rss_mb = 0.0
+            if sys.platform != "win32":
+                import resource
+                rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+            else:
+                try:
+                    import psutil
+                    rss_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                except ImportError:
+                    pass  # psutil not available, skip RSS check on Windows
+
+            if rss_mb > 0 and rss_mb > _rss_limit:
                 sys.exit(0)
 
             continue
