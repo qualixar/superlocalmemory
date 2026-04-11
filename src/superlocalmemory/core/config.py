@@ -153,6 +153,10 @@ class RetrievalConfig:
     temporal_proximity_days: int = 30
 
     # Reranking (V3.3.2: ONNX backend enabled for all modes)
+    # V3.4.2: Tested gte-reranker-modernbert-base (8K context) — REGRESSED
+    # LoCoMo from 68.4% to 64.1%. Reverted to MiniLM-L-12-v2. The 512-token
+    # limit is acceptable because SLM's 6-channel retrieval pre-filters
+    # relevant facts before reranking. See bench-v342-locomo.md.
     use_cross_encoder: bool = True
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
     cross_encoder_backend: str = ""  # "" = PyTorch (~500MB stable), "onnx" = ONNX (leaks on ARM64 CoreML)

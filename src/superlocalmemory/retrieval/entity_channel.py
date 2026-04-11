@@ -282,12 +282,18 @@ class EntityGraphChannel:
                 if use_cache:
                     neighbors = self._adj.get(fid, ())
                     for neighbor, edge_weight in neighbors:
-                        # v3.4.1 P1: Weighted propagation + PageRank bias
-                        weighted = activation[fid] * self._decay * edge_weight
-                        if self._graph_metrics and neighbor in self._graph_metrics:
-                            target_pr = self._graph_metrics[neighbor].get("pagerank_score", 0.0)
-                            pr_boost = min(1.0 + target_pr * 2.0, 2.0)
-                            weighted *= pr_boost
+                        # v3.4.2: Only apply edge_weight and PageRank bias when
+                        # graph metrics are available. Without metrics, edge_weight
+                        # dampens propagation by ~14% with no compensating boost,
+                        # causing retrieval regression (68.4% vs 70.4% on LoCoMo).
+                        if self._graph_metrics:
+                            weighted = activation[fid] * self._decay * edge_weight
+                            if neighbor in self._graph_metrics:
+                                target_pr = self._graph_metrics[neighbor].get("pagerank_score", 0.0)
+                                pr_boost = min(1.0 + target_pr * 2.0, 2.0)
+                                weighted *= pr_boost
+                        else:
+                            weighted = activation[fid] * self._decay
                         if weighted >= self._threshold and weighted > activation.get(neighbor, 0.0):
                             activation[neighbor] = weighted
                             next_frontier.add(neighbor)

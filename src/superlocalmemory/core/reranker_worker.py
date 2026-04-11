@@ -73,15 +73,29 @@ def _start_parent_watchdog() -> None:
     t.start()
 
 
-def _detect_onnx_variant() -> str:
-    """Auto-detect the best ONNX model variant for the current platform."""
+def _detect_onnx_variant(model_name: str = "") -> str:
+    """Auto-detect the best ONNX model variant for the current platform.
+
+    V3.4.2: Supports both legacy ms-marco-MiniLM (platform-specific quantized)
+    and new gte-modernbert-base (int8/uint8 quantized). Falls back to generic
+    model.onnx if platform-specific variant unavailable.
+    """
     arch = platform.machine().lower()
     is_64bit = struct.calcsize("P") * 8 == 64
 
+    # Legacy ms-marco-MiniLM models have platform-specific quantized variants
+    if "ms-marco" in model_name or "MiniLM" in model_name:
+        if sys.platform == "darwin" and arch in ("arm64", "aarch64"):
+            return "onnx/model_qint8_arm64.onnx"
+        if arch in ("x86_64", "amd64") and is_64bit:
+            return "onnx/model_quint8_avx2.onnx"
+        return "onnx/model.onnx"
+
+    # gte-modernbert-base and other modern models: int8 for ARM64, uint8 for x86
     if sys.platform == "darwin" and arch in ("arm64", "aarch64"):
-        return "onnx/model_qint8_arm64.onnx"
+        return "onnx/model_int8.onnx"
     if arch in ("x86_64", "amd64") and is_64bit:
-        return "onnx/model_quint8_avx2.onnx"
+        return "onnx/model_uint8.onnx"
     return "onnx/model.onnx"
 
 
@@ -239,7 +253,7 @@ def _load_model(
         if backend == "onnx":
             # Tier 1: Platform-specific quantized ONNX (fastest)
             try:
-                onnx_file = _detect_onnx_variant()
+                onnx_file = _detect_onnx_variant(name)
                 m = CrossEncoder(
                     name, backend="onnx",
                     model_kwargs={"file_name": onnx_file},

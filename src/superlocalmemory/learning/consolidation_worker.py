@@ -73,7 +73,38 @@ class ConsolidationWorker:
         except Exception as exc:
             logger.debug("Pattern generation failed: %s", exc)
 
-        # 4. Check if ranker should retrain
+        # 4. Recompute graph intelligence (v3.4.2: wired into learning pipeline)
+        try:
+            from superlocalmemory.core.graph_analyzer import GraphAnalyzer
+            conn_ga = sqlite3.connect(self._memory_db, timeout=10)
+            conn_ga.execute("PRAGMA busy_timeout=5000")
+            conn_ga.row_factory = sqlite3.Row
+
+            class _DBProxy:
+                """Minimal DB proxy for GraphAnalyzer compatibility."""
+                def __init__(self, connection: sqlite3.Connection) -> None:
+                    self._conn = connection
+                def execute(self, sql: str, params: tuple = ()) -> list:
+                    cursor = self._conn.execute(sql, params)
+                    if sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "ALTER", "CREATE")):
+                        self._conn.commit()
+                        return []
+                    return cursor.fetchall()
+
+            ga = GraphAnalyzer(_DBProxy(conn_ga))
+            if not dry_run:
+                ga_result = ga.compute_and_store(profile_id)
+                stats["graph_nodes"] = ga_result.get("node_count", 0)
+                stats["graph_communities"] = ga_result.get("community_count", 0)
+                logger.info(
+                    "Graph analysis: %d nodes, %d communities",
+                    stats["graph_nodes"], stats["graph_communities"],
+                )
+            conn_ga.close()
+        except Exception as exc:
+            logger.debug("Graph analysis failed: %s", exc)
+
+        # 5. Check if ranker should retrain
         try:
             from superlocalmemory.learning.feedback import FeedbackCollector
             collector = FeedbackCollector(Path(self._learning_db))

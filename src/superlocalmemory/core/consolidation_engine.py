@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -141,7 +142,13 @@ class ConsolidationEngine:
         """Called after each store() in store_pipeline.py.
 
         Increments internal counter.  When counter hits step_count_trigger
-        (default 50), runs lightweight consolidation.
+        (default 50), runs lightweight consolidation AND queues async
+        graph analysis.
+
+        V3.4.2: Graph analysis runs in background thread after every
+        lightweight consolidation trigger. This populates fact_importance
+        (PageRank, communities, bridge scores) so retrieval channels can
+        use graph intelligence without blocking store/recall latency.
 
         Returns True if lightweight consolidation was triggered.
         """
@@ -152,8 +159,38 @@ class ConsolidationEngine:
         if self._store_count >= self._config.step_count_trigger:
             self._store_count = 0
             self.consolidate(profile_id, lightweight=True)
+            # V3.4.2: Queue graph analysis in background (non-blocking)
+            self._queue_graph_analysis(profile_id)
             return True
         return False
+
+    def _queue_graph_analysis(self, profile_id: str) -> None:
+        """Run graph_analyzer.compute_and_store() in a background thread.
+
+        V3.4.2: Populates fact_importance table with PageRank, community_id,
+        degree_centrality, and bridge_score. Next recall() automatically
+        uses updated graph intelligence for entity channel and spreading
+        activation. Takes ~200-800ms, runs on daemon thread, zero impact
+        on store/recall latency.
+        """
+        if self._graph_analyzer is None:
+            return
+        analyzer = self._graph_analyzer
+        pid = profile_id
+
+        def _run() -> None:
+            try:
+                result = analyzer.compute_and_store(pid)
+                logger.info(
+                    "Background graph analysis complete: %d nodes, %d communities",
+                    result.get("node_count", 0),
+                    result.get("community_count", 0),
+                )
+            except Exception as exc:
+                logger.debug("Background graph analysis failed (non-fatal): %s", exc)
+
+        t = threading.Thread(target=_run, daemon=True, name="graph-analysis-bg")
+        t.start()
 
     def get_core_memory(self, profile_id: str) -> dict[str, str]:
         """Load all Core Memory blocks for a profile.

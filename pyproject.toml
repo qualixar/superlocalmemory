@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.4.1"
+version = "3.4.2"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
