@@ -1035,6 +1035,17 @@ async def trigger_consolidation(request: Request):
         engine = ConsolidationEngine(db=db, config=config.consolidation, slm_config=config)
         result = engine.consolidate(profile_id=pid, lightweight=lightweight)
 
+        # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
+        try:
+            from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
+            learning_db = config.base_dir / "learning.db"
+            cw = ConsolidationWorker(str(config.db_path), str(learning_db))
+            pattern_count = cw._generate_patterns(pid, False)
+            result["patterns_mined"] = pattern_count
+            logger.info("Auto-mined %d patterns after consolidation", pattern_count)
+        except Exception as exc:
+            logger.debug("Pattern mining after consolidation failed: %s", exc)
+
         return {"success": True, **result}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
