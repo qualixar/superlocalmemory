@@ -23,10 +23,16 @@ from pathlib import Path
 logger = logging.getLogger("superlocalmemory.mesh")
 
 
+MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data dumps
+MESSAGE_TTL_HOURS = 48   # Offline messages expire after 48h
+MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+
+
 class MeshBroker:
     """Lightweight mesh broker for SLM's unified daemon.
 
     Provides peer management, messaging, state, locks, and events.
+    v3.4.6: broadcast, project-based routing, offline message queue.
     All methods are synchronous (called from FastAPI via run_in_executor
     or directly for quick operations).
     """
@@ -59,7 +65,8 @@ class MeshBroker:
     # -- Peers --
 
     def register_peer(self, session_id: str, summary: str = "",
-                      host: str = "127.0.0.1", port: int = 0) -> dict:
+                      host: str = "127.0.0.1", port: int = 0,
+                      project_path: str = "", agent_type: str = "unknown") -> dict:
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc).isoformat()
@@ -71,20 +78,26 @@ class MeshBroker:
             if existing:
                 peer_id = existing["peer_id"]
                 conn.execute(
-                    "UPDATE mesh_peers SET summary=?, host=?, port=?, last_heartbeat=?, status='active' "
-                    "WHERE peer_id=?",
-                    (summary, host, port, now, peer_id),
+                    "UPDATE mesh_peers SET summary=?, host=?, port=?, last_heartbeat=?, "
+                    "status='active', project_path=?, agent_type=? WHERE peer_id=?",
+                    (summary, host, port, now, project_path, agent_type, peer_id),
                 )
             else:
                 peer_id = str(uuid.uuid4())[:12]
                 conn.execute(
-                    "INSERT INTO mesh_peers (peer_id, session_id, summary, status, host, port, registered_at, last_heartbeat) "
-                    "VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
-                    (peer_id, session_id, summary, host, port, now, now),
+                    "INSERT INTO mesh_peers (peer_id, session_id, summary, status, host, port, "
+                    "registered_at, last_heartbeat, project_path, agent_type) "
+                    "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)",
+                    (peer_id, session_id, summary, host, port, now, now, project_path, agent_type),
                 )
-            self._log_event(conn, "peer_registered", peer_id, {"session_id": session_id})
+            self._log_event(conn, "peer_registered", peer_id, {
+                "session_id": session_id, "project_path": project_path,
+            })
             conn.commit()
-            return {"peer_id": peer_id, "ok": True}
+
+            # v3.4.6: Deliver pending broadcast/project messages on registration
+            pending = self._get_pending_for_peer(conn, peer_id, project_path)
+            return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending)}
         finally:
             conn.close()
 
@@ -134,7 +147,8 @@ class MeshBroker:
         conn = self._conn()
         try:
             rows = conn.execute(
-                "SELECT peer_id, session_id, summary, status, host, port, registered_at, last_heartbeat "
+                "SELECT peer_id, session_id, summary, status, host, port, "
+                "registered_at, last_heartbeat, project_path, agent_type "
                 "FROM mesh_peers ORDER BY last_heartbeat DESC",
             ).fetchall()
             return [dict(r) for r in rows]
@@ -144,46 +158,136 @@ class MeshBroker:
     # -- Messages --
 
     def send_message(self, from_peer: str, to_peer: str, content: str,
-                     msg_type: str = "text") -> dict:
+                     msg_type: str = "text", project_path: str = "") -> dict:
+        # Guard: 4KB message size cap
+        if len(content) > MAX_MESSAGE_SIZE:
+            return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
+                    "Mesh messages are notifications — reference a file path instead."}
+
         conn = self._conn()
         try:
-            # Verify recipient exists
-            if not conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (to_peer,)).fetchone():
-                return {"ok": False, "error": "recipient peer not found"}
             now = datetime.now(timezone.utc).isoformat()
+            expires_at = self._compute_expires(now)
+
+            # Determine target type
+            if to_peer == "broadcast":
+                target_type = "broadcast"
+            elif to_peer.startswith("project:"):
+                target_type = "project"
+                project_path = to_peer[len("project:"):]
+                to_peer = "project"
+            else:
+                target_type = "peer"
+                # Verify recipient exists for direct messages
+                if not conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (to_peer,)).fetchone():
+                    return {"ok": False, "error": "recipient peer not found"}
+
+            # Enforce per-target queue cap
+            if target_type in ("broadcast", "project"):
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM mesh_messages WHERE target_type=? AND project_path=? AND read=0",
+                    (target_type, project_path),
+                ).fetchone()[0]
+                if count >= MAX_QUEUED_PER_TARGET:
+                    # Delete oldest to make room
+                    conn.execute(
+                        "DELETE FROM mesh_messages WHERE id IN ("
+                        "  SELECT id FROM mesh_messages WHERE target_type=? AND project_path=? AND read=0 "
+                        "  ORDER BY created_at ASC LIMIT ?)",
+                        (target_type, project_path, count - MAX_QUEUED_PER_TARGET + 1),
+                    )
+
             cursor = conn.execute(
-                "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, created_at) "
-                "VALUES (?, ?, ?, ?, 0, ?)",
-                (from_peer, to_peer, msg_type, content, now),
+                "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, "
+                "created_at, expires_at, target_type, project_path) "
+                "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                (from_peer, to_peer, msg_type, content, now, expires_at, target_type, project_path),
             )
-            self._log_event(conn, "message_sent", from_peer, {"to": to_peer})
+            self._log_event(conn, "message_sent", from_peer, {
+                "to": to_peer, "target_type": target_type, "project": project_path,
+            })
             conn.commit()
-            return {"ok": True, "id": cursor.lastrowid}
+            return {"ok": True, "id": cursor.lastrowid, "target_type": target_type,
+                    "expires_at": expires_at}
         finally:
             conn.close()
 
-    def get_inbox(self, peer_id: str) -> list[dict]:
+    def get_inbox(self, peer_id: str, project_path: str = "") -> list[dict]:
+        """Get all messages for this peer: direct + broadcast + project."""
         conn = self._conn()
         try:
-            rows = conn.execute(
-                "SELECT id, from_peer, to_peer, msg_type, content, read, created_at "
-                "FROM mesh_messages WHERE to_peer=? ORDER BY created_at DESC LIMIT 100",
-                (peer_id,),
+            now = datetime.now(timezone.utc).isoformat()
+            # Direct messages to this peer
+            direct = conn.execute(
+                "SELECT id, from_peer, to_peer, msg_type, content, read, created_at, "
+                "target_type, project_path FROM mesh_messages "
+                "WHERE to_peer=? AND target_type='peer' "
+                "AND (expires_at IS NULL OR expires_at > ?) "
+                "ORDER BY created_at DESC LIMIT 100",
+                (peer_id, now),
             ).fetchall()
-            return [dict(r) for r in rows]
+
+            # Broadcast messages not from this peer and not yet read by this peer
+            broadcast = conn.execute(
+                "SELECT m.id, m.from_peer, m.to_peer, m.msg_type, m.content, "
+                "CASE WHEN r.peer_id IS NOT NULL THEN 1 ELSE 0 END AS read, "
+                "m.created_at, m.target_type, m.project_path "
+                "FROM mesh_messages m "
+                "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
+                "WHERE m.target_type='broadcast' AND m.from_peer != ? "
+                "AND (m.expires_at IS NULL OR m.expires_at > ?) "
+                "ORDER BY m.created_at DESC LIMIT 50",
+                (peer_id, peer_id, now),
+            ).fetchall()
+
+            # Project messages for my project, not from me, not yet read
+            project_msgs = []
+            if project_path:
+                project_msgs = conn.execute(
+                    "SELECT m.id, m.from_peer, m.to_peer, m.msg_type, m.content, "
+                    "CASE WHEN r.peer_id IS NOT NULL THEN 1 ELSE 0 END AS read, "
+                    "m.created_at, m.target_type, m.project_path "
+                    "FROM mesh_messages m "
+                    "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
+                    "WHERE m.target_type='project' AND m.project_path=? AND m.from_peer != ? "
+                    "AND (m.expires_at IS NULL OR m.expires_at > ?) "
+                    "ORDER BY m.created_at DESC LIMIT 50",
+                    (peer_id, project_path, peer_id, now),
+                ).fetchall()
+
+            all_msgs = [dict(r) for r in direct] + [dict(r) for r in broadcast] + [dict(r) for r in project_msgs]
+            # Sort by created_at descending
+            all_msgs.sort(key=lambda m: m.get("created_at", ""), reverse=True)
+            return all_msgs[:100]
         finally:
             conn.close()
 
     def mark_read(self, peer_id: str, message_ids: list[int]) -> dict:
         conn = self._conn()
         try:
-            placeholders = ",".join("?" * len(message_ids))
-            conn.execute(
-                f"UPDATE mesh_messages SET read=1 WHERE to_peer=? AND id IN ({placeholders})",
-                [peer_id, *message_ids],
-            )
+            now = datetime.now(timezone.utc).isoformat()
+            for msg_id in message_ids:
+                # Check if this is a direct message or broadcast/project
+                row = conn.execute(
+                    "SELECT target_type FROM mesh_messages WHERE id=?", (msg_id,),
+                ).fetchone()
+                if not row:
+                    continue
+                if row["target_type"] == "peer":
+                    # Direct: update read flag on the message itself
+                    conn.execute(
+                        "UPDATE mesh_messages SET read=1 WHERE id=? AND to_peer=?",
+                        (msg_id, peer_id),
+                    )
+                else:
+                    # Broadcast/project: insert into mesh_reads
+                    conn.execute(
+                        "INSERT OR IGNORE INTO mesh_reads (message_id, peer_id, read_at) "
+                        "VALUES (?, ?, ?)",
+                        (msg_id, peer_id, now),
+                    )
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "marked": len(message_ids)}
         finally:
             conn.close()
 
@@ -262,6 +366,40 @@ class MeshBroker:
         finally:
             conn.close()
 
+    # -- Helpers (v3.4.6) --
+
+    @staticmethod
+    def _compute_expires(now_iso: str) -> str:
+        """Compute expiry timestamp MESSAGE_TTL_HOURS from now."""
+        from datetime import timedelta
+        now = datetime.fromisoformat(now_iso)
+        return (now + timedelta(hours=MESSAGE_TTL_HOURS)).isoformat()
+
+    def _get_pending_for_peer(self, conn: sqlite3.Connection,
+                              peer_id: str, project_path: str) -> list[dict]:
+        """Get unread broadcast/project messages for a newly registered peer."""
+        now = datetime.now(timezone.utc).isoformat()
+        rows = conn.execute(
+            "SELECT m.id, m.from_peer, m.content, m.target_type, m.project_path, m.created_at "
+            "FROM mesh_messages m "
+            "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
+            "WHERE r.peer_id IS NULL AND m.from_peer != ? "
+            "AND (m.expires_at IS NULL OR m.expires_at > ?) "
+            "AND (m.target_type = 'broadcast' "
+            "     OR (m.target_type = 'project' AND m.project_path = ?)) "
+            "ORDER BY m.created_at DESC LIMIT 50",
+            (peer_id, peer_id, now, project_path),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending(self, peer_id: str, project_path: str = "") -> list[dict]:
+        """Public API to get pending broadcast/project messages."""
+        conn = self._conn()
+        try:
+            return self._get_pending_for_peer(conn, peer_id, project_path)
+        finally:
+            conn.close()
+
     # -- Events --
 
     def get_events(self, limit: int = 100) -> list[dict]:
@@ -316,28 +454,46 @@ class MeshBroker:
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc)
+            now_iso = now.isoformat()
             # Mark stale peers (no heartbeat for 5 min)
             conn.execute(
                 "UPDATE mesh_peers SET status='stale' "
                 "WHERE status='active' AND datetime(last_heartbeat) < datetime(?, '-5 minutes')",
-                (now.isoformat(),),
+                (now_iso,),
             )
             # Delete dead peers (stale > 30 min)
             conn.execute(
                 "UPDATE mesh_peers SET status='dead' "
                 "WHERE status='stale' AND datetime(last_heartbeat) < datetime(?, '-30 minutes')",
-                (now.isoformat(),),
+                (now_iso,),
             )
             conn.execute("DELETE FROM mesh_peers WHERE status='dead'")
-            # Delete read messages > 24hr old
+            # Delete read direct messages > 24hr old
             conn.execute(
-                "DELETE FROM mesh_messages WHERE read=1 AND datetime(created_at) < datetime(?, '-24 hours')",
-                (now.isoformat(),),
+                "DELETE FROM mesh_messages WHERE target_type='peer' AND read=1 "
+                "AND datetime(created_at) < datetime(?, '-24 hours')",
+                (now_iso,),
+            )
+            # v3.4.6: Delete EXPIRED messages (48h TTL for broadcast/project)
+            conn.execute(
+                "DELETE FROM mesh_messages WHERE expires_at IS NOT NULL "
+                "AND datetime(expires_at) < datetime(?)",
+                (now_iso,),
+            )
+            # v3.4.6: Clean up orphaned mesh_reads entries
+            conn.execute(
+                "DELETE FROM mesh_reads WHERE message_id NOT IN "
+                "(SELECT id FROM mesh_messages)",
             )
             # Delete expired locks
             conn.execute(
                 "DELETE FROM mesh_locks WHERE datetime(expires_at) < datetime(?)",
-                (now.isoformat(),),
+                (now_iso,),
+            )
+            # v3.4.6: Delete old events (keep last 7 days)
+            conn.execute(
+                "DELETE FROM mesh_events WHERE datetime(created_at) < datetime(?, '-7 days')",
+                (now_iso,),
             )
             conn.commit()
         finally:

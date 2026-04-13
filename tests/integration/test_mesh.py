@@ -12,11 +12,17 @@ from pathlib import Path
 
 @pytest.fixture
 def mesh_db(tmp_path):
-    """Create a temp DB with mesh tables."""
+    """Create a temp DB with mesh tables (v3.4.3 base + v3.4.6 enhancements)."""
     db_path = tmp_path / "mesh_test.db"
     conn = sqlite3.connect(str(db_path))
-    from superlocalmemory.storage.schema_v343 import _MESH_DDL
+    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_DDL, _MESH_V346_ALTERS
     conn.executescript(_MESH_DDL)
+    for alter_sql in _MESH_V346_ALTERS:
+        try:
+            conn.execute(alter_sql)
+        except sqlite3.OperationalError:
+            pass
+    conn.executescript(_MESH_V346_DDL)
     conn.commit()
     conn.close()
     return db_path
@@ -175,3 +181,121 @@ class TestMeshStatus:
         assert status["broker_up"] is True
         assert status["peer_count"] == 1
         assert "uptime_s" in status
+
+
+# ========================= v3.4.6 Connected Brain Tests =========================
+
+
+class TestMeshBroadcast:
+    """Tests for broadcast messaging (v3.4.6)."""
+
+    def test_send_broadcast(self, broker):
+        r1 = broker.register_peer("s1")
+        result = broker.send_message(r1["peer_id"], "broadcast", "hello everyone")
+        assert result["ok"] is True
+        assert result["target_type"] == "broadcast"
+        assert result["expires_at"] is not None
+
+    def test_broadcast_in_inbox(self, broker):
+        r1 = broker.register_peer("s1")
+        r2 = broker.register_peer("s2")
+        broker.send_message(r1["peer_id"], "broadcast", "global announcement")
+        inbox = broker.get_inbox(r2["peer_id"])
+        assert len(inbox) == 1
+        assert inbox[0]["content"] == "global announcement"
+        assert inbox[0]["target_type"] == "broadcast"
+
+    def test_broadcast_not_to_sender(self, broker):
+        r1 = broker.register_peer("s1")
+        broker.send_message(r1["peer_id"], "broadcast", "my own message")
+        inbox = broker.get_inbox(r1["peer_id"])
+        assert len(inbox) == 0  # Sender doesn't see own broadcast
+
+    def test_broadcast_mark_read(self, broker):
+        r1 = broker.register_peer("s1")
+        r2 = broker.register_peer("s2")
+        broker.send_message(r1["peer_id"], "broadcast", "read me")
+        inbox = broker.get_inbox(r2["peer_id"])
+        assert inbox[0]["read"] == 0
+        broker.mark_read(r2["peer_id"], [inbox[0]["id"]])
+        inbox2 = broker.get_inbox(r2["peer_id"])
+        assert inbox2[0]["read"] == 1  # Now marked read via mesh_reads
+
+
+class TestMeshProjectMessages:
+    """Tests for project-based messaging (v3.4.6)."""
+
+    def test_send_to_project(self, broker):
+        r1 = broker.register_peer("s1", project_path="/projects/qos")
+        result = broker.send_message(r1["peer_id"], "project:/projects/qos", "qos update")
+        assert result["ok"] is True
+        assert result["target_type"] == "project"
+
+    def test_project_msg_in_inbox(self, broker):
+        r1 = broker.register_peer("s1", project_path="/projects/qos")
+        r2 = broker.register_peer("s2", project_path="/projects/qos")
+        broker.send_message(r1["peer_id"], "project:/projects/qos", "skill evolution plan ready")
+        inbox = broker.get_inbox(r2["peer_id"], project_path="/projects/qos")
+        assert len(inbox) == 1
+        assert inbox[0]["content"] == "skill evolution plan ready"
+
+    def test_project_msg_not_for_other_project(self, broker):
+        r1 = broker.register_peer("s1", project_path="/projects/qos")
+        r2 = broker.register_peer("s2", project_path="/projects/slm")
+        broker.send_message(r1["peer_id"], "project:/projects/qos", "qos only")
+        inbox = broker.get_inbox(r2["peer_id"], project_path="/projects/slm")
+        assert len(inbox) == 0  # Different project, no message
+
+
+class TestMeshOfflineQueue:
+    """Tests for offline message delivery (v3.4.6)."""
+
+    def test_offline_broadcast_pending(self, broker):
+        # s1 sends broadcast BEFORE s2 registers
+        r1 = broker.register_peer("s1")
+        broker.send_message(r1["peer_id"], "broadcast", "sent while you were away")
+        # s2 registers AFTER the broadcast
+        r2 = broker.register_peer("s2")
+        assert r2["pending_messages"] > 0
+        # s2 should see the message in inbox
+        inbox = broker.get_inbox(r2["peer_id"])
+        assert len(inbox) == 1
+        assert inbox[0]["content"] == "sent while you were away"
+
+    def test_offline_project_pending(self, broker):
+        r1 = broker.register_peer("s1", project_path="/projects/qos")
+        broker.send_message(r1["peer_id"], "project:/projects/qos", "new plan available")
+        # s2 registers in the same project later
+        r2 = broker.register_peer("s2", project_path="/projects/qos")
+        pending = broker.get_pending(r2["peer_id"], "/projects/qos")
+        assert len(pending) == 1
+
+
+class TestMeshGuards:
+    """Tests for anti-bloat guards (v3.4.6)."""
+
+    def test_message_size_cap(self, broker):
+        r1 = broker.register_peer("s1")
+        r2 = broker.register_peer("s2")
+        huge_msg = "x" * 5000  # Over 4KB
+        result = broker.send_message(r1["peer_id"], r2["peer_id"], huge_msg)
+        assert result["ok"] is False
+        assert "too large" in result["error"]
+
+    def test_queue_cap_evicts_oldest(self, broker):
+        from superlocalmemory.mesh.broker import MAX_QUEUED_PER_TARGET
+        r1 = broker.register_peer("s1")
+        # Send MAX+5 broadcast messages
+        for i in range(MAX_QUEUED_PER_TARGET + 5):
+            broker.send_message(r1["peer_id"], "broadcast", f"msg-{i}")
+        # Should be capped at MAX
+        r2 = broker.register_peer("s2")
+        inbox = broker.get_inbox(r2["peer_id"])
+        assert len(inbox) <= MAX_QUEUED_PER_TARGET
+
+    def test_register_with_project_and_agent_type(self, broker):
+        r = broker.register_peer("s1", project_path="/projects/qos", agent_type="claude_code")
+        assert r["ok"] is True
+        peers = broker.list_peers()
+        assert peers[0]["project_path"] == "/projects/qos"
+        assert peers[0]["agent_type"] == "claude_code"

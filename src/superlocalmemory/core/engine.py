@@ -125,6 +125,13 @@ class MemoryEngine:
         except Exception as exc:
             logger.debug("V3.4.3 schema migration: %s", exc)
 
+        # V3.4.6: Apply "Connected Brain" mesh enhancements (broadcast, project routing, offline queue)
+        try:
+            from superlocalmemory.storage.schema_v343 import apply_v346_schema
+            apply_v346_schema(str(self._db.db_path))
+        except Exception as exc:
+            logger.debug("V3.4.6 schema migration: %s", exc)
+
         self._embedder = init_embedder(self._config)
 
         if self._caps.llm_fact_extraction:

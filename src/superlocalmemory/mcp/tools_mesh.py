@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Unique peer ID for this MCP server session
 _PEER_ID = str(uuid.uuid4())[:12]
 _SESSION_SUMMARY = ""
+_PROJECT_PATH = ""  # v3.4.6: detected from cwd or CLAUDE_PROJECT_DIR
 _HEARTBEAT_INTERVAL = 25  # seconds (broker marks stale at 30s, dead at 60s)
 _HEARTBEAT_THREAD: threading.Thread | None = None
 _REGISTERED = False
@@ -44,6 +45,15 @@ def _daemon_url() -> str:
     except Exception:
         pass
     return f"http://127.0.0.1:{port}"
+
+
+def _detect_project_path() -> str:
+    """Detect current project path from env or cwd."""
+    return (
+        os.environ.get("CLAUDE_PROJECT_DIR")
+        or os.environ.get("PROJECT_PATH")
+        or os.getcwd()
+    )
 
 
 def _mesh_request(method: str, path: str, body: dict | None = None) -> dict | None:
@@ -63,18 +73,24 @@ def _mesh_request(method: str, path: str, body: dict | None = None) -> dict | No
 
 def _ensure_registered() -> None:
     """Register this session with the mesh broker if not already."""
-    global _REGISTERED
+    global _REGISTERED, _PROJECT_PATH
     if _REGISTERED:
         return
 
+    _PROJECT_PATH = _detect_project_path()
     result = _mesh_request("POST", "/register", {
         "peer_id": _PEER_ID,
         "session_id": os.environ.get("CLAUDE_SESSION_ID", _PEER_ID),
         "summary": _SESSION_SUMMARY or "SLM MCP session",
+        "project_path": _PROJECT_PATH,
+        "agent_type": os.environ.get("CLAUDE_AGENT_TYPE", "claude_code"),
     })
     if result:
         _REGISTERED = True
         _start_heartbeat()
+        pending = result.get("pending_messages", 0)
+        if pending > 0:
+            logger.info("Mesh: %d pending messages waiting", pending)
 
 
 def _start_heartbeat() -> None:
@@ -96,6 +112,15 @@ def _start_heartbeat() -> None:
     logger.info("Mesh heartbeat started (peer_id=%s, interval=%ds)", _PEER_ID, _HEARTBEAT_INTERVAL)
 
 
+def auto_register_mesh() -> None:
+    """Called from server.py warmup to register this session immediately.
+
+    v3.4.6: Sessions register at MCP startup, not lazily on first tool call.
+    This ensures every Claude session is visible on the mesh from the start.
+    """
+    _ensure_registered()
+
+
 def register_mesh_tools(server, get_engine: Callable) -> None:
     """Register all 8 mesh MCP tools."""
 
@@ -105,6 +130,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
 
         Call this at the start of every session. Other agents can see your summary
         and send you messages. The session stays alive via automatic heartbeat.
+        v3.4.6: Sessions auto-register at MCP startup, but calling this updates
+        the summary so other sessions know what you're doing.
 
         Args:
             summary: What this session is working on (e.g. "Fixing auth bug in api.py")
@@ -123,6 +150,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         return {
             "peer_id": _PEER_ID,
             "summary": _SESSION_SUMMARY,
+            "project_path": _PROJECT_PATH,
             "registered": True,
             "heartbeat_active": _HEARTBEAT_THREAD is not None,
             "broker_response": result,
@@ -146,11 +174,14 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
 
     @server.tool()
     async def mesh_send(to: str, message: str) -> dict:
-        """Send a message to another peer session.
+        """Send a message to another peer session, broadcast, or project.
 
         Args:
-            to: The peer_id of the recipient (from mesh_peers)
-            message: The message content to send
+            to: Target — one of:
+                - A peer_id from mesh_peers (direct message)
+                - "broadcast" (all active + future sessions within 48h)
+                - "project:/path/to/dir" (all sessions in that project directory)
+            message: The message content (max 4KB — use file paths for large data)
         """
         _ensure_registered()
         result = _mesh_request("POST", "/send", {
@@ -164,15 +195,27 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
     async def mesh_inbox() -> dict:
         """Read messages sent to this session.
 
-        Returns unread messages from other peer sessions.
-        Messages are marked as read after retrieval.
+        Returns unread messages: direct + broadcast + project-targeted.
+        Broadcast/project messages are delivered to ALL matching sessions.
+        Messages auto-expire after 48 hours.
         """
         _ensure_registered()
-        messages = _mesh_request("GET", f"/inbox/{_PEER_ID}")
-        if messages:
-            # Mark as read
-            _mesh_request("POST", f"/inbox/{_PEER_ID}/read")
-        return messages or {"messages": [], "count": 0}
+        project = _PROJECT_PATH or _detect_project_path()
+        messages = _mesh_request(
+            "GET", f"/inbox/{_PEER_ID}?project_path={project}",
+        )
+        msg_list = (messages or {}).get("messages", [])
+        # Auto-mark unread messages as read
+        unread_ids = [m["id"] for m in msg_list if not m.get("read")]
+        if unread_ids:
+            _mesh_request("POST", f"/inbox/{_PEER_ID}/read", {
+                "message_ids": unread_ids,
+            })
+        return {
+            "messages": msg_list,
+            "count": len(msg_list),
+            "unread": len(unread_ids),
+        }
 
     @server.tool()
     async def mesh_state(key: str = "", value: str = "", action: str = "get") -> dict:

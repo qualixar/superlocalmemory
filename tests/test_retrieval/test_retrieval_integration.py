@@ -116,7 +116,7 @@ class TestFourChannelPipeline:
     def test_all_channels_contribute_to_fusion(self) -> None:
         """When all 4 channels return results, fusion includes candidates from each."""
         facts = [
-            _make_fact("f_sem", "Alice works at Accenture as a senior architect with deep expertise"),
+            _make_fact("f_sem", "Alice works at NovaTech as a senior architect with deep expertise"),
             _make_fact("f_bm25", "Bob joined the ML team and leads the data science projects"),
             _make_fact("f_entity", "Charlie mentioned the Qualixar product suite during the meeting"),
             _make_fact("f_temp", "Last Tuesday the deployment pipeline was refactored completely"),
@@ -337,7 +337,7 @@ class TestContentQualityPenalty:
         f_short = _make_fact("f_short", "Hi!")  # 3 chars -> quality=0.1
         f_long = _make_fact(
             "f_long",
-            "Alice is a senior architect at Accenture with 15 years of experience building enterprise systems",
+            "Alice is a senior architect at NovaTech with 15 years of experience building enterprise systems",
         )  # 94 chars -> quality=1.0
         db = _mock_db([f_short, f_long])
         engine = _build_engine(

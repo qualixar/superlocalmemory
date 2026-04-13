@@ -61,7 +61,7 @@ def test_extract_from_core_memory():
         {
             "block_id": "block_1",
             "block_type": "user_profile",
-            "content": "- Senior Architect at Accenture, expertise in AI and cloud",
+            "content": "- Senior Architect at NovaTech, expertise in AI and cloud",
             "source_fact_ids": source_ids,
         }
     ]
@@ -669,7 +669,7 @@ def test_contradiction_no_timestamps():
         PatternAssertion(
             category=PatternCategory.IDENTITY,
             key="company",
-            value="Accenture",
+            value="NovaTech",
             confidence=0.9,
             evidence_count=5,
             source="core_memory",
@@ -688,7 +688,7 @@ def test_contradiction_no_timestamps():
 
     resolved = ext._check_contradictions(patterns, "profile_1")
     assert len(resolved) == 1
-    assert resolved[0].value == "Accenture"  # higher confidence wins
+    assert resolved[0].value == "NovaTech"  # higher confidence wins
 
 
 # ---------------------------------------------------------------
@@ -717,7 +717,7 @@ def test_contradiction_same_timestamp():
         PatternAssertion(
             category=PatternCategory.IDENTITY,
             key="company",
-            value="Accenture",
+            value="NovaTech",
             confidence=0.9,
             evidence_count=5,
             source="core_memory",
@@ -736,7 +736,7 @@ def test_contradiction_same_timestamp():
 
     resolved = ext._check_contradictions(patterns, "profile_1")
     assert len(resolved) == 1
-    assert resolved[0].value == "Accenture"
+    assert resolved[0].value == "NovaTech"
 
 
 # ---------------------------------------------------------------
@@ -753,8 +753,8 @@ def test_split_assertions_multiple():
 def test_extract_key():
     """_extract_key extracts first words as key."""
     from superlocalmemory.parameterization.pattern_extractor import PatternExtractor
-    key = PatternExtractor._extract_key("Senior Architect at Accenture")
-    assert key == "senior_architect_at_accenture"
+    key = PatternExtractor._extract_key("Senior Architect at NovaTech")
+    assert key == "senior_architect_at_novatech"
 
 
 def test_extract_key_empty():
@@ -921,7 +921,7 @@ def test_contradiction_same_value_not_contradiction():
         PatternAssertion(
             category=PatternCategory.IDENTITY,
             key="company",
-            value="Accenture",
+            value="NovaTech",
             confidence=0.7,
             evidence_count=3,
             source="core_memory",
@@ -929,7 +929,7 @@ def test_contradiction_same_value_not_contradiction():
         PatternAssertion(
             category=PatternCategory.IDENTITY,
             key="company",
-            value="Accenture",
+            value="NovaTech",
             confidence=0.8,
             evidence_count=5,
             source="behavioral",

@@ -151,6 +151,80 @@ CREATE TABLE IF NOT EXISTS schema_version (
 # Migration runner
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# DDL — v3.4.6: Mesh Connected Brain (broadcast, project routing, offline queue)
+# ---------------------------------------------------------------------------
+
+_MESH_V346_ALTERS = [
+    "ALTER TABLE mesh_peers ADD COLUMN project_path TEXT DEFAULT ''",
+    "ALTER TABLE mesh_peers ADD COLUMN agent_type TEXT DEFAULT 'unknown'",
+    "ALTER TABLE mesh_messages ADD COLUMN expires_at TEXT DEFAULT NULL",
+    "ALTER TABLE mesh_messages ADD COLUMN target_type TEXT DEFAULT 'peer'",
+    "ALTER TABLE mesh_messages ADD COLUMN project_path TEXT DEFAULT ''",
+]
+
+_MESH_V346_DDL = """
+-- Read tracking for broadcast/project messages (each peer tracks own reads)
+CREATE TABLE IF NOT EXISTS mesh_reads (
+    message_id INTEGER NOT NULL,
+    peer_id TEXT NOT NULL,
+    read_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, peer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mesh_messages_target
+    ON mesh_messages(target_type, project_path);
+CREATE INDEX IF NOT EXISTS idx_mesh_messages_expires
+    ON mesh_messages(expires_at);
+CREATE INDEX IF NOT EXISTS idx_mesh_peers_project
+    ON mesh_peers(project_path);
+"""
+
+
+def apply_v346_schema(db_path: str | sqlite3.Connection) -> dict:
+    """Apply v3.4.6 mesh enhancements. Idempotent."""
+    result = {"applied": [], "errors": []}
+
+    if isinstance(db_path, sqlite3.Connection):
+        conn = db_path
+        own_connection = False
+    else:
+        conn = sqlite3.connect(str(db_path))
+        own_connection = True
+
+    try:
+        for alter_sql in _MESH_V346_ALTERS:
+            try:
+                conn.execute(alter_sql)
+                col_name = alter_sql.split("ADD COLUMN")[1].strip().split()[0]
+                result["applied"].append(col_name)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        try:
+            conn.executescript(_MESH_V346_DDL)
+            result["applied"].append("mesh_reads table + indexes")
+        except sqlite3.OperationalError as e:
+            result["errors"].append(f"mesh_v346: {e}")
+
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            ("3.4.6", __import__("datetime").datetime.now().isoformat()),
+        )
+        conn.commit()
+
+        if result["applied"]:
+            logger.info("Schema v3.4.6 applied: %s", ", ".join(result["applied"]))
+
+    except Exception as e:
+        result["errors"].append(f"fatal: {e}")
+    finally:
+        if own_connection:
+            conn.close()
+
+    return result
+
+
 def apply_v343_schema(db_path: str | sqlite3.Connection) -> dict:
     """Apply all v3.4.3 schema changes. Idempotent — safe to call multiple times.
 

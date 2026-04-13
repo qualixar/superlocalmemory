@@ -152,7 +152,7 @@ register_mesh_tools(_target, get_engine)  # v3.4.4: Mesh P2P tools — ships wit
 # the first tool call arrives (1-2s later), the engine is already warm.
 # This applies to ALL IDEs: Claude Code, Cursor, Antigravity, Gemini CLI, etc.
 def _eager_warmup() -> None:
-    """Pre-warm engine + ensure daemon is running (background thread)."""
+    """Pre-warm engine + ensure daemon is running + auto-register mesh (background thread)."""
     import logging
     _logger = logging.getLogger(__name__)
     try:
@@ -169,6 +169,16 @@ def _eager_warmup() -> None:
             _logger.info("Daemon auto-started by MCP server")
     except Exception as exc:
         _logger.debug("Daemon auto-start failed (non-fatal): %s", exc)
+
+    # V3.4.6: Auto-register this MCP session as a mesh peer immediately.
+    # Previously, registration was lazy (only on first mesh tool call).
+    # Now every Claude session appears on the mesh from startup.
+    try:
+        from superlocalmemory.mcp.tools_mesh import auto_register_mesh
+        auto_register_mesh()
+        _logger.info("Mesh peer auto-registered at startup")
+    except Exception as exc:
+        _logger.debug("Mesh auto-register failed (non-fatal): %s", exc)
 
 import threading
 _warmup_thread = threading.Thread(target=_eager_warmup, daemon=True, name="mcp-warmup")

@@ -26,6 +26,8 @@ class RegisterRequest(BaseModel):
     summary: str = ""
     host: str = "127.0.0.1"
     port: int = 0
+    project_path: str = ""
+    agent_type: str = "unknown"
 
 
 class DeregisterRequest(BaseModel):
@@ -43,7 +45,8 @@ class SummaryRequest(BaseModel):
 
 class SendRequest(BaseModel):
     from_peer: str = ""
-    to: str
+    to: str = ""
+    to_peer: str = ""  # v3.4.6: accept both 'to' and 'to_peer' for compatibility
     content: str
     type: str = "text"
 
@@ -84,7 +87,10 @@ async def register(req: RegisterRequest, request: Request):
     broker = _get_broker(request)
     if not req.session_id:
         raise HTTPException(400, detail="session_id required")
-    return broker.register_peer(req.session_id, req.summary, req.host, req.port)
+    return broker.register_peer(
+        req.session_id, req.summary, req.host, req.port,
+        req.project_path, req.agent_type,
+    )
 
 
 @router.post("/deregister")
@@ -123,22 +129,34 @@ async def summary(req: SummaryRequest, request: Request):
 @router.post("/send")
 async def send(req: SendRequest, request: Request):
     broker = _get_broker(request)
-    result = broker.send_message(req.from_peer, req.to, req.content, req.type)
+    to_target = req.to_peer or req.to  # v3.4.6: accept both field names
+    if not to_target:
+        raise HTTPException(400, detail="'to' or 'to_peer' required")
+    result = broker.send_message(req.from_peer, to_target, req.content, req.type)
     if not result.get("ok"):
-        raise HTTPException(404, detail=result.get("error", ""))
+        status = 413 if "too large" in result.get("error", "") else 404
+        raise HTTPException(status, detail=result.get("error", ""))
     return result
 
 
 @router.get("/inbox/{peer_id}")
-async def inbox(peer_id: str, request: Request):
+async def inbox(peer_id: str, request: Request, project_path: str = ""):
     broker = _get_broker(request)
-    return {"messages": broker.get_inbox(peer_id)}
+    return {"messages": broker.get_inbox(peer_id, project_path)}
 
 
 @router.post("/inbox/{peer_id}/read")
 async def mark_read(peer_id: str, req: ReadRequest, request: Request):
     broker = _get_broker(request)
     return broker.mark_read(peer_id, req.message_ids)
+
+
+@router.get("/pending/{peer_id}")
+async def pending(peer_id: str, request: Request, project_path: str = ""):
+    """Get pending broadcast/project messages for this peer."""
+    broker = _get_broker(request)
+    messages = broker.get_pending(peer_id, project_path)
+    return {"messages": messages, "count": len(messages)}
 
 
 @router.get("/state")
