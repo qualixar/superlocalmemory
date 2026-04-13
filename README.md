@@ -22,6 +22,10 @@
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
 </p>
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/c3b54a1d-f62a-4ea7-bba7-900435e7b3ab" width="800" autoplay loop muted playsinline></video>
+</p>
+
 ---
 
 ## Why SuperLocalMemory?
@@ -338,17 +342,6 @@ Built-in compliance tools: GDPR Article 15/17 export + complete erasure, tamper-
 ```bash
 slm dashboard    # Opens at http://localhost:8765
 ```
-
-<details open>
-<summary><strong>Dashboard Demo — v3.4.4 "Neural Glass"</strong> (click to collapse)</summary>
-<p align="center">
-  <a href="https://github.com/qualixar/superlocalmemory/issues/15">
-    <video src="https://github.com/user-attachments/assets/c3b54a1d-f62a-4ea7-bba7-900435e7b3ab" width="800" autoplay loop muted playsinline>
-      Your browser does not support the video tag. <a href="https://github.com/qualixar/superlocalmemory/issues/15">Watch the demo</a>.
-    </video>
-  </a>
-</p>
-</details>
 
 **v3.4.4 "Neural Glass":** 21-tab sidebar dashboard with light + dark theme. Knowledge Graph (Sigma.js WebGL, community detection), Health Monitor, Entity Explorer (1,300+ entities), Mesh Peers (P2P agent communication), Ingestion Status (Gmail/Calendar/Transcript management), Privacy blur mode. Always-on daemon with auto-start. 8 mesh MCP tools built-in. Cross-platform: macOS + Windows + Linux. All data stays local.
 
