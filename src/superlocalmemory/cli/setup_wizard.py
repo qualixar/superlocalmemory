@@ -621,6 +621,10 @@ def check_first_use(command: str) -> None:
 
     Called from main.py before dispatching any command.
     Skips for commands that don't need setup (setup, hook, --version, --help).
+
+    On first use, also auto-installs Claude Code hooks so pip installs have
+    the same "it just works" experience as npm installs (npm does this via
+    postinstall; pip has no postinstall, so we do it here).
     """
     # Commands that work without setup
     _SKIP_COMMANDS = {"setup", "init", "hook", "hooks", "reap", "mcp"}
@@ -641,6 +645,7 @@ def check_first_use(command: str) -> None:
             _mark_complete()
         except Exception:
             pass
+        _maybe_install_hooks_on_first_use()
         return
 
     # Interactive: run the full wizard
@@ -648,6 +653,31 @@ def check_first_use(command: str) -> None:
     print("  First time using SuperLocalMemory!")
     print("  Running setup wizard...\n")
     run_wizard()
+    _maybe_install_hooks_on_first_use()
+
+
+def _maybe_install_hooks_on_first_use() -> None:
+    """Install Claude Code hooks on first SLM run — matches npm postinstall.
+
+    Install/uninstall parity rules:
+      * Skip if the user explicitly opted out via ``slm hooks remove``
+        (creates ``~/.superlocalmemory/hooks/.hooks-disabled``).
+      * Skip if Claude Code isn't installed (no ``~/.claude/settings.json``
+        to merge into).
+      * Silent + best-effort: never fail a CLI command because of this.
+    """
+    try:
+        opt_out = _SLM_HOME / "hooks" / ".hooks-disabled"
+        if opt_out.exists():
+            return
+        claude_settings = Path.home() / ".claude" / "settings.json"
+        if not claude_settings.exists():
+            return  # Claude Code not installed — nothing to hook into.
+        from superlocalmemory.hooks.claude_code_hooks import install_hooks
+        install_hooks()
+    except Exception:
+        # Best-effort: parity-fallback, never block CLI.
+        pass
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.18] - 2026-04-17
+
+### Fixed
+- pip and npm installs now ship identical functionality. Semantic search and cross-encoder reranking work out of the box on pip (previously required `pip install superlocalmemory[search]`).
+- First pip run auto-installs Claude Code hooks when Claude Code is detected, matching the npm postinstall experience.
+
+---
+
 ## [3.4.17] - 2026-04-17
 
 ### Fixed
