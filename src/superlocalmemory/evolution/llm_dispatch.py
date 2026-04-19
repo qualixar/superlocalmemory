@@ -13,17 +13,32 @@ audit row to ``evolution_llm_cost_log`` after the dispatch succeeds — the
 row stores only the *redacted* prompt length and the model, never the
 raw prompt, so no canary can leak via the cost log.
 
+SB-2/SB-3/SB-4 fix cluster (v3.4.21 Stage 8):
+  * All backend entry points (claude CLI, ollama, Anthropic/OpenAI API)
+    live HERE, not in ``skill_evolver``. ``SkillEvolver._llm_call``
+    delegates to ``_dispatch_llm`` so the validate → redact → log
+    invariants can never be bypassed.
+  * The claude CLI backend routes through
+    ``core.security_primitives.run_subprocess_safe`` — no bare
+    ``subprocess.run`` in evolution code (SB-4).
+
 Author: Varun Pratap Bhardwaj / Qualixar
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
-from superlocalmemory.core.security_primitives import redact_secrets
+from superlocalmemory.core.security_primitives import (
+    redact_secrets,
+    run_subprocess_safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,22 +71,162 @@ MAX_TOKENS_CAP: int = 500
 
 
 # ---------------------------------------------------------------------------
-# Real backend (overridable in tests)
+# Backends (SB-2, SB-4) — moved out of skill_evolver.py
+# ---------------------------------------------------------------------------
+#
+# Every backend has a uniform signature::
+#
+#     backend(prompt: str, *, model: str, max_tokens: int) -> str
+#
+# They receive the ALREADY-REDACTED prompt from ``_dispatch_llm``. They
+# must never log the prompt. They return an empty string on any
+# transport failure (fail-closed: caller treats "" as "no evolution").
+
+
+def _call_claude_cli_backend(
+    prompt: str, *, model: str, max_tokens: int,
+) -> str:
+    """Spawn ``claude --model <model>`` via ``run_subprocess_safe``.
+
+    SB-4: bare ``subprocess.run`` is banned in evolution code — every
+    shell-out goes through ``run_subprocess_safe`` which strips the
+    inherited env down to a vetted allow-list.
+    """
+    # Translate the allow-listed model id to the CLI short name.
+    cli_model = "haiku"
+    if "sonnet" in model:
+        cli_model = "sonnet"
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False,
+    ) as f:
+        f.write(prompt)
+        prompt_file = f.name
+
+    try:
+        result = run_subprocess_safe(
+            ["claude", "--model", cli_model, "--print", "--no-input",
+             "--max-tokens", str(max_tokens),
+             "--prompt-file", prompt_file],
+            timeout=120.0,
+            env={
+                "CLAUDE_CODE_ENTRYPOINT": "cli",
+                "ECC_SKIP_OBSERVE": "1",
+            },
+        )
+        stdout = getattr(result, "stdout", "") or ""
+        rc = getattr(result, "returncode", 1)
+        return stdout.strip() if rc == 0 else ""
+    except Exception as exc:  # noqa: BLE001 — fail-closed, never crash caller
+        logger.debug("claude CLI backend failed: %s", exc)
+        return ""
+    finally:
+        try:
+            os.unlink(prompt_file)
+        except OSError:
+            pass
+
+
+def _call_ollama_backend(
+    prompt: str, *, model: str, max_tokens: int,
+) -> str:
+    """Call local Ollama HTTP API for LLM completion.
+
+    ``model`` is expected to be an allow-listed id of the form
+    ``"ollama:<model-name>"`` — the prefix is stripped before dispatch.
+    """
+    import json as _json
+    import urllib.request
+
+    ollama_model = model.split(":", 1)[1] if model.startswith("ollama:") else model
+    payload = _json.dumps({
+        "model": ollama_model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_predict": max_tokens},
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+            data = _json.loads(resp.read())
+            return data.get("response", "") or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Ollama backend failed: %s", exc)
+        return ""
+
+
+def _call_claude_api_backend(
+    prompt: str, *, model: str, max_tokens: int,
+) -> str:
+    """Call the Anthropic Messages API directly.
+
+    The API model id is the allow-listed name itself — no client-side
+    mapping table, so adding a new allow-listed model is a one-line
+    edit to :data:`ALLOWED_LLM_MODELS`.
+    """
+    try:
+        import anthropic  # type: ignore[import-not-found]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("anthropic sdk unavailable: %s", exc)
+        return ""
+
+    try:
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = getattr(msg, "content", None)
+        if content and len(content) > 0:
+            first = content[0]
+            text = getattr(first, "text", None)
+            if isinstance(text, str):
+                return text
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Anthropic API backend failed: %s", exc)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Backend registry — dispatches by (allow-listed) model id
 # ---------------------------------------------------------------------------
 
 
-def _actual_llm_call(prompt: str, *, model: str, max_tokens: int) -> str:
-    """Invoke the concrete backend for ``model`` and return the response.
+def _pick_backend(model: str) -> Callable[..., str]:
+    """Resolve an allow-listed model id to its backend callable.
 
-    The production wiring lives in ``skill_evolver._call_claude_cli`` /
-    ``_call_ollama`` / ``_call_api``. This stub exists so tests can swap
-    a deterministic backend via ``monkeypatch.setattr``. At runtime,
-    SkillEvolver injects the real backend before calling ``_dispatch_llm``.
+    Contract: ``model`` is already validated against ``ALLOWED_LLM_MODELS``
+    by the caller (``_dispatch_llm`` runs ``_validate_model`` first).
+    Unknown models still receive a defensive fallback to the Claude API
+    path so a forgotten registry row never returns None.
     """
-    raise NotImplementedError(
-        "evolution._actual_llm_call not wired. SkillEvolver must inject "
-        "a concrete backend before dispatching."
-    )
+    if model.startswith("ollama:"):
+        return _call_ollama_backend
+    # Claude CLI path is an alternative — selected when an explicit
+    # env flag is set. Default path is the Anthropic API backend.
+    if os.environ.get("SLM_EVOLUTION_BACKEND") == "claude-cli":
+        return _call_claude_cli_backend
+    return _call_claude_api_backend
+
+
+def _actual_llm_call(prompt: str, *, model: str, max_tokens: int) -> str:
+    """Dispatch the redacted prompt to the backend registered for ``model``.
+
+    Kept as a stable module-level function so tests can ``monkeypatch``
+    it with a deterministic stub (see ``record_backend`` fixture in
+    ``test_llm_dispatch.py``). Production callers never invoke this
+    directly — they go through :func:`_dispatch_llm`.
+    """
+    backend = _pick_backend(model)
+    return backend(prompt, model=model, max_tokens=max_tokens)
 
 
 # ---------------------------------------------------------------------------

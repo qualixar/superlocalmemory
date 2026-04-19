@@ -263,3 +263,166 @@ def test_dispatch_redaction_canary_not_in_cost_log(
     for profile_id, model in rows:
         assert canary not in (profile_id or "")
         assert canary not in (model or "")
+
+
+# ---------------------------------------------------------------------------
+# Backend registry (SB-2): _actual_llm_call must dispatch by model string
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_llm_registry_covers_all_allowed_models(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every entry in ALLOWED_LLM_MODELS must have a backend binding.
+
+    The dispatcher no longer raises NotImplementedError — every allowed
+    model resolves to some backend callable.
+    """
+    seen: list[str] = []
+
+    def _spy_claude_api(prompt: str, *, model: str, max_tokens: int) -> str:
+        seen.append(f"api:{model}")
+        return "ok-api"
+
+    def _spy_ollama(prompt: str, *, model: str, max_tokens: int) -> str:
+        seen.append(f"ollama:{model}")
+        return "ok-ollama"
+
+    monkeypatch.setattr(
+        llm_dispatch, "_call_claude_api_backend", _spy_claude_api,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        llm_dispatch, "_call_ollama_backend", _spy_ollama,
+        raising=False,
+    )
+
+    for model in sorted(ALLOWED_LLM_MODELS):
+        _dispatch_llm(
+            "hi",
+            model=model,
+            learning_db=learning_db,
+            profile_id="default",
+        )
+
+    # One dispatch per allowed model.
+    assert len(seen) == len(ALLOWED_LLM_MODELS)
+    # Ollama models route to ollama backend; others to claude-api backend.
+    ollama_count = sum(1 for m in ALLOWED_LLM_MODELS if m.startswith("ollama:"))
+    api_count = len(ALLOWED_LLM_MODELS) - ollama_count
+    assert sum(1 for s in seen if s.startswith("ollama:")) == ollama_count
+    assert sum(1 for s in seen if s.startswith("api:")) == api_count
+
+
+def test_dispatch_llm_registry_rejects_unknown_model(
+    learning_db: Path,
+) -> None:
+    """Unknown (not in allow-list) model rejected before reaching any backend."""
+    with pytest.raises(ValueError, match="ALLOWED_LLM_MODELS"):
+        _dispatch_llm(
+            "hi",
+            model="claude-haiku-99",
+            learning_db=learning_db,
+            profile_id="default",
+        )
+
+
+def test_call_claude_cli_uses_run_subprocess_safe(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The claude-CLI backend (if used) must go via run_subprocess_safe.
+
+    SB-4 fix — no bare subprocess.run allowed in evolution code.
+    """
+    from superlocalmemory.core import security_primitives as secp
+
+    recorded: list[dict] = []
+
+    class _FakeCompleted:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = "safe-output"
+            self.stderr = ""
+
+    def _fake_run_safe(argv, *, timeout=5.0, env=None, check=False,
+                       capture_output=True):
+        recorded.append({"argv": argv, "env": env, "timeout": timeout})
+        return _FakeCompleted()
+
+    monkeypatch.setattr(secp, "run_subprocess_safe", _fake_run_safe)
+    monkeypatch.setattr(
+        llm_dispatch, "run_subprocess_safe", _fake_run_safe, raising=False,
+    )
+
+    # Force the claude-CLI backend by invoking it directly.
+    out = llm_dispatch._call_claude_cli_backend(
+        "prompt text", model="claude-haiku-4-5", max_tokens=100,
+    )
+    assert out == "safe-output"
+    assert recorded, "run_subprocess_safe was NOT called"
+    assert recorded[0]["argv"][0] == "claude"
+    # Env must be a restricted dict — not the full os.environ passthrough.
+    assert isinstance(recorded[0]["env"], dict)
+
+
+# ---------------------------------------------------------------------------
+# Cost log row presence
+# ---------------------------------------------------------------------------
+
+
+def test_evolution_cycle_writes_cost_log_row(
+    learning_db: Path, record_backend: list[dict],
+) -> None:
+    """Every successful dispatch writes exactly one cost-log row."""
+    _dispatch_llm(
+        "hello",
+        model="claude-haiku-4-5",
+        learning_db=learning_db,
+        profile_id="default",
+        cycle_id="cyc-test-123",
+    )
+
+    conn = sqlite3.connect(learning_db)
+    try:
+        rows = conn.execute(
+            "SELECT profile_id, model, cycle_id FROM evolution_llm_cost_log"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == "default"
+    assert rows[0][1] == "claude-haiku-4-5"
+    assert rows[0][2] == "cyc-test-123"
+
+
+def test_secret_canary_in_prompt_never_appears_in_cost_log_row(
+    learning_db: Path, record_backend: list[dict],
+) -> None:
+    """Raw GitHub PAT must be redacted before reaching backend AND not
+    persisted anywhere in the cost log row."""
+    canary = "ghp_" + "B" * 36
+    _dispatch_llm(
+        f"token: {canary}",
+        model="claude-haiku-4-5",
+        learning_db=learning_db,
+        profile_id="default",
+        cycle_id="cyc-sec-1",
+    )
+
+    # Backend never saw the raw canary.
+    assert record_backend
+    assert canary not in record_backend[0]["prompt"]
+
+    conn = sqlite3.connect(learning_db)
+    try:
+        rows = conn.execute(
+            "SELECT profile_id, model, cycle_id, tokens_in, tokens_out "
+            "FROM evolution_llm_cost_log"
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        joined = " ".join(str(c) for c in row)
+        assert canary not in joined

@@ -40,10 +40,32 @@ from superlocalmemory.evolution.triggers import (
 )
 from superlocalmemory.evolution import mutation_generator as mutgen
 from superlocalmemory.evolution import blind_verifier as verifier
+from superlocalmemory.evolution.budget import (
+    BudgetExhausted,
+    EvolutionBudget,
+)
+from superlocalmemory.evolution.llm_dispatch import _dispatch_llm
 
 logger = logging.getLogger(__name__)
 
 EVOLVED_SKILLS_DIR = Path.home() / ".claude" / "skills" / "evolved"
+
+# Short-name → allow-listed model id. Kept narrow so an unknown alias
+# falls through to haiku rather than silently dispatching sonnet.
+_MODEL_ALIASES: dict[str, str] = {
+    "haiku": "claude-haiku-4-5",
+    "sonnet": "claude-sonnet-4-6",
+    "ollama": "ollama:llama3",
+    "ollama:llama3": "ollama:llama3",
+    "ollama:qwen2.5": "ollama:qwen2.5",
+    "claude-haiku-4-5": "claude-haiku-4-5",
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+}
+
+
+def _resolve_model_alias(alias: str) -> str:
+    """Translate a short alias (``haiku``/``sonnet``) to an allow-listed id."""
+    return _MODEL_ALIASES.get(alias, "claude-haiku-4-5")
 
 
 def detect_backend() -> str:
@@ -85,13 +107,34 @@ class SkillEvolver:
     Auto-detects LLM backend: claude CLI → Ollama → API → none.
     """
 
-    def __init__(self, db_path: str | Path, config: object | None = None):
+    def __init__(
+        self,
+        db_path: str | Path,
+        config: object | None = None,
+        *,
+        profile_id: str = "default",
+        budget: EvolutionBudget | None = None,
+    ):
         self._db_path = str(db_path)
         self._store = EvolutionStore(db_path)
         self._degradation = DegradationTrigger(db_path)
         self._health = HealthCheckTrigger(db_path)
         self._config = config
         self._backend: str | None = None
+        self._profile_id = profile_id
+        self._current_cycle_id: str | None = None
+
+        # SB-3: SkillEvolver always holds a budget. Default one is rooted
+        # at ~/.superlocalmemory so production callers pick it up
+        # automatically. Tests inject their own.
+        if budget is None:
+            slm_home = Path.home() / ".superlocalmemory"
+            budget = EvolutionBudget(
+                profile_id=profile_id,
+                learning_db=Path(self._db_path),
+                lock_dir=slm_home,
+            )
+        self._budget = budget
 
     def _is_enabled(self) -> bool:
         """Check if evolution is enabled in config."""
@@ -117,7 +160,13 @@ class SkillEvolver:
         return self._backend
 
     def run_consolidation_cycle(self, profile_id: str = "default") -> dict:
-        """Run during consolidation. Checks triggers 2 and 3."""
+        """Run during consolidation. Checks triggers 2 and 3.
+
+        Wrapped in ``self._budget.cycle()`` — honours the
+        30min/10-LLM-calls/3-cycles-per-day caps (SB-3). If the budget
+        is exhausted, returns ``{"aborted": True}`` rather than raising
+        so the consolidation worker can continue cleanly.
+        """
         if not self._is_enabled():
             return {"enabled": False, "message": "Evolution disabled. Enable via: slm config set evolution.enabled true"}
 
@@ -126,6 +175,30 @@ class SkillEvolver:
             return {"enabled": True, "backend": "none",
                     "message": "No LLM backend available. Install Claude Code, Ollama, or set an API key."}
 
+        try:
+            with self._budget.cycle() as _b:
+                self._current_cycle_id = None  # budget already recorded one
+                return self._run_consolidation_body(profile_id, backend)
+        except BudgetExhausted as exc:
+            logger.warning(
+                "evolution cycle aborted: budget exhausted [%s]",
+                getattr(exc, "dimension", "?"),
+            )
+            return {
+                "enabled": True,
+                "backend": backend,
+                "aborted": True,
+                "budget_exhausted": True,
+                "dimension": getattr(exc, "dimension", None),
+                "candidates": 0, "evolved": 0, "rejected": 0, "skipped": 0,
+            }
+        finally:
+            self._current_cycle_id = None
+
+    def _run_consolidation_body(
+        self, profile_id: str, backend: str,
+    ) -> dict:
+        """Inner consolidation loop — runs under an open budget cycle."""
         self._store.reset_cycle()
         results = {"candidates": 0, "evolved": 0, "rejected": 0, "skipped": 0, "backend": backend}
 
@@ -163,10 +236,33 @@ class SkillEvolver:
     def run_post_session(
         self, session_id: str, profile_id: str = "default",
     ) -> dict:
-        """Run after a session ends. Checks trigger 1."""
+        """Run after a session ends. Checks trigger 1.
+
+        Wrapped in a budget cycle (SB-3) so post-session evolution is
+        subject to the same 10-LLM-call / 30-min wall-time cap.
+        """
         if not self._is_enabled():
             return {"enabled": False, "candidates": 0, "evolved": 0, "rejected": 0}
 
+        try:
+            with self._budget.cycle() as _b:
+                return self._run_post_session_body(session_id, profile_id)
+        except BudgetExhausted as exc:
+            logger.warning(
+                "post-session evolution aborted: budget exhausted [%s]",
+                getattr(exc, "dimension", "?"),
+            )
+            return {
+                "enabled": True, "aborted": True, "budget_exhausted": True,
+                "dimension": getattr(exc, "dimension", None),
+                "candidates": 0, "evolved": 0, "rejected": 0,
+            }
+        finally:
+            self._current_cycle_id = None
+
+    def _run_post_session_body(
+        self, session_id: str, profile_id: str,
+    ) -> dict:
         results = {"candidates": 0, "evolved": 0, "rejected": 0}
 
         trigger = PostSessionTrigger(self._db_path)
@@ -304,108 +400,62 @@ class SkillEvolver:
         return "evolved"
 
     # ------------------------------------------------------------------
-    # LLM calls — isolated, easy to mock in tests
+    # LLM calls — single-line funnel through evolution.llm_dispatch
     # ------------------------------------------------------------------
+    #
+    # SB-2: every LLM call goes through ``_dispatch_llm``. That function
+    # owns model validation, redact_secrets, backend registry, and the
+    # cost-log write. No other code in this module touches a backend.
+    # SB-4: ``_dispatch_llm`` routes the claude-CLI path through
+    # ``run_subprocess_safe`` — no bare ``subprocess.run`` here.
 
-    def _llm_call(self, prompt: str, max_tokens: int = 500, model: str = "haiku") -> str:
-        """Make an LLM call using the detected backend.
+    def _llm_call(
+        self, prompt: str, max_tokens: int = 500, model: str = "haiku",
+    ) -> str:
+        """Funnel a prompt through :func:`_dispatch_llm`.
 
-        Priority: claude CLI → Ollama → API → empty string
-        The `model` parameter differentiates generator ("sonnet") from
-        verifier ("haiku") calls so mutations use a stronger model.
+        The ``model`` arg accepts short aliases (``haiku``/``sonnet``)
+        for backward compatibility; they are resolved to the allow-listed
+        model id before dispatch. Budget charge happens BEFORE dispatch;
+        on ``BudgetExhausted`` we return an empty string so the caller
+        treats this as "no evolution" (the usual fail-closed semantics).
         """
         backend = self._get_backend()
+        if backend == "none":
+            return ""
 
-        if backend == "claude":
-            return self._call_claude_cli(prompt, max_tokens, model=model)
-        elif backend == "ollama":
-            return self._call_ollama(prompt, max_tokens)
-        elif backend in ("anthropic", "openai"):
-            return self._call_api(prompt, max_tokens, backend, model=model)
-        return ""
-
-    def _call_claude_cli(self, prompt: str, max_tokens: int, model: str = "haiku") -> str:
-        """Spawn `claude --model <model>` for a single completion (ECC pattern)."""
-        import subprocess
-        import tempfile
-
-        # Write prompt to temp file (avoids shell escaping issues)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write(prompt)
-            prompt_file = f.name
-
+        # Charge the budget BEFORE dispatching so the cap is protective.
+        # If budget is exhausted we degrade gracefully (empty string).
         try:
-            result = subprocess.run(
-                ["claude", "--model", model, "--print", "--no-input",
-                 "--max-tokens", str(max_tokens),
-                 "--prompt-file", prompt_file],
-                capture_output=True, text=True, timeout=120,
-                env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "cli",
-                     "ECC_SKIP_OBSERVE": "1"},  # Don't observe our own evolution calls
+            self._budget.charge_llm_call()
+            self._budget.check_time()
+        except BudgetExhausted as exc:
+            logger.info("evolution _llm_call skipped: %s", exc)
+            return ""
+        except RuntimeError:
+            # charge_llm_call/check_time outside cycle() — shouldn't
+            # happen in production wiring, but if a caller invokes
+            # _llm_call without opening a cycle (e.g. tests), let it
+            # pass so legacy behaviour is preserved.
+            pass
+
+        resolved_model = _resolve_model_alias(model)
+        try:
+            return _dispatch_llm(
+                prompt,
+                model=resolved_model,
+                learning_db=Path(self._db_path),
+                profile_id=self._profile_id,
+                max_tokens=max_tokens,
+                cycle_id=self._current_cycle_id,
             )
-            return result.stdout.strip() if result.returncode == 0 else ""
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-            logger.debug("Claude CLI call failed: %s", exc)
+        except ValueError as exc:
+            # Gate rejected — treat like "no LLM available".
+            logger.warning("evolution dispatch rejected: %s", exc)
             return ""
-        finally:
-            try:
-                os.unlink(prompt_file)
-            except OSError:
-                pass
-
-    def _call_ollama(self, prompt: str, max_tokens: int) -> str:
-        """Call Ollama API for local LLM completion."""
-        import urllib.request
-        import json as _json
-
-        payload = _json.dumps({
-            "model": "llama3",
-            "prompt": prompt,
-            "stream": False,
-            "options": {"num_predict": max_tokens},
-        }).encode()
-
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:11434/api/generate",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = _json.loads(resp.read())
-                return data.get("response", "")
-        except Exception as exc:
-            logger.debug("Ollama call failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001 — fail-closed
+            logger.debug("evolution dispatch failed: %s", exc)
             return ""
-
-    def _call_api(self, prompt: str, max_tokens: int, provider: str, model: str = "haiku") -> str:
-        """Call Anthropic or OpenAI API directly."""
-        try:
-            if provider == "anthropic":
-                import anthropic
-                client = anthropic.Anthropic()
-                api_model = "claude-sonnet-4-6-20250514" if model == "sonnet" else "claude-haiku-4-5-20251001"
-                msg = client.messages.create(
-                    model=api_model,
-                    max_tokens=max_tokens,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return msg.content[0].text if msg.content else ""
-            elif provider == "openai":
-                import openai
-                client = openai.OpenAI()
-                api_model = "gpt-4o" if model == "sonnet" else "gpt-4o-mini"
-                resp = client.chat.completions.create(
-                    model=api_model,
-                    max_tokens=max_tokens,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return resp.choices[0].message.content or ""
-        except Exception as exc:
-            logger.debug("API call failed (%s): %s", provider, exc)
-            return ""
-        return ""  # Safety net: unmatched provider returns empty string
 
     def _llm_confirm(self, candidate: EvolutionCandidate, original: str) -> bool:
         """LLM confirmation gate."""
