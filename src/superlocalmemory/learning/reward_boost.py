@@ -33,9 +33,38 @@ from superlocalmemory.learning.fact_outcome_joins import (
 # contract in the module docstring); if it is missing at runtime the
 # caller falls back to the per-fact helper which retains its own
 # LIKE-based shim.
+
+
+# S9-W3 H-PERF-03: consolidation invokes ``apply_strong_memory_boost``
+# AND ``select_high_reward_fact_ids`` in the same cycle. Both call
+# ``_bulk_fact_reward_stats`` which is a full GROUP BY scan — at 100k
+# outcomes that's 1-3 s × 2 = 2-6 s wasted inside the 5-min cap. We
+# memoise the result with a short TTL so consecutive calls within the
+# same consolidation cycle share the stats. Key is (id(conn),
+# profile_id) so different conns / profiles get independent caches.
+# TTL expires quickly so live recall updates are reflected within one
+# cycle of the consolidation loop.
+_BULK_STATS_TTL_SEC: float = 30.0
+_bulk_stats_cache: dict[tuple[int, str], tuple[float, dict[str, tuple[int, float]]]] = {}
+
+
+# S9-W3 M-PERF-07: module-level MISS constant so ``stats.get(fid, _MISS)``
+# does not allocate a fresh ``(0, 0.0)`` tuple per call. At 100k facts
+# that saved ~2 MB of short-lived garbage per consolidation cycle.
+_MISS: tuple[int, float] = (0, 0.0)
+
+
 def _bulk_fact_reward_stats(
     conn: sqlite3.Connection, profile_id: str,
 ) -> dict[str, tuple[int, float]]:
+    import time as _time
+    now = _time.monotonic()
+    key = (id(conn), profile_id)
+    cached = _bulk_stats_cache.get(key)
+    if cached is not None:
+        ts, result = cached
+        if now - ts < _BULK_STATS_TTL_SEC:
+            return result
     try:
         rows = conn.execute(
             "SELECT j.value AS fact_id, "
@@ -47,13 +76,22 @@ def _bulk_fact_reward_stats(
             (profile_id,),
         ).fetchall()
     except sqlite3.OperationalError:
-        # JSON1 missing — signal to caller to fall back.
+        # JSON1 missing — signal to caller to fall back. Do NOT cache
+        # this (empty) result: a subsequent call on the same conn may
+        # fall through to the per-fact loop intentionally.
         return {}
     out: dict[str, tuple[int, float]] = {}
     for fid, c, m in rows:
         if fid is None:
             continue
         out[str(fid)] = (int(c or 0), float(m or 0.0))
+    _bulk_stats_cache[key] = (now, out)
+    # Prune the cache if it grows beyond 64 entries (multi-profile envs).
+    if len(_bulk_stats_cache) > 64:
+        stale = [k for k, (t, _) in _bulk_stats_cache.items()
+                 if now - t >= _BULK_STATS_TTL_SEC]
+        for k in stale:
+            _bulk_stats_cache.pop(k, None)
     return out
 
 logger = logging.getLogger(__name__)
@@ -104,7 +142,7 @@ def apply_strong_memory_boost(
         conn.execute("BEGIN IMMEDIATE")
         for (fid,) in rows:
             if stats:
-                count, mean = stats.get(fid, (0, 0.0))
+                count, mean = stats.get(fid, _MISS)
             else:
                 count, mean = aggregate_reward_for_fact(conn, profile_id, fid)
             if count < STRONG_BOOST_MIN_OUTCOMES:
@@ -151,7 +189,7 @@ def select_high_reward_fact_ids(
         out: list[str] = []
         for (fid,) in fact_rows:
             if stats:
-                count, mean = stats.get(fid, (0, 0.0))
+                count, mean = stats.get(fid, _MISS)
             else:
                 count, mean = aggregate_reward_for_fact(conn, profile_id, fid)
             if count < min_outcomes:

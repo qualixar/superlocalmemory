@@ -12,6 +12,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import os
 import sys
 from argparse import Namespace
 
@@ -52,6 +53,12 @@ def _cmd_escape_reconfigure(args: Namespace) -> None:
 def _cmd_escape_benchmark(args: Namespace) -> None:
     from superlocalmemory.cli.escape_hatch import cmd_benchmark
     cmd_benchmark(args)
+
+
+def _cmd_escape_rotate_token(args: Namespace) -> None:
+    """S-M07: rotate the install token."""
+    from superlocalmemory.cli.escape_hatch import cmd_rotate_token
+    cmd_rotate_token(args)
 
 
 def dispatch(args: Namespace) -> None:
@@ -115,6 +122,7 @@ def dispatch(args: Namespace) -> None:
         "clear-cache": _cmd_escape_clear_cache,
         "reconfigure": _cmd_escape_reconfigure,
         "benchmark": _cmd_escape_benchmark,
+        "rotate-token": _cmd_escape_rotate_token,
     }
     handler = handlers.get(args.command)
     if handler:
@@ -885,12 +893,19 @@ def cmd_recall(args: Namespace) -> None:
 
     # V3.3.21: Route through daemon for instant response (no cold start).
     # Falls back to direct engine if daemon not running.
+    # S9-DASH-02: pass a stable session_id derived from the shell's
+    # parent PID so a sequence of CLI recalls in one terminal can be
+    # grouped. The Stop hook on session end won't fire for CLI, so
+    # these outcomes are closed by the reaper (TTL → neutral reward).
     try:
         from superlocalmemory.cli.daemon import is_daemon_running, daemon_request, ensure_daemon
         if is_daemon_running() or ensure_daemon():
             from urllib.parse import quote
+            session_id = f"cli:{os.getppid()}"
             result = daemon_request(
-                "GET", f"/recall?q={quote(args.query)}&limit={args.limit}",
+                "GET",
+                f"/recall?q={quote(args.query)}&limit={args.limit}"
+                f"&session_id={quote(session_id)}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response
@@ -1217,6 +1232,30 @@ def cmd_status(args: Namespace) -> None:
         size_mb = round(config.db_path.stat().st_size / 1024 / 1024, 2)
         print(f"  DB size: {size_mb} MB")
 
+    # S9-UX-07 / S9-UX-13: --verbose surfaces the disabled marker,
+    # last-version marker, and daemon port so users who are debugging
+    # "slm seems broken" get the signal without opening three files.
+    if getattr(args, "verbose", False):
+        home = config.base_dir
+        disabled_path = home / ".disabled"
+        version_path = home / ".last_version"
+        print()
+        print("  --verbose --")
+        print(
+            f"  Disabled marker: "
+            f"{'YES (slm enable to reactivate)' if disabled_path.exists() else 'no'}",
+        )
+        if version_path.exists():
+            try:
+                last_ver = version_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                last_ver = "(unreadable)"
+            print(f"  Last booted version: {last_ver}")
+        else:
+            print("  Last booted version: (never booted)")
+        port = os.environ.get("SLM_DAEMON_PORT") or "8765"
+        print(f"  Daemon port: {port}")
+
 
 def cmd_health(args: Namespace) -> None:
     """Show math layer health status."""
@@ -1259,11 +1298,18 @@ def cmd_health(args: Namespace) -> None:
 
 
 def cmd_doctor(args: Namespace) -> None:
-    """Comprehensive pre-flight check — verify everything works."""
+    """Comprehensive pre-flight check — verify everything works.
+
+    S9-UX-10: ``--quick`` skips the slow probes (embedding worker
+    subprocess, Ollama roundtrip) so first-run installer hooks can
+    surface a sub-second PASS/FAIL line before letting the user go.
+    Full doctor remains the default for ``slm doctor`` with no flag.
+    """
     import shutil
     from pathlib import Path
 
     use_json = getattr(args, "json", False)
+    quick = getattr(args, "quick", False)
     checks: list[dict] = []
     passed = warned = failed = 0
 
@@ -1376,86 +1422,119 @@ def cmd_doctor(args: Namespace) -> None:
         _check("Performance deps", "WARN", f"Missing: {', '.join(missing)}",
                "pip install diskcache orjson")
 
-    # 7. Embedding worker functional test
-    try:
-        import subprocess as _sp
-        import json as _json
+    # 7. Embedding worker functional test — skipped under --quick.
+    if quick:
+        _check("Embedding worker", "PASS", "skipped (--quick)")
+    else:
+        try:
+            import subprocess as _sp
+            import json as _json
 
-        env = {
-            **__import__("os").environ,
-            "CUDA_VISIBLE_DEVICES": "",
-            "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "0.0",
-            "TOKENIZERS_PARALLELISM": "false",
-            "TORCH_DEVICE": "cpu",
-        }
-        proc = _sp.Popen(
-            [sys.executable, "-m", "superlocalmemory.core.embedding_worker"],
-            stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
-            text=True, bufsize=1, env=env,
-        )
-        proc.stdin.write(_json.dumps({"cmd": "ping"}) + "\n")
-        proc.stdin.flush()
+            env = {
+                **__import__("os").environ,
+                "CUDA_VISIBLE_DEVICES": "",
+                "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "0.0",
+                "TOKENIZERS_PARALLELISM": "false",
+                "TORCH_DEVICE": "cpu",
+            }
+            proc = _sp.Popen(
+                [sys.executable, "-m",
+                 "superlocalmemory.core.embedding_worker"],
+                stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                text=True, bufsize=1, env=env,
+            )
+            proc.stdin.write(_json.dumps({"cmd": "ping"}) + "\n")
+            proc.stdin.flush()
 
-        import select as _sel
-        ready, _, _ = _sel.select([proc.stdout], [], [], 30)
-        if ready:
-            resp = _json.loads(proc.stdout.readline())
-            if resp.get("ok"):
-                _check("Embedding worker", "PASS",
-                       f"responsive (PID {proc.pid}, Python {sys.executable})")
-            else:
-                _check("Embedding worker", "FAIL",
-                       f"error: {resp.get('error', 'unknown')}",
-                       "pip install sentence-transformers einops torch")
-        else:
-            _check("Embedding worker", "FAIL", "timed out (30s)",
-                   "slm warmup")
-        proc.stdin.write(_json.dumps({"cmd": "quit"}) + "\n")
-        proc.stdin.flush()
-        proc.wait(timeout=5)
-    except FileNotFoundError:
-        _check("Embedding worker", "FAIL", "embedding_worker module not found",
-               "Reinstall: npm install -g superlocalmemory")
-    except Exception as exc:
-        _check("Embedding worker", "FAIL", str(exc),
-               "slm warmup")
-
-    # 8. Ollama connectivity (Mode B only)
-    try:
-        from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
-        if config.mode.value == "b":
-            import httpx
-            try:
-                resp = httpx.get(
-                    f"{config.llm.api_base}/api/tags", timeout=5.0,
-                )
-                if resp.status_code == 200:
-                    models = [m["name"].split(":")[0] for m in resp.json().get("models", [])]
-                    has_llm = config.llm.model.split(":")[0] in models
-                    if has_llm:
-                        _check("Ollama", "PASS",
-                               f"running, {len(models)} models, '{config.llm.model}' available")
-                    else:
-                        _check("Ollama", "WARN",
-                               f"running but '{config.llm.model}' not pulled",
-                               f"ollama pull {config.llm.model}")
+            import select as _sel
+            ready, _, _ = _sel.select([proc.stdout], [], [], 30)
+            if ready:
+                resp = _json.loads(proc.stdout.readline())
+                if resp.get("ok"):
+                    _check(
+                        "Embedding worker", "PASS",
+                        f"responsive (PID {proc.pid}, "
+                        f"Python {sys.executable})",
+                    )
                 else:
-                    _check("Ollama", "WARN", f"HTTP {resp.status_code}",
-                           "brew services start ollama")
-            except Exception:
-                _check("Ollama", "WARN", "not reachable at " + config.llm.api_base,
-                       "brew services start ollama")
-        elif config.mode.value == "c":
-            # Mode C — check API key
-            if config.llm.api_key:
-                _check("API key", "PASS",
-                       f"provider={config.llm.provider}, key=***{config.llm.api_key[-4:]}")
+                    _check(
+                        "Embedding worker", "FAIL",
+                        f"error: {resp.get('error', 'unknown')}",
+                        "pip install sentence-transformers einops torch",
+                    )
             else:
-                _check("API key", "WARN", "no API key configured",
-                       "slm provider set")
-    except Exception:
-        pass  # Config load failed — already caught above
+                _check("Embedding worker", "FAIL", "timed out (30s)",
+                       "slm warmup")
+            proc.stdin.write(_json.dumps({"cmd": "quit"}) + "\n")
+            proc.stdin.flush()
+            proc.wait(timeout=5)
+        except FileNotFoundError:
+            _check(
+                "Embedding worker", "FAIL",
+                "embedding_worker module not found",
+                "Reinstall: npm install -g superlocalmemory",
+            )
+        except Exception as exc:
+            _check("Embedding worker", "FAIL", str(exc), "slm warmup")
+
+    # 8. Ollama connectivity (Mode B only) — skipped under --quick.
+    if quick:
+        _check("Ollama / API key", "PASS", "skipped (--quick)")
+    else:
+        try:
+            from superlocalmemory.core.config import SLMConfig
+            config = SLMConfig.load()
+            if config.mode.value == "b":
+                import httpx
+                try:
+                    resp = httpx.get(
+                        f"{config.llm.api_base}/api/tags", timeout=5.0,
+                    )
+                    if resp.status_code == 200:
+                        models = [
+                            m["name"].split(":")[0]
+                            for m in resp.json().get("models", [])
+                        ]
+                        has_llm = config.llm.model.split(":")[0] in models
+                        if has_llm:
+                            _check(
+                                "Ollama", "PASS",
+                                f"running, {len(models)} models, "
+                                f"'{config.llm.model}' available",
+                            )
+                        else:
+                            _check(
+                                "Ollama", "WARN",
+                                f"running but '{config.llm.model}' "
+                                f"not pulled",
+                                f"ollama pull {config.llm.model}",
+                            )
+                    else:
+                        _check(
+                            "Ollama", "WARN",
+                            f"HTTP {resp.status_code}",
+                            "brew services start ollama",
+                        )
+                except Exception:
+                    _check(
+                        "Ollama", "WARN",
+                        "not reachable at " + config.llm.api_base,
+                        "brew services start ollama",
+                    )
+            elif config.mode.value == "c":
+                if config.llm.api_key:
+                    _check(
+                        "API key", "PASS",
+                        f"provider={config.llm.provider}, "
+                        f"key=***{config.llm.api_key[-4:]}",
+                    )
+                else:
+                    _check(
+                        "API key", "WARN", "no API key configured",
+                        "slm provider set",
+                    )
+        except Exception:
+            pass  # Config load failed — already caught above
 
     # 9. Disk space
     slm_home = Path.home() / ".superlocalmemory"

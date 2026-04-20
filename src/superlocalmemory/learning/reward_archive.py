@@ -130,6 +130,25 @@ def run_reward_gated_archive(
             return []
 
         conn.execute("BEGIN IMMEDIATE")
+        # S9-SKEP-07: re-verify reward under RESERVED lock. Between the
+        # read-only reward scan above and this BEGIN IMMEDIATE another
+        # writer may have inserted a positive reward row ("user liked
+        # the memory we are about to archive"). With the writer lock
+        # held we now know no further inserts are landing; one last
+        # check per entry catches everything that raced in.
+        verified: list[dict] = []
+        for entry in to_archive:
+            if has_recent_positive_reward(
+                conn, profile_id, entry["fid"],
+                min_reward=ARCHIVE_REWARD_THRESHOLD,
+                window_days=REWARD_WINDOW_DAYS,
+            ):
+                continue
+            verified.append(entry)
+        to_archive = verified
+        if not to_archive:
+            conn.execute("COMMIT")
+            return []
         for entry in to_archive:
             fid = entry["fid"]
             payload = {

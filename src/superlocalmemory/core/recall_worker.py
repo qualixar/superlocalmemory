@@ -72,9 +72,11 @@ def _get_engine():
     return _engine
 
 
-def _handle_recall(query: str, limit: int) -> dict:
+def _handle_recall(query: str, limit: int, session_id: str = "") -> dict:
     engine = _get_engine()
-    response = engine.recall(query, limit=limit)
+    response = engine.recall(
+        query, limit=limit, session_id=session_id or None,
+    )
 
     # Batch-fetch original memory text for all results
     memory_ids = list({r.fact.memory_id for r in response.results[:limit] if r.fact.memory_id})
@@ -288,7 +290,10 @@ def _worker_main() -> None:
 
         try:
             if cmd == "recall":
-                result = _handle_recall(req.get("query", ""), req.get("limit", 10))
+                result = _handle_recall(
+                    req.get("query", ""), req.get("limit", 10),
+                    req.get("session_id", ""),
+                )
                 _respond(result)
             elif cmd == "store":
                 result = _handle_store(req.get("content", ""), req.get("metadata", {}))

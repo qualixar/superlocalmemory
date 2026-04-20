@@ -219,14 +219,14 @@ def create_app() -> FastAPI:
     @application.get("/health")
     async def health_check():
         """Health check."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         engine = application.state.engine
         return {
             "status": "healthy",
             "version": SLM_VERSION,
             "engine": "initialized" if engine else "unavailable",
             "database": "connected" if DB_PATH.exists() else "missing",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     @application.on_event("startup")

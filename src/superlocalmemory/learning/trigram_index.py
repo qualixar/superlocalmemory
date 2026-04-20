@@ -65,6 +65,19 @@ _MAX_INPUT_CHARS: int = 500
 # rebuilt.
 _CACHE_CONN: Optional[sqlite3.Connection] = None
 _CACHE_CONN_LOCK = threading.Lock()
+_CACHE_CONN_OWNER_PID: int | None = None
+
+
+def _reset_cache_conn_for_child() -> None:
+    """S9-W2 C5 fork safety: wipe the inherited handle in the child.
+
+    Running ``close()`` on a handle the parent still uses would be a
+    race; we simply orphan the reference and let the parent keep its
+    open fd. The child opens a fresh conn on first ``_get_cache_conn``.
+    """
+    global _CACHE_CONN, _CACHE_CONN_OWNER_PID
+    _CACHE_CONN = None
+    _CACHE_CONN_OWNER_PID = os.getpid()
 
 
 def _get_cache_conn() -> Optional[sqlite3.Connection]:
@@ -74,7 +87,16 @@ def _get_cache_conn() -> Optional[sqlite3.Connection]:
     Caller holds no lock — every ``execute`` is serialised via
     ``_CACHE_CONN_LOCK``.
     """
-    global _CACHE_CONN
+    global _CACHE_CONN, _CACHE_CONN_OWNER_PID
+    current_pid = os.getpid()
+    # S9-W2 C5: pid drift belt-and-suspenders. If a fork path somehow
+    # skipped ``register_at_fork``, we still refuse to hand out an
+    # inherited handle.
+    if _CACHE_CONN is not None and (
+        _CACHE_CONN_OWNER_PID is not None
+        and _CACHE_CONN_OWNER_PID != current_pid
+    ):
+        _CACHE_CONN = None
     if _CACHE_CONN is not None:
         return _CACHE_CONN
     with _CACHE_CONN_LOCK:
@@ -93,6 +115,7 @@ def _get_cache_conn() -> Optional[sqlite3.Connection]:
         except sqlite3.OperationalError:
             return None
         _CACHE_CONN = conn
+        _CACHE_CONN_OWNER_PID = current_pid
         return _CACHE_CONN
 
 
@@ -100,7 +123,7 @@ def _reset_cache_conn() -> None:
     """Drop the cached connection. Called after ``bootstrap()`` swaps
     the cache table so subsequent lookups re-connect to the fresh DB.
     """
-    global _CACHE_CONN
+    global _CACHE_CONN, _CACHE_CONN_OWNER_PID
     with _CACHE_CONN_LOCK:
         if _CACHE_CONN is not None:
             try:
@@ -108,6 +131,11 @@ def _reset_cache_conn() -> None:
             except sqlite3.Error:  # pragma: no cover — defensive
                 pass
             _CACHE_CONN = None
+            _CACHE_CONN_OWNER_PID = None
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_cache_conn_for_child)
 
 
 # --------------------------------------------------------------------------
@@ -256,7 +284,15 @@ class TrigramIndex:
             # source connection so a locked memory.db fails fast rather
             # than blocking the entire timeout.
             src.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
-            rows = src.execute(
+            # S9-W3 H-PERF-05: previously ``fetchall()`` materialised the
+            # entire 5M-row JOIN as one list in Python, regardless of the
+            # ``ram_reservation`` block. On a pathological input this is
+            # ~1.5 GB peak RAM — the "SLM_TRIGRAM_BOOTSTRAP_RAM_MB"
+            # override looked tuneable but was ornamental. We now iterate
+            # the cursor row-by-row (SQLite streams from the prepared
+            # statement), so peak Python RAM scales with the bucket
+            # dict (bounded by ``MAX_TRIGRAMS``) not the row count.
+            cursor = src.execute(
                 "SELECT ce.entity_id, ce.canonical_name, "
                 "       COALESCE(ea.alias, '') AS alias "
                 "FROM canonical_entities ce "
@@ -264,30 +300,66 @@ class TrigramIndex:
                 "WHERE ce.profile_id = ? "
                 "LIMIT ?",
                 (_ACTIVE_PROFILE, self._MAX_REBUILD_ROWS),
-            ).fetchall()
+            )
+            rows = cursor  # streamed iteration
+            row_iter = iter(rows)
+            # Fall through to the bucket loop — ``cursor`` is consumed
+            # lazily so we can still close(src) in ``finally``.
+        except sqlite3.Error:
+            src.close()
+            raise
+        # Consume the cursor lazily; ``src`` stays open through the
+        # buckets loop because sqlite3 cursors hold a reference to it.
+        try:
+            for entity_id, canonical_name, alias in row_iter:
+                for name in (canonical_name, alias):
+                    if not name:
+                        continue
+                    for tri in _trigrams_for(str(name)):
+                        buckets.setdefault(tri, {}).setdefault(entity_id, 0.0)
+                        buckets[tri][entity_id] += 1.0
         finally:
             src.close()
 
-        for entity_id, canonical_name, alias in rows:
-            for name in (canonical_name, alias):
-                if not name:
-                    continue
-                for tri in _trigrams_for(str(name)):
-                    buckets.setdefault(tri, {}).setdefault(entity_id, 0.0)
-                    buckets[tri][entity_id] += 1.0
-
+        # S9-defer H-P-05: stream the flat-list construction through a
+        # bounded min-heap of size ``MAX_TRIGRAMS`` instead of
+        # materialising the full list and sort-truncating. For a
+        # bucket count far above the cap this saves O(N_extra) Python
+        # memory AND trades an O(N log N) full-sort for an O(N log K)
+        # heap-push pass.
+        import heapq
+        _cap = int(self.MAX_TRIGRAMS)
+        _heap: list[tuple[float, str, str]] = []
+        for tri, d in buckets.items():
+            for eid, w in d.items():
+                # heapq is a min-heap so pushing (w, ...) keeps the
+                # LOWEST-weight row at the root; we evict it whenever a
+                # higher-weight row arrives. Net effect: the heap holds
+                # the top-``_cap`` rows by weight at any given time.
+                if len(_heap) < _cap:
+                    heapq.heappush(_heap, (float(w), tri, eid))
+                else:
+                    heapq.heappushpop(_heap, (float(w), tri, eid))
         flat: list[tuple[str, str, float]] = [
-            (tri, eid, w)
-            for tri, d in buckets.items()
-            for eid, w in d.items()
+            (tri, eid, w) for (w, tri, eid) in _heap
         ]
-        # Cap total rows by highest weight first.
-        if len(flat) > self.MAX_TRIGRAMS:
-            flat.sort(key=lambda r: r[2], reverse=True)
-            flat = flat[: self.MAX_TRIGRAMS]
+        # ``buckets`` is no longer needed; release its memory before
+        # opening the writer connection.
+        buckets = {}
 
         # Write to cache DB via atomic shadow-table swap.
         self.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+        # S9-W2 C5: close the shared reader connection BEFORE opening the
+        # writer. Previously `_reset_cache_conn()` ran AFTER the swap,
+        # which meant concurrent `lookup()` calls (same process, other
+        # threads) held the old conn through the DROP TABLE window and
+        # saw partial/empty rowsets or SQLITE_BUSY retries. Closing up
+        # front forces every subsequent lookup to wait for the writer's
+        # ALTER TABLE (serialised by SQLite's own locking) and then open
+        # a fresh conn against the post-swap schema.
+        _reset_cache_conn()
+
         conn = sqlite3.connect(str(self.CACHE_DB_PATH), timeout=2.0)
         try:
             conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
@@ -338,13 +410,9 @@ class TrigramIndex:
             conn.close()
 
         # Bust the per-instance LRU — stale entries would point at now-
-        # dropped rows.
+        # dropped rows. The module-level cached conn was already dropped
+        # BEFORE the writer ran (see C5 fix above); nothing to do here.
         self._cached_lookup_key.cache_clear()
-        # H-12/H-P-06: also drop the module-level cached conn so the
-        # next lookup re-connects to the post-swap schema. Without this
-        # a long-lived process could hold a handle pinned to the
-        # (dropped-and-recreated) table.
-        _reset_cache_conn()
 
     # ----------------------------------------------------------------------
     # lookup() — hot path
@@ -417,10 +485,18 @@ class TrigramIndex:
             try:
                 with _CACHE_CONN_LOCK:
                     rows = conn.execute(sql, bound).fetchall()
-            except sqlite3.OperationalError:
-                # Table missing/locked or conn stale — drop + one-shot
-                # fresh connect as the defensive fallback path.
-                _reset_cache_conn()
+            except sqlite3.OperationalError as exc:
+                # S9-W2 H-PERF-04: only evict the cached conn when the
+                # error signals a SCHEMA change (table dropped/rebuilt).
+                # A transient SQLITE_BUSY does NOT require re-connecting
+                # — that triggered an eviction storm on concurrent slm
+                # doctor runs and blew the <2 ms p99 budget on 10-30% of
+                # lookups. We let busy errors fall through to the
+                # one-shot fresh-connect fallback without touching the
+                # shared cache.
+                msg = str(exc).lower()
+                if "schema" in msg or "no such table" in msg:
+                    _reset_cache_conn()
                 conn = None
         if conn is None:
             try:

@@ -36,16 +36,20 @@ def test_s_l04_marker_regex_accepts_hex_and_legacy_fact_ids() -> None:
     assert m2 is not None and m2.group(1) == "fact-42"
 
 
-def test_sec_m2_pending_limit_is_tightened() -> None:
-    # Check the actual SQL literal rather than scanning prose comments —
-    # the comment block explaining SEC-M2 mentions the old value by
-    # design for auditability.
-    src = open(h.__file__, encoding="utf-8").read()
-    # The executed query string ends with "ORDER BY created_at_ms DESC LIMIT 5".
-    assert "DESC LIMIT 5\"" in src or 'DESC LIMIT 5"' in src, (
-        "SEC-M2: pending window must be LIMIT 5 in the executed SQL"
+def test_s9_w3_pending_window_and_write_cap() -> None:
+    """S9-W3 C6 / H-SKEP-03 / H-ARC-H4: SEC-M2's LIMIT 5 tightening
+    silently dropped signals on heavy Claude Code sessions (30+ Reads
+    + 10 recalls). The pending-row window is now 50 (so signals on the
+    6th+ outcome still get recorded) and UPDATE amplification is
+    capped at 10 via an outer PENDING_WRITE_CAP on the returned list.
+    The hook no longer embeds the literal SQL — match the contract
+    constants on the EngagementRewardModel class instead.
+    """
+    from superlocalmemory.learning.reward import EngagementRewardModel
+    assert EngagementRewardModel.PENDING_MATCH_WINDOW == 50, (
+        "post-Stage-9 contract: window must be 50 to cover heavy "
+        "tool-use sessions without dropping signals"
     )
-    # And the tightened literal is NOT the old LIMIT 20 SQL form.
-    assert "DESC LIMIT 20\"" not in src, (
-        "SEC-M2: pending window LIMIT 20 SQL regressed"
+    assert EngagementRewardModel.PENDING_WRITE_CAP == 10, (
+        "amplification cap must be 10 regardless of window size"
     )

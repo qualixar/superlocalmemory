@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timezone
 from pathlib import Path
 from typing import Any
 
@@ -506,7 +506,7 @@ def sync_to_github(backup_files: list[Path] | Path, dest_config: dict) -> bool:
         return False
 
     try:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         tag_name = f"backup-{timestamp}"
         total_mb = sum(f.stat().st_size for f in backup_files) / (1024 * 1024)
         file_list = ", ".join(f"{f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)" for f in backup_files)

@@ -186,6 +186,18 @@ def safe_resolve_identifier(base: Path, untrusted: str) -> Path:
     # defensive, though the regex already forbids the empty case).
     if target != base_abs and base_abs not in target.parents:
         raise ValueError(f"path escape: {untrusted!r}")
+    # S9-W2 M-SEC-01: enforce byte-level name equality after resolve.
+    # On case-insensitive filesystems (macOS APFS, Windows NTFS) the
+    # untrusted id "Session_1" can collide with an existing "session_1"
+    # path and ``.resolve()`` returns the on-disk name. Allowing that
+    # equivalence would let a second user on the same macOS machine
+    # enumerate / overwrite another user's session state by guessing
+    # the case-folded identifier.
+    if target != base_abs and target.name != untrusted:
+        raise ValueError(
+            f"path-case collision: resolved {target.name!r} != "
+            f"requested {untrusted!r}"
+        )
     return target
 
 
@@ -251,15 +263,17 @@ _HIGH_AGGRESSION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
      "OPENAI_KEY"),
     # Generic env-var-style secret (e.g. SLM_API_ABC123...).
     #
-    # H-08 (Stage 8): the previous pattern ``[A-Z]{2,5}_[A-Z0-9]{20,}``
-    # matched any 2-5 uppercase letters + underscore + 20+ caps/digits,
-    # which is also the shape of long UPPER_SNAKE_CASE Python constants
-    # like ``SLM_PASSWORDABCDEFGHIJKLMNOPQRST``. We now require at least
-    # one digit in the value portion — real high-entropy secrets almost
-    # always carry digits; pure-letter tails are overwhelmingly constant
-    # names. Keeps the realistic case ``SLM_A1B2C3...`` covered.
-    (re.compile(r"\b[A-Z]{2,5}_(?=[A-Z0-9]*\d)[A-Z0-9]{20,}\b"),
-     "GENERIC_KEY"),
+    # H-08 (Stage 8): must skip pure-letter UPPER_SNAKE_CASE constants.
+    # S9-W2 H-SEC-02: the Stage-8 lookahead ``(?=[A-Z0-9]*\d)`` was
+    # linear-in-text but triggered super-linear BACKTRACKING on crafted
+    # inputs like ``"A" * 256_000`` because every ``[A-Z]{2,5}`` prefix
+    # attempt re-ran the tail lookahead. Under ``redact_secrets`` with
+    # an attacker-controlled prompt this stalled the dispatcher for
+    # seconds — a reachable DoS. New design: match the broader shape
+    # without a lookahead, then check ``"any(ch.isdigit() for ch in m)"``
+    # in Python after the match. Python's post-match loop is O(n) with
+    # no backtracking regardless of input shape.
+    (re.compile(r"\b[A-Z]{2,5}_[A-Z0-9]{20,}\b"), "GENERIC_KEY"),
 )
 
 _VALID_AGGRESSION = frozenset({"normal", "high"})
@@ -314,6 +328,14 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
         for pat, label in _HIGH_AGGRESSION_PATTERNS:
             def _sub_high(match: re.Match[str], _label: str = label) -> str:
                 matched = match.group(0)
+                # S9-W2 H-SEC-02: GENERIC_KEY now requires a post-match
+                # digit check (replaces the lookahead that caused
+                # super-linear backtracking on crafted input). Pure
+                # UPPER_SNAKE constants still pass through unredacted.
+                if _label == "GENERIC_KEY" and not any(
+                    ch.isdigit() for ch in matched
+                ):
+                    return matched
                 last4 = matched[-4:] if len(matched) >= 4 else matched
                 return f"[REDACTED:{_label}:{last4}]"
             out = pat.sub(_sub_high, out)
@@ -324,6 +346,13 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
             last4 = matched[-4:] if len(matched) >= 4 else matched
             return f"[REDACTED:{_label}:{last4}]"
         out = pat.sub(_sub, out)
+
+    # S9-W2 L-SEC-01: skip strings that already look like a REDACTED
+    # marker so the entropy sweep doesn't double-redact and lose the
+    # provenance label (e.g. turning ``[REDACTED:GITHUB_PAT:deadbeef]``
+    # into ``[REDACTED:ENTROPY:eef]``). Matching is conservative — the
+    # regex below is the one ``_emit_marker`` emits.
+    _redacted_marker_re = re.compile(r"\[REDACTED:[A-Z_]+:[^\]]+\]")
 
     # Entropy sweep — scan contiguous URL-safe runs.
     #
@@ -344,9 +373,19 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
 
     def _entropy_sub(match: re.Match[str]) -> str:
         token = match.group(0)
-        if _pure_upper_snake.match(token):
+        # L-SEC-01: preserve REDACTED markers emitted by earlier passes.
+        if _redacted_marker_re.search(token):
             return token
-        if _shannon_entropy(token) >= entropy_threshold:
+        # S9-SKEP-12: pure UPPER_SNAKE is a legitimate-constant shape
+        # ONLY when its entropy is below the secret threshold. A 24-char
+        # all-caps mnemonic backup code or a hand-typed token does clear
+        # 4.5 bits Shannon entropy and should be redacted — the old
+        # unconditional skip let such secrets through. We now require
+        # BOTH "looks like a constant" AND "low entropy" before skipping.
+        entropy = _shannon_entropy(token)
+        if _pure_upper_snake.match(token) and entropy < entropy_threshold:
+            return token
+        if entropy >= entropy_threshold:
             last4 = token[-4:]
             return f"[REDACTED:ENTROPY:{last4}]"
         return token
@@ -385,21 +424,58 @@ def ensure_install_token() -> str:
             return token
         # Empty file — regenerate.
 
+    # S9-W2 H-SEC-01: close the docstring promise "Open with O_EXCL
+    # where possible to prevent races" that the implementation did NOT
+    # enforce. O_EXCL | O_CREAT atomically fails if the file exists,
+    # which means a second concurrent daemon hitting this path after
+    # the first one wrote the token sees EEXIST, re-reads, and returns
+    # the token from disk — both daemons converge on the same token.
+    # Fallback to the non-EXCL path is preserved for exotic FS that
+    # don't support the flag, but the common POSIX case now closes
+    # the race.
     token = _secrets.token_hex(32)
-    # Open with O_EXCL where possible to prevent races; fall back to write.
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    wrote = False
     try:
         fd = os.open(str(token_path), flags, 0o600)
         try:
             os.write(fd, token.encode("utf-8"))
+            wrote = True
         finally:
             os.close(fd)
+    except FileExistsError:
+        # Someone else won the race. Re-read and return their token.
+        try:
+            existing = token_path.read_text(encoding="utf-8").strip()
+        except OSError:  # pragma: no cover — defensive
+            existing = ""
+        if existing:
+            return existing
+        # Empty file left by the racer — overwrite via the non-EXCL
+        # path below so we still end up with a valid token.
+        try:
+            fd = os.open(
+                str(token_path),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | (
+                    os.O_NOFOLLOW if hasattr(os, "O_NOFOLLOW") else 0
+                ),
+                0o600,
+            )
+            try:
+                os.write(fd, token.encode("utf-8"))
+                wrote = True
+            finally:
+                os.close(fd)
+        except OSError:  # pragma: no cover — fallback for exotic FS
+            token_path.write_text(token, encoding="utf-8")
+            wrote = True
     except OSError:  # pragma: no cover — fallback for exotic FS
         token_path.write_text(token, encoding="utf-8")
+        wrote = True
 
-    if not _is_windows():
+    if wrote and not _is_windows():
         try:
             os.chmod(token_path, 0o600)
         except OSError:  # pragma: no cover
@@ -425,6 +501,67 @@ def verify_install_token(presented: str) -> bool:
     if not stored:
         return False
     return hmac.compare_digest(stored, presented)
+
+
+def rotate_install_token() -> tuple[str, str]:
+    """S-M07 — atomically rotate the install token.
+
+    Returns ``(old_token, new_token)``. The old token is captured BEFORE
+    the rotation so callers that need to invalidate cached HMAC markers
+    can detect the change. Atomic file-swap via ``os.replace`` so a
+    concurrent ``verify_install_token`` never observes a half-written
+    value.
+
+    Callers (e.g. ``slm rotate-token`` CLI) SHOULD restart the daemon
+    after a successful rotation: in-memory HMAC marker caches — used by
+    ``recall_pipeline._emit_marker`` — retain the old token until the
+    next cold start. Without a restart, already-emitted markers fail
+    validation on the next ``post_tool_outcome_hook`` call (harmless —
+    just a dropped signal, never a security bypass), but new markers
+    under the new token mix with old-token markers still in transit.
+
+    Never raises; returns ``("", "")`` on any filesystem error so the
+    caller can surface a graceful message to the user.
+    """
+    token_path = _install_token_path()
+    try:
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:  # pragma: no cover — defensive
+        return ("", "")
+
+    old = ""
+    if token_path.exists():
+        try:
+            old = token_path.read_text(encoding="utf-8").strip()
+        except OSError:  # pragma: no cover
+            old = ""
+
+    new_token = _secrets.token_hex(32)
+    # Write via tmp + os.replace for atomic swap.
+    tmp = token_path.with_suffix(
+        token_path.suffix + f".rot.{os.getpid()}.tmp"
+    )
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(str(tmp), flags, 0o600)
+        try:
+            os.write(fd, new_token.encode("utf-8"))
+        finally:
+            os.close(fd)
+        os.replace(str(tmp), str(token_path))
+    except OSError:  # pragma: no cover — fallback
+        try:
+            token_path.write_text(new_token, encoding="utf-8")
+        except OSError:
+            return (old, "")
+    if not _is_windows():
+        try:
+            os.chmod(token_path, 0o600)
+        except OSError:  # pragma: no cover
+            pass
+    return (old, new_token)
 
 
 # ---------------------------------------------------------------------------

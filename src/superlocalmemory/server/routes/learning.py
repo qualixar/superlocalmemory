@@ -11,7 +11,7 @@ Uses V3 learning modules: FeedbackCollector, EngagementTracker, AdaptiveLearner.
 """
 import shutil
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -419,6 +419,42 @@ async def feedback_stats():
 # PATTERNS ENDPOINT (v3.4.1 — CRITICAL FIX: frontend calls /api/patterns)
 # ============================================================================
 
+
+@router.delete("/api/patterns/delete")
+async def delete_pattern(data: dict) -> dict:
+    """S9-DASH-04: delete a single auto-detected pattern by key.
+
+    Body: ``{pattern_type: str, pattern_key: str}``
+
+    Returns ``{success: bool, deleted: int}``. The pattern is scoped
+    to the active profile so cross-profile deletion is impossible.
+    """
+    if not BEHAVIORAL_AVAILABLE:
+        return {"success": False, "error": "Behavioral engine not available"}
+    ptype = (data or {}).get("pattern_type", "")
+    pkey = (data or {}).get("pattern_key", "")
+    if not ptype or not pkey:
+        return {
+            "success": False,
+            "error": "pattern_type and pattern_key are required",
+        }
+    try:
+        profile = get_active_profile()
+        store = BehavioralPatternStore(str(LEARNING_DB))
+        deleted = store.delete_pattern_by_key(
+            profile_id=profile,
+            pattern_type=ptype,
+            pattern_key=pkey,
+        )
+        return {
+            "success": True, "deleted": int(deleted),
+            "active_profile": profile,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("delete_pattern failed: %s", exc)
+        return {"success": False, "error": str(exc)}
+
+
 @router.get("/api/patterns")
 async def get_patterns():
     """Get learned behavioral patterns for the Patterns dashboard tab.
@@ -512,7 +548,7 @@ async def learning_backup():
         if not LEARNING_DB.exists():
             return {"success": False, "error": "No learning.db found"}
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         backup_name = f"learning.db.backup_{timestamp}"
         backup_path = MEMORY_DIR / backup_name
         shutil.copy2(str(LEARNING_DB), str(backup_path))

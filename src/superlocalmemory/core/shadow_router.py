@@ -75,9 +75,64 @@ class ShadowRouter:
         # candidate is persisted).
         self._shadow: ShadowTest | None = None
         self._candidate_id: int | None = None
+        # S9-SKEP-11: pin the routing token at router creation.
+        # ``install_token`` rotation is a documented user action (SEC-M07
+        # ``slm escape-hatch rotate-token``) but must not flip the arm
+        # assignment of every in-flight query_id — that would silently
+        # mix baseline and candidate observations for the same qid and
+        # break the paired-t assumption. We snapshot the token once at
+        # init; subsequent rotations are picked up only when a new
+        # router is created (i.e. at daemon restart / candidate rotate).
+        try:
+            self._routing_token = ensure_install_token()
+        except Exception:  # pragma: no cover — defensive
+            self._routing_token = ""
         # Rollback post-promotion watcher (created when arm_post_promotion
         # is called after a promote).
         self._rollback: ModelRollback | None = None
+        # S9-W4 H-ARC-01: re-attach an existing candidate across daemon
+        # restart. The prior implementation lost the candidate_id on
+        # process exit — a 6-hour shadow test that had persisted a
+        # candidate an hour in would restart the observation window
+        # from zero on the next boot, extending the test indefinitely.
+        # Observations themselves do NOT survive restart (they live
+        # only in ``ShadowTest._active/_candidate`` lists and would
+        # require a new schema to persist durably); re-attaching the
+        # candidate_id is the minimum that keeps the A/B loop from
+        # silently stalling.
+        self._reattach_existing_candidate()
+
+    def _reattach_existing_candidate(self) -> None:
+        """H-ARC-01: look up any ``is_candidate=1`` row for this profile
+        and restore ``self._candidate_id`` + a fresh ``ShadowTest``.
+
+        Fail-soft — on any DB error we leave the router empty and the
+        normal lazy-init path takes over as candidates land.
+        """
+        try:
+            import sqlite3 as _sq
+            conn = _sq.connect(self._learning_db, timeout=2.0)
+            try:
+                row = conn.execute(
+                    "SELECT id FROM learning_model_state "
+                    "WHERE profile_id = ? AND is_candidate = 1 "
+                    "LIMIT 1",
+                    (self._profile_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            return  # learning.db or table missing — normal cold start.
+        if row and row[0] is not None:
+            cid = int(row[0])
+            self._candidate_id = cid
+            # Pass learning_db so ShadowTest reloads persisted paired
+            # observations from ``shadow_observations`` (M012).
+            self._shadow = ShadowTest(
+                profile_id=self._profile_id,
+                candidate_model_id=str(cid),
+                learning_db=self._learning_db,
+            )
 
     # ------------------------------------------------------------------
     # Routing
@@ -89,13 +144,14 @@ class ShadowRouter:
         Deterministic per ``(install_token, query_id)`` — survives
         daemon restart. Install-token dependence closes the
         attacker-picks-query-id bias vector (skeptic H-02).
+
+        S9-SKEP-11: uses ``self._routing_token`` (pinned at router
+        init) instead of a fresh ``ensure_install_token()`` per call,
+        so mid-test token rotation does not silently flip the arm of
+        every subsequent qid and mix the paired-t arms.
         """
-        try:
-            token = ensure_install_token()
-        except Exception:  # pragma: no cover — defensive
-            token = ""
         digest = hashlib.sha256(
-            (token + str(query_id)).encode("utf-8"),
+            (self._routing_token + str(query_id)).encode("utf-8"),
         ).hexdigest()[:8]
         return ARM_CANDIDATE if int(digest, 16) % 2 == 1 else ARM_BASELINE
 
@@ -108,9 +164,12 @@ class ShadowRouter:
         Creates a new ``ShadowTest`` to collect paired recall results.
         """
         self._candidate_id = int(candidate_id)
+        # Pass learning_db so new paired observations persist to
+        # ``shadow_observations`` (M012) for restart durability.
         self._shadow = ShadowTest(
             profile_id=self._profile_id,
             candidate_model_id=str(candidate_id),
+            learning_db=self._learning_db,
         )
 
     # ------------------------------------------------------------------

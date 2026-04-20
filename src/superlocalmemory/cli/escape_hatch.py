@@ -190,10 +190,31 @@ def cmd_benchmark(args: Namespace) -> None:
           f"(gate: {'STABLE' if cmp.get('passes_10pct_gate') else 'DRAFT'})")
 
 
+def cmd_rotate_token(args: Namespace) -> None:
+    """S-M07: rotate the install token.
+
+    Prints the new token's last-4 suffix for operator audit + a line
+    reminding the user to restart the daemon so HMAC marker caches
+    converge on the new token.
+    """
+    from superlocalmemory.core.security_primitives import rotate_install_token
+    old, new = rotate_install_token()
+    if not new:
+        print("install-token rotation failed (check permissions on "
+              "~/.superlocalmemory/.install_token)")
+        return
+    old_tail = old[-4:] if old else "(absent)"
+    new_tail = new[-4:]
+    print(f"install-token rotated: ...{old_tail} -> ...{new_tail}")
+    print("NOTE: restart the daemon so HMAC marker caches pick up "
+          "the new token (run: slm restart).")
+
+
 __all__ = (
     "cmd_disable",
     "cmd_enable",
     "cmd_clear_cache",
     "cmd_reconfigure",
     "cmd_benchmark",
+    "cmd_rotate_token",
 )

@@ -257,7 +257,7 @@ def ensure_profile_in_json(name: str, description: str = "") -> None:
         profiles[name] = {
             'name': name,
             'description': description or f'Memory profile: {name}',
-            'created_at': datetime.now().isoformat(),
+            'created_at': datetime.now(timezone.utc).isoformat(),
             'last_used': None,
         }
         config['profiles'] = profiles

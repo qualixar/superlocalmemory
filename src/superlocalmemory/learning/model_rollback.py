@@ -116,14 +116,39 @@ class ModelRollback:
             return False
         current = sum(self._observations) / len(self._observations)
         drop_abs = self._baseline - current
-        if self._baseline >= _BASELINE_RATIO_FLOOR:
-            # Ratio path — existing semantics.
-            drop_ratio = drop_abs / self._baseline
-            return drop_ratio >= self.REGRESSION_THRESHOLD
-        # Absolute path — works for zero, negative, or tiny positive
-        # baselines. Previously this branch returned False unconditionally
-        # (silent disarm). Now we fall back to the absolute drop.
-        return drop_abs >= self.REGRESSION_THRESHOLD
+        # S9-SKEP-10: smooth the ratio/absolute boundary.
+        #
+        # Before this fix there was a step discontinuity at
+        # ``baseline == _BASELINE_RATIO_FLOOR`` (0.05):
+        #   * baseline=0.049 → abs path fires at drop≥0.02
+        #   * baseline=0.050 → ratio path fires at drop≥0.001 (0.02*0.05)
+        # So a 0.001 baseline drift produced a 20× sensitivity change,
+        # and new-user profiles near 0.05 oscillated between "never
+        # rollback" and "rollback on any noise". We now linearly blend
+        # the two thresholds across a ±`_BLEND_BAND` neighbourhood
+        # around the floor, so the derivative of the threshold with
+        # respect to baseline stays bounded.
+        #
+        # Asymptotic equivalence:
+        #   baseline ≥ floor + band  → pure ratio (prior behaviour).
+        #   baseline ≤ floor - band  → pure absolute (prior behaviour).
+        _BLEND_BAND = 0.02
+        hi = _BASELINE_RATIO_FLOOR + _BLEND_BAND
+        lo = max(0.0, _BASELINE_RATIO_FLOOR - _BLEND_BAND)
+        # The "drop needed to fire" in each regime.
+        #   ratio regime: drop ≥ baseline * REGRESSION_THRESHOLD
+        #   abs regime:   drop ≥ REGRESSION_THRESHOLD
+        ratio_drop = self._baseline * self.REGRESSION_THRESHOLD
+        abs_drop = self.REGRESSION_THRESHOLD
+        if self._baseline >= hi:
+            needed = ratio_drop
+        elif self._baseline <= lo:
+            needed = abs_drop
+        else:
+            # Linear blend — at baseline=lo weight=0, at baseline=hi weight=1.
+            weight = (self._baseline - lo) / (hi - lo)
+            needed = weight * ratio_drop + (1.0 - weight) * abs_drop
+        return drop_abs >= needed
 
     # ------------------------------------------------------------------
     # Lineage flip

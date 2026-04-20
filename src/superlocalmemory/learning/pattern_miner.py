@@ -223,21 +223,42 @@ def _mine_entity_preferences(
         pass
 
     gen = 0
+    # S9-DASH-01: skip entity IDs that don't resolve to a canonical name.
+    # Previously the fallback ``entity_names.get(entity, entity)`` leaked
+    # raw hex entity_ids (e.g. ``ea701bf01f1ff4df8``) into the dashboard
+    # as "preferences". We now (1) require a resolved readable name and
+    # (2) defensively drop pure-hex strings that somehow slip through
+    # (16-17 hex chars — the canonical_entities primary-key shape).
+    _HEX_ID_RE = re.compile(r"^[0-9a-f]{15,20}$")
     for entity, count in entity_counts.most_common(15):
-        if count >= 3 and not dry_run:
-            readable = entity_names.get(entity, entity)
-            confidence = min(1.0, count / max(len(facts) * 0.05, 10))
-            store.record_pattern(
-                profile_id=profile_id,
-                pattern_type="entity_preferences",
-                data={"topic": readable,
-                      "pattern_key": f"entity:{readable}",
-                      "value": readable, "evidence": count,
-                      "source": "entity_frequency"},
-                success_rate=confidence,
-                confidence=confidence,
+        if count < 3 or dry_run:
+            continue
+        readable = entity_names.get(entity)
+        if not readable:
+            logger.debug(
+                "_mine_entity_preferences: skipping orphan entity_id=%r "
+                "(count=%d) — no row in canonical_entities",
+                entity, count,
             )
-            gen += 1
+            continue
+        if _HEX_ID_RE.match(readable):
+            logger.debug(
+                "_mine_entity_preferences: skipping hex-shaped name=%r "
+                "— likely an entity_id stored as name", readable,
+            )
+            continue
+        confidence = min(1.0, count / max(len(facts) * 0.05, 10))
+        store.record_pattern(
+            profile_id=profile_id,
+            pattern_type="entity_preferences",
+            data={"topic": readable,
+                  "pattern_key": f"entity:{readable}",
+                  "value": readable, "evidence": count,
+                  "source": "entity_frequency"},
+            success_rate=confidence,
+            confidence=confidence,
+        )
+        gen += 1
     return gen
 
 

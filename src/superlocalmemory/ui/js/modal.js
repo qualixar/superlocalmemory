@@ -215,10 +215,80 @@ function openMemoryDetail(mem, source) {
         };
         actionsDiv.appendChild(editBtn);
 
-        // Delete button — always available
+        // S9-DASH-08: Forget (soft-archive) — non-destructive; row stays
+        // in atomic_facts with archive_status='archived' and gets a
+        // payload copy in memory_archive for future restore.
+        var forgetBtn = document.createElement('button');
+        forgetBtn.className = 'btn btn-outline-warning btn-sm';
+        forgetBtn.innerHTML = '<i class="bi bi-archive"></i> Forget';
+        forgetBtn.title = 'Archive this memory — hidden from recall but recoverable';
+        forgetBtn.onclick = function() {
+            if (!confirm('Forget this memory? It will be archived '
+                + '(hidden from recall but recoverable).')) return;
+            forgetBtn.disabled = true;
+            fetch('/api/memories/' + encodeURIComponent(mem.id) + '/forget',
+                {method: 'POST'})
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.success) {
+                        modal.hide();
+                        if (typeof showToast === 'function') {
+                            showToast('Memory archived');
+                        }
+                        if (typeof loadMemories === 'function') {
+                            setTimeout(loadMemories, 300);
+                        }
+                    } else {
+                        forgetBtn.disabled = false;
+                    }
+                }).catch(function() { forgetBtn.disabled = false; });
+        };
+        actionsDiv.appendChild(forgetBtn);
+
+        // S9-DASH-08: Merge — this fact is a duplicate of another;
+        // keep the target, archive this one. Writes memory_merge_log.
+        var mergeBtn = document.createElement('button');
+        mergeBtn.className = 'btn btn-outline-info btn-sm';
+        mergeBtn.innerHTML = '<i class="bi bi-union"></i> Merge into...';
+        mergeBtn.title = 'Mark this as a duplicate of another fact';
+        mergeBtn.onclick = function() {
+            var target = prompt(
+                'Merge this memory INTO which fact_id?\n\n'
+                + '(Paste the target fact_id — this memory will be '
+                + 'archived and audit-logged to memory_merge_log.)'
+            );
+            if (!target || !target.trim()) return;
+            mergeBtn.disabled = true;
+            fetch('/api/memories/' + encodeURIComponent(mem.id) + '/merge', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({into: target.trim()}),
+            }).then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.success) {
+                    modal.hide();
+                    if (typeof showToast === 'function') {
+                        showToast('Merged into ' + d.into);
+                    }
+                    if (typeof loadMemories === 'function') {
+                        setTimeout(loadMemories, 300);
+                    }
+                } else {
+                    mergeBtn.disabled = false;
+                    if (typeof showToast === 'function') {
+                        showToast('Merge failed: '
+                            + (d && (d.error || d.detail) || 'unknown'));
+                    }
+                }
+            }).catch(function() { mergeBtn.disabled = false; });
+        };
+        actionsDiv.appendChild(mergeBtn);
+
+        // Delete button — always available (hard delete, irreversible)
         var deleteBtn = document.createElement('button');
         deleteBtn.className = 'btn btn-outline-danger btn-sm';
         deleteBtn.innerHTML = '<i class="bi bi-trash"></i> Delete';
+        deleteBtn.title = 'Permanently delete (cannot be undone) — prefer Forget';
         deleteBtn.onclick = function() {
             if (!confirm('Delete this memory? This cannot be undone.')) return;
             fetch('/api/memories/' + encodeURIComponent(mem.id), {method: 'DELETE'})

@@ -52,8 +52,8 @@
     "test": "echo \"Run: npm install -g . && slm status\" && exit 0"
   },
   "engines": {
-    "node": ">=14.0.0",
-    "npm": ">=6.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   },
   "os": [
     "darwin",
@@ -65,6 +65,7 @@
     "src/",
     "ide/",
     "scripts/",
+    "skills/",
     "pyproject.toml",
     "README.md",
     "LICENSE",

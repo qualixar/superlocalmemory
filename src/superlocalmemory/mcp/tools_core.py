@@ -164,14 +164,65 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
-    async def recall(query: str, limit: int = 10, agent_id: str = "mcp_client") -> dict:
-        """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking."""
+    async def recall(
+        query: str, limit: int = 10, agent_id: str = "mcp_client",
+        session_id: str = "",
+    ) -> dict:
+        """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking.
+
+        S9-DASH-02: optional ``session_id`` threads through to the
+        engine's outcome-queue so PostToolUse / Stop hooks can attach
+        engagement signals to this recall. Claude Code should pass its
+        ``CLAUDE_SESSION_ID``. Omitting it degrades to "no closed-loop
+        learning for this recall" — the recall itself always works.
+        """
         import asyncio
         try:
             from superlocalmemory.core.worker_pool import WorkerPool
             pool = WorkerPool.shared()
+            # S9-DASH-10: priority for session_id, so engagement
+            # signals land on the right pending_outcome:
+            #   1. Explicit ``session_id`` tool-call argument.
+            #   2. ``SLM_SESSION_ID`` / ``CLAUDE_SESSION_ID`` env var.
+            #   3. Most-recent-active Claude session from the hook
+            #      registry (last 60s). This catches the common case
+            #      where Claude Code's hooks ran the UserPromptSubmit
+            #      hook right before invoking the MCP tool.
+            #   4. Stable per-agent fallback ``mcp:<agent_id>`` — the
+            #      Stop hook will NOT match this, so the reaper
+            #      settles it at neutral 0.5.
+            effective_sid = session_id
+            if not effective_sid:
+                import os as _os
+                effective_sid = (
+                    _os.environ.get("SLM_SESSION_ID")
+                    or _os.environ.get("CLAUDE_SESSION_ID")
+                    or ""
+                )
+            if not effective_sid:
+                try:
+                    from superlocalmemory.hooks.session_registry import (
+                        lookup_by_parent,
+                        most_recent_active,
+                    )
+                    # Parent-PID lookup is collision-free across multiple
+                    # parallel Claude sessions (each MCP server's parent
+                    # is the IDE that spawned it).
+                    effective_sid = (
+                        lookup_by_parent(within_seconds=60)
+                        or most_recent_active(
+                            agent_type="claude", within_seconds=60,
+                        )
+                        or ""
+                    )
+                except Exception:
+                    pass
+            if not effective_sid:
+                effective_sid = f"mcp:{agent_id}"
             # V3.3.19: Run in thread pool to avoid blocking MCP event loop
-            result = await asyncio.to_thread(pool.recall, query, limit=limit)
+            result = await asyncio.to_thread(
+                pool.recall, query, limit=limit, session_id=effective_sid,
+            )
             if result.get("ok"):
                 # Record implicit feedback: every returned result is a recall_hit
                 try:

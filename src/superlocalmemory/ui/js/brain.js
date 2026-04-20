@@ -338,10 +338,27 @@
   // --------------------------------------------------------------------
   // Card: Legacy migration (only shows when there are un-migrated rows)
   // --------------------------------------------------------------------
+  // S9-DASH-03: read a persistent dismissal flag so the card stops
+  // nagging once the migration endpoint has reported ``already_done``.
+  // Previously this card showed forever while ``pending > 0``, even
+  // when the 20 remaining rows were permanently un-migratable stubs
+  // (malformed / duplicate). The dismissal is keyed to a migration
+  // version so a future re-run with a new sentinel still surfaces.
+  function _getMigrationDismissed() {
+    try {
+      return window.localStorage.getItem('slm_migrate_legacy_done') === '1';
+    } catch (e) { return false; }
+  }
+  function _setMigrationDismissed() {
+    try { window.localStorage.setItem('slm_migrate_legacy_done', '1'); }
+    catch (e) { /* ignore quota / privacy-mode */ }
+  }
+
   function cardLegacyMigration(l) {
     const data = l || {};
     const pending = data.legacy_migration_pending || 0;
     if (pending <= 0) return null;   // nothing to show when everything migrated
+    if (_getMigrationDismissed()) return null;  // user completed it already
 
     const wrap = EL('section', {className: 'brain-section brain-migration'});
     wrap.appendChild(EL('h4', {text: 'Historic data — ready to migrate'}));
@@ -369,15 +386,29 @@
       status.textContent = 'Migrating…';
       try {
         const r = await postMigrateLegacy();
+        const copied = (r && r.copied != null) ? r.copied : 0;
         if (r && r.already_done) {
-          status.textContent = 'Already migrated.';
+          // The migration previously completed; remaining rows are
+          // structurally un-migratable. Dismiss the card permanently
+          // so we don't nag on every page load.
+          status.textContent = 'Already migrated. ' + pending
+            + ' rows could not be copied (malformed) — skipping.';
+          _setMigrationDismissed();
         } else if (r && r.success !== false) {
-          const copied = (r.copied != null) ? r.copied : 0;
           status.textContent = 'Migrated ' + copied + ' rows. '
             + 'Reloading…';
+          // Also dismiss in case this run left a residual pending
+          // count that won't clear (e.g. sentinel written but a
+          // handful of rows failed per-row).
+          if (copied === 0) _setMigrationDismissed();
         } else {
           status.textContent = (r && r.error) || 'Migration failed.';
+          // Only re-enable on explicit failure so the user can retry.
+          btn.removeAttribute('disabled');
         }
+        // Reload after a short delay so the refreshed brain state
+        // re-evaluates the card visibility. When dismissed, the card
+        // will not re-render at all.
         setTimeout(loadBrain, 1000);
       } catch (e) {
         btn.removeAttribute('disabled');
@@ -599,11 +630,63 @@
       for (let i = 0; i < Math.min(patterns.length, 10); i += 1) {
         const p = patterns[i];
         const rate = Math.round(Number(p.success_rate || 0) * 100);
-        list.appendChild(EL('li', {
+        const li = EL('li');
+        li.appendChild(EL('span', {
           text: String(p.pattern_type || 'pattern') + ': '
             + String(p.pattern_key || '—') + '  ·  '
-            + rate + '%  ·  ' + (p.evidence_count || 0) + ' evidence',
+            + rate + '%  ·  ' + (p.evidence_count || 0) + ' evidence  ',
         }));
+        // S9-DASH-04: delete button — one click kills a wrong pattern.
+        const del = EL('button', {
+          type: 'button',
+          className: 'brain-pattern-del',
+          text: '✕',
+          title: 'Delete this pattern',
+          style: 'margin-left:6px; font-size:11px; cursor:pointer; '
+            + 'background:transparent; border:1px solid #555; '
+            + 'color:#c88; border-radius:3px; padding:0 5px;',
+        });
+        del.addEventListener('click', async () => {
+          del.classList.add('slm-anim-click');
+          setTimeout(() => del.classList.remove('slm-anim-click'), 200);
+          del.setAttribute('disabled', 'disabled');
+          del.classList.add('slm-anim-spin');
+          del.textContent = '';
+          try {
+            const resp = await fetch('/api/patterns/delete', {
+              method: 'DELETE',
+              headers: {'Content-Type': 'application/json'},
+              credentials: 'same-origin',
+              body: JSON.stringify({
+                pattern_type: p.pattern_type || '',
+                pattern_key: p.pattern_key || '',
+              }),
+            });
+            const r = await resp.json();
+            del.classList.remove('slm-anim-spin');
+            if (r && r.success) {
+              li.classList.add('slm-anim-success');
+              setTimeout(() => {
+                li.style.opacity = '0.35';
+                li.style.textDecoration = 'line-through';
+              }, 400);
+              del.textContent = '✓';
+            } else {
+              li.classList.add('slm-anim-fail');
+              setTimeout(() => li.classList.remove('slm-anim-fail'), 700);
+              del.textContent = '✕';
+              del.removeAttribute('disabled');
+            }
+          } catch (e) {
+            del.classList.remove('slm-anim-spin');
+            li.classList.add('slm-anim-fail');
+            setTimeout(() => li.classList.remove('slm-anim-fail'), 700);
+            del.textContent = '✕';
+            del.removeAttribute('disabled');
+          }
+        });
+        li.appendChild(del);
+        list.appendChild(li);
       }
       wrap.appendChild(list);
     }
@@ -715,14 +798,33 @@
       context: context ? context.value : '',
     };
 
+    const submitBtn = form.querySelector('.brain-form-submit');
+    if (submitBtn) {
+      submitBtn.classList.add('slm-anim-click');
+      setTimeout(() => submitBtn.classList.remove('slm-anim-click'), 200);
+      submitBtn.setAttribute('disabled', 'disabled');
+      submitBtn.classList.add('slm-anim-spin');
+    }
     if (status) status.textContent = 'Reporting…';
     try {
       await postReportOutcome(body);
+      if (submitBtn) {
+        submitBtn.classList.remove('slm-anim-spin');
+        submitBtn.removeAttribute('disabled');
+      }
+      form.classList.add('slm-anim-success');
+      setTimeout(() => form.classList.remove('slm-anim-success'), 900);
       if (status) status.textContent = 'Recorded. Thanks — I will learn from this.';
       form.reset();
       // Refresh the Brain so the outcome tiles update immediately.
       setTimeout(loadBrain, 600);
     } catch (e) {
+      if (submitBtn) {
+        submitBtn.classList.remove('slm-anim-spin');
+        submitBtn.removeAttribute('disabled');
+      }
+      form.classList.add('slm-anim-fail');
+      setTimeout(() => form.classList.remove('slm-anim-fail'), 700);
       if (status) {
         status.textContent = 'Could not record right now — try again.';
       }
@@ -1018,11 +1120,128 @@
     nodes.push(cardPreferences(b.preferences));
     nodes.push(cardBehavioralOutcomes(behavioral));
     nodes.push(cardReportOutcome());
+    // S9-DASH-05: live closed-loop tiles — reward, shadow test,
+    // evolution cost. Data already exposed via /api/v3/brain; we only
+    // needed to render it.
+    const rewardCard = cardRewardPreview(b.reward_preview);
+    if (rewardCard) nodes.push(rewardCard);
+    const shadowCard = cardShadowPreview(b.shadow_preview);
+    if (shadowCard) nodes.push(shadowCard);
+    const evoCostCard = cardEvolutionCostPreview(b.evolution_cost_preview);
+    if (evoCostCard) nodes.push(evoCostCard);
+    const oqCard = cardOutcomeQueue(b.outcome_queue);
+    if (oqCard) nodes.push(oqCard);
     nodes.push(cardCrossPlatform(b.cross_platform));
     nodes.push(cardCache(b.cache));
     nodes.push(cardEvolution(b.evolution_preview));
     nodes.push(cardDangerZone());
     return nodes;
+  }
+
+  // --------------------------------------------------------------------
+  // S9-DASH-05: live closed-loop tiles
+  // --------------------------------------------------------------------
+  function cardRewardPreview(rp) {
+    if (!rp) return null;
+    const wrap = EL('section', {className: 'brain-section'});
+    wrap.appendChild(EL('h4', {text: 'Reward signal (last 24h)'}));
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: 'Settled outcomes landing in action_outcomes — the labels '
+        + 'your LightGBM ranker trains on. Neutral (0.5) is the '
+        + 'reaper default when no hook signals accumulated.',
+    }));
+    const grid = EL('div', {className: 'brain-kv-grid'});
+    grid.appendChild(kv('Rows (24h)', String(rp.rows_24h || 0)));
+    grid.appendChild(kv('Mean reward', Number(rp.mean_reward_24h || 0).toFixed(3)));
+    wrap.appendChild(grid);
+    wrap.appendChild(badge(rp.is_real ? 'real' : 'stub', rp.source || ''));
+    return wrap;
+  }
+
+  function cardShadowPreview(sp) {
+    if (!sp) return null;
+    const wrap = EL('section', {className: 'brain-section'});
+    wrap.appendChild(EL('h4', {text: 'Shadow A/B test'}));
+    const hasCandidate = sp.active_candidate_id !== null
+      && sp.active_candidate_id !== undefined;
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: hasCandidate
+        ? 'A candidate ranker is being evaluated against the active '
+          + 'model. Paired NDCG@10 observations accumulate until Phase '
+          + 'A strong-stop (n=100) or Phase B full validation (n=885).'
+        : 'No candidate in flight. Next retrain will fire when drift '
+          + 'is detected or on the 6-hour cadence.',
+    }));
+    const grid = EL('div', {className: 'brain-kv-grid'});
+    grid.appendChild(kv(
+      'Candidate id',
+      hasCandidate ? String(sp.active_candidate_id) : 'none',
+    ));
+    grid.appendChild(kv(
+      'Paired observations', String(sp.paired_observations || 0),
+    ));
+    grid.appendChild(kv(
+      'Rollbacks (90d)', String(sp.rollback_count_90d || 0),
+    ));
+    wrap.appendChild(grid);
+    wrap.appendChild(badge(sp.is_real ? 'real' : 'stub', sp.source || ''));
+    return wrap;
+  }
+
+  function cardEvolutionCostPreview(ec) {
+    if (!ec) return null;
+    const wrap = EL('section', {className: 'brain-section'});
+    wrap.appendChild(EL('h4', {text: 'Evolution LLM cost (7d)'}));
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: 'Skill-evolver LLM spend. Mode A never calls an LLM here; '
+        + 'Mode B uses Ollama (no cost); Mode C may spend API tokens.',
+    }));
+    const grid = EL('div', {className: 'brain-kv-grid'});
+    grid.appendChild(kv('Calls (7d)', String(ec.calls_7d || 0)));
+    grid.appendChild(kv('Cost (USD)', '$' + Number(ec.cost_usd_7d || 0).toFixed(4)));
+    grid.appendChild(kv('Tokens in', String(ec.tokens_in_7d || 0)));
+    grid.appendChild(kv('Tokens out', String(ec.tokens_out_7d || 0)));
+    wrap.appendChild(grid);
+    wrap.appendChild(badge(ec.is_real ? 'real' : 'stub', ec.source || ''));
+    return wrap;
+  }
+
+  function cardOutcomeQueue(oq) {
+    if (!oq) return null;
+    const wrap = EL('section', {className: 'brain-section'});
+    wrap.appendChild(EL('h4', {text: 'Outcome queue (producer health)'}));
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: 'Non-blocking background pipeline that turns every recall '
+        + 'into a pending_outcome for the closed-loop learning. Drops '
+        + 'and failures are always zero on a healthy install.',
+    }));
+    const counters = oq.counters || {};
+    const grid = EL('div', {className: 'brain-kv-grid'});
+    grid.appendChild(kv('Queue depth', String(oq.queue_depth || 0)));
+    grid.appendChild(kv('Pending now', String(oq.pending_outcomes_now || 0)));
+    grid.appendChild(kv('Enqueued', String(counters.recall_enqueued || 0)));
+    grid.appendChild(kv('Persisted', String(counters.recall_persisted || 0)));
+    grid.appendChild(kv('Reaped (TTL)', String(counters.recall_reaped || 0)));
+    grid.appendChild(kv('Drops', String(counters.recall_dropped_queue_full || 0)));
+    grid.appendChild(kv('Persist fails', String(counters.recall_persist_failed || 0)));
+    wrap.appendChild(grid);
+    wrap.appendChild(badge(oq.is_real ? 'real' : 'stub', oq.source || ''));
+    return wrap;
+  }
+
+  function kv(label, value) {
+    const cell = EL('div', {className: 'brain-kv'});
+    cell.appendChild(EL('div', {
+      className: 'brain-kv-label', text: label,
+    }));
+    cell.appendChild(EL('div', {
+      className: 'brain-kv-value', text: value,
+    }));
+    return cell;
   }
 
   function renderError(err) {

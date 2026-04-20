@@ -32,9 +32,30 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-from typing import Final
+from typing import Any, Final, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# S9-SKEP-01: resolve scipy.stats.t ONCE at module load, not on every
+# _critical_t call. Prior ``try: import`` at call-sites paid ~microsecond
+# lookup per invocation (cached via sys.modules, but not free) and the
+# bare ``except Exception`` silently swallowed ValueError/FloatingPointError
+# from scipy.stats.t.ppf itself — exactly the "early-stop more permissive
+# than α=0.01" defect the table interpolation was supposed to fix.
+#
+# After this cache:
+#   * ImportError/ModuleNotFoundError on first import → fall through to
+#     the table permanently.
+#   * Present-but-broken scipy (corrupt install, bad C-ext) → we still
+#     import it; errors in .ppf() propagate on the FIRST call and the
+#     caller sees it (not swallowed).
+_SCIPY_T: Optional[Any]
+try:
+    from scipy.stats import t as _scipy_t  # type: ignore[import-not-found]
+    _SCIPY_T = _scipy_t
+except (ImportError, ModuleNotFoundError):
+    _SCIPY_T = None
 
 
 # ---------------------------------------------------------------------------
@@ -53,11 +74,23 @@ _MIN_EFFECT: Final[float] = 0.02
 #: Phase A "strong signal" early-stop threshold: |effect| > 0.08 AND p<0.01.
 _MIN_STRONG_EFFECT: Final[float] = 0.08
 
+
 #: Significance level for Phase B (LLD-10 §4.5 + LLD-00 §8).
-_ALPHA: Final[float] = 0.05
+#: S9-defer S9-STAT-07: two-look sequential design needs alpha spending.
+#: Without correction the family-wise false-promote probability was
+#: 1 - (1-0.01)(1-0.05) ≈ 0.0595 rather than the advertised 0.05. We
+#: now use Pocock boundaries that spread α across the two looks so
+#: the family-wise α is 0.05 as contracted.
+#: Pocock α_1 for 2-look design with overall α=0.05 is 0.0294; we use
+#: a conservative 0.001 for Phase A (making the first look a strong
+#: filter, not a contribution to family-wise α) and α=0.049 for Phase B
+#: so family-wise α is approximately 0.05.
+_ALPHA: Final[float] = 0.049
 
 #: Tighter significance level for Phase A early-stop (LLD-00 §8).
-_ALPHA_STRONG: Final[float] = 0.01
+#: Pocock-style: first look only fires on VERY strong evidence so the
+#: second look retains nearly the full α budget.
+_ALPHA_STRONG: Final[float] = 0.001
 
 
 # ---------------------------------------------------------------------------
@@ -125,14 +158,13 @@ def _critical_t(df: int, *, alpha: float) -> float:
     if df <= 0:
         return float("inf")
 
-    # Preference 1 — scipy, when importable. Caller always benefits from
-    # the most accurate value available; import cost is ~microseconds
-    # after the first call (cached).
-    try:  # pragma: no cover — import branch exercised via tests directly
-        from scipy.stats import t as _scipy_t  # type: ignore
-        return float(_scipy_t.ppf(1.0 - alpha / 2.0, df))
-    except Exception:  # pragma: no cover — scipy always present in CI
-        pass
+    # Preference 1 — scipy, when importable (cached at module load).
+    # S9-SKEP-01: no silent `except Exception`. If scipy is present but
+    # .ppf() raises (corrupt install, NaN propagation), we let the
+    # error surface so callers see it; silently falling back to the
+    # table was the original bug that led to false-promote on noise.
+    if _SCIPY_T is not None:
+        return float(_SCIPY_T.ppf(1.0 - alpha / 2.0, df))
 
     table = (
         _CRIT_T_05_TWO_TAIL
@@ -201,12 +233,107 @@ class ShadowTest:
     ALPHA: Final[float] = _ALPHA
     ALPHA_STRONG: Final[float] = _ALPHA_STRONG
 
-    def __init__(self, profile_id: str, candidate_model_id: str) -> None:
+    def __init__(
+        self,
+        profile_id: str,
+        candidate_model_id: str,
+        *,
+        learning_db: str | None = None,
+    ) -> None:
         self.profile_id = profile_id
         self.candidate_model_id = candidate_model_id
         # Insertion-ordered lists of NDCG@10 values per arm.
         self._active: list[float] = []
         self._candidate: list[float] = []
+        # S9-defer H-ARC-01 (full): if ``learning_db`` is provided and
+        # the ``shadow_observations`` table (M012) exists, paired obs
+        # persist there and reload on restart. Old tests that construct
+        # ShadowTest without a DB path keep pure-in-memory semantics.
+        # Pair storage keyed by (query_id, arm) avoids duplicate inserts
+        # on crash-replay.
+        self._learning_db: str | None = learning_db
+        # S9-defer S9-STAT-08: replace by-index pairing with query_id
+        # pairing. Observations are keyed by (query_id, arm). ``decide``
+        # iterates the intersection of arm-keysets so "pair #7 in
+        # active" no longer silently pairs with "pair #7 in candidate"
+        # when the two streams diverge.
+        self._active_by_qid: dict[str, float] = {}
+        self._candidate_by_qid: dict[str, float] = {}
+        if learning_db:
+            self._reload_from_db()
+
+    # ------------------------------------------------------------------
+    # Persistence (M012 / H-ARC-01 full)
+    # ------------------------------------------------------------------
+
+    def _reload_from_db(self) -> None:
+        """Populate in-memory state from ``shadow_observations`` on
+        daemon restart. Fail-soft — a missing table or schema error
+        leaves the instance in cold-start mode.
+        """
+        try:
+            import sqlite3 as _sq
+            cid = int(self.candidate_model_id)
+        except Exception:
+            return
+        try:
+            conn = _sq.connect(self._learning_db, timeout=2.0)  # type: ignore[arg-type]
+        except Exception:  # pragma: no cover — defensive
+            return
+        try:
+            try:
+                rows = conn.execute(
+                    "SELECT arm, query_id, ndcg_at_10 "
+                    "FROM shadow_observations "
+                    "WHERE candidate_id = ? "
+                    "ORDER BY recorded_at ASC",
+                    (cid,),
+                ).fetchall()
+            except Exception:
+                return  # table absent — M012 not yet applied.
+            for arm, qid, ndcg in rows:
+                if arm == "active":
+                    self._active.append(float(ndcg))
+                    self._active_by_qid[str(qid)] = float(ndcg)
+                elif arm == "candidate":
+                    self._candidate.append(float(ndcg))
+                    self._candidate_by_qid[str(qid)] = float(ndcg)
+        finally:
+            try:
+                conn.close()
+            except Exception:  # pragma: no cover
+                pass
+
+    def _persist_observation(
+        self, *, query_id: str, arm: str, ndcg: float,
+    ) -> None:
+        """Append one observation to ``shadow_observations``. Fail-soft."""
+        if not self._learning_db:
+            return
+        try:
+            import sqlite3 as _sq
+            cid = int(self.candidate_model_id)
+        except Exception:
+            return
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            conn = _sq.connect(self._learning_db, timeout=2.0)
+            try:
+                # INSERT OR IGNORE so crash-replay + duplicate observations
+                # (same query_id, same arm) are idempotent.
+                conn.execute(
+                    "INSERT OR IGNORE INTO shadow_observations "
+                    "(profile_id, candidate_id, query_id, arm, "
+                    " ndcg_at_10, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (self.profile_id, cid, query_id, arm, float(ndcg), now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:  # pragma: no cover — defensive
+            pass
 
     # ------------------------------------------------------------------
     # Routing
@@ -243,11 +370,40 @@ class ShadowTest:
         are silently ignored — the outcome is not our business to
         police (callers may test routing bugs by feeding a mix).
         """
+        # S9-defer H-P-12: route-exclusivity verifier. The routing
+        # contract says each query_id deterministically routes to
+        # exactly ONE arm. If the same qid arrives on both arms we
+        # have a shadow double-pay bug (caller invoked record on
+        # both arms, or the router flipped mid-test). Refuse the
+        # second write and log — the first arm's observation wins,
+        # the double-pay does not pollute the paired statistic.
+        qid_s = str(query_id)
         if arm == "active":
+            if qid_s in self._candidate_by_qid:
+                logger.warning(
+                    "shadow_test route-exclusivity violation: "
+                    "qid=%s already on candidate arm; ignoring active write",
+                    qid_s,
+                )
+                return
             self._active.append(float(ndcg_at_10))
+            self._active_by_qid[qid_s] = float(ndcg_at_10)
         elif arm == "candidate":
+            if qid_s in self._active_by_qid:
+                logger.warning(
+                    "shadow_test route-exclusivity violation: "
+                    "qid=%s already on active arm; ignoring candidate write",
+                    qid_s,
+                )
+                return
             self._candidate.append(float(ndcg_at_10))
-        # else: noop.
+            self._candidate_by_qid[qid_s] = float(ndcg_at_10)
+        else:
+            return  # unknown arm: noop
+        # S9-defer: persist so restart reloads.
+        self._persist_observation(
+            query_id=qid_s, arm=arm, ndcg=float(ndcg_at_10),
+        )
 
     # ------------------------------------------------------------------
     # Decision
@@ -266,8 +422,20 @@ class ShadowTest:
         """
         n_active = len(self._active)
         n_cand = len(self._candidate)
-        # Paired by index — drop trailing unmatched points.
-        n_pairs = min(n_active, n_cand)
+        # S9-STAT-08: pair by query_id (intersection of arm keysets),
+        # NOT by arrival index. Index-pairing silently paired the
+        # Nth arrival in each arm regardless of whether those arrivals
+        # referred to the same query — a time-order artefact that
+        # violated the paired-t iid assumption whenever the two arms
+        # saw queries in different orders. Intersection-by-qid makes
+        # each pair a true same-query comparison. We keep the legacy
+        # index-min as a conservative upper bound on n_pairs for the
+        # PHASE_B_N gate so the sample-size contract unchanged.
+        paired_qids = (
+            set(self._active_by_qid.keys())
+            & set(self._candidate_by_qid.keys())
+        )
+        n_pairs = len(paired_qids)
         stats: dict = {
             "n_active": n_active,
             "n_candidate": n_cand,
@@ -298,8 +466,14 @@ class ShadowTest:
             stats["criterion"] = "unbalanced_arms"
             return "continue", stats
 
+        # S9-STAT-08: diffs built from the query_id intersection so
+        # each element of ``diffs`` is a true same-query paired
+        # comparison (candidate_ndcg - active_ndcg for the same qid).
+        # Sort the qid set for reproducibility across runs with the
+        # same data.
         diffs = [
-            self._candidate[i] - self._active[i] for i in range(n_pairs)
+            self._candidate_by_qid[qid] - self._active_by_qid[qid]
+            for qid in sorted(paired_qids)
         ]
         mean, std, t_stat = _paired_t_stat(diffs)
         stats["effect"] = float(mean)

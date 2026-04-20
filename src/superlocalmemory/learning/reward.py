@@ -82,6 +82,13 @@ _VALID_SIGNALS: Final[frozenset[str]] = frozenset(
     {"dwell_ms", "requery", "edit", "cite"}
 )
 
+#: S9-SKEP-04: wall-clock/monotonic skew over which we disable TTL
+#: rejection for a single register_signal call. 60 s tolerates the
+#: typical GC pause / NTP slew; >60 s is a sleep/wake event or a
+#: manual clock adjustment, and we prefer accepting one stale signal
+#: over silently discarding a legitimate user's entire session.
+_MAX_CLOCK_SKEW_MS: Final[int] = 60_000
+
 
 # ---------------------------------------------------------------------------
 # Label formula (manifest A.1 verbatim — deterministic, stdlib-only)
@@ -209,6 +216,18 @@ class EngagementRewardModel:
         self._kill_switch: Callable[[], bool] = (
             kill_switch if kill_switch is not None else lambda: False
         )
+        # S9-SKEP-04: laptop sleep/wake advances wall-clock by tens of
+        # minutes while ``time.monotonic_ns`` freezes, so the previous
+        # wall-only TTL check silently rejected every pending outcome
+        # that pre-dated the sleep on the first post-wake signal. We
+        # track monotonic elapsed between register_signal calls and
+        # disable the TTL reject for the one call where the wall-clock
+        # jump exceeds ``_MAX_CLOCK_SKEW_MS`` beyond monotonic elapsed
+        # (typical user event: laptop lid closed for 10+ minutes).
+        # Per-object (not per-module) so concurrent profiles each get a
+        # clean skew window without one leaking into another.
+        self._last_wall_ms: int | None = None
+        self._last_monotonic_ns: int | None = None
         # Short critical sections only — operations hold this lock while
         # they drive a cached writer connection so we don't pay the
         # sqlite3.connect()+WAL fsync round-trip on every hot-path
@@ -366,7 +385,39 @@ class EngagementRewardModel:
                 # harmless in that direction).
                 if row["status"] == "pending":
                     expires = row["expires_at_ms"]
-                    if expires is not None and self._clock_ms() > int(expires):
+                    # S9-SKEP-04: only enforce TTL when wall-clock has
+                    # advanced in line with monotonic time. On laptop
+                    # sleep/wake the wall-clock jumps ahead by minutes
+                    # while monotonic freezes, so a skew > 60 s means
+                    # "user's machine was suspended" — accept this
+                    # signal rather than discard the user's entire
+                    # post-wake session.
+                    now_ms = self._clock_ms()
+                    now_monotonic_ns = time.monotonic_ns()
+                    skew_ok = True
+                    if (
+                        self._last_wall_ms is not None
+                        and self._last_monotonic_ns is not None
+                    ):
+                        wall_delta = now_ms - self._last_wall_ms
+                        mono_delta = (
+                            now_monotonic_ns - self._last_monotonic_ns
+                        ) // 1_000_000
+                        if wall_delta - mono_delta > _MAX_CLOCK_SKEW_MS:
+                            skew_ok = False
+                            logger.info(
+                                "register_signal: clock-skew detected "
+                                "(wall_delta=%dms mono_delta=%dms) — "
+                                "bypassing TTL for outcome=%s",
+                                wall_delta, mono_delta, outcome_id,
+                            )
+                    self._last_wall_ms = now_ms
+                    self._last_monotonic_ns = now_monotonic_ns
+                    if (
+                        skew_ok
+                        and expires is not None
+                        and now_ms > int(expires)
+                    ):
                         logger.debug(
                             "register_signal rejected expired outcome=%s "
                             "name=%s (now > expires_at_ms)",
@@ -387,6 +438,94 @@ class EngagementRewardModel:
         except sqlite3.Error as exc:  # pragma: no cover — defensive
             logger.debug("register_signal SQLite error: %s", exc)
             return False
+
+    # ------------------------------------------------------------------
+    # Hot-path helper (S9-W3 C6): match pending outcomes on the cached
+    # writer connection so the post_tool hook does not pay a second
+    # ``sqlite3.connect`` + fsync per invocation. Previously the hook
+    # opened ``open_memory_db()`` for the SELECT and then the
+    # ``EngagementRewardModel`` for the writes — two connects on the
+    # <20 ms budget. Now the hook creates one model, calls this
+    # helper for the read, and reuses the same conn for writes.
+    #
+    # H-SKEP-03 / H-ARC-H4: raise the pending-row window back to 50
+    # (v3.4.19 had 20; SEC-M2 tightened to 5 and silently dropped
+    # signals on heavy Claude Code sessions). Outer cap on the
+    # returned outcome_ids caps UPDATE amplification at 10 even if
+    # the window grows further.
+    # ------------------------------------------------------------------
+
+    #: Pending-row window. 50 is a defensible upper bound for heavy
+    #: tool-use sessions (30+ Reads + 10 recalls) while keeping
+    #: json_each's group-by under 1 ms on commodity laptops.
+    PENDING_MATCH_WINDOW: Final[int] = 50
+
+    #: Hard cap on how many outcome_ids the hot path will WRITE to in
+    #: a single invocation. Caps UPDATE amplification at fact_hits × 10.
+    PENDING_WRITE_CAP: Final[int] = 10
+
+    def match_pending_for_fact_ids(
+        self,
+        *,
+        session_id: str,
+        fact_ids: list[str] | tuple[str, ...],
+    ) -> list[str]:
+        """Return up to ``PENDING_WRITE_CAP`` outcome_ids whose
+        ``fact_ids_json`` intersects ``fact_ids`` for this session.
+
+        Uses the cached writer connection + SQLite JSON1; falls back
+        to the Python decode path if JSON1 is unavailable. Never
+        raises — returns ``[]`` on any error.
+        """
+        if not session_id or not fact_ids:
+            return []
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                rows = conn.execute(
+                    "SELECT outcome_id, fact_ids_json FROM pending_outcomes "
+                    "WHERE session_id = ? AND status = 'pending' "
+                    "ORDER BY created_at_ms DESC LIMIT ?",
+                    (session_id, int(self.PENDING_MATCH_WINDOW)),
+                ).fetchall()
+                if not rows:
+                    return []
+                oid_list = [r["outcome_id"] for r in rows]
+                oid_ph = ",".join("?" for _ in oid_list)
+                fid_ph = ",".join("?" for _ in fact_ids)
+                sql_json1 = (
+                    "SELECT DISTINCT po.outcome_id "
+                    "FROM pending_outcomes po, json_each(po.fact_ids_json) j "
+                    f"WHERE po.outcome_id IN ({oid_ph}) "
+                    f"  AND j.value IN ({fid_ph})"
+                )
+                try:
+                    hits = conn.execute(
+                        sql_json1, (*oid_list, *fact_ids),
+                    ).fetchall()
+                    matched = [r["outcome_id"] for r in hits]
+                except sqlite3.Error:
+                    # JSON1 unavailable — Python decode fallback on the
+                    # rows we already have in memory (no extra DB work).
+                    hit_set = set(fact_ids)
+                    matched = []
+                    for r in rows:
+                        try:
+                            facts = json.loads(r["fact_ids_json"])
+                        except Exception:
+                            continue
+                        if isinstance(facts, list) and hit_set.intersection(
+                            facts
+                        ):
+                            matched.append(r["outcome_id"])
+                # Preserve "newest first" ordering via the original
+                # ``rows`` index, then cap at PENDING_WRITE_CAP.
+                order = {oid: i for i, oid in enumerate(oid_list)}
+                matched.sort(key=lambda o: order.get(o, 1_000_000))
+                return matched[: int(self.PENDING_WRITE_CAP)]
+        except sqlite3.Error as exc:  # pragma: no cover — defensive
+            logger.debug("match_pending_for_fact_ids SQLite error: %s", exc)
+            return []
 
     # ------------------------------------------------------------------
     # Async worker path — finalisation
@@ -461,13 +600,40 @@ class EngagementRewardModel:
                     "SET status = 'settled' WHERE outcome_id = ?",
                     (outcome_id,),
                 )
-            return reward
+                # Capture fields for the router feed BEFORE leaving the
+                # lock-scope — SQLite rows are tied to the connection.
+                _pid = pending["profile_id"]
+                _qid = pending["recall_query_id"]
         except sqlite3.Error as exc:
             logger.debug("finalize_outcome SQLite error: %s", exc)
             return _FALLBACK_REWARD
         except Exception as exc:  # pragma: no cover — defence in depth
             logger.debug("finalize_outcome unexpected error: %s", exc)
             return _FALLBACK_REWARD
+
+        # S9-W1 C1: feed the settled reward into the shadow router so
+        # LLD-10 ShadowTest / ModelRollback see live A/B signals. Reward
+        # in [0, 1] is the NDCG@10 proxy per LLD-08 — it is computed from
+        # engagement signals (cite/edit/dwell/requery) which directly
+        # reflect recall quality. Fail-soft so router issues never poison
+        # the finalize_outcome return contract.
+        if _qid:
+            try:
+                from superlocalmemory.core import recall_pipeline as _rp
+                # learning.db lives next to memory.db in ``~/.superlocalmemory``.
+                _mem_db = str(self._db)
+                _learn_db = str(self._db.parent / "learning.db")
+                _rp.feed_recall_settled(
+                    memory_db=_mem_db,
+                    learning_db=_learn_db,
+                    profile_id=_pid,
+                    query_id=str(_qid),
+                    ndcg_at_10=float(reward),
+                )
+            except Exception as exc:  # noqa: BLE001 — defence in depth
+                logger.debug("feed_recall_settled failed (non-fatal): %s", exc)
+
+        return reward
 
     # ------------------------------------------------------------------
     # Daemon-start reaper
@@ -486,12 +652,27 @@ class EngagementRewardModel:
         # bulk UPDATE inside one transaction, preserving the same
         # observable contract (reward labels + settled status) at ~50×
         # fewer SQL round-trips.
+
+        # S9-W3 H-PERF-01 / H-PERF-09: the reap loop previously held the
+        # RLock across the full Python label-compute AND the writer
+        # transaction, plus the executemany INSERT ran UNCHUNKED — so
+        # a 50k-row reap could hold the writer lock for 2-5 s, silently
+        # killing every concurrent hot-path recall whose
+        # ``busy_timeout=50`` ms expired. Fix:
+        #   (a) Compute labels OUTSIDE the lock (pure Python, no DB).
+        #   (b) Re-acquire the lock in short chunked bursts so
+        #       hot-path writers can interleave.
+        #   (c) executemany INSERT is chunked at 500 rows, matching the
+        #       existing UPDATE chunk size.
         """
         if self._kill_switch():
             return 0
 
         now_ms = self._clock_ms()
         cutoff_ms = now_ms - older_than_ms
+
+        # Phase 1 — read pending rows under the lock (short critical
+        # section, single SELECT).
         try:
             with self._lock:
                 conn = self._get_conn()
@@ -502,62 +683,76 @@ class EngagementRewardModel:
                     "WHERE status = 'pending' AND created_at_ms < ?",
                     (cutoff_ms,),
                 ).fetchall()
-                if not pending_rows:
-                    return 0
+        except sqlite3.Error as exc:  # pragma: no cover — defensive
+            logger.debug("reap_stale SELECT error: %s", exc)
+            return 0
+        if not pending_rows:
+            return 0
 
-                # Compute rewards in Python (deterministic, stdlib-only).
-                timestamp_iso = _iso_from_ms(now_ms)
-                insert_batch: list[tuple] = []
-                settle_ids: list[str] = []
-                for row in pending_rows:
+        # Phase 2 — compute labels OUTSIDE the lock. Pure Python, no DB,
+        # no lock contention. H-PERF-09 fix: this used to run under the
+        # RLock and block record_recall for ~N × 50 µs (50 ms per 1k
+        # rows; 500 ms per 10k).
+        timestamp_iso = _iso_from_ms(now_ms)
+        insert_batch: list[tuple] = []
+        settle_ids: list[str] = []
+        for row in pending_rows:
+            try:
+                signals = json.loads(row["signals_json"] or "{}")
+            except json.JSONDecodeError:  # pragma: no cover
+                signals = {}
+            reward = _compute_label(signals)
+            insert_batch.append(
+                (
+                    row["outcome_id"],
+                    row["profile_id"],
+                    row["fact_ids_json"],
+                    timestamp_iso,
+                    reward,
+                    timestamp_iso,
+                    row["recall_query_id"],
+                ),
+            )
+            settle_ids.append(row["outcome_id"])
+
+        # Phase 3 — write in chunked bursts. Each burst acquires the
+        # lock, writes up to _CHUNK rows, releases. Concurrent hot-path
+        # writers get fair interleaving instead of being starved for
+        # the entire N-row duration.
+        _CHUNK = 500
+        written = 0
+        try:
+            for i in range(0, len(insert_batch), _CHUNK):
+                i_chunk = insert_batch[i:i + _CHUNK]
+                s_chunk = settle_ids[i:i + _CHUNK]
+                placeholders = ",".join("?" * len(s_chunk))
+                with self._lock:
+                    conn = self._get_conn()
+                    conn.execute("BEGIN IMMEDIATE")
                     try:
-                        signals = json.loads(row["signals_json"] or "{}")
-                    except json.JSONDecodeError:  # pragma: no cover
-                        signals = {}
-                    reward = _compute_label(signals)
-                    insert_batch.append(
-                        (
-                            row["outcome_id"],
-                            row["profile_id"],
-                            row["fact_ids_json"],
-                            timestamp_iso,
-                            reward,
-                            timestamp_iso,
-                            row["recall_query_id"],
-                        ),
-                    )
-                    settle_ids.append(row["outcome_id"])
-
-                conn.execute("BEGIN IMMEDIATE")
-                try:
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO action_outcomes "
-                        "(outcome_id, profile_id, query, fact_ids_json, "
-                        " outcome, context_json, timestamp, reward, "
-                        " settled, settled_at, recall_query_id) "
-                        "VALUES "
-                        "(?, ?, '', ?, 'settled', '{}', ?, ?, 1, ?, ?)",
-                        insert_batch,
-                    )
-                    # Bulk settle. SQLite's parameterised IN requires one
-                    # placeholder per value; chunk to respect SQLITE_MAX_VARIABLE_NUMBER.
-                    _CHUNK = 500
-                    for i in range(0, len(settle_ids), _CHUNK):
-                        chunk = settle_ids[i:i + _CHUNK]
-                        placeholders = ",".join("?" * len(chunk))
+                        conn.executemany(
+                            "INSERT OR REPLACE INTO action_outcomes "
+                            "(outcome_id, profile_id, query, fact_ids_json,"
+                            " outcome, context_json, timestamp, reward,"
+                            " settled, settled_at, recall_query_id) "
+                            "VALUES "
+                            "(?, ?, '', ?, 'settled', '{}', ?, ?, 1, ?, ?)",
+                            i_chunk,
+                        )
                         conn.execute(
                             "UPDATE pending_outcomes "
                             f"SET status = 'settled' WHERE outcome_id IN ({placeholders})",
-                            chunk,
+                            s_chunk,
                         )
-                    conn.execute("COMMIT")
-                except sqlite3.Error:
-                    conn.execute("ROLLBACK")
-                    raise
-                return len(insert_batch)
+                        conn.execute("COMMIT")
+                        written += len(i_chunk)
+                    except sqlite3.Error:
+                        conn.execute("ROLLBACK")
+                        raise
         except sqlite3.Error as exc:  # pragma: no cover — defensive
             logger.debug("reap_stale SQLite error: %s", exc)
-            return 0
+            return written
+        return written
 
 
 # ---------------------------------------------------------------------------

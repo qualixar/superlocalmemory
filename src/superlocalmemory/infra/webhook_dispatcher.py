@@ -20,7 +20,7 @@ import socket
 import threading
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Dict, Optional
 
@@ -136,7 +136,7 @@ class WebhookDispatcher:
                     "event": event,
                     "url": webhook_url,
                     "attempt": 0,
-                    "enqueued_at": datetime.now().isoformat(),
+                    "enqueued_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             with self._stats_lock:
@@ -194,7 +194,7 @@ class WebhookDispatcher:
             payload = json.dumps(
                 {
                     "event": event,
-                    "delivered_at": datetime.now().isoformat(),
+                    "delivered_at": datetime.now(timezone.utc).isoformat(),
                     "attempt": attempt + 1,
                     "source": "superlocalmemory",
                     "version": VERSION,

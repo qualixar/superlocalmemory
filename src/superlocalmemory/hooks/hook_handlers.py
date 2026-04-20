@@ -327,14 +327,45 @@ def _hook_stop() -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M")
 
     # --- Git context ---
-    git_branch = _run_quiet(["git", "-C", project_dir, "branch", "--show-current"])
-    git_diff = _run_quiet(
-        ["git", "-C", project_dir, "diff", "--stat"],
-        postprocess=lambda s: s.strip().rsplit("\n", 1)[-1].strip() if s.strip() else "",
-    )
-    recent_commits = _run_quiet(
-        ["git", "-C", project_dir, "log", "--oneline", "-5", "--since=3 hours ago"],
-    )
+    # S9-defer H-P-07: run the three git probes in parallel instead of
+    # sequentially. Each has a 5s timeout; serial worst-case was 15s of
+    # blocking stop-hook latency. Parallel worst-case is 5s. Falls back
+    # to serial on thread-pool failure (unlikely but defensive).
+    from concurrent.futures import ThreadPoolExecutor
+    def _diff_pp(s: str) -> str:
+        return s.strip().rsplit("\n", 1)[-1].strip() if s.strip() else ""
+    try:
+        with ThreadPoolExecutor(max_workers=3) as _pool:
+            fut_branch = _pool.submit(
+                _run_quiet,
+                ["git", "-C", project_dir, "branch", "--show-current"],
+            )
+            fut_diff = _pool.submit(
+                _run_quiet,
+                ["git", "-C", project_dir, "diff", "--stat"],
+                postprocess=_diff_pp,
+            )
+            fut_log = _pool.submit(
+                _run_quiet,
+                ["git", "-C", project_dir, "log", "--oneline", "-5",
+                 "--since=3 hours ago"],
+            )
+            git_branch = fut_branch.result(timeout=6)
+            git_diff = fut_diff.result(timeout=6)
+            recent_commits = fut_log.result(timeout=6)
+    except Exception:
+        # Defensive fallback to the original serial path.
+        git_branch = _run_quiet(
+            ["git", "-C", project_dir, "branch", "--show-current"]
+        )
+        git_diff = _run_quiet(
+            ["git", "-C", project_dir, "diff", "--stat"],
+            postprocess=_diff_pp,
+        )
+        recent_commits = _run_quiet(
+            ["git", "-C", project_dir, "log", "--oneline", "-5",
+             "--since=3 hours ago"],
+        )
 
     # --- Files from activity log ---
     modified = ""

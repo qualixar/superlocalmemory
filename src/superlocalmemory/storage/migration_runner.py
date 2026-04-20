@@ -47,6 +47,8 @@ from superlocalmemory.storage.migrations import (
     M009_model_lineage as _M009,
     M010_evolution_config as _M010,
     M011_archive_and_merge as _M011,
+    M012_shadow_observations as _M012,
+    M013_bi_temporal_columns as _M013,
 )
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
@@ -63,6 +65,8 @@ _MODULES = {
     _M009.NAME: _M009,
     _M010.NAME: _M010,
     _M011.NAME: _M011,
+    _M012.NAME: _M012,
+    _M013.NAME: _M013,
 }
 
 logger = logging.getLogger(__name__)
@@ -94,6 +98,10 @@ MIGRATIONS: list[Migration] = [
     # M010 creates evolution_config + evolution_llm_cost_log (learning.db).
     Migration(name=_M010.NAME, db_target="learning", ddl=_M010.DDL,
               dependencies=(_M003.NAME,)),
+    # M012 creates shadow_observations (learning.db) — paired NDCG@10
+    # observations for ShadowTest persistence across daemon restart.
+    Migration(name=_M012.NAME, db_target="learning", ddl=_M012.DDL,
+              dependencies=(_M003.NAME,)),
     Migration(name=_M004.NAME, db_target="memory", ddl=_M004.DDL),
     # M007 creates pending_outcomes (memory.db, LLD-00 §1.2).
     Migration(name=_M007.NAME, db_target="memory", ddl=_M007.DDL),
@@ -115,6 +123,10 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M011 extends atomic_facts + creates memory_archive / memory_merge_log.
     # atomic_facts is bootstrapped at engine init, so M011 defers alongside M006.
     Migration(name=_M011.NAME, db_target="memory", ddl=_M011.DDL),
+    # M013 adds bi-temporal columns (valid_from / valid_until) to
+    # atomic_facts. Deferred for the same engine-init-bootstrap reason
+    # as M011.
+    Migration(name=_M013.NAME, db_target="memory", ddl=_M013.DDL),
 ]
 
 
@@ -279,6 +291,28 @@ def _apply_single(
             pass
         return ("failed", f"{type(exc).__name__}: {exc}")
 
+    # S9-W1 H-DATA-01: optional post-DDL Python hook. Runs inside the same
+    # connection (same DB file) after the DDL commits. Used by M002 to
+    # backfill ``bytes_sha256`` on rows copied forward by the new-table
+    # rename. If the hook raises, the migration is marked failed; the DDL
+    # is NOT rolled back (already committed) but the runner reports the
+    # problem so operators can intervene. Non-existent hooks are a no-op.
+    mod = _MODULES.get(migration.name)
+    post_hook = getattr(mod, "post_ddl_hook", None) if mod is not None else None
+    if post_hook is not None:
+        try:
+            post_hook(conn)
+        except Exception as exc:  # noqa: BLE001 — report + mark failed
+            logger.warning(
+                "Migration %s DDL applied but post_ddl_hook failed: %s",
+                migration.name, exc,
+            )
+            try:
+                _upsert_log(conn, migration.name, ddl_hash, "failed")
+            except sqlite3.Error:  # pragma: no cover
+                pass
+            return ("failed", f"post_ddl_hook: {type(exc).__name__}: {exc}")
+
     try:
         _upsert_log(conn, migration.name, ddl_hash, "complete")
     except sqlite3.Error as exc:  # pragma: no cover
@@ -292,6 +326,50 @@ def _db_for(target: str, learning_db: Path, memory_db: Path) -> Path:
     if target == "memory":
         return memory_db
     raise ValueError(f"unknown db_target: {target}")  # pragma: no cover
+
+
+def _bootstrap_both_migration_logs(
+    learning_db: Path, memory_db: Path, *, dry_run: bool,
+) -> tuple[list[str], dict[str, str]]:
+    """S9-W1 C3: bootstrap ``migration_log`` on BOTH DBs up-front.
+
+    Prior versions deferred memory-side bootstrap until the first memory
+    migration ran in ``apply_all``, and ``apply_deferred`` did its own
+    independent bootstrap. That created a split-brain failure mode: if
+    ``apply_all`` crashed before any memory migration ran (e.g. disk-full
+    on learning-side M005), the memory DB never got its log table, and
+    ``apply_deferred`` would later create one without any record of the
+    sync-set attempt. Memory DB is sacred — 18k+ atomic_facts.
+
+    By bootstrapping both DBs up-front here, we make the invariant
+    "migration_log exists on both DBs before any migration runs" hold
+    unconditionally. Returns (failed_names, details) for any DB where
+    bootstrap fails.
+    """
+    failed: list[str] = []
+    details: dict[str, str] = {}
+    if dry_run:
+        return failed, details
+    for label, db_path in (("learning_db", learning_db),
+                           ("memory_db", memory_db)):
+        try:
+            conn = _connect(db_path)
+        except sqlite3.Error as exc:  # pragma: no cover — defensive
+            failed.append(label)
+            details[label] = f"cannot open db for log bootstrap: {exc}"
+            continue
+        try:
+            if not _migration_log_exists(conn):
+                _ensure_migration_log(conn)
+        except sqlite3.Error as exc:  # pragma: no cover — defensive
+            failed.append(label)
+            details[label] = f"migration_log bootstrap failed: {exc}"
+        finally:
+            try:
+                conn.close()
+            except sqlite3.Error:  # pragma: no cover
+                pass
+    return failed, details
 
 
 def apply_all(
@@ -310,9 +388,12 @@ def apply_all(
     failed: list[str] = []
     details: dict[str, str] = {}
 
-    # The memory DB needs its own migration_log for M004's bookkeeping. We
-    # ensure it exists the first time we touch the memory DB.
-    memory_bootstrapped = False
+    # S9-W1 C3: unify the migration_log bootstrap across both DBs up-front.
+    bs_failed, bs_details = _bootstrap_both_migration_logs(
+        learning_db, memory_db, dry_run=dry_run,
+    )
+    failed.extend(bs_failed)
+    details.update(bs_details)
 
     for migration in MIGRATIONS:
         db_path = _db_for(migration.db_target, learning_db, memory_db)
@@ -324,19 +405,6 @@ def apply_all(
             continue
 
         try:
-            if migration.db_target == "memory" and not memory_bootstrapped:
-                if not _migration_log_exists(conn):
-                    if not dry_run:
-                        try:
-                            _ensure_migration_log(conn)
-                        except sqlite3.Error as exc:  # pragma: no cover
-                            failed.append(migration.name)
-                            details[migration.name] = (
-                                f"cannot bootstrap memory migration_log: {exc}"
-                            )
-                            continue
-                memory_bootstrapped = True
-
             outcome, detail = _apply_single(conn, migration, dry_run=dry_run)
             details[migration.name] = detail
             if outcome == "applied":
@@ -392,22 +460,21 @@ def apply_deferred(
             continue
 
         try:
-            # Bootstrap migration_log on memory DB if apply_all didn't already.
+            # S9-W1 C3: apply_deferred must NOT independently bootstrap
+            # migration_log. apply_all is the single source of truth for
+            # log-table creation (bootstraps BOTH DBs up-front). A missing
+            # log here means apply_all never ran or crashed catastrophically
+            # before touching this DB — fail loudly so the operator can
+            # run apply_all first instead of letting the deferred path
+            # silently create a table that records nothing of the sync set.
             if not _migration_log_exists(conn):
-                if dry_run:
-                    skipped.append(migration.name)
-                    details[migration.name] = (
-                        "dry-run: would bootstrap migration_log first"
-                    )
-                    continue
-                try:
-                    _ensure_migration_log(conn)
-                except sqlite3.Error as exc:  # pragma: no cover
-                    failed.append(migration.name)
-                    details[migration.name] = (
-                        f"cannot bootstrap migration_log: {exc}"
-                    )
-                    continue
+                failed.append(migration.name)
+                details[migration.name] = (
+                    "migration_log missing on target DB — apply_all must "
+                    "run first (or failed before reaching this DB); "
+                    "refusing to create split-brain log"
+                )
+                continue
 
             outcome, detail = _apply_single(conn, migration, dry_run=dry_run)
             details[migration.name] = detail

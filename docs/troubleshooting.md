@@ -2,7 +2,7 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-Solutions for common issues. If your problem is not listed here, run `slm status --verbose` and check the output for clues.
+Solutions for common issues. If your problem is not listed here, run `slm status --json` and check the output for clues.
 
 <!-- UX-G1: document the planned slm doctor --fix auto-repair mode so the
      health-ladder self-healing surface has a user-facing verb in docs now,
@@ -128,10 +128,10 @@ This shows which channels contributed what. If BM25 is dominating with weak keyw
 **Rebuild the graph:**
 
 ```bash
-slm build_graph
+slm consolidate --cognitive
 ```
 
-If entity relationships seem wrong, rebuilding the graph can fix ranking issues.
+`consolidate --cognitive` rebuilds the entity graph (and pattern index) from your memories; use it when entity relationships look wrong or after bulk imports.
 
 ## Mode C Issues
 
@@ -153,7 +153,7 @@ export OPENAI_API_KEY="sk-..."
 
 ```bash
 # Test connectivity to your provider
-slm status --verbose
+slm status --json
 
 # Check if you're behind a proxy
 echo $HTTP_PROXY
@@ -207,9 +207,9 @@ slm migrate
 After migration, the entity graph and BM25 index are rebuilt from existing data. This process is automatic but can take a moment for large databases.
 
 ```bash
-# Force a full re-index
-slm build_graph
-slm compact
+# Force a full re-index + consolidation pass
+slm consolidate --cognitive
+slm decay
 ```
 
 ## IDE Connection Issues
@@ -265,7 +265,7 @@ Extremely rare with SQLite WAL mode, but if it happens:
 
 ```bash
 # Check integrity
-slm status --verbose
+slm status --json
 
 # Restore from automatic backup
 ls ~/.superlocalmemory/backups/
@@ -275,14 +275,15 @@ cp ~/.superlocalmemory/backups/memory-2026-03-15.db ~/.superlocalmemory/memory.d
 ### Database is too large
 
 ```bash
-# Check size
-slm memory_used
+# Check size — the JSON payload reports memory.db size + row counts.
+slm status --json
 
-# Compact (merges redundant memories, reclaims space)
-slm compact
+# Consolidate (merges redundant memories, reclaims space)
+slm consolidate --cognitive
 
-# Apply a retention policy to auto-delete old memories
-slm retention set custom --days 180
+# Decay applies the lifecycle policy to fade / archive stale memories.
+# Tune retention via the configuration file (see docs/configuration.md).
+slm decay
 ```
 
 ## Health Check
@@ -311,10 +312,10 @@ If any component shows an error, the output includes a suggested fix.
 
 If none of the above resolves your issue:
 
-1. Run `slm status --verbose` and note the output
+1. Run `slm status --json` and note the output
 2. Check the [GitHub Issues](https://github.com/qualixar/superlocalmemory/issues)
-3. Open a new issue with your `slm status --verbose` output
+3. Open a new issue with your `slm status --json` output
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. Elastic License 2.0. Part of Qualixar.*
+*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

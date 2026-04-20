@@ -513,6 +513,26 @@
                             </button>
                         </div>
                     </div>
+                    <!-- S9-DASH-07: learning-visibility filter pills -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-12">
+                            <span class="text-muted small me-2">Learning lens:</span>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-success mem-filter-pill"
+                                    data-filter="high_reward"
+                                    onclick="setMemoryFilter('high_reward')"
+                                    title="Facts with reward ≥ 0.7 in last 30 days">
+                                ⭐ High-reward (30d)
+                            </button>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-warning mem-filter-pill ms-2"
+                                    data-filter="being_forgotten"
+                                    onclick="setMemoryFilter('being_forgotten')"
+                                    title="Archived or cold with no positive reward in 60 days">
+                                🕯️ Being forgotten
+                            </button>
+                        </div>
+                    </div>
                     <div id="memories-list" class="table-responsive">
                         <div class="loading">
                             <div class="spinner-border text-primary" role="status"></div>

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -227,6 +228,15 @@ class ConsolidationWorker:
             logger.debug("hnsw dedup unexpected error, fallback: %s", exc)
 
         # Legacy fallback (pre-v3.4.21 behaviour).
+        # S9-defer H-P-09: hard cap on the fallback scan so a profile
+        # with 5M+ atomic_facts cannot OOM the consolidation worker
+        # when hnswlib is unavailable. The fallback is a prefix-match
+        # heuristic anyway; scanning more than 100k rows via this
+        # code path is noise, not signal. The cap can be raised via
+        # env var for benchmarking.
+        _LEGACY_DEDUP_SCAN_CAP = int(
+            os.environ.get("SLM_LEGACY_DEDUP_SCAN_CAP", "100000")
+        )
         try:
             conn = sqlite3.connect(self._memory_db, timeout=10)
             conn.execute("PRAGMA busy_timeout=5000")
@@ -234,8 +244,8 @@ class ConsolidationWorker:
 
             rows = conn.execute(
                 "SELECT fact_id, content FROM atomic_facts "
-                "WHERE profile_id = ? ORDER BY created_at",
-                (profile_id,),
+                "WHERE profile_id = ? ORDER BY created_at LIMIT ?",
+                (profile_id, _LEGACY_DEDUP_SCAN_CAP),
             ).fetchall()
 
             seen_prefixes: dict[str, str] = {}

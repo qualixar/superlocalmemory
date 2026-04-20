@@ -95,6 +95,14 @@ def _inner_main() -> str:
     if not isinstance(session_id, str) or not session_id:
         return "no_session"
 
+    # S9-DASH-10: keep registry fresh on every PostToolUse so the MCP
+    # server can pick up the current session even mid-turn.
+    try:
+        from superlocalmemory.hooks.session_registry import mark_active
+        mark_active(session_id, agent_type="claude")
+    except Exception:
+        pass
+
     # Path-escape defence (SEC-C-02) — any unsafe session_id means we
     # must not touch the filesystem for this invocation. We still want
     # to safely query the DB (it uses parameterised SQL), so we only
@@ -112,8 +120,15 @@ def _inner_main() -> str:
     if "slm:fact:" not in response_text:
         return "no_marker"
 
+    # S9-W2 M-SEC-03: cap marker iteration to prevent adversarial
+    # response_text floods. 5,000 crafted markers × ~5 μs HMAC = 25 ms
+    # of CPU inside a 20 ms hook budget — enough to cascade budget
+    # misses. LLD-09 says ≤10 facts per recall; 100 is ample headroom.
+    _MAX_MARKERS = 100
     hits: list[str] = []
     for m in _MARKER_RE.finditer(response_text):
+        if len(hits) >= _MAX_MARKERS:
+            break
         marker = m.group(0)
         fact_id = _validate(marker)
         if fact_id:
@@ -132,82 +147,38 @@ def _inner_main() -> str:
     signal_name = "edit" if tool_name in _EDIT_TOOLS else "dwell_ms"
     signal_value: object = True if signal_name == "edit" else _DEFAULT_DWELL_MS
 
-    # Locate pending outcome(s) for this session whose fact_ids_json
-    # contains ANY of the validated fact_ids.
+    # S9-W3 C6: single connection for BOTH the pending-row match AND
+    # the signal writes. Previously the hook opened ``open_memory_db()``
+    # for the SELECT, closed it, then constructed EngagementRewardModel
+    # which cached its own writer — two connects per invocation × 1-4 ms
+    # each × FileVault contention = blown 20 ms hook budget.
     #
-    # H-12/C-P-02: SQL json_each replaces the Python-side loop of
-    # json.loads + set.intersection. We restrict the candidate window
-    # to the 20 most recent pending rows (preserving the original LIMIT
-    # 20 ordering + semantics) and then ask SQLite to match via JSON1.
-    # Falls back to the Python decode path when JSON1 is unavailable
-    # so the hot path remains hermetic on stock SQLite.
-    hit_list = list(hits)
-    target_outcome_ids: list[str] = []
-    any_pending = False
-    try:
-        with open_memory_db() as conn:
-            # H-12/C-P-02: single connection does both the pending-window
-            # fetch and the JSON1 match, avoiding the Python-side
-            # json.loads loop. We stream the 20 most-recent pending rows
-            # through json_each; on a JSON1 failure we fall back to the
-            # original Python decode on the same rows (no second connect).
-            # SEC-M2 — tighten pending window cap to 5. Pending queue
-            # depth per session is typically 1-2; the old LIMIT 20 left
-            # a 5120-UPDATE amplification surface (256 HMAC hits × 20
-            # rows). The "attacker within your own session" threat
-            # model is documented as out-of-scope in LLD-09 §8: they
-            # already surfaced the fact via recall, so forging a
-            # signal on it is a no-op.
-            rows = conn.execute(
-                "SELECT outcome_id, fact_ids_json FROM pending_outcomes "
-                "WHERE session_id = ? AND status = 'pending' "
-                "ORDER BY created_at_ms DESC LIMIT 5",
-                (session_id,),
-            ).fetchall()
-            if not rows:
-                return "no_pending"
-            any_pending = True
-
-            placeholders = ",".join("?" for _ in hit_list)
-            oid_list = [r["outcome_id"] for r in rows]
-            oid_ph = ",".join("?" for _ in oid_list)
-            sql_json1 = (
-                "SELECT DISTINCT po.outcome_id "
-                "FROM pending_outcomes po, json_each(po.fact_ids_json) j "
-                f"WHERE po.outcome_id IN ({oid_ph}) "
-                f"  AND j.value IN ({placeholders})"
-            )
-            try:
-                hit_rows = conn.execute(
-                    sql_json1, (*oid_list, *hit_list),
-                ).fetchall()
-                target_outcome_ids = [r["outcome_id"] for r in hit_rows]
-            except Exception:
-                # JSON1 unavailable — fall back to the Python decode
-                # over the already-fetched `rows` (no extra DB work).
-                import json as _json
-                hit_set = set(hits)
-                for r in rows:
-                    try:
-                        facts = _json.loads(r["fact_ids_json"])
-                    except Exception:
-                        continue
-                    if not isinstance(facts, list):
-                        continue
-                    if hit_set.intersection(facts):
-                        target_outcome_ids.append(r["outcome_id"])
-    except Exception:
-        return "db_locked"
-
-    if not target_outcome_ids:
-        return "no_match" if any_pending else "no_pending"
-
+    # H-SKEP-03 / H-ARC-H4: pending-row window raised back to 50
+    # (SEC-M2 had tightened it to 5 which silently dropped signals on
+    # heavy Claude Code sessions). Outer cap on returned outcome_ids
+    # caps UPDATE amplification at PENDING_WRITE_CAP × 10 by default.
     try:
         model = EngagementRewardModel(_memory_db_path())
     except Exception:
         return "model_init_fail"
 
     try:
+        target_outcome_ids = model.match_pending_for_fact_ids(
+            session_id=session_id, fact_ids=hits,
+        )
+        if not target_outcome_ids:
+            # Distinguish "no pending rows exist" from "rows exist but
+            # none matched" for perf-log observability.
+            with model._lock:
+                conn = model._get_conn()
+                has_pending = conn.execute(
+                    "SELECT 1 FROM pending_outcomes "
+                    "WHERE session_id = ? AND status = 'pending' "
+                    "LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+            return "no_match" if has_pending else "no_pending"
+
         wrote = 0
         for oid in target_outcome_ids:
             ok = model.register_signal(

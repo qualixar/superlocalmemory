@@ -65,9 +65,20 @@ class WorkerPool:
     # Public API
     # ------------------------------------------------------------------
 
-    def recall(self, query: str, limit: int = 10) -> dict:
-        """Run recall in worker subprocess. Returns result dict."""
-        return self._send({"cmd": "recall", "query": query, "limit": limit})
+    def recall(
+        self, query: str, limit: int = 10, session_id: str = "",
+    ) -> dict:
+        """Run recall in worker subprocess. Returns result dict.
+
+        S9-DASH-02: ``session_id`` threads through to ``engine.recall``
+        so the outcome-queue gets a pending_outcomes row for this
+        recall. Without it, hook-based signals have no outcome to
+        attach to.
+        """
+        return self._send({
+            "cmd": "recall", "query": query, "limit": limit,
+            "session_id": session_id or "",
+        })
 
     def store(self, content: str, metadata: dict | None = None) -> dict:
         """Run store in worker subprocess. Returns result dict."""

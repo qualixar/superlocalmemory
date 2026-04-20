@@ -20,7 +20,7 @@ All route handlers live in routes/ directory:
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,7 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "version": SLM_VERSION,
             "database": "connected" if DB_PATH.exists() else "missing",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     # ========================================================================

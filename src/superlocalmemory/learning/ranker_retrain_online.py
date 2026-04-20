@@ -199,7 +199,32 @@ def _train_booster(
     num_boost_round = int(params.pop("num_boost_round"))
 
     start = time.monotonic()
+    # S9-defer H-P-08: before v3.4.21 the wall-time check fired only
+    # AFTER ``lgb.train`` returned, which could take minutes on a
+    # pathological dataset before we noticed. LightGBM's ``callbacks``
+    # parameter accepts a per-iteration hook that can stop training
+    # early. We install a callback that raises once the cumulative
+    # wall-time exceeds ``RETRAIN_WALL_TIME_BUDGET_SEC`` so overrun
+    # aborts mid-training, not post-training.
+    class _WallTimeAbort(Exception):
+        pass
+
+    def _timeout_cb(_env):
+        if time.monotonic() - start >= RETRAIN_WALL_TIME_BUDGET_SEC:
+            raise _WallTimeAbort
+
     try:
+        booster = lgb.train(
+            params, ds_train, num_boost_round=num_boost_round,
+            callbacks=[_timeout_cb],
+        )
+    except _WallTimeAbort:
+        elapsed = time.monotonic() - start
+        raise RetrainWallTimeExceeded(elapsed_sec=elapsed)
+    except TypeError:
+        # Older lightgbm binaries don't accept callbacks= in lgb.train.
+        # Fall back to the original post-hoc check (still bounded by
+        # num_boost_round * per-round work, which params cap tightly).
         booster = lgb.train(
             params, ds_train, num_boost_round=num_boost_round,
         )
@@ -257,10 +282,32 @@ def _persist_candidate(
                 ),
             )
             conn.commit()
-            return int(cur.lastrowid or 0)
+            candidate_id = int(cur.lastrowid or 0)
         except sqlite3.Error:
             conn.rollback()
             raise
+
+    # S9-W1 C1: attach the new candidate to the shadow router so live
+    # recall-settled signals start accumulating into its ShadowTest.
+    # Without this call, ``ShadowTest.decide()`` would sit at
+    # ``insufficient_data`` forever and the candidate would never be
+    # promoted or rejected — LLD-10 would be shipped-but-cold (exactly
+    # the failure mode Stage 8 SB-1 claimed to close but only wired the
+    # consumer side for). Fail-soft so persist itself never regresses.
+    try:
+        from superlocalmemory.core import shadow_router as _sr
+        # memory_db path is not available here; the router accepts empty
+        # string — attach_candidate only touches learning_db state.
+        router = _sr.get_shadow_router(
+            memory_db="",
+            learning_db=learning_db_path,
+            profile_id=profile_id,
+        )
+        router.attach_candidate(candidate_id)
+    except Exception as exc:  # noqa: BLE001 — defence in depth
+        logger.debug("attach_candidate failed (non-fatal): %s", exc)
+
+    return candidate_id
 
 
 def _promote_candidate(

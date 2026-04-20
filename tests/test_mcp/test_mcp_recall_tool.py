@@ -107,10 +107,20 @@ class TestRecallTool:
 
         recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
+        # S9-DASH-10: registry lookup must return None in tests so the
+        # final fallback ``mcp:<agent_id>`` is used. Without the patch
+        # the test picks up a real live session from the CI/dev registry.
+        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool), \
+             patch("superlocalmemory.hooks.session_registry.lookup_by_parent", return_value=None), \
+             patch("superlocalmemory.hooks.session_registry.most_recent_active", return_value=None):
             asyncio.run(recall("architecture patterns", limit=5))
 
-        pool.recall.assert_called_once_with("architecture patterns", limit=5)
+        # S9-DASH-02: recall now threads session_id to pool.recall so the
+        # outcome-queue producer can correlate hook signals. Default
+        # session_id when the caller doesn't supply one is ``mcp:<agent_id>``.
+        pool.recall.assert_called_once_with(
+            "architecture patterns", limit=5, session_id="mcp:mcp_client",
+        )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
     @patch("superlocalmemory.mcp.tools_core._emit_event")
@@ -171,11 +181,15 @@ class TestRecallEdgeCases:
 
         recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
+        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool), \
+             patch("superlocalmemory.hooks.session_registry.lookup_by_parent", return_value=None), \
+             patch("superlocalmemory.hooks.session_registry.most_recent_active", return_value=None):
             result = asyncio.run(recall(""))
 
         assert result["success"] is True
-        pool.recall.assert_called_once_with("", limit=10)
+        pool.recall.assert_called_once_with(
+            "", limit=10, session_id="mcp:mcp_client",
+        )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
     @patch("superlocalmemory.mcp.tools_core._emit_event")
@@ -188,10 +202,14 @@ class TestRecallEdgeCases:
 
         recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
+        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool), \
+             patch("superlocalmemory.hooks.session_registry.lookup_by_parent", return_value=None), \
+             patch("superlocalmemory.hooks.session_registry.most_recent_active", return_value=None):
             asyncio.run(recall("limit test", limit=5))
 
-        pool.recall.assert_called_once_with("limit test", limit=5)
+        pool.recall.assert_called_once_with(
+            "limit test", limit=5, session_id="mcp:mcp_client",
+        )
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")
     def test_recall_feedback_failure_non_blocking(self, mock_emit):

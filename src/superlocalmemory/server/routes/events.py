@@ -12,7 +12,7 @@ import threading
 import queue as _queue
 import logging
 from typing import Optional, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -136,7 +136,7 @@ async def event_stream(
 
                 # 3. Keepalive + sleep
                 if not drained:
-                    yield f": keepalive {datetime.now().isoformat()}\n\n"
+                    yield f": keepalive {datetime.now(timezone.utc).isoformat()}\n\n"
                 await asyncio.sleep(1)
         finally:
             with _sse_queues_lock:

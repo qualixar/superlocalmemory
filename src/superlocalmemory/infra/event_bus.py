@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import threading
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -138,7 +138,7 @@ class EventBus:
 
         importance = max(1, min(10, importance))
 
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._counter_lock:
             self._event_counter += 1
             seq = self._event_counter

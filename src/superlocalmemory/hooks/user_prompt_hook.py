@@ -58,6 +58,16 @@ def main() -> int:
         sys.stdout.write("{}")
         return 0
 
+    # S9-DASH-10: register this session_id as the most recent active
+    # Claude session so the MCP ``recall`` tool can pick it up when
+    # the MCP protocol doesn't thread the session_id through tool
+    # arguments. Fail-soft — never raises on the hot path.
+    try:
+        from superlocalmemory.hooks.session_registry import mark_active
+        mark_active(session_id, agent_type="claude")
+    except Exception:
+        pass
+
     # Delayed imports keep cold-start small and isolate any pathological
     # import-time failure of the SLM modules from the hot path.
     try:

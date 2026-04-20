@@ -50,14 +50,67 @@ logger = logging.getLogger(__name__)
 # current volume (<10 calls/cycle) the cost is small, but caching keeps
 # the dispatch code consistent with the rest of the "one-cached-writer"
 # pattern the codebase standardised on (reward.py, trigram_index.py).
+#
+# S9-W2 C4 (fork safety): a cached SQLite handle inherited across
+# ``os.fork()`` corrupts the DB because both processes think they hold an
+# exclusive lock. We clear the cache in any forked child via
+# ``os.register_at_fork`` AND keyed-by-pid within ``_get_cost_conn`` so
+# a child that somehow missed the registrar still behaves correctly.
+# On Windows / platforms without ``register_at_fork`` the fork path
+# cannot happen so the pid-check is free insurance.
+#
+# S9-W2 C9 (serialization): ``_COST_CONN_LOCK`` is now ONLY held during
+# the get/create-cache flip, NOT during the ``execute+commit`` inside
+# ``_log_cost``. SQLite's own writer serialisation (BEGIN IMMEDIATE +
+# busy_timeout) is the correct tool for write ordering; the Python lock
+# was converting 10 parallel candidates × 3-8ms fsync into a single
+# 30-80ms tail. Cache structure remains intact; the lock's scope shrinks.
 _COST_CONN_CACHE: dict[str, sqlite3.Connection] = {}
 _COST_CONN_LOCK = threading.Lock()
+_COST_CONN_OWNER_PID: int | None = None
+
+
+def _resolve_cost_key(learning_db: Path) -> str:
+    """Resolve a DB path to a stable cache key.
+
+    M-P-03 fix: ``~/.slm/learning.db`` and ``/home/u/.slm/learning.db``
+    previously cached to separate conns on the same inode, producing two
+    writers contending over WAL. ``os.path.realpath`` collapses them.
+    """
+    try:
+        return os.path.realpath(str(learning_db))
+    except OSError:  # pragma: no cover — defensive
+        return str(learning_db)
+
+
+def _reset_cost_cache_for_child() -> None:
+    """Close any inherited handles in the fork child.
+
+    C4: ``os.register_at_fork(after_in_child=...)`` fires before any user
+    code runs in the child, so closing here is safe even if the parent
+    was mid-write (the child never participated in that transaction).
+    """
+    global _COST_CONN_OWNER_PID
+    # Do NOT close parent-owned handles — let the parent keep using them.
+    # We only clear our cache reference so the child opens fresh ones.
+    _COST_CONN_CACHE.clear()
+    _COST_CONN_OWNER_PID = os.getpid()
 
 
 def _get_cost_conn(learning_db: Path) -> sqlite3.Connection:
     """Return a cached writer connection for ``learning_db``. Never raises."""
-    key = str(learning_db)
+    global _COST_CONN_OWNER_PID
+    key = _resolve_cost_key(learning_db)
     with _COST_CONN_LOCK:
+        # Belt-and-suspenders: if we somehow missed the fork registrar
+        # (embedded interpreter, non-POSIX fork path), detect pid drift
+        # and reset before handing out a potentially-corrupt handle.
+        current_pid = os.getpid()
+        if _COST_CONN_OWNER_PID is not None and (
+            _COST_CONN_OWNER_PID != current_pid
+        ):
+            _COST_CONN_CACHE.clear()
+        _COST_CONN_OWNER_PID = current_pid
         conn = _COST_CONN_CACHE.get(key)
         if conn is not None:
             return conn
@@ -79,6 +132,10 @@ def _close_cost_conns() -> None:
 
 
 atexit.register(_close_cost_conns)
+# C4: wipe inherited caches in any forked child. ``register_at_fork`` is
+# POSIX-only; Windows simply doesn't fork so there is nothing to register.
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_cost_cache_for_child)
 
 
 # ---------------------------------------------------------------------------
@@ -238,21 +295,44 @@ def _call_claude_api_backend(
 # ---------------------------------------------------------------------------
 
 
+def _fail_closed_backend(
+    prompt: str, *, model: str, max_tokens: int,
+) -> str:
+    """S9-SKEP-14: explicit fail-closed backend for unroutable models.
+
+    Returns "" (the fail-closed sentinel every dispatch treats as
+    "no evolution happened") and logs a warning. Previously the
+    fallthrough silently routed any unknown id to the paid Anthropic
+    API — a misconfigured entry in ``ALLOWED_LLM_MODELS`` would burn
+    user money without anyone noticing.
+    """
+    logger.warning(
+        "llm_dispatch: no backend registered for model=%r — "
+        "fail-closed (returning empty string)", model,
+    )
+    return ""
+
+
 def _pick_backend(model: str) -> Callable[..., str]:
     """Resolve an allow-listed model id to its backend callable.
 
     Contract: ``model`` is already validated against ``ALLOWED_LLM_MODELS``
     by the caller (``_dispatch_llm`` runs ``_validate_model`` first).
-    Unknown models still receive a defensive fallback to the Claude API
-    path so a forgotten registry row never returns None.
+
+    S9-SKEP-14: routing is prefix-exact — we no longer default unknown
+    models to the Claude API path. An allow-listed model without a
+    backend entry hits ``_fail_closed_backend`` and returns ""
+    instead of silently spending money on the wrong vendor.
     """
     if model.startswith("ollama:"):
         return _call_ollama_backend
-    # Claude CLI path is an alternative — selected when an explicit
-    # env flag is set. Default path is the Anthropic API backend.
-    if os.environ.get("SLM_EVOLUTION_BACKEND") == "claude-cli":
-        return _call_claude_cli_backend
-    return _call_claude_api_backend
+    if model.startswith("claude-"):
+        # Claude CLI path is an alternative — selected when an explicit
+        # env flag is set. Default path is the Anthropic API backend.
+        if os.environ.get("SLM_EVOLUTION_BACKEND") == "claude-cli":
+            return _call_claude_cli_backend
+        return _call_claude_api_backend
+    return _fail_closed_backend
 
 
 def _actual_llm_call(prompt: str, *, model: str, max_tokens: int) -> str:
@@ -315,18 +395,21 @@ def _log_cost(
         )
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
-        # M-P-09: reuse a cached writer conn across calls. Serialised by
-        # a dedicated lock so multi-threaded dispatchers don't interleave
-        # in-flight ``execute`` / ``commit`` on the same handle.
+        # S9-W2 C9: the cached conn is ``check_same_thread=False`` and
+        # SQLite's own writer serialisation (BEGIN IMMEDIATE + 2 s
+        # ``busy_timeout`` in the connect() call) is the right tool for
+        # write ordering. Previously we held _COST_CONN_LOCK across the
+        # execute+commit fsync, converting 10 parallel candidates' worth
+        # of 3-8 ms commits into a single 30-80 ms tail. Release the
+        # Python lock BEFORE the SQL round-trip.
         conn = _get_cost_conn(Path(learning_db))
-        with _COST_CONN_LOCK:
-            conn.execute(
-                "INSERT INTO evolution_llm_cost_log "
-                "(profile_id, ts, model, tokens_in, tokens_out, cost_usd, cycle_id) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (profile_id, now, model, tokens_in, tokens_out, cost_usd, cycle_id),
-            )
-            conn.commit()
+        conn.execute(
+            "INSERT INTO evolution_llm_cost_log "
+            "(profile_id, ts, model, tokens_in, tokens_out, cost_usd, cycle_id) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (profile_id, now, model, tokens_in, tokens_out, cost_usd, cycle_id),
+        )
+        conn.commit()
     except sqlite3.Error as e:
         logger.warning("cost log write failed: %s", e)
 
@@ -356,9 +439,56 @@ def _dispatch_llm(
         raise ValueError(
             f"max_tokens {max_tokens} > {MAX_TOKENS_CAP} cap (LLD-11)"
         )
+    # S9-W2 H-SKEP-05: validate profile_id BEFORE paying for the LLM
+    # call. Previously the check lived in _log_cost, AFTER the paid
+    # Anthropic round-trip — a misconfigured profile with empty id would
+    # spend the money, raise ValueError in _log_cost, and return "" from
+    # _llm_call's except. Net: cost incurred, no cost-log row, caller
+    # may retry and burn more. Validate up-front, fail-closed, zero cost.
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise ValueError(
+            "profile_id must be a non-empty string "
+            f"(got {profile_id!r})"
+        )
 
     # LLD-00 §5 — redact BEFORE dispatch. Never log the raw prompt.
     safe_prompt = redact_secrets(prompt, aggression="high")
+
+    # S9-defer H-P-10: per-cycle retry-cost DoS guard. If the caller
+    # (or an orchestrator layer) keeps retrying a failing dispatch on
+    # the same ``cycle_id``, cost escalates without bound — a crafted
+    # adversarial scenario could make evolution burn through the
+    # daily USD cap in minutes. Count prior calls for this cycle_id
+    # in ``evolution_llm_cost_log`` and refuse once the retry cap is
+    # hit. The EvolutionBudget object already caps overall LLM calls
+    # per cycle to 10; this is the per-cycle-ID guard for retries on
+    # the SAME logical step (distinct from 10 different LLM calls for
+    # 10 different steps).
+    _RETRY_CAP_PER_CYCLE = int(
+        os.environ.get("SLM_EVOLUTION_RETRY_CAP", "5")
+    )
+    if cycle_id:
+        try:
+            _conn = _get_cost_conn(Path(learning_db))
+            row = _conn.execute(
+                "SELECT COUNT(*) FROM evolution_llm_cost_log "
+                "WHERE profile_id = ? AND cycle_id = ?",
+                (profile_id, cycle_id),
+            ).fetchone()
+            prior = int(row[0]) if row and row[0] is not None else 0
+            if prior >= _RETRY_CAP_PER_CYCLE:
+                logger.warning(
+                    "evolution retry cap hit: profile=%s cycle_id=%s "
+                    "prior=%d cap=%d — refusing dispatch",
+                    profile_id, cycle_id, prior, _RETRY_CAP_PER_CYCLE,
+                )
+                raise RuntimeError(
+                    f"evolution retry cap exceeded for cycle {cycle_id}"
+                )
+        except sqlite3.Error:
+            # Cost log unavailable — fail-open on this guard (the
+            # outer EvolutionBudget still enforces the 10-call cap).
+            pass
 
     response = _actual_llm_call(
         safe_prompt, model=model, max_tokens=max_tokens,

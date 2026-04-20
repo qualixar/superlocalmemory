@@ -183,17 +183,43 @@ def save_session_state(session_id: str, state: dict) -> None:
     # mid-write cannot leave a truncated JSON on disk. A truncated file
     # would make ``load_session_state`` return ``{}`` and silently
     # forfeit the rehash signal on the next turn.
+
+    # S9-W2 H-SEC-07: tmp file now opens with mode 0600 via os.open so a
+    # shared-host observer watching the dir with inotify cannot read the
+    # session state (outcome_id, last_prompt_ts) between write_text and
+    # os.replace. Previously ``Path.write_text`` opened at 0666 & ~umask
+    # (typically 0644) leaving the data world-readable for ~microseconds.
+    # Also makes the tmp filename per-pid + nanosecond unique so two
+    # concurrent hooks don't overwrite each other's tmp (M-SKEP-03
+    # data-tearing).
     """
     p = session_state_file(session_id)
     if p is None:
         return
     try:
         data = json.dumps(state)
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(data)
+        tmp = p.with_suffix(
+            f"{p.suffix}.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        if os.name == "posix":
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(tmp), flags, 0o600)
+            try:
+                os.write(fd, data.encode("utf-8"))
+            finally:
+                os.close(fd)
+        else:  # pragma: no cover — Windows path
+            tmp.write_text(data)
         os.replace(tmp, p)
     except Exception:
-        pass
+        # Best-effort cleanup of orphaned tmp — M-PERF-05.
+        try:
+            if tmp.exists():  # type: ignore[name-defined]
+                tmp.unlink()
+        except Exception:  # pragma: no cover
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +264,32 @@ def summarize_response(raw: object, cap: int = SCAN_BYTES_CAP) -> str:
 # safe across platforms and captures a post-rotation reopen cleanly.
 _PERF_LOG_FD: Optional[IO[str]] = None
 _PERF_LOG_PATH: Optional[Path] = None
-_PERF_LOG_LOCK = threading.Lock()
+# S9-W3 M-PERF-02: RLock (not Lock) so a reentrant acquire during
+# atexit shutdown — e.g. a handler that calls ``log_perf`` while
+# ``_perf_log_flush`` already holds the lock — does not deadlock
+# the interpreter for the 30s graceful-shutdown timeout.
+_PERF_LOG_LOCK = threading.RLock()
 _PERF_LOG_WRITE_COUNT: int = 0  # SEC-M4 — rotation cadence counter
+_PERF_LOG_OWNER_PID: int | None = None  # S9-W2 H-SEC-05 — fork safety
+
+
+def _reset_perf_log_for_child() -> None:
+    """S9-W2 H-SEC-05: wipe the inherited fd in the fork child.
+
+    Buffered file objects inherited across fork() interleave their
+    userland buffers when both processes flush to the same fd offset.
+    We orphan the child's handle so the next ``log_perf`` reopens a
+    fresh one; the parent keeps its fd intact.
+    """
+    global _PERF_LOG_FD, _PERF_LOG_PATH, _PERF_LOG_WRITE_COUNT, _PERF_LOG_OWNER_PID
+    _PERF_LOG_FD = None
+    _PERF_LOG_PATH = None
+    _PERF_LOG_WRITE_COUNT = 0
+    _PERF_LOG_OWNER_PID = os.getpid()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_perf_log_for_child)
 
 
 def _open_perf_log_fd(path: Path) -> Optional[IO[str]]:
@@ -270,6 +320,12 @@ def _maybe_rotate_perf_log(path: Path) -> None:
     SEC-M4 — called from ``log_perf`` under ``_PERF_LOG_LOCK`` every
     ``PERF_LOG_CHECK_EVERY`` writes so the stat() cost is negligible
     on the hot path. Single rotation slot (overwrite .1 if present).
+
+    S9-W2 H-SEC-06: rotation now uses ``os.replace`` instead of the
+    ``unlink() + rename()`` two-step. Two-step left a window between
+    the unlink and the rename during which a concurrent writer could
+    open a fresh fd at ``path`` and have its line land in the rotated
+    archive. ``os.replace`` is atomic on POSIX and Windows.
     """
     try:
         size = path.stat().st_size
@@ -279,9 +335,7 @@ def _maybe_rotate_perf_log(path: Path) -> None:
         return
     rotated = path.with_suffix(path.suffix + ".1")
     try:
-        if rotated.exists():
-            rotated.unlink()
-        path.rename(rotated)
+        os.replace(str(path), str(rotated))
     except OSError:  # pragma: no cover — fs race
         pass
 
@@ -307,14 +361,63 @@ def _perf_log_flush() -> None:
 atexit.register(_perf_log_flush)
 
 
+#: S9-W3 C8: rotation flag set on hot path, drained on exit / next
+#: call at no latency cost. Every 256th write flips the flag; the NEXT
+#: invocation notices the flag and runs the rotation BEFORE acquiring
+#: the write lock for its own record. Net effect: the hot-path caller
+#: that trips the counter pays only a bool flip (not a rename + reopen);
+#: the next caller pays the rotation cost but only once per 10 MB of
+#: log traffic — amortised to essentially free on 20 tool-events/min.
+_PERF_LOG_ROTATION_PENDING = False
+
+
+def _drain_rotation_pending(path: Path) -> None:
+    """C8: execute a pending rotation outside the hot-path lock.
+
+    Runs the unlink/rename + fd reopen. Callers invoke it with the
+    lock released so concurrent hot-path writers are not blocked for
+    the 5-20 ms the rotation can take on a contended FS.
+    """
+    global _PERF_LOG_FD, _PERF_LOG_PATH, _PERF_LOG_ROTATION_PENDING
+    # Race-harmless double-check under the lock: if someone else
+    # already drained the flag, just return.
+    with _PERF_LOG_LOCK:
+        if not _PERF_LOG_ROTATION_PENDING:
+            return
+        _PERF_LOG_ROTATION_PENDING = False
+        fd_to_close = _PERF_LOG_FD
+        _PERF_LOG_FD = None
+    # Close + rotate + reopen without holding the lock.
+    if fd_to_close is not None:
+        try:
+            fd_to_close.close()
+        except Exception:  # pragma: no cover
+            pass
+    _maybe_rotate_perf_log(path)
+    new_fd = _open_perf_log_fd(path)
+    with _PERF_LOG_LOCK:
+        # Another thread may have reopened already — don't clobber.
+        if _PERF_LOG_FD is None:
+            _PERF_LOG_FD = new_fd
+            _PERF_LOG_PATH = path
+
+
 def log_perf(hook_name: str, duration_ms: float, outcome: str) -> None:
     """Append one NDJSON line to ``logs/hook-perf.log``.
 
     Best-effort: disk full / unwritable dir → silently skip. Uses a
     module-level append-only fd opened on first use and flushed on
     process exit via :func:`_perf_log_flush`.
+
+    S9-W3 C8: the rotation/rename/reopen workflow has moved OFF the
+    hot-path lock. Previously every 256th call held the lock across
+    ``stat + unlink + rename + os.open + os.chmod + fdopen`` — 5-20 ms
+    while every concurrent hook blocked. Now the hot-path branch only
+    flips a bool; the drain function runs the slow path after the
+    lock is released.
     """
     global _PERF_LOG_FD, _PERF_LOG_PATH, _PERF_LOG_WRITE_COUNT
+    global _PERF_LOG_ROTATION_PENDING
     try:
         rec = {
             "ts": int(time.time() * 1000),
@@ -324,18 +427,19 @@ def log_perf(hook_name: str, duration_ms: float, outcome: str) -> None:
         }
         line = json.dumps(rec, separators=(",", ":")) + "\n"
         path = perf_log_path()
+
+        # Drain any rotation pending from a prior call. This runs
+        # BEFORE we take the hot-path lock so the current caller's
+        # write goes to the post-rotation file without waiting.
+        if _PERF_LOG_ROTATION_PENDING:
+            _drain_rotation_pending(path)
+
         with _PERF_LOG_LOCK:
-            # SEC-M4 — amortised rotation check.
             _PERF_LOG_WRITE_COUNT += 1
+            # SEC-M4 — amortised rotation check (now: flag-only under
+            # the lock; the slow path runs out-of-lock on the NEXT call).
             if _PERF_LOG_WRITE_COUNT % PERF_LOG_CHECK_EVERY == 0:
-                # Close fd before rename so POSIX release is clean.
-                if _PERF_LOG_FD is not None:
-                    try:
-                        _PERF_LOG_FD.close()
-                    except Exception:  # pragma: no cover
-                        pass
-                    _PERF_LOG_FD = None
-                _maybe_rotate_perf_log(path)
+                _PERF_LOG_ROTATION_PENDING = True
             # Reopen if first use OR if the target path has changed (tests
             # flip ``SLM_HOME`` between cases — honour the new location).
             if _PERF_LOG_FD is None or _PERF_LOG_PATH != path:

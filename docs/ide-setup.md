@@ -258,4 +258,4 @@ Each IDE has its own config file. They do not conflict. All IDEs share the same 
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. Elastic License 2.0. Part of Qualixar.*
+*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

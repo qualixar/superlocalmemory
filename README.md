@@ -3,12 +3,12 @@
 </p>
 
 <h1 align="center">SuperLocalMemory V3.4</h1>
-<p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.</em></p>
+<p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf, and any MCP-compatible AI client.</em></p>
 <p align="center"><code>v3.4.21</code> — Install once. Every session remembers the last. Automatically.</p>
-<p align="center"><strong>Backed by 3 peer-reviewed research papers</strong> · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
+<p align="center"><strong>Backed by 3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
-  <code>+16pp vs Mem0 (zero cloud)</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
+  <code>+10.6pp vs Mem0 zero-LLM</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
-  <a href="#eu-ai-act-compliance"><img src="https://img.shields.io/badge/EU_AI_Act-Compliant-brightgreen?style=for-the-badge" alt="EU AI Act"/></a>
+  <a href="#eu-ai-act-compliance"><img src="https://img.shields.io/badge/EU_AI_Act-Design_Compliant-brightgreen?style=for-the-badge" alt="EU AI Act Design Compliant"/></a>
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
@@ -30,24 +30,25 @@
 
 ## Why SuperLocalMemory?
 
-Every major AI memory system — Mem0, Zep, Letta, EverMemOS — sends your data to cloud LLMs for core operations. That means latency on every query, cost on every interaction, and after **August 2, 2026**, a compliance problem under the EU AI Act.
+Every **hosted** AI memory platform — Mem0 Cloud, Zep Cloud, Letta Cloud, EverMemOS Cloud — sends your data to cloud LLMs by default. Their self-hosted variants exist (Mem0 OpenMemory, Letta self-hosted, Graphiti) but require Docker + a separate graph DB or Ollama config, and most still default to OpenAI until you flip env vars. After **August 2, 2026**, any of those cloud paths becomes a compliance problem under the EU AI Act.
 
-SuperLocalMemory V3 takes a different approach: **mathematics instead of cloud compute.** Three techniques from differential geometry, algebraic topology, and stochastic analysis replace the work that other systems need LLMs to do — similarity scoring, contradiction detection, and lifecycle management. The result is an agent memory that runs entirely on your machine, on CPU, with no API keys, and still outperforms funded alternatives.
+SuperLocalMemory V3 takes a different approach: **mathematics instead of cloud compute.** Three techniques from differential geometry, algebraic topology, and stochastic analysis replace the work that other systems need LLMs to do — similarity scoring, contradiction detection, and lifecycle management. The result is an agent memory that ships local-first out of the box — no Docker, no graph DB, no API keys — on CPU.
 
-**The numbers** (evaluated on [LoCoMo](https://arxiv.org/abs/2402.09714), the standard long-conversation memory benchmark):
+**The numbers** (evaluated on [LoCoMo](https://arxiv.org/abs/2402.09714), the standard long-conversation memory benchmark). Published numbers as of April 2026:
 
-| System | Score | Cloud Required | Open Source | Funding |
-|:-------|:-----:|:--------------:|:-----------:|:-------:|
-| EverMemOS | 92.3% | Yes | No | — |
-| Hindsight | 89.6% | Yes | No | — |
-| **SLM V3 Mode C** | **87.7%** | Optional | **Yes (EL2)** | $0 |
-| Zep v3 | 85.2% | Yes | Deprecated | $35M |
-| **SLM V3 Mode A** | **74.8%** | **No** | **Yes (EL2)** | $0 |
-| Mem0 | 64.2% | Yes | Partial | $24M |
+| System | Score | Config | Cloud LLM required? | Open Source | Source |
+|:-------|:-----:|:-------|:-------------------:|:-----------:|:-------|
+| EverMemOS | 93.05% | Cloud (proprietary) | Yes | Core only | [evermind.ai](https://evermind.ai/) (Feb 2026) |
+| Hindsight (LoComo10) | 92.0% | Cloud | Yes | No | [benchmarks.hindsight.vectorize.io](https://benchmarks.hindsight.vectorize.io) (Apr 2026) |
+| Mem0 (token-efficient) | 91.6% | Hybrid (Cohere/OpenAI) | Yes | Partial | [mem0.ai blog](https://mem0.ai/blog/mem0-the-token-efficient-memory-algorithm) (Apr 16 2026) |
+| **SLM V3 Mode C** | **87.7%** | Local + optional LLM | Optional (Ollama OK) | **Yes (AGPL-3.0)** | In-house, repro script in `docs/benchmarks/` |
+| Zep v3 Cloud | 85.2% | Cloud | Yes | Community deprecated | [getzep.com](https://www.getzep.com/) |
+| **SLM V3 Mode A** | **74.8%** | **Local, CPU-only, zero-LLM** | **No** | **Yes (AGPL-3.0)** | In-house, repro script in `docs/benchmarks/` |
+| Mem0 (zero-retrieval-LLM) | 64.2% | Local baseline | No | Partial | Mem0 paper, zero-LLM row |
 
-Mode A scores **74.8% with zero cloud dependency** — outperforming Mem0 by 16 percentage points on this evaluation, without a single API call. On the open-domain subset, Mode A scores **85.0%**, the highest observed score among the systems we evaluated without any cloud LLM call. Mode C reaches **87.7%**, competitive with enterprise cloud systems.
+> **How to read this table.** Scores from different papers use different LoCoMo splits, judge models, and prompt variants. We do NOT claim these numbers are apples-to-apples across rows. The rows we re-ran in-house are marked "In-house"; cited rows link to the vendor's public source and date. Mode A is the only zero-LLM configuration in the list, so the comparison that is apples-to-apples is **Mode A 74.8% vs Mem0 zero-retrieval-LLM 64.2%** (+10.6pp). Mem0's 91.6% and EverMemOS's 93.05% use cloud LLMs; Mode C uses a local LLM (Ollama). BEAM-10M, the emerging successor benchmark, will be added in a future release.
 
-> **Comparison caveat.** We compare Mode A (zero-LLM, CPU-only) with published Mem0, Zep, Letta, and EverMemOS scores on LoCoMo. Mem0's public hybrid-with-LLM configuration reports numbers higher than 64.2% on some LoCoMo splits; the 64.2% cited here is the zero-retrieval-LLM baseline disclosed in their paper. Our scores were re-run in-house on the same LoCoMo questions. Mode C uses a local LLM (Ollama / Mistral by default); it is not "zero cloud". The goal of the table is like-for-like among locally-running configurations, not an across-the-board ranking.
+**What Mode A is**: CPU-only, SQLite-only, zero-LLM retrieval pipeline on published LoCoMo questions. To the best of our knowledge it is the only publicly-released local-first memory that clears Mem0's zero-LLM baseline on this benchmark. If another fully-local system hits similar numbers, please open an issue so we can update the table.
 
 Mathematical layers contribute **+12.7 percentage points** on average across 6 conversations (n=832 questions), with up to **+19.9pp on the most challenging dialogues**. This isn't more compute — it's better math.
 
@@ -55,7 +56,8 @@ Mathematical layers contribute **+12.7 percentage points** on average across 6 c
 
 ---
 
-## What's New in V3.3 — The Living Brain Evolves
+<details>
+<summary><strong>What's New in V3.3 — The Living Brain Evolves</strong> (click to expand)</summary>
 
 > V3.3 gives your memory a lifecycle. Memories strengthen when used, fade when neglected, compress when idle, and consolidate into reusable patterns — all automatically, all locally. Your agent gets smarter the longer it runs.
 
@@ -104,9 +106,9 @@ slm reap
 |:-------|:----:|:----:|:------:|
 | RAM usage (Mode A/B) | ~4GB | ~40MB | **100x reduction** |
 | Retrieval channels | 5 | 6 | +Hopfield completion |
-| MCP tools | 29 | 35 | +6 new |
+| MCP tools (default) | 29 | 33 | +4 new (mesh set) |
 | CLI commands | 21 | 26 | +5 new |
-| Dashboard tabs | 20 | 23 | +3 new |
+| Dashboard tabs | 17 | 17 | (H-22: Reward / Shadow / EvolutionCost tiles deferred to next cycle — data exposed via API today, see [DASHBOARD-COVERAGE.md](docs/DASHBOARD-COVERAGE.md)) |
 | API endpoints | 9 | 16 | +7 new |
 
 Embedding migration happens automatically when you switch modes — no manual steps needed.
@@ -140,6 +142,8 @@ slm config set v33_features.all true
 ```
 
 **Fully backward compatible.** All existing MCP tools, CLI commands, and configs work unchanged. New tables are created automatically on first run. No migration needed.
+
+</details>
 
 ---
 
@@ -199,7 +203,7 @@ slm status
 }
 ```
 
-35 MCP tools + 7 resources available. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and 17+ AI tools. **V3.3: Adaptive lifecycle, smart compression, and pattern learning.**
+33 MCP tools by default (+42 optional behind `SLM_MCP_ALL_TOOLS=1`) + 7 resources. Works with any MCP-compatible client — we ship templated configs for Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and Antigravity (15 IDE configs in `ide/configs/`). **V3.3: Adaptive lifecycle, smart compression, and pattern learning.**
 
 ### Dual Interface: MCP + CLI
 
@@ -250,13 +254,12 @@ slm mode c   # Cloud LLM
 ## Architecture
 
 ```
-Query  ──►  Strategy Classifier  ──►  6 Parallel Channels:
+Query  ──►  Strategy Classifier  ──►  5 Parallel Channels:
                                        ├── Semantic (Fisher-Rao geodesic distance)
                                        ├── BM25 (keyword matching)
                                        ├── Entity Graph (spreading activation, 3 hops)
                                        ├── Temporal (date-aware retrieval)
-                                       ├── Associative (multi-hop spreading activation)
-                                       └── Hopfield (partial query completion)
+                                       └── Hopfield (partial-query completion / associative recall)
                                                     │
                                        RRF Fusion (k=60)
                                                     │
@@ -345,7 +348,7 @@ Built-in compliance tools: GDPR Article 15/17 export + complete erasure, tamper-
 slm dashboard    # Opens at http://localhost:8765
 ```
 
-**v3.4.4 "Neural Glass":** 21-tab sidebar dashboard with light + dark theme. Knowledge Graph (Sigma.js WebGL, community detection), Health Monitor, Entity Explorer (1,300+ entities), Mesh Peers (P2P agent communication), Ingestion Status (Gmail/Calendar/Transcript management), Privacy blur mode. Always-on daemon with auto-start. 8 mesh MCP tools built-in. Cross-platform: macOS + Windows + Linux. All data stays local.
+**v3.4.4 "Neural Glass":** 17-tab sidebar dashboard with light + dark theme. Knowledge Graph (Sigma.js WebGL, community detection), Health Monitor, Entity Explorer (1,300+ entities), Mesh Peers (P2P agent communication), Ingestion Status (Gmail/Calendar/Transcript management), Privacy blur mode. Always-on daemon with auto-start. 8 mesh MCP tools built-in. Cross-platform: macOS + Windows + Linux. All data stays local.
 
 <!-- UX-M1: link dashboard-coverage so users can find deferred Living Brain Evolution tiles -->
 > **Living Brain Evolution visibility:** v3.4.21 ships the reward model, shadow test + online retrain, and evolution cost log via the REST API and `slm status --json`; the dedicated dashboard tiles are deferred to the next cycle. See [docs/DASHBOARD-COVERAGE.md](docs/DASHBOARD-COVERAGE.md) for endpoints and workarounds.
@@ -368,7 +371,7 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 ## Features
 
 ### Retrieval
-- 6-channel hybrid: Semantic (Fisher-Rao) + BM25 + Entity Graph + Temporal + Associative + Hopfield
+- 5-channel hybrid: Semantic (Fisher-Rao) + BM25 + Entity Graph + Temporal + Hopfield (associative / partial-query completion)
 - RRF fusion + cross-encoder reranking
 - Agentic sufficiency verification (auto-retry on weak results)
 - Adaptive ranking with LightGBM (learns from usage)
@@ -405,9 +408,9 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 - Tamper-proof hash-chain audit trail (SHA-256 linked entries)
 
 ### Infrastructure
-- 23-tab web dashboard with real-time visualization
+- 17-tab web dashboard with real-time visualization
 - 17+ IDE integrations (Claude, Cursor, Windsurf, VS Code, JetBrains, Zed, etc.)
-- 38 MCP tools + 7 MCP resources
+- 33 default MCP tools (+42 optional via `SLM_MCP_ALL_TOOLS=1`) + 7 MCP resources
 - Profile isolation (independent memory spaces)
 - 2,900+ tests, AGPL v3, cross-platform (Mac/Linux/Windows)
 - CPU-only — no GPU required
@@ -445,7 +448,7 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 
 ## Research Papers
 
-SuperLocalMemory is backed by three peer-reviewed research papers covering trust, information geometry, and cognitive memory architecture.
+SuperLocalMemory is backed by three published research papers (arXiv preprints + Zenodo DOIs) covering trust, information geometry, and cognitive memory architecture. These are preprints — not conference-accepted or journal-published yet.
 
 ### Paper 3: The Living Brain (V3.3)
 > **SuperLocalMemory V3.3: The Living Brain — Biologically-Inspired Forgetting, Cognitive Quantization, and Multi-Channel Retrieval for Zero-LLM Agent Memory Systems**
@@ -551,7 +554,7 @@ If this project solves a real problem for you, **please star the repo** — it h
 
 ## Part of the Qualixar AI Agent Reliability Platform
 
-Qualixar is building the open-source infrastructure for AI agent reliability engineering. Seven products, seven peer-reviewed papers, one coherent platform. Each tool solves one reliability pillar:
+Qualixar is building the open-source infrastructure for AI agent reliability engineering. Seven products, seven research papers (published as arXiv preprints + Zenodo archives), one coherent platform. Each tool solves one reliability pillar:
 
 | Product | Purpose | Install | Paper |
 |---------|---------|---------|-------|

@@ -271,6 +271,17 @@ def _compute_learning_status(profile_id: str,
     phase, phase_label = _resolve_phase(signals_total, model_active,
                                         model_sha256_present)
 
+    # S9-DASH-03: consult migration_log. If the legacy migration is
+    # marked complete but some rows remain uncopied, those rows are
+    # structurally un-migratable (malformed, duplicate, or missing
+    # required cols). Reporting them as "pending" is misleading and
+    # the dashboard card nags forever. After completion we report
+    # pending=0 so the card auto-hides.
+    migration_complete = _legacy_migration_sentinel_complete(lrn_db)
+    legacy_pending = max(0, legacy_feedback_rows - legacy_migrated)
+    if migration_complete:
+        legacy_pending = 0
+
     return {
         "phase": phase,
         "phase_label": phase_label,
@@ -282,9 +293,8 @@ def _compute_learning_status(profile_id: str,
         # actually copied forward via the migrate-legacy flow.
         "legacy_feedback_rows": legacy_feedback_rows,
         "legacy_migrated_count": legacy_migrated,
-        "legacy_migration_pending": max(
-            0, legacy_feedback_rows - legacy_migrated,
-        ),
+        "legacy_migration_pending": legacy_pending,
+        "legacy_migration_complete": migration_complete,
         "model_active": model_active,
         "model_version": model_version,
         "model_trained_at": model_trained_at,
@@ -702,6 +712,29 @@ def _safe_count(lrn_db: LearningDatabase, table: str,
         return 0
 
 
+def _legacy_migration_sentinel_complete(lrn_db: LearningDatabase) -> bool:
+    """Return True when ``migration_log`` marks the legacy feedback
+    migration as complete (S9-DASH-03).
+
+    Signals that the historic-data card should auto-hide even if a
+    small residual of un-migratable rows lingers in ``learning_feedback``.
+    """
+    try:
+        conn = sqlite3.connect(lrn_db.path, timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT status FROM migration_log "
+                "WHERE name = 'LEG001_feedback_to_signals'",
+            ).fetchone()
+            if row is None:
+                return False
+            return str(row[0]).lower() == "complete"
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
 def _count_legacy_migrated(lrn_db: LearningDatabase, profile_id: str) -> int:
     """Count rows copied forward by the legacy-feedback migration.
 
@@ -932,7 +965,208 @@ async def get_brain(profile_id: str = "default") -> dict:
                 0 if isinstance(outcomes_rows, Exception) else outcomes_rows,
             "ships_in": "3.4.21",
         },
+        # S9-defer H-22: live tile data for the Reward / Shadow /
+        # Evolution-Cost dashboard tiles. Each block is a honest-empty
+        # default when the underlying table is missing (fresh install
+        # or older schema) so the UI can render "no data yet" without
+        # a 500. All three queries are cheap COUNT / AVG aggregates.
+        "reward_preview": _compute_reward_preview(profile_id),
+        "shadow_preview": _compute_shadow_preview(profile_id),
+        "evolution_cost_preview": _compute_evolution_cost_preview(profile_id),
+        "outcome_queue": _compute_outcome_queue_stats(profile_id),
         "meta": _meta_now(),
+    }
+
+
+def _compute_outcome_queue_stats(profile_id: str) -> dict:
+    """S9-DASH-02: producer-side telemetry for the Brain panel.
+
+    Exposes the outcome-queue worker counters + a live count of
+    ``pending_outcomes`` so the operator can see the closed loop is
+    actually flowing: recall → enqueue → persist → finalize.
+    """
+    import sqlite3
+    from pathlib import Path
+    try:
+        from superlocalmemory.learning.outcome_queue import (
+            get_counters, queue_size,
+        )
+        counters = get_counters()
+        qsz = queue_size()
+    except Exception:
+        counters, qsz = {}, 0
+    home = Path.home() / ".superlocalmemory"
+    db = home / "memory.db"
+    pending_now = 0
+    if db.exists():
+        try:
+            conn = sqlite3.connect(str(db), timeout=1.0)
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM pending_outcomes "
+                    "WHERE profile_id = ? AND status = 'pending'",
+                    (profile_id,),
+                ).fetchone()
+                if row:
+                    pending_now = int(row[0] or 0)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    return {
+        "is_real": True,
+        "queue_depth": int(qsz),
+        "pending_outcomes_now": pending_now,
+        "counters": counters,
+        "source": "outcome_queue + pending_outcomes",
+    }
+
+
+# ---------------------------------------------------------------------------
+# S9-defer H-22 — dashboard-tile aggregates
+# ---------------------------------------------------------------------------
+
+
+def _compute_reward_preview(profile_id: str) -> dict:
+    """Reward-tile aggregate — count + mean reward over the last 24h."""
+    import sqlite3
+    from pathlib import Path
+    home = Path.home() / ".superlocalmemory"
+    db = home / "memory.db"
+    default = {
+        "is_real": False, "rows_24h": 0, "mean_reward_24h": 0.0,
+        "source": "action_outcomes",
+    }
+    if not db.exists():
+        return default
+    try:
+        conn = sqlite3.connect(str(db), timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c, AVG(reward) AS m "
+                "FROM action_outcomes "
+                "WHERE profile_id = ? AND settled = 1 "
+                "  AND reward IS NOT NULL "
+                "  AND settled_at >= datetime('now', '-1 day')",
+                (profile_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+    if row is None:
+        return default
+    return {
+        "is_real": True,
+        "rows_24h": int(row[0] or 0),
+        "mean_reward_24h": float(row[1] or 0.0),
+        "source": "action_outcomes",
+    }
+
+
+def _compute_shadow_preview(profile_id: str) -> dict:
+    """Shadow-tile aggregate — latest candidate + paired-obs count."""
+    import sqlite3
+    default = {
+        "is_real": False, "active_candidate_id": None,
+        "paired_observations": 0, "rollback_count_90d": 0,
+        "source": "learning_model_state+shadow_observations",
+    }
+    learning_db = _learning_db_path()
+    if not learning_db.exists():
+        return default
+    try:
+        conn = sqlite3.connect(str(learning_db), timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT id FROM learning_model_state "
+                "WHERE profile_id = ? AND is_candidate = 1 "
+                "LIMIT 1",
+                (profile_id,),
+            ).fetchone()
+            cand_id = int(row[0]) if row and row[0] is not None else None
+            paired = 0
+            if cand_id is not None:
+                try:
+                    c = conn.execute(
+                        "SELECT COUNT(DISTINCT query_id) "
+                        "FROM shadow_observations "
+                        "WHERE candidate_id = ? "
+                        "  AND query_id IN ("
+                        "    SELECT query_id FROM shadow_observations "
+                        "    WHERE candidate_id = ? AND arm = 'active' "
+                        "    INTERSECT "
+                        "    SELECT query_id FROM shadow_observations "
+                        "    WHERE candidate_id = ? AND arm = 'candidate' "
+                        "  )",
+                        (cand_id, cand_id, cand_id),
+                    ).fetchone()
+                    paired = int(c[0]) if c and c[0] is not None else 0
+                except sqlite3.Error:
+                    paired = 0
+            # Rollback count in the last 90d. The rollback log is a
+            # separate table the learning subsystem writes; if it is
+            # absent we simply return 0.
+            try:
+                r2 = conn.execute(
+                    "SELECT COUNT(*) FROM model_state_history "
+                    "WHERE profile_id = ? AND action = 'rollback' "
+                    "  AND ts >= datetime('now', '-90 day')",
+                    (profile_id,),
+                ).fetchone()
+                rollbacks = int(r2[0]) if r2 and r2[0] is not None else 0
+            except sqlite3.Error:
+                rollbacks = 0
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+    return {
+        "is_real": True,
+        "active_candidate_id": cand_id,
+        "paired_observations": paired,
+        "rollback_count_90d": rollbacks,
+        "source": "learning_model_state+shadow_observations",
+    }
+
+
+def _compute_evolution_cost_preview(profile_id: str) -> dict:
+    """Evolution-cost tile — last 7d spend + call count."""
+    import sqlite3
+    default = {
+        "is_real": False, "calls_7d": 0, "cost_usd_7d": 0.0,
+        "tokens_in_7d": 0, "tokens_out_7d": 0,
+        "source": "evolution_llm_cost_log",
+    }
+    learning_db = _learning_db_path()
+    if not learning_db.exists():
+        return default
+    try:
+        conn = sqlite3.connect(str(learning_db), timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c, "
+                "       COALESCE(SUM(cost_usd), 0) AS cost, "
+                "       COALESCE(SUM(tokens_in), 0) AS tin, "
+                "       COALESCE(SUM(tokens_out), 0) AS tout "
+                "FROM evolution_llm_cost_log "
+                "WHERE profile_id = ? "
+                "  AND ts >= datetime('now', '-7 day')",
+                (profile_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+    if row is None:
+        return default
+    return {
+        "is_real": True,
+        "calls_7d": int(row[0] or 0),
+        "cost_usd_7d": float(row[1] or 0.0),
+        "tokens_in_7d": int(row[2] or 0),
+        "tokens_out_7d": int(row[3] or 0),
+        "source": "evolution_llm_cost_log",
     }
 
 

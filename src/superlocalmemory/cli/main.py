@@ -185,6 +185,10 @@ def main() -> None:
     # -- Diagnostics ---------------------------------------------------
     status_p = sub.add_parser("status", help="System status (mode, profile, DB size)")
     status_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
+    status_p.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show extended status: migration log, daemon port, disabled marker, last version",
+    )
 
     health_p = sub.add_parser("health", help="Math layer health (Fisher-Rao, Sheaf, Langevin)")
     health_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
@@ -197,6 +201,10 @@ def main() -> None:
     # -- Diagnostics (continued) ----------------------------------------
     doctor_p = sub.add_parser("doctor", help="Pre-flight check: deps, embedding worker, connectivity")
     doctor_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
+    doctor_p.add_argument(
+        "--quick", action="store_true",
+        help="Run only the fast checks (deps + config); skip daemon/embedding probes",
+    )
 
     # -- Services ------------------------------------------------------
     sub.add_parser("mcp", help="Start MCP server (stdio transport for IDE integration)")
@@ -387,6 +395,12 @@ def main() -> None:
         help="Emit JSON result instead of human-readable summary",
     )
 
+    # S-M07: install-token rotation.
+    sub.add_parser(
+        "rotate-token",
+        help="Rotate the SLM install token (run `slm restart` afterwards)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -405,6 +419,7 @@ def main() -> None:
         "config", "evolve", "db",
         # v3.4.21 escape hatches — never auto-start the daemon on these.
         "disable", "enable", "clear-cache", "reconfigure", "benchmark",
+        "rotate-token",
     }
     if args.command not in _NO_DAEMON_COMMANDS:
         try:

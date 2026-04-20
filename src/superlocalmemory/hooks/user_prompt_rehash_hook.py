@@ -46,6 +46,12 @@ def _current_latest_outcome_id(session_id: str) -> str | None:
 
     Kept for monkey-patch compatibility in tests. The main hot path in
     ``_inner_main`` now reuses a single DB connection — see H-12/H-P-04.
+
+    S9-SKEP-08: index the result by position (``row[0]``) rather than
+    by name. ``open_memory_db()`` returns a ``sqlite3.Row`` factory
+    today, but downstream callers occasionally reset the factory (test
+    fixtures, future connection pooling). Positional access works for
+    both ``Row`` and the default tuple factory — future-proof, no cost.
     """
     try:
         with open_memory_db() as conn:
@@ -57,7 +63,7 @@ def _current_latest_outcome_id(session_id: str) -> str | None:
             ).fetchone()
     except Exception:
         return None
-    return row["outcome_id"] if row else None
+    return row[0] if row else None
 
 
 def _current_latest_outcome_id_on(
@@ -65,6 +71,8 @@ def _current_latest_outcome_id_on(
 ) -> str | None:
     """H-12/H-P-04: same as above but drives an existing connection —
     avoids a second ``sqlite3.connect`` on the UserPromptSubmit hot path.
+
+    S9-SKEP-08: positional indexing — see sibling function docstring.
     """
     try:
         row = conn.execute(
@@ -75,7 +83,7 @@ def _current_latest_outcome_id_on(
         ).fetchone()
     except Exception:
         return None
-    return row["outcome_id"] if row else None
+    return row[0] if row else None
 
 
 def _inner_main() -> str:

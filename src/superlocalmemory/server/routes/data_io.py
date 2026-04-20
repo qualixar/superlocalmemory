@@ -11,7 +11,7 @@ import gzip
 import json
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -79,14 +79,14 @@ async def export_memories(
         else:
             content = json.dumps({
                 "version": "3.0.0",
-                "exported_at": datetime.now().isoformat(),
+                "exported_at": datetime.now(timezone.utc).isoformat(),
                 "total_memories": len(memories),
                 "filters": {"category": category, "project_name": project_name},
                 "memories": memories,
             }, indent=2)
             media_type = "application/json"
 
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         if len(content) > 10000:
             compressed = gzip.compress(content.encode())
             return StreamingResponse(
@@ -167,7 +167,7 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 if ws_manager:
                     await ws_manager.broadcast({
                         "type": "memory_added", "memory_id": imported,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
 
             except Exception as e:

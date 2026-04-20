@@ -473,8 +473,22 @@ class DaemonHandler(BaseHTTPRequestHandler):
                 query = params.get("q", [""])[0]
                 limit = int(params.get("limit", ["20"])[0])
 
+                # S9-DASH-02: session_id for outcome-queue enqueue.
+                # Priority: ?session_id= query arg > X-SLM-Session-Id
+                # header > synthetic "cli:<ts>". Without any of these
+                # the recall still works — it just doesn't produce a
+                # pending_outcome (hook-based signals can't match).
+                session_id = params.get("session_id", [""])[0]
+                if not session_id:
+                    session_id = self.headers.get("X-SLM-Session-Id", "")
+                if not session_id:
+                    import time as _t
+                    session_id = f"http:{int(_t.time() * 1000)}"
+
                 engine = _get_engine()
-                response = engine.recall(query, limit=limit)
+                response = engine.recall(
+                    query, limit=limit, session_id=session_id,
+                )
                 results = [
                     {"content": r.fact.content, "score": round(r.score, 4),
                      "fact_type": getattr(r.fact.fact_type, 'value', str(r.fact.fact_type)),

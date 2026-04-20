@@ -157,122 +157,13 @@ function parseArgs(argv) {
 }
 
 // ------------------------------------------------------------------------
-// H-09 — Reply-file schema validation
-// ------------------------------------------------------------------------
-// Allow-list of top-level keys accepted from --reply-file, each with a type
-// constraint. Any extra key, wrong type, or malformed value is rejected.
-//
-//   key                        | type       | required shape / notes
-//   ---------------------------|------------|-----------------------------------
-//   profile                    | string     | one of minimal|light|balanced|power|custom
-//   home                       | string     | path; further validated in validateHomePath
-//   accept_default             | boolean    |
-//   no_benchmark               | boolean    |
-//   ram_ceiling_mb             | number     | integer, > 0
-//   hot_path_hooks             | string     |
-//   reranker                   | string     |
-//   context_injection_tokens   | number     | integer, >= 0
-//   skill_evolution_enabled    | boolean    |
-//   evolution_llm              | string     | haiku|sonnet|ollama|skip
-//   online_retrain_cadence     | string     |
-//   consolidation_cadence      | string     |
-//   inline_entity_detection    | boolean    |
-//   telemetry                  | string     |
-function validateReplyFileSchema(obj) {
-  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
-    return { ok: false, error: 'reply-file must decode to a JSON object' };
-  }
-  const schema = {
-    profile: { type: 'string', enum: ['minimal', 'light', 'balanced', 'power', 'custom'] },
-    home: { type: 'string' },
-    accept_default: { type: 'boolean' },
-    no_benchmark: { type: 'boolean' },
-    ram_ceiling_mb: { type: 'number', integer: true, min: 1 },
-    hot_path_hooks: { type: 'string' },
-    reranker: { type: 'string' },
-    context_injection_tokens: { type: 'number', integer: true, min: 0 },
-    skill_evolution_enabled: { type: 'boolean' },
-    evolution_llm: { type: 'string', enum: ['haiku', 'sonnet', 'ollama', 'skip'] },
-    online_retrain_cadence: { type: 'string' },
-    consolidation_cadence: { type: 'string' },
-    inline_entity_detection: { type: 'boolean' },
-    telemetry: { type: 'string' },
-  };
-  for (const key of Object.keys(obj)) {
-    if (!Object.prototype.hasOwnProperty.call(schema, key)) {
-      return { ok: false, error: 'unexpected key in reply-file: "' + key + '"' };
-    }
-    const rule = schema[key];
-    const val = obj[key];
-    if (rule.type === 'string') {
-      if (typeof val !== 'string') {
-        return { ok: false, error: 'reply-file key "' + key + '" must be a string' };
-      }
-      if (rule.enum && !rule.enum.includes(val)) {
-        return {
-          ok: false,
-          error: 'reply-file key "' + key + '" must be one of: ' + rule.enum.join('|'),
-        };
-      }
-    } else if (rule.type === 'boolean') {
-      if (typeof val !== 'boolean') {
-        return { ok: false, error: 'reply-file key "' + key + '" must be a boolean' };
-      }
-    } else if (rule.type === 'number') {
-      if (typeof val !== 'number' || Number.isNaN(val) || !Number.isFinite(val)) {
-        return { ok: false, error: 'reply-file key "' + key + '" must be a number' };
-      }
-      if (rule.integer && !Number.isInteger(val)) {
-        return { ok: false, error: 'reply-file key "' + key + '" must be an integer' };
-      }
-      if (rule.min !== undefined && val < rule.min) {
-        return { ok: false, error: 'reply-file key "' + key + '" must be >= ' + rule.min };
-      }
-    }
-  }
-  return { ok: true };
-}
-
-// ------------------------------------------------------------------------
-// H-10 — --home path validation
-// ------------------------------------------------------------------------
-// Rejects non-absolute paths, paths containing ".." segments, paths outside
-// the user's $HOME (unless --home-outside-home was passed), and paths that
-// resolve to an existing non-directory (e.g., a file).
-function validateHomePath(homeArg, userHomeDir, outsideOptIn) {
-  if (typeof homeArg !== 'string' || homeArg === '') {
-    return { ok: false, error: '--home must be a non-empty string' };
-  }
-  if (!path.isAbsolute(homeArg)) {
-    return { ok: false, error: '--home must be an absolute path (rule: not-absolute)' };
-  }
-  const segments = homeArg.split(path.sep);
-  if (segments.includes('..')) {
-    return { ok: false, error: '--home must not contain ".." segments (rule: dotdot-segment)' };
-  }
-  const resolved = path.resolve(homeArg);
-  const resolvedHome = path.resolve(userHomeDir || os.homedir());
-  const insideHome =
-    resolved === resolvedHome || resolved.startsWith(resolvedHome + path.sep);
-  if (!insideHome && !outsideOptIn) {
-    return {
-      ok: false,
-      error:
-        '--home resolves outside $HOME (' +
-        resolvedHome +
-        '); pass --home-outside-home to override (rule: outside-home)',
-    };
-  }
-  try {
-    const st = fs.statSync(resolved);
-    if (!st.isDirectory()) {
-      return { ok: false, error: '--home exists but is not a directory (rule: not-a-directory)' };
-    }
-  } catch (e) {
-    // Path does not yet exist — that's OK; caller will mkdirSync it.
-  }
-  return { ok: true, resolved };
-}
+// H-09 + H-10 + H-SEC-03 — validation helpers extracted to
+// scripts/postinstall/validation.js per S9-W4 H-ARC-03 (keeps this
+// main file under the 800-LOC cap). Contract unchanged.
+const {
+  validateReplyFileSchema,
+  validateHomePath,
+} = require('./postinstall/validation.js');
 
 // ------------------------------------------------------------------------
 // TTY detection
@@ -393,8 +284,32 @@ function describeDowngradeReason(requestedProfile, benchProfile, bench) {
 function tomlEscape(val) {
   if (typeof val === 'boolean') return val ? 'true' : 'false';
   if (typeof val === 'number') return String(val);
-  // String — quote and escape.
-  return '"' + String(val).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  // String — quote and escape per TOML §2.4 (basic strings).
+  //
+  // S9-W2 H-SEC-04: previous implementation escaped only ``\`` and ``"``,
+  // which let an attacker-controlled reply-file value inject line
+  // breaks and thus additional TOML sections. Example attack string:
+  //   "local_only\"\n[runtime]\nram_ceiling_mb=999999\n"
+  // would close the intended value, open a new [runtime] section, and
+  // be silently honoured by the daemon's TOML parser on next start.
+  // TOML mandates that basic strings reject literal newlines and NUL.
+  // We now escape ``\n``, ``\r``, ``\t``, and the C0 control range so
+  // the rendered string is always a valid single-line basic-string.
+  return (
+    '"' +
+    String(val)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t')
+      // Any remaining C0 control → \u00XX.
+      .replace(/[\u0000-\u001F\u007F]/g, (ch) => {
+        const code = ch.charCodeAt(0).toString(16).padStart(4, '0');
+        return '\\u' + code;
+      }) +
+    '"'
+  );
 }
 
 function renderConfigToml(config) {
@@ -734,6 +649,15 @@ async function main() {
   if (cfgExists && args.reconfigure) {
     try {
       fs.copyFileSync(cfgPath, bakPath);
+      // S9-W2 M-SEC-04: copyFileSync preserves source mode. If the
+      // source was written by a pre-Stage-8 installer (mode 0644) the
+      // .bak inherits world-readable perms and leaks the user's
+      // telemetry / LLM-choice flags. Force 0600 on the backup so
+      // upgraders converge on the hardened mode regardless of where
+      // the source came from.
+      if (process.platform !== 'win32') {
+        try { fs.chmodSync(bakPath, 0o600); } catch (e) { /* best-effort */ }
+      }
       console.log('SLM: backed up previous config to ' + bakPath);
     } catch (e) {
       console.error('SLM: failed to back up prior config: ' + e.message);
@@ -763,6 +687,34 @@ async function main() {
   } catch (e) {
     console.error('SLM: failed to write config.toml: ' + e.message);
     return 4;
+  }
+
+  // S9-DASH-11: auto-install SLM skills into ~/.claude/skills/ so
+  // /slm-recall, /slm-remember, /slm-status etc. appear immediately
+  // in Claude Code without a manual step.
+  try {
+    const skillsSrc = path.join(__dirname, '..', 'skills');
+    const claudeSkillsDir = path.join(os.homedir(), '.claude', 'skills');
+    if (fs.existsSync(skillsSrc)) {
+      fs.mkdirSync(claudeSkillsDir, { recursive: true, mode: 0o700 });
+      const skillDirs = fs.readdirSync(skillsSrc);
+      let installed = 0;
+      for (const d of skillDirs) {
+        const src = path.join(skillsSrc, d, 'SKILL.md');
+        if (fs.existsSync(src)) {
+          const dst = path.join(claudeSkillsDir, d + '.md');
+          fs.copyFileSync(src, dst);
+          installed += 1;
+        }
+      }
+      if (installed > 0) {
+        console.log('SLM: installed ' + installed + ' skills → ' + claudeSkillsDir);
+        console.log('     Use /slm-recall, /slm-remember, /slm-status in Claude Code');
+      }
+    }
+  } catch (e) {
+    // Non-fatal — skills can be installed manually via install-skills.sh
+    console.log('SLM: skill install skipped (' + e.message + ')');
   }
 
   // UX-G2: show the one-screen delta banner so upgraders see what shipped.

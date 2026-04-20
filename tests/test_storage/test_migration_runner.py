@@ -137,7 +137,7 @@ def test_apply_all_on_fresh_db_applies_all(fresh_dbs: tuple[Path, Path]) -> None
     assert stats["applied"]
     assert stats["failed"] == [] or stats["failed"] == 0 or not stats["failed"]
     # 8 migrations in MIGRATIONS: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(stats["applied"]) == 8
+    assert len(stats["applied"]) == 9
     # migration_log should contain each as complete.
     log_learning = _log_rows(learning_db)
     log_memory = _log_rows(memory_db)
@@ -200,10 +200,10 @@ def test_apply_all_idempotent(fresh_dbs: tuple[Path, Path]) -> None:
     first = mr.apply_all(learning_db, memory_db)
     second = mr.apply_all(learning_db, memory_db)
     # 8 migrations: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(first["applied"]) == 8
+    assert len(first["applied"]) == 9
     # Second pass: everything skipped.
     assert len(second["applied"]) == 0
-    assert len(second["skipped"]) == 8
+    assert len(second["skipped"]) == 9
 
 
 def test_apply_all_preserves_model_state_rows(
@@ -497,17 +497,32 @@ def test_apply_deferred_is_idempotent(fresh_dbs: tuple[Path, Path]) -> None:
     assert "reward" in _table_cols(memory_db, "action_outcomes")
 
 
-def test_apply_deferred_without_prior_apply_all_bootstraps_log(
+def test_apply_deferred_without_prior_apply_all_refuses_split_brain(
     fresh_dbs: tuple[Path, Path],
 ) -> None:
-    """apply_deferred called cold (no apply_all yet) still works on memory DB.
+    """S9-W1 C3: apply_deferred must NOT independently bootstrap migration_log.
 
-    The memory DB has action_outcomes (fixture bootstraps it) but no
-    migration_log — apply_deferred must create the log and succeed.
+    Prior contract let apply_deferred create the log on its own. That
+    created split-brain state when apply_all had crashed before reaching
+    the memory DB — the log would then record only deferred migrations as
+    applied, with no trace of the sync set ever being attempted. Memory
+    DB is sacred (18k+ atomic facts). The new contract: apply_deferred
+    fails loudly if the log is missing, forcing the operator to run
+    apply_all first.
     """
     learning_db, memory_db = fresh_dbs
     stats = mr.apply_deferred(learning_db, memory_db)
-    assert "M006_action_outcomes_reward" in stats["applied"]
+    assert "M006_action_outcomes_reward" in stats["failed"]
+    assert "migration_log missing" in stats["details"][
+        "M006_action_outcomes_reward"
+    ]
+    # Reward column NOT added because the migration refused to run.
+    assert "reward" not in _table_cols(memory_db, "action_outcomes")
+
+    # After apply_all bootstraps both logs, apply_deferred succeeds.
+    mr.apply_all(learning_db, memory_db)
+    stats2 = mr.apply_deferred(learning_db, memory_db)
+    assert "M006_action_outcomes_reward" in stats2["applied"]
     assert "reward" in _table_cols(memory_db, "action_outcomes")
 
 
@@ -668,6 +683,9 @@ def test_apply_deferred_creates_archive_and_merge_log(
             );
             """
         )
+    # S9-W1 C3: apply_all must run first to bootstrap migration_log on
+    # both DBs. apply_deferred no longer independently creates the log.
+    mr.apply_all(learning_db, memory_db)
     stats = mr.apply_deferred(learning_db, memory_db)
     assert "M011_archive_and_merge" in stats["applied"]
     tables = _table_names(memory_db)
@@ -687,6 +705,8 @@ def test_apply_deferred_extends_atomic_facts(tmp_path: Path) -> None:
             );
             """
         )
+    # S9-W1 C3: apply_all bootstraps both DBs' migration_log first.
+    mr.apply_all(learning_db, memory_db)
     mr.apply_deferred(learning_db, memory_db)
     cols = set(_table_cols(memory_db, "atomic_facts"))
     assert {"archive_status", "archive_reason", "merged_into",

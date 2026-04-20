@@ -211,8 +211,22 @@ async def get_memories(
     tags: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    filter: Optional[str] = Query(
+        None,
+        description="Named filter: 'high_reward' | 'being_forgotten'",
+    ),
 ):
-    """List memories with optional filtering and pagination."""
+    """List memories with optional filtering and pagination.
+
+    S9-DASH-07: ``filter`` enables dashboard "learning-visible" views:
+
+    * ``high_reward``: facts cited by ``action_outcomes`` with
+      ``reward >= 0.7`` in the last 30 days. Surfaces what the ranker
+      is actually learning from.
+    * ``being_forgotten``: facts in ``archive_status='archived'`` OR
+      with ``lifecycle='cold'`` AND no positive reward in 60 days.
+      Makes "memory decay" tangible to the operator.
+    """
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
@@ -276,6 +290,56 @@ async def get_memories(
             for tag in tag_list:
                 query += " AND tags LIKE ?"
                 params.append(f'%{tag}%')
+
+        # S9-DASH-07: named filters — "high_reward" and "being_forgotten".
+        # Only supported on the v3 (atomic_facts) path — v2 fallback
+        # ignores the flag silently.
+        if filter and use_v3:
+            if filter == "high_reward":
+                query += (
+                    " AND fact_id IN ("
+                    "  SELECT DISTINCT json_each.value"
+                    "  FROM action_outcomes, json_each(action_outcomes.fact_ids_json)"
+                    "  WHERE action_outcomes.reward >= 0.7"
+                    "    AND datetime(action_outcomes.settled_at) >= "
+                    "        datetime('now', '-30 day')"
+                    ")"
+                )
+                count_base += (
+                    " AND fact_id IN ("
+                    "  SELECT DISTINCT json_each.value"
+                    "  FROM action_outcomes, json_each(action_outcomes.fact_ids_json)"
+                    "  WHERE action_outcomes.reward >= 0.7"
+                    "    AND datetime(action_outcomes.settled_at) >= "
+                    "        datetime('now', '-30 day')"
+                    ")"
+                )
+            elif filter == "being_forgotten":
+                # Cold / archived + no recent positive reward.
+                query += (
+                    " AND ("
+                    "  archive_status = 'archived' OR "
+                    "  (lifecycle = 'cold' AND fact_id NOT IN ("
+                    "    SELECT DISTINCT json_each.value"
+                    "    FROM action_outcomes, json_each(action_outcomes.fact_ids_json)"
+                    "    WHERE action_outcomes.reward >= 0.5"
+                    "      AND datetime(action_outcomes.settled_at) >= "
+                    "          datetime('now', '-60 day')"
+                    "  ))"
+                    ")"
+                )
+                count_base += (
+                    " AND ("
+                    "  archive_status = 'archived' OR "
+                    "  (lifecycle = 'cold' AND fact_id NOT IN ("
+                    "    SELECT DISTINCT json_each.value"
+                    "    FROM action_outcomes, json_each(action_outcomes.fact_ids_json)"
+                    "    WHERE action_outcomes.reward >= 0.5"
+                    "      AND datetime(action_outcomes.settled_at) >= "
+                    "          datetime('now', '-60 day')"
+                    "  ))"
+                    ")"
+                )
 
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
@@ -567,6 +631,130 @@ async def delete_memory(request: Request, fact_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete error: {str(e)}")
+
+
+@router.post("/api/memories/{fact_id}/forget")
+async def forget_memory(request: Request, fact_id: str):
+    """S9-DASH-08: soft-forget a fact — flip archive_status='archived'.
+
+    Non-destructive: the row stays in ``atomic_facts`` for audit and
+    can be un-archived later. Default recall paths filter it out.
+    The fact's payload is ALSO copied into ``memory_archive`` so a
+    future ``slm restore`` can bring it back.
+    """
+    import json as _json
+    try:
+        conn = get_db_connection()
+        conn.row_factory = dict_factory
+        cursor = conn.cursor()
+        active_profile = get_active_profile()
+        cursor.execute(
+            "SELECT fact_id, content, importance, confidence, "
+            "       canonical_entities_json, embedding, created_at "
+            "FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, active_profile),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Memory not found")
+        # Archive copy — payload_json small enough for the canonical row.
+        payload = {
+            "fact_id": row["fact_id"],
+            "content": row["content"],
+            "canonical_entities_json": row.get("canonical_entities_json"),
+            "importance": row.get("importance"),
+            "confidence": row.get("confidence"),
+            "created_at": row.get("created_at"),
+        }
+        from datetime import datetime, timezone
+        archived_at = datetime.now(timezone.utc).isoformat()
+        import uuid as _uuid
+        cursor.execute(
+            "INSERT INTO memory_archive "
+            "(archive_id, fact_id, profile_id, payload_json, archived_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(_uuid.uuid4()), fact_id, active_profile,
+             _json.dumps(payload), archived_at, "user_forget_dashboard"),
+        )
+        cursor.execute(
+            "UPDATE atomic_facts SET archive_status = 'archived' "
+            "WHERE fact_id = ?",
+            (fact_id,),
+        )
+        conn.commit()
+        conn.close()
+        return {"success": True, "fact_id": fact_id, "archived_at": archived_at}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Forget error: {str(e)}")
+
+
+@router.post("/api/memories/{fact_id}/merge")
+async def merge_memory(request: Request, fact_id: str):
+    """S9-DASH-08: merge this fact into another (keep the other).
+
+    Body: ``{into: <kept_fact_id>}``.
+
+    Writes a ``memory_merge_log`` row (M011) for provenance and marks
+    the loser's ``merged_into`` column. The loser is archived so it
+    no longer appears in default recall. The winner is untouched.
+    """
+    try:
+        body = await request.json()
+        kept = str((body or {}).get("into", "")).strip()
+        if not kept:
+            raise HTTPException(400, "Body field 'into' is required")
+        # S9-AUDIT: cap length defensively — fact_ids are UUID-v4 36 chars.
+        if len(kept) > 200:
+            raise HTTPException(400, "'into' exceeds 200-char limit")
+        if kept == fact_id:
+            raise HTTPException(400, "Cannot merge a fact into itself")
+        conn = get_db_connection()
+        conn.row_factory = dict_factory
+        cursor = conn.cursor()
+        active_profile = get_active_profile()
+        # Both must belong to the active profile.
+        cursor.execute(
+            "SELECT fact_id FROM atomic_facts "
+            "WHERE fact_id IN (?, ?) AND profile_id = ?",
+            (fact_id, kept, active_profile),
+        )
+        found = {r["fact_id"] for r in cursor.fetchall()}
+        if fact_id not in found or kept not in found:
+            conn.close()
+            raise HTTPException(
+                404,
+                "Both fact_ids must exist in the active profile",
+            )
+        from datetime import datetime, timezone
+        merged_at = datetime.now(timezone.utc).isoformat()
+        cursor.execute(
+            "INSERT INTO memory_merge_log "
+            "(kept_fact_id, merged_fact_id, profile_id, reason, merged_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (kept, fact_id, active_profile,
+             "user_merge_dashboard", merged_at),
+        )
+        cursor.execute(
+            "UPDATE atomic_facts "
+            "SET merged_into = ?, archive_status = 'archived' "
+            "WHERE fact_id = ?",
+            (kept, fact_id),
+        )
+        conn.commit()
+        conn.close()
+        return {
+            "success": True,
+            "merged": fact_id,
+            "into": kept,
+            "merged_at": merged_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Merge error: {str(e)}")
 
 
 @router.patch("/api/memories/{fact_id}")

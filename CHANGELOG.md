@@ -12,7 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.4.21] - 2026-04-18
 
-SLM now actively learns from your use.
+Hardening release — correctness, stability, and security fixes.
+
+### Added
+- `slm benchmark` plus escape-hatch commands (`disable`, `enable`,
+  `clear-cache`, `reconfigure`).
+- One-time upgrade banner on first boot after install.
+
+### Changed
+- Tighter defaults for the interactive installer.
+- Licence: AGPL-3.0-or-later.
+- Node.js prerequisite: ≥ 18.
+
+### Security
+- Hardened redaction, path validation, and token handling per internal
+  audit. No end-user-visible behaviour change.
+
+### Compatibility
+- Fully backward compatible. `atomic_facts` is never modified by any
+  migration. All upgrades are additive.
 
 ---
 

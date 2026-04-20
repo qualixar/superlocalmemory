@@ -251,7 +251,12 @@ async def lifespan(application: FastAPI):
                 _prev = _version_marker.read_text(encoding="utf-8").strip()
             except OSError:
                 _prev = None
-        if _prev != _slm_version:
+        # S9-SKEP-15: the version marker is written AFTER the migration
+        # block succeeds (see below). A failed migration must NOT cause
+        # the next successful start to skip the upgrade banner — the
+        # banner is the operator's cue that a new version just landed.
+        _want_write_marker = _prev != _slm_version
+        if _want_write_marker:
             if _prev is None:
                 logger.info(
                     "[slm] first boot on v%s — run `slm status` to see your "
@@ -266,13 +271,11 @@ async def lifespan(application: FastAPI):
                     "https://github.com/qualixar/superlocalmemory/blob/main/CHANGELOG.md",
                     _prev, _slm_version,
                 )
-            try:
-                _version_marker.parent.mkdir(parents=True, exist_ok=True)
-                _version_marker.write_text(_slm_version, encoding="utf-8")
-            except OSError:
-                pass  # non-fatal
     except Exception as _exc:  # pragma: no cover — never block startup
         logger.debug("version-banner skipped: %s", _exc)
+        _want_write_marker = False
+        _version_marker = None
+        _slm_version = None
 
     # LLD-06 §7.3 / LLD-07 §4.1 — run additive schema migrations BEFORE
     # engine init so later queries see the expected columns/tables.
@@ -291,6 +294,22 @@ async def lifespan(application: FastAPI):
         if _failed:
             logger.warning("migrations failed (non-fatal): %s", _failed)
         application.state.migration_result = _result
+        # S9-SKEP-15: only commit the new `.last_version` AFTER migrations
+        # complete with zero failures. A partial upgrade (schema didn't
+        # land) must retain the old marker so the next successful start
+        # still fires the upgrade banner — otherwise the operator loses
+        # the one signal that tells them a version just changed.
+        if (
+            _want_write_marker
+            and _version_marker is not None
+            and _slm_version is not None
+            and not _failed
+        ):
+            try:
+                _version_marker.parent.mkdir(parents=True, exist_ok=True)
+                _version_marker.write_text(_slm_version, encoding="utf-8")
+            except OSError:
+                pass  # non-fatal
     except Exception as _exc:
         logger.warning("migration runner crashed (non-fatal): %s", _exc)
         application.state.migration_result = {
@@ -348,6 +367,17 @@ async def lifespan(application: FastAPI):
             logger.warning(
                 "deferred migration runner crashed (non-fatal): %s", _dexc,
             )
+
+        # S9-DASH-02: start the outcome-queue worker so recall →
+        # pending_outcomes is actually produced. Before v3.4.21 this
+        # producer had zero callers and the closed-loop pipeline was
+        # dark. Worker drains at 250 ms cadence; one SQLite INSERT per
+        # event via EngagementRewardModel.record_recall.
+        try:
+            from superlocalmemory.learning.outcome_queue import start_worker
+            start_worker(_memory_db)
+        except Exception as _oqexc:  # pragma: no cover — defensive
+            logger.debug("outcome_queue start failed (non-fatal): %s", _oqexc)
 
         # Set up observe buffer
         _observe_buffer.set_engine(engine)
@@ -471,8 +501,74 @@ async def lifespan(application: FastAPI):
 
     yield
 
-    # Shutdown
+    # S9-W4 C2: symmetric shutdown. Prior version only flushed the
+    # observe-buffer + signal_worker + engine. The following long-lived
+    # subsystems lived on ``application.state`` but were never
+    # explicitly cancelled / joined, so uvicorn's
+    # ``timeout_graceful_shutdown=10`` silently killed live threads
+    # mid-commit: HealthMonitor probes, MeshBroker cleanup thread,
+    # bandit settler asyncio tasks, and the process-wide cost-log
+    # connection cache. A WAL commit interrupted mid-flight could
+    # leave ``evolution_llm_cost_log`` with torn rows.
+    #
+    # New policy: every subsystem that stored a handle on
+    # ``application.state`` MUST be stopped here, in reverse start
+    # order. Each stop is wrapped in try/except so one failure does
+    # not skip the rest.
     _observe_buffer.flush_sync()
+
+    # S9-DASH-02: stop outcome-queue worker (final drain on graceful
+    # shutdown). Any events left unpersisted are logged but not
+    # replayed — signal capture is not load-bearing on correctness.
+    try:
+        from superlocalmemory.learning.outcome_queue import stop_worker
+        _oq_remaining = stop_worker(timeout_s=2.0)
+        if _oq_remaining:
+            logger.info(
+                "outcome_queue shutdown: %d events dropped on flush",
+                _oq_remaining,
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("outcome_queue stop failed: %s", exc)
+
+    # Cancel bandit asyncio tasks (LLD-03). ``bandit_loops`` stashes
+    # them at ``application.state.bandit_tasks``; if the attr is
+    # missing we skip.
+    _bandit_tasks = getattr(application.state, "bandit_tasks", None)
+    if _bandit_tasks:
+        try:
+            for _t in _bandit_tasks:
+                try:
+                    _t.cancel()
+                except Exception:  # pragma: no cover
+                    pass
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("bandit_tasks cancel failed: %s", exc)
+
+    # Stop HealthMonitor (health_monitor.py owns a daemon thread).
+    _health = getattr(application.state, "health_monitor", None)
+    if _health is not None:
+        try:
+            stop_fn = getattr(_health, "stop", None)
+            if callable(stop_fn):
+                stop_fn()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("health_monitor stop failed: %s", exc)
+
+    # Stop MeshBroker cleanup thread.
+    _mesh = getattr(application.state, "mesh_broker", None)
+    if _mesh is not None:
+        try:
+            stop_fn = getattr(_mesh, "stop_cleanup", None)
+            if callable(stop_fn):
+                stop_fn()
+            else:  # pragma: no cover — older broker versions
+                stop_fn = getattr(_mesh, "stop", None)
+                if callable(stop_fn):
+                    stop_fn()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("mesh_broker stop failed: %s", exc)
+
     # LLD-02 SW3: flush pending signals to DB before closing. Bounded 3 s
     # to keep daemon shutdown snappy; drops + counts anything unwritten.
     if getattr(application.state, "signal_worker_started", False):
@@ -481,6 +577,34 @@ async def lifespan(application: FastAPI):
             _sw.stop(timeout=3.0)
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("signal_worker shutdown flush failed: %s", exc)
+
+    # Close the process-wide evolution cost-log connection cache
+    # BEFORE engine.close so fsyncs land under our own control, not
+    # under uvicorn's SIGTERM timeout. ``_close_cost_conns`` is
+    # idempotent — the atexit hook is still registered but won't
+    # re-close since the cache is cleared.
+    try:
+        from superlocalmemory.evolution import llm_dispatch as _ld
+        _ld._close_cost_conns()
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("evolution cost-conn cache close failed: %s", exc)
+
+    # Drop the trigram cache conn symmetrically.
+    try:
+        from superlocalmemory.learning import trigram_index as _ti
+        _ti._reset_cache_conn()
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("trigram cache conn close failed: %s", exc)
+
+    # Flush the perf-log fd explicitly (the atexit hook still fires
+    # but explicit close here is cheap insurance against uvicorn
+    # killing the process before atexit runs).
+    try:
+        from superlocalmemory.hooks._outcome_common import _perf_log_flush
+        _perf_log_flush()
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("perf_log flush failed: %s", exc)
+
     if engine is not None:
         try:
             engine.close()
@@ -610,9 +734,18 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         _write_limiter = RateLimiter(max_requests=30, window_seconds=60)
         _read_limiter = RateLimiter(max_requests=120, window_seconds=60)
 
+        # S9-DASH-09: loopback (127.0.0.1 / ::1) is always the dashboard
+        # itself — it legitimately makes many rapid reads (Brain + tabs +
+        # polling). Rate-limiting our own UI produces 429s that cascade
+        # into blank panels. CORS already restricts origins to localhost,
+        # so we don't lose the anti-abuse posture for external callers.
+        _LOOPBACK_IPS = frozenset({"127.0.0.1", "::1", "localhost"})
+
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"
+            if client_ip in _LOOPBACK_IPS:
+                return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             limiter = _write_limiter if is_write else _read_limiter
             allowed, remaining = limiter.is_allowed(client_ip)
@@ -769,14 +902,30 @@ def _register_daemon_routes(application: FastAPI) -> None:
         }
 
     @application.get("/recall")
-    async def recall(q: str = "", query: str = "", limit: int = 20):
+    async def recall(
+        request: Request,
+        q: str = "", query: str = "", limit: int = 20,
+        session_id: str = "",
+    ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
         engine = _get_engine_or_503()
         if not search_query:
             return {"results": [], "count": 0, "query_type": "none", "retrieval_time_ms": 0}
+        # S9-DASH-02: session_id for the outcome-queue producer.
+        # Priority: ?session_id= > X-SLM-Session-Id header > synthetic
+        # "http:<ts>". Without a session_id the recall still works
+        # (outcome just can't be hook-matched).
+        effective_sid = session_id
+        if not effective_sid:
+            effective_sid = request.headers.get("X-SLM-Session-Id", "")
+        if not effective_sid:
+            import time as _t
+            effective_sid = f"http:{int(_t.time() * 1000)}"
         try:
-            response = engine.recall(search_query, limit=limit)
+            response = engine.recall(
+                search_query, limit=limit, session_id=effective_sid,
+            )
             results = [
                 {
                     "content": r.fact.content,

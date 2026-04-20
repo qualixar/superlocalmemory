@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -32,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 # Minimum observations before emitting a pattern
 MIN_EVIDENCE = 3
+
+# S9-DASH-01: filter orphan entity_ids that leak into patterns. The
+# canonical_entities primary key is 16 hex chars; some historic rows
+# also carry 17 (off-by-one). Any pattern value matching this shape
+# with no accompanying ``metadata.value`` is skipped at read time so
+# the dashboard no longer shows raw ids as "preferences".
+_HEX_ID_RE = re.compile(r"^[0-9a-f]{15,20}$")
 
 # Transfer eligibility thresholds
 TRANSFER_MIN_CONFIDENCE = 0.3
@@ -176,7 +184,24 @@ class BehavioralPatternStore:
                 params.append(limit)
 
                 rows = conn.execute(query, params).fetchall()
-                return [self._row_to_dict(r) for r in rows]
+                out: List[Dict[str, Any]] = []
+                for r in rows:
+                    d = self._row_to_dict(r)
+                    # S9-DASH-01: historic rows wrote raw hex entity_ids
+                    # (16-20 hex chars, no row in canonical_entities) into
+                    # ``pattern_key``/``metadata.value``. They surface as
+                    # "entity_preferences: ea701bf01f1ff4df8" on the
+                    # dashboard, which is noise. Skip them at read time so
+                    # existing installs don't require a destructive DB
+                    # cleanup migration.
+                    key = d.get("pattern_key") or ""
+                    meta_val = (d.get("metadata") or {}).get("value") or ""
+                    if _HEX_ID_RE.match(str(key).split(":", 1)[-1]):
+                        continue
+                    if _HEX_ID_RE.match(str(meta_val)):
+                        continue
+                    out.append(d)
+                return out
             finally:
                 conn.close()
 
@@ -280,6 +305,33 @@ class BehavioralPatternStore:
                         "DELETE FROM _store_patterns WHERE profile_id = ?",
                         (profile_id,),
                     )
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+
+    def delete_pattern_by_key(
+        self,
+        profile_id: str,
+        pattern_type: str,
+        pattern_key: str,
+    ) -> int:
+        """S9-DASH-04: delete a single pattern row by its user-visible
+        identity ``(profile_id, pattern_type, pattern_key)``.
+
+        Used by the dashboard "Delete pattern" button so an operator
+        can kill a wrong auto-detected pattern without wiping the full
+        table. Returns 1 if a row was deleted, 0 if no match.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "DELETE FROM _store_patterns "
+                    "WHERE profile_id = ? AND pattern_type = ? "
+                    "AND pattern_key = ?",
+                    (profile_id, pattern_type, pattern_key),
+                )
                 conn.commit()
                 return cur.rowcount
             finally:

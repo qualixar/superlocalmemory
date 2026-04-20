@@ -44,7 +44,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 
 from superlocalmemory.storage.models import _new_id
@@ -176,7 +176,7 @@ def _parse_date(raw: str | None) -> datetime | None:
 def _temporal_midpoint(dates: list[datetime]) -> str:
     """Compute ISO-8601 midpoint of a list of datetimes."""
     if not dates:
-        return datetime.now().isoformat()
+        return datetime.now(timezone.utc).isoformat()
     ts = [d.timestamp() for d in dates]
     mid = sum(ts) / len(ts)
     return datetime.fromtimestamp(mid).isoformat()

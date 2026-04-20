@@ -15,7 +15,7 @@ V3 change: base directory is ``~/.superlocalmemory/`` (was ``~/.claude-memory/``
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -169,7 +169,7 @@ class BackupManager:
 
         self._ensure_backup_dir()
 
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = f"-{label}" if label else ""
         backup_name = f"memory-{timestamp}{suffix}.db"
         backup_path = self.backup_dir / backup_name
@@ -184,7 +184,7 @@ class BackupManager:
                 source.close()
 
             size_mb = backup_path.stat().st_size / (1024 * 1024)
-            self.config["last_backup"] = datetime.now().isoformat()
+            self.config["last_backup"] = datetime.now(timezone.utc).isoformat()
             self.config["last_backup_file"] = backup_name
             self._save_config()
             logger.info("Backup created: %s (%.1f MB)", backup_name, size_mb)

@@ -7,7 +7,7 @@
 Routes: /ws/updates
 """
 from typing import Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -49,7 +49,7 @@ async def websocket_updates(websocket: WebSocket):
         await websocket.send_json({
             "type": "connected",
             "message": "WebSocket connection established",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
         while True:
@@ -59,14 +59,14 @@ async def websocket_updates(websocket: WebSocket):
                 if data.get('type') == 'ping':
                     await websocket.send_json({
                         "type": "pong",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
 
                 elif data.get('type') == 'get_stats':
                     await websocket.send_json({
                         "type": "stats_update",
                         "message": "Use /api/stats endpoint for stats",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
 
             except WebSocketDisconnect:
@@ -75,7 +75,7 @@ async def websocket_updates(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "error",
                     "message": str(e),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
     finally:

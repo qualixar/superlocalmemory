@@ -6,12 +6,29 @@
 // value passes through escapeHtml(). Data comes from our own local SQLite DB only.
 // nosemgrep: innerHTML-xss — all dynamic values escaped via escapeHtml()
 
+// S9-DASH-07: active named filter ('high_reward' | 'being_forgotten' | null).
+var _slmMemoryFilter = null;
+
+function setMemoryFilter(name) {
+    // Toggle: second click on same pill clears.
+    _slmMemoryFilter = (_slmMemoryFilter === name) ? null : name;
+    var pills = document.querySelectorAll('.mem-filter-pill');
+    for (var i = 0; i < pills.length; i++) {
+        var active = pills[i].getAttribute('data-filter') === _slmMemoryFilter;
+        pills[i].classList.toggle('active', active);
+    }
+    loadMemories();
+}
+
 async function loadMemories() {
     var category = document.getElementById('filter-category').value;
     var project = document.getElementById('filter-project').value;
     var url = '/api/memories?limit=50';
     if (category) url += '&category=' + encodeURIComponent(category);
     if (project) url += '&project_name=' + encodeURIComponent(project);
+    if (_slmMemoryFilter) {
+        url += '&filter=' + encodeURIComponent(_slmMemoryFilter);
+    }
 
     showLoading('memories-list', 'Loading memories...');
     try {
@@ -56,13 +73,33 @@ function renderMemoriesTable(memories, showScores) {
         }
 
         var memId = mem.memory_id || mem.id;
+        var factId = mem.fact_id || '';
         var expandBtnHtml = '<button class="btn btn-sm btn-outline-secondary expand-facts-btn ms-1" data-memory-id="' + escapeHtml(String(memId)) + '" title="View atomic facts">&#9660;</button>';
+
+        // S9-DASH-06: inline thumbs ↑/↓ on recall results. Writes a
+        // reward label to action_outcomes via /api/behavioral/
+        // report-outcome. Only shown when we have a fact_id (recall
+        // path) since the outcome is keyed by memory_ids.
+        var feedbackHtml = '';
+        if (showScores && factId) {
+            feedbackHtml = ''
+                + '<span class="inline-feedback" data-fact-id="'
+                + escapeHtml(String(factId)) + '" '
+                + 'style="margin-left:8px; white-space:nowrap;">'
+                + '<button type="button" class="btn btn-sm btn-outline-success fb-up" '
+                + 'title="This was helpful (+1 reward)" '
+                + 'style="padding:0 6px; font-size:11px;">👍</button> '
+                + '<button type="button" class="btn btn-sm btn-outline-danger fb-down" '
+                + 'title="Not helpful (0 reward)" '
+                + 'style="padding:0 6px; font-size:11px;">👎</button>'
+                + '</span>';
+        }
 
         rows += '<tr data-mem-idx="' + idx + '">'
             + '<td>' + escapeHtml(String(mem.id)) + '</td>'
             + '<td><span class="badge bg-primary">' + escapeHtml(mem.category || 'None') + '</span></td>'
             + '<td><small>' + escapeHtml(mem.project_name || '-') + '</small></td>'
-            + '<td class="memory-content" title="' + escapeHtml(content) + '">' + escapeHtml(contentPreview) + expandBtnHtml + '</td>'
+            + '<td class="memory-content" title="' + escapeHtml(content) + '">' + escapeHtml(contentPreview) + expandBtnHtml + feedbackHtml + '</td>'
             + scoreCell
             + '<td><span class="badge bg-' + importanceClass + ' badge-importance">' + escapeHtml(String(importance)) + '</span></td>'
             + '<td>' + escapeHtml(String(mem.cluster_id || '-')) + '</td>'
@@ -100,8 +137,57 @@ function renderMemoriesTable(memories, showScores) {
                 return;
             }
 
+            // S9-DASH-06: inline thumbs ↑/↓.
+            var fbUp = e.target.closest('.fb-up');
+            var fbDown = e.target.closest('.fb-down');
+            if (fbUp || fbDown) {
+                e.stopPropagation();
+                var btn = fbUp || fbDown;
+                var wrapper = btn.closest('.inline-feedback');
+                var fid = wrapper && wrapper.getAttribute('data-fact-id');
+                if (!fid) return;
+                var outcome = fbUp ? 'success' : 'failure';
+                // Disable both buttons while the request is in flight.
+                var allBtns = wrapper.querySelectorAll('button');
+                for (var i = 0; i < allBtns.length; i++) {
+                    allBtns[i].setAttribute('disabled', 'disabled');
+                }
+                btn.textContent = '…';
+                fetch('/api/behavioral/report-outcome', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        memory_ids: [fid],
+                        outcome: outcome,
+                        action_type: 'inline_feedback',
+                        context: 'search/recall result',
+                    }),
+                }).then(function(r) { return r.json(); })
+                .then(function(json) {
+                    if (json && json.success) {
+                        btn.textContent = fbUp ? '✓' : '✓';
+                        btn.style.background = fbUp ? '#2d7a2d' : '#7a2d2d';
+                        btn.style.borderColor = fbUp ? '#2d7a2d' : '#7a2d2d';
+                        btn.style.color = '#fff';
+                    } else {
+                        btn.textContent = fbUp ? '👍' : '👎';
+                        for (var j = 0; j < allBtns.length; j++) {
+                            allBtns[j].removeAttribute('disabled');
+                        }
+                    }
+                }).catch(function() {
+                    btn.textContent = fbUp ? '👍' : '👎';
+                    for (var k = 0; k < allBtns.length; k++) {
+                        allBtns[k].removeAttribute('disabled');
+                    }
+                });
+                return;
+            }
+
             var row = e.target.closest('tr[data-mem-idx]');
-            if (row && !e.target.closest('.expand-facts-btn')) {
+            if (row && !e.target.closest('.expand-facts-btn')
+                   && !e.target.closest('.inline-feedback')) {
                 var idx = parseInt(row.getAttribute('data-mem-idx'), 10);
                 if (window._slmMemories && window._slmMemories[idx]) {
                     openMemoryDetail(window._slmMemories[idx]);

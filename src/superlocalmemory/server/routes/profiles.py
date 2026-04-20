@@ -11,7 +11,7 @@ SQLite is the single source of truth for profiles. profiles.json
 is kept in sync as a cache for backward compatibility.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
@@ -106,7 +106,7 @@ async def switch_profile(name: str):
         # Update last_used in profiles.json
         json_config = _load_profiles_json()
         if name in json_config.get('profiles', {}):
-            json_config['profiles'][name]['last_used'] = datetime.now().isoformat()
+            json_config['profiles'][name]['last_used'] = datetime.now(timezone.utc).isoformat()
             _save_profiles_json(json_config)
 
         count = _get_memory_count(name)
@@ -115,7 +115,7 @@ async def switch_profile(name: str):
             await ws_manager.broadcast({
                 "type": "profile_switched", "profile": name,
                 "previous": previous, "memory_count": count,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
         return {

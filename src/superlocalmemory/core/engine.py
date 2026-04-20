@@ -346,14 +346,23 @@ class MemoryEngine:
         self, query: str, profile_id: str | None = None,
         mode: Mode | None = None, limit: int = 20,
         agent_id: str = "unknown",
+        session_id: str | None = None,
     ) -> RecallResponse:
-        """Recall relevant facts for a query."""
+        """Recall relevant facts for a query.
+
+        S9-DASH-02: when ``session_id`` is provided, the recall is
+        non-blockingly enqueued to the outcome queue so downstream
+        hooks (PostToolUse, Stop) can attach engagement signals.
+        Zero additional latency on the hot path — enqueue is a
+        ``put_nowait`` and the actual ``pending_outcomes`` INSERT runs
+        on a background worker.
+        """
         self._ensure_init()
 
         pid = profile_id or self._profile_id
 
         from superlocalmemory.core.recall_pipeline import run_recall
-        return run_recall(
+        response = run_recall(
             query, pid, mode=mode, limit=limit, agent_id=agent_id,
             config=self._config,
             retrieval_engine=self._retrieval_engine,
@@ -364,6 +373,33 @@ class MemoryEngine:
             access_log=self._access_log,
             auto_linker=self._auto_linker,
         )
+
+        # S9-DASH-02: enqueue for pending_outcomes. Non-blocking; errors
+        # swallowed because signal capture is never load-bearing on
+        # recall correctness (LLD-02 §4.9, LLD-08 §4.1).
+        if session_id:
+            try:
+                from superlocalmemory.learning.outcome_queue import (
+                    RecallEvent, enqueue_recall,
+                )
+                fact_ids = tuple(
+                    getattr(r.fact, "fact_id", "") or ""
+                    for r in getattr(response, "results", [])
+                    if getattr(r, "fact", None) is not None
+                )
+                fact_ids = tuple(f for f in fact_ids if f)
+                if fact_ids:
+                    enqueue_recall(RecallEvent(
+                        session_id=session_id,
+                        profile_id=pid,
+                        query=query,
+                        fact_ids=fact_ids,
+                        query_id=getattr(response, "query_id", "") or "",
+                    ))
+            except Exception:
+                pass
+
+        return response
 
     # -- Session operations -------------------------------------------------
 

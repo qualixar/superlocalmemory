@@ -96,7 +96,7 @@ async def behavioral_status():
 
 @router.post("/api/behavioral/report-outcome")
 async def report_outcome(data: dict):
-    """Record an action outcome for behavioral learning.
+    """Record an explicit dashboard-reported outcome.
 
     Body: {
         memory_ids: [str, ...],
@@ -104,10 +104,15 @@ async def report_outcome(data: dict):
         action_type: str (optional),
         context: str (optional)
     }
-    """
-    if not BEHAVIORAL_AVAILABLE:
-        return {"success": False, "error": "Behavioral engine not available"}
 
+    S9-DASH-02: previously this handler passed a path string to
+    ``OutcomeTracker(db)`` (which expects a DatabaseManager) and also
+    targeted ``learning.db`` — but ``action_outcomes`` lives in
+    ``memory.db`` (M006). Both failures were silent. This rewrite
+    writes directly to ``action_outcomes`` with a reward label derived
+    from ``outcome``:
+      success=1.0, failure=0.0, partial=0.5
+    """
     memory_ids = data.get('memory_ids')
     outcome = data.get('outcome')
     action_type = data.get('action_type', 'other')
@@ -120,26 +125,52 @@ async def report_outcome(data: dict):
     if outcome not in valid_outcomes:
         return {"success": False, "error": f"outcome must be one of: {valid_outcomes}"}
 
+    import sqlite3
+    import time
+    import uuid
+    from datetime import datetime, timezone
+
+    reward_map = {"success": 1.0, "failure": 0.0, "partial": 0.5}
+    reward = reward_map[outcome]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    outcome_id = str(uuid.uuid4())
+    memory_db_path = MEMORY_DIR / "memory.db"
+
     try:
         profile = get_active_profile()
-        tracker = OutcomeTracker(str(LEARNING_DB))
-
-        context_dict = {"note": context_note} if context_note else {}
-        row_id = tracker.record_outcome(
-            memory_ids=memory_ids,
-            outcome=outcome,
-            action_type=action_type,
-            context=context_dict,
-            project=profile,
-        )
-
-        if row_id is None:
-            return {"success": False, "error": "Failed to record outcome"}
+        context_dict = {
+            "note": context_note,
+            "action_type": action_type,
+            "source": "dashboard_report_outcome",
+        }
+        conn = sqlite3.connect(str(memory_db_path), timeout=5.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute(
+                "INSERT INTO action_outcomes "
+                "(outcome_id, profile_id, query, fact_ids_json, outcome, "
+                " context_json, timestamp, reward, settled, settled_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    outcome_id, profile, "",
+                    json.dumps(memory_ids),
+                    outcome,
+                    json.dumps(context_dict),
+                    now_iso, reward, now_iso,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         return {
-            "success": True, "outcome_id": row_id,
+            "success": True, "outcome_id": outcome_id,
             "active_profile": profile,
-            "message": f"Recorded {outcome} outcome for {len(memory_ids)} memories",
+            "reward": reward,
+            "message": (
+                f"Recorded {outcome} outcome for {len(memory_ids)} "
+                f"memories (reward={reward})"
+            ),
         }
     except Exception as e:
         logger.error("report_outcome error: %s", e)
