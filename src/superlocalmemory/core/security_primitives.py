@@ -250,7 +250,16 @@ _HIGH_AGGRESSION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bsk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}\b"),
      "OPENAI_KEY"),
     # Generic env-var-style secret (e.g. SLM_API_ABC123...).
-    (re.compile(r"\b[A-Z]{2,5}_[A-Z0-9]{20,}\b"), "GENERIC_KEY"),
+    #
+    # H-08 (Stage 8): the previous pattern ``[A-Z]{2,5}_[A-Z0-9]{20,}``
+    # matched any 2-5 uppercase letters + underscore + 20+ caps/digits,
+    # which is also the shape of long UPPER_SNAKE_CASE Python constants
+    # like ``SLM_PASSWORDABCDEFGHIJKLMNOPQRST``. We now require at least
+    # one digit in the value portion — real high-entropy secrets almost
+    # always carry digits; pure-letter tails are overwhelmingly constant
+    # names. Keeps the realistic case ``SLM_A1B2C3...`` covered.
+    (re.compile(r"\b[A-Z]{2,5}_(?=[A-Z0-9]*\d)[A-Z0-9]{20,}\b"),
+     "GENERIC_KEY"),
 )
 
 _VALID_AGGRESSION = frozenset({"normal", "high"})
@@ -317,10 +326,26 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
         out = pat.sub(_sub, out)
 
     # Entropy sweep — scan contiguous URL-safe runs.
-    token_re = re.compile(r"[A-Za-z0-9_\-./+=]{%d,}" % window)
+    #
+    # H-08 (Stage 8): real high-entropy secrets (API keys, hex tokens,
+    # base64 blobs) almost always carry at least one digit or lowercase
+    # letter. Pure ``UPPER_SNAKE_CASE`` constants clear the 4.5 entropy
+    # threshold too — so without this guard the entropy sweep misfires
+    # on long variable/field names. We skip tokens whose character set
+    # is a subset of ``[A-Z_]``.
+    #
+    # ``=`` is deliberately excluded from the token class so a
+    # ``key=VALUE`` pair splits on the sign; otherwise a short ``key=``
+    # prefix bridges into the value and bypasses the pure-upper-snake
+    # check. Base64 padding is at most ``==`` — losing those two
+    # characters at the tail does not hide a secret.
+    token_re = re.compile(r"[A-Za-z0-9_\-./+]{%d,}" % window)
+    _pure_upper_snake = re.compile(r"^[A-Z_]+$")
 
     def _entropy_sub(match: re.Match[str]) -> str:
         token = match.group(0)
+        if _pure_upper_snake.match(token):
+            return token
         if _shannon_entropy(token) >= entropy_threshold:
             last4 = token[-4:]
             return f"[REDACTED:ENTROPY:{last4}]"

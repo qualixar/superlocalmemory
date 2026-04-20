@@ -534,6 +534,34 @@ def test_redact_secrets_high_preserves_non_secret_text() -> None:
     assert sp.redact_secrets(text, aggression="high") == text
 
 
+def test_redact_secrets_high_spares_pure_letter_constant() -> None:
+    """H-08: long UPPER_SNAKE_CASE constants without digits must NOT trigger
+    GENERIC_KEY redaction — they are overwhelmingly variable/field names, not
+    real secrets. Real high-entropy keys almost always carry digits."""
+    # No digits in the 20+ char tail → must be preserved.
+    constant = "SLM_PASSWORDABCDEFGHIJKLMNOPQRST"
+    redacted = sp.redact_secrets(f"const={constant}", aggression="high")
+    assert constant in redacted
+    assert "[REDACTED:GENERIC_KEY:" not in redacted
+
+
+def test_redact_secrets_high_catches_digit_bearing_generic_key() -> None:
+    """H-08: the tightened pattern still catches realistic env-var secrets
+    whose 20+ char tail contains at least one digit."""
+    key = "SLM_" + "ABCDEFGHIJKLMNOPQRS1"  # 20-char tail with trailing digit
+    redacted = sp.redact_secrets(f"config={key}", aggression="high")
+    assert key not in redacted
+    assert "[REDACTED:GENERIC_KEY:" in redacted
+
+
+def test_redact_secrets_high_spares_enum_style_names() -> None:
+    """H-08: enum-style identifiers that happen to be long remain safe."""
+    # 25 char letters-only tail — classic enum/field name.
+    name = "CFG_READY_FOR_SHIPMENT_ENUM"
+    redacted = sp.redact_secrets(f"state={name}", aggression="high")
+    assert name in redacted
+
+
 def test_redact_secrets_normal_unchanged_behavior() -> None:
     # Regression: default behavior still works with NO aggression kwarg.
     text = "my key is sk-" + "A" * 40 + " end"
