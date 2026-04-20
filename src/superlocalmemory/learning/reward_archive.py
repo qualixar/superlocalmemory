@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-18/H-06 fix
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-18/H-06 fix
 
 """Reward-gated Ebbinghaus archive.
 
@@ -10,7 +10,7 @@ positive reward in the last 60 days AND are not marked important
 updates ``atomic_facts.archive_status='archived'``.
 
 **Never issues DELETE FROM atomic_facts** (SOUL directive, LLD-12 §1 —
-memory is sacred across v3.4.21 with 18 000 live users).
+memory is sacred across v3.4.22 with 18 000 live users).
 
 JSON1 join helper (``iter_outcomes_for_fact``) replaces the former
 ``fact_ids_json LIKE '%"<fid>"%'`` pattern so that overlapping fact_id

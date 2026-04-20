@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-01 + LLD-10
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-01 + LLD-10
 
 """LLD-10 online retrain: hyperparam-capped LightGBM training + candidate
 persist + atomic lineage flip.
@@ -17,7 +17,7 @@ working without any test churn.
 
 Contract refs:
   - LLD-10 §2 (triggers), §3.2 (caps), §5 (lineage flip).
-  - IMPLEMENTATION-MANIFEST v3.4.21 FINAL A.3.
+  - IMPLEMENTATION-MANIFEST v3.4.22 FINAL A.3.
   - Stage 8 H-01 (architect).
 """
 
@@ -199,7 +199,7 @@ def _train_booster(
     num_boost_round = int(params.pop("num_boost_round"))
 
     start = time.monotonic()
-    # S9-defer H-P-08: before v3.4.21 the wall-time check fired only
+    # S9-defer H-P-08: before v3.4.22 the wall-time check fired only
     # AFTER ``lgb.train`` returned, which could take minutes on a
     # pathological dataset before we noticed. LightGBM's ``callbacks``
     # parameter accepts a per-iteration hook that can stop training
@@ -275,7 +275,7 @@ def _persist_candidate(
                 " trained_on_count, feature_names, metrics_json, "
                 " is_active, is_candidate, shadow_results_json, "
                 " trained_at, updated_at) "
-                "VALUES (?, '3.4.21', ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)",
+                "VALUES (?, '3.4.22', ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)",
                 (
                     profile_id, state_bytes, sha, int(trained_on_count),
                     fn_json, metrics_json, shadow_json, now, now,

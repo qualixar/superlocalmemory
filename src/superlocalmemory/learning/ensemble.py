@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-03 §5.4
+# Part of SuperLocalMemory v3.4.22 — LLD-03 §5.4
 
 """Bandit / LightGBM ensemble blender.
 
@@ -137,7 +137,7 @@ def _apply_weights_score(candidate: Any, weights: dict[str, float]) -> float:
     """Compute a scalar bandit score for a candidate under the arm weights.
 
     Input shape: candidate has either ``.channel_scores`` attr OR ``score``.
-    For v3.4.21 the bandit-only path simply uses the already-weighted ordering
+    For v3.4.22 the bandit-only path simply uses the already-weighted ordering
     from ``apply_channel_weights``; this helper only matters when we blend.
     """
     # Prefer pre-weighted score on the object.

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 refactor regression suite
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 refactor regression suite
 
 """Regression + architecture tests for the F4.A Stage-8 learning-track split.
 

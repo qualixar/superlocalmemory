@@ -1,11 +1,11 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-07
+# Part of SuperLocalMemory v3.4.22 — LLD-07
 
 """Per-migration DDL content tests.
 
 Covers LLD-07 §8.2 — each migration's exact schema effects on a
-pre-v3.4.21 database.
+pre-v3.4.22 database.
 """
 
 from __future__ import annotations

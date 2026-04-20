@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-03 §7.5
+# Part of SuperLocalMemory v3.4.22 — LLD-03 §7.5
 
 """Integration tests for the bandit + ensemble hook inside
 ``core/recall_pipeline.apply_v2_bandit_ensemble``.

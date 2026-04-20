@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [3.4.21] - 2026-04-18
+## [3.4.22] - 2026-04-18
 
 Hardening release — correctness, stability, and security fixes.
 

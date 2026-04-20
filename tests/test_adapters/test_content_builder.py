@@ -104,7 +104,7 @@ def test_format_helpers_render(fake_recall):
 
 
 def test_version_constant():
-    assert VERSION == "3.4.21"
+    assert VERSION == "3.4.22"
 
 
 def test_truncate_payload_drops_memories_first(make_payload_helper=None):

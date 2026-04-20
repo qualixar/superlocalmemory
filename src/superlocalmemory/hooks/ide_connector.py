@@ -84,7 +84,7 @@ MARKDOWN_TEMPLATE = """
 class IDEConnector:  # pragma: no cover — legacy shim, covered by test_ide_connector.py
     """Detect installed IDEs and generate SLM integration configs.
 
-    NOTE (v3.4.21): this is the pre-LLD-05 connector kept for backward
+    NOTE (v3.4.22): this is the pre-LLD-05 connector kept for backward
     compatibility. New code should use
     ``superlocalmemory.hooks.cross_platform_connector.CrossPlatformConnector``.
     This class has its own dedicated test file (``tests/test_ide_connector.py``)
@@ -214,7 +214,7 @@ class IDEConnector:  # pragma: no cover — legacy shim, covered by test_ide_con
 
 
 # ---------------------------------------------------------------------------
-# LLD-05 Cross-Platform Adapter Orchestrator (v3.4.21) — re-export
+# LLD-05 Cross-Platform Adapter Orchestrator (v3.4.22) — re-export
 # ---------------------------------------------------------------------------
 # The orchestrator now lives in ``hooks.cross_platform_connector`` so it can
 # be unit-tested in isolation from the legacy ``IDEConnector`` shim above.

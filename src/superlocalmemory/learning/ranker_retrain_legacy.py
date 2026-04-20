@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-07 deprecation
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-07 deprecation
 
 """Legacy ranker retrain path (signal_count >= 200 cold-start).
 
-**DEPRECATED** as of v3.4.21: superseded by the LLD-10 online retrain
+**DEPRECATED** as of v3.4.22: superseded by the LLD-10 online retrain
 cycle in ``ranker_retrain_online.py``. Retained for two reasons:
 
   1. Back-compat — ``tests/test_learning/test_ranker_v2.py`` and
@@ -55,7 +55,7 @@ def _emit_deprecation_once() -> None:
     # survive into v3.5.x tech debt. Remove with the dashboard lineage
     # UI ship (Stage 7+) per MANIFEST-DEVIATION A.3 #3.
     warnings.warn(
-        "ranker_retrain_legacy is deprecated as of SLM v3.4.21 and will "
+        "ranker_retrain_legacy is deprecated as of SLM v3.4.22 and will "
         "be REMOVED in v3.5.0 — use ranker_retrain_online._run_shadow_cycle "
         "instead. The legacy path is kept only for cold-start profiles "
         "with no active model.",

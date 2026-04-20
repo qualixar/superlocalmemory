@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-06 §6.1
+# Part of SuperLocalMemory v3.4.22 — LLD-06 §6.1
 
 """Generate the release ``manifest.json`` for ``slm-hook`` binaries.
 
@@ -10,7 +10,7 @@ Section 6.1 (Release manifest).
 Shape (per LLD-06 §6.1):
 
     {
-      "version": "3.4.21",
+      "version": "3.4.22",
       "released_at": "2026-04-17T00:00:00Z",
       "assets": [
         {

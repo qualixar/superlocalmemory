@@ -369,7 +369,7 @@ async def lifespan(application: FastAPI):
             )
 
         # S9-DASH-02: start the outcome-queue worker so recall →
-        # pending_outcomes is actually produced. Before v3.4.21 this
+        # pending_outcomes is actually produced. Before v3.4.22 this
         # producer had zero callers and the closed-loop pipeline was
         # dark. Worker drains at 250 ms cadence; one SQLite INSERT per
         # event via EngagementRewardModel.record_recall.
@@ -457,7 +457,7 @@ async def lifespan(application: FastAPI):
     if enable_legacy:
         asyncio.create_task(_start_legacy_redirect(_DEFAULT_PORT, _LEGACY_PORT))
 
-    # V3.4.21 LLD-02: signal-worker background drainer (S8-SK-01 fix).
+    # V3.4.22 LLD-02: signal-worker background drainer (S8-SK-01 fix).
     # Without this, ``signals.enqueue`` fills a bounded queue and drops
     # silently after ~250 recalls — learning_signals never populates,
     # Phase 3 never activates, the whole Living Brain stays cold.
@@ -473,7 +473,7 @@ async def lifespan(application: FastAPI):
             logger.warning("signal_worker failed to start: %s", exc)
             application.state.signal_worker_started = False
 
-    # V3.4.21 LLD-05: cross-platform adapter sync loop
+    # V3.4.22 LLD-05: cross-platform adapter sync loop
     if os.environ.get("SLM_CROSS_PLATFORM_SYNC_DISABLED", "").lower() not in ("1", "true"):
         try:
             from superlocalmemory.cli.context_commands import build_default_adapters
@@ -482,7 +482,7 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("cross-platform sync loop failed to start: %s", exc)
 
-    # V3.4.21 LLD-03: bandit reward proxy settler + retention sweep loops
+    # V3.4.22 LLD-03: bandit reward proxy settler + retention sweep loops
     if os.environ.get("SLM_BANDIT_DISABLED", "0") != "1":
         try:
             from superlocalmemory.server.bandit_loops import (

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-02 §4.2
+# Part of SuperLocalMemory v3.4.22 — LLD-02 §4.2
 
 """Background signal drain worker.
 
@@ -37,7 +37,7 @@ def _current_queue() -> "queue.Queue[SignalBatch]":
     """Resolve the queue through the public ``signals.get_queue()``
     contract. Tests monkeypatching ``signals._Q`` still win because
     ``get_queue`` reads the attribute dynamically via ``sys.modules``.
-    S8-ARC-03 (v3.4.21): no more private ``_Q`` reach-through.
+    S8-ARC-03 (v3.4.22): no more private ``_Q`` reach-through.
     """
     return _signals_get_queue()
 

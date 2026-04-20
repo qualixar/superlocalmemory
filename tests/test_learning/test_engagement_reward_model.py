@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Track A.1 (LLD-08)
+# Part of SuperLocalMemory v3.4.22 — Track A.1 (LLD-08)
 
 """Tests for ``superlocalmemory.learning.reward`` (EngagementRewardModel).
 
@@ -9,7 +9,7 @@ Contract references:
   - LLD-00 §1.2 — pending_outcomes schema (memory.db, single table).
   - LLD-00 §2  — EngagementRewardModel interface (finalize_outcome by
                  outcome_id kwarg only).
-  - IMPLEMENTATION-MANIFEST v3.4.21 FINAL A.1 — test names verbatim and
+  - IMPLEMENTATION-MANIFEST v3.4.22 FINAL A.1 — test names verbatim and
                  label formula:
                  label = 0.5 + 0.4*cited + 0.25*edited + dwell_bonus
                          - 0.5*requeried

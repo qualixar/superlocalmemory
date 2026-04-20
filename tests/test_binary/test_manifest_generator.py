@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-06 §9.3 / H8, H9
+# Part of SuperLocalMemory v3.4.22 — LLD-06 §9.3 / H8, H9
 
 """Tests for ``scripts/release_manifest.py``.
 
@@ -41,7 +41,7 @@ def test_build_asset_entry_happy(tmp_path):
         signing=rm.SIGNING_APPLE_NOTARIZED,
     )
     entry = rm.build_asset_entry(
-        spec, version="3.4.21",
+        spec, version="3.4.22",
         base_url=rm.DEFAULT_BASE_URL,
     )
     assert entry["name"] == path.name
@@ -53,7 +53,7 @@ def test_build_asset_entry_happy(tmp_path):
     assert entry["url"].startswith(
         "https://github.com/qualixar/superlocalmemory/releases/download"
     )
-    assert "v3.4.21" in entry["url"]
+    assert "v3.4.22" in entry["url"]
     assert entry["url"].endswith(path.name)
 
 
@@ -64,7 +64,7 @@ def test_build_asset_entry_missing_file_raises(tmp_path):
         signing=rm.SIGNING_UNSIGNED,
     )
     with pytest.raises(FileNotFoundError):
-        rm.build_asset_entry(spec, version="3.4.21",
+        rm.build_asset_entry(spec, version="3.4.22",
                              base_url=rm.DEFAULT_BASE_URL)
 
 
@@ -75,7 +75,7 @@ def test_build_asset_entry_rejects_bad_platform(tmp_path):
         signing=rm.SIGNING_UNSIGNED,
     )
     with pytest.raises(ValueError, match="unsupported platform"):
-        rm.build_asset_entry(spec, version="3.4.21",
+        rm.build_asset_entry(spec, version="3.4.22",
                              base_url=rm.DEFAULT_BASE_URL)
 
 
@@ -86,7 +86,7 @@ def test_build_asset_entry_rejects_bad_signing(tmp_path):
         signing="not-a-signing",
     )
     with pytest.raises(ValueError, match="invalid signing"):
-        rm.build_asset_entry(spec, version="3.4.21",
+        rm.build_asset_entry(spec, version="3.4.22",
                              base_url=rm.DEFAULT_BASE_URL)
 
 
@@ -121,7 +121,7 @@ def _three_assets(tmp_path: Path) -> list[rm.AssetSpec]:
 
 def test_manifest_has_sha256_per_asset(tmp_path):
     manifest = rm.build_manifest(
-        "3.4.21", _three_assets(tmp_path),
+        "3.4.22", _three_assets(tmp_path),
         released_at="2026-04-17T00:00:00+00:00",
     )
     for entry in manifest.assets:
@@ -131,14 +131,14 @@ def test_manifest_has_sha256_per_asset(tmp_path):
 
 def test_manifest_shape(tmp_path):
     manifest = rm.build_manifest(
-        "3.4.21", _three_assets(tmp_path),
+        "3.4.22", _three_assets(tmp_path),
         released_at="2026-04-17T00:00:00+00:00",
     )
     doc = json.loads(rm.serialize(manifest))
     errors = rm.validate_shape(doc)
     assert errors == [], errors
     # Explicit keys.
-    assert doc["version"] == "3.4.21"
+    assert doc["version"] == "3.4.22"
     assert doc["released_at"].startswith("2026-04-17")
     assert isinstance(doc["assets"], list) and len(doc["assets"]) == 3
     assert len(doc["manifest_sha256_self"]) == 64
@@ -146,11 +146,11 @@ def test_manifest_shape(tmp_path):
 
 def test_manifest_self_sha_is_deterministic(tmp_path):
     m1 = rm.build_manifest(
-        "3.4.21", _three_assets(tmp_path),
+        "3.4.22", _three_assets(tmp_path),
         released_at="2026-04-17T00:00:00+00:00",
     )
     m2 = rm.build_manifest(
-        "3.4.21", _three_assets(tmp_path),
+        "3.4.22", _three_assets(tmp_path),
         released_at="2026-04-17T00:00:00+00:00",
     )
     assert m1.manifest_sha256_self == m2.manifest_sha256_self
@@ -163,14 +163,14 @@ def test_manifest_requires_version():
 
 def test_manifest_requires_at_least_one_asset():
     with pytest.raises(ValueError, match="at least one asset"):
-        rm.build_manifest("3.4.21", [])
+        rm.build_manifest("3.4.22", [])
 
 
 def test_write_manifest_emits_json_and_sig(tmp_path):
     assets_dir = tmp_path / "assets"
     assets_dir.mkdir()
     manifest = rm.build_manifest(
-        "3.4.21",
+        "3.4.22",
         [rm.AssetSpec(
             path=_seed_asset(assets_dir, "slm-hook-linux-arm64.tar.gz",
                              b"linux-arm"),
@@ -184,7 +184,7 @@ def test_write_manifest_emits_json_and_sig(tmp_path):
     assert manifest_path.is_file()
     assert sig_path.is_file()
     loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert loaded["version"] == "3.4.21"
+    assert loaded["version"] == "3.4.22"
     sig_body = sig_path.read_text(encoding="utf-8")
     assert "placeholder" in sig_body
     assert manifest.manifest_sha256_self in sig_body
@@ -203,7 +203,7 @@ def test_validate_shape_flags_missing_top_level_keys():
 
 def test_validate_shape_flags_non_list_assets():
     errors = rm.validate_shape({
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": "nope", "manifest_sha256_self": "x",
         "manifest_signature": "y",
     })
@@ -212,7 +212,7 @@ def test_validate_shape_flags_non_list_assets():
 
 def test_validate_shape_flags_empty_assets():
     errors = rm.validate_shape({
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": [], "manifest_sha256_self": "x",
         "manifest_signature": "y",
     })
@@ -221,7 +221,7 @@ def test_validate_shape_flags_empty_assets():
 
 def test_validate_shape_flags_bad_sha256_length():
     doc = {
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": [{
             "name": "a.tgz", "url": "https://x/a.tgz",
             "size_bytes": 1, "sha256": "short", "signing": "unsigned",
@@ -234,7 +234,7 @@ def test_validate_shape_flags_bad_sha256_length():
 
 def test_validate_shape_flags_bad_signing():
     doc = {
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": [{
             "name": "a.tgz", "url": "https://x/a.tgz",
             "size_bytes": 1, "sha256": "a" * 64, "signing": "WRONG",
@@ -247,7 +247,7 @@ def test_validate_shape_flags_bad_signing():
 
 def test_validate_shape_flags_missing_field():
     doc = {
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": [{"name": "a.tgz"}],
         "manifest_sha256_self": "x", "manifest_signature": "y",
     }
@@ -257,7 +257,7 @@ def test_validate_shape_flags_missing_field():
 
 def test_validate_shape_flags_non_dict_asset():
     doc = {
-        "version": "3.4.21", "released_at": "now",
+        "version": "3.4.22", "released_at": "now",
         "assets": ["not-a-dict"],
         "manifest_sha256_self": "x", "manifest_signature": "y",
     }

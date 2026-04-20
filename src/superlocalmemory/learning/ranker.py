@@ -55,7 +55,7 @@ class AdaptiveRanker:
         available — it carries verified booster + feature_names. The legacy
         ``model_state`` bytes path remains for backward compatibility with
         3.4.20 callers; it does NOT perform SHA-256 verification and should
-        not be used by the 3.4.21 recall path.
+        not be used by the 3.4.22 recall path.
         """
         self._signal_count = signal_count
         self._active = active_model
@@ -215,7 +215,7 @@ class AdaptiveRanker:
     def _load_legacy_bytes(self, state: bytes) -> None:
         """Best-effort load from raw bytes — NO SHA-256 verify.
 
-        Kept for 3.4.20 callers. The 3.4.21 recall path uses
+        Kept for 3.4.20 callers. The 3.4.22 recall path uses
         ``model_cache.load_active`` which enforces verification.
         """
         try:
@@ -240,7 +240,7 @@ class AdaptiveRanker:
     # --- legacy train() shim (3.4.20 API) ------------------------------
 
     def train(self, training_data: list) -> bool:
-        """Deprecated — v3.4.21 training lives in ``consolidation_worker``.
+        """Deprecated — v3.4.22 training lives in ``consolidation_worker``.
 
         Kept as a guard for 3.4.20 callers: returns False when
         training_data is below the Phase-3 threshold, True after a best-

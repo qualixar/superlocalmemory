@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-01 fix
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-01 fix
 
 """ConsolidationWorker — background memory maintenance lifecycle.
 
@@ -196,7 +196,7 @@ class ConsolidationWorker:
     def _deduplicate(self, profile_id: str, dry_run: bool) -> int:
         """Find and mark near-duplicate facts.
 
-        v3.4.21 (LLD-12): prefer HNSW ANN + entity-overlap dedup with a
+        v3.4.22 (LLD-12): prefer HNSW ANN + entity-overlap dedup with a
         reversible merge log. On any error (missing schema columns,
         hnswlib unavailable, RAM budget exceeded) fall back to the
         legacy prefix dedup so existing deployments keep working.
@@ -204,7 +204,7 @@ class ConsolidationWorker:
         Never DELETEs from atomic_facts — merges flip archive_status
         and write memory_merge_log rows.
         """
-        # v3.4.21 preferred path: HNSW + memory_merge (LLD-12).
+        # v3.4.22 preferred path: HNSW + memory_merge (LLD-12).
         try:
             from superlocalmemory.learning.hnsw_dedup import (
                 HnswDeduplicator,
@@ -227,7 +227,7 @@ class ConsolidationWorker:
         except Exception as exc:
             logger.debug("hnsw dedup unexpected error, fallback: %s", exc)
 
-        # Legacy fallback (pre-v3.4.21 behaviour).
+        # Legacy fallback (pre-v3.4.22 behaviour).
         # S9-defer H-P-09: hard cap on the fallback scan so a profile
         # with 5M+ atomic_facts cannot OOM the consolidation worker
         # when hnswlib is unavailable. The fallback is a prefix-match

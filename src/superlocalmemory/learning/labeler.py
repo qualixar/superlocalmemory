@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-02 §4.7
+# Part of SuperLocalMemory v3.4.22 — LLD-02 §4.7
 
 """Integer-label mapping for LightGBM ``lambdarank`` training.
 
@@ -11,7 +11,7 @@ Rules:
     - Labels are integers in ``[0, 4]`` (5 relevance tiers).
     - ``label_gain`` length MUST be ``>= max(label) + 1``; we ship
       ``label_gain=[0, 1, 3, 7, 15]`` (length 5).
-    - Prefer ``outcome_reward`` (v3.4.21) if present; else position proxy.
+    - Prefer ``outcome_reward`` (v3.4.22) if present; else position proxy.
     - ``NaN`` reward is treated as missing and falls through to position.
 """
 
@@ -68,7 +68,7 @@ def label_for_row(row: dict) -> int:
             return 1
         return 0
 
-    # 3.4.21 proxy: position (0 = best, higher = worse).
+    # 3.4.22 proxy: position (0 = best, higher = worse).
     try:
         pos = int(row.get("position", 99))
     except (TypeError, ValueError):

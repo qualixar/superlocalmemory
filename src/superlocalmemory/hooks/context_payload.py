@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-05 §3
+# Part of SuperLocalMemory v3.4.22 — LLD-05 §3
 
 """Shared content builder — single source for every adapter body.
 
@@ -22,7 +22,7 @@ from typing import Callable, Iterable
 from superlocalmemory.core.security_primitives import redact_secrets
 
 
-VERSION = "3.4.21"
+VERSION = "3.4.22"
 DEFAULT_TOP_K = 10
 DEFAULT_DECISIONS_K = 5
 DEFAULT_MEMORIES_K = 10

@@ -130,7 +130,7 @@ def main() -> None:
     )
 
     # LLD-06 §7.2 — `slm db migrate` wraps LLD-07's additive schema migrations.
-    db_p = sub.add_parser("db", help="Database maintenance commands (v3.4.21)")
+    db_p = sub.add_parser("db", help="Database maintenance commands (v3.4.22)")
     db_sub = db_p.add_subparsers(dest="db_command", title="db subcommands")
     db_mig_p = db_sub.add_parser(
         "migrate",
@@ -357,7 +357,7 @@ def main() -> None:
     evolve_p.add_argument("--session", default="", help="Session ID to process")
     evolve_p.add_argument("--profile", default="default", help="Profile ID")
 
-    # v3.4.21 — MASTER-PLAN §8 escape hatches (Stage 8 SB-5).
+    # v3.4.22 — MASTER-PLAN §8 escape hatches (Stage 8 SB-5).
     disable_p = sub.add_parser(
         "disable",
         help="Disable SLM globally (writes ~/.superlocalmemory/.disabled, stops daemon)",
@@ -417,7 +417,7 @@ def main() -> None:
     _NO_DAEMON_COMMANDS = {
         "setup", "mode", "provider", "connect", "migrate", "mcp", "warmup",
         "config", "evolve", "db",
-        # v3.4.21 escape hatches — never auto-start the daemon on these.
+        # v3.4.22 escape hatches — never auto-start the daemon on these.
         "disable", "enable", "clear-cache", "reconfigure", "benchmark",
         "rotate-token",
     }

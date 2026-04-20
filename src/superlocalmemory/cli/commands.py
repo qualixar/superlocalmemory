@@ -112,11 +112,11 @@ def dispatch(args: Namespace) -> None:
         # V3.4.11 skill evolution
         "config": cmd_config,
         "evolve": cmd_evolve,
-        # V3.4.21 LLD-05 context pre-staging
+        # V3.4.22 LLD-05 context pre-staging
         "context": _cmd_context_dispatch,
-        # V3.4.21 LLD-06 additive schema migrations
+        # V3.4.22 LLD-06 additive schema migrations
         "db": _cmd_db_dispatch,
-        # V3.4.21 Stage 8 SB-5 — MASTER-PLAN §8 escape hatches.
+        # V3.4.22 Stage 8 SB-5 — MASTER-PLAN §8 escape hatches.
         "disable": _cmd_escape_disable,
         "enable": _cmd_escape_enable,
         "clear-cache": _cmd_escape_clear_cache,
@@ -690,13 +690,13 @@ def cmd_provider(args: Namespace) -> None:
 
 
 def _cmd_context_dispatch(args: Namespace) -> None:
-    """V3.4.21 LLD-05: ``slm context prestage``."""
+    """V3.4.22 LLD-05: ``slm context prestage``."""
     from superlocalmemory.cli.context_commands import cmd_context
     cmd_context(args)
 
 
 def cmd_connect(args: Namespace) -> None:
-    """Configure IDE integrations. V3.4.21: ``--cross-platform`` uses LLD-05."""
+    """Configure IDE integrations. V3.4.22: ``--cross-platform`` uses LLD-05."""
     # Route --disable <name> and --cross-platform to the LLD-05 orchestrator.
     if getattr(args, "disable", None) or getattr(args, "cross_platform", False):
         from superlocalmemory.cli.context_commands import (
@@ -1939,6 +1939,41 @@ def cmd_hooks(args: Namespace) -> None:
             if include_gate:
                 print("  Gate: ON (enforces session_init — experimental)")
             print("  SLM: Hooks installed into Claude Code (slm hooks remove to undo)")
+            # S9-DASH-11: also install skills so /slm-recall, /slm-remember
+            # etc. are available immediately in Claude Code regardless of
+            # whether the user installed via npm or pip.
+            try:
+                import importlib.resources as _ir
+                import importlib.util as _iu
+                import shutil as _sh
+                from pathlib import Path as _P
+
+                claude_skills_dir = _P.home() / ".claude" / "skills"
+                claude_skills_dir.mkdir(parents=True, exist_ok=True)
+
+                # Try Python-package bundled skills first (works for both
+                # pip and npm users who have the Python pkg installed).
+                pkg_skills: _P | None = None
+                spec = _iu.find_spec("superlocalmemory")
+                if spec and spec.submodule_search_locations:
+                    candidate = _P(list(spec.submodule_search_locations)[0]) / "skills"
+                    if candidate.is_dir():
+                        pkg_skills = candidate
+
+                if pkg_skills:
+                    installed_skills = 0
+                    for d in pkg_skills.iterdir():
+                        if d.is_dir():
+                            src_skill = d / "SKILL.md"
+                            if src_skill.exists():
+                                dst = claude_skills_dir / (d.name + ".md")
+                                _sh.copy2(str(src_skill), str(dst))
+                                installed_skills += 1
+                    if installed_skills:
+                        print(f"  Skills: {installed_skills} skills installed → {claude_skills_dir}")
+                        print("           Use /slm-recall, /slm-remember, /slm-status in Claude Code")
+            except Exception as _skill_exc:
+                pass  # non-fatal — skills can be installed via install-skills.sh
         else:
             print(f"Installation failed: {result['errors']}")
     elif action == "remove":

@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.4.21"
+version = "3.4.22"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -116,7 +116,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-superlocalmemory = ["ui/**/*"]
+superlocalmemory = ["ui/**/*", "skills/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

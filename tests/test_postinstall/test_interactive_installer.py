@@ -1,6 +1,6 @@
 """Tests for scripts/postinstall-interactive.js — Track D.3 interactive installer.
 
-Per IMPLEMENTATION-MANIFEST-v3.4.21-FINAL.md §D.3 and MASTER-PLAN §5.
+Per IMPLEMENTATION-MANIFEST-v3.4.22-FINAL.md §D.3 and MASTER-PLAN §5.
 
 The installer is a Node script (invoked by `npm postinstall` on 18,000+ live
 npm users, so porting to Python or Bash is not allowed). These Python tests

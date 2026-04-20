@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Stage 9 W1
+# Part of SuperLocalMemory v3.4.22 — Stage 9 W1
 
 """Stage 9 W1 regressions — LLD-10 producer wiring (C1).
 
@@ -177,7 +177,7 @@ def test_persist_candidate_attaches_to_router(
             CREATE TABLE learning_model_state (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 profile_id TEXT NOT NULL,
-                model_version TEXT NOT NULL DEFAULT '3.4.21',
+                model_version TEXT NOT NULL DEFAULT '3.4.22',
                 state_bytes BLOB NOT NULL,
                 bytes_sha256 TEXT NOT NULL DEFAULT '',
                 trained_on_count INTEGER NOT NULL DEFAULT 0,

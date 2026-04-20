@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-05 §4
+# Part of SuperLocalMemory v3.4.22 — LLD-05 §4
 
 """Cursor adapter — writes ``.cursor/rules/*.mdc`` per-project AND global.
 

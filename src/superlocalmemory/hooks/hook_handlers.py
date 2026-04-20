@@ -62,7 +62,7 @@ def _daemon_post(path: str, body: dict, timeout: float = 3.0) -> bool:
 
 def handle_hook(action: str) -> None:
     """Dispatch to the appropriate hook handler. Called from main() fast path."""
-    # v3.4.21 (LLD-01 §4.7): Active-Brain hot-path handlers are routed here
+    # v3.4.22 (LLD-01 §4.7): Active-Brain hot-path handlers are routed here
     # as a Python fallback when the compiled ``slm-hook`` binary (LLD-06) is
     # unavailable. They read stdin, write stdout, and exit 0 themselves.
     if action == "user_prompt_submit":

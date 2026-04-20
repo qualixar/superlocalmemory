@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-03/H-17/H-18 shim
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-03/H-17/H-18 shim
 
 """HNSW dedup + reward-gated archive + strong-memory boost — shim.
 
-As of v3.4.21 (Stage 8 H-03/H-17/H-18 fixes), the 535-LOC god-module
+As of v3.4.22 (Stage 8 H-03/H-17/H-18 fixes), the 535-LOC god-module
 was split into three cohesive files:
 
   - ``dedup_hnsw.py``     — :class:`HnswDeduplicator` + fallback counter.

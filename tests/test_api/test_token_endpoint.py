@@ -1,6 +1,6 @@
 """Tests for ``/internal/token`` — the auto-inject install-token route.
 
-Contract (v3.4.21 post-ship UX fix):
+Contract (v3.4.22 post-ship UX fix):
 - Loopback caller (absent or loopback Origin) gets 200 + ``{token: "..."}``
 - Non-loopback caller → 403 "loopback only"
 - Loopback caller with non-loopback Origin → 403 "origin not allowed"

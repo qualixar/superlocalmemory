@@ -1,8 +1,8 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-07
+# Part of SuperLocalMemory v3.4.22 — LLD-07
 
-"""v3.4.21 migration definitions.
+"""v3.4.22 migration definitions.
 
 One module per migration. Each exposes:
   - ``NAME``: canonical migration name (used in ``migration_log``)
@@ -33,7 +33,7 @@ from . import (
 # the ``migrations/`` package in Wave 1 shadowed that flat module, so any
 # caller that did ``from superlocalmemory.storage.migrations import X``
 # broke. We re-load the legacy module under a distinct name and re-export
-# the symbols here so pre-3.4.21 callers (and the pre-existing tests at
+# the symbols here so pre-3.4.22 callers (and the pre-existing tests at
 # ``tests/test_storage/test_migrations.py``) keep working unchanged.
 # ---------------------------------------------------------------------------
 

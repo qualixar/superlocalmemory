@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-00 §1.6 + LLD-11
+# Part of SuperLocalMemory v3.4.22 — LLD-00 §1.6 + LLD-11
 
 """M010 — evolution_config + evolution_llm_cost_log tables (learning.db).
 
@@ -19,7 +19,7 @@ Target DB: learning.db. Additive only.
 SEC-L2 — ``cost_usd`` is IEEE-754 REAL (double). This loses precision
 when summing thousands of sub-cent rows (rounding drift < 0.5 ¢ per
 10k rows in practice). The schema is additive and therefore locked
-for v3.4.21 — dashboards MUST compute aggregate cost as
+for v3.4.22 — dashboards MUST compute aggregate cost as
 ``SUM(cost_usd)`` with explicit ``ROUND(x, 4)`` at display time, and
 MUST NOT branch on sub-cent equality. A follow-on migration is
 scheduled to switch the column to INTEGER millicents (see FINAL

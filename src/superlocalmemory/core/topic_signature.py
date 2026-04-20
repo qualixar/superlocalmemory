@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-01 §4.2
+# Part of SuperLocalMemory v3.4.22 — LLD-01 §4.2
 
 """Topic signature — deterministic, Unicode-safe, ReDoS-resistant 16-char hex.
 
@@ -91,7 +91,7 @@ def compute_topic_signature(
 
     ``entity_hits`` (LLD-13 Track C.1) — optional list of entity IDs
     produced by the inline trigram lookup. Backward-compatible default:
-    when omitted or empty, the output is BYTE-IDENTICAL to the v3.4.21
+    when omitted or empty, the output is BYTE-IDENTICAL to the v3.4.22
     pre-Living-Brain signature. When non-empty, the sorted-deduped IDs
     are mixed into the canonical material as a seventh group so that
     cache probes differentiate semantically-distinct prompts that
@@ -133,7 +133,7 @@ def compute_topic_signature(
         _canon(bigrams),
     ]
     # LLD-13: append entity-hits group ONLY when non-empty. Empty/missing
-    # preserves the byte-identical v3.4.21 pre-Living-Brain signature.
+    # preserves the byte-identical v3.4.22 pre-Living-Brain signature.
     if entity_hits:
         groups.append(_canon([str(e) for e in entity_hits]))
     material = "\0\0".join(groups)

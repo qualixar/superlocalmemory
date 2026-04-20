@@ -4,7 +4,7 @@
 
 """Sleep-Time Consolidation Worker — **back-compat shim**.
 
-As of v3.4.21 (F4.A Stage-8 H-01 fix), the 1344-LOC god-module was
+As of v3.4.22 (F4.A Stage-8 H-01 fix), the 1344-LOC god-module was
 split into five cohesive files:
 
   - ``consolidation_cycle.py``     — :class:`ConsolidationWorker`.

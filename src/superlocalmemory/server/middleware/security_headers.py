@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §4.2 (v2)
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §4.2 (v2)
 
 """Strict security-headers ASGI middleware for the Brain UI.
 
@@ -72,7 +72,7 @@ _OWNED_NAMES: frozenset[bytes] = frozenset(name for name, _ in _HEADERS)
 # ``/ui/*``, ``/static/*``, other tabs) currently load vendor libraries
 # (Bootstrap, Bootstrap Icons, Inter font, D3, Sigma, graphology) from CDNs
 # and would break under ``script-src 'self'`` until those assets are vendored
-# locally (tracked for v3.4.21 vendoring work). Applying the strict set there
+# locally (tracked for v3.4.22 vendoring work). Applying the strict set there
 # produced a user-visible regression during Stage 6 delivery-lead review,
 # which contradicts LLD-04's user-benefit goal. This middleware therefore
 # enforces the strict set on the routes that actually need it today —
@@ -106,7 +106,7 @@ class SecurityHeadersMiddleware:
 
     Scope: see ``_STRICT_SCOPE_PREFIXES``. Outside that scope the middleware
     passes through untouched so pre-existing dashboard CSP policy still
-    governs index/static responses until the vendoring work in v3.4.21.
+    governs index/static responses until the vendoring work in v3.4.22.
     """
 
     def __init__(self, app: ASGIApp) -> None:

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §6.1
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §6.1
 
 """Tests for ``/api/v3/brain`` endpoint (LLD-04 v2).
 
@@ -310,7 +310,7 @@ def test_phase_3_when_model_active_and_enough_signals(
     """Phase 3 path — active model row + ≥200 signals + SHA present."""
     from superlocalmemory.learning.database import LearningDatabase
     db = LearningDatabase(tmp_learning_db)
-    # Schema lacks the v3.4.21 columns in the stock learning DB. Add them
+    # Schema lacks the v3.4.22 columns in the stock learning DB. Add them
     # ad-hoc for this test so persist_model has a surface to write into.
     import sqlite3
     conn = sqlite3.connect(str(tmp_learning_db))
@@ -711,7 +711,7 @@ def test_meta_now_shape() -> None:
     from superlocalmemory.server.routes.brain import _meta_now
     meta = _meta_now()
     assert meta["honest_labels"] is True
-    assert meta["version"] == "3.4.21"
+    assert meta["version"] == "3.4.22"
     assert meta["generated_at"].endswith("Z")
 
 
@@ -796,7 +796,7 @@ def test_auth_non_bearer_scheme(
 
 
 # ---------------------------------------------------------------------------
-# D.2 (v3.4.21) — /brain/evolution-timeseries
+# D.2 (v3.4.22) — /brain/evolution-timeseries
 # ---------------------------------------------------------------------------
 
 

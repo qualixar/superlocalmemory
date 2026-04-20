@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §6.3
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §6.3
 
 """Tests for the strict security-headers middleware (LLD-04 §4.2 v2)."""
 
@@ -150,7 +150,7 @@ def test_security_headers_on_brain(
 def test_strict_csp_scope_skips_non_brain_routes(client: TestClient) -> None:
     """Strict middleware MUST NO-OP on non-/api/v3/brain* paths so the
     existing dashboard (which currently loads CDN libs under the legacy
-    CSP) keeps working until the v3.4.21 vendoring work. Regression test
+    CSP) keeps working until the v3.4.22 vendoring work. Regression test
     for the P0 CDN-removal incident caught during Stage 6 delivery review.
     """
     r = client.get("/static-test")
@@ -222,7 +222,7 @@ def test_brain_js_is_same_origin_in_index_html() -> None:
     Other dashboard assets can still load from CDN under the legacy CSP —
     the strict policy in ``server/middleware/security_headers.py`` applies
     only to ``/api/v3/brain*`` routes. Vendoring the rest is tracked for
-    v3.4.21. This test pins the Brain-owned assets to same-origin so the
+    v3.4.22. This test pins the Brain-owned assets to same-origin so the
     Brain tab itself stays under the strict policy end-to-end.
     """
     html = (_SRC_DIR / "ui" / "index.html").read_text(encoding="utf-8")

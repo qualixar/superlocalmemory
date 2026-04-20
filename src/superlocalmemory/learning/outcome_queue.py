@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Stage 9 DASH-02
+# Part of SuperLocalMemory v3.4.22 — Stage 9 DASH-02
 
 """Background queue for producer-side engagement-reward recording.
 
-**Why this module exists.** Before v3.4.21, ``EngagementRewardModel.record_recall``
+**Why this module exists.** Before v3.4.22, ``EngagementRewardModel.record_recall``
 had zero production callers. Every recall path (CLI, MCP, dashboard, daemon
 HTTP) returned results without ever creating a ``pending_outcomes`` row. The
 closed-loop learning pipeline therefore had no producer — its consumers

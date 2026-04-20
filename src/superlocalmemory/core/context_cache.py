@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-01 §4.1
+# Part of SuperLocalMemory v3.4.22 — LLD-01 §4.1
 
 """Context cache — separate SQLite WAL DB, read-path <10 ms.
 
@@ -47,7 +47,7 @@ TTL_SECONDS: int = 120
 CLEANUP_HORIZON_SECONDS: int = 600
 MAX_BYTES: int = 50 * 1024 * 1024
 MAX_CONTENT_CHARS: int = 4000
-SCHEMA_VERSION: str = "3.4.21"
+SCHEMA_VERSION: str = "3.4.22"
 
 _HMAC_MATERIAL: bytes = b"active_brain_cache"
 _HMAC_HEX_LEN: int = 32

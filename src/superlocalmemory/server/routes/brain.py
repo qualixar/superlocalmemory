@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §4.1 + §3
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §4.1 + §3
 
 """``/api/v3/brain`` — unified Brain endpoint (LLD-04 v2).
 
-Merges the pre-3.4.21 Patterns / Learning / Behavioral dashboard tabs
+Merges the pre-3.4.22 Patterns / Learning / Behavioral dashboard tabs
 into one auth-gated, honestly-labelled JSON payload. Every metric has
 an ``is_real`` (numeric counters) or ``is_real_ml`` (ML-derived) flag
 and points at the real table it was computed from. No metric is
@@ -24,7 +24,7 @@ Design notes (LLD-04 §7 hard rules):
 * **U2** — every metric section carries ``is_real`` or ``is_real_ml``.
 * **U3** — ``learning.phase`` never returns ``3`` without an active
   model row AND passing SHA check. Both conditions computed here.
-* **U4** — response shape must not contain the three pre-3.4.21
+* **U4** — response shape must not contain the three pre-3.4.22
   fabricated metrics (24h hit-rate, avg age on hit, skill-evolution
   row counts). A static test greps this file to verify; therefore we
   never spell those names anywhere in this module.
@@ -64,7 +64,7 @@ router = APIRouter(prefix="/api/v3", tags=["brain"])
 # LLD-03 v2 stratum space = 4 query types × 3 entity bins × 4 time buckets.
 _STRATA_TOTAL: int = 48
 
-_VERSION: str = "3.4.21"
+_VERSION: str = "3.4.22"
 
 # Banned metric names (LLD-04 U4). Kept as a tuple for grep visibility;
 # the source-level test asserts we don't accidentally reintroduce them.
@@ -246,7 +246,7 @@ def _compute_learning_status(profile_id: str,
     """Section ``learning`` — LLD-02 §4.10 phase truth + counters."""
     signals_total = _safe_count(lrn_db, "learning_signals", profile_id)
     features_total = _safe_count(lrn_db, "learning_features", profile_id)
-    # Raw count of historic pre-v3.4.21 feedback rows (the source table)
+    # Raw count of historic pre-v3.4.22 feedback rows (the source table)
     legacy_feedback_rows = _safe_count(lrn_db, "learning_feedback", profile_id)
     # Count of rows actually copied forward into learning_signals by
     # legacy_migration.migrate_legacy_feedback (signal_type='legacy_feedback').
@@ -289,7 +289,7 @@ def _compute_learning_status(profile_id: str,
         "signals_last_hour": signals_last_hour,
         "features_total": features_total,
         "feature_count_expected": FEATURE_DIM,
-        # Honest split (v3.4.21+): raw historic table count vs rows
+        # Honest split (v3.4.22+): raw historic table count vs rows
         # actually copied forward via the migrate-legacy flow.
         "legacy_feedback_rows": legacy_feedback_rows,
         "legacy_migrated_count": legacy_migrated,
@@ -356,7 +356,7 @@ def _top_query_types(
     ``query_type_od`` (features.py FEATURE_NAMES). We aggregate by the
     active one-hot slot. Missing table or zero rows → empty list.
     """
-    # E.1 (v3.4.21 perf): push the query-type classification into SQL via
+    # E.1 (v3.4.22 perf): push the query-type classification into SQL via
     # json_extract so we don't drag 10k rows' worth of JSON through Python.
     # SQLite's json1 extension treats json_extract as an ordinary scalar
     # function, so the whole aggregation becomes a single COUNT(*)
@@ -601,7 +601,7 @@ def _compute_cross_platform() -> dict:
     reports ``active: false`` with ``reason: error:<ExcName>`` rather
     than crashing the whole Brain endpoint (LLD-04 §2 — "honest, never
     fake"). An unimportable adapter means the install is missing Wave 2C
-    components, which is legitimate for an older 3.4.20 → 3.4.21 upgrade
+    components, which is legitimate for an older 3.4.20 → 3.4.22 upgrade
     mid-migration.
     """
     out: dict = {}
@@ -871,7 +871,7 @@ def _action_outcomes_count(lrn_db: LearningDatabase,
                            profile_id: str) -> int:
     """Row count in ``action_outcomes`` for ``profile_id``.
 
-    ``action_outcomes`` ships in v3.4.21 (M006). While absent, returns 0.
+    ``action_outcomes`` ships in v3.4.22 (M006). While absent, returns 0.
     """
     try:
         conn = sqlite3.connect(lrn_db.path, timeout=5.0)
@@ -963,7 +963,7 @@ async def get_brain(profile_id: str = "default") -> dict:
         "outcomes_preview": {
             "action_outcomes_rows":
                 0 if isinstance(outcomes_rows, Exception) else outcomes_rows,
-            "ships_in": "3.4.21",
+            "ships_in": "3.4.22",
         },
         # S9-defer H-22: live tile data for the Reward / Shadow /
         # Evolution-Cost dashboard tiles. Each block is a honest-empty

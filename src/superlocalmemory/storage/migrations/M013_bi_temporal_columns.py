@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21
+# Part of SuperLocalMemory v3.4.22
 
 """M013 — bi-temporal columns on ``atomic_facts`` (memory.db, deferred).
 
 Adds two NULLable columns that let SLM capture fact validity windows
 WITHOUT changing the retrieval path today. Wiring the retrieval
-consumer is a later-cycle item; what we ship in v3.4.21 is the
+consumer is a later-cycle item; what we ship in v3.4.22 is the
 data-capture surface so existing user memories start accumulating
 temporal metadata on every new fact.
 

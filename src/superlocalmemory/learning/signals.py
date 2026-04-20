@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # LLD-02 §4.1 — SignalBatch + enqueue + record_signal_batch
 # ===========================================================================
 #
-# These module-level helpers are the v3.4.21 signal pipeline. The class
+# These module-level helpers are the v3.4.22 signal pipeline. The class
 # ``LearningSignals`` below stays in place for v3.4.20 compatibility (D5);
 # new writers go through ``enqueue`` / ``record_signal_batch``.
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ def _bump(counter: str, n: int = 1) -> None:
         _counters[counter] = _counters.get(counter, 0) + n
 
 
-# S8-ARC-03 (v3.4.21): public producer/consumer contract. ``signal_worker``
+# S8-ARC-03 (v3.4.22): public producer/consumer contract. ``signal_worker``
 # used to reach through ``signals._Q`` and ``signals._bump`` by name,
 # which made the private-by-convention boundary the actual test seam
 # too. These wrappers are the sanctioned surface; ``_Q`` / ``_bump`` stay

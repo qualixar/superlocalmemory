@@ -1,6 +1,6 @@
 """Tests for scripts/ci/stage5b_gate.sh — the Stage-5b contract gate.
 
-Per IMPLEMENTATION-MANIFEST-v3.4.21-FINAL.md P0.1. The gate enforces LLD-00
+Per IMPLEMENTATION-MANIFEST-v3.4.22-FINAL.md P0.1. The gate enforces LLD-00
 contracts at CI time by grep-scanning the source tree for retired patterns
 and contract violations.
 """

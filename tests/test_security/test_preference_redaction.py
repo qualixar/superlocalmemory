@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §6.4
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §6.4
 
 """Tests for deep-iteration secret redaction on preferences (LLD-04 §4.1)."""
 

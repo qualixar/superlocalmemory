@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-04 §6.2
+# Part of SuperLocalMemory v3.4.22 — LLD-04 §6.2
 
 """Static-scan tests for ``ui/js/brain.js`` — XSS-safe rendering (LLD-04 §4.3).
 
@@ -95,7 +95,7 @@ def test_brain_js_has_toggle_function() -> None:
 
 
 def test_brain_js_renders_all_sections() -> None:
-    """Post-v3.4.21: all ML / behavioral / adapter state on one view."""
+    """Post-v3.4.22: all ML / behavioral / adapter state on one view."""
     js = _UI_JS.read_text(encoding="utf-8")
     for card in (
         "cardLearning",

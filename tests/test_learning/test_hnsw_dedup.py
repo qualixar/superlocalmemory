@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Track B.2 (LLD-12)
+# Part of SuperLocalMemory v3.4.22 — Track B.2 (LLD-12)
 
 """Tests for ``superlocalmemory.learning.hnsw_dedup`` (HnswDeduplicator).
 
@@ -9,7 +9,7 @@ Contract references:
   - LLD-00 §7  — ram_reservation protocol.
   - LLD-12 §2  — cosine > 0.95 AND entity_overlap > 0.8 thresholds.
   - LLD-12 §3  — hnswlib RAM budget + prefix-dedup fallback.
-  - IMPLEMENTATION-MANIFEST v3.4.21 FINAL B.2 — test names verbatim.
+  - IMPLEMENTATION-MANIFEST v3.4.22 FINAL B.2 — test names verbatim.
 
 Invariants:
   - NEVER deletes rows from atomic_facts. Only UPDATE archive_status.
@@ -172,7 +172,7 @@ def _seed_known_duplicates(
 
 
 # ---------------------------------------------------------------------------
-# Tests — exact names per IMPLEMENTATION-MANIFEST v3.4.21 FINAL B.2
+# Tests — exact names per IMPLEMENTATION-MANIFEST v3.4.22 FINAL B.2
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ def test_hnsw_respects_entity_jaccard_threshold(memory_db: Path) -> None:
 
 
 def test_hnsw_uses_ram_reservation(memory_db: Path) -> None:
-    # v3.4.21 F4.A: HnswDeduplicator now lives in learning.dedup_hnsw.
+    # v3.4.22 F4.A: HnswDeduplicator now lives in learning.dedup_hnsw.
     # The shim ``learning.hnsw_dedup`` re-exports; patches must target
     # the real definition module so HnswDeduplicator.find_merge_candidates
     # sees the spy.
@@ -260,7 +260,7 @@ def test_hnsw_uses_ram_reservation(memory_db: Path) -> None:
 
 
 def test_hnsw_fallback_to_prefix_when_oom(memory_db: Path) -> None:
-    # v3.4.21 F4.A: patch the real module, not the shim.
+    # v3.4.22 F4.A: patch the real module, not the shim.
     from superlocalmemory.learning import dedup_hnsw as mod
 
     _seed_known_duplicates(memory_db, n_unique=5, n_dup_pairs=2)

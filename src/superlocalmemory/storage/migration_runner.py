@@ -1,15 +1,15 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-07 §4
+# Part of SuperLocalMemory v3.4.22 — LLD-07 §4
 
-"""Forward-only additive migrations for SLM v3.4.21.
+"""Forward-only additive migrations for SLM v3.4.22.
 
 LLD reference: ``.backup/active-brain/lld/LLD-07-schema-migrations-and-security-primitives.md``
 Section 4 (Migration Runner).
 
 Contract:
   - ``apply_all(learning_db, memory_db, *, dry_run=False) -> dict`` —
-    runs every v3.4.21 migration, idempotent and transactional. Returns
+    runs every v3.4.22 migration, idempotent and transactional. Returns
     ``{"applied": [names], "skipped": [names], "failed": [names],
        "details": {name: str}}``.
   - ``status(learning_db, memory_db) -> dict[str, str]`` — returns the
@@ -378,7 +378,7 @@ def apply_all(
     *,
     dry_run: bool = False,
 ) -> dict:
-    """Apply all v3.4.21 migrations; return stats.
+    """Apply all v3.4.22 migrations; return stats.
 
     Idempotent: already-applied migrations are skipped. Non-fatal: any
     migration that fails is recorded in ``failed`` and the runner moves on.

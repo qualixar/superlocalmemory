@@ -176,7 +176,7 @@ def _get_forgetting_scheduler(db: Any, config: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# S8-ARC-04 (v3.4.21): unified ranking entry point.
+# S8-ARC-04 (v3.4.22): unified ranking entry point.
 # ---------------------------------------------------------------------------
 
 _RANKING_MODES: frozenset[str] = frozenset({"off", "v1", "v2", "v2-ensemble"})
@@ -215,8 +215,8 @@ def apply_ranking(
     Modes:
       - ``off``: identity — no ranking passes run at all.
       - ``v1``: v3.1 Active-Memory adaptive rerank only.
-      - ``v2``: v1 + v3.4.21 lambdarank rerank + signal enqueue.
-      - ``v2-ensemble`` (default): v2 + v3.4.21 contextual-bandit ensemble.
+      - ``v2``: v1 + v3.4.22 lambdarank rerank + signal enqueue.
+      - ``v2-ensemble`` (default): v2 + v3.4.22 contextual-bandit ensemble.
 
     Each underlying pass is already defensive (catches its own exceptions),
     so this wrapper adds an outer try/except to guarantee the caller
@@ -317,7 +317,7 @@ def apply_adaptive_ranking(
 # apply_v2_adaptive_ranking (LLD-02 §4.3)
 # ---------------------------------------------------------------------------
 #
-# Opt-in v3.4.21 path: load active model from learning.db with SHA-256
+# Opt-in v3.4.22 path: load active model from learning.db with SHA-256
 # verification, re-rank via native Booster, enqueue signals async. The
 # existing ``apply_adaptive_ranking`` above stays for 3.4.20 callers.
 # ---------------------------------------------------------------------------
@@ -694,7 +694,7 @@ def run_recall(
         except Exception as exc:
             logger.debug("Hebbian strengthening: %s", exc)
 
-    # S8-ARC-04 (v3.4.21): unified ranking entry point. Single env-var
+    # S8-ARC-04 (v3.4.22): unified ranking entry point. Single env-var
     # (SLM_RANKING=off|v1|v2|v2-ensemble) controls the pipeline. Legacy
     # SLM_V2_PIPELINE_DISABLED + SLM_BANDIT_DISABLED still honoured for
     # one-release back-compat. Identity when no active model.

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — F4.A Stage-8 H-06/H-18 fix
+# Part of SuperLocalMemory v3.4.22 — F4.A Stage-8 H-06/H-18 fix
 
 """Strong-memory boost + reward-aware fact selection.
 
@@ -29,7 +29,7 @@ from superlocalmemory.learning.fact_outcome_joins import (
 # Returns ``{fact_id: (count, mean_reward)}`` for outcomes with reward NOT
 # NULL. Replaces the per-fact O(F) loop of ``aggregate_reward_for_fact``
 # with one GROUP BY scan — O(F+O) instead of O(F·O). JSON1 has been
-# mandatory since v3.4.21 (see ``fact_outcome_joins._json1_available``
+# mandatory since v3.4.22 (see ``fact_outcome_joins._json1_available``
 # contract in the module docstring); if it is missing at runtime the
 # caller falls back to the per-fact helper which retains its own
 # LIKE-based shim.

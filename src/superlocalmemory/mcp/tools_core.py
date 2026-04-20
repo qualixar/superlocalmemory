@@ -45,9 +45,9 @@ def _record_recall_hits(
 ) -> None:
     """Record honest shown-state signals (LLD-02 §4.9).
 
-    v3.4.21: No more fake positives. For every candidate we enqueue a
+    v3.4.22: No more fake positives. For every candidate we enqueue a
     ``shown`` / ``not_shown`` flip based on whether it was returned in the
-    top-K presented to the user. Outcome/reward arrives in v3.4.21 via the
+    top-K presented to the user. Outcome/reward arrives in v3.4.22 via the
     action-outcomes pipeline.
 
     Non-blocking: all work funnels through ``signals.enqueue_shown_flip``

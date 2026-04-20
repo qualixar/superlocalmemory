@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-06 §7.2
+# Part of SuperLocalMemory v3.4.22 — LLD-06 §7.2
 
 """CLI handler for ``slm db migrate``.
 

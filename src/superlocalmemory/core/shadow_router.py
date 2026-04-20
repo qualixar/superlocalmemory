@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Stage 8 SB-1 / Track A.3 (LLD-10)
+# Part of SuperLocalMemory v3.4.22 — Stage 8 SB-1 / Track A.3 (LLD-10)
 
 """Daemon-resident recall-time A/B router for LLD-10 shadow + rollback.
 
 This module is the single seam that wires ``ShadowTest`` (pre-promotion)
 and ``ModelRollback`` (post-promotion) into the live recall path. Before
-this module existed (pre-v3.4.21 Stage 8 SB-1) both classes were
+this module existed (pre-v3.4.22 Stage 8 SB-1) both classes were
 defined + unit-tested but had zero production callers in ``src/``.
 
 Design constraints:

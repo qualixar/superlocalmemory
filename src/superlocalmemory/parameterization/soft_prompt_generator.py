@@ -131,10 +131,10 @@ class SoftPromptGenerator:
         Args:
             patterns: Extracted pattern assertions.
             profile_id: Target profile.
-            high_reward_source_ids: Optional v3.4.21 (LLD-12 §6) filter —
+            high_reward_source_ids: Optional v3.4.22 (LLD-12 §6) filter —
                 when provided, only patterns whose source_ids intersect
                 this set are considered. When None (default), behaviour
-                matches pre-v3.4.21 and every pattern flows through.
+                matches pre-v3.4.22 and every pattern flows through.
 
         Returns:
             List of SoftPromptTemplate, ordered by category priority,
@@ -146,7 +146,7 @@ class SoftPromptGenerator:
             p for p in patterns if p.category.value in enabled
         ]
 
-        # v3.4.21 (LLD-12 §6): reward-aware filter — opt-in only.
+        # v3.4.22 (LLD-12 §6): reward-aware filter — opt-in only.
         if high_reward_source_ids is not None:
             filtered = [
                 p for p in filtered

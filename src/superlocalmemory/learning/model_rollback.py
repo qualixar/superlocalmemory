@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Track A.3 (LLD-10 §5)
+# Part of SuperLocalMemory v3.4.22 — Track A.3 (LLD-10 §5)
 
 """Post-promotion watch + auto-rollback (LLD-10 §5).
 
@@ -98,7 +98,7 @@ class ModelRollback:
         Regression is detected by whichever of these is true:
           * **Ratio path** (baseline ≥ ``_BASELINE_RATIO_FLOOR``, i.e. 0.05):
             ``(baseline - current) / baseline ≥ REGRESSION_THRESHOLD``.
-            Existing v3.4.21 pre-fix semantics preserved at normal
+            Existing v3.4.22 pre-fix semantics preserved at normal
             baselines.
           * **Absolute path** (baseline below the ratio floor — includes
             zero and negative baselines which can happen on sparse data):

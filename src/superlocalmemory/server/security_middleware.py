@@ -33,7 +33,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Enable browser XSS filter (legacy, but doesn't hurt)
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
-        # Content Security Policy (v3.4.21 — vendored assets, no CDN hosts).
+        # Content Security Policy (v3.4.22 — vendored assets, no CDN hosts).
         # All Bootstrap/D3/Sigma/graphology/Inter assets ship locally under
         # /static/vendor/, so we drop every CDN host from the allow-list.
         # 'unsafe-inline' stays on script-src/style-src for the legacy inline

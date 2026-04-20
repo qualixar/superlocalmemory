@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Track A.3 (LLD-10 / LLD-00 §8)
+# Part of SuperLocalMemory v3.4.22 — Track A.3 (LLD-10 / LLD-00 §8)
 
 """Tests for ``superlocalmemory.learning.shadow_test`` (ShadowTest).
 
@@ -12,7 +12,7 @@ Contract references:
                  first 8 hex chars → 2-bucket modulo split.
   - LLD-10 §4.5 — promotion decision (paired t-test, fallback to
                  hardcoded t>2.0 if scipy absent).
-  - IMPLEMENTATION-MANIFEST v3.4.21 FINAL A.3 — 5 test names verbatim.
+  - IMPLEMENTATION-MANIFEST v3.4.22 FINAL A.3 — 5 test names verbatim.
 
 Stdlib-only tests; no scipy/lightgbm required. The ShadowTest class is
 pure bookkeeping + paired-t math — it does not touch the DB or any

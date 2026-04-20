@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21
+# Part of SuperLocalMemory v3.4.22
 
 """Multi-seed Evo-Memory runner (S9-defer C10 / STAT-01 / STAT-06).
 
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         }
 
     result = {
-        "version": "3.4.21",
+        "version": "3.4.22",
         "n_seeds": len(seeds),
         "seeds": seeds,
         "per_day_aggregate": agg,

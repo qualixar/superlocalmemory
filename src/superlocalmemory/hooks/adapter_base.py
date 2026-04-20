@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-05 §2, §4.4, §9.3
+# Part of SuperLocalMemory v3.4.22 — LLD-05 §2, §4.4, §9.3
 
 """Cross-platform adapter base — shared Protocol and atomic write primitive.
 

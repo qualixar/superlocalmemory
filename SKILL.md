@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally with zero cloud dependency."
-version: "3.4.21"
+version: "3.4.22"
 author: "Varun Pratap Bhardwaj"
 license: Elastic-2.0
 homepage: https://superlocalmemory.com

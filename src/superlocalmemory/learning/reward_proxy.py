@@ -1,13 +1,13 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-03 §3.5 + §5.6
+# Part of SuperLocalMemory v3.4.22 — LLD-03 §3.5 + §5.6
 
-"""Proxy settlement for bandit plays (v3.4.21 only).
+"""Proxy settlement for bandit plays (v3.4.22 only).
 
 LLD reference: ``.backup/active-brain/lld/LLD-03-contextual-bandit-and-ensemble.md``
 Section 3.5 and 5.6.
 
-Replaced in v3.4.21 by ``reward_from_outcomes.py`` — DO NOT extend this
+Replaced in v3.4.22 by ``reward_from_outcomes.py`` — DO NOT extend this
 module beyond the proxy window contract.
 
 Policy (§3.5):
@@ -133,7 +133,7 @@ def _tool_event_hit(
     except sqlite3.Error:
         return False
 
-    # E.2 (v3.4.21 perf): previously ran N separate LIKE '%fid%' scans,
+    # E.2 (v3.4.22 perf): previously ran N separate LIKE '%fid%' scans,
     # each doing a full table scan of ``tool_events`` inside the 30-second
     # window. Instead, fetch the small window once and scan its payloads
     # in Python — typically 0-few rows in a 30 s window, far cheaper than

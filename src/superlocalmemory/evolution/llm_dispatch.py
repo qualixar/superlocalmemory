@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-11 §Dispatch
+# Part of SuperLocalMemory v3.4.22 — LLD-11 §Dispatch
 
 """Central LLM dispatch for the skill-evolution subsystem.
 
@@ -13,7 +13,7 @@ audit row to ``evolution_llm_cost_log`` after the dispatch succeeds — the
 row stores only the *redacted* prompt length and the model, never the
 raw prompt, so no canary can leak via the cost log.
 
-SB-2/SB-3/SB-4 fix cluster (v3.4.21 Stage 8):
+SB-2/SB-3/SB-4 fix cluster (v3.4.22 Stage 8):
   * All backend entry points (claude CLI, ollama, Anthropic/OpenAI API)
     live HERE, not in ``skill_evolver``. ``SkillEvolver._llm_call``
     delegates to ``_dispatch_llm`` so the validate → redact → log

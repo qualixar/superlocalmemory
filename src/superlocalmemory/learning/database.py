@@ -91,7 +91,7 @@ class LearningDatabase:
     def path(self) -> str:
         """Read-only path to the learning SQLite database.
 
-        S8-ARC-02 (v3.4.21): public alternative to the underscore-private
+        S8-ARC-02 (v3.4.22): public alternative to the underscore-private
         ``_db_path``. Callers that need a raw connection for specialised
         read patterns should prefer :meth:`ro_connection` over building
         one themselves so WAL + busy_timeout pragmas are consistent.
@@ -366,7 +366,7 @@ class LearningDatabase:
             conn.close()
 
     # ------------------------------------------------------------------
-    # LLD-02 §4.8 — v3.4.21 writer surface
+    # LLD-02 §4.8 — v3.4.22 writer surface
     # ------------------------------------------------------------------
 
     def count_signals(self, profile_id: str) -> int:
@@ -395,7 +395,7 @@ class LearningDatabase:
         feature_names: list[str],
         trained_on_count: int,
         metrics: dict,
-        model_version: str = "3.4.21",
+        model_version: str = "3.4.22",
     ) -> int:
         """Persist a newly trained model and flip the active flag.
 
@@ -520,7 +520,7 @@ class LearningDatabase:
     def _migration_applied(self, name: str) -> bool:
         """Return True if ``name`` is recorded complete in migration_log.
 
-        M006 (action_outcomes.reward) lands in v3.4.21. When absent, we
+        M006 (action_outcomes.reward) lands in v3.4.22. When absent, we
         fall back to the position-only training query.
         """
         conn = self._connect()
@@ -556,7 +556,7 @@ class LearningDatabase:
         (False) preserves Stage 8 D9 — synthetic rows excluded unless the
         caller opts in explicitly. The UI exposes this via the
         "Migrate legacy data" flow so users consciously choose to let their
-        pre-v3.4.21 feedback bootstrap the model.
+        pre-v3.4.22 feedback bootstrap the model.
 
         Returns rows sorted newest-first; the caller is expected to regroup
         by ``query_id`` before training.

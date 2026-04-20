@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-01 §4.4
+# Part of SuperLocalMemory v3.4.22 — LLD-01 §4.4
 
 """PostToolUse async:true hook — fire-and-forget prewarm via stdlib urllib.
 

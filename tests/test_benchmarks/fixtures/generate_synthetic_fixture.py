@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — Track C.2 (LLD-14 §2)
+# Part of SuperLocalMemory v3.4.22 — Track C.2 (LLD-14 §2)
 
 """Synthetic fixture generator for the evo-memory benchmark.
 
@@ -65,7 +65,7 @@ ENTITIES_PER_TOPIC = [
 FACT_TEMPLATES = [
     "Varun prefers {a} terminals on {b}",
     "AgentAssert {a} decision recorded on {b}",
-    "SuperLocalMemory v3.4.21 ships {a} {b}",
+    "SuperLocalMemory v3.4.22 ships {a} {b}",
     "Research note {a} published at {b}",
     "Conference {a} deadline on {b}",
     "Memory engine {a} wired to {b}",

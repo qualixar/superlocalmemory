@@ -1,8 +1,8 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-03 §3.5 + §3.6
+# Part of SuperLocalMemory v3.4.22 — LLD-03 §3.5 + §3.6
 
-"""Background schedulers for the v3.4.21 contextual bandit.
+"""Background schedulers for the v3.4.22 contextual bandit.
 
 Two asyncio tasks, both registered in the daemon lifespan:
 

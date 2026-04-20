@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-05 §9
+# Part of SuperLocalMemory v3.4.22 — LLD-05 §9
 
 """Background sync loop — keeps every cross-platform adapter fresh.
 
@@ -68,7 +68,7 @@ async def cross_platform_sync_loop(
 async def run_once(adapters: Iterable[Adapter]) -> dict[str, str]:
     """Run a single sync cycle over all adapters. Never raises.
 
-    E.3 (v3.4.21 perf): ``adapter.sync()`` is synchronous file I/O
+    E.3 (v3.4.22 perf): ``adapter.sync()`` is synchronous file I/O
     (opens/reads/writes JSON files in ~/.cursor, ~/.antigravity, etc.)
     and used to run directly on the event loop — a slow disk or a
     large workspace could block the daemon for tens of milliseconds,

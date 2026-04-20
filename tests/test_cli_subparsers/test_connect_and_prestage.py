@@ -18,7 +18,7 @@ def fake_recall():
         if "entities" in q:
             return [{"name": "SLM", "mentions": 10}]
         if "decisions" in q:
-            return [{"text": "ship v3.4.21"}]
+            return [{"text": "ship v3.4.22"}]
         if "memories" in q:
             return [{"text": "mem one"}]
         return []

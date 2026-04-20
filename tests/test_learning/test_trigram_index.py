@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-13 Track C.1
+# Part of SuperLocalMemory v3.4.22 — LLD-13 Track C.1
 
 """Tests for TrigramIndex (LLD-13 inline entity detection).
 
@@ -8,7 +8,7 @@ TDD red-first. These tests were written BEFORE the implementation and
 must fail on the bare module, then pass once ``trigram_index.py`` is in
 place.
 
-Manifest: IMPLEMENTATION-MANIFEST-v3.4.21-FINAL.md → Track C.1 (12 tests
+Manifest: IMPLEMENTATION-MANIFEST-v3.4.22-FINAL.md → Track C.1 (12 tests
 total across this file + ``test_user_prompt_hook_entity_detection.py``).
 
 Hard invariants verified:

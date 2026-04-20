@@ -30,7 +30,7 @@ def make_payload(
         project_memories=tuple(f"{memory_text}_{i}"
                                 for i in range(memories_n)),
         generated_at="2026-04-18T00:00:00+00:00",
-        version="3.4.21",
+        version="3.4.22",
     )
 
 

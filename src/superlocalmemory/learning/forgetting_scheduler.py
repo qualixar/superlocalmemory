@@ -306,7 +306,7 @@ class ForgettingScheduler:
     def _soft_delete_with_audit(self, fact_id: str, profile_id: str) -> None:
         """Soft-delete a forgotten fact with compliance audit trail.
 
-        v3.4.21 (LLD-12 §4): reward-gated. If the fact has any positive
+        v3.4.22 (LLD-12 §4): reward-gated. If the fact has any positive
         reward (>0.3) in the last 60 days, it is considered "still
         useful" and kept live — consolidation will retry next cycle.
 
@@ -329,7 +329,7 @@ class ForgettingScheduler:
     ) -> bool:
         """True if fact has an outcome_reward > 0.3 in the last 60 days.
 
-        v3.4.21 (Stage 8 H-06): routes through the JSON1-backed
+        v3.4.22 (Stage 8 H-06): routes through the JSON1-backed
         ``fact_outcome_joins.has_recent_positive_reward`` helper —
         eliminates the substring-LIKE false-positive class.
 

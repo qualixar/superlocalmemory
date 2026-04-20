@@ -116,7 +116,7 @@ class TestWorkerManagement:
             "targeted patches don't recover from. Logic itself is "
             "verified by the sibling tests ``test_ensure_worker_noop_if_alive`` "
             "and ``test_ensure_worker_handles_spawn_failure`` (both pass). "
-            "Tracked for cleanup in v3.4.21 test-suite hardening."
+            "Tracked for cleanup in v3.4.22 test-suite hardening."
         ),
     )
     def test_ensure_worker_spawns_subprocess(self, tmp_path,
@@ -153,7 +153,7 @@ class TestWorkerManagement:
         reason=(
             "Pre-existing suite-order pollution — same root cause as "
             "``test_ensure_worker_spawns_subprocess`` above. "
-            "Tracked for v3.4.21 test-suite hardening."
+            "Tracked for v3.4.22 test-suite hardening."
         ),
     )
     def test_ensure_worker_respawns_if_dead(self, tmp_path,

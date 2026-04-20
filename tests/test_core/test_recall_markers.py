@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21 — LLD-00 §3 + P0.4
+# Part of SuperLocalMemory v3.4.22 — LLD-00 §3 + P0.4
 
 """Tests for HMAC fact-id markers on recall results.
 
@@ -10,7 +10,7 @@ fact_id observed in tool output actually originated from this SLM
 install. Without this, attacker-controlled tool responses can forge
 engagement signals.
 
-Covers IMPLEMENTATION-MANIFEST-v3.4.21-FINAL.md §P0.4.
+Covers IMPLEMENTATION-MANIFEST-v3.4.22-FINAL.md §P0.4.
 """
 
 from __future__ import annotations

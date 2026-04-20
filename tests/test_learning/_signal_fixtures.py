@@ -21,7 +21,7 @@ from superlocalmemory.storage.migration_runner import apply_all
 
 
 def make_db_with_migrations(tmp_path: Path) -> LearningDatabase:
-    """Build a fresh learning.db + memory.db with v3.4.21 migrations applied.
+    """Build a fresh learning.db + memory.db with v3.4.22 migrations applied.
 
     Returns a ``LearningDatabase`` pointing at the learning.db so tests can
     write and query without touching ``Path.home()``.

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory v3.4.21
+# Part of SuperLocalMemory v3.4.22
 
 """Public LoCoMo runner — S9-STAT-04.
 
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     overall_mrr = (sum(per_conv_mrr) / len(per_conv_mrr)) if per_conv_mrr else 0.0
 
     result = {
-        "version": "3.4.21",
+        "version": "3.4.22",
         "mode": args.mode,
         "n_conversations": len(per_conv_mrr),
         "n_questions": total_q,
