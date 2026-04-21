@@ -4,7 +4,7 @@
 
 <h1 align="center">SuperLocalMemory V3.4</h1>
 <p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf, and any MCP-compatible AI client.</em></p>
-<p align="center"><code>v3.4.21</code> — Install once. Every session remembers the last. Automatically.</p>
+<p align="center"><code>v3.4.25</code> — Install once. Every session remembers the last. Automatically.</p>
 <p align="center"><strong>Backed by 3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
@@ -20,6 +20,7 @@
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
+  <a href="#multilingual-embedding-support"><img src="https://img.shields.io/badge/Multilingual-30%2B_Languages-ff69b4?style=for-the-badge" alt="Multilingual 30+ Languages"/></a>
 </p>
 
 <p align="center">
@@ -339,6 +340,12 @@ The EU AI Act (Regulation 2024/1689) takes full effect **August 2, 2026**. Every
 To the best of our knowledge, **no existing agent memory system addresses EU AI Act compliance**. Modes A and B pass all checks by architectural design — no personal data leaves the device during any memory operation.
 
 Built-in compliance tools: GDPR Article 15/17 export + complete erasure, tamper-proof SHA-256 audit chain, data provenance tracking, ABAC policy enforcement.
+
+---
+
+## Multilingual Embedding Support
+
+**v3.4.24+:** Plug in any OpenAI-compatible embedding endpoint — Ollama, vLLM, LiteLLM, or self-hosted models like `bge-m3`, `multilingual-e5`, `Qwen3-Embedding`. Configure from the dashboard (Settings > Step 3) or `config.json`. SLM's math layer (Fisher-Rao, Sheaf, Langevin) is language-agnostic — swap the embedding model and all 30+ languages work at full retrieval quality. No cloud dependency. No code changes. Your data, your language, your model.
 
 ---
 
