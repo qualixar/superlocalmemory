@@ -15,6 +15,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install libomp (macOS — required by lightgbm)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
       - name: Install package
         run: pip install -e ".[dev]" 2>/dev/null || pip install -e .
         shell: bash
