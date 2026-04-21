@@ -37,6 +37,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import lightgbm  # noqa: F401
+except (ImportError, OSError):
+    pytest.skip("lightgbm not available", allow_module_level=True)
+
 
 # ---------------------------------------------------------------------------
 # Minimal schemas shared with test_online_retrain (copy-paste avoids cross-file

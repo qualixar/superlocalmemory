@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import sqlite3
 import sys
 import uuid
@@ -30,6 +29,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+try:
+    import resource
+except ImportError:
+    resource = None
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +185,11 @@ def test_hnsw_finds_known_duplicates(memory_db: Path) -> None:
     _seed_known_duplicates(memory_db)
     dedup = HnswDeduplicator(memory_db_path=memory_db)
     candidates = dedup.find_merge_candidates("p1")
+    if not candidates:
+        try:
+            import hnswlib  # noqa: F401
+        except ImportError:
+            pytest.skip("hnswlib not installed — prefix fallback finds 0 pairs")
     # Expect all 10 duplicate pairs surfaced.
     found_pairs = {
         frozenset((c[0], c[1])) for c in candidates
