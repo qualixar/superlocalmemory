@@ -98,3 +98,34 @@ class TestFullEngineDefault:
         response = engine.recall("query on empty db")
         # response may be empty; must not raise
         assert response is not None
+
+
+class TestLightEngineDBOnlyFeatures:
+    """LIGHT must still serve DB-only features so user-facing feedback,
+    learning-status, and session_init phase counters keep working in MCP."""
+
+    def test_light_engine_has_adaptive_learner(self, mode_a_config):
+        """AdaptiveLearner needs only the DB; it must be available in LIGHT
+        so report_feedback and get_feedback_count work through MCP."""
+        engine = MemoryEngine(mode_a_config, capabilities=Capabilities.LIGHT)
+        engine.initialize()
+        assert engine._adaptive_learner is not None
+
+    def test_light_engine_adaptive_learner_interface_intact(self, mode_a_config):
+        """AdaptiveLearner under LIGHT exposes record_feedback +
+        get_feedback_count callables bound to the engine's DB.
+
+        The DB-write end-to-end (with its FK chain through atomic_facts /
+        memories) is covered by the existing FULL-engine feedback tests.
+        Here we only need to verify LIGHT wiring.
+        """
+        engine = MemoryEngine(mode_a_config, capabilities=Capabilities.LIGHT)
+        engine.initialize()
+        learner = engine._adaptive_learner
+        assert learner is not None
+        assert callable(learner.record_feedback)
+        assert callable(learner.get_feedback_count)
+        # empty profile returns 0, not an error — this is the session_init
+        # happy path that Varun cares about (no "learning disabled" copy
+        # showing up in the MCP response).
+        assert learner.get_feedback_count(engine.profile_id) == 0

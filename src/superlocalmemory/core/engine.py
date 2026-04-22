@@ -181,6 +181,12 @@ class MemoryEngine:
         except Exception as exc:
             logger.debug("V3.4.11 schema migration: %s", exc)
 
+        # DB-only learner — no embedder / LLM dependency. Available in
+        # LIGHT so MCP report_feedback and session_init phase counters
+        # work on the MCP process without loading the heavy layer.
+        from superlocalmemory.learning.adaptive import AdaptiveLearner
+        self._adaptive_learner = AdaptiveLearner(self._db)
+
     def _init_heavy_layer(self) -> None:
         from superlocalmemory.llm.backbone import LLMBackbone
         from superlocalmemory.core.engine_wiring import (
@@ -200,7 +206,6 @@ class MemoryEngine:
 
         from superlocalmemory.trust.scorer import TrustScorer
         from superlocalmemory.trust.provenance import ProvenanceTracker
-        from superlocalmemory.learning.adaptive import AdaptiveLearner
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
 
         self._trust_scorer = TrustScorer(self._db)
@@ -233,7 +238,8 @@ class MemoryEngine:
         )
 
         self._provenance = ProvenanceTracker(self._db)
-        self._adaptive_learner = AdaptiveLearner(self._db)
+        # self._adaptive_learner is initialized in _init_db_layer() because
+        # it depends only on the DB (no embedder / LLM); see note there.
         self._compliance_checker = EUAIActChecker()
 
         hook_result = wire_hooks(
