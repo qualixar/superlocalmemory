@@ -105,22 +105,26 @@ class TestRememberTool:
         assert result.get("pending") is True
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_calls_worker_pool_store(self, mock_emit):
-        """pool.store() is called with the content and metadata dict."""
-        pool = MagicMock()
-        pool.store.return_value = {"ok": True, "fact_ids": ["f-x"], "count": 1}
-
+    def test_remember_routes_to_pending_store(self, mock_emit):
+        """v3.4.32: remember writes to pending.db only — daemon materializer
+        drains the queue with recall priority. No redundant pool.store call."""
         remember = _get_remember_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
-            asyncio.run(remember("important fact", tags="python", project="slm"))
+        with patch("superlocalmemory.cli.pending_store.store_pending",
+                   return_value=42) as mock_store:
+            result = asyncio.run(
+                remember("important fact", tags="python", project="slm")
+            )
 
-        pool.store.assert_called_once()
-        call_args = pool.store.call_args
+        mock_store.assert_called_once()
+        call_args = mock_store.call_args
         assert call_args[0][0] == "important fact"
-        meta = call_args[1]["metadata"] if "metadata" in call_args[1] else call_args[0][1]
-        assert meta["tags"] == "python"
-        assert meta["project"] == "slm"
+        assert call_args[1]["tags"] == "python"
+        assert call_args[1]["metadata"]["project"] == "slm"
+        assert result["success"] is True
+        assert result["pending"] is True
+        assert result["pending_id"] == 42
+        assert result["fact_ids"] == ["pending:42"]
 
     def test_remember_stores_to_pending_with_metadata(self):
         """V3.3.27: Store-first pattern saves content and metadata to pending.db."""

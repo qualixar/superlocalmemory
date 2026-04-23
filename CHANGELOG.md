@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.32] - 2026-04-24
+
+Fix: concurrent remembers no longer block recalls on the shared embedder.
+
+### Fixed
+- **Daemon `/remember` is now async by default.** Writes to the pending
+  queue in under 100 ms and returns a `pending_id`; a background thread
+  drains the queue in the background. Previously, the synchronous
+  `engine.store()` on the FastAPI event loop could block `/search` and
+  `/health` for 30+ seconds while the single embedder worker processed a
+  large write. Under concurrent load the daemon could appear hung.
+- **Materializer yields to active recalls.** While any `/search` is in
+  flight the drainer sleeps between items, so user-initiated recalls
+  always get the embedder first.
+- **MCP remember tool simplified.** Writes to `pending.db` and returns;
+  the daemon's materializer completes the pipeline. Removes the
+  redundant in-process `pool.store` background task that previously
+  contended with `/search`.
+- **`pool_store` returns `["pending:<id>"]`** when the daemon is async,
+  keeping a stable identifier for callers without blocking on the
+  embedder.
+
+### Added
+- `?wait=true` query parameter on `POST /remember` for callers that
+  need synchronous behaviour and real `fact_ids` in the response.
+- `superlocalmemory.core.recall_gate` module — shared counter that lets
+  the materializer detect in-flight recalls and yield priority.
+
+### Migration notes
+- **No action required.** Existing clients continue to work; the
+  response shape is compatible (`ok`, `count` still present). Scripts
+  that depended on `fact_ids` to validate the write should switch to
+  `pending_id` or pass `?wait=true` to opt in to the legacy behaviour.
+
+---
+
 ## [3.4.31] - 2026-04-24
 
 Dashboard truth, memory vs fact clarity, and self-cleaning pending queue.

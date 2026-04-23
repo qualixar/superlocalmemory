@@ -113,12 +113,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """
         import asyncio
         try:
-            # V3.3.27: Store-first pattern — write to pending.db immediately
-            # (<100ms), then process through full pipeline in background.
-            # This eliminates the 30-40s blocking that Mode B users experience.
-            # Pending memories are auto-processed on next engine.initialize()
-            # or by the daemon's background loop.
-            from superlocalmemory.cli.pending_store import store_pending, mark_done
+            # v3.4.32: Store-first pattern. Write to pending.db and return
+            # immediately. The daemon's pending-materializer thread drains
+            # the queue with recall priority, so concurrent MCP remembers
+            # no longer contend with /search on the shared embedder.
+            from superlocalmemory.cli.pending_store import store_pending
 
             pending_id = store_pending(content, tags=tags, metadata={
                 "project": project,
@@ -127,39 +126,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "session_id": session_id,
             })
 
-            # Fire-and-forget: process in background thread
-            async def _process_in_background():
-                try:
-                    from superlocalmemory.core.worker_pool import WorkerPool
-                    pool = WorkerPool.shared()
-                    result = await asyncio.to_thread(
-                        pool.store, content, metadata={
-                            "tags": tags, "project": project,
-                            "importance": importance, "agent_id": agent_id,
-                            "session_id": session_id,
-                        },
-                    )
-                    if result.get("ok"):
-                        mark_done(pending_id)
-                        _emit_event("memory.created", {
-                            "content_preview": content[:80],
-                            "agent_id": agent_id,
-                            "fact_count": result.get("count", 0),
-                        }, source_agent=agent_id)
-                except Exception as _bg_exc:
-                    logger.warning(
-                        "Background store failed (pending_id=%s): %s",
-                        pending_id, _bg_exc,
-                    )
-
-            asyncio.create_task(_process_in_background())
-
             return {
                 "success": True,
                 "fact_ids": [f"pending:{pending_id}"],
                 "count": 1,
                 "pending": True,
-                "message": "Stored to pending — processing in background.",
+                "pending_id": pending_id,
+                "message": "Stored — facts will appear in the dashboard shortly.",
             }
         except Exception as exc:
             logger.exception("remember failed")

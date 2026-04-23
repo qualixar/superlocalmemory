@@ -398,7 +398,12 @@ async def get_graph(
 
 @router.post("/api/search")
 async def search_memories(request: Request, body: SearchRequest):
-    """Semantic search via subprocess worker pool (memory-isolated)."""
+    """Semantic search via subprocess worker pool (memory-isolated).
+
+    v3.4.32: marks recall in-flight so the pending materializer yields.
+    """
+    from superlocalmemory.core.recall_gate import begin_recall, end_recall
+    begin_recall()
     try:
         from superlocalmemory.core.worker_pool import WorkerPool
         pool = WorkerPool.shared()
@@ -435,6 +440,8 @@ async def search_memories(request: Request, body: SearchRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+    finally:
+        end_recall()
 
 
 @router.get("/api/clusters")

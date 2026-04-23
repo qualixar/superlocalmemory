@@ -67,6 +67,20 @@ class ObserveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# v3.4.32: Recall-priority gate for the pending materializer.
+# All /remember writes go to pending.db and return fast; a background
+# thread drains pending while yielding to any in-flight /search.
+# See ``superlocalmemory.core.recall_gate``.
+# ---------------------------------------------------------------------------
+
+from superlocalmemory.core.recall_gate import (
+    begin_recall as _begin_recall,
+    end_recall as _end_recall,
+    in_flight as _recalls_in_flight,
+)
+
+
+# ---------------------------------------------------------------------------
 # Observation debounce buffer (migrated from daemon.py)
 # ---------------------------------------------------------------------------
 
@@ -949,6 +963,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         if not effective_sid:
             import time as _t
             effective_sid = f"http:{int(_t.time() * 1000)}"
+        # v3.4.32: mark recall in-flight so the pending materializer pauses
+        _begin_recall()
         try:
             response = engine.recall(
                 search_query, limit=limit, session_id=effective_sid,
@@ -1006,18 +1022,47 @@ def _register_daemon_routes(application: FastAPI) -> None:
             }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
+        finally:
+            _end_recall()
 
     @application.post("/remember")
-    async def remember(req: RememberRequest):
+    async def remember(req: RememberRequest, wait: bool = False):
+        """v3.4.32: Async by default — writes to pending.db, returns pending_id
+        in <100ms. Materializer thread drains at low priority, yielding to
+        /search. Pass ``?wait=true`` for legacy synchronous behavior (blocks
+        on the embedder until facts are written).
+        """
         _update_activity()
         engine = _get_engine_or_503()
+
+        if wait:
+            try:
+                metadata = {"tags": req.tags} if req.tags else {}
+                extra = getattr(req, "metadata", None)
+                if isinstance(extra, dict):
+                    metadata.update(extra)
+                fact_ids = engine.store(req.content, metadata=metadata)
+                return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
+            except Exception as exc:
+                raise HTTPException(500, detail=str(exc))
+
         try:
-            metadata = {"tags": req.tags} if req.tags else {}
+            from superlocalmemory.cli.pending_store import store_pending
+            meta = {}
+            if req.tags:
+                meta["tags"] = req.tags
             extra = getattr(req, "metadata", None)
             if isinstance(extra, dict):
-                metadata.update(extra)
-            fact_ids = engine.store(req.content, metadata=metadata)
-            return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
+                meta.update(extra)
+            pending_id = store_pending(
+                req.content, tags=req.tags or "", metadata=meta,
+            )
+            return {
+                "ok": True,
+                "pending_id": pending_id,
+                "status": "queued",
+                "note": "materialized async; pass ?wait=true for legacy sync",
+            }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
 
@@ -1189,6 +1234,70 @@ def _start_memory_watchdog() -> None:
     logger.info("Memory watchdog started (limit: %d MB per worker)", MAX_WORKER_MB)
 
 
+_materializer_stop = threading.Event()
+_materializer_thread: threading.Thread | None = None
+
+
+def _start_pending_materializer() -> None:
+    """Background thread: drains pending.db, yields to active /search calls.
+
+    Poll loop:
+    1. Fetch up to 5 pending rows.
+    2. For each row: if any /search is in flight, sleep 500ms (yield priority).
+    3. Call engine.store(), mark_done or mark_failed.
+    4. Sleep 2s between polls when idle (empty queue).
+    """
+    global _materializer_thread
+
+    def _loop():
+        from superlocalmemory.cli.pending_store import (
+            get_pending, mark_done, mark_failed,
+        )
+        while not _materializer_stop.is_set():
+            try:
+                engine = _engine  # may be None briefly at startup
+                if engine is None:
+                    time.sleep(2.0)
+                    continue
+                pending = get_pending(limit=5)
+                if not pending:
+                    time.sleep(2.0)
+                    continue
+                for item in pending:
+                    if _materializer_stop.is_set():
+                        break
+                    # Yield to recalls: wait until none in flight
+                    waits = 0
+                    while _recalls_in_flight() > 0 and waits < 60:
+                        time.sleep(0.5)
+                        waits += 1
+                    try:
+                        import json as _json
+                        md_str = item.get("metadata") or "{}"
+                        try:
+                            md = _json.loads(md_str)
+                        except Exception:
+                            md = {}
+                        if item.get("tags"):
+                            md.setdefault("tags", item["tags"])
+                        engine.store(item["content"], metadata=md)
+                        mark_done(item["id"])
+                    except Exception as exc:
+                        logger.warning(
+                            "Pending %d failed: %s", item["id"], exc,
+                        )
+                        mark_failed(item["id"], str(exc))
+            except Exception as exc:
+                logger.warning("materializer loop error: %s", exc)
+                time.sleep(5.0)
+
+    _materializer_thread = threading.Thread(
+        target=_loop, daemon=True, name="pending-materializer",
+    )
+    _materializer_thread.start()
+    logger.info("Pending materializer started (recall-priority)")
+
+
 def start_server(port: int = _DEFAULT_PORT) -> None:
     """Start the unified daemon. Blocks until stopped."""
     global _start_time
@@ -1222,6 +1331,9 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
 
     # v3.4.7: Start memory watchdog to prevent runaway workers
     _start_memory_watchdog()
+
+    # v3.4.32: Continuous pending-queue materializer with recall priority.
+    _start_pending_materializer()
 
     log_dir = Path.home() / ".superlocalmemory" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)

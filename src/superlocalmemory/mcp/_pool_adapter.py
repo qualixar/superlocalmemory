@@ -110,12 +110,24 @@ def pool_recall(query: str, limit: int = 10, **_: Any) -> PoolRecallResponse:
 
 
 def pool_store(content: str, metadata: dict | None = None) -> list[str]:
-    """Call pool.store and return the fact id list.
+    """Call pool.store and return fact id list (or pending tracker).
 
-    Raises :class:`PoolError` on worker death or any non-ok envelope.
+    v3.4.32: the daemon /remember endpoint is async by default — it
+    returns ``pending_id`` and queues the write. We surface this to
+    callers as ``["pending:<id>"]`` so they have a stable identifier
+    without blocking the remember on the embedder worker.
+
+    Legacy synchronous path (``?wait=true``) still returns real
+    ``fact_ids``. Worker death raises :class:`PoolError`.
     """
     raw = _pool().store(content=content, metadata=metadata or {})
     _unwrap_error(raw, "store")
-    if isinstance(raw, dict):
-        return list(raw.get("fact_ids", []))
+    if not isinstance(raw, dict):
+        return []
+    fact_ids = raw.get("fact_ids")
+    if fact_ids:
+        return list(fact_ids)
+    pending_id = raw.get("pending_id")
+    if pending_id is not None:
+        return [f"pending:{pending_id}"]
     return []
