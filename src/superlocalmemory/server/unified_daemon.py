@@ -1206,6 +1206,20 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     _PORT_FILE.write_text(str(port))
     _start_time = time.monotonic()
 
+    try:
+        from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+            is_ready as _is_ready, migrate as _migrate,
+        )
+        _data = Path(os.environ.get("SLM_DATA_DIR")
+                     or Path.home() / ".superlocalmemory")
+        if not _is_ready(_data):
+            _migrate(_data)
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "v3.4.26 migration on daemon start failed: %s", exc,
+        )
+
     # v3.4.7: Start memory watchdog to prevent runaway workers
     _start_memory_watchdog()
 
