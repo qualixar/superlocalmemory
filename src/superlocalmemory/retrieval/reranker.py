@@ -51,7 +51,7 @@ _live_rerankers: set[weakref.ref] = set()
 
 logger = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT_SECONDS = 1800  # 30 min — keep cross-encoder warm for active sessions.
+_IDLE_TIMEOUT_SECONDS = 300  # V3.4.37: 5 min (was 30) — balance cold-start vs RAM.
 # V3.3.12: Configurable via SLM_RERANKER_IDLE_TIMEOUT env var.
 # V3.4.19: Bumped from 120 → 1800 in lock-step with the embedding worker.
 # Set ``SLM_RERANKER_IDLE_TIMEOUT=120`` + ``slm restart`` to revert.
@@ -192,6 +192,7 @@ class CrossEncoderReranker:
                 "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
+                "ORT_DISABLE_COREML": "1",
             }
             from superlocalmemory.core.platform_utils import popen_platform_kwargs
             self._worker_proc = subprocess.Popen(

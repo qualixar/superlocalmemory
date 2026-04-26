@@ -1710,6 +1710,7 @@ def _warmup_diagnose() -> None:
     """Diagnostic helper when warmup fails."""
     print("\nDiagnosing...")
     print(f"  Python executable: {sys.executable}")
+    os.environ["ORT_DISABLE_COREML"] = "1"
     try:
         from sentence_transformers import SentenceTransformer
         print("  sentence-transformers: importable")

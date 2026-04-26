@@ -140,14 +140,10 @@ def release_embedding_lock() -> None:
         _embedding_lock_fd = None
 
 
-_IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes — keep model warm across bursty use.
-# V3.3.12: Configurable via SLM_EMBED_IDLE_TIMEOUT env var (seconds).
-# V3.4.19: Bumped from 120 → 1800 to eliminate the 30-60s cold-start pain
-# when the embedding worker was killed too aggressively. Safety: the
-# per-embed RSS self-check (SLM_EMBED_WORKER_RSS_LIMIT_MB, 4GB default) and
-# the daemon memory watchdog (unified_daemon.py, 4GB/60s) still cap any
-# runaway. To restore the old aggressive policy without redeploying, set
-# ``SLM_EMBED_IDLE_TIMEOUT=120`` and ``slm restart``.
+_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes — balance cold-start vs RAM.
+# V3.4.37: Reduced from 1800 → 300. Holding 1.1 GB for 30 min idle
+# wastes RAM on laptops. 5 min covers bursty session_init+recall
+# patterns while freeing memory between sessions.
 _IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_EMBED_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
 # V3.3.21: Configurable response timeout — 180s default, but batch ingestion
 # (2-turn chunks across 10 conversations) needs 600s+ to survive cold-start
@@ -476,6 +472,7 @@ class EmbeddingService:
                 "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
+                "ORT_DISABLE_COREML": "1",
             }
             from superlocalmemory.core.platform_utils import popen_platform_kwargs
             self._worker_proc = subprocess.Popen(

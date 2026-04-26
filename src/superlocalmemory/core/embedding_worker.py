@@ -151,7 +151,7 @@ def _worker_main() -> None:
                 _respond({"ok": False, "error": str(exc)})
 
             # V3.3.16: RSS watchdog — V3.4.24: cross-platform via platform_utils.
-            _rss_limit = int(os.environ.get("SLM_EMBED_WORKER_RSS_LIMIT_MB", 4000))
+            _rss_limit = int(os.environ.get("SLM_EMBED_WORKER_RSS_LIMIT_MB", 1800))
             rss_mb = get_rss_mb()
             if rss_mb > 0 and rss_mb > _rss_limit:
                 sys.exit(0)

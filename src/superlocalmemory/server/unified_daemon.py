@@ -67,6 +67,75 @@ class ObserveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# V3.4.37: Engine recall adapter — routes QueueConsumer through the daemon's
+# in-process MemoryEngine instead of spawning a recall_worker subprocess.
+# Saves ~800 MB by eliminating the duplicate engine.
+# ---------------------------------------------------------------------------
+
+class EngineRecallAdapter:
+    """Adapts MemoryEngine.recall() to RecallPoolProtocol for QueueConsumer.
+
+    The daemon already has a full MemoryEngine in-process. The QueueConsumer
+    previously routed through WorkerPool → recall_worker subprocess, which
+    loaded a SECOND MemoryEngine. This adapter eliminates that duplication.
+    """
+
+    def __init__(self, engine) -> None:
+        self._engine = engine
+
+    def recall(self, query: str, limit: int = 10, session_id: str = "") -> dict:
+        response = self._engine.recall(
+            query, limit=limit, session_id=session_id or None,
+        )
+        memory_ids = list({
+            r.fact.memory_id for r in response.results[:limit]
+            if r.fact.memory_id
+        })
+        memory_map = (
+            self._engine._db.get_memory_content_batch(memory_ids)
+            if memory_ids else {}
+        )
+        results = []
+        for r in response.results[:limit]:
+            fact_type = getattr(r.fact, "fact_type", None)
+            lifecycle = getattr(r.fact, "lifecycle", None)
+            results.append({
+                "fact_id": r.fact.fact_id,
+                "memory_id": r.fact.memory_id,
+                "content": r.fact.content[:300],
+                "source_content": memory_map.get(r.fact.memory_id, ""),
+                "score": round(r.score, 4),
+                "confidence": round(r.confidence, 4),
+                "trust_score": round(r.trust_score, 4),
+                "channel_scores": {
+                    k: round(v, 4)
+                    for k, v in (r.channel_scores or {}).items()
+                },
+                "fact_type": fact_type.value
+                    if fact_type and hasattr(fact_type, "value") else "",
+                "lifecycle": lifecycle.value
+                    if lifecycle and hasattr(lifecycle, "value") else "",
+                "access_count": getattr(r.fact, "access_count", 0),
+                "evidence_chain": list(
+                    getattr(r, "evidence_chain", []) or []
+                ),
+            })
+        return {
+            "ok": True,
+            "query": query,
+            "query_type": response.query_type,
+            "result_count": len(results),
+            "retrieval_time_ms": round(response.retrieval_time_ms, 1),
+            "channel_weights": {
+                k: round(v, 3)
+                for k, v in (response.channel_weights or {}).items()
+            },
+            "total_candidates": getattr(response, "total_candidates", 0),
+            "results": results,
+        }
+
+
+# ---------------------------------------------------------------------------
 # v3.4.32: Recall-priority gate for the pending materializer.
 # All /remember writes go to pending.db and return fast; a background
 # thread drains pending while yielding to any in-flight /search.
@@ -397,9 +466,10 @@ async def lifespan(application: FastAPI):
         # Set up observe buffer
         _observe_buffer.set_engine(engine)
 
-        # Pre-warm workers (background)
-        from superlocalmemory.core.worker_pool import WorkerPool
-        WorkerPool.shared().warmup()
+        # V3.4.37: Removed WorkerPool.warmup() — the recall_worker subprocess
+        # duplicated the daemon's MemoryEngine (800+ MB). QueueConsumer now
+        # uses the daemon's engine directly via EngineRecallAdapter.
+        # WorkerPool is still available as fallback for dashboard/chat routes.
 
         # Force reranker warmup
         retrieval_eng = getattr(engine, '_retrieval_engine', None)
@@ -422,8 +492,9 @@ async def lifespan(application: FastAPI):
                 logger.warning("Embedding warmup failed: %s", exc)
         threading.Thread(target=_warmup_embedder, daemon=True, name="embed-warmup").start()
 
-        # v3.4.26: Start QueueConsumer — drains recall_queue.db via pool.recall().
-        # Must start AFTER WorkerPool.warmup() so the worker is ready.
+        # v3.4.37: QueueConsumer uses daemon's engine directly via adapter.
+        # Previously routed through WorkerPool → recall_worker subprocess,
+        # which loaded a duplicate MemoryEngine (~800 MB waste).
         try:
             from pathlib import Path as _QP
             from superlocalmemory.core.queue_consumer import QueueConsumer
@@ -432,7 +503,7 @@ async def lifespan(application: FastAPI):
             _recall_queue = RecallQueue(_queue_db)
             _queue_consumer = QueueConsumer(
                 queue=_recall_queue,
-                pool=WorkerPool.shared(),
+                pool=EngineRecallAdapter(engine),
             )
             _queue_consumer.start()
             application.state.queue_consumer = _queue_consumer
@@ -466,9 +537,9 @@ async def lifespan(application: FastAPI):
         from superlocalmemory.core.health_monitor import HealthMonitor
         health_config = getattr(config, 'health', None)
         monitor = HealthMonitor(
-            global_rss_budget_mb=getattr(health_config, 'global_rss_budget_mb', 4096) if health_config else 4096,
+            global_rss_budget_mb=getattr(health_config, 'global_rss_budget_mb', 2500) if health_config else 2500,
             heartbeat_timeout_sec=getattr(health_config, 'heartbeat_timeout_sec', 60) if health_config else 60,
-            check_interval_sec=getattr(health_config, 'health_check_interval_sec', 30) if health_config else 30,
+            check_interval_sec=getattr(health_config, 'health_check_interval_sec', 15) if health_config else 15,
             enable_structured_logging=getattr(health_config, 'enable_structured_logging', True) if health_config else True,
         )
         monitor.start()
@@ -1259,11 +1330,11 @@ def _start_memory_watchdog() -> None:
     """
     import threading
 
-    MAX_WORKER_MB = 4096  # 4GB per worker — ONNX full model is 1.6GB + overhead
+    MAX_WORKER_MB = 1800  # V3.4.37: 1.8GB — ONNX nomic-embed is ~1.7GB loaded
 
     def watchdog_loop():
         while True:
-            time.sleep(60)
+            time.sleep(15)  # V3.4.37: 15s (was 60s) — catch spikes faster
             try:
                 import psutil
                 parent = psutil.Process(os.getpid())

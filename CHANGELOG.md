@@ -10,6 +10,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.37] - 2026-04-26
+
+**P0 RAM fix.** Total SLM footprint reduced from ~14 GB peak to ~2.3 GB peak
+(84% reduction). Idle dropped from ~2.5 GB to ~1.0 GB. Users with 16 GB
+laptops can now run SLM without uninstalling.
+
+### Fixed
+- **CoreML EP allocation** — Added `ORT_DISABLE_COREML=1` to
+  `recall_worker.py`, `cli/commands.py` (warmup diagnose path), and the
+  Popen environment dicts in `core/embeddings.py` and
+  `retrieval/reranker.py`. Previously only `embedding_worker.py` and
+  `reranker_worker.py` set this. On ARM64 Mac, ONNX Runtime's CoreML
+  Execution Provider allocated 3-5 GB per missing guard.
+- **Duplicate MemoryEngine** — The QueueConsumer (recall_queue.db drain)
+  was routing through `WorkerPool` → `recall_worker` subprocess, which
+  loaded a SECOND full MemoryEngine inside the daemon. Now routes through
+  the daemon's in-process engine via the new `EngineRecallAdapter`.
+  Eliminates ~800 MB of duplication.
+- **Eager warmup** — Removed `WorkerPool.shared().warmup()` from daemon
+  startup. The recall_worker subprocess no longer spawns at boot. It
+  remains available as a fallback for dashboard/chat routes.
+
+### Changed
+- **RSS limits tightened:**
+  - `embedding_worker` self-kill: 4000 MB → 1800 MB
+  - `recall_worker` self-kill: 2500 MB → 1500 MB
+  - Daemon watchdog `MAX_WORKER_MB`: 4096 MB → 1800 MB
+  - `HealthMonitor.global_rss_budget_mb`: 4096 MB → 2500 MB
+- **Watchdog interval:** 60s → 15s in both daemon watchdog and
+  HealthMonitor `check_interval_sec`. Catches memory spikes faster.
+- **Idle timeouts:**
+  - `SLM_EMBED_IDLE_TIMEOUT`: 1800s (30 min) → 300s (5 min)
+  - `SLM_RERANKER_IDLE_TIMEOUT`: 1800s → 300s
+  - Reduces idle RAM held by ML model subprocesses.
+
+### Added
+- **`EngineRecallAdapter`** in `unified_daemon.py` — wraps the in-process
+  MemoryEngine to satisfy `RecallPoolProtocol` for the QueueConsumer.
+  Eliminates the recall_worker subprocess on the hot path.
+
+---
+
 ## [3.4.36] - 2026-04-25
 
 Persistent hook daemon: recall latency drops from ~2.2s to sub-second by

@@ -133,9 +133,9 @@ class HealthMonitor:
 
     def __init__(
         self,
-        global_rss_budget_mb: int = 4096,
+        global_rss_budget_mb: int = 2500,
         heartbeat_timeout_sec: int = 60,
-        check_interval_sec: int = 30,
+        check_interval_sec: int = 15,
         enable_structured_logging: bool = True,
     ):
         self._budget_mb = global_rss_budget_mb
