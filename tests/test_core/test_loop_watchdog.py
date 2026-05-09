@@ -32,10 +32,15 @@ def test_no_tick_becomes_stale() -> None:
 
 def test_repeated_ticks_stay_fresh() -> None:
     lw = _imports()
-    w = lw.LoopWatchdog(stale_threshold_s=0.1)
+    # V3.4.41: bumped threshold 0.1s -> 0.5s and intervals 0.02s -> 0.05s.
+    # GitHub macos-14 runners exhibit timer skew up to ~80ms under load,
+    # which made this test occasionally flake on `not is_stale()`. Wider
+    # tolerance preserves the contract (5 ticks well below threshold)
+    # while removing CI flake.
+    w = lw.LoopWatchdog(stale_threshold_s=0.5)
     for _ in range(5):
         w.tick()
-        time.sleep(0.02)
+        time.sleep(0.05)
     assert not w.is_stale()
 
 
