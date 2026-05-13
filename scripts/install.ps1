@@ -260,6 +260,23 @@ if ($ProjRoot) {
     Write-Host "WARNING: pyproject.toml not found, cannot install dependencies" -ForegroundColor Yellow
 }
 
+# Verify critical dependency versions (pip resolver can override pins)
+Write-Host ""
+Write-Host "Verifying critical dependency versions..."
+$criticalDeps = @{ "sentence_transformers" = "5.3.0"; "onnxruntime" = "1.24.4" }
+foreach ($mod in $criticalDeps.Keys) {
+    $expected = $criticalDeps[$mod]
+    $pipName = $mod.Replace("_", "-")
+    $actual = & python -c "import $mod; print(getattr($mod,'__version__',''))" 2>$null
+    if ($actual -and $actual -ne $expected) {
+        Write-Host "WARNING: $pipName is $actual, expected $expected. Fixing..." -ForegroundColor Yellow
+        & python -m pip install -q "$pipName==$expected" 2>$null
+        Write-Host "OK $pipName==$expected installed" -ForegroundColor Green
+    } elseif ($actual -eq $expected) {
+        Write-Host "OK $mod==$expected" -ForegroundColor Green
+    }
+}
+
 # Initialize knowledge graph and pattern learning
 Write-Host ""
 Write-Host "Initializing advanced features..."

@@ -140,6 +140,28 @@ if (pipInstallPkg.status === 0) {
     }
 }
 
+// --- Step 3c: Verify critical dependency versions ---
+// sentence-transformers and onnxruntime MUST be exact versions to avoid
+// memory blow-up on Apple Silicon. pip resolver can override pins via
+// transitive deps — this step catches and fixes that.
+console.log('\nVerifying critical dependency versions...');
+const criticalDeps = { 'sentence_transformers': '5.3.0', 'onnxruntime': '1.24.4' };
+for (const [mod, expected] of Object.entries(criticalDeps)) {
+    const check = spawnSync(pythonParts[0], [
+        ...pythonParts.slice(1), '-c',
+        `import ${mod}; v=getattr(${mod},'__version__',''); print(v)`,
+    ], { stdio: 'pipe', timeout: 10000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
+    const actual = (check.stdout || '').toString().trim();
+    if (actual && actual !== expected) {
+        const pipName = mod.replace('_', '-');
+        console.log(`⚠ ${pipName} is ${actual}, expected ${expected}. Fixing...`);
+        pipInstall([`${pipName}==${expected}`], pipName);
+        console.log(`✓ ${pipName}==${expected} installed`);
+    } else if (actual === expected) {
+        console.log(`✓ ${mod}==${expected}`);
+    }
+}
+
 // --- Step 4: Detect V2 installation ---
 const V2_HOME = path.join(os.homedir(), '.claude-memory');
 if (fs.existsSync(V2_HOME) && fs.existsSync(path.join(V2_HOME, 'memory.db'))) {

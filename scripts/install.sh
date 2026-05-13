@@ -389,6 +389,23 @@ else
     echo "⚠️  pyproject.toml not found, cannot install dependencies"
 fi
 
+# Verify critical dependency versions (pip resolver can override pins)
+echo ""
+echo "Verifying critical dependency versions..."
+for pair in "sentence_transformers:5.3.0:sentence-transformers" "onnxruntime:1.24.4:onnxruntime"; do
+    mod=$(echo "$pair" | cut -d: -f1)
+    expected=$(echo "$pair" | cut -d: -f2)
+    pipname=$(echo "$pair" | cut -d: -f3)
+    actual=$(python3 -c "import $mod; print(getattr($mod,'__version__',''))" 2>/dev/null)
+    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
+        echo "⚠️  $pipname is $actual, expected $expected. Fixing..."
+        pip3 install $PIP_FLAGS -q "$pipname==$expected" 2>/dev/null
+        echo "✓ $pipname==$expected installed"
+    elif [ "$actual" = "$expected" ]; then
+        echo "✓ $mod==$expected"
+    fi
+done
+
 # Initialize knowledge graph and pattern learning
 echo ""
 echo "Initializing advanced features..."
