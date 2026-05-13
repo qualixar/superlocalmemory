@@ -176,21 +176,6 @@ class EmbeddingService:
         self._request_count: int = 0
         self._http_client: object | None = None
 
-        # v3.4.44: Circuit-breaker for embedding worker death-spiral.
-        # After _failure_disable_threshold consecutive failures, we skip
-        # spawning any more workers for _failure_disable_cooldown_s seconds.
-        # SLM gracefully degrades to non-embedding retrieval (BM25, entity
-        # graph, temporal) instead of pegging CPU on an infinite respawn
-        # loop. Both knobs are env-overridable.
-        self._consecutive_failures: int = 0
-        self._failure_disabled_until: float = 0.0
-        self._failure_disable_threshold: int = int(
-            os.environ.get("SLM_EMBED_FAILURE_THRESHOLD", "3")
-        )
-        self._failure_disable_cooldown_s: float = float(
-            os.environ.get("SLM_EMBED_FAILURE_COOLDOWN_S", "300")
-        )
-
         # Register for atexit cleanup (prevent orphaned workers)
         ref = weakref.ref(self, _live_embedding_services.discard)
         _live_embedding_services.add(ref)
@@ -214,18 +199,6 @@ class EmbeddingService:
             return bool(self._config.api_endpoint)
         if self._config.is_cloud:
             return bool(self._config.api_endpoint and self._config.api_key)
-        # v3.4.44: Honor circuit-breaker cooldown for the subprocess path.
-        if self._failure_disabled_until > 0.0:
-            if time.monotonic() < self._failure_disabled_until:
-                return False
-            # Cooldown expired — re-arm and let the next call try a fresh worker.
-            self._failure_disabled_until = 0.0
-            self._consecutive_failures = 0
-            logger.info(
-                "Embedding subsystem re-arming after %.0fs cooldown — "
-                "next embed call will attempt a fresh worker.",
-                self._failure_disable_cooldown_s,
-            )
         return self._available
 
     @property
