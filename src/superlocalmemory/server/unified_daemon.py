@@ -1418,12 +1418,23 @@ def _start_pending_materializer() -> None:
                 for item in pending:
                     if _materializer_stop.is_set():
                         break
-                    # Yield to recalls: wait until none in flight
                     waits = 0
                     while _recalls_in_flight() > 0 and waits < 60:
                         time.sleep(0.5)
                         waits += 1
                     try:
+                        import hashlib
+                        content = item["content"]
+                        # Dedup: skip if identical content already stored.
+                        content_hash = hashlib.md5(content.encode()).hexdigest()
+                        dup = engine._db.execute(
+                            "SELECT 1 FROM atomic_facts WHERE "
+                            "content = ? LIMIT 1",
+                            (content,),
+                        )
+                        if dup:
+                            mark_done(item["id"])
+                            continue
                         import json as _json
                         md_str = item.get("metadata") or "{}"
                         try:
@@ -1432,7 +1443,29 @@ def _start_pending_materializer() -> None:
                             md = {}
                         if item.get("tags"):
                             md.setdefault("tags", item["tags"])
-                        engine.store(item["content"], metadata=md)
+                        # Create memory row (FK target for atomic_facts)
+                        from datetime import datetime, timezone
+                        from superlocalmemory.storage.models import (
+                            AtomicFact, FactType,
+                        )
+                        mem_id = content_hash[:16]
+                        engine._db.execute(
+                            "INSERT OR IGNORE INTO memories "
+                            "(memory_id, profile_id, content, "
+                            "session_id, speaker, role, created_at, "
+                            "metadata_json) VALUES (?,?,?,?,?,?,?,?)",
+                            (mem_id, engine._profile_id, content,
+                             "", "", "user",
+                             datetime.now(timezone.utc).isoformat(),
+                             _json.dumps(md)),
+                        )
+                        fact = AtomicFact(
+                            content=content,
+                            fact_type=FactType.EPISODIC,
+                            memory_id=mem_id,
+                            profile_id=engine._profile_id,
+                        )
+                        engine.store_fact_direct(fact)
                         mark_done(item["id"])
                     except Exception as exc:
                         logger.warning(
