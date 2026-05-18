@@ -122,13 +122,21 @@ _ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
 
 _all_tools = _os_reg.environ.get("SLM_MCP_ALL_TOOLS") == "1"
 
+# v3.4.45: Minimal mode — explicit user allowlist via SLM_MCP_TOOLS env var.
+# Format: comma-separated tool names, e.g. "remember,recall,session_init,search"
+# Use case: Claude Code consumer plans with tight context budgets where the
+# 25-tool essential set is still too many. Power users override to expose
+# exactly the tools they invoke. Falls back to _ESSENTIAL_TOOLS when unset.
+_user_allowlist_str = _os_reg.environ.get("SLM_MCP_TOOLS", "").strip()
+
 
 class _FilteredServer:
     """Wraps FastMCP to only register essential tools.
 
     Non-essential tools are silently skipped (not registered on the MCP
     server). They remain available via CLI. When SLM_MCP_ALL_TOOLS=1,
-    all tools are registered (bypass filter).
+    all tools are registered (bypass filter). When SLM_MCP_TOOLS is set,
+    that user allowlist is used instead of _ESSENTIAL_TOOLS.
     """
     __slots__ = ("_server", "_allowed")
 
@@ -147,8 +155,14 @@ class _FilteredServer:
         return getattr(self._server, name)
 
 
-# Choose full or filtered registration target
-_target = server if _all_tools else _FilteredServer(server, _ESSENTIAL_TOOLS)
+# Choose registration target (precedence: ALL > user allowlist > essential)
+if _all_tools:
+    _target = server
+elif _user_allowlist_str:
+    _user_allowlist = frozenset(t.strip() for t in _user_allowlist_str.split(",") if t.strip())
+    _target = _FilteredServer(server, _user_allowlist)
+else:
+    _target = _FilteredServer(server, _ESSENTIAL_TOOLS)
 
 from superlocalmemory.mcp.tools_core import register_core_tools
 from superlocalmemory.mcp.tools_v28 import register_v28_tools

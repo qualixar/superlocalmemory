@@ -1,5 +1,8 @@
 """SuperLocalMemory — information-geometric agent memory."""
 
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 __version__ = "3.4.45"
 
 _REQUIRED_VERSIONS = {
