@@ -105,7 +105,7 @@ async def deregister(req: DeregisterRequest, request: Request):
 @router.get("/peers")
 async def peers(request: Request):
     broker = _get_broker(request)
-    return {"peers": broker.list_peers()}
+    return {"peers": broker.list_all_peers()}
 
 
 @router.post("/heartbeat")

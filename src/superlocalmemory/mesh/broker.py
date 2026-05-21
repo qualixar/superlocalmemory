@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("superlocalmemory.mesh")
+import os as _os
+
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
 
 
 MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data dumps
@@ -42,6 +46,37 @@ class MeshBroker:
         self._started_at = time.monotonic()
         self._cleanup_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._host = _os.environ.get("SLM_MESH_HOST", "127.0.0.1")
+        self._shared_secret = _os.environ.get("SLM_MESH_SHARED_SECRET", "") or None
+        self._is_remote = self._host not in LOCAL_HOSTS
+        self._ws_port = int(_os.environ.get("SLM_MESH_WS_PORT", "7900"))
+        self._discovery_enabled = self._is_remote and _os.environ.get("SLM_MESH_DISCOVERY", "on") != "off"
+        self._remote_peers: dict[str, dict] = {}
+        if self._is_remote and not self._shared_secret:
+            raise RuntimeError(
+                "SLM_MESH_SHARED_SECRET is required when SLM_MESH_HOST is not localhost"
+            )
+
+
+    # -- Remote / Multi-Machine support (v3.4.47) --
+
+    def get_remote_peers(self) -> list[dict]:
+        """Return peers from discovered remote brokers."""
+        return list(self._remote_peers.values())
+
+    def add_remote_peer(self, peer_id: str, info: dict) -> None:
+        """Register a peer from a remote broker."""
+        self._remote_peers[peer_id] = info
+
+    def remove_remote_peer(self, peer_id: str) -> None:
+        """Remove a remote peer."""
+        self._remote_peers.pop(peer_id, None)
+
+    def list_all_peers(self) -> list[dict]:
+        """Return local + remote peers merged."""
+        local = self.list_peers()
+        remote = self.get_remote_peers()
+        return local + remote
 
     def start_cleanup(self) -> None:
         """Start background cleanup thread for stale peers/messages."""
@@ -65,11 +100,13 @@ class MeshBroker:
     # -- Peers --
 
     def register_peer(self, session_id: str, summary: str = "",
-                      host: str = "127.0.0.1", port: int = 0,
+                      host: str = "", port: int = 0,
                       project_path: str = "", agent_type: str = "unknown") -> dict:
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc).isoformat()
+            if not host:
+                host = self._host
             # Idempotent: update if same session_id exists
             existing = conn.execute(
                 "SELECT peer_id FROM mesh_peers WHERE session_id = ?",
