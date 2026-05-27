@@ -239,11 +239,63 @@ if [ -f "${REPO_DIR}/mcp_server.py" ]; then
     echo "✓ MCP server copied"
 fi
 
-# Copy config if not exists
-if [ ! -f "${INSTALL_DIR}/config.json" ]; then
-    echo "Creating default config..."
-    cp "${REPO_DIR}/config.json" "${INSTALL_DIR}/config.json"
-    echo "✓ Config created"
+# Interactive mode selection (v3.4.55)
+if [ ! -f "${INSTALL_DIR}/current_mode" ] && [ "${NON_INTERACTIVE}" != "true" ]; then
+    echo ""
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│         SuperLocalMemory V3 — Setup         │"
+    echo "└─────────────────────────────────────────────┘"
+    echo ""
+    echo "  Choose operating mode:"
+    echo ""
+    echo "    [A] Zero-Cloud — Pure local, no API keys needed"
+    echo "        • Embedding: sentence-transformers (local)"
+    echo "        • LLM: none"
+    echo "        • Best for: privacy, air-gapped, EU AI Act"
+    echo ""
+    echo "    [B] Local AI — Ollama-powered (recommended)"
+    echo "        • Embedding: ollama / nomic-embed-text"
+    echo "        • LLM: ollama / llama3.2"
+    echo "        • Best for: full offline AI, zero cost"
+    echo ""
+    echo "    [C] Cloud Power — OpenRouter / OpenAI API"
+    echo "        • Embedding: text-embedding-3-large"
+    echo "        • LLM: claude-sonnet-4 / gpt-4.1-mini"
+    echo "        • Best for: max quality, API required"
+    echo ""
+    read -r -p "  Enter mode [A/B/C] (default: B): " MODE_CHOICE
+    MODE_CHOICE=${MODE_CHOICE:-b}
+    case "${MODE_CHOICE,,}" in
+        a) SELECTED_MODE="a" ;;
+        c) SELECTED_MODE="c" ;;
+        *) SELECTED_MODE="b" ;;
+    esac
+    echo ""
+    echo "  → Selected Mode ${SELECTED_MODE^^}"
+    echo ""
+    # Generate initial 3-mode config via Python
+    python3 -c "
+from superlocalmemory.core.config import SLMConfig
+SLMConfig.migrate_to_3mode()
+SLMConfig.switch_mode('${SELECTED_MODE}')
+print('✓ Mode ${SELECTED_MODE^^} configured')
+print('  Config files created: mode_a.json, mode_b.json, mode_c.json')
+print('  Run slm mode a/b/c to switch modes later')
+"
+elif [ ! -f "${INSTALL_DIR}/config.json" ] && [ "${NON_INTERACTIVE}" = "true" ]; then
+    echo "Creating default config (non-interactive, Mode B)..."
+    python3 -c "
+from superlocalmemory.core.config import SLMConfig
+SLMConfig.migrate_to_3mode()
+print('✓ Default config created (Mode B)')
+"
+elif [ -f "${INSTALL_DIR}/config.json" ] && [ ! -f "${INSTALL_DIR}/current_mode" ]; then
+    echo "Migrating existing config to 3-mode system..."
+    python3 -c "
+from superlocalmemory.core.config import SLMConfig
+SLMConfig.migrate_to_3mode()
+print('✓ Config migrated — your settings preserved')
+"
 else
     echo "○ Config exists (keeping existing)"
 fi
