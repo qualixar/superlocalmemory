@@ -1,8 +1,8 @@
-# Session Handoff — 2026-05-28 — SLM v3.4.51 → v3.4.55
+# Session Handoff — 2026-05-28 — SLM v3.4.51 → v3.4.56
 
 **Date:** 2026-05-27/28 (overnight session)
-**Releases shipped:** 5 (v3.4.51, v3.4.52, v3.4.53, v3.4.54, v3.4.55)
-**Published:** GitHub, PyPI, npm — all live
+**Releases shipped:** 6 (v3.4.51, v3.4.52, v3.4.53, v3.4.54, v3.4.55, v3.4.56)
+**Published:** GitHub (58f5876), PyPI 3.4.56, npm 3.4.56 — all live
 
 ---
 

@@ -1000,79 +1000,86 @@ class SLMConfig:
         new_mode: str,
         base_dir: Path | None = None,
     ) -> "SLMConfig":
-        """Switch to a different mode, preserving the old mode's config.
+        """Switch to a different mode, preserving ALL non-mode settings.
 
-        v3.4.54: Saves the current config as ``mode_{old}.json``, then
-        loads ``mode_{new}.json`` (or creates it from defaults if it
-        doesn't exist). Writes ``current_mode`` and persists the new
-        active config as ``config.json`` for backward compatibility
-        with tooling that reads it directly.
+        v3.4.58 fix: Only ``config.mode`` changes. The previous implementation
+        called ``for_mode()`` (which resets embedding/LLM/retrieval to mode
+        defaults) whenever the target mode's per-mode file didn't exist.
+        This silently clobbered custom embeddings, endpoints, and LLM config.
+
+        Correct behavior:
+          - Load the current (old) config from config.json.
+          - Save it to mode_{old}.json for the 3-mode system.
+          - If mode_{new}.json exists, load it (user had a prior config for that mode).
+          - If mode_{new}.json does NOT exist: start from the OLD config, change
+            only the mode field. This preserves embedding, retrieval, forgetting, etc.
+          - Exception: if user has NO LLM provider AND is switching to B/C, populate
+            sensible LLM defaults so the daemon doesn't start dead.
+          - Write the result to config.json (backward compat) and current_mode.
 
         Returns the new active config.
         """
+        import copy
+        import dataclasses
+
         from superlocalmemory.storage.models import Mode as _M
         _base = base_dir or DEFAULT_BASE_DIR
         _base.mkdir(parents=True, exist_ok=True)
 
         old_config = cls.load(_base / "config.json")
         old_mode = old_config.mode.value.lower()
-
         new_mode_val = _M(new_mode.lower())
 
-        # 1. Save current config to its per-mode file (unless already
-        #    matched — prevents overwriting user customizations)
+        # 1. Save current config to its per-mode file (preserve customizations)
         if old_mode != new_mode.lower():
             old_path = cls._mode_config_path(_base, old_config.mode)
             old_config.save(old_path)
 
-        # 2. Try to load the target mode's saved config.
+        # 2. Determine new config:
+        #    a) mode_{new}.json exists → user had prior config for this mode, use it
+        #    b) otherwise → copy old config, change only mode
         new_path = cls._mode_config_path(_base, new_mode_val)
-        need_migration = False
         if new_path.exists():
             try:
                 new_config = cls.load(new_path)
-                # Ensure the loaded config actually has the right mode
                 if new_config.mode != new_mode_val:
-                    new_config = cls.for_mode(new_mode_val, base_dir=_base)
+                    # Corrupt/mismatched mode file — rebuild preserving old values
+                    new_config = copy.copy(old_config)
+                    new_config.mode = new_mode_val
             except Exception:
-                new_config = cls.for_mode(new_mode_val, base_dir=_base)
+                new_config = copy.copy(old_config)
+                new_config.mode = new_mode_val
         else:
-            # First time switching to this mode: try migrating from
-            # legacy config.json if it was already in this mode
-            legacy = _base / "config.json"
-            if legacy.exists():
-                try:
-                    import json
-                    _data = json.loads(legacy.read_text(encoding="utf-8"))
-                    _legacy_mode = _data.get("mode", "").lower()
-                    if _legacy_mode == new_mode.lower():
-                        # config.json IS this mode — use it directly
-                        new_config = cls.load(legacy)
-                        need_migration = True
-                    else:
-                        new_config = cls.for_mode(new_mode_val, base_dir=_base)
-                except Exception:
-                    new_config = cls.for_mode(new_mode_val, base_dir=_base)
-            else:
-                new_config = cls.for_mode(new_mode_val, base_dir=_base)
+            # First time switching to this mode: start from old config, change mode only.
+            # Use dataclasses.replace() to produce a new frozen-compatible object.
+            new_config = dataclasses.replace(old_config, mode=new_mode_val)
 
-        # 3. Save as active config.json (backward compat)
+        # 3. LLM default population — ONLY if user has no provider AND switching to B/C.
+        #    Never overwrites an existing provider.
+        if new_mode_val in (_M.B, _M.C) and not new_config.llm.provider:
+            if new_mode_val == _M.B:
+                new_config = dataclasses.replace(
+                    new_config,
+                    llm=LLMConfig(
+                        provider="ollama",
+                        model="llama3.2",
+                        api_base="http://localhost:11434",
+                    ),
+                )
+            else:  # Mode C
+                new_config = dataclasses.replace(
+                    new_config,
+                    llm=LLMConfig(
+                        provider="openrouter",
+                        model="anthropic/claude-sonnet-4",
+                    ),
+                )
+
+        # 4. Save as active config.json (backward compat)
         new_config.save(_base / "config.json", mode_change=True)
 
-        # 4. Write current_mode
+        # 5. Write current_mode
         cls.write_current_mode(new_mode, _base)
-
-        # 5. On first migration, also save mode_a.json and mode_c.json
-        #    so users have a complete set
-        if need_migration:
-            for _m in (_M.A, _M.B, _M.C):
-                _mp = cls._mode_config_path(_base, _m)
-                if not _mp.exists():
-                    try:
-                        _mc = cls.for_mode(_m, base_dir=_base)
-                        _mc.save(_mp)
-                    except Exception:
-                        pass
 
         return new_config
 

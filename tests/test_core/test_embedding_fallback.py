@@ -113,20 +113,19 @@ class TestEngineEmbedderAutoDetect:
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
     def test_auto_detects_ollama_when_llm_ollama(self, _mock, tmp_path: Path) -> None:
-        """V3.3.27: Mode B hybrid uses sentence-transformers for embeddings.
+        """v3.4.55: When LLM=ollama and provider=ollama, use OllamaEmbedder directly.
 
-        When LLM=ollama, Mode B now prefers EmbeddingService (subprocess)
-        for fast batched embeddings. Ollama is only used for LLM chat.
+        v3.4.55 changed init_embedder: provider=ollama now returns OllamaEmbedder
+        (not EmbeddingService) when Ollama is available. Reason: Ollama's
+        nomic-embed-text and sentence-transformers' nomic-embed-text-v1.5
+        produce DIFFERENT vector spaces — mixing them degrades semantic recall.
+        Using OllamaEmbedder when provider=ollama is consistent with stored vectors.
         """
-        from superlocalmemory.core.embeddings import EmbeddingService
+        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(tmp_path=tmp_path)
-        with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
-            mock_instance = MagicMock()
-            mock_instance.is_available = True
-            MockES.return_value = mock_instance
-            embedder = init_embedder(engine._config)
-        # V3.3.27: Mode B hybrid → sentence-transformers, not Ollama
-        assert embedder is mock_instance
+        embedder = init_embedder(engine._config)
+        # v3.4.55: provider=ollama + Ollama available → OllamaEmbedder returned directly
+        assert isinstance(embedder, OllamaEmbedder)
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
     def test_falls_back_to_st_when_ollama_unavailable(self, _mock, tmp_path: Path) -> None:
@@ -154,34 +153,36 @@ class TestEngineEmbedderAutoDetect:
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
     def test_explicit_ollama_provider_mode_b_hybrid(self, _mock, tmp_path: Path) -> None:
-        """V3.3.27: Mode B with provider=ollama → hybrid (sentence-transformers).
+        """v3.4.55: Explicit provider=ollama → OllamaEmbedder when Ollama is available.
 
-        Mode B now prefers EmbeddingService for fast batched embeddings.
-        Ollama is only used for LLM chat operations.
+        v3.4.55 fix: provider=ollama now returns OllamaEmbedder directly
+        when available. Vectors stored by Ollama's embedding API are incompatible
+        with sentence-transformers' embedding space — mixing providers degrades recall.
+        EmbeddingService (sentence-transformers) is only the fallback when Ollama is down.
         """
+        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(
             llm_provider="", emb_provider="ollama", tmp_path=tmp_path,
         )
-        with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
-            mock_instance = MagicMock()
-            mock_instance.is_available = True
-            MockES.return_value = mock_instance
-            embedder = init_embedder(engine._config)
-        assert embedder is mock_instance
+        embedder = init_embedder(engine._config)
+        # v3.4.55: explicit provider=ollama + Ollama up → OllamaEmbedder (not EmbeddingService)
+        assert isinstance(embedder, OllamaEmbedder)
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
-    def test_explicit_ollama_provider_mode_a_prefers_st(self, _mock, tmp_path: Path) -> None:
-        """Mode A with provider=ollama prefers sentence-transformers subprocess
-        for consistent embedding space with stored vectors."""
+    def test_explicit_ollama_provider_mode_a_prefers_ollama(self, _mock, tmp_path: Path) -> None:
+        """v3.4.55: Mode A with explicit provider=ollama → OllamaEmbedder when Ollama is up.
+
+        init_embedder respects the explicit provider choice regardless of mode.
+        When provider=ollama and Ollama is available, OllamaEmbedder is returned
+        to keep vector spaces consistent with existing stored vectors.
+        """
+        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(
             mode=Mode.A, llm_provider="", emb_provider="ollama", tmp_path=tmp_path,
         )
-        with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
-            mock_instance = MagicMock()
-            mock_instance.is_available = True
-            MockES.return_value = mock_instance
-            embedder = init_embedder(engine._config)
-        assert embedder is mock_instance
+        embedder = init_embedder(engine._config)
+        # v3.4.55: explicit provider=ollama + Ollama up → OllamaEmbedder (not EmbeddingService)
+        assert isinstance(embedder, OllamaEmbedder)
 
     def test_explicit_st_provider_skips_ollama(self, tmp_path: Path) -> None:
         """When provider=sentence-transformers → skip Ollama detection."""

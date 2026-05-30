@@ -147,3 +147,23 @@ def empty_db(tmp_path):
     _seed_profile(conn)
     conn.close()
     return db_path
+
+
+# ---------------------------------------------------------------------------
+# LightGBM mock — prevents real C training in test_api/
+# test_dashboard_phase_truth.py calls _retrain_ranker_impl which calls
+# lgb.Dataset + lgb.train. With real C training + LanceDB background thread
+# (started by other test_api tests via FastAPI/starlette) the process crashes
+# with SIGSEGV on macOS ARM (multi-libomp OpenMP race).
+# ---------------------------------------------------------------------------
+from tests.fixtures.lgb_mock import MockBooster, MockDataset, mock_lgb_train  # noqa: E402
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _mock_lgb_training_for_api_tests():
+    """Patch lightgbm.Dataset and lightgbm.train for this test directory."""
+    with (
+        patch("lightgbm.Dataset", MockDataset),
+        patch("lightgbm.train", mock_lgb_train),
+    ):
+        yield

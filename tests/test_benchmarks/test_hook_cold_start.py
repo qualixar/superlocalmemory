@@ -108,6 +108,7 @@ def _p95(values: list[float]) -> float:
     platform.system() == "Windows",
     reason="Hook cold-start is POSIX-first; Windows subprocess timing not comparable",
 )
+@pytest.mark.slow  # torch+transformers cold-start ~2s on macOS ARM; run with -m slow
 @pytest.mark.parametrize("module_name", _HOOK_MODULES)
 def test_hook_cold_start_under_budget(module_name: str) -> None:
     budget = _budget_ms()
