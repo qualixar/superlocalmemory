@@ -5,6 +5,39 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.60] - 2026-05-31 — Daemon OpenMP Crash Hotfix
+
+**Hotfix for v3.4.59.** Forces `OMP_NUM_THREADS=1` and `KMP_DUPLICATE_LIB_OK=TRUE`
+in the daemon subprocess environment BEFORE Python imports any C extensions that
+bundle their own libomp.dylib (torch, scikit-learn, lightgbm).
+
+### Root Cause
+Setting these env vars in `superlocalmemory/__init__.py` (v3.4.58 fix) was too
+late on Apple Silicon (M5 Pro). By the time `import superlocalmemory` runs, the
+parent process has often already loaded one of the OpenMP-using extensions, and
+that libomp's thread pool is initialized. When lightgbm later forks its worker
+pool from `LGBM_DatasetCreateFromMat`, the parent's libomp thread structs are
+incompatible with lightgbm's libomp → SIGSEGV at
+`__kmp_suspend_initialize_thread` reading address `0x580`.
+
+### Fix
+`cli/daemon.py:_start_daemon_subprocess()` now copies `os.environ`, sets
+`OMP_NUM_THREADS=1` + `KMP_DUPLICATE_LIB_OK=TRUE`, and passes it via the
+`env=` kwarg to `subprocess.Popen`. The daemon Python interpreter starts
+with these vars already in its environment, so C extension imports see the
+correct values during their `_init` constructors.
+
+### Why 1 thread and not 2
+v3.4.58 set `OMP_NUM_THREADS=2` as a compromise. On M5 Pro the parallel-fork
+race still triggered at 2. SLM's actual ML workloads (ranker retrain, dedup)
+operate on datasets of 50–5,000 rows where 1-thread serial OpenMP is within
+~10% of multi-threaded but eliminates the crash class entirely.
+
+### Changed
+- `cli/daemon.py`: `_start_daemon_subprocess()` injects `env={OMP_NUM_THREADS=1, KMP_DUPLICATE_LIB_OK=TRUE}` into Popen
+
+---
+
 ## [3.4.59] - 2026-05-31 — Graph Edge Cap + Recall Reliability
 
 **Fixes SLM falling into degraded FTS5 mode on every session start**, and stops

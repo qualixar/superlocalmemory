@@ -171,6 +171,17 @@ def _start_daemon_subprocess() -> bool:
     else:
         kwargs["start_new_session"] = True
 
+    # v3.4.60: Force OMP_NUM_THREADS=1 in daemon env BEFORE Python imports
+    # numpy/torch/lightgbm. Setting it in __init__.py is too late on M5 Pro —
+    # by the time superlocalmemory.__init__ runs, libomp has already been
+    # initialized by an earlier import, causing the SIGSEGV at
+    # __kmp_suspend_initialize_thread when lightgbm forks its worker pool.
+    # Forcing serial OpenMP eliminates the parallel barrier race entirely.
+    daemon_env = os.environ.copy()
+    daemon_env["OMP_NUM_THREADS"] = "1"
+    daemon_env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    kwargs["env"] = daemon_env
+
     with open(log_file, "a") as lf:
         proc = subprocess.Popen(cmd, stdout=lf, stderr=lf, **kwargs)
 
