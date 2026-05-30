@@ -46,7 +46,7 @@ class ReaperConfig:
 
     enabled: bool = True
     heartbeat_interval_seconds: int = 60
-    orphan_age_threshold_hours: float = 4.0
+    orphan_age_threshold_hours: float = 1.0  # v3.4.57: reduced from 4.0 — confirmed-dead parent = safe to kill after 1h
     pid_file_path: str = ""  # Empty = default (~/.superlocalmemory/slm.pids)
     graceful_timeout_seconds: float = 5.0
 

@@ -36,7 +36,7 @@ class DaemonPoolProxy:
     envelopes — the adapter is responsible for surfacing those.
     """
 
-    def __init__(self, port: int, *, timeout_s: float = 60.0) -> None:
+    def __init__(self, port: int, *, timeout_s: float = 8.0) -> None:  # v3.4.57: 60s→8s — prevents orphan flood from blocking daemon event loop
         self._port = port
         self._timeout = timeout_s
 

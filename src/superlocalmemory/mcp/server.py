@@ -241,5 +241,42 @@ _warmup_thread = threading.Thread(target=_eager_warmup, daemon=True, name="mcp-w
 _warmup_thread.start()
 
 
+# V3.4.57: Parent watchdog — self-terminate when the IDE/Claude session dies.
+# FastMCP relies on stdin EOF to stop, but stdin EOF is NOT guaranteed on
+# crash or force-quit. Without this, every abnormal exit leaves an orphaned
+# slm mcp process consuming ~100-200 MB indefinitely. 22 orphans caused a
+# daemon deadlock on May 30 2026 (241% CPU, session_init timeouts).
+def _parent_watchdog() -> None:
+    """Exit when parent IDE process (Claude Code, Cursor, etc.) dies.
+
+    Polls os.getppid() every 10 seconds. On macOS/Linux, when a parent
+    dies the child is reparented to PID 1 (init) — getppid() returns 1.
+    Also validates the original parent is still alive via os.kill(ppid, 0).
+    Uses os._exit(0) to bypass any atexit handlers that might hang.
+    """
+    import os as _os_wd, time as _time
+    _wlog = logging.getLogger(__name__ + ".watchdog")
+    initial_ppid = _os_wd.getppid()
+    if initial_ppid <= 1:
+        return  # Already reparented at startup — don't self-terminate
+    while True:
+        _time.sleep(10)
+        try:
+            current_ppid = _os_wd.getppid()
+            if current_ppid != initial_ppid or current_ppid <= 1:
+                _wlog.info("Parent PID changed (%d→%d), self-terminating", initial_ppid, current_ppid)
+                _os_wd._exit(0)
+            _os_wd.kill(initial_ppid, 0)  # Raises ProcessLookupError if dead
+        except ProcessLookupError:
+            _wlog.info("Parent PID %d gone, self-terminating", initial_ppid)
+            _os_wd._exit(0)
+        except Exception:
+            pass  # Transient errors — keep watching
+
+
+_watchdog_thread = threading.Thread(target=_parent_watchdog, daemon=True, name="parent-watchdog")
+_watchdog_thread.start()
+
+
 if __name__ == "__main__":
     server.run(transport="stdio")
