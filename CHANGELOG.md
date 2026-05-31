@@ -5,6 +5,29 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.64] - 2026-05-31 — Fix recall/trace endpoint (Recall Lab search)
+
+The dashboard "Search memories" button (Recall Lab) calls `POST /api/v3/recall/trace`,
+NOT `POST /api/search`. v3.4.63 fixed the wrong endpoint. This is the real fix.
+
+### Root Cause
+`recall_trace()` called `WorkerPool.shared().recall()` — subprocess worker pool
+that blocks the ASGI event loop and crashes (`Worker died`) after ~17s. The
+15s global fetch timeout in core.js fired first, aborting with "signal is aborted
+without reason".
+
+### Fix
+Same pattern as v3.4.63: `run_in_executor` + daemon engine + `fast=True`.
+Synthesis removed (was using the crashed subprocess anyway).
+
+### Result
+recall/trace: 7.2s cold, 1.1s warm. Zero browser aborts. No more "Worker died".
+
+### Changed
+- `server/routes/v3_api.py`: `recall_trace` uses `run_in_executor` + daemon engine
+
+---
+
 ## [3.4.63] - 2026-05-31 — Dashboard search: fix async blocking + fast mode
 
 Fixes "signal is aborted without reason" in dashboard search (second root cause,

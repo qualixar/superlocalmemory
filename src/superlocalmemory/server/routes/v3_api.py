@@ -514,45 +514,60 @@ async def set_provider(request: Request):
 
 @router.post("/recall/trace")
 async def recall_trace(request: Request):
-    """Recall with per-channel score breakdown."""
+    """Recall with per-channel score breakdown.
+
+    v3.4.64: Replaced WorkerPool.shared() (subprocess, blocks event loop,
+    worker crashes after ~15s) with daemon engine via run_in_executor.
+    Same fix as POST /api/search in v3.4.63.
+    """
+    import asyncio
+    import time as _time
     try:
         body = await request.json()
         query = body.get("query", "")
         limit = body.get("limit", 10)
 
-        from superlocalmemory.core.worker_pool import WorkerPool
-        pool = WorkerPool.shared()
-        result = pool.recall(query, limit=limit)
+        # Use daemon engine — already loaded, shares warm page cache.
+        # run_in_executor keeps event loop alive so browser doesn't abort.
+        from .helpers import get_engine_lazy
+        engine = get_engine_lazy(request.app.state)
+        if engine is None:
+            return JSONResponse({"error": "Engine not initialised"}, status_code=503)
 
-        if not result.get("ok"):
-            return JSONResponse(
-                {"error": result.get("error", "Recall failed")},
-                status_code=503,
-            )
+        loop = asyncio.get_event_loop()
+        t0 = _time.monotonic()
+        response = await loop.run_in_executor(
+            None,
+            lambda: engine.recall(query, limit=limit, fast=True),
+        )
+        elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
 
-        # Optional: synthesize answer from results (Mode B/C only)
-        synthesis = ""
-        if body.get("synthesize") and result.get("results"):
-            try:
-                syn_result = pool.synthesize(query, result["results"][:5])
-                synthesis = syn_result.get("synthesis", "") if syn_result.get("ok") else ""
-            except Exception:
-                pass
+        results = []
+        for r in response.results[:limit]:
+            results.append({
+                "fact_id": r.fact.fact_id,
+                "memory_id": getattr(r.fact, "memory_id", ""),
+                "content": r.fact.content[:300],
+                "score": round(r.score, 4),
+                "confidence": round(getattr(r, "confidence", 0.0), 4),
+                "channel_scores": getattr(r, "channel_scores", {}),
+                "created_at": getattr(r.fact, "created_at", ""),
+            })
 
         # Record learning signals (non-blocking, non-critical)
         try:
-            _record_learning_signals(query, result.get("results", []))
+            _record_learning_signals(query, results)
         except Exception as _sig_exc:
             import logging as _log
             _log.getLogger(__name__).warning("Learning signal error: %s", _sig_exc)
 
         return {
             "query": query,
-            "query_type": result.get("query_type", "unknown"),
-            "result_count": result.get("result_count", 0),
-            "retrieval_time_ms": result.get("retrieval_time_ms", 0),
-            "results": result.get("results", []),
-            "synthesis": synthesis,
+            "query_type": getattr(response, "query_type", "semantic"),
+            "result_count": len(results),
+            "retrieval_time_ms": elapsed_ms,
+            "results": results,
+            "synthesis": "",
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
