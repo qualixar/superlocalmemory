@@ -572,7 +572,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
 
             if action == "list":
                 pinned = db.get_pinned(pid)
-                cfg_inj = getattr(engine.config, "injection", None)
+                cfg_inj = getattr(getattr(engine, "config", None), "injection", None)
                 max_tok = getattr(cfg_inj, "per_memory_max_tokens", 600) if cfg_inj else 600
                 return {
                     "success": True,

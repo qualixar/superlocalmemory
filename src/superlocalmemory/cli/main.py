@@ -136,7 +136,7 @@ def main() -> None:
 
     mode_p = sub.add_parser("mode", help="Get or set operating mode (a/b/c)")
     mode_p.add_argument(
-        "value", nargs="?", choices=["a", "b", "c"], help="Mode to set",
+        "value", nargs="?", choices=["a", "b", "c", "A", "B", "C"], help="Mode to set",
     )
     mode_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
