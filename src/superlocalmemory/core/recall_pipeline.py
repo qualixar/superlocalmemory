@@ -798,6 +798,18 @@ def run_recall(
     hook_ctx["query_type"] = response.query_type
     hooks.run_post("recall", hook_ctx)
 
+    # v3.5.0 (M2): soft-normalize ALL scores to [0,1] after the full pipeline.
+    # The retrieval engine _build_results normalizes, but the ranking pipeline
+    # (v1/v2/bandit-ensemble) re-weights and may produce scores outside [0,1].
+    # This final sigmoid catches every path (MCP/CLI/Dashboard) and is monotonic.
+    if response.results:
+        import math as _mn
+        max_s = max((r.score for r in response.results), default=1.0)
+        scale = 2.0 / max(1.0, max_s)
+        for r in response.results:
+            r.score = round(1.0 / (1.0 + _mn.exp(-r.score * scale)), 4)
+            r.confidence = min(1.0, r.score * 2.0)
+
     # LLD-00 §3 — stamp HMAC markers on every result so post_tool_outcome_hook
     # can validate fact_ids observed in downstream tool output.
     _apply_markers_to_response(response)
