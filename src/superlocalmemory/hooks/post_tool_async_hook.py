@@ -30,6 +30,24 @@ _ALLOWED_DAEMON_HOSTS: frozenset[str] = frozenset({
     "127.0.0.1", "localhost", "::1", "[::1]",
 })
 
+_DEFAULT_DAEMON_PORT = 8765
+
+
+def _port_file_url() -> str:
+    """Loopback daemon URL from the per-user port file (default 8765).
+
+    On a shared host each user runs their own daemon on a different port,
+    written to ``~/.superlocalmemory/daemon.port`` at startup. Falling back
+    to this instead of a hard-coded ``8765`` keeps the hook pointed at the
+    caller's own daemon. Stdlib only.
+    """
+    port = _DEFAULT_DAEMON_PORT
+    try:
+        port = int((Path.home() / ".superlocalmemory" / "daemon.port").read_text().strip())
+    except Exception:
+        pass
+    return f"http://127.0.0.1:{port}"
+
 
 def _sanitised_daemon_url() -> str:
     """Return the configured daemon URL only if it's loopback-scoped.
@@ -38,21 +56,21 @@ def _sanitised_daemon_url() -> str:
     shell profile) could set ``SLM_HOOK_DAEMON_URL`` to a remote host
     and exfiltrate the install token via the ``X-SLM-Hook-Token``
     header. We refuse any non-loopback URL and fall back to the local
-    daemon.
+    daemon (resolved via the per-user port file, not a hard-coded port).
     """
     raw = os.environ.get("SLM_HOOK_DAEMON_URL", "").strip()
     if not raw:
-        return "http://127.0.0.1:8765"
+        return _port_file_url()
     try:
         from urllib.parse import urlparse
         parsed = urlparse(raw)
     except Exception:  # pragma: no cover — urllib always importable
-        return "http://127.0.0.1:8765"
+        return _port_file_url()
     if parsed.scheme not in ("http", "https"):
-        return "http://127.0.0.1:8765"
+        return _port_file_url()
     host = (parsed.hostname or "").lower()
     if host not in _ALLOWED_DAEMON_HOSTS:
-        return "http://127.0.0.1:8765"
+        return _port_file_url()
     # Preserve the scheme + port (user may bind daemon on a non-default port).
     port = f":{parsed.port}" if parsed.port else ""
     return f"{parsed.scheme}://{host}{port}"

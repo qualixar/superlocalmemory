@@ -36,7 +36,32 @@ _LAST_CONSOLIDATION = os.path.join(
 )
 
 
-_DAEMON_URL = "http://127.0.0.1:8765"
+_DEFAULT_DAEMON_PORT = 8765
+
+
+def _daemon_url() -> str:
+    """Resolve the daemon base URL, preferring the per-user port file.
+
+    On a shared host each user runs their own daemon bound to a different
+    port; the active port is written to ``~/.superlocalmemory/daemon.port``
+    at startup. Reading it here keeps lifecycle hooks pointed at the
+    caller's own daemon instead of a hard-coded ``8765`` that may belong to
+    another user's instance. Falls back to the default port when the file is
+    absent or unreadable. Stdlib only — no SLM imports in the hot path.
+    """
+    port = _DEFAULT_DAEMON_PORT
+    try:
+        port_file = os.path.join(
+            os.path.expanduser("~"), ".superlocalmemory", "daemon.port",
+        )
+        with open(port_file) as fh:
+            port = int(fh.read().strip())
+    except Exception:
+        pass
+    return f"http://127.0.0.1:{port}"
+
+
+_DAEMON_URL = _daemon_url()
 
 
 def _daemon_post(path: str, body: dict, timeout: float = 3.0) -> bool:
