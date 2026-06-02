@@ -806,15 +806,37 @@ async def run_consolidation(request: Request):
     try:
         body = await request.json()
         dry_run = body.get("dry_run", False)
-        from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
+        # Run the full cycle OUT OF PROCESS. Step 5 trains the LightGBM ranker
+        # (online _run_shadow_cycle or legacy cold-start); importing lightgbm
+        # in the torch-warm daemon loads a second libomp and SIGSEGVs it (see
+        # lightgbm_subprocess module docstring). Isolation is the fix.
+        from superlocalmemory.learning.lightgbm_subprocess import (
+            run_consolidation_isolated,
+        )
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.server.routes.helpers import DB_PATH
-        worker = ConsolidationWorker(
-            memory_db=str(DB_PATH),
-            learning_db=str(DB_PATH.parent / "learning.db"),
-        )
+        from fastapi.concurrency import run_in_threadpool
+
         config = SLMConfig.load()
-        stats = worker.run(config.active_profile, dry_run=dry_run)
+        learning_db = DB_PATH.parent / "learning.db"
+        result = await run_in_threadpool(
+            run_consolidation_isolated,
+            str(DB_PATH),
+            str(learning_db),
+            config.active_profile,
+            dry_run=dry_run,
+        )
+        if result.get("error"):
+            return {"success": False, "error": result["error"]}
+        # Step-5 training may have promoted a new model — drop the daemon's
+        # cached model so the next recall reloads it from learning.db.
+        if not dry_run:
+            try:
+                from superlocalmemory.learning.model_cache import invalidate
+                invalidate(config.active_profile)
+            except Exception:
+                pass
+        stats = result.get("stats") or {}
         return {"success": True, **stats}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

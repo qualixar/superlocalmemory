@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 
 from .helpers import get_active_profile, MEMORY_DIR
 
@@ -597,16 +598,31 @@ async def learning_retrain(data: dict | None = None):
         data and data.get("include_synthetic")
     ) if isinstance(data, dict) else False
     try:
-        from superlocalmemory.learning.consolidation_worker import (
-            _retrain_ranker_impl,
+        # Train OUT OF PROCESS. The daemon already has torch's OpenMP runtime
+        # loaded with warm worker threads; importing lightgbm in-process loads
+        # a second libomp and SIGSEGVs the whole daemon (see
+        # retrain_subprocess module docstring). Isolation is the fix.
+        from superlocalmemory.learning.lightgbm_subprocess import (
+            run_retrain_isolated,
         )
         profile_id = get_active_profile() or "default"
-        trained = _retrain_ranker_impl(
+        result = await run_in_threadpool(
+            run_retrain_isolated,
             LEARNING_DB,
             profile_id,
             include_synthetic=include_synthetic,
         )
-        if trained:
+        if result.get("error"):
+            logger.error("learning_retrain failed: %s", result["error"])
+            return {"success": False, "error": result["error"]}
+        if result.get("trained"):
+            # Drop the cached model so the next recall reloads the freshly
+            # trained one the subprocess just persisted to learning.db.
+            try:
+                from superlocalmemory.learning.model_cache import invalidate
+                invalidate(profile_id)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.debug("model cache invalidate failed: %s", exc)
             return {
                 "success": True,
                 "trained": True,
