@@ -5,6 +5,30 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.6] - 2026-06-03 — Isolate LightGBM training (macOS daemon SIGSEGV fix)
+
+### Fixed (CRITICAL — daemon hard-crash on macOS / Apple Silicon)
+- **`POST /api/learning/retrain`** ("Train model now" in the dashboard Brain pane)
+  and **`POST /api/v3/learning/consolidate`** no longer crash the unified daemon.
+  The daemon serves the API in-process with PyTorch's OpenMP runtime already warm
+  (reranker + embedding warm-up); importing `lightgbm` in that same process loaded
+  a second `libomp.dylib`, corrupting shared `__kmp` state and segfaulting a worker
+  thread (`SIGSEGV`, no Python traceback — the process died on a native signal and
+  auto-restarted).
+- **Fix:** all LightGBM training now runs in an isolated subprocess
+  (`learning/lightgbm_subprocess.py`) that imports `lightgbm` **before** the
+  `superlocalmemory` package, so torch's OMP pool stays dormant and only LightGBM's
+  runtime is active. The child emits a single JSON verdict; the parent never raises,
+  so a native child crash is reported as an error and the daemon stays up. Mirrors
+  the existing `embedding_worker` / `reranker_worker` isolation pattern.
+- On success the daemon invalidates the model cache so the freshly trained model is
+  reloaded. The fix applies on all platforms (subprocess spawn cost only off macOS).
+- Thanks to @barrygfox for the detailed report, repro, and fix (#27).
+
+### Changed
+- CI: publish workflows now fail fast if `package.json`, `pyproject.toml`, and the
+  pushed `v*` tag disagree — prevents shipping mismatched npm/PyPI versions.
+
 ## [3.5.5] - 2026-05-31 — Write-Through Remember (instant cross-session recall)
 
 ### Fixed (CRITICAL — closes the remember→recall window)
