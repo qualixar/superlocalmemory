@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reloaded. The fix applies on all platforms (subprocess spawn cost only off macOS).
 - Thanks to @barrygfox for the detailed report, repro, and fix (#27).
 
+### Added
+- **`SLM_HOST` env var** — shorter alias for `SLM_DAEMON_HOST` to set the daemon
+  bind address (issue #23). Set `SLM_HOST=0.0.0.0` (or `SLM_DAEMON_HOST=0.0.0.0`)
+  to serve one shared instance across a trusted private network; pair with
+  `SLM_MESH_HOST=0.0.0.0` + `SLM_MESH_SHARED_SECRET` for the mesh broker.
+  `SLM_DAEMON_HOST` takes precedence when both are set.
+
 ### Changed
 - CI: publish workflows now fail fast if `package.json`, `pyproject.toml`, and the
   pushed `v*` tag disagree — prevents shipping mismatched npm/PyPI versions.

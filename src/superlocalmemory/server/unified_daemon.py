@@ -1950,10 +1950,19 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     log_dir = Path.home() / ".superlocalmemory" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Bind address. `SLM_DAEMON_HOST` is the canonical name; `SLM_HOST` is
+    # accepted as a shorter alias (issue #23). Set either to 0.0.0.0 to serve
+    # a shared instance over a trusted private network (e.g. WireGuard mesh).
+    bind_host = (
+        os.environ.get("SLM_DAEMON_HOST")
+        or os.environ.get("SLM_HOST")
+        or "127.0.0.1"
+    )
+
     config = uvicorn.Config(
         app="superlocalmemory.server.unified_daemon:create_app",
         factory=True,
-        host=os.environ.get("SLM_DAEMON_HOST", "127.0.0.1"),
+        host=bind_host,
         port=port,
         log_level="warning",
         timeout_graceful_shutdown=10,
