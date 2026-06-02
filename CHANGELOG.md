@@ -5,6 +5,16 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.7] - 2026-06-03 — Fix `__version__` mismatch (PyPI wheel correctness)
+
+### Fixed
+- `superlocalmemory.__version__` now correctly returns `"3.5.7"` at runtime.
+  The 3.5.6 PyPI wheel shipped with `__version__ = "3.4.64"` in `__init__.py`
+  (stale value not updated during the M4 release). Any code or tool that reads
+  `superlocalmemory.__version__` (including `slm status`) would show `3.4.64`
+  despite the package being at 3.5.6. This patch corrects the value and adds
+  a CI note to keep `__version__` in sync with `pyproject.toml` on every bump.
+
 ## [3.5.6] - 2026-06-03 — Isolate LightGBM training (macOS daemon SIGSEGV fix)
 
 ### Fixed (CRITICAL — daemon hard-crash on macOS / Apple Silicon)
