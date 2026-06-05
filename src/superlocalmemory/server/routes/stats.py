@@ -11,12 +11,30 @@ import logging
 from collections import defaultdict
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH, MEMORY_DIR
 
 logger = logging.getLogger("superlocalmemory.routes.stats")
 router = APIRouter()
+
+
+@router.post("/api/embed")
+async def embed_texts(request: Request):
+    """Embed texts via the daemon's in-process embedder.
+
+    Used by McpEmbedderProxy so the MCP LIGHT-engine can obtain embeddings
+    without spawning a second ONNX worker process.
+    """
+    engine = getattr(request.app.state, "engine", None)
+    if engine is None or engine._embedder is None:
+        raise HTTPException(status_code=503, detail="Embedder unavailable")
+    body = await request.json()
+    texts = body.get("texts", [])
+    if not texts:
+        raise HTTPException(status_code=400, detail="texts required")
+    vectors = engine._embedder.embed_batch(texts)
+    return {"vectors": vectors, "dim": engine._embedder.dimension}
 
 
 @router.get("/api/stats")

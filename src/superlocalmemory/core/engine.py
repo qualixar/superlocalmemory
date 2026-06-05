@@ -124,6 +124,9 @@ class MemoryEngine:
 
         self._init_db_layer()
 
+        if self._capabilities is Capabilities.LIGHT:
+            self._embedder = self._try_init_proxy()
+
         if self._capabilities is Capabilities.FULL:
             self._init_heavy_layer()
 
@@ -137,6 +140,26 @@ class MemoryEngine:
         if self._capabilities is Capabilities.FULL:
             # Replay pending async writes only when heavy layer is available.
             self._process_pending_memories()
+
+    def _try_init_proxy(self):
+        """Try to initialise McpEmbedderProxy when running as LIGHT engine.
+
+        The MCP server uses Capabilities.LIGHT to stay lean (~60 MB).
+        Without this, _embedder is always None: every memory stored via
+        MCP receives embedding=NULL and semantic search is silently absent.
+
+        Falls back gracefully: if the daemon is not running, returns None
+        and the LIGHT engine continues with 5-channel retrieval.
+        """
+        try:
+            from superlocalmemory.core.mcp_embedder_proxy import McpEmbedderProxy
+            proxy = McpEmbedderProxy(dimension=self._config.embedding.dimension)
+            if proxy.is_available:
+                logger.info("LIGHT engine: using McpEmbedderProxy for semantic channel")
+                return proxy
+        except Exception as exc:
+            logger.debug("McpEmbedderProxy unavailable: %s", exc)
+        return None
 
     def _init_db_layer(self) -> None:
         from superlocalmemory.storage import schema

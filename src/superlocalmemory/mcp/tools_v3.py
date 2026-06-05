@@ -162,8 +162,14 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             }
 
             # Embedding service
+            _emb = engine._embedder
+            _emb_status = (
+                "proxy_via_daemon" if _emb and getattr(_emb, "_is_proxy", False)
+                else "ok" if _emb
+                else "unavailable"
+            )
             status["components"]["embedder"] = {
-                "status": "ok" if engine._embedder else "unavailable",
+                "status": _emb_status,
                 "model": engine._config.embedding.model_name,
             }
 
