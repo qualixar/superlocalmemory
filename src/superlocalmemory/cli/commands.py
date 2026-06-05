@@ -1661,6 +1661,26 @@ def cmd_trace(args: Namespace) -> None:
 
 def cmd_mcp(_args: Namespace) -> None:
     """Start the V3 MCP server (stdio transport for IDE integration)."""
+    # SINGLETON GUARD (v3.5.8): Reap fresh orphans before binding stdio.
+    # Root cause: every IDE session spawns a new `slm mcp`; dead sessions'
+    # processes survive indefinitely (~400 MB each) because the reaper's
+    # 1-hour age gate misses them. Fix: run find_orphans with age_threshold=0
+    # so any `slm mcp` whose parent IDE/Claude process has died is killed
+    # immediately. Only orphans (dead parent) are killed — live sessions safe.
+    # CRITICAL: No stdout anywhere below — MCP stdio transport, any print
+    # corrupts the JSON-RPC protocol.
+    try:
+        from superlocalmemory.infra.process_reaper import (
+            ReaperConfig,
+            find_orphans,
+            kill_orphan,
+        )
+        _reaper_cfg = ReaperConfig(orphan_age_threshold_hours=0.0)
+        for _orphan in find_orphans(_reaper_cfg):
+            kill_orphan(_orphan.pid, graceful_timeout_seconds=1.0)
+    except Exception:
+        pass  # Never block MCP startup on cleanup failure
+
     # Auto-install hooks on MCP startup (fast path: ~0.1ms if already current)
     # CRITICAL: No stdout — MCP uses stdio transport, any print corrupts protocol
     try:

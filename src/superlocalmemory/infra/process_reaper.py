@@ -185,7 +185,18 @@ else:
             if not line:
                 continue
 
-            if "superlocalmemory" not in line:
+            # v3.5.8: Expand detection to include entry-point launched `slm mcp`
+            # processes. Previously only `python -m superlocalmemory.*` was caught;
+            # `/opt/homebrew/bin/slm mcp` processes were invisible to the reaper,
+            # causing zombie accumulation (55 processes / ~5 GB RAM observed).
+            _slm_identifiers = (
+                "superlocalmemory",
+                "/slm ",
+                "slm mcp",
+                "slm serve",
+                "slm daemon",
+            )
+            if not any(kw in line for kw in _slm_identifiers):
                 continue
 
             try:

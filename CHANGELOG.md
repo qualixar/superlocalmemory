@@ -5,6 +5,11 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.8] - 2026-06-06 — MCP zombie process fix
+
+### Fixed
+- `slm mcp` zombie processes no longer accumulate across IDE sessions. Each new session now kills stale orphaned MCP bridges (dead parent) before starting. Also fixed `find_slm_processes()` which was blind to entry-point launched processes.
+
 ## [3.5.7] - 2026-06-03 — Fix `__version__` mismatch (PyPI wheel correctness)
 
 ### Fixed
