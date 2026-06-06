@@ -20,12 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `next_actions`.
 - **MCP embedder NULL (PR #30):** `MemoryEngine(Capabilities.LIGHT)` permanently left
   `_embedder=None`, causing memories stored via MCP tools to have no embeddings — semantic
-  search was silently broken and `health()` reported the embedder as `unavailable`. Fix: after
-  LIGHT init, engine now tries to attach a `McpEmbedderProxy` that delegates `embed_batch()`
-  to the daemon's `/api/v3/embed` endpoint over localhost HTTP. One ONNX worker total across
-  all sessions. If the daemon is unreachable, the engine gracefully degrades to keyword-only
-  recall (same behaviour as before, but now honest). `health()` reports `source: daemon_proxy`
-  so users can distinguish proxy from local embedder.
+  search was silently broken and `health()` reported the embedder as `unavailable`. Root
+  cause correctly diagnosed by @kotys2022 in PR #30. Fix: after LIGHT init, engine now tries
+  to attach a `McpEmbedderProxy` that delegates `embed_batch()` to the daemon's
+  `/api/v3/embed` endpoint over localhost HTTP. One ONNX worker total across all sessions.
+  If the daemon is unreachable, the engine gracefully degrades to keyword-only recall (same
+  behaviour as before, but now honest). `health()` reports `source: daemon_proxy` so users
+  can distinguish proxy from local embedder.
 - **`base_dir` ignored in config (issue #28):** `SLMConfig.load()` no longer ignores a custom
   `base_dir` in `config.json` — it now passes it to `for_mode()` so `db_path` and all
   derivative paths are built from the user's directory, not `~/.superlocalmemory`. `save()`
