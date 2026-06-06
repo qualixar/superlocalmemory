@@ -349,6 +349,10 @@ def main() -> None:
         "--force", action="store_true",
         help="Kill orphans (default: dry run only)",
     )
+    reap_p.add_argument(
+        "--all", action="store_true", dest="all",
+        help="Kill ALL slm mcp processes regardless of orphan status (use after IDE switch)",
+    )
     reap_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
     # V3.4.3: Ingestion adapters

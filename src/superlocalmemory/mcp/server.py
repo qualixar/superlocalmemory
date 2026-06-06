@@ -278,5 +278,39 @@ _watchdog_thread = threading.Thread(target=_parent_watchdog, daemon=True, name="
 _watchdog_thread.start()
 
 
+# V3.5.9: Stdin EOF monitor — complements the parent watchdog for the case where
+# the IDE starts a new MCP session WITHOUT quitting the app. The old stdio pipe
+# is abandoned (write-end closed) but the parent process stays alive, so the
+# watchdog never fires. Without this, each IDE reconnect adds a zombie process
+# (22 seen in production causing 12 GB swap on the M5 Pro).
+#
+# Uses kqueue(2) KQ_EV_EOF on macOS — fires when the write-end of the stdin pipe
+# closes WITHOUT consuming any bytes, so it cannot race with FastMCP's asyncio
+# stdin reader. On Linux (no kqueue), the watchdog alone provides coverage.
+def _stdin_eof_monitor() -> None:
+    """Exit when the IDE closes our stdin pipe (kqueue — macOS only)."""
+    import select as _sel, os as _os_eof
+    _mlog = logging.getLogger(__name__ + ".stdin_monitor")
+    if not hasattr(_sel, "kqueue"):
+        return  # Linux / non-macOS: watchdog covers process death
+    try:
+        fd = sys.stdin.fileno()
+        kq = _sel.kqueue()
+        ke = _sel.kevent(fd, filter=_sel.KQ_FILTER_READ, flags=_sel.KQ_EV_ADD | _sel.KQ_EV_EOF)
+        kq.control([ke], 0)  # register without waiting
+        while True:
+            evs = kq.control(None, 4, 30.0)  # 30 s poll — low cost
+            for ev in evs:
+                if ev.flags & _sel.KQ_EV_EOF:
+                    _mlog.info("stdin write-end closed (kqueue EOF), self-terminating")
+                    _os_eof._exit(0)
+    except Exception as exc:
+        _mlog.debug("stdin EOF monitor error: %s — watchdog will cover", exc)
+
+
+_stdin_monitor_thread = threading.Thread(target=_stdin_eof_monitor, daemon=True, name="stdin-eof-monitor")
+_stdin_monitor_thread.start()
+
+
 if __name__ == "__main__":
     server.run(transport="stdio")

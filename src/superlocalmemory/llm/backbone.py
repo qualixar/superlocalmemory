@@ -233,17 +233,23 @@ class LLMBackbone:
         self, prompt: str, system: str, max_tokens: int, temperature: float,
     ) -> tuple[str, dict[str, str], dict]:
         messages = self._make_messages(system, prompt)
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        # V3.5.9: Skip Authorization header when api_key is empty so unauthenticated
+        # local endpoints (llama.cpp, LM Studio, etc.) don't reject with HTTP 401.
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         payload = {
             "model": self._model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        # V3.5.9: If base_url is a bare base (e.g. "http://host:port/v1") without
+        # the /chat/completions path, append it — matching OpenAI SDK behaviour and
+        # fixing the /v1/v1 duplication reported in issue #29.
         url = self._base_url or _OPENAI_URL
+        if self._base_url and not self._base_url.rstrip("/").endswith("chat/completions"):
+            url = f"{self._base_url.rstrip('/')}/chat/completions"
         return url, headers, payload
 
     def _build_ollama(

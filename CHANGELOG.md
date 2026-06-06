@@ -5,6 +5,40 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.9] - 2026-06-07 — Community bug fixes (issues #28, #29, PR #30) + zombie process hardening
+
+### Fixed
+- **MCP zombie processes — stdin EOF monitor (macOS):** `slm mcp` now self-terminates when
+  the IDE closes the stdio pipe without quitting the parent app (e.g. "start new session"
+  in Claude Code or Antigravity). Uses `kqueue` `KQ_EV_EOF` so it detects the hangup without
+  consuming bytes needed by FastMCP's asyncio stdin reader. Complements the existing parent
+  watchdog (which only fires on process death). Previously 22+ orphan MCP sessions were
+  accumulating on the M5 Pro causing 12 GB of swap.
+- **`slm reap --all`** (new flag): kills every `slm mcp` process except the caller, regardless
+  of orphan status. Use this after switching IDEs to clear all stale sessions in one command.
+  `slm reap --force` still kills only confirmed orphans. JSON output now lists this option in
+  `next_actions`.
+- **MCP embedder NULL (PR #30):** `MemoryEngine(Capabilities.LIGHT)` permanently left
+  `_embedder=None`, causing memories stored via MCP tools to have no embeddings — semantic
+  search was silently broken and `health()` reported the embedder as `unavailable`. Fix: after
+  LIGHT init, engine now tries to attach a `McpEmbedderProxy` that delegates `embed_batch()`
+  to the daemon's `/api/v3/embed` endpoint over localhost HTTP. One ONNX worker total across
+  all sessions. If the daemon is unreachable, the engine gracefully degrades to keyword-only
+  recall (same behaviour as before, but now honest). `health()` reports `source: daemon_proxy`
+  so users can distinguish proxy from local embedder.
+- **`base_dir` ignored in config (issue #28):** `SLMConfig.load()` no longer ignores a custom
+  `base_dir` in `config.json` — it now passes it to `for_mode()` so `db_path` and all
+  derivative paths are built from the user's directory, not `~/.superlocalmemory`. `save()`
+  now persists `base_dir` so the setting survives daemon restarts.
+- **Local model auth deadlock (issue #29):** Three interlocking fixes for `llama.cpp` / LM
+  Studio / other unauthenticated endpoints under the `openai` provider:
+  1. `LLMBackbone._build_openai()` omits the `Authorization: Bearer` header when `api_key` is
+     empty — unauthenticated local servers no longer reject with HTTP 401.
+  2. `_build_openai()` appends `/chat/completions` when `base_url` does not already end in
+     that path, fixing the `/v1/v1/chat/completions` duplication reported in the issue.
+  3. `POST /api/v3/provider/test` now accepts an empty `api_key` when a custom `base_url` or
+     `endpoint` is provided, and probes the actual endpoint instead of hard-coding OpenAI's URL.
+
 ## [3.5.8] - 2026-06-06 — MCP zombie process fix
 
 ### Fixed

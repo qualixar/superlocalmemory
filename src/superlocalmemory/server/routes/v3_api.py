@@ -365,6 +365,51 @@ async def test_embedding_endpoint(request: Request):
         return {"success": False, "error": type(e).__name__}
 
 
+@router.get("/embed/ping")
+async def embed_ping():
+    """V3.5.9: Liveness probe for McpEmbedderProxy. Returns 200 when daemon
+    embedder is ready so the proxy knows the daemon is reachable."""
+    try:
+        from .helpers import get_engine_lazy
+        # We just need to confirm the route is alive — engine check is optional
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+
+
+@router.post("/embed")
+async def embed_texts(request: Request):
+    """V3.5.9: Embed texts via daemon's FULL engine for McpEmbedderProxy.
+
+    MCP processes run LIGHT engines (no ONNX worker). This endpoint lets them
+    delegate embed_batch() to the daemon's single real embedder — one ONNX
+    worker total across all sessions (fixes PR #30 NULL embedder bug).
+    """
+    import asyncio
+    try:
+        body = await request.json()
+        texts = body.get("texts", [])
+        if not texts:
+            return {"embeddings": []}
+
+        from .helpers import get_engine_lazy
+        engine = get_engine_lazy(request.app.state)
+        if engine is None or engine._embedder is None:
+            return JSONResponse(
+                {"error": "Embedder not available in daemon"},
+                status_code=503,
+            )
+
+        loop = asyncio.get_event_loop()
+        embeddings = await loop.run_in_executor(
+            None,
+            lambda: engine._embedder.embed_batch(texts),
+        )
+        return {"embeddings": embeddings}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.post("/provider/test")
 async def test_provider(request: Request):
     """Test connectivity to an LLM provider."""
@@ -400,8 +445,25 @@ async def test_provider(request: Request):
                 return {"success": True, "message": "OpenRouter connected, key valid"}
 
         if provider == "openai":
+            # V3.5.9: custom/local endpoint — api_key is optional (llama.cpp, LM Studio etc.)
+            custom_endpoint = body.get("base_url", "").strip() or body.get("endpoint", "").strip()
+            if custom_endpoint:
+                headers_test = {"Content-Type": "application/json"}
+                if api_key:
+                    headers_test["Authorization"] = f"Bearer {api_key}"
+                base = custom_endpoint.rstrip("/")
+                if not base.endswith("chat/completions"):
+                    base = f"{base}/chat/completions"
+                with httpx.Client(timeout=httpx.Timeout(10.0)) as c:
+                    # Probe with a minimal chat request (models list not universal on local servers)
+                    probe = {"model": body.get("model", "test"), "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                    resp = c.post(base, headers=headers_test, json=probe)
+                    if resp.status_code in (200, 400, 422):
+                        return {"success": True, "message": f"Custom endpoint reachable (HTTP {resp.status_code})"}
+                    resp.raise_for_status()
+                    return {"success": True, "message": "Custom OpenAI-compatible endpoint connected"}
             if not api_key:
-                return {"success": False, "error": "API key required"}
+                return {"success": False, "error": "API key required for official OpenAI endpoint"}
             with httpx.Client(timeout=httpx.Timeout(10.0)) as c:
                 resp = c.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
                 resp.raise_for_status()

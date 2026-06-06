@@ -691,6 +691,9 @@ class SLMConfig:
         mode = Mode(data.get("mode", "a"))
         llm_data = data.get("llm", {})
         emb_data = data.get("embedding", {})
+        # V3.5.9: read base_dir before constructing config so for_mode() builds
+        # db_path from the user's directory, not DEFAULT_BASE_DIR.
+        raw_base_dir = Path(data.get("base_dir", str(DEFAULT_BASE_DIR)))
         config = cls.for_mode(
             mode,
             llm_provider=llm_data.get("provider", ""),
@@ -703,6 +706,7 @@ class SLMConfig:
             embedding_deployment=emb_data.get("deployment_name", ""),
             embedding_model_name=emb_data.get("model_name", ""),
             embedding_dimension=int(emb_data.get("dimension", 0) or 0),
+            base_dir=raw_base_dir,
         )
         config.active_profile = data.get("active_profile", "default")
 
@@ -813,6 +817,7 @@ class SLMConfig:
         data = {
             "mode": effective_mode,
             "active_profile": self.active_profile,
+            "base_dir": str(self.base_dir),  # V3.5.9: persist so load() can restore custom paths
             "llm": {
                 "provider": self.llm.provider,
                 "model": self.llm.model,

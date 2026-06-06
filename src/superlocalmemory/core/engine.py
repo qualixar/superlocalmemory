@@ -126,6 +126,10 @@ class MemoryEngine:
 
         if self._capabilities is Capabilities.FULL:
             self._init_heavy_layer()
+        else:
+            # V3.5.9: LIGHT mode — try to get embedder from running daemon so that
+            # memories stored via MCP have real embeddings (fixes PR #30 NULL embedder).
+            self._try_init_proxy()
 
         self._initialized = True
         logger.info(
@@ -186,6 +190,25 @@ class MemoryEngine:
         # work on the MCP process without loading the heavy layer.
         from superlocalmemory.learning.adaptive import AdaptiveLearner
         self._adaptive_learner = AdaptiveLearner(self._db)
+
+    def _try_init_proxy(self) -> None:
+        """V3.5.9: Attach McpEmbedderProxy when running in LIGHT mode.
+
+        If the daemon is reachable, the proxy delegates embed calls over HTTP
+        so that MCP-stored facts have real embeddings (fixes PR #30). Silently
+        skips if the daemon is not running — keyword recall still works.
+        """
+        try:
+            from superlocalmemory.core.mcp_embedder_proxy import McpEmbedderProxy
+            port = getattr(self._config, "daemon_port", 8765)
+            proxy = McpEmbedderProxy(port=port)
+            if proxy.is_available():
+                self._embedder = proxy
+                logger.info("MCP embedder proxy attached (daemon port %d)", port)
+            else:
+                logger.debug("Daemon not reachable — MCP will run without embedder")
+        except Exception as exc:
+            logger.debug("McpEmbedderProxy init skipped: %s", exc)
 
     def _init_heavy_layer(self) -> None:
         from superlocalmemory.llm.backbone import LLMBackbone

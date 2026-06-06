@@ -161,9 +161,13 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                 "fact_count": fact_count,
             }
 
-            # Embedding service
+            # Embedding service — distinguish real embedder from V3.5.9 daemon proxy
+            _emb = engine._embedder
+            from superlocalmemory.core.mcp_embedder_proxy import McpEmbedderProxy
+            _is_proxy = isinstance(_emb, McpEmbedderProxy)
             status["components"]["embedder"] = {
-                "status": "ok" if engine._embedder else "unavailable",
+                "status": "ok" if _emb else "unavailable",
+                "source": "daemon_proxy" if _is_proxy else "local",
                 "model": engine._config.embedding.model_name,
             }
 

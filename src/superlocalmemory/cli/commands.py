@@ -2573,6 +2573,11 @@ def cmd_reap(args: Namespace) -> None:
     """Find and kill orphaned SLM processes."""
     use_json = getattr(args, "json", False)
     dry_run = not getattr(args, "force", False)
+    # V3.5.9: --all bypasses orphan detection and kills every slm mcp process
+    # except the current one. Use after switching IDEs to clear stale sessions.
+    use_force_all = getattr(args, "all", False)
+    if use_force_all:
+        dry_run = False  # --all always kills; --force is implied
 
     try:
         from superlocalmemory.infra.process_reaper import (
@@ -2581,7 +2586,7 @@ def cmd_reap(args: Namespace) -> None:
         )
 
         config = ReaperConfig()
-        result = cleanup_all_orphans(config, dry_run=dry_run)
+        result = cleanup_all_orphans(config, dry_run=dry_run, force=use_force_all)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -2600,7 +2605,8 @@ def cmd_reap(args: Namespace) -> None:
             "killed": result.get("killed", 0),
             "skipped": result.get("skipped", 0),
         }, next_actions=[
-            {"command": "slm reap --force --json", "description": "Kill orphans"},
+            {"command": "slm reap --force --json", "description": "Kill orphan processes"},
+            {"command": "slm reap --all --json", "description": "Kill ALL slm mcp sessions (IDE switch)"},
             {"command": "slm status --json", "description": "Check status"},
         ])
         return
@@ -2620,3 +2626,4 @@ def cmd_reap(args: Namespace) -> None:
     print(f"  Skipped:             {skipped}")
     if dry_run and orphans > 0:
         print("\n  Use --force to kill orphaned processes.")
+        print("  Use --all to kill ALL slm mcp sessions (after IDE switch).")
