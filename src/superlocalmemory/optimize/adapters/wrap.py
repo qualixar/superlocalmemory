@@ -164,6 +164,11 @@ def wrap_agent(
         if not binary:
             print(f"[slm wrap] {agent_key}: no binary specified", file=sys.stderr)
             return 1
+        # dry_run: show intent without requiring the binary to be installed
+        if dry_run:
+            print(f"[slm wrap] would exec: {binary} {' '.join(agent_args)}")
+            print(f"[slm wrap] env: {env_vars}")
+            return 0
         if shutil.which(binary) is None:
             print(
                 f"[slm wrap] binary '{binary}' not found in PATH. "
@@ -174,10 +179,6 @@ def wrap_agent(
         full_env = os.environ.copy()
         for k, v in env_vars.items():
             full_env[k] = v.replace("{port}", str(port))
-        if dry_run:
-            print(f"[slm wrap] would exec: {binary} {' '.join(agent_args)}")
-            print(f"[slm wrap] env: {env_vars}")
-            return 0
         try:
             return subprocess.call([binary, *agent_args], env=full_env)
         except FileNotFoundError as exc:
