@@ -389,6 +389,9 @@
         if (typeof loadAutoSettings === 'function') loadAutoSettings();
         if (typeof updateModeUI === 'function') updateModeUI();
         break;
+      case 'optimize-pane':
+        if (typeof initOptimizeTab === 'function') initOptimizeTab();
+        break;
     }
   }
 

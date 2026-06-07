@@ -27,6 +27,7 @@ _savings_estimator = _SavingsEstimator()
 class ConfigUpdateRequest(BaseModel):
     """Partial config update — only provided fields are changed."""
     enabled: bool | None = None
+    proxy_enabled: bool | None = None
     cache_enabled: bool | None = None
     semantic_enabled: bool | None = None
     compress_enabled: bool | None = None

@@ -67,8 +67,11 @@ def cmd_optimize_status(args: Namespace) -> None:
 
     proxy_running = False
     try:
-        from superlocalmemory.optimize.proxy import lifecycle
-        proxy_running = lifecycle.proxy_is_running()
+        import urllib.request
+        _url = f"http://127.0.0.1:{OPTIMIZE_DEFAULT_PORT}/health"
+        _req = urllib.request.Request(_url, method="GET")
+        with urllib.request.urlopen(_req, timeout=1) as _resp:
+            proxy_running = _resp.status == 200
     except Exception:
         pass
 

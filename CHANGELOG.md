@@ -5,6 +5,57 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.1] - 2026-06-07 — Optimize module fixes: proxy liveness probe, UI tab init, PyPI CI unblock
+
+### Fixed
+- **`slm proxy` AttributeError — wrong lifecycle function name:** `proxy_cmd.py` called
+  `lifecycle.ensure_running(port=port)` which does not exist. The function signature is
+  `ensure_proxy_running()` and is designed for daemon-internal use only (requires
+  `_store` to be initialised via `_set_config_store()`). In CLI subprocess context
+  `_store is None`, so `get_optimize_config()` returns `DEFAULT_OPTIMIZE_CONFIG` with
+  `proxy_enabled=False`, causing the function to return `False` immediately. Fix: replaced
+  the entire implementation with a direct `urllib.request` HTTP probe to
+  `http://127.0.0.1:8765/health` — correct in all execution contexts without any import
+  of `lifecycle`. Also corrected missing `proxy_enabled: True` in the fields dict written
+  to ConfigStore when `slm proxy --providers ...` is invoked.
+- **`slm optimize status` always showed "Proxy: not running":** `optimize_cmd.py` called
+  `lifecycle.proxy_is_running()` which does not exist either. The call was caught by a
+  broad `except Exception: pass`, so `proxy_running` was silently always `False`. Fix:
+  same pattern — direct HTTP health probe to `http://127.0.0.1:8765/health` with a 1s
+  timeout. `slm optimize status` now accurately reflects proxy liveness.
+- **Optimize pane UI always showing all toggles OFF:** `ng-shell.js`'s `triggerTabLoad()`
+  switch statement was completely missing the `'optimize-pane'` case. `initOptimizeTab()`
+  is defined and populates the UI from the live API, but it was never called when the user
+  switched to the Optimize tab — the pane rendered HTML defaults (all OFF) forever.
+  Fix: added `case 'optimize-pane': if (typeof initOptimizeTab === 'function') initOptimizeTab(); break;`
+  to the switch. Hard-refresh (`Cmd+Shift+R`) required after install.
+- **`ConfigUpdateRequest` missing `proxy_enabled` field:** `server/routes/optimize.py`'s
+  `ConfigUpdateRequest` Pydantic model did not include `proxy_enabled`, so the UI could
+  not toggle proxy via the `PATCH /api/optimize/config` endpoint. Added
+  `proxy_enabled: bool | None = None` with the existing nullable pattern.
+- **`pytest` `import file mismatch` blocking ALL PyPI CI since v3.5.6:** `tests/test_cli.py`
+  (a legacy file with 6 basic tests) coexisted with `tests/test_cli/` (a package directory
+  with `__init__.py`). Python 3.12 on Ubuntu resolves the package name `test_cli` to the
+  directory — pytest then tries to collect the file under a conflicting module path and
+  raises `import file mismatch: imported module 'tests.test_cli' has this __file__ ...
+  which is not the same as the test file`. Every PyPI publish attempt since v3.5.6 failed
+  silently at this step (npm publishes succeeded because the npm CI workflow skips pytest).
+  Fix: `git mv tests/test_cli.py tests/test_cli_core.py` — no tests dropped, no changes
+  to test logic, collision eliminated.
+
+## [3.6.0] - 2026-06-07 — Optimize module: cache, compress, proxy (3-lever token-saving system)
+
+### Added
+- **Optimize module** — a 3-lever system for reducing LLM token spend through an SLM-hosted
+  proxy at `http://localhost:8765`. Levers: (1) **Cache** — exact and semantic caching of
+  LLM calls with separate TTLs; (2) **Compress** — prompt compression via CCR/code/prose
+  strategies; (3) **Align** — model routing. Proxy intercepts calls routed via
+  `ANTHROPIC_BASE_URL=http://localhost:8765` or the `withSLM(Anthropic())` SDK adapter.
+- `slm optimize status|on|off|savings` CLI subcommands.
+- `slm proxy` CLI to start/stop the proxy and configure providers.
+- Dashboard Optimize pane at `http://localhost:8765/#optimize-pane` with live toggle UI.
+- Separate `llmcache.db` for cache storage — never writes to `memory.db`.
+
 ## [3.5.9] - 2026-06-07 — Community bug fixes (issues #28, #29, PR #30) + zombie process hardening
 
 ### Fixed

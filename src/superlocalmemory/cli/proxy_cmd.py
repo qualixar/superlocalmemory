@@ -20,12 +20,21 @@ def _get_store():
 
 
 def _ensure_running(port: int) -> bool:
-    """Wrap proxy.lifecycle.ensure_running. Monkeypatchable in tests."""
+    """Liveness probe: return True if the SLM daemon is responding at *port*.
+
+    Calls GET /health with a 2-second timeout.  The SLM daemon (which also acts
+    as the optimize proxy) is the process that answers on :8765; if it responds
+    the proxy layer is alive. We do NOT call lifecycle.ensure_proxy_running()
+    here because that function reads config via the daemon-internal store
+    (get_optimize_config/_store) which is None in a CLI subprocess context.
+    """
     try:
-        from superlocalmemory.optimize.proxy import lifecycle
-        return lifecycle.ensure_running(port=port)
-    except ImportError:
-        print("Error: proxy module not available.", file=sys.stderr)
+        import urllib.request
+        url = f"http://127.0.0.1:{port}/health"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status == 200
+    except Exception:
         return False
 
 
@@ -54,7 +63,7 @@ def cmd_proxy(args: Namespace) -> None:
         base_url=f"http://localhost:{port}",
     )
 
-    fields: dict = {"providers": providers}
+    fields: dict = {"providers": providers, "proxy_enabled": True}
     if no_compress:
         fields["compress_enabled"] = False
     if semantic:
