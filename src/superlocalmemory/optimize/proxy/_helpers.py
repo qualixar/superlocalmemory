@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 from fastapi.requests import Request
@@ -121,6 +122,143 @@ def _filter_response_headers(headers) -> dict:
     return {k: v for k, v in items if k.lower() not in _HOP_BY_HOP}
 
 
+# ---------------------------------------------------------------------------
+# SSE → JSON converter (for streaming cache hits and post-stream storage)
+# ---------------------------------------------------------------------------
+
+def _parse_sse_to_json(sse_bytes: bytes) -> bytes | None:
+    """Parse an accumulated Anthropic SSE stream into a single JSON message.
+
+    Used for two purposes:
+    1. After a streaming response completes — store the assembled JSON in the
+       cache so the next identical streaming request is served from cache.
+    2. Cache hit path — convert stored JSON back to SSE via _sse_from_cached_json
+       in anthropic_surface.py.
+
+    Returns None if the bytes are not a valid/complete Anthropic SSE stream
+    (e.g. error response, client-disconnected partial, or empty). The caller
+    MUST treat None as "do not cache".
+
+    BUG-FIX (v3.6.4): Previously returned None for any response containing
+    tool_use blocks, which meant Claude Code responses were NEVER cached (Claude
+    Code always uses tools). Now handles both text AND tool_use content blocks:
+    - text blocks: accumulated via text_delta events
+    - tool_use blocks: accumulated via input_json_delta events, stored with
+      full {id, name, input} so _sse_from_cached_json can replay them correctly.
+    """
+    # content_blocks[index] = {"type": "text", "text_parts": [...]} OR
+    #                          {"type": "tool_use", "id": "...", "name": "...", "input_parts": [...]}
+    content_blocks: dict[int, dict] = {}
+    message_id = ""
+    model = ""
+    role = "assistant"
+    input_tokens = 0
+    output_tokens = 0
+    stop_reason = "end_turn"
+    message_start_seen = False
+    message_stop_seen = False
+
+    current_event = ""
+    for raw_line in sse_bytes.decode("utf-8", errors="replace").split("\n"):
+        line = raw_line.rstrip("\r")
+        if line.startswith("event: "):
+            current_event = line[7:].strip()
+        elif line.startswith("data: "):
+            data_str = line[6:].strip()
+            if not data_str or data_str == "[DONE]":
+                continue
+            try:
+                data = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            if current_event == "message_start":
+                message_start_seen = True
+                msg = data.get("message", {})
+                message_id = msg.get("id", "")
+                model = msg.get("model", "")
+                role = msg.get("role", "assistant")
+                usage = msg.get("usage", {})
+                input_tokens = usage.get("input_tokens", 0)
+
+            elif current_event == "content_block_start":
+                idx = data.get("index", 0)
+                cb = data.get("content_block", {})
+                block_type = cb.get("type", "text")
+                if block_type == "tool_use":
+                    content_blocks[idx] = {
+                        "type": "tool_use",
+                        "id": cb.get("id", ""),
+                        "name": cb.get("name", ""),
+                        "input_parts": [],
+                    }
+                else:
+                    content_blocks[idx] = {"type": "text", "text_parts": []}
+
+            elif current_event == "content_block_delta":
+                idx = data.get("index", 0)
+                delta = data.get("delta", {})
+                block = content_blocks.get(idx)
+                if block is None:
+                    continue
+                delta_type = delta.get("type", "")
+                if delta_type == "text_delta":
+                    block.setdefault("text_parts", []).append(delta.get("text", ""))
+                elif delta_type == "input_json_delta":
+                    block.setdefault("input_parts", []).append(delta.get("partial_json", ""))
+
+            elif current_event == "message_delta":
+                usage2 = data.get("usage", {})
+                output_tokens = usage2.get("output_tokens", 0)
+                stop = data.get("delta", {})
+                stop_reason = stop.get("stop_reason", stop_reason) or stop_reason
+
+            elif current_event == "message_stop":
+                message_stop_seen = True
+
+    if not message_start_seen or not message_stop_seen:
+        return None
+
+    # Assemble content array — preserve block ordering by index
+    content: list[dict] = []
+    for idx in sorted(content_blocks.keys()):
+        block = content_blocks[idx]
+        if block["type"] == "tool_use":
+            input_json_str = "".join(block.get("input_parts", []))
+            try:
+                input_obj = json.loads(input_json_str) if input_json_str else {}
+            except json.JSONDecodeError:
+                input_obj = {"_raw": input_json_str}
+            content.append({
+                "type": "tool_use",
+                "id": block["id"],
+                "name": block["name"],
+                "input": input_obj,
+            })
+        else:
+            text = "".join(block.get("text_parts", []))
+            content.append({"type": "text", "text": text})
+
+    result = {
+        "id": message_id,
+        "type": "message",
+        "role": role,
+        "content": content,
+        "model": model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    }
+    return json.dumps(result, separators=(",", ":")).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
 async def _fail_open_forward(proxy: Any, request: Request, upstream_url: str) -> Response:
     if proxy.http_client is None:
         logger.error(
@@ -167,6 +305,7 @@ async def _stream_forward(
     body_bytes: bytes,
     upstream_url: str,
 ) -> Response | StreamingResponse:
+    """Simple passthrough streaming — no cache accumulation."""
     if proxy.http_client is None:
         logger.error(
             "[%s] _stream_forward: http_client is None - startup() was not called. "
@@ -200,6 +339,102 @@ async def _stream_forward(
                 b'event: error\ndata: {"type":"error","error":{'
                 b'"type":"api_error","message":"SLM proxy stream error"}}\n\n'
             )
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _stream_and_cache_forward(
+    proxy: Any,
+    request_id: str,
+    fwd_headers: dict,
+    body_bytes: bytes,
+    upstream_url: str,
+    on_complete: "Callable[[bytes], Any] | None" = None,
+) -> Response | StreamingResponse:
+    """Stream-forward with optional post-stream cache-store callback.
+
+    BUG-FIX (v3.6.3): Claude Code exclusively uses streaming.  The old
+    _stream_forward never accumulated the response body, so the cache was
+    NEVER populated — savings were permanently 0.
+
+    This helper tees the stream: each chunk is yielded to the client AND
+    appended to an in-memory accumulator.  After the LAST chunk (detected by
+    ``message_stop`` in the SSE bytes), ``on_complete`` is awaited with the
+    full accumulated bytes.  The caller converts those bytes to a JSON message
+    via ``_parse_sse_to_json`` and stores them in the cache.
+
+    on_complete is only called when:
+    - the accumulated bytes contain ``b"message_stop"`` (complete response),
+    - the response did NOT error mid-stream.
+    """
+    if proxy.http_client is None:
+        logger.error(
+            "[%s] _stream_and_cache_forward: http_client is None.",
+            request_id,
+        )
+        return Response(
+            content=b'{"type":"error","error":{"type":"api_error",'
+                    b'"message":"SLM proxy not started - lifespan wiring error"}}',
+            status_code=502,
+            media_type="application/json",
+        )
+
+    acc: list[bytes] = []
+    complete_called = False
+
+    async def _generate() -> AsyncIterator[bytes]:
+        nonlocal complete_called
+        stream_error = False
+        try:
+            async with proxy.http_client.stream(
+                "POST", upstream_url, content=body_bytes, headers=fwd_headers,
+            ) as upstream_resp:
+                async for chunk in upstream_resp.aiter_bytes():
+                    if chunk:
+                        acc.append(chunk)
+                        yield chunk
+        except httpx.RemoteProtocolError as exc:
+            stream_error = True
+            logger.warning("[%s] upstream stream closed early: %r", request_id, exc)
+            yield (
+                b'event: error\ndata: {"type":"error","error":{'
+                b'"type":"api_error","message":"upstream stream closed"}}\n\n'
+            )
+        except Exception as exc:
+            stream_error = True
+            logger.error("[%s] stream forward error: %r", request_id, exc)
+            yield (
+                b'event: error\ndata: {"type":"error","error":{'
+                b'"type":"api_error","message":"SLM proxy stream error"}}\n\n'
+            )
+        finally:
+            # BUG-FIX (v3.6.4): Removed surface-specific sentinel check
+            # ("message_stop" / "[DONE]"). Completeness is now validated
+            # inside each parser (_parse_sse_to_json, _parse_openai_sse_to_json,
+            # _parse_gemini_sse_to_json) which return None for incomplete
+            # streams. This makes _stream_and_cache_forward universal: it
+            # calls on_complete whenever the stream ends without error and
+            # lets the parser decide whether to store. Gemini SSE has neither
+            # sentinel — streams end by connection close after the final chunk
+            # containing "finishReason".
+            _joined = b"".join(acc)
+            if on_complete and acc and not complete_called and not stream_error:
+                complete_called = True
+                try:
+                    await on_complete(_joined)
+                except Exception as exc:
+                    logger.warning(
+                        "[%s] cache store callback raised (fail-open): %r",
+                        request_id, exc,
+                    )
 
     return StreamingResponse(
         _generate(),

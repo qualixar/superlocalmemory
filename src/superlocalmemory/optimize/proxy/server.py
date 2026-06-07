@@ -17,7 +17,7 @@ from superlocalmemory.optimize.proxy.lifecycle import HookChain
 
 logger = logging.getLogger("slm.optimize.proxy")
 
-_PROXY_VERSION = "3.6.0"
+_PROXY_VERSION = "3.6.3"
 _REQUEST_TIMEOUT_S = 300.0
 _CONNECT_TIMEOUT_S = 10.0
 _MAX_CONNECTIONS = 100
@@ -145,7 +145,14 @@ def _load_hooks(config: OptimizeConfig) -> HookChain:
             )
 
     if config.compress_enabled:
-        # Compress is Phase 2; not wired in P1. P1 keeps the slot for the seam.
-        pass
+        try:
+            from superlocalmemory.optimize.compress.router import CompressRouter
+            from superlocalmemory.optimize.metrics.counters import MetricsCollector
+            compress_hook = CompressRouter.get_instance()
+            compress_hook.set_metrics(MetricsCollector.get_instance())
+        except Exception as exc:
+            logger.warning(
+                "compress hook load failed (proxy continues without compress): %s", exc
+            )
 
     return HookChain(cache=cache_hook, compress=compress_hook)

@@ -21,10 +21,19 @@ _STATIC_MECHANISMS = {"settings-file", "config-file", "print-only"}
 
 
 def _proxy_configured() -> bool:
-    """Return True if proxy_enabled=True in optimize.json (no liveness check)."""
+    """Return True if proxy_enabled=True in optimize.json (no liveness check).
+
+    Reads from the module-level _store if it has been set (daemon process or
+    tests that call _set_config_store). Falls back to a fresh ConfigStore read
+    from disk when _store is None — which is always the case in CLI subprocess
+    context because _set_config_store() is only called by the daemon on startup.
+    """
     try:
-        from superlocalmemory.optimize.config import get_optimize_config
-        return get_optimize_config().proxy_enabled
+        from superlocalmemory.optimize.config import _store
+        if _store is not None:
+            return _store.get().proxy_enabled
+        from superlocalmemory.optimize.config.store import ConfigStore
+        return ConfigStore().get().proxy_enabled
     except Exception:
         return False
 

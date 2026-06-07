@@ -71,10 +71,6 @@ class CompressRouter:
 
             if not cfg.compress_enabled:
                 return req
-            if req.stream:
-                return req
-            if req.has_tools:
-                return req  # §6.5 safety rule
 
             body = dict(req.body)
             messages = body.get("messages", [])
@@ -139,8 +135,8 @@ class CompressRouter:
         try:
             saved = max(0, before_tokens - after_tokens)
             if self._metrics_counters is not None:
-                # M-02: Call proper method instead of accessing private attribute
-                self._metrics_counters.on_compress(saved, lossy)
+                # M-02: pass before/after directly (bytes_original, bytes_after contract)
+                self._metrics_counters.on_compress(before_tokens, after_tokens)
             logger.debug("on_compress: saved=%d tokens lossy=%s", saved, lossy)
         except Exception as exc:
             logger.debug("on_compress metrics update failed (non-fatal): %s", exc)
@@ -169,9 +165,11 @@ class CompressRouter:
         for idx, msg in enumerate(messages):
             role = msg.get("role", "")
             is_tool_msg = (
-                role == "tool"
-                or role == "user"
-                or _msg_has_tool_result(msg)
+                role == "tool"  # OpenAI tool result messages (plain text, skip entirely)
+                # Anthropic tool_result blocks are NOT skipped — _compress_content_block
+                # handles type=="tool_result" blocks by compressing their text content
+                # while preserving the block structure. This is where the bulk of
+                # Claude Code output lives (bash results, file contents, JSON data).
             )
             if idx in protect_indices or is_tool_msg:
                 new_messages.append(msg)

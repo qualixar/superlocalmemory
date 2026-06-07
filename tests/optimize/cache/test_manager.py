@@ -250,14 +250,22 @@ def test_get_miss_when_key_is_none(tmp_cache_db) -> None:
     assert result is None
 
 
-def test_get_miss_returns_none(tmp_cache_db) -> None:
-    """get() returns None on cache miss."""
+def test_get_miss_returns_cached_response_with_key(tmp_cache_db) -> None:
+    """get() on cache miss returns CachedResponse(hit=False) with a non-empty key.
+
+    BUG-FIX (v3.6.3): Previously returned None, which caused the store
+    condition in handle_messages to be permanently False (empty key is falsy),
+    meaning the cache was never populated.  Now returns a miss CachedResponse
+    that carries the computed key so callers can proceed with storage.
+    """
     cm = CacheManager(tmp_cache_db)
     result = cm.get(
         {"model": "xyz-nonexistent", "messages": [{"role": "user", "content": "nope"}], "params": {}},
         _tenant(1),
     )
-    assert result is None
+    assert result is not None, "get() on miss should return CachedResponse, not None"
+    assert not result.hit, "Expected hit=False on cache miss"
+    assert result.cache_key, "Expected non-empty cache_key on miss so callers can store"
 
 
 def test_set_with_dict_response(tmp_cache_db) -> None:
@@ -319,11 +327,13 @@ def test_set_key_none_skips(tmp_cache_db) -> None:
 # ---- CacheHook protocol ----
 
 def test_check_success(tmp_cache_db) -> None:
-    """CacheManager.check() wraps get() with fail-open."""
+    """CacheManager.check() wraps get() fail-open; miss returns CachedResponse with key.
+
+    BUG-FIX (v3.6.3): check() now returns CachedResponse(hit=False, cache_key=...)
+    on a miss instead of None so the proxy can proceed with cache storage.
+    """
     from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest
     cm = CacheManager(tmp_cache_db)
-    # Pre-populate
-    cm._exact.set("test-key", "default", {"id": "x"}, ["tag1"], "m")
     ctx = ProxyRequest(
         provider="anthropic", method="POST", path="/v1/messages",
         headers={},
@@ -334,8 +344,11 @@ def test_check_success(tmp_cache_db) -> None:
         has_tools=False,
     )
     result = cm.check(ctx)
-    # May hit or miss, but should not raise
-    assert result is None or result.hit is True
+    # check() should not raise and must return a CachedResponse (miss or hit).
+    assert result is not None, "check() must not return None — use CachedResponse(hit=False) for misses"
+    # On a cold cache this is a miss; the key must be populated for store to work.
+    if not result.hit:
+        assert result.cache_key, "Miss CachedResponse must carry a non-empty cache_key"
 
 
 def test_check_fail_open(tmp_cache_db, monkeypatch) -> None:

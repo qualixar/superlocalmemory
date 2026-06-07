@@ -114,11 +114,13 @@ def test_load_hooks_cache_load_failure(monkeypatch):
     assert hooks.cache is None  # fail-open
 
 
-def test_load_hooks_compress_enabled_placeholder():
-    """_load_hooks with compress_enabled=True — placeholder (no hook yet)."""
+def test_load_hooks_compress_enabled_loads_router():
+    """_load_hooks with compress_enabled=True — CompressRouter singleton loaded (BUG-FIX v3.6.4)."""
+    from superlocalmemory.optimize.compress.router import CompressRouter
     config = _make_config(compress_enabled=True)
     hooks = _load_hooks(config)
-    assert hooks.compress is None  # Phase 2 not wired
+    assert hooks.compress is not None, "CompressRouter must be loaded when compress_enabled=True"
+    assert isinstance(hooks.compress, CompressRouter)
 
 
 @pytest.mark.asyncio

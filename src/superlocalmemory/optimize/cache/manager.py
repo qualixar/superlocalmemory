@@ -153,9 +153,42 @@ class CacheManager:
     # ---- INTERFACE-CONTRACT §4 public methods ----
 
     def build_key(self, req: Any, tenant_id: str) -> str | None:
-        """Build a deterministic cache key for req + tenant_id."""
-        if isinstance(req, dict):
-            model_id = req.get("model", "")
+        """Build a deterministic cache key for req + tenant_id.
+
+        BUG-FIX (v3.6.3): Two bugs repaired here:
+        1. tenant_id="default" failed KeyBuilder's 64-char hex SHA-256 validation,
+           silently raising ValueError caught by fail-open wrappers → cache never
+           stored or retrieved anything via the proxy path. Fix: normalize any
+           non-hex tenant_id to its SHA-256 digest before passing to KeyBuilder.
+        2. ProxyRequest objects have a `body` dict, not model_id/messages/system
+           attributes. The old `getattr(req, "model_id", "")` path silently
+           returned empty strings → all proxy requests got the same (invalid) key.
+           Fix: detect ProxyRequest and extract fields from .body.
+        """
+        import hashlib as _hashlib
+        import json as _json
+        import re as _re
+        _HEX64 = _re.compile(r"[0-9a-f]{64}")
+        # Normalize tenant_id: KeyBuilder requires a 64-char lowercase hex SHA-256.
+        if not _HEX64.fullmatch(tenant_id or ""):
+            tenant_id = _hashlib.sha256(tenant_id.encode()).hexdigest()
+
+        if isinstance(req, ProxyRequest):
+            # Extract semantic fields from the parsed JSON body.
+            body = req.body or {}
+            model_id = body.get("model", "") or ""
+            messages = body.get("messages", []) or []
+            system_raw = body.get("system", "") or ""
+            # Anthropic allows system as a list of content blocks — normalise to str.
+            if isinstance(system_raw, list):
+                system = _json.dumps(system_raw, sort_keys=True, separators=(",", ":"))
+            else:
+                system = str(system_raw)
+            # params: everything except fields extracted above and stream flag.
+            _SKIP = frozenset({"model", "messages", "system", "stream"})
+            params = {k: v for k, v in body.items() if k not in _SKIP}
+        elif isinstance(req, dict):
+            model_id = req.get("model", "") or ""
             messages = req.get("messages", []) or []
             params = req.get("params", {}) or {}
             system = req.get("system", "") or ""
@@ -174,9 +207,18 @@ class CacheManager:
         )
 
     def get(self, req: Any, tenant_id: str) -> "CachedResponse | None":
-        """CacheHook.check() entry point."""
+        """CacheHook.check() entry point.
+
+        BUG-FIX (v3.6.3): Previously returned None on cache miss, which caused
+        _safe_cache_check to return CachedResponse(cache_key="").  The empty
+        cache_key is falsy, so the store condition in handle_messages
+        (``cache_result.cache_key``) was always False → cache was NEVER
+        populated.  Fix: return a miss CachedResponse that carries the computed
+        key so the store path can proceed.
+        """
         key = self.build_key(req, tenant_id)
         if key is None:
+            # Uncacheable (non-zero temperature, etc.) — signal with None.
             return None
         row = self._exact.get(key, tenant_id)
         if row is not None:
@@ -188,7 +230,8 @@ class CacheManager:
                 ttl_seconds=0,
             )
         self._metrics.exact_misses += 1
-        return None
+        # Return miss WITH the key so callers can use it for cache storage.
+        return CachedResponse(hit=False, data=None, cache_key=key, ttl_seconds=0)
 
     def set(self, req: Any, resp: Any, tenant_id: str) -> None:
         """CacheHook.store() entry point."""
@@ -196,8 +239,10 @@ class CacheManager:
         key = self.build_key(req, tenant_id)
         if key is None:
             return
-        if isinstance(req, dict):
-            model_id = req.get("model", "")
+        if isinstance(req, ProxyRequest):
+            model_id = (req.body or {}).get("model", "") or ""
+        elif isinstance(req, dict):
+            model_id = req.get("model", "") or ""
         else:
             model_id = getattr(req, "model_id", "") or ""
         tags = [
@@ -216,9 +261,18 @@ class CacheManager:
     # ---- CacheHook protocol implementation (INTERFACE-CONTRACT §3) ----
 
     def check(self, req: ProxyRequest) -> "CachedResponse | None":
-        """CacheHook.check() — look up by ProxyRequest; fail-open on error."""
+        """CacheHook.check() — look up by ProxyRequest; fail-open on error.
+
+        BUG-FIX (v3.6.3): on_miss() was never called from the proxy path,
+        so MetricsCollector.misses stayed at 0 and the dashboard always showed
+        0 misses.  Fixed by calling on_miss() here whenever get() returns a
+        cache-miss result.
+        """
         try:
-            return self.get(req, tenant_id="default")
+            result = self.get(req, tenant_id="default")
+            if result is not None and not result.hit:
+                MetricsCollector.get_instance().on_miss()
+            return result
         except Exception as exc:
             logger.warning("CacheManager.check raised (fail-open): %s", exc)
             return None

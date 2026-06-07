@@ -5,6 +5,165 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.3] - 2026-06-08 — Cache + compression now work for Claude Code, Claude Desktop, Codex CLI
+
+### Fixed
+
+- **CRITICAL — Cache permanently bypassed for ALL tool-bearing clients (Claude Code, Claude Desktop, Codex CLI):**
+  `anthropic_surface.py` and `openai_surface.py` both wrapped every cache operation with
+  `if not has_tools and proxy.hooks.cache:`. Because Claude Code ALWAYS sends a `tools` array,
+  caching was structurally impossible — zero savings regardless of how many identical prompts
+  were sent. Fix: removed all four `has_tools` guards across both surfaces. Cache now fires
+  unconditionally for every request on both streaming and non-streaming paths.
+
+- **CRITICAL — Anthropic streaming SSE parser returned `None` for tool_use responses:**
+  `_parse_sse_to_json()` only accumulated `text_delta` events. Any response containing a
+  `tool_use` content block (every Claude Code response) caused the parser to emit an empty
+  content array and return `None`, meaning the completed SSE stream was never stored even if the
+  `has_tools` guard had been removed. Full rewrite: the parser now tracks content blocks by
+  index, handles both `text_delta` and `input_json_delta` events, and assembles complete
+  `tool_use` entries (with `id`, `name`, `input` JSON object) in the stored JSON. Returns
+  `None` only on genuinely incomplete streams (missing `message_start` or `message_stop`).
+
+- **CRITICAL — Anthropic SSE cache replay did not emit tool_use blocks:**
+  `_sse_from_cached_json()` only replayed `text` content blocks. Tool-use blocks were silently
+  dropped, producing a truncated response on cache hits. Fixed: the replay function now handles
+  `tool_use` blocks — emits `content_block_start` with `{type:"tool_use", id, name, input:{}}`,
+  then `input_json_delta` chunks (50-char pieces), then `content_block_stop`. Clients receive
+  a byte-for-byte equivalent of the original SSE stream.
+
+- **CRITICAL — OpenAI SSE parser returned `None` for tool_calls responses:**
+  `_parse_openai_sse_to_json()` detected `tool_calls` in the delta and returned `None`
+  immediately. OpenAI-compatible clients (Codex CLI, Antigravity) were therefore never cached.
+  Fixed: parser now accumulates `tool_calls` by `choice_index → tc_index → {id, type, function}`
+  and stores them in the assembled `chat.completion` JSON. Tool call arguments are joined from
+  streaming `arguments` deltas.
+
+- **CRITICAL — OpenAI SSE cache replay dropped tool_calls entirely:**
+  `_openai_sse_from_cached_json()` only replayed text content. Tool calls were silently dropped.
+  Fixed: replays `tool_calls` as proper OpenAI SSE delta events — first chunk with role +
+  tool_call headers (id, type, name, empty arguments), then argument chunks (50-char pieces),
+  then finish chunk. Preserves the streaming contract with clients.
+
+- **CompressRouter never instantiated — `compress_hook=None` always:**
+  `_load_hooks()` in `server.py` had dead code: `if config.compress_enabled: pass`. The
+  `CompressRouter` singleton was never created, so compression was silently a no-op for every
+  session since v3.6.0. Fixed: `_load_hooks()` now calls `CompressRouter.get_instance()` and
+  wires it into the `HookChain`. Daemon log now correctly reports `compress_hook=CompressRouter`.
+
+- **MetricsCollector never wired to CompressRouter — `compress_runs=0` always:**
+  `CompressRouter.set_metrics()` was never called during proxy startup, so
+  `_metrics_counters=None` permanently. Result: `compress_runs` counter was always 0 in the
+  dashboard even when compression was running. Fixed: `_load_hooks()` calls
+  `compress_hook.set_metrics(MetricsCollector.get_instance())` immediately after instantiation.
+
+- **`on_compress` signature mismatch — metrics counter never incremented:**
+  `CompressRouter._compress_messages()` called `self._metrics_counters.on_compress(saved, lossy)`
+  where `saved` was bytes-saved and `lossy` was a bool. `MetricsCollector.on_compress()` expects
+  `(bytes_original, bytes_after)`. The mismatch meant `compress_runs` and `bytes_saved` were
+  always wrong even after wiring. Fixed: caller now passes `(before_tokens, after_tokens)`.
+
+- **`is_tool_msg` in `CompressRouter` skipped ALL user messages from compression:**
+  The original guard was `is_tool_msg = (role == "tool" or role == "user")`. This silently
+  skipped every `user` turn, including long tool-result messages (the main source of savings
+  in Claude Code sessions). Fixed: only OpenAI `role=="tool"` messages are skipped. Anthropic
+  `tool_result` blocks (embedded in user message content arrays) are now compressed by
+  `_compress_content_block()`, which handles the nested structure correctly.
+
+### Tests
+
+- `tests/optimize/proxy/test_openai_surface.py`: updated `test_parse_openai_sse_to_json_tool_calls_returns_none`
+  → renamed to `test_parse_openai_sse_to_json_tool_calls_cached`, asserts valid JSON returned
+  with `tool_calls` array preserved instead of `None`.
+- `tests/optimize/proxy/test_server.py`: updated `test_load_hooks_compress_enabled_placeholder`
+  → renamed to `test_load_hooks_compress_enabled_loads_router`, asserts `hooks.compress is not None`
+  and `isinstance(hooks.compress, CompressRouter)`.
+- All 83 proxy tests pass (0 failures).
+
+### Documentation
+
+- `docs/proxy-setup.md`: removed "Cache fires only for requests WITHOUT tools" caveat. Updated
+  "What Gets Cached" table — Claude Code, Claude Desktop, Codex CLI now show `✓ Yes`. Added
+  explanation of how tool-use caching works (SSE accumulate → parse → store → replay as SSE).
+  Updated troubleshooting section — removed stale "tool-bearing requests are bypassed" note,
+  added actionable checklist for diagnosing zero-savings scenarios.
+
+---
+
+## [3.6.3] - 2026-06-08 — Proxy streaming cache fix for Anthropic, OpenAI surfaces
+
+### Fixed
+
+- **CRITICAL — Anthropic streaming cache never populated (miss permanently 0 savings):**
+  `anthropic_surface.py`'s streaming path called `_stream_forward()` (no-op passthrough)
+  instead of the new `_stream_and_cache_forward()`. Claude Code, AGY, and every other
+  streaming Anthropic client could never populate the cache because the response body was
+  never accumulated. Cache was always empty, `tokens_saved` was always 0, regardless of how
+  many identical prompts were sent. Fix: streaming path now checks cache on the way in
+  (`_safe_cache_check`), runs compression on the request body, and passes a `store_callback`
+  to `_stream_and_cache_forward()` that accumulates the SSE stream, parses it via
+  `_parse_sse_to_json`, and stores the assembled JSON message after `message_stop` is seen.
+  Second identical streaming call returns a properly re-emitted SSE stream from cache
+  (verified: `msg_id` identical, no upstream call on hit).
+
+- **CRITICAL — OpenAI streaming surface: cache bypassed + `_safe_compress` NameError:**
+  `openai_surface.py` had the same streaming bypass bug AND a missing import — `_safe_compress`
+  was called on the non-streaming compression path but never imported, causing a silent
+  `NameError` on any non-streaming request with compression enabled. Both issues fixed:
+  (1) streaming path now wires `_stream_and_cache_forward` with `_parse_openai_sse_to_json`
+  and `_openai_sse_from_cached_json` helpers (OpenAI SSE format differs from Anthropic's —
+  uses `[DONE]` sentinel and `chat.completion.chunk` objects). (2) `_safe_compress` added
+  to imports. Cache hit on OpenAI streaming calls now returns a re-emitted SSE stream with
+  proper `chat.completion.chunk` events and `[DONE]` terminator.
+
+- **`_stream_and_cache_forward` completion marker was Anthropic-only:**
+  The `finally` block checked for `b"message_stop"` to detect a complete stream before
+  calling `on_complete`. OpenAI SSE streams end with `data: [DONE]\n\n` — not `message_stop`.
+  Result: OpenAI streaming responses were never stored in cache even after the fix above
+  because the `on_complete` callback was never fired. Fixed by checking both markers:
+  `b"message_stop"` (Anthropic) OR `b"[DONE]"` (OpenAI / any compatible provider).
+
+- **`_stream_and_cache_forward` redundant join:** `full = b"".join(acc)` recomputed the
+  join that `_joined` had already computed. Fixed to reuse `_joined` directly.
+
+- **`server.py` version string stuck at `"3.6.0"`:** `_PROXY_VERSION` was not updated
+  during the 3.6.1 and 3.6.2 releases. Fixed to `"3.6.3"`. The `/health` endpoint now
+  correctly reports `"version":"3.6.3"`.
+
+- **`CacheManager.get()` returned `None` on miss, discarding the cache key:** Store
+  condition `cache_result.cache_key` was always falsy on miss because `get()` returned
+  `None` (no `CachedResponse` object). Non-streaming responses after a miss were never
+  stored. Fixed: `get()` now returns `CachedResponse(hit=False, data=None, cache_key=key)`
+  so the key propagates to the store condition.
+
+- **`CacheManager.check()` never called `MetricsCollector.on_miss()`:** Miss events were
+  not counted, so `hits/(hits+misses)` was always 0 in the dashboard. Fixed: `check()`
+  calls `MetricsCollector.get_instance().on_miss()` when `result.hit is False`.
+
+### Added
+
+- `_parse_openai_sse_to_json(sse_bytes)`: assembles OpenAI streaming chunks into a
+  single `chat.completion` JSON for cache storage. Handles multi-index choices, usage
+  capture, `tool_calls` detection (never caches tool responses), and `[DONE]` sentinel.
+- `_openai_sse_from_cached_json(cached_bytes)`: replays a stored `chat.completion` as
+  a proper OpenAI SSE stream for cache-hit responses. Emits role chunk, content chunks
+  (100-char batches), finish chunk, and `[DONE]`. Preserves the streaming contract with
+  clients (Codex CLI, Antigravity, openai-python).
+- `docs/proxy-setup.md`: comprehensive per-CLI proxy activation guide covering Claude Code
+  CLI, Claude Desktop, Cursor, Windsurf, AGY/Antigravity, Gemini CLI, Codex CLI, Python
+  anthropic/openai SDK, Node.js SDK, LangChain, LlamaIndex, SDK adapter, and raw curl.
+  Includes an honest "What Gets Cached" table showing which clients benefit from caching.
+
+### Tests
+
+- `tests/optimize/proxy/test_openai_surface.py`: 9 new tests covering
+  `_parse_openai_sse_to_json` (complete stream, missing `[DONE]`, tool calls, empty bytes,
+  usage capture) and `_openai_sse_from_cached_json` (roundtrip, bad JSON, wrong object
+  type) plus an end-to-end streaming cache miss→store→hit cycle.
+- All 583 optimize tests pass (4 skipped — platform-specific).
+
+---
+
 ## [3.6.2] - 2026-06-08 — wrap dry_run fix for config-file mechanism (macOS CI)
 
 ### Fixed

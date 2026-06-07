@@ -73,8 +73,8 @@ All errors are **fail-open** — any cache/compress/proxy error passes through t
 ### Step 1: Install
 
 ```bash
-pip install -U superlocalmemory==3.6.0
-# or: npm i -g superlocalmemory@3.6
+pip install -U superlocalmemory    # always latest 3.6.x
+# or: npm i -g superlocalmemory
 ```
 
 ### Step 2: Verify
@@ -217,6 +217,7 @@ See `ATTRIBUTION.md` and `NOTICE` for full attribution.
 
 ## Related Pages
 
+- [proxy-setup.md](proxy-setup.md) — Per-CLI proxy activation (Claude Code, Cursor, AGY, SDK, curl, 16+ clients)
 - [optimize-cli.md](optimize-cli.md) — Full CLI command reference
 - [optimize-config.md](optimize-config.md) — Configuration reference
 - [cli-reference.md](cli-reference.md) — Master CLI reference (all commands)
