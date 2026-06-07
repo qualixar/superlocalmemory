@@ -16,6 +16,18 @@ from typing import Any
 from superlocalmemory.optimize.adapters._agent_registry import AGENT_REGISTRY
 from superlocalmemory.optimize.proxy.lifecycle import ensure_proxy_running, proxy_port
 
+# Mechanisms that write static config files — need proxy *configured*, not alive.
+_STATIC_MECHANISMS = {"settings-file", "config-file", "print-only"}
+
+
+def _proxy_configured() -> bool:
+    """Return True if proxy_enabled=True in optimize.json (no liveness check)."""
+    try:
+        from superlocalmemory.optimize.config import get_optimize_config
+        return get_optimize_config().proxy_enabled
+    except Exception:
+        return False
+
 
 def list_agents() -> list[str]:
     """Return all registered agent keys."""
@@ -42,18 +54,30 @@ def wrap_agent(
         )
         return 1
 
-    if not ensure_proxy_running():
-        print(
-            f"[slm wrap] proxy is not enabled in optimize.json — set "
-            f"`proxy_enabled: true` (port 8765) and re-run, or run "
-            f"`slm optimize on` first.",
-            file=sys.stderr,
-        )
-        return 1
-
     port = proxy_port()
     spec = AGENT_REGISTRY[agent_key]
     mechanism = spec.get("mechanism", "print-only")
+
+    # Static mechanisms (settings-file, config-file) only write JSON — proxy
+    # doesn't need to be alive yet.  env/subprocess mechanisms inject the proxy
+    # URL into a live process, so full liveness is required there.
+    if mechanism in _STATIC_MECHANISMS:
+        if not _proxy_configured():
+            print(
+                f"[slm wrap] proxy is not enabled in optimize.json — set "
+                f"`proxy_enabled: true` (port 8765) and re-run, or run "
+                f"`slm optimize on` first.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        if not ensure_proxy_running():
+            print(
+                f"[slm wrap] proxy is not enabled or not running — run "
+                f"`slm proxy` to start it, or `slm optimize on` first.",
+                file=sys.stderr,
+            )
+            return 1
 
     if mechanism == "print-only":
         print(f"[slm wrap] {agent_key}: manual instructions")
