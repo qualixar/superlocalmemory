@@ -116,6 +116,97 @@ Full docs:
 
 ---
 
+<details>
+<summary><strong>What's New in V3.3 — The Living Brain Evolves</strong> (click to expand)</summary>
+
+> V3.3 gives your memory a lifecycle. Memories strengthen when used, fade when neglected, compress when idle, and consolidate into reusable patterns — all automatically, all locally. Your agent gets smarter the longer it runs.
+
+### Features at a Glance
+
+- **Adaptive Memory Lifecycle** — memories naturally strengthen with use and fade when neglected. No manual cleanup, no hardcoded TTLs.
+- **Smart Compression** — embedding precision adapts to memory importance. Low-priority memories compress up to 32x. High-value memories stay full-resolution.
+- **Cognitive Consolidation** — the system automatically extracts patterns from clusters of related memories. One decision referenced 50 times becomes one reusable insight.
+- **Pattern Learning** — auto-learned soft prompts injected into your agent's context at session start. The system teaches itself what matters to you.
+- **Hopfield Retrieval (6th Channel)** — vague or partial queries now complete themselves. Ask half a question, get the whole answer.
+- **Process Health** — orphaned SLM processes detected and cleaned automatically. No more zombie workers eating RAM.
+
+### New CLI Commands
+
+```bash
+# Run a memory lifecycle review — strengthens active memories, archives neglected ones
+slm decay
+
+# Run smart compression — adapts embedding precision to memory importance
+slm quantize
+
+# Extract reusable patterns from memory clusters
+slm consolidate --cognitive
+
+# View auto-learned patterns that get injected into agent context
+slm soft-prompts
+
+# Clean up orphaned SLM processes
+slm reap
+```
+
+### New MCP Tools
+
+| Tool | Description |
+|:-----|:------------|
+| `forget` | Programmatic memory archival via lifecycle rules |
+| `quantize` | Trigger smart compression on demand |
+| `consolidate_cognitive` | Extract and store patterns from memory clusters |
+| `get_soft_prompts` | Retrieve auto-learned patterns for context injection |
+| `reap_processes` | Clean orphaned SLM processes |
+| `get_retention_stats` | Memory lifecycle analytics |
+
+### Mode A/B Memory Improvements
+
+| Metric | V3.2 | V3.3 | Change |
+|:-------|:----:|:----:|:------:|
+| RAM usage (Mode A/B) | ~4GB | ~40MB | **100x reduction** |
+| Retrieval channels | 5 | 6 | +Hopfield completion |
+| MCP tools (default) | 29 | 33 | +4 new (mesh set) |
+| CLI commands | 21 | 26 | +5 new |
+| Dashboard tabs | 17 | 17 | (H-22: Reward / Shadow / EvolutionCost tiles deferred to next cycle — data exposed via API today, see [DASHBOARD-COVERAGE.md](docs/DASHBOARD-COVERAGE.md)) |
+| API endpoints | 9 | 16 | +7 new |
+
+Embedding migration happens automatically when you switch modes — no manual steps needed.
+
+### Dashboard
+
+Three new tabs: **Memory Lifecycle** (retention curves, decay stats), **Compression** (storage savings, precision distribution), and **Patterns** (auto-learned soft prompts, consolidation history). Seven new API endpoints power the new views.
+
+### Enable V3.3 Features
+
+All new features default OFF. Zero breaking changes. Opt in when ready:
+
+```bash
+# Turn on adaptive memory lifecycle
+slm config set lifecycle.enabled true
+
+# Turn on smart compression
+slm config set quantization.enabled true
+
+# Turn on cognitive consolidation
+slm config set consolidation.cognitive.enabled true
+
+# Turn on pattern learning (soft prompts)
+slm config set soft_prompts.enabled true
+
+# Turn on Hopfield retrieval (6th channel)
+slm config set retrieval.hopfield.enabled true
+
+# Or enable everything at once
+slm config set v33_features.all true
+```
+
+**Fully backward compatible.** All existing MCP tools, CLI commands, and configs work unchanged. New tables are created automatically on first run. No migration needed.
+
+</details>
+
+---
+
 ## Why SuperLocalMemory?
 
 Every **hosted** AI memory platform — Mem0 Cloud, Zep Cloud, Letta Cloud, EverMemOS Cloud — sends your data to cloud LLMs by default. Their self-hosted variants exist (Mem0 OpenMemory, Letta self-hosted, Graphiti) but require Docker + a separate graph DB or Ollama config, and most still default to OpenAI until you flip env vars. After **August 2, 2026**, any of those cloud paths becomes a compliance problem under the EU AI Act.
