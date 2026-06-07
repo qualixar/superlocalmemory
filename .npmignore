@@ -19,6 +19,7 @@ ui-server.log
 
 # Private research & strategy (NEVER include)
 .backup/
+slm-time-papers/
 
 # Benchmarks (development only)
 benchmarks/

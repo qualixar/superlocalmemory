@@ -24,6 +24,9 @@ profiles.json
 # ==== BACKUP DIRECTORY (Internal/archived files) ====
 .backup/
 
+# ==== RESEARCH & IP (Never commit — contains LLDs, audits, handoffs) ====
+slm-time-papers/
+
 # ==== CLAUDE CODE CONFIG (Never commit) ====
 .claude/
 

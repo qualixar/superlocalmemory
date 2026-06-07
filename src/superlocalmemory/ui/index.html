@@ -1400,6 +1400,33 @@
     <script src="static/js/ng-skills.js?v=3411"></script>
     <script src="static/js/ng-mesh.js?v=345"></script>
     <script src="static/js/ng-shell.js?v=34421g"></script>
+    <!-- Optimize tab (v3.6.0) — runtime config for cache + compress + proxy -->
+    <script src="static/js/optimize.js?v=360"></script>
+
+    <!-- Aggressive compression warning modal (v3.6.0 M-03) -->
+    <div class="modal fade" id="optimizeAggressiveModal" tabindex="-1" aria-labelledby="optimizeAggressiveModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background:var(--ng-bg-elevated);border:1px solid var(--ng-status-warning-bg);">
+                <div class="modal-header" style="border-bottom:1px solid var(--ng-border-subtle);">
+                    <h5 class="modal-title" id="optimizeAggressiveModalLabel" style="color:var(--ng-status-warning);">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>Aggressive Compression Warning
+                    </h5>
+                </div>
+                <div class="modal-body" style="color:var(--ng-text-secondary);">
+                    <p><strong style="color:var(--ng-text-primary);">Aggressive mode may reduce output fidelity.</strong></p>
+                    <ul>
+                        <li>Do NOT use for: code generation, legal text, exact-output tasks, math.</li>
+                        <li>Safe for: summarization, brainstorming, open-ended chat.</li>
+                    </ul>
+                    <p class="mb-0">Switch to Aggressive mode anyway?</p>
+                </div>
+                <div class="modal-footer" style="border-top:1px solid var(--ng-border-subtle);">
+                    <button type="button" class="btn btn-outline-secondary" id="optimize-aggressive-cancel">Keep Safe Mode</button>
+                    <button type="button" class="btn btn-warning" id="optimize-aggressive-confirm">I Understand — Use Aggressive</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <footer style="text-align:center; padding:24px; border-top:1px solid var(--bs-border-color); font-size:0.8125rem;">
         <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:8px;">

@@ -55,6 +55,7 @@ dependencies = [
     "psutil==7.2.2",
     "structlog==25.5.0",
     "portalocker==3.2.0",
+    "cryptography==45.0.2",
     # Semantic search + cross-encoder reranker. Do NOT use
     # sentence-transformers[onnx] — its extras pull optimum which
     # overrides the sentence-transformers pin via transitive deps.
