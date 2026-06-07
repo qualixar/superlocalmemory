@@ -61,20 +61,25 @@ def wrap_agent(
     # Static mechanisms (settings-file, config-file) only write JSON — proxy
     # doesn't need to be alive yet.  env/subprocess mechanisms inject the proxy
     # URL into a live process, so full liveness is required there.
-    if mechanism in _STATIC_MECHANISMS:
+    # Static mechanisms (settings-file, config-file, print-only) write JSON and
+    # dry-run modes only print — neither needs the proxy to be alive right now.
+    # Only live subprocess launches (mechanism="env", dry_run=False) require the
+    # proxy to be running so the subprocess can actually connect.
+    needs_liveness = (mechanism not in _STATIC_MECHANISMS) and not dry_run
+    if needs_liveness:
+        if not ensure_proxy_running():
+            print(
+                f"[slm wrap] proxy is not enabled or not running — run "
+                f"`slm proxy` to start it, or `slm optimize on` first.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
         if not _proxy_configured():
             print(
                 f"[slm wrap] proxy is not enabled in optimize.json — set "
                 f"`proxy_enabled: true` (port 8765) and re-run, or run "
                 f"`slm optimize on` first.",
-                file=sys.stderr,
-            )
-            return 1
-    else:
-        if not ensure_proxy_running():
-            print(
-                f"[slm wrap] proxy is not enabled or not running — run "
-                f"`slm proxy` to start it, or `slm optimize on` first.",
                 file=sys.stderr,
             )
             return 1
