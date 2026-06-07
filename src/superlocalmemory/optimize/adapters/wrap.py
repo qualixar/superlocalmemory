@@ -130,6 +130,10 @@ def wrap_agent(
         if not config_path_str:
             print("[slm wrap] no config_path specified", file=sys.stderr)
             return 1
+        # dry_run: show intent without requiring VS Code to be installed.
+        if dry_run:
+            print(f"[slm wrap] would write {config_path_str} key={config_key} value={config_value}")
+            return 0
         if "{vscode_user_dir}" in config_path_str:
             vscode_dir = _vscode_user_dir()
             if vscode_dir is None:
@@ -138,9 +142,6 @@ def wrap_agent(
             path = Path(config_path_str.replace("{vscode_user_dir}", str(vscode_dir)))
         else:
             path = Path(config_path_str).expanduser()
-        if dry_run:
-            print(f"[slm wrap] would write {path} key={config_key} value={config_value}")
-            return 0
         existing = {}
         if path.exists():
             try:

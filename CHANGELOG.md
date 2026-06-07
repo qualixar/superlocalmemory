@@ -5,6 +5,19 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.2] - 2026-06-08 — wrap dry_run fix for config-file mechanism (macOS CI)
+
+### Fixed
+- **`slm wrap` `config-file` dry_run fails on machines without VS Code installed:** `wrap_agent()`
+  with `mechanism="config-file"` called `_vscode_user_dir()` before the `if dry_run: return 0`
+  guard. On CI runners (and any machine without VS Code), `_vscode_user_dir()` returns `None`,
+  causing the function to return 1 with "[slm wrap] VS Code user dir not found" even for
+  `dry_run=True` calls that never need the path to exist. Fix: moved `if dry_run: return 0`
+  to before the `_vscode_user_dir()` lookup — consistent with the same pattern already applied
+  to the `env` mechanism in v3.6.1.
+
+---
+
 ## [3.6.1] - 2026-06-07 — Optimize module fixes: proxy liveness probe, UI tab init, PyPI CI unblock
 
 ### Fixed
