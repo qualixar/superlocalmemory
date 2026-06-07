@@ -28,7 +28,16 @@ def test_get_engine_returns_light_capability():
     from superlocalmemory.mcp import server
     server.reset_engine()
 
-    engine = server.get_engine()
+    # V3.5.9: McpEmbedderProxy attaches when the daemon is reachable. The
+    # test must not depend on a real daemon being up or down — mock the
+    # proxy availability check to False so the LIGHT engine is truly
+    # embedder-free regardless of environment.
+    import unittest.mock as _mock
+    with _mock.patch(
+        "superlocalmemory.core.mcp_embedder_proxy.McpEmbedderProxy.is_available",
+        return_value=False,
+    ):
+        engine = server.get_engine()
     try:
         assert engine.capabilities is Capabilities.LIGHT
         assert engine._embedder is None
@@ -103,6 +112,13 @@ def test_subprocess_does_not_import_onnxruntime():
         "os.environ['SLM_DISABLE_WARMUP_SIDE_EFFECTS'] = '1'; "
         # Skip the top-level dep check in __init__.py that imports onnxruntime.
         "os.environ['SLM_SKIP_DEP_CHECK'] = '1'; "
+        # V3.5.9: McpEmbedderProxy attaches when daemon is reachable. Mock
+        # the availability check to False so the subprocess is hermetic
+        # regardless of whether the daemon happens to be running.
+        "import unittest.mock as _m; "
+        "_p = _m.patch('superlocalmemory.core.mcp_embedder_proxy.McpEmbedderProxy.is_available', "
+        "             return_value=False); "
+        "_p.start(); "
         "from superlocalmemory.mcp import server; "
         "engine = server.get_engine(); "
         "import sys; "

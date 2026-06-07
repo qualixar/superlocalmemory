@@ -1,0 +1,173 @@
+// SuperLocalMemory V3 — Optimize Tab
+// Part of Qualixar | https://superlocalmemory.com
+
+(function() {
+  'use strict';
+
+  var _pollTimer = null;
+
+  window.initOptimizeTab = function() {
+    _loadOptimizeConfig();
+    _loadSavings();
+    _startSavingsPolling();
+  };
+
+  function _startSavingsPolling() {
+    if (_pollTimer) clearInterval(_pollTimer);
+    _pollTimer = setInterval(_loadSavings, 10000);
+  }
+
+  async function _loadOptimizeConfig() {
+    try {
+      var resp = await fetch('/api/optimize/config');
+      if (!resp.ok) return;
+      var cfg = await resp.json();
+      _setToggle('opt-enabled', cfg.enabled);
+      _setToggle('opt-cache-enabled', cfg.cache_enabled);
+      _setToggle('opt-semantic-enabled', cfg.semantic_enabled);
+      _setToggle('opt-compress-enabled', cfg.compress_enabled);
+      _setSelect('opt-compress-mode', cfg.compress_mode);
+      _setToggle('opt-compress-code', cfg.compress_code);
+      _setToggle('opt-compress-prose', cfg.compress_prose);
+      _setToggle('opt-compress-ccr', cfg.compress_ccr);
+      _setToggle('opt-compress-align', cfg.compress_align);
+      var verEl = document.getElementById('opt-config-version');
+      if (verEl) verEl.textContent = cfg.config_version || '-';
+    } catch (e) {
+      console.log('Optimize config load error:', e);
+    }
+  }
+
+  async function _loadSavings() {
+    try {
+      var resp = await fetch('/api/optimize/savings');
+      if (!resp.ok) return;
+      var data = await resp.json();
+      var tokensSaved = (data.tokens_saved_input || 0) + (data.tokens_saved_output || 0) + (data.tokens_saved_compress || 0);
+      _setText('opt-tokens-saved', tokensSaved.toLocaleString());
+      var costSaved = data.cost_saved || {};
+      _setText('opt-usd-saved', '$' + (costSaved.usd || 0).toFixed(4));
+      _setText('opt-inr-saved', '\u20B9' + (costSaved.inr || 0).toFixed(2));
+      _setText('opt-hit-rate', ((data.hit_rate || 0) * 100).toFixed(1) + '%');
+      _setText('opt-cache-entries', data.entries || 0);
+      _setText('opt-cache-size', _formatBytes(data.cache_bytes || 0));
+      if (data.compress_ratio !== null && data.compress_ratio !== undefined) {
+        _setText('opt-compression-ratio', data.compress_ratio.toFixed(2));
+      }
+      _setText('opt-pricing-date', data.pricing_date || '-');
+      if (data.is_stale) {
+        _setText('opt-stale-warning', 'Pricing data may be outdated');
+      }
+    } catch (e) {
+      console.log('Savings load error:', e);
+    }
+  }
+
+  // Toggle handlers
+  document.addEventListener('change', function(e) {
+    var id = e.target.id;
+    if (!id || !id.startsWith('opt-')) return;
+    var val = e.target.checked;
+
+    var fieldMap = {
+      'opt-enabled': 'enabled',
+      'opt-cache-enabled': 'cache_enabled',
+      'opt-semantic-enabled': 'semantic_enabled',
+      'opt-compress-enabled': 'compress_enabled',
+      'opt-compress-code': 'compress_code',
+      'opt-compress-prose': 'compress_prose',
+      'opt-compress-ccr': 'compress_ccr',
+      'opt-compress-align': 'compress_align'
+    };
+
+    if (id === 'opt-compress-mode') {
+      var mode = e.target.value;
+      if (mode === 'aggressive') {
+        // M-03: Bootstrap modal replaces browser confirm() for aggressive warning
+        var modalEl = document.getElementById('optimizeAggressiveModal');
+        if (modalEl && typeof bootstrap !== 'undefined') {
+          var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+          modal.show();
+          var confirmBtn = document.getElementById('optimize-aggressive-confirm');
+          var cancelBtn = document.getElementById('optimize-aggressive-cancel');
+          if (confirmBtn) confirmBtn.onclick = function() { modal.hide(); _putConfig({compress_mode: 'aggressive'}); };
+          if (cancelBtn) cancelBtn.onclick = function() { modal.hide(); e.target.value = 'safe'; };
+          return;
+        }
+        // Fallback for environments without Bootstrap
+        if (!confirm('WARNING: Aggressive mode may reduce output fidelity.\n\nDo NOT use for: code generation, legal text, exact-output tasks, math.\nSafe for: summarization, brainstorming, open-ended chat.\n\nContinue?')) {
+          e.target.value = 'safe';
+          return;
+        }
+      }
+      _putConfig({compress_mode: mode});
+      return;
+    }
+
+    var field = fieldMap[id];
+    if (field) {
+      var body = {};
+      body[field] = val;
+      _putConfig(body);
+    }
+  });
+
+  async function _putConfig(body) {
+    try {
+      await fetch('/api/optimize/config', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      console.log('Config update error:', e);
+    }
+  }
+
+  // Copy proxy URL to clipboard
+  document.addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'opt-copy-url') {
+      var url = 'http://localhost:8765';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).catch(function() {
+          _fallbackCopy(url);
+        });
+      } else {
+        _fallbackCopy(url);
+      }
+      e.target.textContent = 'Copied!';
+      setTimeout(function() { e.target.textContent = 'Copy URL'; }, 2000);
+    }
+  });
+
+  function _fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  function _setToggle(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.checked = !!val;
+  }
+  function _setSelect(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.value = val || 'safe';
+  }
+  function _setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+  function _formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    var k = 1024;
+    var sizes = ['B', 'KB', 'MB', 'GB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+  }
+})();

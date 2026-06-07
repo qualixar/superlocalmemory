@@ -1,0 +1,11 @@
+Third-party components used by SLM v3.6 Optimize module:
+
+1. Headroom (Apache-2.0)
+   Copyright (c) 2024 Headroom contributors
+   Source: https://github.com/headroom/headroom
+   License: Apache-2.0
+
+2. LLMLingua-2 (MIT)
+   Copyright (c) 2024 Microsoft Corporation
+   Source: https://github.com/microsoft/LLMLingua
+   License: MIT

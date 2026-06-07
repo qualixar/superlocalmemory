@@ -824,7 +824,75 @@ async def lifespan(application: FastAPI):
         )
     logger.info(_ready_msg)
 
+    # Start optimize proxy httpx client if mounted
+    try:
+        _opt_proxy = getattr(application.state, "optimize_proxy", None)
+        if _opt_proxy is not None:
+            await _opt_proxy.startup()
+    except Exception as _exc:  # pragma: no cover — defensive
+        logger.warning("optimize_proxy startup failed (non-fatal): %s", _exc)
+
+    # V3.6: Mount optimize API routes + restore persisted metrics + start flush loop
+    try:
+        from superlocalmemory.server.routes.optimize import router as optimize_router
+        from superlocalmemory.optimize.metrics.counters import MetricsCollector
+        from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
+        from superlocalmemory.optimize.storage.db import CacheDB
+        application.include_router(optimize_router)
+
+        # Restore persisted metrics counters on startup
+        MetricsPersistence().load(MetricsCollector.get_instance(), CacheDB())
+
+        # Periodic flush — every 60s (OPT-005: guard + task ref for shutdown)
+        _metrics_flush_task = getattr(application.state, "_optimize_flush_task", None)
+        if _metrics_flush_task is None or _metrics_flush_task.done():
+            async def _metrics_flush_loop():
+                while True:
+                    await asyncio.sleep(60)
+                    try:
+                        MetricsPersistence().flush(
+                            MetricsCollector.get_instance(), CacheDB()
+                        )
+                    except Exception as e:
+                        logger.warning("metrics flush error: %s", e)
+            application.state._optimize_flush_task = asyncio.create_task(
+                _metrics_flush_loop()
+            )
+    except Exception as e:
+        logger.warning("optimize module not available: %s", e)
+
     yield
+
+    # Cancel optimize metrics flush loop + run final flush before shutdown
+    try:
+        _flush_task = getattr(application.state, "_optimize_flush_task", None)
+        if _flush_task is not None and not _flush_task.done():
+            _flush_task.cancel()
+            try:
+                await _flush_task
+            except asyncio.CancelledError:
+                pass
+        # Final flush to persist the last window (H-04: use singleton)
+        try:
+            from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
+            from superlocalmemory.optimize.metrics.counters import MetricsCollector
+            from superlocalmemory.optimize.storage.db import CacheDB as _FinalCacheDB
+            MetricsPersistence().flush(
+                MetricsCollector.get_instance(),
+                _FinalCacheDB.get_default(),
+            )
+        except Exception:
+            pass
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    # Shutdown optimize proxy httpx client (symmetric with startup)
+    try:
+        _opt_proxy = getattr(application.state, "optimize_proxy", None)
+        if _opt_proxy is not None:
+            await _opt_proxy.shutdown()
+    except Exception as _exc:  # pragma: no cover — defensive
+        logger.warning("optimize_proxy shutdown failed (non-fatal): %s", _exc)
 
     # S9-W4 C2: symmetric shutdown. Prior version only flushed the
     # observe-buffer + signal_worker + engine. The following long-lived
@@ -1062,6 +1130,33 @@ def create_app() -> FastAPI:
     except ImportError as exc:  # pragma: no cover — defensive wiring
         logger.warning("token router not wired: %s", exc)
 
+    # ── Optimize proxy (optional, fail-open) ──────────────────────────────
+    # Mounts on the existing daemon port 8765. Proxy routes carry provider
+    # API keys (x-api-key, Authorization), NOT the SLM API key. Auth-exempt
+    # path prefixes are configured below in the auth_middleware block.
+    try:
+        from superlocalmemory.optimize.config.store import ConfigStore
+        from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
+
+        _opt_cfg = ConfigStore().get()
+        if _opt_cfg.proxy_enabled:
+            _proxy = ProxyApp(config=_opt_cfg)
+            application.state.optimize_proxy = _proxy
+            _proxy_router = build_proxy_router(_proxy)
+            # prefix="" — proxy claims /v1/*, /v1beta/* directly.
+            application.include_router(_proxy_router, prefix="")
+            logger.info(
+                "optimize.proxy mounted on /v1/*, /v1beta/*  port=8765"
+            )
+        else:
+            application.state.optimize_proxy = None
+    except ImportError:
+        application.state.optimize_proxy = None
+        logger.debug("optimize.proxy not installed — skipping")
+    except Exception as _exc:  # pragma: no cover — defensive
+        application.state.optimize_proxy = None
+        logger.warning("optimize.proxy mount failed (non-fatal): %s", _exc)
+
     # -- Daemon-specific routes --
     _register_daemon_routes(application)
 
@@ -1113,8 +1208,18 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     try:
         from superlocalmemory.infra.auth_middleware import check_api_key
 
+        # Auth-exempt path prefixes — proxy routes carry provider API keys
+        # (x-api-key for Anthropic, Authorization: Bearer for OpenAI, x-goog-api-key
+        # for Gemini), never X-SLM-API-Key. Verified: auth_middleware.py:50-82
+        # returns False for POST when api_key file exists and X-SLM-API-Key
+        # is absent.
+        _AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/")
+
         @application.middleware("http")
         async def auth_middleware(request, call_next):
+            # Exempt proxy paths — LLM clients carry provider keys, not SLM keys.
+            if request.url.path.startswith(_AUTH_EXEMPT_PREFIXES):
+                return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             headers = dict(request.headers)
             if not check_api_key(headers, is_write=is_write):

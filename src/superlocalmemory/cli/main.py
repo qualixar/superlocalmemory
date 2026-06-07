@@ -240,6 +240,28 @@ def main() -> None:
         help="Run only the fast checks (deps + config); skip daemon/embedding probes",
     )
 
+    # LLD-06 §6.6 — `slm wrap <agent> [args...]` activates the Optimize
+    # proxy for a specific agent. Supported agents: claude, claude-settings,
+    # codex, aider, cline, generic, etc. See optimize.adapters._agent_registry.
+    wrap_p = sub.add_parser(
+        "wrap",
+        help="Activate Optimize proxy for a specific agent (claude, codex, aider, ...)",
+    )
+    wrap_p.add_argument(
+        "--list", action="store_true",
+        help="List all registered agents and their mechanisms",
+    )
+    wrap_p.add_argument(
+        "--persistent", action="store_true",
+        help="Persist env vars to the agent's config file (~/.claude/settings.json) instead of launching",
+    )
+    wrap_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Print the action that would be taken without executing it",
+    )
+    wrap_p.add_argument("agent", nargs="?", default=None, help="Agent key (run `slm wrap --list` to see all)")
+    wrap_p.add_argument("agent_args", nargs=argparse.REMAINDER, help="Args passed to the agent binary")
+
     # -- Services ------------------------------------------------------
     sub.add_parser("mcp", help="Start MCP server (stdio transport for IDE integration)")
     sub.add_parser("warmup", help="Pre-download embedding model (~500MB, one-time)")
@@ -449,6 +471,95 @@ def main() -> None:
         help="Rotate the SLM install token (run `slm restart` afterwards)",
     )
 
+    # ---- SLM v3.6 Optimize subcommands (additive, never modify above) ----
+
+    # slm optimize status|on|off|savings
+    opt_p = sub.add_parser("optimize", help="Optimize module control (cache + compress)")
+    opt_sub = opt_p.add_subparsers(dest="opt_command", title="optimize subcommands")
+    opt_sub.add_parser("status", help="Show Optimize status")
+    opt_sub.add_parser("on", help="Enable cache + compress")
+    opt_sub.add_parser("off", help="Disable cache + compress")
+    savings_p = opt_sub.add_parser("savings", help="Token/cost savings report")
+    savings_p.add_argument("--since", type=int, default=7, help="Days to look back (default 7)")
+    savings_p.add_argument("--provider", default=None,
+                           choices=["anthropic", "openai", "gemini"],
+                           help="Filter by provider")
+    for _sp in opt_sub.choices.values():
+        if not any(a.option_strings == ["--json"] for a in _sp._actions):
+            _sp.add_argument("--json", action="store_true",
+                             help="Output structured JSON (agent-native)")
+
+    # slm cache status|clear|invalidate|ttl|semantic
+    cache_p = sub.add_parser("cache", help="Cache control (TTL, clear, invalidate, semantic)")
+    cache_sub = cache_p.add_subparsers(dest="cache_command", title="cache subcommands")
+    cache_sub.add_parser("status", help="Show cache state")
+    cache_sub.add_parser("clear", help="Delete all entries for tenant")
+    cache_inv_p = cache_sub.add_parser("invalidate", help="Delete entries by tag")
+    cache_inv_p.add_argument("--tag", required=True, help="Tag string to match")
+    cache_ttl_p = cache_sub.add_parser("ttl", help="Set cache TTL in seconds")
+    cache_ttl_p.add_argument("--set", dest="ttl_set", type=int, default=None,
+                             help="Exact-cache TTL (seconds, >0)")
+    cache_ttl_p.add_argument("--semantic", dest="ttl_semantic", type=int, default=None,
+                             help="Semantic-cache TTL (seconds, >0)")
+    cache_sem_p = cache_sub.add_parser("semantic", help="Enable/disable semantic cache")
+    cache_sem_p.add_argument("semantic_value", choices=["on", "off"], help="on or off")
+    for _sp in cache_sub.choices.values():
+        if not any(a.option_strings == ["--json"] for a in _sp._actions):
+            _sp.add_argument("--json", action="store_true",
+                             help="Output structured JSON (agent-native)")
+        if not any(a.option_strings == ["--tenant"] for a in _sp._actions):
+            _sp.add_argument("--tenant", default="default", help="Tenant ID (default: 'default')")
+
+    # slm compress status|mode|code|prose|ccr
+    compress_p = sub.add_parser("compress", help="Compression control (mode, code, prose, CCR)")
+    comp_sub = compress_p.add_subparsers(dest="compress_command", title="compress subcommands")
+    comp_sub.add_parser("status", help="Show compression state")
+    comp_mode_p = comp_sub.add_parser("mode", help="Set compression mode")
+    comp_mode_p.add_argument("mode_value", choices=["safe", "aggressive"],
+                             help="safe (default) or aggressive")
+    comp_code_p = comp_sub.add_parser("code", help="Enable/disable code compression")
+    comp_code_p.add_argument("code_value", choices=["on", "off"], help="on or off")
+    comp_prose_p = comp_sub.add_parser("prose", help="Enable/disable prose compression")
+    comp_prose_p.add_argument("prose_value", choices=["on", "off"], help="on or off")
+    comp_ccr_p = comp_sub.add_parser("ccr", help="Enable/disable CCR")
+    comp_ccr_p.add_argument("ccr_value", choices=["on", "off"], help="on or off")
+    comp_align_p = comp_sub.add_parser("align", help="Enable/disable alignment compression")
+    comp_align_p.add_argument("align_value", choices=["on", "off"], help="on or off")
+    for _sp in comp_sub.choices.values():
+        if not any(a.option_strings == ["--json"] for a in _sp._actions):
+            _sp.add_argument("--json", action="store_true",
+                             help="Output structured JSON (agent-native)")
+
+    # slm proxy
+    proxy_p = sub.add_parser("proxy", help="Start SLM optimization proxy (Anthropic + OpenAI)")
+    proxy_p.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
+    proxy_p.add_argument("--provider", default="anthropic",
+                         choices=["anthropic", "openai", "gemini"],
+                         help="Target provider (default: anthropic)")
+    proxy_p.add_argument("--no-compress", action="store_true", dest="no_compress",
+                         help="Disable compression for this session")
+    proxy_p.add_argument("--semantic", action="store_true",
+                         help="Enable semantic cache for this session")
+    proxy_p.add_argument("--json", action="store_true",
+                         help="Output structured JSON (agent-native)")
+
+    # slm help-optimize
+    help_opt_p = sub.add_parser(
+        "help-optimize",
+        help="Full Optimize reference: subcommands + agent recipes + safety notes",
+    )
+    help_opt_p.add_argument(
+        "topic", nargs="?", default=None,
+        choices=["cache", "compress", "optimize", "proxy", "agents", "safety"],
+        help="Topic to display (default: all)",
+    )
+    help_opt_p.add_argument(
+        "--no-pager", action="store_true", dest="no_pager", default=False,
+        help="Print to stdout instead of piping through a pager",
+    )
+
+    # ---- end SLM v3.6 Optimize subcommands ----
+
     args = parser.parse_args()
 
     if not args.command:
@@ -468,6 +579,13 @@ def main() -> None:
         # v3.4.22 escape hatches — never auto-start the daemon on these.
         "disable", "enable", "clear-cache", "reconfigure", "benchmark",
         "rotate-token",
+        # LLD-06 — `slm wrap` may launch the agent binary directly without
+        # needing the daemon running (the agent will start the daemon on
+        # first LLM call, or the wrap command can be --dry-run).
+        "wrap",
+        # V3.6 Optimize commands that are config read/write only (no daemon needed)
+        "optimize", "cache", "compress", "help-optimize",
+        # NOTE: "proxy" NOT here — proxy needs daemon running
     }
     if args.command not in _NO_DAEMON_COMMANDS:
         try:

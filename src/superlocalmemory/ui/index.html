@@ -1233,6 +1233,77 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Optimize Tab -->
+            <div class="tab-pane fade" id="optimize-pane">
+                <div class="card mb-3">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0"><i class="bi bi-speedometer"></i> Optimize Module</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <h6>Controls</h6>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-enabled">
+                                    <label class="form-check-label" for="opt-enabled">Optimize Enabled</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-cache-enabled">
+                                    <label class="form-check-label" for="opt-cache-enabled">Cache Enabled</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-semantic-enabled">
+                                    <label class="form-check-label" for="opt-semantic-enabled">Semantic Cache</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-compress-enabled">
+                                    <label class="form-check-label" for="opt-compress-enabled">Compression</label>
+                                </div>
+                                <div class="mb-2">
+                                    <label for="opt-compress-mode" class="form-label">Compression Mode</label>
+                                    <select class="form-select form-select-sm" id="opt-compress-mode">
+                                        <option value="safe">Safe</option>
+                                        <option value="aggressive">Aggressive</option>
+                                    </select>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-compress-code">
+                                    <label class="form-check-label" for="opt-compress-code">Code Compression</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-compress-prose">
+                                    <label class="form-check-label" for="opt-compress-prose">Prose Compression</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-compress-ccr">
+                                    <label class="form-check-label" for="opt-compress-ccr">CCR</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-compress-align">
+                                    <label class="form-check-label" for="opt-compress-align">Alignment Compression</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Savings</h6>
+                                <table class="table table-sm">
+                                    <tr><td>Tokens Saved</td><td id="opt-tokens-saved">-</td></tr>
+                                    <tr><td>USD Saved</td><td id="opt-usd-saved">-</td></tr>
+                                    <tr><td>INR Saved</td><td id="opt-inr-saved">-</td></tr>
+                                    <tr><td>Hit Rate</td><td id="opt-hit-rate">-</td></tr>
+                                    <tr><td>Cache Entries</td><td id="opt-cache-entries">-</td></tr>
+                                    <tr><td>Cache Size</td><td id="opt-cache-size">-</td></tr>
+                                    <tr><td>Compression Ratio</td><td id="opt-compression-ratio">-</td></tr>
+                                    <tr><td>Pricing Date</td><td id="opt-pricing-date">-</td></tr>
+                                </table>
+                                <div class="small text-muted">Config version: <span id="opt-config-version">-</span></div>
+                                <div id="opt-stale-warning" class="text-warning small mt-1"></div>
+                                <button class="btn btn-sm btn-outline-primary mt-2" id="opt-copy-url">Copy URL</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

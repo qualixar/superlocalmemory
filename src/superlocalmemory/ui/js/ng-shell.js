@@ -29,7 +29,8 @@
     {
       label: 'Config',
       items: [
-        { id: 'settings-pane', icon: 'bi-gear', text: 'Settings' }
+        { id: 'settings-pane', icon: 'bi-gear', text: 'Settings' },
+        { id: 'optimize-pane', icon: 'bi-speedometer', text: 'Optimize' }
       ]
     }
   ];

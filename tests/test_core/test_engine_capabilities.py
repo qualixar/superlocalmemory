@@ -28,9 +28,20 @@ def mode_a_config(tmp_path):
 
 
 class TestLightEngine:
-    def test_light_engine_does_not_load_embedder(self, mode_a_config):
-        engine = MemoryEngine(mode_a_config, capabilities=Capabilities.LIGHT)
-        engine.initialize()
+    def test_light_engine_does_not_load_embedder(self, mode_a_config, monkeypatch):
+        """LIGHT mode must not load a heavy embedder.
+
+        V3.5.9 added a McpEmbedderProxy that attaches when the daemon is
+        reachable. The test must NOT depend on a real daemon being up or
+        down — mock the proxy availability check to False.
+        """
+        import unittest.mock as _mock
+        with _mock.patch(
+            "superlocalmemory.core.mcp_embedder_proxy.McpEmbedderProxy.is_available",
+            return_value=False,
+        ):
+            engine = MemoryEngine(mode_a_config, capabilities=Capabilities.LIGHT)
+            engine.initialize()
         assert engine._embedder is None
         assert engine._retrieval_engine is None
         assert engine._llm is None

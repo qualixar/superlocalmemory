@@ -64,6 +64,36 @@ def _cmd_escape_rotate_token(args: Namespace) -> None:
     cmd_rotate_token(args)
 
 
+# ---- SLM v3.6 Optimize dispatch functions (additive) ----
+
+def _cmd_optimize(args: Namespace) -> None:
+    from superlocalmemory.cli.optimize_cmd import cmd_optimize
+    cmd_optimize(args)
+
+
+def _cmd_cache(args: Namespace) -> None:
+    from superlocalmemory.cli.cache_cmd import cmd_cache
+    cmd_cache(args)
+
+
+def _cmd_compress(args: Namespace) -> None:
+    from superlocalmemory.cli.compress_cmd import cmd_compress
+    cmd_compress(args)
+
+
+def _cmd_proxy(args: Namespace) -> None:
+    from superlocalmemory.cli.proxy_cmd import cmd_proxy
+    cmd_proxy(args)
+
+
+def _cmd_help_optimize(args: Namespace) -> None:
+    from superlocalmemory.cli.help_cmd import cmd_help_optimize
+    cmd_help_optimize(args)
+
+
+# ---- end SLM v3.6 Optimize dispatch functions ----
+
+
 def dispatch(args: Namespace) -> None:
     """Route CLI command to the appropriate handler."""
     # Auto-install/upgrade hooks on version change (single file read, ~0.1ms)
@@ -126,6 +156,14 @@ def dispatch(args: Namespace) -> None:
         "reconfigure": _cmd_escape_reconfigure,
         "benchmark": _cmd_escape_benchmark,
         "rotate-token": _cmd_escape_rotate_token,
+        # LLD-06 — `slm wrap <agent> [args...]` activates the Optimize proxy.
+        "wrap": _cmd_wrap,
+        # V3.6 Optimize subcommands (additive)
+        "optimize": _cmd_optimize,
+        "cache": _cmd_cache,
+        "compress": _cmd_compress,
+        "proxy": _cmd_proxy,
+        "help-optimize": _cmd_help_optimize,
     }
     handler = handlers.get(args.command)
     if handler:
@@ -133,6 +171,39 @@ def dispatch(args: Namespace) -> None:
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
+
+
+def _cmd_wrap(args: Namespace) -> None:
+    """LLD-06 §6.6 — `slm wrap <agent> [args...]` activates the Optimize proxy.
+
+    Routes the Optimize layer's per-agent launch/activation. See
+    optimize.adapters._agent_registry for the full agent table.
+    """
+    if getattr(args, "list", False):
+        from superlocalmemory.optimize.adapters.wrap import list_agents
+        from superlocalmemory.optimize.adapters._agent_registry import AGENT_REGISTRY
+        print("Registered agents for `slm wrap`:")
+        for key in list_agents():
+            spec = AGENT_REGISTRY.get(key, {})
+            mech = spec.get("mechanism", "unknown")
+            print(f"  {key:20s}  mechanism={mech}")
+        return
+
+    agent = getattr(args, "agent", None)
+    if not agent:
+        print("Usage: slm wrap <agent> [args...]\n"
+              "       slm wrap --list\n"
+              "       slm wrap --help")
+        sys.exit(2)
+
+    agent_args = list(getattr(args, "agent_args", []) or [])
+    persistent = bool(getattr(args, "persistent", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+
+    from superlocalmemory.optimize.adapters.wrap import wrap_agent
+    rc = wrap_agent(agent, agent_args, persistent=persistent, dry_run=dry_run)
+    if rc:
+        sys.exit(rc)
 
 
 # -- Daemon serve mode (V3.3.21) ------------------------------------------

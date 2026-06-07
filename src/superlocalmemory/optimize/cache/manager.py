@@ -1,0 +1,452 @@
+"""manager.py — CacheManager orchestrator (singleton, fail-open, stampede-shielded)."""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Callable
+
+from superlocalmemory.optimize.cache.exact import ExactCache
+from superlocalmemory.optimize.cache.invalidation import InvalidationEngine
+from superlocalmemory.optimize.cache.key_builder import CacheConfig, KeyBuilder
+from superlocalmemory.optimize.cache.stampede import StampedeShield
+from superlocalmemory.optimize.metrics.counters import MetricsCollector
+from superlocalmemory.optimize.proxy.lifecycle import (
+    CachedResponse,
+    ProxyRequest,
+    ProviderResponse,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# SemanticTier interface seam
+# ---------------------------------------------------------------------------
+
+class SemanticTier(ABC):
+    """Abstract interface for the semantic cache tier (Phase 3).
+
+    INTERFACE-CONTRACT §4 conformance: lookup/learn/index_entry/is_enabled.
+    Phase 3 (LLD-03) implements VCacheSemantic.
+    """
+
+    @abstractmethod
+    def lookup(self, req, tenant_id: str, embed):
+        """Return semantically similar cached response or None. Fail-open."""
+        ...
+
+    @abstractmethod
+    def learn(self, entry_id: str, similarity: float, was_correct: bool) -> None:
+        """Update per-item MLE model with feedback. Fail-open."""
+        ...
+
+    @abstractmethod
+    def index_entry(
+        self, req, tenant_id: str, embed, resp
+    ) -> None:
+        """Index a new response vector in the ANN index. Fail-open.
+
+        INTERFACE-CONTRACT v2 §4: canonical signature
+        (self, req, tenant_id, embed, resp).
+        """
+        ...
+
+    @abstractmethod
+    def is_enabled(self) -> bool: ...
+
+
+class NoOpSemantic(SemanticTier):
+    """Phase 1 placeholder (also used when semantic_enabled=False)."""
+
+    def lookup(self, req, tenant_id: str, embed):
+        return None
+
+    def learn(self, entry_id: str, similarity: float, was_correct: bool) -> None:
+        return None
+
+    def index_entry(self, req, tenant_id: str, embed, resp) -> None:
+        return None
+
+    def is_enabled(self) -> bool:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+class CacheMetrics:
+    """Thread-safe counters. A-20 fix: lock guards the two-counter read."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.exact_hits: int = 0
+        self.exact_misses: int = 0
+        self.semantic_hits: int = 0
+        self.semantic_misses: int = 0
+        self.sets: int = 0
+        self.skipped_non_cacheable: int = 0
+        self.invalidations: int = 0
+        self.stampede_contentions: int = 0
+        self.errors: int = 0
+
+    def hit_rate(self) -> float:
+        with self._lock:
+            total = self.exact_hits + self.exact_misses
+            return self.exact_hits / total if total > 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# CacheManager
+# ---------------------------------------------------------------------------
+
+class CacheManager:
+    """Central orchestrator for the SLM Optimize exact cache."""
+
+    _instance: "CacheManager | None" = None
+    _instance_lock: threading.Lock = threading.Lock()
+
+    def __init__(
+        self,
+        db: Any,
+        config: CacheConfig | None = None,
+        semantic_tier: SemanticTier | None = None,
+    ) -> None:
+        self._db = db
+        self._config = config or CacheConfig()
+        self._key_builder = KeyBuilder(self._config)
+        self._exact = ExactCache(db, self._config)
+        self._stampede = StampedeShield(timeout=self._config.stampede_timeout_seconds)
+        self._invalidation = InvalidationEngine(db)
+        self._semantic = semantic_tier or NoOpSemantic()
+        self._metrics = CacheMetrics()
+
+    @classmethod
+    def get_instance(cls) -> "CacheManager":
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    from superlocalmemory.optimize.storage.db import CacheDB as _CacheDB
+                    _db = _CacheDB.get_default()
+                    cls._instance = cls(db=_db)
+        return cls._instance
+
+    @classmethod
+    def set_instance(cls, instance: "CacheManager") -> None:
+        with cls._instance_lock:
+            cls._instance = instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset the singleton (testing only)."""
+        with cls._instance_lock:
+            if cls._instance is not None:
+                try:
+                    cls._instance._db.close()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            cls._instance = None
+
+    # ---- INTERFACE-CONTRACT §4 public methods ----
+
+    def build_key(self, req: Any, tenant_id: str) -> str | None:
+        """Build a deterministic cache key for req + tenant_id."""
+        if isinstance(req, dict):
+            model_id = req.get("model", "")
+            messages = req.get("messages", []) or []
+            params = req.get("params", {}) or {}
+            system = req.get("system", "") or ""
+        else:
+            model_id = getattr(req, "model_id", "") or ""
+            messages = getattr(req, "messages", []) or []
+            params = getattr(req, "params", {}) or {}
+            system = getattr(req, "system", "") or ""
+        return self._key_builder.build(
+            tenant_id=tenant_id,
+            model_id=model_id,
+            model_version="",
+            system=system,
+            messages=messages,
+            raw_params=params,
+        )
+
+    def get(self, req: Any, tenant_id: str) -> "CachedResponse | None":
+        """CacheHook.check() entry point."""
+        key = self.build_key(req, tenant_id)
+        if key is None:
+            return None
+        row = self._exact.get(key, tenant_id)
+        if row is not None:
+            self._metrics.exact_hits += 1
+            return CachedResponse(
+                hit=True,
+                data=json_dumps_bytes(row),
+                cache_key=key,
+                ttl_seconds=0,
+            )
+        self._metrics.exact_misses += 1
+        return None
+
+    def set(self, req: Any, resp: Any, tenant_id: str) -> None:
+        """CacheHook.store() entry point."""
+        import json as _json
+        key = self.build_key(req, tenant_id)
+        if key is None:
+            return
+        if isinstance(req, dict):
+            model_id = req.get("model", "")
+        else:
+            model_id = getattr(req, "model_id", "") or ""
+        tags = [
+            self._key_builder.model_tag(model_id),
+            self._key_builder.tenant_tag(tenant_id),
+        ]
+        # resp may be ProviderResponse (proxy) or dict (manager)
+        if isinstance(resp, dict):
+            response_dict = resp
+        else:
+            response_dict = _json.loads(resp.body_bytes) if hasattr(resp, "body_bytes") else {}
+        self._exact.set(key, tenant_id, response_dict, tags, model_id)
+        self._invalidation.register(key, tenant_id, tags)
+        self._metrics.sets += 1
+
+    # ---- CacheHook protocol implementation (INTERFACE-CONTRACT §3) ----
+
+    def check(self, req: ProxyRequest) -> "CachedResponse | None":
+        """CacheHook.check() — look up by ProxyRequest; fail-open on error."""
+        try:
+            return self.get(req, tenant_id="default")
+        except Exception as exc:
+            logger.warning("CacheManager.check raised (fail-open): %s", exc)
+            return None
+
+    def store(self, req: ProxyRequest, resp: ProviderResponse) -> None:
+        """CacheHook.store() — persist response; fail-open on error."""
+        try:
+            self.set(req, resp, tenant_id="default")
+        except Exception as exc:
+            logger.warning("CacheManager.store raised (fail-open): %s", exc)
+
+    def on_hit(self, req: ProxyRequest, resp: bytes, tokens_saved: int) -> None:
+        """CacheHook.on_hit() — forward token savings to MetricsCollector.
+        
+        Contract §7: cache skip saves BOTH input+output tokens (whole call avoided).
+        tokens_saved = input tokens saved (from request).
+        Output tokens estimated from response body size (~4 bytes per token).
+        """
+        output_tokens = 0
+        if resp:
+            # Rough estimate: 4 bytes per token for English text
+            output_tokens = len(resp) // 4
+        MetricsCollector.get_instance().on_hit(
+            tokens_saved_input=tokens_saved,
+            tokens_saved_output=output_tokens,
+        )
+
+    def on_miss(self, req: ProxyRequest) -> None:
+        """CacheHook.on_miss() — forward miss event to MetricsCollector."""
+        MetricsCollector.get_instance().on_miss()
+
+    def set_semantic_tier(self, tier: SemanticTier) -> None:
+        self._semantic = tier
+
+    # ---- core request path ----
+
+    def get_or_call(
+        self,
+        *,
+        tenant_id: str,
+        model_id: str,
+        model_version: str,
+        system: str,
+        messages: list,
+        raw_params: dict,
+        upstream_fn: Callable[[], dict],
+        http_status: int = 200,
+        ttl: int | None = None,
+        extra_tags: list | None = None,
+    ) -> dict:
+        from types import SimpleNamespace as _NS
+        _req = _NS(
+            model_id=model_id, model_version=model_version,
+            system=system, messages=messages, params=raw_params,
+        )
+        try:
+            return self._get_or_call_inner(
+                req=_req,
+                tenant_id=tenant_id, model_id=model_id, model_version=model_version,
+                system=system, messages=messages, raw_params=raw_params,
+                upstream_fn=upstream_fn, http_status=http_status,
+                ttl=ttl, extra_tags=extra_tags or [],
+            )
+        except Exception as exc:
+            logger.error(
+                "CacheManager.get_or_call failed — falling through to upstream: %s", exc,
+                exc_info=True,
+            )
+            self._metrics.errors += 1
+            return upstream_fn()
+
+    def _get_or_call_inner(
+        self,
+        *,
+        req: Any,
+        tenant_id: str,
+        model_id: str,
+        model_version: str,
+        system: str,
+        messages: list,
+        raw_params: dict,
+        upstream_fn: Callable[[], dict],
+        http_status: int,
+        ttl: int | None,
+        extra_tags: list,
+    ) -> dict:
+        key = self._key_builder.build(
+            tenant_id=tenant_id, model_id=model_id, model_version=model_version,
+            system=system, messages=messages, raw_params=raw_params,
+        )
+        if key is None:
+            self._metrics.exact_misses += 1
+            return upstream_fn()
+
+        cached = self._exact.get(key, tenant_id)
+        if cached is not None:
+            self._metrics.exact_hits += 1
+            return cached
+
+        if self._semantic.is_enabled():
+            # vCache path: exact miss → optional semantic hit
+            # (CacheManager does not pre-embed; the semantic tier embeds
+            # lazily via its injected EmbeddingService. The VCache lookup
+            # returns a response dict or None on miss/explore.)
+            try:
+                sem_hit = self._semantic.lookup(req, tenant_id, None)
+                if sem_hit is not None:
+                    self._metrics.semantic_hits += 1
+                    return sem_hit
+            except Exception as exc:
+                logger.warning("SemanticTier.lookup raised (fail-open): %s", exc)
+            self._metrics.semantic_misses += 1
+
+        self._metrics.exact_misses += 1
+
+        with self._stampede.lock(key):
+            cached = self._exact.get(key, tenant_id)
+            if cached is not None:
+                self._metrics.stampede_contentions += 1
+                return cached
+
+            response = upstream_fn()
+
+            if 200 <= http_status < 300:
+                tags = [
+                    self._key_builder.model_tag(model_id),
+                    self._key_builder.tenant_tag(tenant_id),
+                    *extra_tags,
+                ]
+                stored = self._exact.set(key, tenant_id, response, tags, model_id, ttl)
+                if stored:
+                    self._invalidation.register(key, tenant_id, tags)
+                    self._metrics.sets += 1
+                else:
+                    self._metrics.skipped_non_cacheable += 1
+
+        return response
+
+    # ---- tenant scoping ----
+
+    def for_tenant(self, tenant_id: str) -> "_TenantScopedManager":
+        return _TenantScopedManager(manager=self, tenant_id=tenant_id)
+
+    # ---- invalidation API ----
+
+    def invalidate_tag(self, tag: str) -> int:
+        count = self._invalidation.invalidate_tag(tag)
+        self._metrics.invalidations += count
+        return count
+
+    def invalidate_by_tag(self, tag: str) -> int:
+        """INTERFACE-CONTRACT v2 §4: delegate to invalidation engine by tag."""
+        return self.invalidate_tag(tag)
+
+    def invalidate_model(self, model_id: str) -> int:
+        return self.invalidate_tag(f"model:{model_id}")
+
+    def invalidate_tenant(self, tenant_id: str) -> int:
+        return self.invalidate_tag(f"tenant:{tenant_id}")
+
+    @property
+    def metrics(self) -> CacheMetrics:
+        return self._metrics
+
+
+class _TenantScopedManager:
+    """Thin view over CacheManager with tenant_id pre-filled."""
+
+    def __init__(self, manager: CacheManager, tenant_id: str) -> None:
+        self._m = manager
+        self._tenant_id = tenant_id
+
+    def get_or_call(
+        self,
+        *,
+        model_id: str,
+        model_version: str,
+        system: str,
+        messages: list,
+        raw_params: dict,
+        upstream_fn: Callable[[], dict],
+        http_status: int = 200,
+        ttl: int | None = None,
+        extra_tags: list | None = None,
+    ) -> dict:
+        return self._m.get_or_call(
+            tenant_id=self._tenant_id,
+            model_id=model_id,
+            model_version=model_version,
+            system=system,
+            messages=messages,
+            raw_params=raw_params,
+            upstream_fn=upstream_fn,
+            http_status=http_status,
+            ttl=ttl,
+            extra_tags=extra_tags,
+        )
+
+    def get(self, key: str) -> bytes | None:
+        row = self._m._exact.get(key, self._tenant_id)
+        if row is None:
+            return None
+        import json as _json
+        return _json.dumps(row).encode("utf-8")
+
+    def set(self, key: str, value: bytes) -> None:
+        # Adapter-friendly write path: not used in Phase 1.
+        import json as _json
+        try:
+            decoded = _json.loads(value.decode("utf-8"))
+        except Exception:
+            return
+        self._m._exact.set(
+            key, self._tenant_id, decoded, [], "", None,
+        )
+
+    def invalidate_all(self) -> int:
+        return self._m.invalidate_tenant(self._tenant_id)
+
+    @property
+    def metrics(self) -> CacheMetrics:
+        return self._m.metrics
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def json_dumps_bytes(d: dict) -> bytes:
+    import json as _json
+    return _json.dumps(d, separators=(",", ":"), default=str).encode("utf-8")
