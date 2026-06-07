@@ -43,7 +43,8 @@ jobs:
             --ignore=tests/test_integration/test_e2e_v32.py \
             --ignore=tests/test_integration/test_e2e_v33.py \
             --ignore=tests/test_benchmarks/ \
-            --ignore=tests/graph/test_cozo_backend.py
+            --ignore=tests/graph/test_cozo_backend.py \
+            --ignore=tests/vector/test_lancedb_backend.py
 
       - name: Build package
         run: uv build

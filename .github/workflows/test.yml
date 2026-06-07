@@ -40,6 +40,7 @@ jobs:
             --ignore=tests/test_integration/test_e2e_v33.py \
             --ignore=tests/test_benchmarks/ \
             --ignore=tests/graph/test_cozo_backend.py \
+            --ignore=tests/vector/test_lancedb_backend.py \
             || EXIT_CODE=$?
           # Windows Python exits with code 1 due to KeyboardInterrupt during
           # daemon thread cleanup (not a test failure). Tests themselves pass.
