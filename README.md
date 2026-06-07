@@ -235,9 +235,6 @@ Mathematical layers contribute **+12.7 percentage points** on average across 6 c
 
 ---
 
-<details>
-<summary><strong>What's New in V3.3 — The Living Brain Evolves</strong> (click to expand)</summary>
-
 ## Quick Start
 
 ### Install via npm (recommended)
