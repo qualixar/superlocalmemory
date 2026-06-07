@@ -324,4 +324,89 @@ slm remember "CI/CD via GitHub Actions, deploys on merge to main"
 
 ---
 
+## Optimize Commands (v3.6)
+
+SLM v3.6 adds the **Optimize** layer — Cache + Compress + Align for LLM cost reduction.
+
+### `slm optimize status|on|off|savings`
+
+Master control for the Optimize module.
+
+```bash
+slm optimize status                # Show all settings
+slm optimize on                    # Enable cache + compress
+slm optimize off                   # Disable (proxy passes through)
+slm optimize savings               # Token/cost report (last 7 days)
+slm optimize savings --since 30    # Last 30 days
+slm optimize savings --provider anthropic  # Per-provider filter
+slm optimize savings --json
+```
+
+### `slm cache status|clear|invalidate|ttl|semantic`
+
+Cache sub-control — exact and semantic tiers.
+
+```bash
+slm cache status                   # Entry count, DB size, TTLs, hit rate
+slm cache clear                    # Delete all entries (default tenant)
+slm cache invalidate --tag "key"   # Delete entries by tag
+slm cache ttl --set 86400          # Set exact TTL (24h default)
+slm cache ttl --semantic 3600      # Set semantic TTL
+slm cache semantic on|off          # Enable/disable semantic cache
+```
+
+### `slm compress status|mode|code|prose|ccr|align`
+
+Compression sub-control — per-channel toggles.
+
+```bash
+slm compress status                # Mode + per-channel state
+slm compress mode safe|aggressive  # Set aggressiveness
+slm compress code on|off           # Code/JSON compression
+slm compress prose on|off          # Prose compression (opt-in)
+slm compress ccr on|off            # Reversible context retrieval
+slm compress align on|off          # Prefix stabilization
+```
+
+### `slm proxy [options]`
+
+Start the optimization proxy (port 8765 by default).
+
+```bash
+slm proxy                          # Default port 8765
+slm proxy --port 8080              # Custom port
+slm proxy --provider anthropic     # Provider surface
+slm proxy --no-compress            # Cache only
+slm proxy --semantic               # Enable semantic cache
+```
+
+### `slm wrap <agent> [options]`
+
+Proxy-activate an agent — starts proxy + sets environment + launches agent.
+
+```bash
+slm wrap claude                    # Claude Code (recommended)
+slm wrap cursor                    # Cursor
+slm wrap aider -- --model gpt-4    # Aider
+slm wrap --list                    # List registered agents
+slm wrap --persistent              # Permanent config write
+slm wrap --dry-run                 # Preview
+```
+
+### `slm help-optimize [topic]`
+
+Full developer reference with per-agent recipes.
+
+```bash
+slm help-optimize                  # Full reference
+slm help-optimize cache            # Cache reference
+slm help-optimize compress         # Compress + safety warning
+slm help-optimize agents           # Per-agent setup
+slm help-optimize safety           # Safety warning only
+```
+
+Full details: [docs/optimize-cli.md](./optimize-cli.md)
+
+---
+
 *SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

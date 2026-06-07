@@ -193,4 +193,42 @@ See [Multi-Machine Setup](./multi-machine.md) for full setup guide.
 
 ---
 
+## Optimize Configuration (v3.6)
+
+SLM v3.6 adds the **Optimize** module — Cache + Compress + Align for LLM cost reduction. Configuration lives in a separate file at `~/.superlocalmemory/optimize.json` and hot-reloads within 2 seconds — no daemon restart required.
+
+### Master Switches
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `optimize enabled` | `true` | Master ON/OFF |
+| `cache enabled` | `true` | Cache lookups (exact match) |
+| `semantic cache` | `false` | vCache semantic (opt-in) |
+| `compression` | `safe` | `safe` (lossless) or `aggressive` (lossy prose allowed) |
+
+### Quick Toggle via CLI
+
+```bash
+slm optimize on                     # Enable all
+slm optimize off                    # Disable all
+slm cache semantic on               # Enable semantic cache
+slm compress mode aggressive        # Enable aggressive compression
+```
+
+### Config File Location
+
+```bash
+~/.superlocalmemory/optimize.json   # Written by UI, CLI, and API
+```
+
+### Hot-Reload
+
+The daemon polls this file every 2 seconds. On change, all settings take effect without restart. Config version is auto-incremented for change tracking.
+
+### Full Reference
+
+See [docs/optimize-config.md](./optimize-config.md) for all 45+ config fields with defaults and descriptions.
+
+---
+
 *SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

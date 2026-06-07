@@ -2,17 +2,18 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.5</h1>
-<p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf, and any MCP-compatible AI client.</em></p>
-<p align="center"><code>v3.5.0 "Scale-Ready + Context Injection v2"</code> — <strong>Your database auto-migrates. 6-channel recall in &lt;1s. Core Memory Block + explicit pinning. CozoDB + LanceDB on the recall path.</strong><br>No manual migrations. No data loss. One command: <code>pip install -U superlocalmemory && slm restart</code></p>
+<h1 align="center">SuperLocalMemory V3.6</h1>
+<p align="center"><strong>Save up to 90% on every LLM API call. Cache. Compress. Remember.</strong><br/><em>The only local-first memory system that SKIPS repeat calls (100% saved), SHRINKS prompts 60-95%, and REMEMBERS everything — locally, for free. For Claude Code, Cursor, Windsurf, and any AI client.</em></p>
+<p align="center"><code>v3.6.0 "Optimize"</code> — <strong>Cache & Compress & Align. Save up to 90% on every LLM API call — locally.</strong> One command: <code>slm wrap claude</code><br>Also includes v3.5 Scale-Ready: 6-channel recall &lt;1s, CozoDB + LanceDB, Core Memory Block. Your database auto-migrates.</p>
 <p align="center"><strong>Backed by 3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
-  <code>+10.6pp vs Mem0 zero-LLM</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
+  <code>Saves up to 90% on LLM API costs</code> &nbsp;·&nbsp; <code>+10.6pp vs Mem0 zero-LLM</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
 </p>
 
 <p align="center">
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
+  <a href="https://img.shields.io/badge/Saves_90%25_on_LLM_Costs-22c55e?style=for-the-badge"><img src="https://img.shields.io/badge/Saves_90%25_on_LLM_Costs-22c55e?style=for-the-badge" alt="Saves 90% on LLM Costs"/></a>
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
@@ -26,6 +27,92 @@
 <p align="center">
   <video src="https://github.com/user-attachments/assets/c3b54a1d-f62a-4ea7-bba7-900435e7b3ab" width="800" autoplay loop muted playsinline></video>
 </p>
+
+---
+
+<details>
+<summary><strong>What's New in V3.6 — Optimize: SKIP, SHRINK, DISCOUNT, REMEMBER</strong> (click to expand)</summary>
+
+> V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% saved), SHRINKS prompts 60-95% (compress: extractive + LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install. **Your first cache hit pays for the install time. Hours of coding on repeat, minimal API cost.**
+
+### The Three Levers
+
+| Lever | Mechanism | Saving | Off by default? |
+|-------|-----------|:------:|:---------------:|
+| **Cache** | Skip repeat calls — exact-match SQLite lookup, vCache-gated semantic (opt-in) | **100% on a hit** (input + output) | Cache ON, Semantic OFF |
+| **Compress** | Shrink prompts — extractive JSON/code (lossless) + LLMLingua-2 prose (opt-in) | **60–95% on a miss** (input only) | Safe mode ON, Aggressive OFF |
+| **Align** | Stabilize prefix — maximize provider prefix-cache discounts | **Lossless extra** | ON when compression is ON |
+
+**Memory** (v3.5's existing engine) runs in parallel — it shapes *what is in* the prompt (relevant facts); Optimize decides *whether and how* it is sent.
+
+### Quick Start
+
+```bash
+# One command to start saving
+slm wrap claude
+# Your first repeat prompt → CACHE HIT → $0.00
+# Your first long prompt → COMPRESSED 70% → $0.00 per token saved
+```
+
+### New CLI Commands (6 total)
+
+| Command | What It Does |
+|:--------|:-------------|
+| `slm optimize status\|on\|off\|savings` | Master Optimize control + savings report (USD/INR/tokens) |
+| `slm cache status\|clear\|invalidate\|ttl\|semantic` | Cache sub-control — exact + semantic tiers |
+| `slm compress status\|mode\|code\|prose\|ccr\|align` | Compression control — per-channel toggles |
+| `slm proxy [--port] [--provider]` | Start the interception proxy (port 8765) |
+| `slm wrap <agent>` | Proxy-activate an agent — one command to start saving |
+| `slm help-optimize [topic]` | Full developer reference + per-agent setup recipes |
+
+### Savings Dashboard
+
+All metrics tracked and displayed live — from the dashboard (Optimize tab) or CLI:
+
+```bash
+slm optimize savings --since 7
+# Savings (last 7 days):
+#   Exact cache hits:        43   (127,580 input tokens saved)
+#   Tokens saved (total): 153,096
+#   Estimated savings:  ~$2.30 (at $3.00/M tokens — Anthropic rates)
+```
+
+### Enable / Disable
+
+```bash
+slm optimize on                      # Enable cache + compress
+slm optimize off                     # Disable (proxy passes through)
+slm cache semantic on                # Enable semantic cache (needs embedding model)
+slm compress mode aggressive         # Enable prose compression (with safety warning)
+```
+
+**Safety defaults:** Optimize ON. Safe mode ON (extractive only — lossless, production-safe). Semantic OFF. Aggressive OFF. No behavior change until you explicitly enable features.
+
+### How It Works
+
+```
+Your App → Proxy/SDK/Wrap → Cache Check → HIT → Return Cached (0 tokens)
+                                   |
+                                 MISS
+                                   |
+                            Compress → Provider → Store in Cache
+                            60-95%     + Align
+```
+
+- **Fail-open** — any error passes through. Your calls never break.
+- **Separate database** — `llmcache.db` never touches `memory.db`. AES-256-GCM at rest.
+- **Hot-reload config** — UI/CLI writes `~/.superlocalmemory/optimize.json`, daemon reloads in 2s.
+
+### Links
+
+Full docs:
+- [Optimize Product Overview](docs/optimize-overview.md)
+- [Optimize CLI Reference](docs/optimize-cli.md)
+- [Optimize Config Reference](docs/optimize-config.md)
+- [Wiki: V3.6 Overview](https://github.com/qualixar/superlocalmemory/wiki/V3.6-Overview)
+- [Website: v3.6 Optimize](https://superlocalmemory.com/optimize)
+
+</details>
 
 ---
 
@@ -60,112 +147,6 @@ Mathematical layers contribute **+12.7 percentage points** on average across 6 c
 <details>
 <summary><strong>What's New in V3.3 — The Living Brain Evolves</strong> (click to expand)</summary>
 
-> V3.3 gives your memory a lifecycle. Memories strengthen when used, fade when neglected, compress when idle, and consolidate into reusable patterns — all automatically, all locally. Your agent gets smarter the longer it runs.
-
-### Features at a Glance
-
-- **Adaptive Memory Lifecycle** — memories naturally strengthen with use and fade when neglected. No manual cleanup, no hardcoded TTLs.
-- **Smart Compression** — embedding precision adapts to memory importance. Low-priority memories compress up to 32x. High-value memories stay full-resolution.
-- **Cognitive Consolidation** — the system automatically extracts patterns from clusters of related memories. One decision referenced 50 times becomes one reusable insight.
-- **Pattern Learning** — auto-learned soft prompts injected into your agent's context at session start. The system teaches itself what matters to you.
-- **Hopfield Retrieval (6th Channel)** — vague or partial queries now complete themselves. Ask half a question, get the whole answer.
-- **Process Health** — orphaned SLM processes detected and cleaned automatically. No more zombie workers eating RAM.
-
-### New CLI Commands
-
-```bash
-# Run a memory lifecycle review — strengthens active memories, archives neglected ones
-slm decay
-
-# Run smart compression — adapts embedding precision to memory importance
-slm quantize
-
-# Extract reusable patterns from memory clusters
-slm consolidate --cognitive
-
-# View auto-learned patterns that get injected into agent context
-slm soft-prompts
-
-# Clean up orphaned SLM processes
-slm reap
-```
-
-### New MCP Tools
-
-| Tool | Description |
-|:-----|:------------|
-| `forget` | Programmatic memory archival via lifecycle rules |
-| `quantize` | Trigger smart compression on demand |
-| `consolidate_cognitive` | Extract and store patterns from memory clusters |
-| `get_soft_prompts` | Retrieve auto-learned patterns for context injection |
-| `reap_processes` | Clean orphaned SLM processes |
-| `get_retention_stats` | Memory lifecycle analytics |
-
-### Mode A/B Memory Improvements
-
-| Metric | V3.2 | V3.3 | Change |
-|:-------|:----:|:----:|:------:|
-| RAM usage (Mode A/B) | ~4GB | ~40MB | **100x reduction** |
-| Retrieval channels | 5 | 6 | +Hopfield completion |
-| MCP tools (default) | 29 | 33 | +4 new (mesh set) |
-| CLI commands | 21 | 26 | +5 new |
-| Dashboard tabs | 17 | 17 | (H-22: Reward / Shadow / EvolutionCost tiles deferred to next cycle — data exposed via API today, see [DASHBOARD-COVERAGE.md](docs/DASHBOARD-COVERAGE.md)) |
-| API endpoints | 9 | 16 | +7 new |
-
-Embedding migration happens automatically when you switch modes — no manual steps needed.
-
-### Dashboard
-
-Three new tabs: **Memory Lifecycle** (retention curves, decay stats), **Compression** (storage savings, precision distribution), and **Patterns** (auto-learned soft prompts, consolidation history). Seven new API endpoints power the new views.
-
-### Enable V3.3 Features
-
-All new features default OFF. Zero breaking changes. Opt in when ready:
-
-```bash
-# Turn on adaptive memory lifecycle
-slm config set lifecycle.enabled true
-
-# Turn on smart compression
-slm config set quantization.enabled true
-
-# Turn on cognitive consolidation
-slm config set consolidation.cognitive.enabled true
-
-# Turn on pattern learning (soft prompts)
-slm config set soft_prompts.enabled true
-
-# Turn on Hopfield retrieval (6th channel)
-slm config set retrieval.hopfield.enabled true
-
-# Or enable everything at once
-slm config set v33_features.all true
-```
-
-**Fully backward compatible.** All existing MCP tools, CLI commands, and configs work unchanged. New tables are created automatically on first run. No migration needed.
-
-</details>
-
----
-
-<details>
-<summary><strong>What's New in V3.2 — The Living Brain</strong> (click to expand)</summary>
-
-100x faster recall (<10ms at 10K facts), automatic memory surfacing, associative retrieval (5th channel), temporal intelligence with bi-temporal validity, sleep-time consolidation, and core memory blocks. All features default OFF, zero breaking changes.
-
-| Metric | V3.0 | V3.2 | Change |
-|:-------|:----:|:----:|:------:|
-| Recall latency (10K facts) | ~500ms | <10ms | **100x faster** |
-| Retrieval channels | 4 | 5 | +spreading activation |
-| MCP tools | 24 | 29 | +5 new |
-| DB tables | 9 | 18 | +9 new |
-
-Enable with `slm config set v32_features.all true`. See the [V3.2 Overview](https://github.com/qualixar/superlocalmemory/wiki/V3.2-Overview) wiki page for details.
-
-</details>
-
----
-
 ## Quick Start
 
 ### Install via npm (recommended)
@@ -183,9 +164,18 @@ slm warmup    # Pre-download embedding model (~500MB, optional)
 pip install superlocalmemory
 ```
 
-### Upgrading to v3.5.0 "Scale-Ready — CozoDB + LanceDB"
+### Start Saving on LLM Costs (v3.6 Optimize)
 
-**Migration is automatic.** Upgrade the package, restart the daemon — CozoDB, LanceDB, and the vector store all self-migrate in the background.
+```bash
+# Wrap your agent — starts proxy + sets environment + launches agent
+slm wrap claude
+# Your first repeat prompt → CACHE HIT → $0.00 saved
+# See savings: slm optimize savings --since 1
+```
+
+### Upgrading to v3.6 "Optimize" + v3.5.0 "Scale-Ready"
+
+**Migration is automatic.** Upgrade the package, restart the daemon — all migrations run in the background.
 
 ```bash
 pip install -U superlocalmemory
@@ -193,7 +183,13 @@ slm restart
 slm doctor
 ```
 
-No manual commands. No data loss. Your database upgrades in-place. The daemon applies all migrations (including CozoDB graph, LanceDB vector, and the `pinned` column for Core Memory) on first start after upgrade.
+No manual commands. No data loss. Zero downtime.
+
+**What you get after upgrading to v3.6.0:**
+- **Cache** — skip repeat LLM calls entirely. Exact-match + vCache-gated semantic. **100% cost saved on hit.**
+- **Compress** — shrink prompts 60-95% before sending. Extractive JSON/code (lossless) + LLMLingua-2 prose (opt-in). CCR reversible.
+- **Align** — stabilize prompt prefix for native provider KV-cache discounts (Anthropic 90%, OpenAI 50%).
+- **Savings dashboard** — live USD/INR/tokens saved displayed in the Optimize tab.
 
 **What you get after upgrading to v3.5.0:**
 - **CozoDB on the recall path** — entity_graph channel routes through the CozoDB backend (auto-detected, no config needed). Millions of graph edges indexed and traversed in milliseconds.
@@ -208,6 +204,7 @@ No manual commands. No data loss. Your database upgrades in-place. The daemon ap
 
 | Version | Codename | Key Features |
 |---|---|---|
+| **v3.6.0** | Optimize | **Cache** (skip repeat calls, 100% on hit) · **Compress** (shrink prompts 60-95%) · **Align** (KV-cache stabilization) · `slm optimize\|cache\|compress\|proxy\|wrap` CLI · Live savings dashboard (USD/INR/tokens) · Hot-reload config · Safe defaults · Links: [docs/optimize-overview.md](docs/optimize-overview.md) · [V3.6 Wiki](https://github.com/qualixar/superlocalmemory/wiki/V3.6-Overview) |
 | **v3.5.0** | Scale-Ready + Context Injection v2 | CozoDB/LanceDB migration, 6-channel recall <1s, Core Memory Block, BM25→FTS5, context injection v2, score normalization |
 | **v3.4.5** | Scale-Ready (foundation) | Tiered storage (active/warm/cold), graph pruning, BackendOrchestrator scaffolding, CozoDB + LanceDB init + migration code (read path wired in v3.5.0) |
 | **v3.4.51** | Recency Intelligence | Ebbinghaus decay + FSRS stability, age gate, session context time-awareness |
@@ -527,6 +524,20 @@ All 8 mesh tools work seamlessly across machines:
 
 ## Features
 
+### LLM Cost Optimization (v3.6 Optimize)
+- **Exact Cache** — byte-identical repeat calls served from local SQLite. SHA-256 key derivation, stampede shield, tag-based invalidation. **100% cost saved on hit** (input + output tokens).
+- **Semantic Cache** (opt-in) — vCache-powered learned thresholds with SAFE-CACHE centroid defense. Near-duplicate queries served within error bound. CacheAttack 86% hijack class blocked.
+- **Extractive Compression** — structure-preserving compression for JSON, code (AST-aware: Python/JS/Go/Rust/Java/C++), and tool outputs. **60-95% fewer input tokens**, zero accuracy regression.
+- **LLMLingua-2 Prose** (opt-in) — extractive prose summarization for open-ended chat. Safety-warned before enable.
+- **CCR (Compressed Context Retrieval)** — pre-compression originals stored for byte-exact reversal under UUID. Every compressed block recoverable.
+- **CacheAligner** — detects volatile tokens (UUIDs, timestamps, JWTs) in system prompts. Maximizes native provider prefix-cache discounts (Anthropic 90%, OpenAI 50%).
+- **Interception Proxy** — HTTP proxy on port 8765 serving Anthropic, OpenAI, and Gemini surfaces. Zero-code integration — just set `base_url`.
+- **Agent Wrapping** — `slm wrap claude` — one command starts proxy + sets environment + launches agent. 10 supported agents.
+- **Savings Dashboard** — live USD/INR/tokens saved, hit rate, compression ratio, cache size. CLI + UI.
+- **Hot-Reload Config** — UI/CLI writes `optimize.json`; daemon reloads in 2 seconds. No restart.
+- **Fail-open** — any cache/compress/proxy error passes through. Your calls never break.
+- **Data isolation** — separate `llmcache.db` with AES-256-GCM encryption. Never touches `memory.db`.
+
 ### Retrieval
 - 5-channel hybrid: Semantic (Fisher-Rao) + BM25 + Entity Graph + Temporal + Hopfield (associative / partial-query completion)
 - RRF fusion + cross-encoder reranking
@@ -579,6 +590,14 @@ All 8 mesh tools work seamlessly across machines:
 
 | Command | What It Does |
 |:--------|:-------------|
+| `slm optimize status` | Show all Optimize settings (cache, compress, proxy, config version) |
+| `slm optimize on\|off` | Enable/disable all Optimize features (hot-reload, no restart) |
+| `slm optimize savings [--since N] [--provider P] [--json]` | Token/cost savings report — live USD/INR |
+| `slm cache status\|clear\|invalidate\|ttl\|semantic` | Cache sub-control — exact + semantic tiers, TTL management |
+| `slm compress status\|mode\|code\|prose\|ccr\|align` | Compression control — per-channel toggle, safe/aggressive mode |
+| `slm proxy [--port] [--provider] [--no-compress] [--semantic]` | Start interception proxy (port 8765) |
+| `slm wrap <agent> [options]` | Proxy-activate an agent — one command to start saving |
+| `slm help-optimize [topic]` | Full developer reference + per-agent setup recipes |
 | `slm remember "..."` | Store a memory |
 | `slm recall "..."` | Search memories |
 | `slm forget "..."` | Delete matching memories |
