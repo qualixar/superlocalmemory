@@ -103,6 +103,37 @@ def enrich_fact(
 
 
 # ---------------------------------------------------------------------------
+# Vector dual-write helper (P1-2 / embeddings-vector-01)
+# ---------------------------------------------------------------------------
+
+def _upsert_fact_vectors(fact, profile_id, ann_index, vector_store, embedder=None):
+    """Dual-write a fact's embedding to the ANN index + sqlite-vec store.
+
+    Embeds on-demand when the fact has no embedding (e.g. consolidated
+    summary facts created without one), so UPDATE/SUPERSEDE and consolidated
+    facts remain visible to the semantic channel instead of having a row in
+    ``atomic_facts`` but none in the vector store.
+    """
+    if not getattr(fact, "embedding", None) and embedder is not None and fact.content:
+        try:
+            fact.embedding = embedder.embed(fact.content)
+        except Exception as _emb_exc:  # pragma: no cover - defensive
+            logger.debug("on-demand embed failed for %s: %s", fact.fact_id, _emb_exc)
+            return
+    if not getattr(fact, "embedding", None):
+        return
+    if ann_index:
+        ann_index.add(fact.fact_id, fact.embedding)
+    # V3.2: VectorStore upsert (sqlite-vec) -- dual-write (Rule 12)
+    if vector_store and getattr(vector_store, "available", False):
+        vector_store.upsert(
+            fact_id=fact.fact_id,
+            profile_id=profile_id,
+            embedding=fact.embedding,
+        )
+
+
+# ---------------------------------------------------------------------------
 # run_store  (was MemoryEngine.store)
 # ---------------------------------------------------------------------------
 
@@ -175,10 +206,20 @@ def run_store(
     )
     db.store_memory(record)
 
-    facts = fact_extractor.extract_facts(
-        turns=[content], session_id=session_id,
-        session_date=parsed_date, speaker_a=speaker,
-    )
+    try:
+        facts = fact_extractor.extract_facts(
+            turns=[content], session_id=session_id,
+            session_date=parsed_date, speaker_a=speaker,
+        )
+    except Exception as _extract_exc:
+        # P0-1 (remember-write-04): an extractor EXCEPTION (transient LLM/embed
+        # backend error) must NOT orphan the already-committed memory. The None
+        # guard below only handled a None *return*, not a raise. Treat a raise
+        # as "no facts" so the verbatim/raw fallback persists the content.
+        logger.warning(
+            "extract_facts() raised — falling back to raw fact: %s", _extract_exc,
+        )
+        facts = None
 
     # v3.4.38: Defensive None guard. extract_facts() returns None on transient
     # failures (embedding worker timeout, LLM call fail). Without this guard,
@@ -257,58 +298,77 @@ def run_store(
         )
 
         if consolidator:
-            action = consolidator.consolidate(fact, profile_id)
-            if action.action_type.value == "noop":
-                continue
+            try:
+                action = consolidator.consolidate(fact, profile_id)
+            except Exception as _consolidate_exc:
+                # P0-1 (remember-write-03): a consolidate failure (e.g. LLM
+                # timeout) must NOT orphan the already-committed memory. Fall
+                # back to storing the raw enriched fact so the content stays
+                # retrievable across all channels.
+                logger.warning(
+                    "consolidate() failed for fact %s — storing raw fact as "
+                    "fallback: %s", fact.fact_id, _consolidate_exc,
+                )
+                action = None
 
-            # Opinion confidence tracking: reinforce or decay
-            if fact.fact_type == FactType.OPINION and action.action_type.value == "update":
-                try:
-                    existing = db.get_fact(action.new_fact_id)
-                    if existing and existing.fact_type == FactType.OPINION:
-                        new_conf = min(1.0, existing.confidence + 0.1)
-                        db.update_fact(action.new_fact_id, {"confidence": new_conf})
-                except Exception:
-                    pass
-            elif fact.fact_type == FactType.OPINION and action.action_type.value == "supersede":
-                try:
-                    old_id = getattr(action, "old_fact_id", None)
-                    if old_id:
-                        old_fact = db.get_fact(old_id)
-                        if old_fact:
-                            new_conf = max(0.0, old_fact.confidence - 0.2)
-                            db.update_fact(old_id, {"confidence": new_conf})
-                except Exception:
-                    pass
+            if action is not None:
+                if action.action_type.value == "noop":
+                    continue
 
-            if action.action_type.value in ("update", "supersede"):
-                updated_fact = db.get_fact(action.new_fact_id)
-                if updated_fact:
-                    if graph_builder:
-                        graph_builder.build_edges(updated_fact, profile_id)
-                    if observation_builder:
-                        for eid in updated_fact.canonical_entities:
-                            observation_builder.update_profile(
-                                eid, updated_fact, profile_id,
-                            )
-                stored_ids.append(action.new_fact_id)
-                continue
-            # ADD case: consolidator already stored the fact (F8 fix)
-            # Fall through to post-processing below
+                # Opinion confidence tracking: reinforce or decay
+                if fact.fact_type == FactType.OPINION and action.action_type.value == "update":
+                    try:
+                        existing = db.get_fact(action.new_fact_id)
+                        if existing and existing.fact_type == FactType.OPINION:
+                            new_conf = min(1.0, existing.confidence + 0.1)
+                            db.update_fact(action.new_fact_id, {"confidence": new_conf})
+                    except Exception:
+                        pass
+                elif fact.fact_type == FactType.OPINION and action.action_type.value == "supersede":
+                    try:
+                        old_id = getattr(action, "old_fact_id", None)
+                        if old_id:
+                            old_fact = db.get_fact(old_id)
+                            if old_fact:
+                                new_conf = max(0.0, old_fact.confidence - 0.2)
+                                db.update_fact(old_id, {"confidence": new_conf})
+                    except Exception:
+                        pass
+
+                if action.action_type.value in ("update", "supersede"):
+                    updated_fact = db.get_fact(action.new_fact_id)
+                    if updated_fact:
+                        # P1-2 (embeddings-vector-01): the merged/superseding
+                        # fact must reach the vector store (embed on-demand if
+                        # it has none) — otherwise it is invisible to the
+                        # semantic channel despite living in atomic_facts.
+                        _upsert_fact_vectors(
+                            updated_fact, profile_id, ann_index, vector_store, embedder,
+                        )
+                        if graph_builder:
+                            graph_builder.build_edges(updated_fact, profile_id)
+                        if observation_builder:
+                            for eid in updated_fact.canonical_entities:
+                                observation_builder.update_profile(
+                                    eid, updated_fact, profile_id,
+                                )
+                    stored_ids.append(action.new_fact_id)
+                    continue
+                # ADD case: consolidator already stored the fact (F8 fix)
+                # Fall through to post-processing below
+            else:
+                # Consolidate failed → store the raw fact ourselves so the
+                # memory is never left without a retrievable fact, then fall
+                # through to post-processing (embeddings, graph, context).
+                db.store_fact(fact)
         else:
             db.store_fact(fact)
 
         stored_ids.append(fact.fact_id)
 
-        if fact.embedding and ann_index:
-            ann_index.add(fact.fact_id, fact.embedding)
-        # V3.2: VectorStore upsert (sqlite-vec) -- dual-write (Rule 12)
-        if fact.embedding and vector_store and vector_store.available:
-            vector_store.upsert(
-                fact_id=fact.fact_id,
-                profile_id=profile_id,
-                embedding=fact.embedding,
-            )
+        # Dual-write embedding to ANN index + vector store (embed on-demand if
+        # a consolidated ADD fact arrived without one). See _upsert_fact_vectors.
+        _upsert_fact_vectors(fact, profile_id, ann_index, vector_store, embedder)
         # Phase 2: Generate contextual description (after consolidator, before graph_builder)
         if context_generator:
             try:
@@ -489,6 +549,15 @@ def run_store_fact_direct(
     and graph edges are all populated — even for auxiliary data.
     Creates a parent memory record to satisfy FK constraint.
     """
+    # remember-write-02: gate low-quality content (empty, bare category tags,
+    # placeholder/template leakage) at the WRITE boundary, matching run_store's
+    # gate. Previously this direct path had no filter, so junk entered the KB
+    # and polluted evidence/stats/embeddings (the read-side filter only hid it).
+    from superlocalmemory.core.injection import is_low_quality
+    if is_low_quality(fact.content):
+        logger.debug("run_store_fact_direct: skipping low-quality content")
+        return fact.fact_id
+
     # Create parent memory record (FK: atomic_facts.memory_id → memories.memory_id)
     if not fact.memory_id:
         record = MemoryRecord(

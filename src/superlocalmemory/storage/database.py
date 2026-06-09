@@ -188,7 +188,47 @@ class DatabaseManager:
         return ""
 
     def store_fact(self, fact: AtomicFact) -> str:
-        """Persist an atomic fact. Returns fact_id."""
+        """Persist an atomic fact. Returns fact_id.
+
+        v3.6.4 — idempotent on content. If an ACTIVE fact with identical
+        content already exists for this profile, reinforce it (bump
+        evidence_count + access_count) and return its fact_id instead of
+        inserting a duplicate row. The passed fact's ``fact_id`` is rewritten
+        to the canonical id so downstream writes keyed on it (embeddings,
+        graph edges, context) target the real fact rather than orphaning.
+
+        This enforces the memory-system invariant "storing the same fact
+        twice is one fact" — preventing the duplicate explosion that poisons
+        importance ranking and core-memory promotion. Empty/whitespace
+        content is exempt (handled by placeholder filtering, not dedup).
+        """
+        if fact.content and fact.content.strip():
+            # Dedup across all LIVE lifecycle zones (active/warm/cold). Excludes
+            # 'archived' — that is soft-deleted/forgotten, so re-storing the same
+            # content correctly re-learns it as a fresh fact. Matching only
+            # 'active' (pre-3.6.4) re-opened the duplication window for every
+            # fact that aged to warm/cold (the bulk of the KB).
+            existing = self.execute(
+                "SELECT fact_id FROM atomic_facts "
+                "WHERE profile_id = ? AND content = ? "
+                "AND lifecycle IN ('active', 'warm', 'cold') "
+                "ORDER BY created_at LIMIT 1",
+                (fact.profile_id, fact.content),
+            )
+            if existing:
+                canonical_id = dict(existing[0])["fact_id"]
+                self.execute(
+                    "UPDATE atomic_facts "
+                    "SET evidence_count = evidence_count + 1, "
+                    "    access_count = access_count + 1 "
+                    "WHERE fact_id = ?",
+                    (canonical_id,),
+                )
+                # Rewrite caller's id so downstream embedding/graph/context
+                # writes target the canonical fact (idempotent), not an
+                # orphaned id that was never inserted.
+                fact.fact_id = canonical_id
+                return canonical_id
         self.execute(
             """INSERT OR REPLACE INTO atomic_facts
                (fact_id, memory_id, profile_id, content, fact_type,
@@ -259,12 +299,26 @@ class DatabaseManager:
         )
         return [self._row_to_fact(r) for r in rows]
 
-    def get_all_facts(self, profile_id: str) -> list[AtomicFact]:
-        """All facts for a profile, newest first."""
-        rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE profile_id = ? ORDER BY created_at DESC",
-            (profile_id,),
-        )
+    def get_all_facts(
+        self, profile_id: str, limit: int | None = None,
+    ) -> list[AtomicFact]:
+        """All facts for a profile, newest first.
+
+        memory-bounding-02: optional SQL LIMIT so callers needing only the
+        most-recent N (e.g. the Hopfield channel's 5000 cap) don't deserialize
+        the entire table into AtomicFact objects. Default (None) = all facts.
+        """
+        if limit is not None:
+            rows = self.execute(
+                "SELECT * FROM atomic_facts WHERE profile_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (profile_id, int(limit)),
+            )
+        else:
+            rows = self.execute(
+                "SELECT * FROM atomic_facts WHERE profile_id = ? ORDER BY created_at DESC",
+                (profile_id,),
+            )
         return [self._row_to_fact(r) for r in rows]
 
     _MAX_FACTS_PER_ENTITY_LOOKUP: int = 100
@@ -325,8 +379,37 @@ class DatabaseManager:
         )
 
     def delete_fact(self, fact_id: str) -> None:
-        """Hard-delete a fact."""
+        """Hard-delete a fact.
+
+        DatabaseManager connections enforce FKs (PRAGMA foreign_keys=ON), so
+        embedding_metadata / fact_retention / edges cascade. The explicit
+        embedding_metadata delete below is belt-and-suspenders for the case a
+        future caller routes through a connection without FK enforcement.
+        """
+        self.execute("DELETE FROM embedding_metadata WHERE fact_id = ?", (fact_id,))
         self.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
+
+    def gc_orphaned_embedding_metadata(self) -> int:
+        """Remove embedding_metadata rows whose parent atomic_fact is gone.
+
+        P1-3 (embeddings-vector-02): orphans accumulate when facts are deleted
+        through a connection that has FK enforcement OFF (the ON DELETE CASCADE
+        never fires). Vector search maps a vec0 rowid → fact_id via this table;
+        orphans return stale fact_ids that fail downstream fetch. This
+        maintenance sweep removes them regardless of how they were created.
+        Returns the number of rows deleted.
+        """
+        rows = self.execute(
+            "SELECT COUNT(*) AS c FROM embedding_metadata "
+            "WHERE fact_id NOT IN (SELECT fact_id FROM atomic_facts)"
+        )
+        n = int(rows[0]["c"]) if rows else 0
+        if n:
+            self.execute(
+                "DELETE FROM embedding_metadata "
+                "WHERE fact_id NOT IN (SELECT fact_id FROM atomic_facts)"
+            )
+        return n
 
     def get_fact_count(self, profile_id: str) -> int:
         """Total fact count for a profile."""
@@ -408,7 +491,28 @@ class DatabaseManager:
         return [self._row_to_fact(r) for r in rows]
 
     def store_edge(self, edge: GraphEdge) -> str:
-        """Persist a graph edge. Returns edge_id."""
+        """Persist a graph edge. Returns edge_id.
+
+        graph-integrity-02: dedup on the LOGICAL edge identity
+        (profile, source, target, type). The PK is a random edge_id, so
+        without this every re-link created a duplicate row, and NetworkX
+        builds read last-weight-wins — corrupting PageRank/centrality. On a
+        duplicate we keep the MAX weight (strongest association wins) and
+        return the existing edge_id.
+        """
+        existing = self.execute(
+            "SELECT edge_id FROM graph_edges "
+            "WHERE profile_id = ? AND source_id = ? AND target_id = ? AND edge_type = ? "
+            "LIMIT 1",
+            (edge.profile_id, edge.source_id, edge.target_id, edge.edge_type.value),
+        )
+        if existing:
+            canonical_id = dict(existing[0])["edge_id"]
+            self.execute(
+                "UPDATE graph_edges SET weight = MAX(weight, ?) WHERE edge_id = ?",
+                (edge.weight, canonical_id),
+            )
+            return canonical_id
         self.execute(
             """INSERT OR REPLACE INTO graph_edges
                (edge_id, profile_id, source_id, target_id, edge_type, weight, created_at)

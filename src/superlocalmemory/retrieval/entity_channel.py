@@ -118,9 +118,17 @@ class EntityGraphChannel:
         """
         # Check staleness: profile changed or new edges added since last load
         current_count = self._get_edge_count(profile_id)
+        # memory-bounding-01: also reload if the cache is older than the TTL,
+        # even when the edge COUNT is unchanged. Edge weights/pruning can mutate
+        # the graph without changing the count (e.g. store_edge MAX-merge), and a
+        # count-stable window would otherwise serve a stale adjacency map.
+        import time as _t_ec
+        _now_ec = _t_ec.monotonic()
+        _fresh = (_now_ec - getattr(self, "_adj_loaded_at", 0.0)) < 300.0
         if (self._adj_profile == profile_id
                 and self._adj
-                and self._adj_edge_count == current_count):
+                and self._adj_edge_count == current_count
+                and _fresh):
             return
         adj: dict[str, list[tuple[str, float]]] = defaultdict(list)
         try:
@@ -138,6 +146,7 @@ class EntityGraphChannel:
         self._adj = dict(adj)  # Convert defaultdict to regular dict (no accidental growth)
         self._adj_profile = profile_id
         self._adj_edge_count = current_count
+        self._adj_loaded_at = _now_ec  # memory-bounding-01: TTL reference
         # Also load entity maps (same staleness lifecycle)
         self._load_entity_maps(profile_id)
         # v3.4.1: Load graph intelligence metrics (P0)

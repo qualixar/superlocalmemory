@@ -477,3 +477,161 @@ class TestEnableWal:
         # Verify WAL mode is active
         journal = db.execute("PRAGMA journal_mode")[0][0]
         assert journal.lower() == "wal", f"Expected wal, got {journal}"
+
+
+# ---------------------------------------------------------------------------
+# v3.6.4: Idempotent fact writes (content-level dedup)
+# ---------------------------------------------------------------------------
+#
+# Invariant: storing the same fact content twice for the same profile is a
+# no-op on row count — it reinforces the existing fact instead of creating a
+# duplicate. This prevents the duplicate explosion that poisons importance
+# ranking and core-memory promotion (root cause of recall noise).
+
+class TestStoreFactIdempotent:
+    def _parent(self, db: DatabaseManager, mid: str = "m0") -> None:
+        db.store_memory(MemoryRecord(memory_id=mid, content="parent"))
+
+    def test_duplicate_content_creates_one_fact(self, db: DatabaseManager) -> None:
+        self._parent(db)
+        c = "Varun ships SLM v3.6.4"
+        id1 = db.store_fact(AtomicFact(fact_id="f1", memory_id="m0", content=c,
+                                       fact_type=FactType.SEMANTIC))
+        id2 = db.store_fact(AtomicFact(fact_id="f2", memory_id="m0", content=c,
+                                       fact_type=FactType.SEMANTIC))
+        facts = db.get_all_facts("default")
+        assert len(facts) == 1, "duplicate content must not create a second fact"
+        # Second write returns the canonical (first) fact_id, not a new one.
+        assert id1 == "f1"
+        assert id2 == "f1"
+
+    def test_duplicate_reinforces_evidence_count(self, db: DatabaseManager) -> None:
+        self._parent(db)
+        c = "Idempotent writes are a memory-system invariant"
+        for fid in ("a", "b", "c3"):
+            db.store_fact(AtomicFact(fact_id=fid, memory_id="m0", content=c,
+                                     fact_type=FactType.SEMANTIC, evidence_count=1))
+        facts = db.get_all_facts("default")
+        assert len(facts) == 1
+        # Three writes of the same content → evidence reinforced (>= 3).
+        assert facts[0].evidence_count >= 3
+
+    def test_distinct_content_creates_separate_facts(self, db: DatabaseManager) -> None:
+        self._parent(db)
+        db.store_fact(AtomicFact(fact_id="x", memory_id="m0", content="fact A",
+                                 fact_type=FactType.SEMANTIC))
+        db.store_fact(AtomicFact(fact_id="y", memory_id="m0", content="fact B",
+                                 fact_type=FactType.SEMANTIC))
+        assert len(db.get_all_facts("default")) == 2
+
+    def test_dedup_is_profile_scoped(self, db_with_profile: DatabaseManager) -> None:
+        self._parent(db_with_profile)
+        c = "shared content across profiles"
+        db_with_profile.store_fact(AtomicFact(fact_id="p1", memory_id="m0",
+                                              profile_id="default", content=c,
+                                              fact_type=FactType.SEMANTIC))
+        db_with_profile.store_fact(AtomicFact(fact_id="p2", memory_id="m0",
+                                              profile_id="work", content=c,
+                                              fact_type=FactType.SEMANTIC))
+        # Same content under two profiles → two facts (profile isolation holds).
+        assert len(db_with_profile.get_all_facts("default")) == 1
+        assert len(db_with_profile.get_all_facts("work")) == 1
+
+    def test_dedup_mutates_fact_id_to_canonical(self, db: DatabaseManager) -> None:
+        # The passed fact's id is rewritten to the canonical id so downstream
+        # embedding/graph writes (keyed on fact.fact_id) target the real fact.
+        self._parent(db)
+        c = "canonical id rewrite check"
+        db.store_fact(AtomicFact(fact_id="orig", memory_id="m0", content=c,
+                                 fact_type=FactType.SEMANTIC))
+        dup = AtomicFact(fact_id="dup", memory_id="m0", content=c,
+                         fact_type=FactType.SEMANTIC)
+        db.store_fact(dup)
+        assert dup.fact_id == "orig"
+
+    def test_dedup_matches_warm_and_cold_facts(self, db: DatabaseManager) -> None:
+        # P0-2: a fact that ages to warm/cold must still dedup — otherwise the
+        # 9944 warm + 3672 cold facts re-open the duplication window.
+        self._parent(db)
+        for zone in ("warm", "cold"):
+            c = f"{zone} lifecycle dedup check"
+            id1 = db.store_fact(AtomicFact(fact_id=f"{zone}1", memory_id="m0",
+                                           content=c, fact_type=FactType.SEMANTIC))
+            db.execute("UPDATE atomic_facts SET lifecycle = ? WHERE fact_id = ?",
+                       (zone, id1))
+            dup = AtomicFact(fact_id=f"{zone}2", memory_id="m0", content=c,
+                             fact_type=FactType.SEMANTIC)
+            id2 = db.store_fact(dup)
+            assert id2 == id1, f"{zone} fact was not deduped"
+            assert dup.fact_id == id1
+            rows = db.execute("SELECT COUNT(*) AS c FROM atomic_facts WHERE content = ?", (c,))
+            assert dict(rows[0])["c"] == 1, f"duplicate row created for {zone} fact"
+
+    def test_gc_removes_orphaned_embedding_metadata(self, db: DatabaseManager) -> None:
+        # P1-3: an orphan arises when a fact is deleted via an FK-OFF connection.
+        import sqlite3
+        self._parent(db)
+        db.store_fact(AtomicFact(fact_id="real1", memory_id="m0", content="kept",
+                                 fact_type=FactType.SEMANTIC))
+        db.execute(
+            "INSERT INTO embedding_metadata (vec_rowid, fact_id, profile_id) "
+            "VALUES (1, 'real1', 'default')"
+        )
+        # Insert an orphan exactly how production does — a connection with FK OFF.
+        raw = sqlite3.connect(str(db.db_path))
+        raw.execute(
+            "INSERT INTO embedding_metadata (vec_rowid, fact_id, profile_id) "
+            "VALUES (2, 'ghost', 'default')"
+        )
+        raw.commit()
+        raw.close()
+
+        removed = db.gc_orphaned_embedding_metadata()
+        assert removed == 1
+        rows = db.execute("SELECT fact_id FROM embedding_metadata ORDER BY fact_id")
+        assert [dict(r)["fact_id"] for r in rows] == ["real1"]
+        # Idempotent: second sweep removes nothing.
+        assert db.gc_orphaned_embedding_metadata() == 0
+
+    def test_delete_fact_removes_its_embedding_metadata(self, db: DatabaseManager) -> None:
+        self._parent(db)
+        db.store_fact(AtomicFact(fact_id="d1", memory_id="m0", content="bye",
+                                 fact_type=FactType.SEMANTIC))
+        db.execute(
+            "INSERT INTO embedding_metadata (vec_rowid, fact_id, profile_id) "
+            "VALUES (9, 'd1', 'default')"
+        )
+        db.delete_fact("d1")
+        rows = db.execute("SELECT COUNT(*) AS c FROM embedding_metadata WHERE fact_id='d1'")
+        assert dict(rows[0])["c"] == 0
+
+    def test_get_all_facts_respects_sql_limit(self, db: DatabaseManager) -> None:
+        # memory-bounding-02: limit pushed into SQL, newest-first.
+        self._parent(db)
+        for i in range(5):
+            db.store_fact(AtomicFact(
+                fact_id=f"lf{i}", memory_id="m0", content=f"limited fact number {i}",
+                fact_type=FactType.SEMANTIC, created_at=f"2026-01-0{i + 1}T00:00:00",
+            ))
+        limited = db.get_all_facts("default", limit=2)
+        assert len(limited) == 2
+        assert limited[0].fact_id == "lf4", "must return newest first under LIMIT"
+        # Default (no limit) returns all.
+        assert len(db.get_all_facts("default")) == 5
+
+    def test_dedup_excludes_archived(self, db: DatabaseManager) -> None:
+        # Archived == soft-deleted / forgotten. Re-storing the same content must
+        # create a FRESH active fact (re-learning), NOT resurrect the archived one.
+        self._parent(db)
+        c = "archived must not dedup-match"
+        id1 = db.store_fact(AtomicFact(fact_id="arch1", memory_id="m0", content=c,
+                                       fact_type=FactType.SEMANTIC))
+        db.execute("UPDATE atomic_facts SET lifecycle = 'archived' WHERE fact_id = ?", (id1,))
+        id2 = db.store_fact(AtomicFact(fact_id="arch2", memory_id="m0", content=c,
+                                       fact_type=FactType.SEMANTIC))
+        assert id2 == "arch2", "archived fact was wrongly resurrected by dedup"
+        rows = db.execute(
+            "SELECT COUNT(*) AS c FROM atomic_facts WHERE content = ? AND lifecycle != 'archived'",
+            (c,),
+        )
+        assert dict(rows[0])["c"] == 1

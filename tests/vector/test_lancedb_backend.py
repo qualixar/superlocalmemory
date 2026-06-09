@@ -10,7 +10,18 @@ import numpy as np
 import pytest
 import shutil
 
-from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
+from superlocalmemory.vector.lancedb_backend import (
+    LanceDBVectorBackend,
+    _LANCEDB_AVAILABLE,
+)
+
+# LanceDB is an optional backend (pip install superlocalmemory[lancedb]). When
+# it is absent these tests cannot run — skip cleanly instead of erroring at
+# fixture setup, so the suite stays honestly green on installs without it.
+pytestmark = pytest.mark.skipif(
+    not _LANCEDB_AVAILABLE,
+    reason="LanceDB optional dependency not installed (pip install superlocalmemory[lancedb])",
+)
 
 
 @pytest.fixture

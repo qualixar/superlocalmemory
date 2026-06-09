@@ -281,13 +281,18 @@ class MemoryEngine:
         # V3.2: ConsolidationEngine (Phase 5) -- sleep-time consolidation
         from superlocalmemory.core.summarizer import Summarizer
         summarizer = Summarizer(self._config)
+        # P1-5 (core-promotion-01): wire a real behavioral store. Previously
+        # hardcoded None → _compile_behavioral_block always returned the
+        # "No behavioral patterns detected yet." placeholder, so behavioral
+        # patterns never reached the always-injected core block (dead feature).
+        from superlocalmemory.core.recall_pipeline import _get_behavioral_tracker
         self._consolidation_engine = _init_consolidation(
             self._config, self._db,
             auto_linker=self._auto_linker,
             graph_analyzer=self._graph_analyzer,
             temporal_validator=self._temporal_validator,
             summarizer=summarizer,
-            behavioral_store=None,
+            behavioral_store=_get_behavioral_tracker(self._db),
             embedder=self._embedder,  # v3.4.7: for CCQ worker
             llm=getattr(self, "_llm", None),  # v3.4.7: for CCQ worker
         )

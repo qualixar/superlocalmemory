@@ -302,7 +302,9 @@ class HopfieldChannel:
             return (self._cached_matrix, self._cached_fact_ids)
 
         # Step 2: Load facts (V3.3.12: cap to most recent 5000 to bound memory)
-        facts = self._db.get_all_facts(profile_id)[:5000]
+        # memory-bounding-02: push the cap into SQL (LIMIT) so we don't
+        # deserialize the whole table just to slice it.
+        facts = self._db.get_all_facts(profile_id, limit=5000)
         if not facts:
             return (None, [])
 

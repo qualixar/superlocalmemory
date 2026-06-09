@@ -288,11 +288,26 @@ _watchdog_thread.start()
 # closes WITHOUT consuming any bytes, so it cannot race with FastMCP's asyncio
 # stdin reader. On Linux (no kqueue), the watchdog alone provides coverage.
 def _stdin_eof_monitor() -> None:
-    """Exit when the IDE closes our stdin pipe (kqueue — macOS only)."""
-    import select as _sel, os as _os_eof
+    """Exit when the IDE closes our stdin pipe (kqueue — macOS only).
+
+    V3.6.4: kqueue ``EVFILT_READ`` reports ``EV_EOF`` *together with*
+    still-readable bytes (``ev.data > 0``) when the write-end closes while a
+    final request is buffered. Exiting on the EOF flag alone (pre-3.6.4)
+    dropped that in-flight request and self-terminated a session that still
+    had work to deliver — strict MCP hosts (e.g. the Hermes agent) then
+    logged a keepalive failure and respawned the process. We now defer
+    termination until the buffer is genuinely drained (see ``_stdin_guard``).
+    """
+    import select as _sel, os as _os_eof, time as _time
+    from superlocalmemory.mcp._stdin_guard import eof_action
     _mlog = logging.getLogger(__name__ + ".stdin_monitor")
     if not hasattr(_sel, "kqueue"):
         return  # Linux / non-macOS: watchdog covers process death
+    # Bounded grace for the FastMCP reader to drain a buffered final request
+    # before we tear down. ~2 s ceiling (40 × 50 ms): a genuine EOF means the
+    # session is ending regardless, so we never wait indefinitely.
+    _DRAIN_POLL_S = 0.05
+    _DRAIN_MAX_POLLS = 40
     try:
         fd = sys.stdin.fileno()
         kq = _sel.kqueue()
@@ -301,9 +316,23 @@ def _stdin_eof_monitor() -> None:
         while True:
             evs = kq.control(None, 4, 30.0)  # 30 s poll — low cost
             for ev in evs:
-                if ev.flags & _sel.KQ_EV_EOF:
-                    _mlog.info("stdin write-end closed (kqueue EOF), self-terminating")
-                    _os_eof._exit(0)
+                action = eof_action(ev.flags, ev.data, _sel.KQ_EV_EOF)
+                if action == "ignore":
+                    continue
+                if action == "drain":
+                    # Write-end closed but unread bytes remain. Let the
+                    # FastMCP reader consume the final request(s); poll until
+                    # drained or the grace ceiling elapses.
+                    for _ in range(_DRAIN_MAX_POLLS):
+                        _time.sleep(_DRAIN_POLL_S)
+                        recheck = kq.control(None, 4, 0)  # non-blocking
+                        if not recheck:
+                            break
+                        ev = recheck[0]
+                        if eof_action(ev.flags, ev.data, _sel.KQ_EV_EOF) != "drain":
+                            break
+                _mlog.info("stdin write-end closed (kqueue EOF, drained), self-terminating")
+                _os_eof._exit(0)
     except Exception as exc:
         _mlog.debug("stdin EOF monitor error: %s — watchdog will cover", exc)
 

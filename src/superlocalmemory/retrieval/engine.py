@@ -182,16 +182,26 @@ class RetrievalEngine:
         # V3.3.19: Only bridge.discover() (86ms). Removed bridge.spreading_activation()
         # which did per-node SQL queries across 254K edges → 78s latency.
         # The SYNAPSE SA channel already provides proper SA with in-memory caching.
+        # recall-retrieval-01: O(1) membership/score lookups instead of repeated
+        # O(N) `any(...)`/`next(...)` scans inside the bridge + scene loops
+        # (was O(N^2) per recall, ~400 ms on large sessions). Kept in sync as
+        # `fused` grows so behaviour is identical.
+        fused_ids = {fr.fact_id for fr in fused}
+        fused_scores = {fr.fact_id: fr.fused_score for fr in fused}
+
         if self._bridge is not None and strat.query_type in ("multi_hop", "entity", "factual", "general"):
             try:
                 seed_ids = [fr.fact_id for fr in fused[:10]]
                 bridges = self._bridge.discover(seed_ids, profile_id, max_bridges=10)
                 for fid, score in bridges:
-                    if not any(fr.fact_id == fid for fr in fused):
+                    if fid not in fused_ids:
+                        new_score = score * 0.8
                         fused.append(FusionResult(
-                            fact_id=fid, fused_score=score * 0.8,
+                            fact_id=fid, fused_score=new_score,
                             channel_ranks={}, channel_scores={},
                         ))
+                        fused_ids.add(fid)
+                        fused_scores[fid] = new_score
             except Exception as exc:
                 logger.warning("Bridge discovery: %s", exc)
 
@@ -206,14 +216,15 @@ class RetrievalEngine:
                 for fid in top_ids:
                     for scene in scenes_map.get(fid, [])[:2]:
                         for sfid in scene.fact_ids:
-                            if not any(f.fact_id == sfid for f in fused) and sfid not in expanded_ids:
+                            if sfid not in fused_ids and sfid not in expanded_ids:
                                 expanded_ids.add(sfid)
+                                new_score = fused_scores.get(fid, 0.5) * 0.8
                                 fused.append(FusionResult(
-                                    fact_id=sfid, fused_score=(
-                                        next((f.fused_score for f in fused if f.fact_id == fid), 0.5) * 0.8
-                                    ),
+                                    fact_id=sfid, fused_score=new_score,
                                     channel_ranks={}, channel_scores={},
                                 ))
+                                fused_ids.add(sfid)
+                                fused_scores[sfid] = new_score
             except Exception as exc:
                 logger.warning("Scene expansion: %s", exc)
 

@@ -31,7 +31,11 @@ class TestEstimateTokens:
     def test_empty_string(self):
         assert estimate_tokens("") == 0
 
+    @patch.dict("sys.modules", {"tiktoken": None})
     def test_chars_div_4(self):
+        # Force the chars/4 fallback path (tiktoken import → ImportError) so
+        # this test deterministically exercises the heuristic it documents,
+        # regardless of whether the optional tiktoken dep is installed.
         assert estimate_tokens("1234") == 1
         assert estimate_tokens("12345678") == 2
 
@@ -144,7 +148,10 @@ class TestSelectCoreBlock:
         core = select_core_block(mems, cfg)
         assert len(core) == 3
 
+    @patch.dict("sys.modules", {"tiktoken": None})
     def test_cap_by_max_tokens(self):
+        # Force chars/4 fallback for deterministic token math (3000 chars ⇒
+        # 750 tokens each), independent of tiktoken being installed.
         mems = [
             InjectableMemory("x" * 3000, 0.9, f"f{i}", importance=0.9)
             for i in range(5)
@@ -216,7 +223,10 @@ class TestEdgeOrder:
 
 
 class TestClampToBudget:
+    @patch.dict("sys.modules", {"tiktoken": None})
     def test_stops_at_budget(self):
+        # Force chars/4 fallback so the documented token math holds
+        # deterministically (40 chars ⇒ 10 tokens each), independent of tiktoken.
         mems = [
             InjectableMemory("x" * 40, 0.9),
             InjectableMemory("x" * 40, 0.8),

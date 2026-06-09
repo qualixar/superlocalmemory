@@ -5,6 +5,27 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.4] - 2026-06-09 — Memory-integrity & reliability hardening
+
+### Fixed
+
+- **`remember` write-path integrity:** fact storage is now idempotent across all memory
+  lifecycle states and every write path — storing the same fact twice is one fact. A transient
+  backend error during extraction or consolidation can no longer leave a memory without a
+  retrievable fact (graceful fallback).
+- **Graph & vector consistency:** edges and embeddings stay correct as memories age,
+  consolidate, and are archived (no stale or orphaned graph/vector entries influencing recall).
+- **MCP stdio stability:** resolved a connection-lifecycle edge case that could prematurely
+  end a session with strict MCP hosts.
+
+### Performance
+
+- Faster recall on large knowledge bases; tighter memory bounds in hot paths.
+
+### Internal
+
+- Expanded automated test coverage for write-path and graph integrity.
+
 ## [3.6.3] - 2026-06-08 — Cache + compression now work for Claude Code, Claude Desktop, Codex CLI
 
 ### Fixed

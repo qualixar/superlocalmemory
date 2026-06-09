@@ -274,3 +274,105 @@ class TestStoreFactDirect:
             engine_with_mock_deps.store_fact_direct(fact)
             bm25_spy.assert_called_once()
             assert bm25_spy.call_args[0][0] == "bm25-f1"
+
+
+# ---------------------------------------------------------------------------
+# P0-1 (remember-write-03 / -04): write-path failure must not orphan memory
+# ---------------------------------------------------------------------------
+#
+# db.store_memory() commits the memory BEFORE fact extraction + consolidation.
+# If extract_facts() or consolidate() throws afterward, the memory row persists
+# with ZERO retrievable facts (the live DB had 1,265 such orphans). The store
+# path must degrade gracefully — fall back to a raw retrievable fact — so the
+# "we don't forget" contract holds even under transient backend failures.
+
+class TestStoreWriteLossGuard:
+    def test_consolidator_exception_does_not_orphan_memory(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        content = "Grace deployed the ranking model to production on Tuesday afternoon"
+        consolidator = engine_with_mock_deps._consolidator
+        with patch.object(
+            consolidator, "consolidate",
+            side_effect=RuntimeError("LLM timeout during consolidation"),
+        ):
+            # Must NOT raise — the failure is contained.
+            engine_with_mock_deps.store(content, session_id="s1")
+        facts = engine_with_mock_deps._db.get_all_facts(
+            engine_with_mock_deps._profile_id,
+        )
+        assert len(facts) >= 1, "consolidate() failure orphaned the memory"
+        assert any("Grace deployed" in f.content for f in facts), \
+            "content not retrievable after consolidate failure"
+
+    def test_extractor_exception_does_not_orphan_memory(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        content = "Heidi signed the partnership agreement with the vendor last week"
+        extractor = engine_with_mock_deps._fact_extractor
+        with patch.object(
+            extractor, "extract_facts",
+            side_effect=RuntimeError("extractor backbone unavailable"),
+        ):
+            engine_with_mock_deps.store(content, session_id="s1")
+        facts = engine_with_mock_deps._db.get_all_facts(
+            engine_with_mock_deps._profile_id,
+        )
+        assert any("Heidi signed" in f.content for f in facts), \
+            "extract_facts() failure orphaned the memory (no fallback fact)"
+
+
+# ---------------------------------------------------------------------------
+# P1-5 (core-promotion-01): behavioral_store must be wired into consolidation
+# ---------------------------------------------------------------------------
+#
+# engine.py hardcoded behavioral_store=None → _compile_behavioral_block always
+# returned the "No behavioral patterns detected yet." placeholder, so a core
+# "remember" feature (behavioral patterns in the always-injected block) was dead.
+
+class TestBehavioralStoreWiring:
+    def test_consolidation_engine_has_behavioral_store(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        ce = engine_with_mock_deps._consolidation_engine
+        assert ce is not None, "consolidation engine not constructed"
+        assert ce._behavioral is not None, \
+            "behavioral_store not wired — behavioral block can never compile"
+
+    def test_behavioral_block_compiles_real_patterns(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        eng = engine_with_mock_deps
+        pid = eng._profile_id
+        eng._db.execute(
+            "INSERT INTO behavioral_patterns "
+            "(profile_id, pattern_type, pattern_key, confidence) "
+            "VALUES (?, 'tool_pref', 'frequently uses Bash', 0.9)",
+            (pid,),
+        )
+        block = eng._consolidation_engine._compile_behavioral_block(pid, 500)
+        assert "No behavioral patterns detected yet" not in block, \
+            "behavioral block still placeholder despite seeded patterns"
+
+
+# ---------------------------------------------------------------------------
+# P2: write-time quality gates (remember-write-02, core-promotion-02)
+# ---------------------------------------------------------------------------
+
+class TestWriteTimeQualityGates:
+    def test_store_fact_direct_rejects_low_quality(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        eng = engine_with_mock_deps
+        junk = AtomicFact(fact_id="junk1", content="[active_decisions]",
+                          fact_type=FactType.SEMANTIC)
+        junk.memory_id = ""
+        eng.store_fact_direct(junk)
+        facts = eng._db.get_all_facts(eng._profile_id)
+        assert not any(f.fact_id == "junk1" for f in facts), \
+            "low-quality content was stored via the direct path"
+
+    # core-promotion-02 intentionally dropped (conflicts with the tested
+    # always-5-blocks + version-on-recompile design; read-side filter already
+    # hides placeholders). See _store_core_block note. Only remember-write-02
+    # (low-quality gate on the direct write path) is kept above.

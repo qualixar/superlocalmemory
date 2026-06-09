@@ -107,7 +107,16 @@ def run_maintenance(
         "fisher_coupled": 0,
         "sheaf_checked": 0,
         "entity_summaries_consolidated": 0,  # V3.4.40
+        "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
     }
+
+    # P1-3 (embeddings-vector-02): sweep orphaned embedding_metadata left by
+    # any FK-off delete path, so the semantic channel never maps to dead facts.
+    # Runs before the early-return so it sweeps even for empty profiles.
+    try:
+        counts["orphan_metadata_gc"] = db.gc_orphaned_embedding_metadata()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("orphan metadata GC skipped: %s", exc)
 
     facts = db.get_all_facts(profile_id)
     if not facts:

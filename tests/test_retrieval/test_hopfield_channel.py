@@ -49,8 +49,9 @@ class FakeDB:
     def __init__(self, facts: list[FakeFact] | None = None) -> None:
         self._facts = facts or []
 
-    def get_all_facts(self, profile_id: str) -> list[FakeFact]:
-        return [f for f in self._facts if f.profile_id == profile_id]
+    def get_all_facts(self, profile_id: str, limit: int | None = None) -> list[FakeFact]:
+        out = [f for f in self._facts if f.profile_id == profile_id]
+        return out[:limit] if limit is not None else out
 
     def get_facts_by_ids(
         self, fact_ids: list[str], profile_id: str,

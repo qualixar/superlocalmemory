@@ -56,6 +56,7 @@ def prune_graph(
         "self_loops_removed": 0,
         "duplicates_removed": 0,
         "hub_edges_removed": 0,
+        "association_orphans_removed": 0,  # gi-04
         "total_before": 0,
         "total_after": 0,
     }
@@ -83,6 +84,9 @@ def prune_graph(
             stats["hub_edges_removed"] = _cap_node_degree(
                 c, profile_id, _MAX_DEGREE_PER_NODE, dry_run,
             )
+        stats["association_orphans_removed"] = _remove_orphan_association_edges(
+            c, profile_id, dry_run,
+        )
 
         if dry_run:
             c.execute("ROLLBACK")
@@ -120,6 +124,34 @@ def prune_graph(
         conn.close()
 
     return stats
+
+
+def _remove_orphan_association_edges(
+    c: sqlite3.Cursor,
+    profile_id: str,
+    dry_run: bool,
+) -> int:
+    """gi-04: remove association_edges whose source/target fact no longer
+    exists in atomic_facts.
+
+    prune_graph historically only touched graph_edges despite its docstring
+    claiming "all graph pruning". Hard-deleted facts leave orphaned
+    association_edges (the FK cascade only fires under FK-on connections),
+    which spreading_activation then has to scan. Returns rows removed.
+    """
+    where = (
+        "profile_id = ? AND ("
+        "source_fact_id NOT IN (SELECT fact_id FROM atomic_facts WHERE profile_id = ?) "
+        "OR target_fact_id NOT IN (SELECT fact_id FROM atomic_facts WHERE profile_id = ?))"
+    )
+    c.execute(f"SELECT COUNT(*) AS cnt FROM association_edges WHERE {where}",
+              (profile_id, profile_id, profile_id))
+    n = c.fetchone()["cnt"]
+    if dry_run or not n:
+        return n
+    c.execute(f"DELETE FROM association_edges WHERE {where}",
+              (profile_id, profile_id, profile_id))
+    return c.rowcount
 
 
 def _remove_orphan_edges(
@@ -321,60 +353,64 @@ def _cap_node_degree(
       2. Edges with rn > max_degree are deleted in a single DELETE statement.
       Requires SQLite 3.25+ (window functions). System is on 3.53.1.
     """
+    # gi-03: cap BOTH out-degree (PARTITION BY source_id) AND in-degree
+    # (PARTITION BY target_id). Previously only out-degree was capped, so hub
+    # nodes accumulated unbounded in-degree (observed up to 1457), inflating
+    # entity-channel fan-in cost. An edge is removed if it exceeds max_degree
+    # in EITHER direction (low-weight to both its endpoints). Computed in one
+    # window-function pass, no Python loops.
     if dry_run:
         c.execute(
             """
             SELECT COUNT(*) as cnt FROM (
                 SELECT edge_id,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY source_id ORDER BY weight DESC
-                       ) as rn
+                       ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY weight DESC) as out_rn,
+                       ROW_NUMBER() OVER (PARTITION BY target_id ORDER BY weight DESC) as in_rn
                 FROM graph_edges
                 WHERE profile_id = ?
-            ) WHERE rn > ?
+            ) WHERE out_rn > ? OR in_rn > ?
             """,
-            (profile_id, max_degree),
+            (profile_id, max_degree, max_degree),
         )
         excess = c.fetchone()["cnt"]
         logger.info(
-            "(dry-run) _cap_node_degree: ~%d edges would be removed (max_degree=%d)",
+            "(dry-run) _cap_node_degree: ~%d edges would be removed (max_degree=%d, in+out)",
             excess, max_degree,
         )
         return excess
 
-    # Step 1: build temp keep-list in one pass (ROW_NUMBER ranks by weight DESC)
-    c.execute("CREATE TEMP TABLE IF NOT EXISTS _slm_keep_edges (edge_id TEXT PRIMARY KEY)")
-    c.execute("DELETE FROM _slm_keep_edges")  # idempotent if called twice
+    # Step 1: collect edges exceeding the cap in either direction (one pass).
+    c.execute("DROP TABLE IF EXISTS _slm_cap_del")
+    c.execute("CREATE TEMP TABLE _slm_cap_del (edge_id TEXT PRIMARY KEY)")
     c.execute(
         """
-        INSERT INTO _slm_keep_edges (edge_id)
+        INSERT OR IGNORE INTO _slm_cap_del (edge_id)
         SELECT edge_id FROM (
             SELECT edge_id,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY source_id ORDER BY weight DESC
-                   ) as rn
+                   ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY weight DESC) as out_rn,
+                   ROW_NUMBER() OVER (PARTITION BY target_id ORDER BY weight DESC) as in_rn
             FROM graph_edges
             WHERE profile_id = ?
-        ) WHERE rn <= ?
+        ) WHERE out_rn > ? OR in_rn > ?
         """,
-        (profile_id, max_degree),
+        (profile_id, max_degree, max_degree),
     )
 
-    # Step 2: delete everything not in keep-list (single DELETE)
+    # Step 2: delete the over-cap edges (single DELETE).
     c.execute(
         """
         DELETE FROM graph_edges
         WHERE profile_id = ?
-          AND edge_id NOT IN (SELECT edge_id FROM _slm_keep_edges)
+          AND edge_id IN (SELECT edge_id FROM _slm_cap_del)
         """,
         (profile_id,),
     )
     deleted = c.rowcount
 
-    c.execute("DROP TABLE IF EXISTS _slm_keep_edges")
+    c.execute("DROP TABLE IF EXISTS _slm_cap_del")
 
     logger.info(
-        "_cap_node_degree: deleted %d low-weight edges (max_degree=%d)",
+        "_cap_node_degree: deleted %d low-weight edges (max_degree=%d, in+out capped)",
         deleted, max_degree,
     )
     return deleted

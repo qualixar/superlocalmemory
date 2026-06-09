@@ -414,20 +414,24 @@ def test_on_compress_metrics_counter_wired() -> None:
     """set_metrics injects counters that on_compress calls."""
     router = CompressRouter()
     
-    # M-02: Create mock with on_compress method instead of attribute
+    # Mock mirrors the real counter signature:
+    # MetricsCounters.on_compress(bytes_original, bytes_after) — two ints, no
+    # lossy flag (v3.6.3 corrected the router to call this contract).
     class MockCounters:
         def __init__(self):
             self.calls = []
-        
-        def on_compress(self, saved_tokens: int, lossy: bool):
-            self.calls.append((saved_tokens, lossy))
-    
+
+        def on_compress(self, bytes_original: int, bytes_after: int):
+            self.calls.append((bytes_original, bytes_after))
+
     counters = MockCounters()
     router.set_metrics(counters)
 
     router.on_compress(100, 40, False)
     assert len(counters.calls) == 1
-    assert counters.calls[0] == (60, False)  # 100 - 40 = 60 saved tokens
+    # Router forwards (before_tokens, after_tokens) to the counter, which
+    # derives "saved" itself. The lossy flag is logged, not forwarded.
+    assert counters.calls[0] == (100, 40)
 
 
 def test_on_compress_non_fatal_on_error() -> None:

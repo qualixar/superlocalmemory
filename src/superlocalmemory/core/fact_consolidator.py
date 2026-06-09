@@ -226,19 +226,41 @@ def _consolidate_cluster(
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        c.execute("""
-            INSERT INTO atomic_facts
-            (fact_id, memory_id, profile_id, content, fact_type,
-             entities_json, canonical_entities_json,
-             confidence, importance, evidence_count, access_count,
-             created_at, lifecycle)
-            VALUES (?, '', ?, ?, 'semantic', ?, ?, ?, 0.8, ?, 0, ?, 'active')
-        """, (
-            new_fact_id, profile_id, summary,
-            json.dumps(list(all_entities)),
-            json.dumps(list(all_entities)),
-            round(avg_confidence, 3), len(facts), now,
-        ))
+        # P0-3 (dedup-complete-01): apply the SAME content-idempotency invariant
+        # as storage.database.store_fact — but on THIS cursor so it stays inside
+        # the cluster SAVEPOINT. Previously this raw INSERT bypassed dedup, so a
+        # consolidated summary identical to an existing live fact created a
+        # duplicate row and never reinforced evidence. Now: reinforce-or-insert.
+        # (Excludes 'archived' = soft-deleted, mirroring store_fact.)
+        _existing = c.execute(
+            "SELECT fact_id FROM atomic_facts "
+            "WHERE profile_id = ? AND content = ? "
+            "AND lifecycle IN ('active', 'warm', 'cold') "
+            "ORDER BY created_at LIMIT 1",
+            (profile_id, summary),
+        ).fetchone()
+        if _existing:
+            new_fact_id = _existing["fact_id"]
+            c.execute(
+                "UPDATE atomic_facts "
+                "SET evidence_count = evidence_count + ?, access_count = access_count + 1 "
+                "WHERE fact_id = ?",
+                (len(facts), new_fact_id),
+            )
+        else:
+            c.execute("""
+                INSERT INTO atomic_facts
+                (fact_id, memory_id, profile_id, content, fact_type,
+                 entities_json, canonical_entities_json,
+                 confidence, importance, evidence_count, access_count,
+                 created_at, lifecycle)
+                VALUES (?, '', ?, ?, 'semantic', ?, ?, ?, 0.8, ?, 0, ?, 'active')
+            """, (
+                new_fact_id, profile_id, summary,
+                json.dumps(list(all_entities)),
+                json.dumps(list(all_entities)),
+                round(avg_confidence, 3), len(facts), now,
+            ))
 
         # Record the consolidation
         consolidation_id = uuid.uuid4().hex[:16]
@@ -255,6 +277,25 @@ def _consolidate_cluster(
             f"UPDATE atomic_facts SET lifecycle = 'archived' "
             f"WHERE fact_id IN ({placeholders}) AND profile_id = ?",
             (*fact_ids, profile_id),
+        )
+
+        # P1-4 (graph-integrity-01): archived facts must stop influencing
+        # graph-based ranking. The association_edges FK is ON DELETE CASCADE
+        # only (no ON UPDATE), so archiving via UPDATE leaves orphaned edges
+        # that spreading_activation still reads. Remove edges touching the
+        # archived facts, and set their retention zone so ForgettingFilter
+        # excludes them. Inside the SAVEPOINT for atomicity.
+        c.execute(
+            f"DELETE FROM association_edges "
+            f"WHERE profile_id = ? "
+            f"AND (source_fact_id IN ({placeholders}) "
+            f"     OR target_fact_id IN ({placeholders}))",
+            (profile_id, *fact_ids, *fact_ids),
+        )
+        c.execute(
+            f"UPDATE fact_retention SET lifecycle_zone = 'archive' "
+            f"WHERE profile_id = ? AND fact_id IN ({placeholders})",
+            (profile_id, *fact_ids),
         )
 
         c.execute(f"RELEASE SAVEPOINT {savepoint_name}")

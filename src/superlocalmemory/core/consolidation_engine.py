@@ -745,6 +745,14 @@ class ConsolidationEngine:
         """
         from superlocalmemory.storage.models import _new_id
 
+        # NOTE (core-promotion-02, intentionally NOT changed): the audit
+        # flagged placeholder core blocks ("No data available.") + version
+        # churn. Investigation showed BOTH the "always 5 blocks" layout and the
+        # monotonic version-on-recompile counter are intentional, tested design
+        # (see test_consolidation_engine), and the read-side injection filter
+        # already hides placeholders from agents. Suppressing or de-churning
+        # here breaks that design for a cosmetic gain — so it is left as-is.
+
         # Get existing version for increment
         existing = self._db.get_core_block(profile_id, block_type)
         version = (existing["version"] + 1) if existing else 1
