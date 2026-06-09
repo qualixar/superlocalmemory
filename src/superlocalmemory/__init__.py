@@ -36,22 +36,35 @@ _REQUIRED_VERSIONS = {
 }
 
 
+# Module name -> distribution name for metadata lookup.
+_DIST_NAMES = {
+    "sentence_transformers": "sentence-transformers",
+    "onnxruntime": "onnxruntime",
+}
+
+
 def _check_critical_deps() -> None:
-    """Warn if embedding-critical packages have wrong versions."""
+    """Warn if embedding-critical packages have wrong versions.
+
+    Reads installed versions from package metadata — does NOT import the
+    packages. Importing sentence_transformers here would eagerly load torch
+    (native) into every process: a memory blow-up on Apple Silicon and, on
+    some interpreters, a source of native-heap instability at teardown.
+    """
     import warnings
+    from importlib import metadata
     for mod_name, expected in _REQUIRED_VERSIONS.items():
         try:
-            mod = __import__(mod_name)
-            actual = getattr(mod, "__version__", None)
-            if actual and actual != expected:
-                warnings.warn(
-                    f"SuperLocalMemory requires {mod_name}=={expected} but "
-                    f"{actual} is installed. This causes memory blow-up on "
-                    f"Apple Silicon. Fix: pip install {mod_name}=={expected}",
-                    stacklevel=2,
-                )
-        except ImportError:
-            pass
+            actual = metadata.version(_DIST_NAMES[mod_name])
+        except metadata.PackageNotFoundError:
+            continue
+        if actual != expected:
+            warnings.warn(
+                f"SuperLocalMemory requires {mod_name}=={expected} but "
+                f"{actual} is installed. This causes memory blow-up on "
+                f"Apple Silicon. Fix: pip install {mod_name}=={expected}",
+                stacklevel=2,
+            )
 
 
 # Only run the dep check when a full (non-LIGHT) engine is in use.
