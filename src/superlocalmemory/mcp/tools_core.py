@@ -236,6 +236,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "query_type": result.get("query_type", "unknown"),
                     "channel_weights": result.get("channel_weights", {}),
                     "retrieval_time_ms": result.get("retrieval_time_ms", 0),
+                    # v3.6.6: surface evidence-floor signal to MCP clients.
+                    "no_confident_match": result.get("no_confident_match", False),
                 }
             return {"success": False, "error": result.get("error", "Recall failed")}
         except Exception as exc:

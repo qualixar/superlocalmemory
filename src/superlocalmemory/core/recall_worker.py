@@ -71,26 +71,17 @@ def _handle_recall(
     memory_ids = list({r.fact.memory_id for r in response.results[:limit] if r.fact.memory_id})
     memory_map = engine._db.get_memory_content_batch(memory_ids) if memory_ids else {}
 
-    results = []
-    for r in response.results[:limit]:
-        fact_type = getattr(r.fact, "fact_type", None)
-        lifecycle = getattr(r.fact, "lifecycle", None)
-        results.append({
-            "fact_id": r.fact.fact_id,
-            "memory_id": r.fact.memory_id,
-            "content": r.fact.content[:300],
-            "source_content": memory_map.get(r.fact.memory_id, ""),
-            "score": round(r.score, 4),
-            "confidence": round(r.confidence, 4),
-            "trust_score": round(r.trust_score, 4),
-            "channel_scores": {
-                k: round(v, 4) for k, v in (r.channel_scores or {}).items()
-            },
-            "fact_type": fact_type.value if fact_type and hasattr(fact_type, "value") else "",
-            "lifecycle": lifecycle.value if lifecycle and hasattr(lifecycle, "value") else "",
-            "access_count": getattr(r.fact, "access_count", 0),
-            "evidence_chain": list(getattr(r, "evidence_chain", []) or []),
-        })
+    # v3.6.6: same shared chokepoint as the daemon HTTP route + CLI fallback,
+    # so the MCP WorkerPool subprocess path returns identical budgeted output.
+    from superlocalmemory.server.recall_serializer import serialize_recall_response
+    _rc = getattr(engine._config, "retrieval", None)
+    results, no_confident_match = serialize_recall_response(
+        response,
+        limit=limit,
+        memory_map=memory_map,
+        per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
+        total_max=getattr(_rc, "recall_total_max_chars", 12000),
+    )
     return {
         "ok": True,
         "query": query,
@@ -102,6 +93,7 @@ def _handle_recall(
         },
         "total_candidates": getattr(response, "total_candidates", 0),
         "results": results,
+        "no_confident_match": no_confident_match,
     }
 
 

@@ -181,3 +181,6 @@ test-results/
 .gitnexus/
 .claude/skills/generated/
 graphify-out/
+
+# Internal-only intelligence audits (never publish)
+docs/SLM-INTELLIGENCE-AUDIT-*.md

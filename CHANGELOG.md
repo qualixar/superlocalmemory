@@ -5,6 +5,53 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.6] - 2026-06-10 — Recall precision & memory hygiene
+
+Memory means providing the best data, not the most data. v3.6.6 makes recall
+output disciplined and the write path quality-gated, with full parity across
+MCP, CLI, the daemon HTTP route, the in-process adapter, and the WorkerPool
+fallback (identical output regardless of surface or mode A/B).
+
+### Added
+
+- **Evidence floor (recall):** results must earn retrieval evidence — semantic
+  cosine ≥ 0.60, or BM25 / entity-graph / temporal signal, or a pinned fact.
+  Associative-only channels (spreading-activation, hopfield) no longer fabricate
+  matches. A query with no confident match returns an empty result set plus
+  `no_confident_match: true` instead of filler. Config:
+  `retrieval.evidence_floor_enabled`, `retrieval.min_semantic_evidence`.
+  Kill-switch: `SLM_RECALL_NO_FLOOR=1`.
+- **Recall output budget:** per-fact content clamp (default 2,400 chars,
+  head+tail preserved) and per-response budget (default 12,000 chars; remaining
+  results returned as stubs). New optional `full=true` parameter bypasses
+  clamping; clamped results carry `truncated: true`. Config:
+  `retrieval.recall_per_fact_max_chars`, `retrieval.recall_total_max_chars`.
+- **source_content discipline:** `source_content` defaults to a ≤280-char
+  preview (`include_source=true` restores full); internal prompt-template
+  content is never returned.
+- **Ingest gate (remember):** content over 24,000 chars is stored as a
+  head+tail-clamped fact while the full original is preserved in the source
+  memory record; content over 1MB is rejected. Prompt-template text can no
+  longer be stored as a memory. Config: `store.max_verbatim_chars`,
+  `store.max_ingest_bytes`. Kill-switch: `SLM_INGEST_NO_GATE=1`.
+- **Core-block hygiene:** core memory blocks now deduplicate lines at compile
+  time, drop low-quality/template source facts, enforce a per-block char cap,
+  and recompile on the daily maintenance schedule.
+
+### Compatibility
+
+- All MCP/HTTP/CLI signatures unchanged; new parameters and response fields are
+  additive. No database schema migrations. Every new behavior has a config
+  field and an environment kill-switch.
+
+## [3.6.5] - 2026-06-09 — Dependency-check hardening
+
+### Fixed
+
+- Dependency version check no longer eager-imports `torch` into every process
+  (caused a Python 3.14 test segfault and Apple-Silicon memory blow-up); now
+  uses `importlib.metadata.version()`.
+
 ## [3.6.4] - 2026-06-09 — Memory-integrity & reliability hardening
 
 ### Fixed

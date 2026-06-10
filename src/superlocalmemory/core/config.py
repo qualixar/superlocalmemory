@@ -197,6 +197,17 @@ class RetrievalConfig:
     # Used by s19_runner for ablation experiments. Empty = all channels active.
     disabled_channels: list[str] = field(default_factory=list)
 
+    # v3.6.6: Evidence floor — gate on per-channel scores, not fused/RRF score.
+    # Nonsense queries earn 0.0 on every primary channel; real matches earn
+    # semantic >= 0.85 or bm25 > 0. The discriminator is earned channel evidence.
+    # Env kill-switch: SLM_RECALL_NO_FLOOR=1 disables without release.
+    evidence_floor_enabled: bool = True
+    min_semantic_evidence: float = 0.60   # Minimum cosine similarity to keep a result
+
+    # v3.6.6: Recall output budget — protect consuming agents from 585KB responses.
+    recall_per_fact_max_chars: int = 2400  # ~600 tokens; head 70% + tail 30%
+    recall_total_max_chars: int = 12000    # ~3K tokens; stubs beyond this
+
 
 # ---------------------------------------------------------------------------
 # Math Config
@@ -231,6 +242,30 @@ class MathConfig:
     sheaf_max_edges_per_check: int = 200
 
     # Rate-Distortion (production only, disabled for benchmarks)
+
+
+# ---------------------------------------------------------------------------
+# Store Config (v3.6.6)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StoreConfig:
+    """Configuration for the remember/store write path (v3.6.6).
+
+    Ingest gate: protect the DB from oversized facts and prompt-template
+    pollution. Defaults ON; env kill-switch SLM_INGEST_NO_GATE=1.
+    """
+
+    # Max chars for the FACT content stored in atomic_facts.content.
+    # Content above this is clamped to head 70% + tail 30% + truncation marker.
+    # The FULL original is preserved in the memories table row. Set high (24K
+    # ≈ 6K tokens) so only pathological pastes are touched; normal dense
+    # session-handoff memories (6-15K chars) are stored 100% intact.
+    max_verbatim_chars: int = 24000
+
+    # Hard upper bound in bytes. Content above this is rejected outright.
+    # Nobody's "memory" is a megabyte (MCP: success=False, HTTP: 413).
+    max_ingest_bytes: int = 1_048_576  # 1 MB
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +693,7 @@ class SLMConfig:
         default_factory=ParameterizationConfig,
     )
     injection: InjectionConfig = field(default_factory=InjectionConfig)
+    store: StoreConfig = field(default_factory=StoreConfig)
     # v3.5.0: scaling backends — "sqlite" / "cozo" / "auto" / "lancedb" / "sqlite-vec" / "auto".
     graph_backend: str = "auto"       # "auto" = cozo if pycozo installed, else sqlite
     vector_backend: str = "auto"      # "auto" = lancedb if installed, else sqlite-vec

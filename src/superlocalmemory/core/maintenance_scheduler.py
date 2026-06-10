@@ -124,6 +124,15 @@ class MaintenanceScheduler:
         except Exception as exc:
             logger.debug("Pending cleanup skipped: %s", exc)
 
+        # v3.6.6 F-5: Daily core-block recompile with hygiene (dedup + char cap).
+        # Ensures blocks stay clean even when purge or new facts arrive between
+        # session-init recompiles.
+        try:
+            from superlocalmemory.core.block_hygiene import _recompile_core_blocks
+            _recompile_core_blocks(self._db, self._config, self._profile_id)
+        except Exception as exc:
+            logger.debug("Core-block recompile skipped: %s", exc)
+
         self._schedule_next()
 
     def _sync_cloud_destinations(self, manager: object) -> None:

@@ -411,3 +411,6 @@ class RecallResponse:
     channel_weights: dict[str, float] = field(default_factory=dict)
     total_candidates: int = 0
     retrieval_time_ms: float = 0.0
+    # v3.6.6: Evidence floor. True when floor gates out ALL results.
+    # Additive field — backward compatible (defaults to False).
+    no_confident_match: bool = False

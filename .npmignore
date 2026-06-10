@@ -204,3 +204,5 @@ ide/integrations/*/tests/**
 
 # Screenshots (bloat)
 docs/screenshots/
+
+docs/SLM-INTELLIGENCE-AUDIT-*.md

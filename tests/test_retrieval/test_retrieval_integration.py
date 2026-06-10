@@ -176,7 +176,12 @@ class TestFourChannelPipeline:
         assert len(response.results) == 1
 
     def test_fusion_ranks_by_rrf_score(self) -> None:
-        """Facts appearing in more channels should rank higher via RRF."""
+        """Facts appearing in more channels should rank higher via RRF.
+
+        Both facts carry above-floor semantic evidence (v3.6.6 evidence floor
+        requires semantic >= 0.60 or other channel signal); this test isolates
+        RRF *ranking*, not the floor (which is covered in test_evidence_floor).
+        """
         facts = [
             _make_fact("f_multi", "Alice is an engineer working on multiple critical projects"),
             _make_fact("f_single", "Bob mentioned he likes coffee during the morning standup"),
@@ -184,7 +189,7 @@ class TestFourChannelPipeline:
         db = _mock_db(facts)
         engine = _build_engine(
             db=db,
-            semantic_results=[("f_multi", 0.9), ("f_single", 0.3)],
+            semantic_results=[("f_multi", 0.9), ("f_single", 0.65)],
             bm25_results=[("f_multi", 0.8)],
         )
         response = engine.recall("q", "default")

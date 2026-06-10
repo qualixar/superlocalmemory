@@ -295,14 +295,72 @@ class RetrievalEngine:
         if len(final_top) > len(top[:effective_limit]):
             facts = self._load_facts(final_top, profile_id)
 
+        # v3.6.6: Evidence floor — gate on per-channel scores (NOT fused/RRF score).
+        # Nonsense queries fuse at 0.75-0.78 because RRF is rank-derived and
+        # uncalibrated. The discriminator is EARNED CHANNEL EVIDENCE:
+        #   semantic >= min_semantic_evidence (0.60) OR bm25 > 0
+        #   OR entity_graph > 0 OR temporal > 0 OR fact is pinned.
+        # spreading_activation and hopfield do NOT count — they are associative
+        # amplifiers that fabricated the nonsense results in calibration tests.
+        # Kill-switch: SLM_RECALL_NO_FLOOR=1 bypasses the floor.
+        import os as _os_floor
+        floor_enabled = (
+            getattr(self._config, "evidence_floor_enabled", True)
+            and _os_floor.environ.get("SLM_RECALL_NO_FLOOR", "0") != "1"
+        )
+        if floor_enabled:
+            min_sem = getattr(self._config, "min_semantic_evidence", 0.60)
+            final_top = self._apply_evidence_floor(final_top, facts, min_sem)
+            # Trim facts dict to match filtered final_top
+            filtered_ids = {fr.fact_id for fr in final_top}
+            facts = {fid: f for fid, f in facts.items() if fid in filtered_ids}
+
         # 6. Build response
         results = self._build_results(final_top, facts, strat)
         ms = (time.monotonic() - t0) * 1000.0
+        no_match = floor_enabled and len(results) == 0
         return RecallResponse(
             query=query, mode=mode, results=results,
             query_type=strat.query_type, channel_weights=strat.weights,
             total_candidates=total, retrieval_time_ms=ms,
+            no_confident_match=no_match,
         )
+
+    # -- Evidence floor (v3.6.6) -------------------------------------------
+
+    @staticmethod
+    def _apply_evidence_floor(
+        final_top: list[FusionResult],
+        facts: dict[str, AtomicFact],
+        min_semantic: float,
+    ) -> list[FusionResult]:
+        """Filter results that earned no channel evidence.
+
+        Keep a result only if it earned:
+          - semantic cosine >= min_semantic (default 0.60), OR
+          - bm25 > 0, OR entity_graph > 0, OR temporal > 0, OR
+          - the underlying fact is pinned.
+
+        spreading_activation and hopfield do NOT count as primary evidence.
+        Empty result after filtering is a success (no_confident_match=True).
+        """
+        kept: list[FusionResult] = []
+        for fr in final_top:
+            cs = fr.channel_scores or {}
+            # Primary channel evidence check
+            if (
+                cs.get("semantic", 0.0) >= min_semantic
+                or cs.get("bm25", 0.0) > 0.0
+                or cs.get("entity_graph", 0.0) > 0.0
+                or cs.get("temporal", 0.0) > 0.0
+            ):
+                kept.append(fr)
+                continue
+            # Pinned fact bypass — always pass regardless of channel scores
+            fact = facts.get(fr.fact_id)
+            if fact is not None and getattr(fact, "pinned", False):
+                kept.append(fr)
+        return kept
 
     # -- Cross-channel intersection boost -----------------------------------
 

@@ -1001,7 +1001,9 @@ def cmd_recall(args: Namespace) -> None:
                     ])
                     return
                 if not result["results"]:
-                    print("No matching memories found.")
+                    print("No confident match."
+                          if result.get("no_confident_match")
+                          else "No matching memories found.")
                     return
                 # Text output
                 print(f"SpreadingActivation.search completed via daemon ({result.get('retrieval_time_ms', 0):.0f}ms)")
@@ -1030,20 +1032,38 @@ def cmd_recall(args: Namespace) -> None:
             sys.exit(1)
         raise
 
+    # v3.6.6: route the direct-fallback path through the SAME shared
+    # serializer the daemon uses, so CLI-without-daemon output is identical
+    # to CLI/MCP-with-daemon (budget + source discipline + no_confident_match).
+    from superlocalmemory.server.recall_serializer import serialize_recall_response
+    _rc = getattr(config, "retrieval", None)
+    _ser, _no_match = serialize_recall_response(
+        response,
+        limit=args.limit,
+        per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
+        total_max=getattr(_rc, "recall_total_max_chars", 12000),
+        full=getattr(args, "full", False),
+    )
+
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         items = []
-        for r in response.results:
+        for d in _ser:
             item = {
-                "fact_id": r.fact.fact_id, "content": r.fact.content,
-                "score": round(r.score, 3),
+                "fact_id": d["fact_id"], "content": d["content"],
+                "score": round(d["score"], 3),
             }
-            if hasattr(r, "channel_scores") and r.channel_scores:
-                item["channel_scores"] = {k: round(v, 3) for k, v in r.channel_scores.items()}
+            if d.get("channel_scores"):
+                item["channel_scores"] = {k: round(v, 3) for k, v in d["channel_scores"].items()}
+            if d.get("truncated"):
+                item["truncated"] = True
+            if d.get("stub"):
+                item["stub"] = True
             items.append(item)
         json_print("recall", data={
             "results": items, "count": len(items),
             "query_type": getattr(response, "query_type", "unknown"),
+            "no_confident_match": _no_match,
         }, next_actions=[
             {"command": "slm list --json", "description": "List recent memories"},
         ])
@@ -1055,11 +1075,11 @@ def cmd_recall(args: Namespace) -> None:
     except Exception:
         pass
 
-    if not response.results:
-        print("No memories found.")
+    if not _ser:
+        print("No confident match." if _no_match else "No memories found.")
         return
-    for i, r in enumerate(response.results, 1):
-        print(f"  {i}. [{r.score:.2f}] {r.fact.content[:120]}")
+    for i, d in enumerate(_ser, 1):
+        print(f"  {i}. [{d['score']:.2f}] {d['content']}")
 
 
 def _cli_record_signals(config, query, results):

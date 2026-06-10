@@ -35,6 +35,33 @@ _LOW_QUALITY_PATTERNS = (
     re.compile(r"the first line must be exactly", re.IGNORECASE),
 )
 
+# v3.6.6: Prompt-template firewall patterns (F-3, F-4).
+# These patterns identify content that is internal LLM prompt machinery,
+# not genuine user memories. Used at ingest (F-4) and recall serialization (F-3).
+# Stdlib-only (re module) so hooks import chain stays light.
+_PROMPT_TEMPLATE_PATTERNS = (
+    re.compile(r"you are summarizing a claude code session", re.IGNORECASE),
+    re.compile(r"you are a memory consolidation agent", re.IGNORECASE),
+    re.compile(r"apply maximum non-destructive compression", re.IGNORECASE),
+    re.compile(r"<task-notification\b", re.IGNORECASE),
+)
+
+
+def is_prompt_template(content: str) -> bool:
+    """True if *content* matches internal prompt-template patterns.
+
+    Used by:
+      - F-3: drop source_content that is prompt machinery
+      - F-4: reject template content at ingest (extends v3.6.4 quality gate)
+
+    Separate from is_low_quality() so the firewall can be applied without
+    the full quality-check heuristics (e.g. at raw ingest before any
+    other processing).
+    """
+    if not content:
+        return False
+    return any(pat.search(content) for pat in _PROMPT_TEMPLATE_PATTERNS)
+
 # Leading category tag like "[active_decisions] " / "[learned_preferences] ".
 _CATEGORY_TAG_RE = re.compile(r"^\s*\[[a-z0-9_]+\]\s*", re.IGNORECASE)
 

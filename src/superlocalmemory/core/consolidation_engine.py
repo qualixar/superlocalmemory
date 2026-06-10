@@ -808,22 +808,25 @@ class ConsolidationEngine:
     def _facts_to_content(
         self, facts: list[dict], char_limit: int,
     ) -> str:
-        """Join fact contents with separators, capped at char_limit."""
-        parts = [f.get("content", "") for f in facts if f.get("content")]
-        joined = "\n---\n".join(parts)
-        return joined[:char_limit] if joined else "No data available."
+        """Compile fact contents into a block with hygiene (v3.6.6 F-5).
+
+        Filters low-quality/template facts, dedupes lines WITHIN the block
+        (fixes the "same fixture ×5" core-block bug), caps at char_limit.
+        """
+        from superlocalmemory.core.block_hygiene import compile_block_content
+        compiled = compile_block_content(facts, max_chars=char_limit)
+        return compiled if compiled else "No data available."
 
     def _rows_to_content(
         self, rows: list | None, char_limit: int,
     ) -> str:
-        """Convert DB rows to content string."""
+        """Convert DB rows to a hygienic block content string (v3.6.6 F-5)."""
         if not rows:
             return "No data available."
-        parts = [
-            dict(r).get("content", "") for r in rows if dict(r).get("content")
-        ]
-        joined = "\n---\n".join(parts)
-        return joined[:char_limit] if joined else "No data available."
+        from superlocalmemory.core.block_hygiene import compile_block_content
+        facts = [dict(r) for r in rows]
+        compiled = compile_block_content(facts, max_chars=char_limit)
+        return compiled if compiled else "No data available."
 
     def _compile_behavioral_block(
         self, profile_id: str, char_limit: int,

@@ -324,6 +324,8 @@ def apply_adaptive_ranking(
         channel_weights=response.channel_weights,
         total_candidates=response.total_candidates,
         retrieval_time_ms=response.retrieval_time_ms,
+        # v3.6.6: preserve evidence-floor signal across reranking rebuilds.
+        no_confident_match=(len(new_results) == 0) and response.no_confident_match,
     )
 
 
@@ -426,6 +428,8 @@ def apply_v2_adaptive_ranking(
             channel_weights=response.channel_weights,
             total_candidates=response.total_candidates,
             retrieval_time_ms=response.retrieval_time_ms,
+            # v3.6.6: preserve evidence-floor signal across reranking rebuilds.
+            no_confident_match=(len(new_results) == 0) and response.no_confident_match,
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.debug("apply_v2_adaptive_ranking skipped: %s", exc)
@@ -554,6 +558,8 @@ def apply_v2_bandit_ensemble(
             channel_weights=response.channel_weights,
             total_candidates=response.total_candidates,
             retrieval_time_ms=response.retrieval_time_ms,
+            # v3.6.6: preserve evidence-floor signal across ensemble rebuilds.
+            no_confident_match=(len(final_results) == 0) and response.no_confident_match,
         )
     except Exception as exc:  # pragma: no cover — defensive top-level
         logger.debug("apply_v2_bandit_ensemble skipped: %s", exc)
@@ -675,6 +681,9 @@ def run_recall(
                         channel_weights=response.channel_weights,
                         total_candidates=response.total_candidates + len(enhanced_facts),
                         retrieval_time_ms=response.retrieval_time_ms,
+                        # v3.6.6: agentic round-2 may add facts; recompute flag.
+                        no_confident_match=(len(enhanced_results[:limit]) == 0)
+                        and response.no_confident_match,
                     )
             except Exception as exc:
                 logger.debug("Agentic sufficiency skipped: %s", exc)

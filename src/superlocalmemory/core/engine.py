@@ -430,6 +430,25 @@ class MemoryEngine:
                 return []
         except Exception:
             pass
+        # v3.6.6 ingest gate: reject 1MB monsters + prompt-template pollution;
+        # clamp the searchable FACT copy (head+tail) while the memories row keeps
+        # the FULL original. Embedding/BM25 use the clamped copy so a 167KB paste
+        # never produces a garbage vector. Env kill-switch: SLM_INGEST_NO_GATE=1.
+        fact_text = content
+        try:
+            from superlocalmemory.core.ingest_gate import apply_ingest_gate
+            _sc = getattr(self._config, "store", None)
+            gate = apply_ingest_gate(
+                content,
+                max_verbatim_chars=getattr(_sc, "max_verbatim_chars", 24000),
+                max_ingest_bytes=getattr(_sc, "max_ingest_bytes", 1_048_576),
+            )
+            if gate.rejected:
+                logger.debug("store_fast ingest gate rejected: %s", gate.rejection_reason)
+                return []
+            fact_text = gate.fact_content
+        except ImportError:
+            pass  # gate module missing → store verbatim (never block a write)
         now = datetime.now(timezone.utc).isoformat()
         record = MemoryRecord(
             profile_id=self._profile_id, content=content,
@@ -440,8 +459,8 @@ class MemoryEngine:
         # the entity_graph channel has something to work with before enrichment.
         ents = sorted(
             {m.group(1) for m in _re.finditer(
-                r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b", content)}
-            | {m.group(1) for m in _re.finditer(r"\b([A-Z]{2,})\b", content)}
+                r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b", fact_text)}
+            | {m.group(1) for m in _re.finditer(r"\b([A-Z]{2,})\b", fact_text)}
         )
         # v3.5.5: compute the embedding SYNCHRONOUSLY. A single warm embed is
         # ~22ms (the 30-180s of full store() was LLM fact-extraction + graph,
@@ -452,14 +471,14 @@ class MemoryEngine:
         emb = None
         fmean = fvar = None
         try:
-            emb = self._embedder.embed(content) if self._embedder else None
+            emb = self._embedder.embed(fact_text) if self._embedder else None
             if emb:
                 fmean, fvar = self._embedder.compute_fisher_params(emb)
         except Exception:
             emb = None
         fact = AtomicFact(
             fact_id=_uuid.uuid4().hex[:16], memory_id=record.memory_id,
-            profile_id=self._profile_id, content=content,
+            profile_id=self._profile_id, content=fact_text,
             fact_type=FactType.EPISODIC, entities=ents,
             observation_date=now[:10], confidence=0.7, importance=0.5,
             embedding=emb, fisher_mean=fmean, fisher_variance=fvar,
@@ -477,7 +496,7 @@ class MemoryEngine:
         try:
             bm25 = getattr(self._retrieval_engine, "_bm25", None)
             if bm25:
-                bm25.add(fact.fact_id, content, self._profile_id)
+                bm25.add(fact.fact_id, fact_text, self._profile_id)
         except Exception:
             pass
         return [fact.fact_id]
