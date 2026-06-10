@@ -34,10 +34,16 @@ import signal
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+# v3.6.7: Tell mcp/server.py it is being imported inside the daemon process.
+# This suppresses the three side-effect threads (mcp-warmup, parent-watchdog,
+# stdin-eof-monitor) that are harmful when the MCP server runs embedded.
+# Must be set BEFORE any import of superlocalmemory.mcp.server.
+os.environ.setdefault("SLM_MCP_EMBEDDED", "1")
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -850,7 +856,20 @@ async def lifespan(application: FastAPI):
     except Exception as e:
         logger.warning("optimize module not available: %s", e)
 
-    yield
+    # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
+    # streamable_http_app() carries its own Starlette lifespan that initialises
+    # an anyio task group inside the session manager. Without entering that
+    # lifespan every POST /mcp 500s with "Task group is not initialized."
+    # AsyncExitStack enters the context only when _mcp_app was mounted; if the
+    # mount failed (non-fatal) the daemon starts normally without HTTP MCP.
+    async with AsyncExitStack() as _mcp_stack:
+        if _mcp_app is not None:
+            await _mcp_stack.enter_async_context(
+                _mcp_app.router.lifespan_context(_mcp_app)
+            )
+            logger.info("MCP HTTP session manager started (Streamable-HTTP on /mcp)")
+
+        yield
 
     # Cancel optimize metrics flush loop + run final flush before shutdown
     try:
@@ -1149,6 +1168,28 @@ def create_app() -> FastAPI:
     # -- Daemon-specific routes --
     _register_daemon_routes(application)
 
+    # -- v3.6.7: MCP Streamable-HTTP transport at /mcp --
+    # Mount the FastMCP server as a Starlette ASGI sub-app so ALL clients
+    # (Claude Code sessions, subagents, desktop, hermes) share ONE daemon
+    # process instead of spawning an `slm mcp` subprocess per connection.
+    # The session manager lifespan is started in lifespan() via AsyncExitStack.
+    # Fail-open: if import or mount fails, stdio transport keeps working.
+    #
+    # streamable_http_path is set to "/" so that when mounted at "/mcp" the
+    # effective user-facing endpoint is exactly http://127.0.0.1:8765/mcp.
+    # (FastAPI strips the mount prefix before passing the request to the
+    # sub-app, so the sub-app's internal route must be "/".)
+    try:
+        from superlocalmemory.mcp.server import server as _mcp_fastmcp
+        _mcp_fastmcp.settings.streamable_http_path = "/"
+        _mcp_fastmcp._session_manager = None  # Defensive reset for idempotency
+        global _mcp_app
+        _mcp_app = _mcp_fastmcp.streamable_http_app()
+        application.mount("/mcp", _mcp_app)
+        logger.info("MCP HTTP transport mounted at /mcp (Streamable HTTP, port 8765)")
+    except Exception as _mcp_exc:  # pragma: no cover — defensive
+        logger.warning("MCP HTTP mount failed (non-fatal, stdio still works): %s", _mcp_exc)
+
     return application
 
 
@@ -1202,7 +1243,9 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         # for Gemini), never X-SLM-API-Key. Verified: auth_middleware.py:50-82
         # returns False for POST when api_key file exists and X-SLM-API-Key
         # is absent.
-        _AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/")
+        # v3.6.7: /mcp is also exempt — MCP clients negotiate their own session
+        # via the MCP protocol; they have no knowledge of X-SLM-API-Key.
+        _AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/", "/mcp")
 
         @application.middleware("http")
         async def auth_middleware(request, call_next):
@@ -1819,6 +1862,10 @@ def _update_activity():
 
 
 _start_time: float | None = None
+
+# v3.6.7: Starlette app returned by mcp_server.streamable_http_app().
+# Set in create_app(); consumed by lifespan() to start the session manager.
+_mcp_app = None
 
 
 # ---------------------------------------------------------------------------

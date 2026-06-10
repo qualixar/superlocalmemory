@@ -5,6 +5,23 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.7] - 2026-06-10 — MCP Streamable-HTTP Transport (Embedded)
+
+### Added
+- **Embedded MCP HTTP Transport:** The FastMCP server is now mounted directly inside the unified daemon at `/mcp`. All MCP clients (Claude Code, subagents, desktop, Hermes) now share a single daemon process instead of spawning separate `slm mcp` subprocesses per connection, eliminating process overhead and orphaned process risks.
+- **Graceful Fallback:** If the HTTP mount fails, the daemon continues to operate normally, preserving stdio transport compatibility.
+
+### Changed
+- **Thread Suppression in Daemon Context:** Three background threads that are safe in a standalone `slm mcp` subprocess but harmful inside the daemon are now suppressed when `SLM_MCP_EMBEDDED=1`:
+  - `mcp-warmup` thread (prevents duplicate LIGHT engine creation)
+  - `parent-watchdog` thread (prevents accidental daemon termination via `os._exit(0)`)
+  - `stdin-eof-monitor` thread (irrelevant inside the daemon process)
+- **Session Manager Idempotency:** Added defensive reset of `_session_manager` during app creation to guarantee safe re-initialization if the app factory is called multiple times in the same process.
+
+### Fixed
+- **Lifespan Ordering:** Ensured the MCP Streamable-HTTP session manager lifecycle is correctly wrapped in an `AsyncExitStack` within the daemon's lifespan, preventing "Task group is not initialized" errors on `/mcp` requests.
+- **Route Prefix Stripping:** Explicitly set `streamable_http_path="/"` on the FastMCP instance so that FastAPI's mount prefix stripping correctly routes requests to the sub-app's root endpoint.
+
 ## [3.6.6] - 2026-06-10 — Recall precision & memory hygiene
 
 Memory means providing the best data, not the most data. v3.6.6 makes recall
