@@ -237,8 +237,19 @@ def _eager_warmup() -> None:
         _logger.warning("Mesh auto-register failed: %s", exc)
 
 import threading
-_warmup_thread = threading.Thread(target=_eager_warmup, daemon=True, name="mcp-warmup")
-_warmup_thread.start()
+
+# v3.6.7: Suppress standalone-process behaviours when the MCP server is
+# imported inside the daemon (SLM_MCP_EMBEDDED=1). Three threads are safe
+# to run in a dedicated `slm mcp` subprocess but harmful inside the daemon:
+#   mcp-warmup      — creates a LIGHT engine duplicate; daemon has a FULL one.
+#   parent-watchdog — calls os._exit(0) if its parent IDE quits, which would
+#                     kill the daemon along with it.
+#   stdin-eof-monitor — monitors stdin pipe; meaningless inside the daemon.
+_embedded_in_daemon = _os.environ.get("SLM_MCP_EMBEDDED") == "1"
+
+if not _embedded_in_daemon:
+    _warmup_thread = threading.Thread(target=_eager_warmup, daemon=True, name="mcp-warmup")
+    _warmup_thread.start()
 
 
 # V3.4.57: Parent watchdog — self-terminate when the IDE/Claude session dies.
@@ -274,8 +285,9 @@ def _parent_watchdog() -> None:
             pass  # Transient errors — keep watching
 
 
-_watchdog_thread = threading.Thread(target=_parent_watchdog, daemon=True, name="parent-watchdog")
-_watchdog_thread.start()
+if not _embedded_in_daemon:
+    _watchdog_thread = threading.Thread(target=_parent_watchdog, daemon=True, name="parent-watchdog")
+    _watchdog_thread.start()
 
 
 # V3.5.9: Stdin EOF monitor — complements the parent watchdog for the case where
@@ -337,8 +349,9 @@ def _stdin_eof_monitor() -> None:
         _mlog.debug("stdin EOF monitor error: %s — watchdog will cover", exc)
 
 
-_stdin_monitor_thread = threading.Thread(target=_stdin_eof_monitor, daemon=True, name="stdin-eof-monitor")
-_stdin_monitor_thread.start()
+if not _embedded_in_daemon:
+    _stdin_monitor_thread = threading.Thread(target=_stdin_eof_monitor, daemon=True, name="stdin-eof-monitor")
+    _stdin_monitor_thread.start()
 
 
 if __name__ == "__main__":
