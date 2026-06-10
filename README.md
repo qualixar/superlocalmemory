@@ -309,6 +309,32 @@ slm status
 
 ### MCP Integration (Claude, Cursor, Windsurf, VS Code, etc.)
 
+SLM supports **two MCP transports** — use whichever fits your tool. Both expose the same 33 tools and 7 resources.
+
+#### Option A — HTTP transport (v3.6.7+, recommended)
+
+One shared process handles every client. RAM is flat regardless of how many IDE windows, subagents, or concurrent sessions connect. Requires the SLM daemon to be running (`slm start`).
+
+```json
+{
+  "mcpServers": {
+    "superlocalmemory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp/"
+    }
+  }
+}
+```
+
+> **Claude Code** also accepts:
+> ```bash
+> claude mcp add --transport http superlocalmemory http://127.0.0.1:8765/mcp/
+> ```
+
+#### Option B — stdio transport (universal, works everywhere)
+
+Spawns one `slm mcp` subprocess per client connection (~90–110 MB each). Works with every MCP-compatible tool including those that do not yet support HTTP transport. No daemon required.
+
 ```json
 {
   "mcpServers": {
@@ -320,7 +346,36 @@ slm status
 }
 ```
 
-33 MCP tools by default (+42 optional behind `SLM_MCP_ALL_TOOLS=1`) + 7 resources. Works with any MCP-compatible client — we ship templated configs for Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and Antigravity (15 IDE configs in `ide/configs/`). **V3.3: Adaptive lifecycle, smart compression, and pattern learning.**
+#### Option C — `mcp-remote` bridge (for stdio-only tools that want HTTP)
+
+Some CLIs (e.g. Grok CLI) only speak stdio but you still want the RAM benefit of HTTP. The [`@modelcontextprotocol/client-cli`](https://www.npmjs.com/package/@modelcontextprotocol/client-cli) package bridges them:
+
+```bash
+npm install -g @modelcontextprotocol/client-cli
+```
+
+```json
+{
+  "mcpServers": {
+    "superlocalmemory": {
+      "command": "mcp-remote",
+      "args": ["http://127.0.0.1:8765/mcp/", "--allow-http", "--transport", "http-only"]
+    }
+  }
+}
+```
+
+#### When to use which
+
+| Situation | Use |
+|-----------|-----|
+| Claude Code / Claude Desktop (v3.6.7+) | **HTTP** — zero new processes per session |
+| Cursor, Windsurf, Gemini CLI, Antigravity | **HTTP** — native support |
+| Grok CLI, tools that only support stdio | **`mcp-remote` bridge** |
+| Offline / daemon-free usage | **stdio** |
+| Any tool, any version | **stdio** always works as fallback |
+
+See [`docs/ide-setup.md`](docs/ide-setup.md) for per-IDE configs. 33 MCP tools by default (+42 optional behind `SLM_MCP_ALL_TOOLS=1`) + 7 resources. Works with any MCP-compatible client — we ship templated configs for Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and Antigravity (15 IDE configs in `ide/configs/`).
 
 ### Dual Interface: MCP + CLI
 

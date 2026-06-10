@@ -2,7 +2,25 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SuperLocalMemory exposes 24 tools and 6 resources via the Model Context Protocol (MCP). Any MCP-compatible AI assistant can use these automatically.
+SuperLocalMemory exposes 33 tools and 7 resources via the Model Context Protocol (MCP). Any MCP-compatible AI assistant can use these automatically.
+
+## Connecting
+
+SLM supports two transports — both expose the exact same tools.
+
+**HTTP (v3.6.7+, recommended):** one shared daemon process, flat RAM.
+
+```json
+{ "mcpServers": { "superlocalmemory": { "type": "http", "url": "http://127.0.0.1:8765/mcp/" } } }
+```
+
+**stdio (universal fallback):** one subprocess per connection.
+
+```json
+{ "mcpServers": { "superlocalmemory": { "command": "slm", "args": ["mcp"] } } }
+```
+
+See [`docs/ide-setup.md`](ide-setup.md) for per-IDE configs and the `mcp-remote` bridge option for stdio-only tools.
 
 ---
 
