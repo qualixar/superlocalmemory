@@ -5,6 +5,21 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.8] - 2026-06-11 — Runtime recall-health monitor (self-healing recall)
+
+### Fixed
+- **Silent recall degradation eliminated.** On a long-running daemon the cold full-fusion recall could exceed the MCP pool's 30s timeout, so `session_init` silently fell back to FTS5/BM25 keyword-only ("DEGRADED MODE") — observed 7× in 2 days in production logs. Two root causes are now repaired in-life rather than only at boot:
+  - **Page-cache eviction:** the graph/`association_edges` table gets evicted under memory pressure, so the first recall after idle re-reads it from disk (15–24s+).
+  - **Warm-but-broken embedder:** `OllamaEmbedder.embed` returns `None` on a transient Ollama failure while the boot `_embedding_warm` flag still reports `True`; with `q_emb is None` the engine skips the semantic, hopfield and spreading_activation channels, silently degrading to keyword-only (semantic score `0.0` on every result).
+
+### Added
+- **`server/recall_health.py` — runtime recall-health monitor** (industry-standard 3-tier, validated against Ollama keep-alive, Chroma's active heartbeat, LangChain's circuit breaker and the K8s liveness/readiness split):
+  - **Tier 1 — re-warm:** fires a real `engine.recall` every 5 min to keep the graph page cache hot and nomic-embed resident.
+  - **Tier 2 — readiness probe:** asserts the semantic channel actually fired (`max semantic > 0`); rows-with-`semantic==0` everywhere is the warm-but-broken signature.
+  - **Tier 3 — circuit-breaker self-heal:** resets the embedder's cached `_available` flag (the "available once, cached forever" bug), re-exercises `embed()`, tracks consecutive failures, and logs **CRITICAL** so degradation is never silent.
+- **`/health` now reports `recall_health`** (`recall_healthy`, `consecutive_failures`, `total_heals`, `checks`, `last_semantic_score`) — degradation is visible to operators, not hidden.
+- 8 new tests in `tests/test_core/test_recall_health.py`.
+
 ## [3.6.7] - 2026-06-10 — MCP Streamable-HTTP Transport (Embedded)
 
 ### Added

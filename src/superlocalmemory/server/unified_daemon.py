@@ -683,6 +683,25 @@ async def lifespan(application: FastAPI):
         threading.Thread(target=_warmup_recall, daemon=True, name="recall-warmup").start()
         threading.Thread(target=_backfill_vector_store, daemon=True, name="vs-backfill").start()
 
+        # v3.6.8: Runtime recall-health monitor. The three warmups above run
+        # ONCE at boot; on a long-running daemon the graph page cache gets
+        # evicted and the embedder can start returning None while _embedding_warm
+        # still claims True — both silently degrade recall to keyword-only BM25
+        # (observed: session_init "pool.recall timed out → DEGRADED MODE", 7×/2d).
+        # This monitor re-warms + actively probes the semantic channel + self-heals
+        # a dead embedder for the daemon's whole life. See server/recall_health.py.
+        try:
+            from superlocalmemory.server.recall_health import (
+                start_recall_health_monitor,
+            )
+            _rh_thread, _rh_stop, _ = start_recall_health_monitor(engine)
+            application.state.recall_health_stop = _rh_stop
+        except Exception as _rh_exc:
+            logger.warning(
+                "recall-health monitor start failed (non-fatal): %s", _rh_exc,
+            )
+            application.state.recall_health_stop = None
+
         # v3.4.37: QueueConsumer uses daemon's engine directly via adapter.
         # Previously routed through WorkerPool → recall_worker subprocess,
         # which loaded a duplicate MemoryEngine (~800 MB waste).
@@ -967,6 +986,14 @@ async def lifespan(application: FastAPI):
             _rq.close()
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("recall_queue close failed: %s", exc)
+
+    # v3.6.8: Stop recall-health monitor (owns a daemon thread).
+    _rh_stop = getattr(application.state, "recall_health_stop", None)
+    if _rh_stop is not None:
+        try:
+            _rh_stop.set()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("recall_health monitor stop failed: %s", exc)
 
     # Stop HealthMonitor (health_monitor.py owns a daemon thread).
     _health = getattr(application.state, "health_monitor", None)
@@ -1579,6 +1606,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         # Non-blocking peek: report status without forcing a re-init.
         engine = getattr(application.state, "engine", None)
+        # v3.6.8: surface the recall-health verdict so a silently-degraded
+        # recall path (warm-but-broken embedder) is VISIBLE, never silent.
+        try:
+            from superlocalmemory.server.recall_health import get_recall_health
+            _recall_health = get_recall_health()
+        except Exception:
+            _recall_health = {"recall_healthy": None}
         return {
             "status": "ok",
             "pid": os.getpid(),
@@ -1587,6 +1621,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # v3.4.52: clients can poll this to wait for embedding model
             # readiness before issuing recall calls.
             "embedding_warm": _embedding_warm,
+            # v3.6.8: True iff the semantic channel actually fired on the last
+            # health probe; includes self-heal counters.
+            "recall_health": _recall_health,
         }
 
     @application.get("/recall")
