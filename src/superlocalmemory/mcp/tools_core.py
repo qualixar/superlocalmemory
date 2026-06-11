@@ -122,9 +122,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
         # recall window so a parallel/next agent finds memories saved seconds ago.
         # Falls back to pending.db only if the daemon is unreachable.
         try:
+            import asyncio as _asyncio
             from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
-            if is_daemon_running():
-                resp = daemon_request("POST", "/remember", {
+            # is_daemon_running() and daemon_request() both use blocking urllib
+            # against the same uvicorn server — run in threads so the MCP
+            # event loop stays unblocked (#34 class bug).
+            if await _asyncio.to_thread(is_daemon_running):
+                resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
                     "content": content, "tags": tags, "metadata": meta,
                 })
                 if resp and (resp.get("fact_ids") is not None or resp.get("ok")):

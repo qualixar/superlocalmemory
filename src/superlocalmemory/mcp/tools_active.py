@@ -447,8 +447,11 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     "confidence": round(decision.confidence, 3),
                 }
 
-            # Auto-store via engine
-            stored = auto.capture(
+            # Auto-store via engine.
+            # pool_store uses blocking urllib (DaemonPoolProxy) — run in
+            # thread so the MCP event loop stays unblocked (#34 class).
+            stored = await asyncio.to_thread(
+                auto.capture,
                 content,
                 category=decision.category,
                 metadata={"agent_id": agent_id, "source": "auto-observe"},
