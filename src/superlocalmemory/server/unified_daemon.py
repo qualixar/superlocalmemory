@@ -1221,15 +1221,17 @@ def create_app() -> FastAPI:
     # sub-app, so the sub-app's internal route must be "/".)
     try:
         from superlocalmemory.mcp.server import server as _mcp_fastmcp
-        from mcp.server.transport_security import TransportSecuritySettings
         _mcp_fastmcp.settings.streamable_http_path = "/"
         _mcp_fastmcp._session_manager = None  # Defensive reset for idempotency
         # v3.6.9 (#36): configure DNS-rebinding protection from env.
         # Default: localhost-only (safe). Set SLM_MCP_ALLOWED_HOSTS=192.168.x.y:*
         # (comma-separated, e.g. "192.168.50.144:*,slm.lan:*") to open to a LAN.
         # Use "*" to disable protection entirely (trusted private network only).
+        # TransportSecuritySettings imported lazily here so that MCP mount
+        # works on older SDK versions when SLM_MCP_ALLOWED_HOSTS is not set.
         _mcp_allowed = os.environ.get("SLM_MCP_ALLOWED_HOSTS", "").strip()
         if _mcp_allowed:
+            from mcp.server.transport_security import TransportSecuritySettings
             if _mcp_allowed == "*":
                 _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
                     enable_dns_rebinding_protection=False,

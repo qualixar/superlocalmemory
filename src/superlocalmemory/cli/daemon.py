@@ -34,7 +34,10 @@ from threading import Thread
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PORT = int(os.environ.get("SLM_DAEMON_PORT", "") or 8765)
+try:
+    _DEFAULT_PORT = int(os.environ.get("SLM_DAEMON_PORT", "") or 8765)
+except ValueError:
+    _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767   # backward-compat redirect
 _DEFAULT_IDLE_TIMEOUT = 0  # v3.4.3: 24/7 default (was 1800)
 _PID_FILE = Path.home() / ".superlocalmemory" / "daemon.pid"

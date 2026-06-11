@@ -219,7 +219,7 @@ class HealthMonitor:
                     slm_workers.append({
                         "pid": child.pid,
                         "rss_mb": round(rss_mb, 1),
-                        "cmdline": cmdline[:80],
+                        "cmdline": cmdline[:200],
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue

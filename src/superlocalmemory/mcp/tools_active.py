@@ -16,6 +16,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import os
@@ -215,7 +216,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
             from superlocalmemory.mcp._pool_adapter import PoolError
             degraded_mode = False
             try:
-                response = pool_recall(search_query, limit=max_results, fast=False)
+                # v3.6.9-audit: pool_recall uses blocking urllib under the hood
+                # (DaemonPoolProxy.recall → urllib.urlopen). Must run in a
+                # thread so the async MCP event loop is not stalled — same
+                # fix class as #34 mesh tools deadlock.
+                response = await asyncio.to_thread(
+                    pool_recall, search_query, limit=max_results, fast=False,
+                )
             except (PoolError, Exception) as exc:
                 logger.warning(
                     "session_init: daemon recall failed (%s) — using FTS5 emergency fallback. "
@@ -541,14 +548,14 @@ def register_active_tools(server, get_engine: Callable) -> None:
             if not sid:
                 try:
                     db = getattr(engine, '_db', None) or getattr(engine, 'db', None)
-                    if db:
-                        with db._get_conn() as conn:
-                            row = conn.execute(
-                                "SELECT session_id FROM memories "
-                                "WHERE session_id != '' ORDER BY created_at DESC LIMIT 1"
-                            ).fetchone()
-                            if row:
-                                sid = row[0]
+                    if db and hasattr(db, 'execute'):
+                        rows = db.execute(
+                            "SELECT session_id FROM memories "
+                            "WHERE session_id != '' ORDER BY created_at DESC LIMIT 1",
+                            ()
+                        )
+                        if rows:
+                            sid = str(rows[0][0])
                 except Exception:
                     pass
             if not sid:
