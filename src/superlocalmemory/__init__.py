@@ -1,4 +1,8 @@
-"""SuperLocalMemory — information-geometric agent memory."""
+"""SuperLocalMemory — information-geometric agent memory.
+
+v3.6.9: all 7 retrieval layers at full quality (Hopfield@1000, entity_graph@100,
+SA neighbor-cache fix, fast=True deprecated). See CHANGELOG.md.
+"""
 
 import os
 
