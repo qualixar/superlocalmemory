@@ -5,6 +5,52 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.9] - 2026-06-11 — Full 7-layer recall quality · event-loop safety · health watchdog
+
+This release fixes seven GitHub issues, one critical production incident, five post-implementation audit bugs, and two event-loop deadlocks introduced in v3.6.7. All 7 retrieval layers (semantic, BM25, temporal, spreading activation, Hopfield, entity graph, cross-encoder reranker) now operate at full designed quality with no capability tradeoffs.
+
+### Fixed — Production incident
+
+- **BUG-A (CRITICAL): Health monitor RSS watchdog no longer kills the embedding worker.** On machines with <16 GB RAM the hardcoded 2500 MB budget caused the watchdog to kill the ~1 GB ONNX embedding worker during recall bursts. Semantic channel silently scored 0.0, recall fell back to keyword-only FTS5/BM25 ("DEGRADED MODE"), and the v3.6.8 health monitor reported false-healthy because it checked worker liveness rather than semantic signal quality. Fixed by: (1) defaulting the budget to 40% of physical RAM (floor 2500 MB) with `SLM_RSS_BUDGET_MB` env override; (2) protecting the embedder from the kill list — the reranker is targeted first as it can be recreated without losing recall quality; (3) adding `HealthConfig` dataclass and `SLMConfig.load()` parsing so `config.json` `"health"` keys now actually take effect.
+
+### Fixed — GitHub issues
+
+- **#34: Mesh tools no longer deadlock the daemon.** All 8 async mesh MCP tools called blocking `urllib.urlopen` loopback HTTP against the daemon's own `/mcp` endpoint introduced in v3.6.7. From inside the event loop this self-deadlocked uvicorn's single-thread executor, causing a graceful-shutdown timeout that killed the daemon. All 8 call sites wrapped in `asyncio.to_thread`. MCP lifespan hardened so a tool-level exception cannot propagate to uvicorn's shutdown handler. `heartbeat_active` and `registered` return live state instead of hardcoded literals.
+- **#35: `session_init` now returns a `session_id`.** Three spots fixed: (1) `tools_active.py` — `session_init` now passes `session_id` through to callers; (2) `engine.py` `store_fast` — lifts `session_id` from metadata onto the `MemoryRecord` row so facts are correctly attributed to sessions; (3) `close_session` — queries the DB for the most recent session instead of chasing a phantom `_last_session_id` that was never assigned, and `summary_events_created` now returns real counts.
+- **#36-1: HTTP MCP now reachable from LAN hosts.** The new `SLM_MCP_ALLOWED_HOSTS` env (opt-in, default localhost-only) overrides FastMCP's DNS-rebinding protection that rejected non-`127.0.0.1` `Host` headers on LAN deployments. Accepts comma-separated `host:port*` patterns or `*`. Security default is unchanged — the endpoint stays localhost-only without explicit opt-in.
+- **#36-2: `slm mcp` and the HTTP daemon no longer race for port 8765.** `ensure_daemon` now checks TCP connectivity in addition to PID file + HTTP health, detecting systemd-started daemons mid-startup before attempting a second bind. `SLM_DAEMON_PORT` is now fully wired end-to-end (previously only read in `commands.py` URL construction, ignored in the actual uvicorn bind and `_start_daemon_subprocess`). Wrapped in `try/except ValueError` so a malformed env value fails with a clear message rather than a silent zero-port bind.
+- **#33 + #37: Environment variable reference table published.** All ~90 `SLM_*` variables documented in `docs/distributed-deployment.md` with type, default, scope, and example. Closes both issues.
+- **#32: Python version requirement corrected.** Docs previously stated "3.10 or later" — the codebase enforces 3.11+. Updated `getting-started.md`, added Ubuntu 22.04 deadsnakes install path and a new `docs/install-linux.md`.
+
+### Fixed — Event-loop blocking (post-v3.6.7 audit)
+
+The v3.6.7 in-process HTTP MCP transport changed the execution context of all MCP tools from stdio subprocess threads to async event-loop coroutines. Three core tools made blocking HTTP or I/O calls that safe in a subprocess become event-loop deadlocks in the new context.
+
+- **`session_init` no longer blocks the event loop.** `pool_recall` called `DaemonPoolProxy.recall` which uses blocking `urllib.urlopen` internally. Wrapped in `asyncio.to_thread`.
+- **`observe` no longer blocks the event loop.** `auto.capture()` is a synchronous function that makes an internal HTTP call. Wrapped in `asyncio.to_thread`.
+- **`remember` no longer blocks the event loop.** Both `is_daemon_running()` (file-system check + HTTP probe) and `daemon_request()` (blocking HTTP POST) wrapped in `asyncio.to_thread`.
+
+### Fixed — Post-implementation audit (5 bugs)
+
+- **`close_session` crash eliminated.** `tools_active.py` `close_session` called `engine._db._get_conn()`, a private method removed in a prior refactor. Changed to the public `engine._db.execute()` API.
+- **`TransportSecuritySettings` import no longer fails on older MCP SDK versions.** The import was at module level in `unified_daemon.py`, causing an `ImportError` on MCP SDK < 1.27. Moved inside the `if _mcp_allowed:` conditional so it only loads when the HTTP transport is actually being activated.
+- **`SLM_DAEMON_PORT` no longer silently becomes 0 on invalid input.** `int(os.environ.get("SLM_DAEMON_PORT", "") or 8765)` evaluated to `int("")` → `ValueError` → port 0. Wrapped in `try/except ValueError` with a fallback to 8765 and a log warning.
+- **Health monitor cmdline truncation increased.** `cmdline[:80]` silently dropped long Python command lines (common with virtualenv paths), producing false "not SLM" negatives. Increased to `cmdline[:200]`.
+- **Daemon `_DEFAULT_PORT` no longer crashes on malformed env.** Same `ValueError` guard added to the module-level `_DEFAULT_PORT` assignment in `cli/daemon.py`.
+
+### Changed — Recall performance (zero quality tradeoff)
+
+- **SpreadingActivation: 418ms → 36ms (12×).** Neighbor lookups for each graph node are now cached across propagation iterations. The neighbor list is static within a single recall — re-querying SQL per iteration (up to ~120 queries per propagation) was pure waste. The cache is local to the call, so correctness is unchanged.
+- **`fast=True` deprecated.** `fast=True` was added in v3.4.40 when SpreadingActivation took 418ms. With SA now completing in ~36ms, `fast=True` (which disables SA) is actually *slower* than `fast=False` and reduces recall quality by dropping a full retrieval channel. `MemoryEngine.recall()` now logs a `WARNING` and silently treats `fast=True` as `False`. The parameter is retained for API backward compatibility and will be removed in v3.7.x. All built-in callers already passed `fast=False`.
+- Hopfield `prefilter_candidates` and entity-graph scoring candidates retain their original designed values (1000 and 100 respectively) — no quality tradeoffs were made in pursuit of latency targets.
+
+### Added
+
+- `HealthConfig` dataclass in `core/config.py` and `"health"` section parsing in `SLMConfig.load()`.
+- `SLM_RSS_BUDGET_MB` environment variable for operator control of the health watchdog kill threshold.
+- `docs/distributed-deployment.md` — complete guide for LXC/container/multi-machine setups with full `SLM_*` environment variable reference (closes #33 + #37).
+- `docs/install-linux.md` — Ubuntu 22.04 / Debian install guide with venv, pipx, and pyenv paths plus a systemd unit template.
+
 ## [3.6.8] - 2026-06-11 — Runtime recall-health monitor (self-healing recall)
 
 ### Fixed

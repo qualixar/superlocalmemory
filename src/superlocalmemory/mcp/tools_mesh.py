@@ -16,6 +16,7 @@ Auto-heartbeat keeps the session alive as long as the MCP server is running.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -141,20 +142,20 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         global _SESSION_SUMMARY
         _SESSION_SUMMARY = summary or "Active session"
 
-        _ensure_registered()
+        await asyncio.to_thread(_ensure_registered)
 
         # Update summary
-        result = _mesh_request("POST", "/summary", {
-            "peer_id": _PEER_ID,
-            "summary": _SESSION_SUMMARY,
-        })
+        result = await asyncio.to_thread(
+            _mesh_request, "POST", "/summary",
+            {"peer_id": _PEER_ID, "summary": _SESSION_SUMMARY},
+        )
 
         return {
             "peer_id": _PEER_ID,
             "summary": _SESSION_SUMMARY,
             "project_path": _PROJECT_PATH,
-            "registered": True,
-            "heartbeat_active": _HEARTBEAT_THREAD is not None,
+            "registered": _REGISTERED,
+            "heartbeat_active": _HEARTBEAT_THREAD is not None and _HEARTBEAT_THREAD.is_alive(),
             "broker_response": result,
         }
 
@@ -165,8 +166,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         Shows other Claude Code, Cursor, or AI agent sessions that are
         connected to the same SLM mesh network.
         """
-        _ensure_registered()
-        result = _mesh_request("GET", "/peers")
+        await asyncio.to_thread(_ensure_registered)
+        result = await asyncio.to_thread(_mesh_request, "GET", "/peers")
         peers = (result or {}).get("peers", [])
         return {
             "peers": peers,
@@ -185,12 +186,11 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
                 - "project:/path/to/dir" (all sessions in that project directory)
             message: The message content (max 4KB — use file paths for large data)
         """
-        _ensure_registered()
-        result = _mesh_request("POST", "/send", {
-            "from_peer": _PEER_ID,
-            "to_peer": to,
-            "content": message,
-        })
+        await asyncio.to_thread(_ensure_registered)
+        result = await asyncio.to_thread(
+            _mesh_request, "POST", "/send",
+            {"from_peer": _PEER_ID, "to_peer": to, "content": message},
+        )
         return result or {"error": "Failed to send message"}
 
     @server.tool()
@@ -201,18 +201,19 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         Broadcast/project messages are delivered to ALL matching sessions.
         Messages auto-expire after 48 hours.
         """
-        _ensure_registered()
+        await asyncio.to_thread(_ensure_registered)
         project = _PROJECT_PATH or _detect_project_path()
-        messages = _mesh_request(
-            "GET", f"/inbox/{_PEER_ID}?project_path={project}",
+        messages = await asyncio.to_thread(
+            _mesh_request, "GET", f"/inbox/{_PEER_ID}?project_path={project}",
         )
         msg_list = (messages or {}).get("messages", [])
         # Auto-mark unread messages as read
         unread_ids = [m["id"] for m in msg_list if not m.get("read")]
         if unread_ids:
-            _mesh_request("POST", f"/inbox/{_PEER_ID}/read", {
-                "message_ids": unread_ids,
-            })
+            await asyncio.to_thread(
+                _mesh_request, "POST", f"/inbox/{_PEER_ID}/read",
+                {"message_ids": unread_ids},
+            )
         return {
             "messages": msg_list,
             "count": len(msg_list),
@@ -231,21 +232,20 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             value: Value to set (only for action="set")
             action: "get" (read all or one key), "set" (write a key)
         """
-        _ensure_registered()
+        await asyncio.to_thread(_ensure_registered)
 
         if action == "set" and key:
-            result = _mesh_request("POST", "/state", {
-                "key": key,
-                "value": value,
-                "set_by": _PEER_ID,
-            })
+            result = await asyncio.to_thread(
+                _mesh_request, "POST", "/state",
+                {"key": key, "value": value, "set_by": _PEER_ID},
+            )
             return result or {"error": "Failed to set state"}
 
         if key:
-            result = _mesh_request("GET", f"/state/{key}")
+            result = await asyncio.to_thread(_mesh_request, "GET", f"/state/{key}")
             return result or {"key": key, "value": None}
 
-        result = _mesh_request("GET", "/state")
+        result = await asyncio.to_thread(_mesh_request, "GET", "/state")
         return result or {"state": {}}
 
     @server.tool()
@@ -261,12 +261,11 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             file_path: Path to the file
             action: "query" (check lock), "acquire" (lock file), "release" (unlock)
         """
-        _ensure_registered()
-        result = _mesh_request("POST", "/lock", {
-            "file_path": file_path,
-            "action": action,
-            "locked_by": _PEER_ID,
-        })
+        await asyncio.to_thread(_ensure_registered)
+        result = await asyncio.to_thread(
+            _mesh_request, "POST", "/lock",
+            {"file_path": file_path, "action": action, "locked_by": _PEER_ID},
+        )
         return result or {"error": "Lock operation failed"}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -275,7 +274,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
 
         Shows the activity log of the mesh network.
         """
-        result = _mesh_request("GET", "/events")
+        result = await asyncio.to_thread(_mesh_request, "GET", "/events")
         return result or {"events": []}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -284,10 +283,10 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
 
         Shows broker uptime, peer count, and connection status.
         """
-        result = _mesh_request("GET", "/status")
+        result = await asyncio.to_thread(_mesh_request, "GET", "/status")
         if result:
             result["my_peer_id"] = _PEER_ID
-            result["heartbeat_active"] = _HEARTBEAT_THREAD is not None
+            result["heartbeat_active"] = _HEARTBEAT_THREAD is not None and _HEARTBEAT_THREAD.is_alive()
         return result or {
             "broker_up": False,
             "error": "Cannot reach mesh broker. Is the daemon running? (slm serve start)",

@@ -34,7 +34,10 @@ from threading import Thread
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PORT = 8765  # v3.4.3: unified daemon on 8765 (was 8767)
+try:
+    _DEFAULT_PORT = int(os.environ.get("SLM_DAEMON_PORT", "") or 8765)
+except ValueError:
+    _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767   # backward-compat redirect
 _DEFAULT_IDLE_TIMEOUT = 0  # v3.4.3: 24/7 default (was 1800)
 _PID_FILE = Path.home() / ".superlocalmemory" / "daemon.pid"
@@ -160,7 +163,13 @@ def _start_daemon_subprocess() -> bool:
         return True
 
     import subprocess
-    cmd = [sys.executable, "-m", "superlocalmemory.server.unified_daemon", "--start"]
+    # v3.6.9 (#33): pass SLM_DAEMON_PORT as explicit --port= so the daemon
+    # binds the right port even when the env var reaches the subprocess.
+    _target_port = _DEFAULT_PORT
+    cmd = [
+        sys.executable, "-m", "superlocalmemory.server.unified_daemon",
+        "--start", f"--port={_target_port}",
+    ]
     log_dir = Path.home() / ".superlocalmemory" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "daemon.log"
@@ -187,7 +196,7 @@ def _start_daemon_subprocess() -> bool:
 
     # Write PID immediately so other callers see it during warmup
     _PID_FILE.write_text(str(proc.pid))
-    _PORT_FILE.write_text(str(_DEFAULT_PORT))
+    _PORT_FILE.write_text(str(_target_port))
 
     return _wait_for_daemon(timeout=60)
 
@@ -236,6 +245,19 @@ def ensure_daemon() -> bool:
         # Re-check after acquiring lock (another process may have started it)
         if is_daemon_running():
             return True
+
+        # v3.6.9 (#36): TCP-level check catches a systemd-started daemon that
+        # has bound the port but hasn't written a PID file yet (e.g. different
+        # HOME for the service user vs. the SSH user).  If the port is already
+        # bound, don't start a second daemon — wait for HTTP readiness instead.
+        try:
+            import socket as _socket
+            with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as _s:
+                _s.settimeout(1)
+                if _s.connect_ex(("127.0.0.1", _DEFAULT_PORT)) == 0:
+                    return _wait_for_daemon(timeout=30)
+        except Exception:
+            pass
 
         # Start unified daemon in background — delegated to helper so the
         # same logic can be reused by callers that already hold the lock.

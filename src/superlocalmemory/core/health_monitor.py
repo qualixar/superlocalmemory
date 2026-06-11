@@ -130,14 +130,26 @@ class HealthMonitor:
         "superlocalmemory.core.reranker_worker",
         "superlocalmemory.core.recall_worker",
     )
+    # Workers that are LOAD-BEARING for recall quality — never kill these
+    # first; prefer killing the reranker (gracefully degrades) or GC instead.
+    _EMBEDDING_IDENTIFIER = "superlocalmemory.core.embedding_worker"
 
     def __init__(
         self,
-        global_rss_budget_mb: int = 2500,
+        global_rss_budget_mb: int = 0,
         heartbeat_timeout_sec: int = 60,
         check_interval_sec: int = 15,
         enable_structured_logging: bool = True,
     ):
+        # Compute RAM-scaled default when 0 is passed (or when the caller
+        # explicitly passes 0 meaning "auto"). Floor at 2500 so low-RAM boxes
+        # keep the old conservative behaviour.
+        if global_rss_budget_mb <= 0:
+            if PSUTIL_AVAILABLE:
+                phys_mb = psutil.virtual_memory().total // (1024 * 1024)
+                global_rss_budget_mb = max(2500, int(phys_mb * 0.40))
+            else:
+                global_rss_budget_mb = 8000  # safe fallback when psutil absent
         self._budget_mb = global_rss_budget_mb
         self._heartbeat_timeout = heartbeat_timeout_sec
         self._interval = check_interval_sec
@@ -207,7 +219,7 @@ class HealthMonitor:
                     slm_workers.append({
                         "pid": child.pid,
                         "rss_mb": round(rss_mb, 1),
-                        "cmdline": cmdline[:80],
+                        "cmdline": cmdline[:200],
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -225,22 +237,33 @@ class HealthMonitor:
             budget_mb=self._budget_mb,
         )
 
-        # RSS budget enforcement
+        # RSS budget enforcement — spare the embedding worker (load-bearing for
+        # recall quality). Kill the reranker first (degrades gracefully); only
+        # fall back to the embedder if it is the only worker remaining.
         if total_rss_mb > self._budget_mb and slm_workers:
-            heaviest = max(slm_workers, key=lambda w: w["rss_mb"])
+            non_embedder = [
+                w for w in slm_workers
+                if self._EMBEDDING_IDENTIFIER not in w["cmdline"]
+            ]
+            candidate = (
+                max(non_embedder, key=lambda w: w["rss_mb"])
+                if non_embedder
+                else max(slm_workers, key=lambda w: w["rss_mb"])
+            )
             logger.warning(
-                "RSS budget exceeded (%.0fMB > %dMB). Killing heaviest worker PID %d (%.0fMB)",
-                total_rss_mb, self._budget_mb, heaviest["pid"], heaviest["rss_mb"],
+                "RSS budget exceeded (%.0fMB > %dMB). Killing worker PID %d (%.0fMB)",
+                total_rss_mb, self._budget_mb, candidate["pid"], candidate["rss_mb"],
             )
             log_structured(
                 level="warning",
                 operation="rss_budget_kill",
-                killed_pid=heaviest["pid"],
-                killed_rss_mb=heaviest["rss_mb"],
+                killed_pid=candidate["pid"],
+                killed_rss_mb=candidate["rss_mb"],
                 total_rss_mb=round(total_rss_mb, 1),
+                spared_embedder=bool(non_embedder),
             )
             try:
-                psutil.Process(heaviest["pid"]).terminate()
+                psutil.Process(candidate["pid"]).terminate()
             except psutil.NoSuchProcess:
                 pass
 

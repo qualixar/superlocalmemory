@@ -746,8 +746,12 @@ async def lifespan(application: FastAPI):
     try:
         from superlocalmemory.core.health_monitor import HealthMonitor
         health_config = getattr(config, 'health', None)
+        # v3.6.9 BUG-A: env override + RAM-scaled default (HealthMonitor computes
+        # 40% of physical RAM when budget=0). SLM_RSS_BUDGET_MB takes priority.
+        _env_budget = int(os.environ.get("SLM_RSS_BUDGET_MB", "0") or 0)
+        _cfg_budget = getattr(health_config, 'global_rss_budget_mb', 0) if health_config else 0
         monitor = HealthMonitor(
-            global_rss_budget_mb=getattr(health_config, 'global_rss_budget_mb', 2500) if health_config else 2500,
+            global_rss_budget_mb=_env_budget or _cfg_budget or 0,
             heartbeat_timeout_sec=getattr(health_config, 'heartbeat_timeout_sec', 60) if health_config else 60,
             check_interval_sec=getattr(health_config, 'health_check_interval_sec', 15) if health_config else 15,
             enable_structured_logging=getattr(health_config, 'enable_structured_logging', True) if health_config else True,
@@ -881,12 +885,21 @@ async def lifespan(application: FastAPI):
     # lifespan every POST /mcp 500s with "Task group is not initialized."
     # AsyncExitStack enters the context only when _mcp_app was mounted; if the
     # mount failed (non-fatal) the daemon starts normally without HTTP MCP.
+    # v3.6.9 (#34): wrap the MCP lifespan in shield so an unhandled exception
+    # or tool-level cancellation inside a session manager task group cannot
+    # propagate out and trigger uvicorn's graceful-shutdown handler.
     async with AsyncExitStack() as _mcp_stack:
         if _mcp_app is not None:
-            await _mcp_stack.enter_async_context(
-                _mcp_app.router.lifespan_context(_mcp_app)
-            )
-            logger.info("MCP HTTP session manager started (Streamable-HTTP on /mcp)")
+            try:
+                await _mcp_stack.enter_async_context(
+                    _mcp_app.router.lifespan_context(_mcp_app)
+                )
+                logger.info("MCP HTTP session manager started (Streamable-HTTP on /mcp)")
+            except Exception as _mcp_lifespan_exc:
+                logger.warning(
+                    "MCP HTTP session manager failed to start (non-fatal, stdio still works): %s",
+                    _mcp_lifespan_exc,
+                )
 
         yield
 
@@ -1210,6 +1223,27 @@ def create_app() -> FastAPI:
         from superlocalmemory.mcp.server import server as _mcp_fastmcp
         _mcp_fastmcp.settings.streamable_http_path = "/"
         _mcp_fastmcp._session_manager = None  # Defensive reset for idempotency
+        # v3.6.9 (#36): configure DNS-rebinding protection from env.
+        # Default: localhost-only (safe). Set SLM_MCP_ALLOWED_HOSTS=192.168.x.y:*
+        # (comma-separated, e.g. "192.168.50.144:*,slm.lan:*") to open to a LAN.
+        # Use "*" to disable protection entirely (trusted private network only).
+        # TransportSecuritySettings imported lazily here so that MCP mount
+        # works on older SDK versions when SLM_MCP_ALLOWED_HOSTS is not set.
+        _mcp_allowed = os.environ.get("SLM_MCP_ALLOWED_HOSTS", "").strip()
+        if _mcp_allowed:
+            from mcp.server.transport_security import TransportSecuritySettings
+            if _mcp_allowed == "*":
+                _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
+                    enable_dns_rebinding_protection=False,
+                )
+            else:
+                _hosts = [h.strip() for h in _mcp_allowed.split(",") if h.strip()]
+                _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
+                    enable_dns_rebinding_protection=True,
+                    allowed_hosts=_hosts,
+                    allowed_origins=[f"http://{h}" for h in _hosts],
+                )
+            logger.info("MCP transport security: allowed_hosts=%r", _mcp_allowed)
         global _mcp_app
         _mcp_app = _mcp_fastmcp.streamable_http_app()
         application.mount("/mcp", _mcp_app)
@@ -2222,7 +2256,9 @@ if __name__ == "__main__":
     # freshly-sized file.
     rotate_oversized_logs()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    port = _DEFAULT_PORT
+    # v3.6.9 (#33): honour SLM_DAEMON_PORT env so operators can configure the
+    # port without changing the launch command. --port= arg takes precedence.
+    port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
     for arg in sys.argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
