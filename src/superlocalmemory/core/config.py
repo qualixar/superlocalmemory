@@ -379,9 +379,7 @@ class HopfieldConfig:
     max_iterations: int = 1
     convergence_epsilon: float = 1e-6
     prefilter_threshold: int = 10_000
-    # v3.6.9: reduced from 1000 — fetching 1000 ANN vectors cost 321ms;
-    # 200 candidates still provide strong associative signal in 5x less time.
-    prefilter_candidates: int = 200
+    prefilter_candidates: int = 1000
     skip_threshold: int = 100_000
     cache_ttl_seconds: float = 60.0
 

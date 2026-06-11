@@ -522,12 +522,21 @@ class MemoryEngine:
         on a background worker.
 
         V3.4.40 (2026-05-09): ``fast=True`` skips the SpreadingActivation
-        5th channel for sub-second response. The other 4 channels still
-        run. Use when recall must complete before another tool call (e.g.
-        agent recall before WebSearch).
+        channel. Deprecated in v3.6.9 — SA now completes in ~36ms after the
+        neighbor-cache fix; fast=True is slower than fast=False and reduces
+        recall quality. The parameter is accepted for backward compatibility
+        but is silently treated as False.
         """
         self._require_full("recall")
         self._ensure_init()
+
+        if fast:
+            logger.warning(
+                "fast=True is deprecated (v3.6.9): SpreadingActivation now "
+                "completes in ~36ms; fast mode is slower and reduces quality. "
+                "Pass fast=False (the default) to silence this warning."
+            )
+            fast = False
 
         pid = profile_id or self._profile_id
 
