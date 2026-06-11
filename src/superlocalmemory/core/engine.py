@@ -452,7 +452,9 @@ class MemoryEngine:
         now = datetime.now(timezone.utc).isoformat()
         record = MemoryRecord(
             profile_id=self._profile_id, content=content,
-            session_date=now[:10], metadata=metadata or {},
+            session_date=now[:10],
+            session_id=(metadata or {}).get("session_id", ""),
+            metadata=metadata or {},
         )
         self._db.store_memory(record)
         # Lightweight regex entities (matches store_pipeline verbatim path) so

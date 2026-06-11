@@ -5,6 +5,21 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.9] - 2026-06-11
+
+### Fixed
+- **BUG-A: Health monitor no longer kills the embedding worker under memory pressure.** The watchdog now spares the embedding worker (load-bearing for recall quality) and prefers the reranker instead. The RSS budget defaults to 40% of physical RAM (floor 2500 MB) rather than a hardcoded 2500 MB, preventing thrash on machines with ≥8 GB. `SLM_RSS_BUDGET_MB` env and a new `"health"` config section give full operator control. `HealthConfig` dataclass + `SLMConfig.load()` parsing added so config.json `"health"` keys now actually take effect.
+- **#34: Mesh tools no longer block the daemon event loop.** All 8 async mesh tools wrapped `_ensure_registered` and `_mesh_request` in `asyncio.to_thread` so the blocking loopback HTTP calls leave the event loop (v3.6.7 in-process transport made this a self-deadlock). MCP lifespan hardened so a tool-level exception cannot propagate to uvicorn's shutdown handler. `heartbeat_active` and `registered` now return live state instead of hardcoded literals.
+- **#35: `session_init` now returns a `session_id`.** Clients pass it to `remember()` and `close_session()`. `store_fast` lifts `session_id` from metadata onto the `MemoryRecord` row so facts are correctly attributed. `close_session` queries the DB for the most recent session instead of chasing a phantom `_last_session_id` that was never assigned — `summary_events_created` now returns real counts.
+- **#36-1: HTTP MCP reachable from LAN.** New `SLM_MCP_ALLOWED_HOSTS` (opt-in, default localhost-only) overrides MCP's DNS-rebinding protection. Accepts comma-separated `host:port*` patterns or `*` to disable protection entirely on a trusted LAN.
+- **#36-2: `slm mcp` and the HTTP daemon no longer race for port 8765.** `ensure_daemon` now checks TCP connectivity in addition to PID file + HTTP health, detecting systemd-started daemons mid-startup before attempting a second bind. `SLM_DAEMON_PORT` is now fully wired end-to-end (previously only read in `commands.py` URL building, not in the actual uvicorn bind or `_start_daemon_subprocess`).
+- **#32: Docs correctly state Python 3.11+ requirement** (was "3.10 or later"). Added Ubuntu 22.04 deadsnakes install instructions and a new `docs/install-linux.md` guide.
+
+### Added
+- `HealthConfig` dataclass in `core/config.py` and `"health"` section parsing in `SLMConfig.load()`.
+- `docs/distributed-deployment.md` — complete guide for LXC/container/multi-machine setups, including a full ~90-entry `SLM_*` environment variable reference table (closes #33 + #37).
+- `docs/install-linux.md` — Ubuntu 22.04 / Debian install guide with venv, pipx, and pyenv options, plus a systemd unit template.
+
 ## [3.6.8] - 2026-06-11 — Runtime recall-health monitor (self-healing recall)
 
 ### Fixed

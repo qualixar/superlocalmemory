@@ -655,6 +655,25 @@ class AutoInvokeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Health Config (v3.6.9 BUG-A)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HealthConfig:
+    """Health-monitor tuning knobs.
+
+    All values have safe defaults so an empty ``"health": {}`` JSON section
+    silently inherits them. The ``global_rss_budget_mb`` default is computed
+    at runtime (40% of physical RAM, floor 2500 MB) so low-RAM boxes keep the
+    old behaviour while large machines are never accidentally throttled.
+    """
+    global_rss_budget_mb: int = 0          # 0 = compute at runtime (40% RAM, floor 2500)
+    heartbeat_timeout_sec: int = 60
+    health_check_interval_sec: int = 15
+    enable_structured_logging: bool = True
+
+
+# ---------------------------------------------------------------------------
 # Master Config
 # ---------------------------------------------------------------------------
 
@@ -698,6 +717,7 @@ class SLMConfig:
     graph_backend: str = "auto"       # "auto" = cozo if pycozo installed, else sqlite
     vector_backend: str = "auto"      # "auto" = lancedb if installed, else sqlite-vec
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
+    health: HealthConfig = field(default_factory=HealthConfig)
 
     # v3.4.3: Daemon configuration
     daemon_idle_timeout: int = 0       # 0 = 24/7 (no auto-kill). >0 = seconds before auto-kill.
@@ -787,6 +807,14 @@ class SLMConfig:
             config.evolution = EvolutionConfig(**{
                 k: v for k, v in evo.items()
                 if k in EvolutionConfig.__dataclass_fields__
+            })
+
+        # V3.6.9: Health monitor config (BUG-A — previously silently ignored)
+        hlth = data.get("health", {})
+        if hlth:
+            config.health = HealthConfig(**{
+                k: v for k, v in hlth.items()
+                if k in HealthConfig.__dataclass_fields__
             })
 
         # V3.4.65: Injection config (additive — defaults if missing from JSON)

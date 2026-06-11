@@ -16,9 +16,11 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -349,6 +351,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     "session_init feedback_count read failed: %s", exc,
                 )
 
+            # v3.6.9 (#35): generate a stable session_id so clients can pass it
+            # to remember() and close_session() for proper session aggregation.
+            session_id = (
+                f"slm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d}"
+                f"-{uuid.uuid4().hex[:8]}"
+            )
+
             # Register agent + emit event (v3.4.39: SLM_AGENT_ID env support)
             agent_id = _get_agent_id()
             _register_agent(agent_id, pid)
@@ -360,6 +369,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
 
             return {
                 "success": True,
+                "session_id": session_id,
                 "context": context,
                 "memories": memories[:max_results],
                 "memory_count": len(memories),
@@ -525,8 +535,24 @@ def register_active_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             sid = session_id or getattr(engine, '_last_session_id', '')
+            # v3.6.9 (#35): _last_session_id was never assigned — fall back to
+            # querying the DB for the most recent session_id instead of silently
+            # returning summary_events_created: 0.
             if not sid:
-                return {"success": False, "error": "No session_id provided"}
+                try:
+                    db = getattr(engine, '_db', None) or getattr(engine, 'db', None)
+                    if db:
+                        with db._get_conn() as conn:
+                            row = conn.execute(
+                                "SELECT session_id FROM memories "
+                                "WHERE session_id != '' ORDER BY created_at DESC LIMIT 1"
+                            ).fetchone()
+                            if row:
+                                sid = row[0]
+                except Exception:
+                    pass
+            if not sid:
+                return {"success": False, "error": "No session_id provided or found"}
             count = engine.close_session(sid)
             return {
                 "success": True,
