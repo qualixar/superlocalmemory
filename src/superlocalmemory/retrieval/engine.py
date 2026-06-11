@@ -237,7 +237,7 @@ class RetrievalEngine:
                 and fused
                 and (_time_e.monotonic() - _e0) < 0.9):
             try:
-                candidate_ids = [fr.fact_id for fr in fused[:100]]
+                candidate_ids = [fr.fact_id for fr in fused[:50]]
                 eg_scores = self._entity.score_candidates(
                     query, candidate_ids, profile_id,
                 )

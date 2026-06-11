@@ -56,7 +56,7 @@ class HopfieldConfig:
     max_iterations: int = 1
     convergence_epsilon: float = 1e-6
     prefilter_threshold: int = 10_000
-    prefilter_candidates: int = 1000
+    prefilter_candidates: int = 200
     skip_threshold: int = 100_000
     cache_ttl_seconds: float = 60.0
 
