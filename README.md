@@ -33,17 +33,21 @@
 <details>
 <summary><strong>What's New in V3.6 — Optimize: SKIP, SHRINK, DISCOUNT, REMEMBER</strong> (click to expand)</summary>
 
-> V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% saved), SHRINKS prompts 60-95% (compress: extractive + LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install. **Your first cache hit pays for the install time. Hours of coding on repeat, minimal API cost.**
+> V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% saved on a hit), SHRINKS prose prompts (compress: lossless-by-default, opt-in LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install. **Your first cache hit pays for the install time. Hours of coding on repeat, minimal API cost.**
+>
+> **v3.6.10:** cache and compression are now **independent runtime switches** (cache-only, compress-only, both, or neither — toggle live from the dashboard, no restart). Compression was rebuilt to be **lossless by default** (the old string/array/code truncation is gone); aggressive mode adds LLMLingua-2 for **prose only** — never code, numbers, structured data, or the current turn.
 
 ### The Three Levers
 
 | Lever | Mechanism | Saving | Off by default? |
 |-------|-----------|:------:|:---------------:|
-| **Cache** | Skip repeat calls — exact-match SQLite lookup, vCache-gated semantic (opt-in) | **100% on a hit** (input + output) | Cache ON, Semantic OFF |
-| **Compress** | Shrink prompts — extractive JSON/code (lossless) + LLMLingua-2 prose (opt-in) | **60–95% on a miss** (input only) | Safe mode ON, Aggressive OFF |
+| **Cache** | Skip repeat calls — exact-match SQLite lookup (zero false hits), vCache-gated semantic (opt-in) | **100% on a hit** (input + output) | Cache ON, Semantic OFF |
+| **Compress** | Shrink prompts — **safe = lossless** normalization; **aggressive = LLMLingua-2 prose only** (opt-in) | Safe: small + lossless · Aggressive: large on prose | Safe mode, Aggressive OFF |
 | **Align** | Stabilize prefix — maximize provider prefix-cache discounts | **Lossless extra** | ON when compression is ON |
 
 **Memory** (v3.5's existing engine) runs in parallel — it shapes *what is in* the prompt (relevant facts); Optimize decides *whether and how* it is sent.
+
+> **Independent at runtime:** enable caching only, compression only, both, or neither — from the dashboard Optimize tab, applied live (no restart). Each AI client can also get its own memory identity over HTTP MCP via `http://127.0.0.1:8765/mcp/{agent_id}`.
 
 ### Quick Start
 
@@ -60,7 +64,7 @@ slm wrap claude
 |:--------|:-------------|
 | `slm optimize status\|on\|off\|savings` | Master Optimize control + savings report (USD/INR/tokens) |
 | `slm cache status\|clear\|invalidate\|ttl\|semantic` | Cache sub-control — exact + semantic tiers |
-| `slm compress status\|mode\|code\|prose\|ccr\|align` | Compression control — per-channel toggles |
+| `slm compress status\|mode\|prose` | Compression control — safe (lossless) / aggressive (LLMLingua-2 prose) |
 | `slm proxy [--port] [--provider]` | Start the interception proxy (port 8765) |
 | `slm wrap <agent>` | Proxy-activate an agent — one command to start saving |
 | `slm help-optimize [topic]` | Full developer reference + per-agent setup recipes |

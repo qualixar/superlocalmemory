@@ -135,3 +135,27 @@ def test_tenant_tag() -> None:
 def test_model_tag() -> None:
     kb = KeyBuilder()
     assert kb.model_tag("claude-sonnet-4-6") == "model:claude-sonnet-4-6"
+
+
+def test_c04_temperature_skip_increments_calls_skipped() -> None:
+    """C-04: build() with non-zero temperature must increment MetricsCollector.calls_skipped."""
+    from superlocalmemory.optimize.metrics.counters import MetricsCollector
+
+    collector = MetricsCollector.get_instance()
+    collector.reset()
+
+    kb = KeyBuilder()
+    key = kb.build(
+        tenant_id=_tenant(1),
+        model_id="claude",
+        model_version="",
+        system="",
+        messages=[{"role": "user", "content": "temp test"}],
+        raw_params={"temperature": 0.7},
+    )
+
+    assert key is None, "non-zero temperature with default config must return None"
+    snap = collector.snapshot()
+    assert snap.calls_skipped >= 1, (
+        f"C-04: calls_skipped not incremented on temperature skip; got {snap.calls_skipped}"
+    )

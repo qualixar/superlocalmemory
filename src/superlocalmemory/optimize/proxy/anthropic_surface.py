@@ -25,7 +25,9 @@ from superlocalmemory.optimize.proxy._helpers import (
     _safe_compress,
     _stream_and_cache_forward,
     _stream_forward,
+    capture_passthrough_forward,
 )
+from superlocalmemory.optimize.proxy.capture import capture_enabled
 from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse, ProxyRequest
 
 logger = logging.getLogger("slm.optimize.proxy.anthropic")
@@ -192,6 +194,16 @@ async def handle_messages(proxy: object, request: Request) -> Response:
 
         stream = bool(body.get("stream", False))
         has_tools = _body_has_tools(body)
+
+        # v3.6.10 shadow-capture (plan §7): pure passthrough + corpus record.
+        if capture_enabled():
+            return await capture_passthrough_forward(
+                proxy, request, provider="anthropic", upstream_url=upstream_url,
+                allowed_headers=_ANTHROPIC_FORWARD_HEADERS, request_id=request_id,
+                model_hint=str(body.get("model", "")),
+                sse_parser=_parse_sse_to_json, is_stream=stream,
+            )
+
         ctx = ProxyRequest(
             provider="anthropic",
             method="POST",

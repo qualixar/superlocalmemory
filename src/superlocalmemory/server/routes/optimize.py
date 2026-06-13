@@ -32,17 +32,15 @@ class ConfigUpdateRequest(BaseModel):
     semantic_enabled: bool | None = None
     compress_enabled: bool | None = None
     compress_mode: Literal['safe', 'aggressive'] | None = None
-    compress_code: bool | None = None
     compress_prose: bool | None = None
-    compress_ccr: bool | None = None
 
 
 @router.get("/config")
 async def get_config() -> dict[str, Any]:
     """Return current optimize config as JSON."""
     try:
-        from superlocalmemory.optimize.config.store import ConfigStore
-        cfg = ConfigStore().get()
+        from superlocalmemory.optimize.config import get_shared_store
+        cfg = get_shared_store().get()
         return cfg.as_dict()
     except Exception as exc:
         logger.warning("GET /api/optimize/config failed: %s", exc)
@@ -54,8 +52,8 @@ async def put_config(body: ConfigUpdateRequest) -> dict[str, Any]:
     """Update optimize config (partial). Daemon hot-reloads within 2s."""
     try:
         import dataclasses
-        from superlocalmemory.optimize.config.store import ConfigStore
-        store = ConfigStore()
+        from superlocalmemory.optimize.config import get_shared_store
+        store = get_shared_store()
         cfg = store.get()
         updates: dict[str, Any] = {}
         for field_name in ConfigUpdateRequest.model_fields:
@@ -80,11 +78,11 @@ async def get_savings() -> dict[str, Any]:
     Field names match INTERFACE-CONTRACT §5 exactly.
     """
     try:
-        from superlocalmemory.optimize.config.store import ConfigStore
+        from superlocalmemory.optimize.config import get_shared_store
         from superlocalmemory.optimize.metrics.counters import get_metrics
         from superlocalmemory.optimize.storage.db import CacheDB
 
-        cfg = ConfigStore().get()
+        cfg = get_shared_store().get()
         collector = get_metrics()
         db = CacheDB()
         snap = collector.snapshot(

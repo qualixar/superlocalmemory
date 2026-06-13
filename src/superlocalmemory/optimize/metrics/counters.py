@@ -24,7 +24,7 @@ class MetricsCollector:
     Hook binding (from INTERFACE-CONTRACT §3):
         on_hit(tokens_saved_input, tokens_saved_output):  cache hit
         on_miss():                                         cache miss
-        on_compress(bytes_original, bytes_after):          compress ran
+        on_compress(tokens_before, tokens_after):          compress ran (word-count proxy)
         on_eviction():                                     entry expired/evicted
     """
 
@@ -69,19 +69,27 @@ class MetricsCollector:
         with self._data_lock:
             self._misses += 1
 
-    def on_compress(self, bytes_original: int, bytes_after: int) -> None:
-        """Record a compression run with byte counts."""
+    def on_compress(self, tokens_before: int, tokens_after: int) -> None:
+        """Record a compression run. Arguments are word-count proxy estimates from _token_estimate().
+
+        M-03: consistent naming — these are token estimates, not byte counts.
+        Stored in compress_bytes_original/after fields for DB schema compat; unit is word-count.
+        """
         with self._data_lock:
             self._compress_runs += 1
-            self._compress_bytes_original += max(0, bytes_original)
-            self._compress_bytes_after += max(0, bytes_after)
-            saved_tokens = max(0, bytes_original - bytes_after)
-            self._tokens_saved_compress += saved_tokens
+            self._compress_bytes_original += max(0, tokens_before)
+            self._compress_bytes_after += max(0, tokens_after)
+            self._tokens_saved_compress += max(0, tokens_before - tokens_after)
 
     def on_eviction(self) -> None:
         """Record an eviction."""
         with self._data_lock:
             self._evictions += 1
+
+    def increment_skipped_temperature(self) -> None:
+        """C-04: record a cache skip due to non-zero temperature."""
+        with self._data_lock:
+            self._calls_skipped += 1
 
     def record_latency(self, ms: float) -> None:
         """Record latency overhead in milliseconds."""

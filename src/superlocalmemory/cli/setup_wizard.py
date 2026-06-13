@@ -32,6 +32,8 @@ _SLM_HOME = Path(os.environ.get("SL_MEMORY_PATH", Path.home() / ".superlocalmemo
 _SETUP_MARKER = _SLM_HOME / ".setup-complete"
 _EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+# v3.6.10: compulsory LLMLingua-2 prose compression model (~560MB, aggressive mode).
+_COMPRESSOR_MODEL = "microsoft/llmlingua-2-xlm-roberta-large-meetingbank"
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +177,49 @@ def _download_reranker(model_name: str) -> bool:
         return False
     except Exception as exc:
         print(f"  ✗ Reranker error: {exc}")
+        return False
+
+
+def _download_compressor(model_name: str) -> bool:
+    """Download the LLMLingua-2 prose compression model (v3.6.10).
+
+    Mirrors _download_reranker: a subprocess forces the HF download with visible
+    progress. Fail-open — a network hiccup must NOT break setup; the model also
+    lazy-downloads on first use in prose_llmlingua.py.
+    """
+    print(f"\n  Downloading compression model: {model_name}")
+    print(f"  (LLMLingua-2 prose compressor, ~560MB — aggressive mode only)\n")
+
+    script = (
+        "from llmlingua import PromptCompressor; "
+        f"PromptCompressor(model_name='{model_name}', use_llmlingua2=True, "
+        "device_map='cpu'); "
+        "print('OK')"
+    )
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            timeout=900,  # 560MB on a slow link can exceed 5 min
+            capture_output=False,
+            text=True,
+            env={
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": "",
+                "TOKENIZERS_PARALLELISM": "false",
+                "TORCH_DEVICE": "cpu",
+            },
+        )
+        if result.returncode == 0:
+            print(f"  ✓ Compression model ready")
+            return True
+        print(f"  ✗ Compression model download failed (will lazy-download on first use)")
+        return False
+    except ImportError:
+        print(f"  ⚠ llmlingua not installed — compression model will download on first use")
+        return False
+    except Exception as exc:
+        print(f"  ✗ Compression model error: {exc}")
         return False
 
 
@@ -392,6 +437,10 @@ def run_wizard(auto: bool = False) -> None:
         print("  ⚠ Skipped (sentence-transformers not installed)")
     else:
         _download_reranker(_RERANKER_MODEL)
+
+    print()
+    print("─── Step 4c/10: Download Compression Model (LLMLingua-2) ───")
+    _download_compressor(_COMPRESSOR_MODEL)
 
     # -- Step 5: Daemon Configuration (v3.4.3) --
     print()

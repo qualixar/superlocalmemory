@@ -243,3 +243,84 @@ def test_get_fail_open_on_corrupt_db(tmp_path: Path) -> None:
     except RuntimeError:
         # Acceptable: init refuses a corrupt file; proxy won't instantiate.
         pass
+
+
+# ---- C-06: AES key persistence ----
+
+def test_c06_aes_key_persisted_to_file(tmp_path: Path) -> None:
+    """C-06: _get_or_persist_aes_key() must write 32 bytes to opt-key.bin on first open."""
+    from superlocalmemory.optimize.storage.db import CacheDB, _KEY_FILE
+    import importlib
+
+    key_file = tmp_path / "opt-key.bin"
+
+    # Patch _KEY_FILE to use tmp_path so we don't pollute the real ~/.superlocalmemory/
+    import superlocalmemory.optimize.storage.db as db_mod
+    original = db_mod._KEY_FILE
+    db_mod._KEY_FILE = key_file
+    try:
+        db = CacheDB(tmp_path / "llmcache.db")
+        assert key_file.exists(), "opt-key.bin must be created on first DB open"
+        key_bytes = key_file.read_bytes()
+        assert len(key_bytes) == 32, f"Persisted key must be 32 bytes, got {len(key_bytes)}"
+        # Permissions must be 0600
+        mode = oct(key_file.stat().st_mode & 0o777)
+        assert mode == "0o600", f"opt-key.bin must be 0600, got {mode}"
+    finally:
+        db_mod._KEY_FILE = original
+
+
+def test_c10_vec_add_persists_context_fp(tmp_cache_db) -> None:
+    """C-10: vec_add must persist context_fp; get_all_vectors must return it."""
+    import struct
+    tmp_cache_db.set("k-c10", "t1", b"v", model="m", ttl_expires=None, tags=[])
+    row = tmp_cache_db.get("k-c10", "t1")
+    vec = struct.pack("3f", 0.5, 0.6, 0.7)
+    ctx = "sha256:abc123"
+
+    tmp_cache_db.vec_add(row.entry_id, "t1", vec, meta={"dim": 3, "model": "x", "context_fp": ctx})
+
+    all_vecs = tmp_cache_db.get_all_vectors("t1")
+    assert len(all_vecs) == 1
+    entry_id_ret, blob_ret, ctx_fp_ret = all_vecs[0]
+    assert entry_id_ret == row.entry_id
+    assert blob_ret == vec
+    assert ctx_fp_ret == ctx, f"C-10: context_fp must be persisted; got {ctx_fp_ret!r}"
+
+
+def test_c10_vec_add_default_context_fp_is_empty(tmp_cache_db) -> None:
+    """C-10: vec_add without context_fp in meta defaults to empty string."""
+    import struct
+    tmp_cache_db.set("k-c10b", "t1", b"v", model="m", ttl_expires=None, tags=[])
+    row = tmp_cache_db.get("k-c10b", "t1")
+    vec = struct.pack("3f", 0.1, 0.2, 0.3)
+
+    tmp_cache_db.vec_add(row.entry_id, "t1", vec, meta={"dim": 3, "model": "x"})
+
+    all_vecs = tmp_cache_db.get_all_vectors("t1")
+    assert len(all_vecs) == 1
+    _, _, ctx_fp_ret = all_vecs[0]
+    assert ctx_fp_ret == "", f"C-10: missing context_fp must default to ''; got {ctx_fp_ret!r}"
+
+
+def test_c06_second_open_uses_persisted_key(tmp_path: Path) -> None:
+    """C-06: Second CacheDB open must use the persisted key (decrypt still works)."""
+    from superlocalmemory.optimize.storage.db import CacheDB
+    import superlocalmemory.optimize.storage.db as db_mod
+
+    key_file = tmp_path / "opt-key.bin"
+    db_path = tmp_path / "llmcache.db"
+    original = db_mod._KEY_FILE
+    db_mod._KEY_FILE = key_file
+    try:
+        # First open — derives and persists key
+        db1 = CacheDB(db_path)
+        db1.set("k1", "a" * 64, b"hello world", model="m", ttl_expires=None, tags=[])
+        db1.close()
+
+        # Second open — must load persisted key and decrypt successfully
+        db2 = CacheDB(db_path)
+        row = db2.get("k1", "a" * 64)
+        assert row is not None, "C-06: second open must read entries written by first open"
+    finally:
+        db_mod._KEY_FILE = original

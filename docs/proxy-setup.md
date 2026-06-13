@@ -55,6 +55,8 @@ Cache fires for **all requests** — including those with tools. As of v3.6.3, t
 
 > **How tool-use caching works:** The proxy accumulates the full SSE stream (including all `tool_use` blocks), assembles the complete JSON message, and stores it under the request hash. On a cache hit, it replays the stored JSON as a properly formed SSE stream — emitting `content_block_start` (type `tool_use`), `input_json_delta` chunks, and `message_stop` — exactly as the real API would. The client sees no difference.
 
+> **Turning cache / compression on or off (v3.6.10).** Caching and compression are **independent runtime switches** in the dashboard **Optimize** tab — enable caching only, compression only, both, or neither, applied **live with no restart**. (Starting the proxy itself — `proxy_enabled` — is still a one-time setup that needs a daemon restart.) Equivalent CLI: `slm cache on|off`, `slm compress mode safe|aggressive`, `slm compress prose on|off`.
+
 ---
 
 ## Claude Code CLI

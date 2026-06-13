@@ -109,15 +109,14 @@ def _sqlite_emergency_recall(
 def _get_agent_id(default: str = "mcp_client") -> str:
     """Resolve the calling agent's ID for attribution.
 
-    Each MCP client (Claude Code, Codex, Gemini CLI, Kimi, etc.) can set
-    the ``SLM_AGENT_ID`` env var in its MCP server config so that memories,
-    observations, and registry entries are tagged with the actual source
-    agent — not the legacy ``"mcp_client"`` default.
-
-    v3.4.39+: enables proper per-agent attribution in ``session_init``,
-    ``observe``, and event emissions.
+    Priority chain (v3.6.10+):
+    1. ContextVar set by HTTP URL path (/mcp/{agent_id}) — HTTP transport.
+    2. SLM_AGENT_ID env var — stdio transport per-process identity.
+    3. Provided default (legacy "mcp_client").
     """
-    return os.environ.get("SLM_AGENT_ID", default)
+    from superlocalmemory.mcp.agent_context import get_current_agent_id
+    resolved = get_current_agent_id(env_fallback=True)
+    return resolved if resolved != "mcp_client" else default
 
 
 def _emit_event(event_type: str, payload: dict | None = None,

@@ -9,7 +9,6 @@ from superlocalmemory.optimize.compress.router import (
     _msg_has_tool_result,
     _set_tool_result_text,
     _token_estimate,
-    _token_estimate_structured,
     _tool_result_text,
     CompressTextResult,
 )
@@ -18,11 +17,6 @@ from superlocalmemory.optimize.compress.router import (
 def test_token_estimate_prose() -> None:
     assert _token_estimate("hello world") == 2
     assert _token_estimate("") == 0
-
-
-def test_token_estimate_structured() -> None:
-    assert _token_estimate_structured("abcd" * 10) == 10  # 40 chars / 4
-    assert _token_estimate_structured("") == 0
 
 
 def test_msg_has_tool_result_true() -> None:

@@ -93,19 +93,23 @@ class PerItemBoundaryRecord:
         query_sim: float,
         delta: float = 0.05,
         epsilon_grid: tuple[float, ...] = (0.01, 0.02, 0.05, 0.10),
+        return_threshold: float = 1.0,
     ) -> float:
         """Compute τ̂ — the vCache exploration probability (Eq. 11).
 
         Args:
-            query_sim: Cosine similarity s(x) ∈ [0, 1] for the incoming query.
-            delta:     δ — user-defined maximum error rate.
-                       Theorem 4.1 guarantee: Pr(correct) ≥ 1 - δ.
-            epsilon_grid: ε values for the Eq. 11 min sweep.
-                          Distinct from δ; controls CI conservativeness.
+            query_sim:        Cosine similarity s(x) ∈ [0, 1] for the incoming query.
+            delta:            δ — user-defined maximum error rate.
+                              Theorem 4.1 guarantee: Pr(correct) ≥ 1 - δ.
+            epsilon_grid:     ε values for the Eq. 11 min sweep.
+                              Distinct from δ; controls CI conservativeness.
+            return_threshold: Semantic return threshold from config (semantic_return_threshold).
+                              C-03 fix: during cold start, exploit directly when
+                              query_sim >= return_threshold instead of always exploring.
 
         Returns:
             τ̂ ∈ [0.0, 1.0]. Lower = more exploitation.
-            Cold start (n < 3): returns 1.0 (always explore).
+            Cold start (n < 3): 0.0 if query_sim >= return_threshold, else 1.0.
 
         Eq. 11 derivation (from the paper):
           1. I_tt = Σ γ̂² · p_i(1 - p_i)            [Fisher info diagonal]
@@ -117,7 +121,12 @@ class PerItemBoundaryRecord:
         """
         n = len(self.samples)
         if n < 3:
-            return 1.0  # cold start — always explore
+            # ARCH-02 note: this function serves dual purpose — (a) warm-phase vCache
+            # Eq. 11 tau computation and (b) cold-start similarity gate. The cold-start
+            # branch (n < 3) is intentionally simple: if the query is already above the
+            # return threshold, serve it (tau=0.0 → exploit); otherwise explore (tau=1.0).
+            # C-03: honor return_threshold — avoids 100% miss until 3 samples are accumulated.
+            return 0.0 if query_sim >= return_threshold else 1.0
 
         # Step 1: Fisher-information SE
         i_tt = 0.0
@@ -144,12 +153,17 @@ class PerItemBoundaryRecord:
 
         return best_tau
 
-    def should_explore(self, query_sim: float, delta: float = 0.05) -> bool:
+    def should_explore(
+        self,
+        query_sim: float,
+        delta: float = 0.05,
+        return_threshold: float = 1.0,
+    ) -> bool:
         """Return True (explore = LLM call) or False (exploit = serve cache).
 
         Source: vCache Algorithm 2: draw u ~ Uniform(0, 1); explore iff u ≤ τ̂.
         """
-        tau = self.compute_tau(query_sim, delta=delta)
+        tau = self.compute_tau(query_sim, delta=delta, return_threshold=return_threshold)
         return _RNG.random() <= tau
 
     def add_sample(

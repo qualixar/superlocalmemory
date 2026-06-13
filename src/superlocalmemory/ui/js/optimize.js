@@ -23,14 +23,12 @@
       if (!resp.ok) return;
       var cfg = await resp.json();
       _setToggle('opt-enabled', cfg.enabled);
+      _setToggle('opt-proxy-enabled', cfg.proxy_enabled);
       _setToggle('opt-cache-enabled', cfg.cache_enabled);
       _setToggle('opt-semantic-enabled', cfg.semantic_enabled);
       _setToggle('opt-compress-enabled', cfg.compress_enabled);
       _setSelect('opt-compress-mode', cfg.compress_mode);
-      _setToggle('opt-compress-code', cfg.compress_code);
       _setToggle('opt-compress-prose', cfg.compress_prose);
-      _setToggle('opt-compress-ccr', cfg.compress_ccr);
-      _setToggle('opt-compress-align', cfg.compress_align);
       var verEl = document.getElementById('opt-config-version');
       if (verEl) verEl.textContent = cfg.config_version || '-';
     } catch (e) {
@@ -70,14 +68,12 @@
     var val = e.target.checked;
 
     var fieldMap = {
-      'opt-enabled': 'enabled',
-      'opt-cache-enabled': 'cache_enabled',
+      'opt-enabled':          'enabled',
+      'opt-proxy-enabled':    'proxy_enabled',
+      'opt-cache-enabled':    'cache_enabled',
       'opt-semantic-enabled': 'semantic_enabled',
       'opt-compress-enabled': 'compress_enabled',
-      'opt-compress-code': 'compress_code',
-      'opt-compress-prose': 'compress_prose',
-      'opt-compress-ccr': 'compress_ccr',
-      'opt-compress-align': 'compress_align'
+      'opt-compress-prose':   'compress_prose'
     };
 
     if (id === 'opt-compress-mode') {
@@ -109,6 +105,10 @@
       var body = {};
       body[field] = val;
       _putConfig(body);
+      if (id === 'opt-proxy-enabled' || id === 'opt-enabled') {
+        var notice = document.getElementById('opt-restart-notice');
+        if (notice) notice.classList.remove('d-none');
+      }
     }
   });
 

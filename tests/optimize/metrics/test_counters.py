@@ -127,3 +127,25 @@ def test_get_metrics_returns_singleton():
     a = get_metrics()
     b = get_metrics()
     assert a is b
+
+
+def test_m03_on_compress_uses_token_params() -> None:
+    """M-03: on_compress accepts tokens_before/tokens_after (not bytes)."""
+    mc = MetricsCollector.get_instance()
+    mc.reset()
+    mc.on_compress(tokens_before=100, tokens_after=70)
+    snap = mc.snapshot()
+    assert snap.compress_runs == 1
+    assert snap.compress_bytes_original == 100
+    assert snap.compress_bytes_after == 70
+    assert snap.tokens_saved_compress == 30
+
+
+def test_m03_on_compress_positional_args_still_work() -> None:
+    """M-03: positional call (router pattern) still works after rename."""
+    mc = MetricsCollector.get_instance()
+    mc.reset()
+    mc.on_compress(200, 150)
+    snap = mc.snapshot()
+    assert snap.compress_bytes_original == 200
+    assert snap.tokens_saved_compress == 50

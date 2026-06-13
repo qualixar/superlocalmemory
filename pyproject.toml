@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.6.9"
+version = "3.6.10"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -69,6 +69,11 @@ dependencies = [
     "scikit-learn==1.8.0",
     # Vector KNN extension for the semantic channel.
     "sqlite-vec==0.1.9",
+    # v3.6.10: LLMLingua-2 prose compression (aggressive mode, opt-in at runtime).
+    # Hard dependency so `pip install superlocalmemory` ships compression-ready;
+    # the ~560MB model downloads on first setup/warmup (fail-open). Verified the
+    # pin does NOT disturb the transformers/torch/numpy pins above.
+    "llmlingua==0.2.2",
 ]
 
 [project.optional-dependencies]

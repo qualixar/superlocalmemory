@@ -74,7 +74,13 @@ class ConfigStore:
             return self._current_config
 
     def save(self, config: OptimizeConfig) -> None:
-        """Write config to optimize.json with version bump."""
+        """Write config to optimize.json with version bump.
+
+        Fires registered change callbacks immediately after a successful write
+        (outside the lock) so a UI/CLI save reaches the live proxy without
+        waiting for the 2s watchdog poll. The watchdog skips this write via
+        ``_saved_by_self`` so callbacks fire exactly once.
+        """
         config.validate()
         with self._lock:
             new_version = self._version + 1
@@ -93,6 +99,14 @@ class ConfigStore:
                 self._version = new_version
             finally:
                 self._saved_by_self = False
+            callbacks = list(self._change_callbacks)
+        # Fire callbacks OUTSIDE the lock — a callback may rebuild proxy hooks
+        # or call back into get(); keeping them off the lock avoids contention.
+        for cb in callbacks:
+            try:
+                cb(new_cfg)
+            except Exception as exc:
+                logger.warning("ConfigStore save callback error: %s", exc)
 
     def start_watchdog(self) -> None:
         """Start the background hot-reload watchdog thread.

@@ -1249,6 +1249,16 @@
                                     <label class="form-check-label" for="opt-enabled">Optimize Enabled</label>
                                 </div>
                                 <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="opt-proxy-enabled">
+                                    <label class="form-check-label" for="opt-proxy-enabled">
+                                        Proxy Enabled
+                                        <span class="text-muted small ms-1">(restart required)</span>
+                                    </label>
+                                </div>
+                                <div id="opt-restart-notice" class="alert alert-warning py-1 px-2 small mb-2 d-none">
+                                    Proxy setting changed. Run <code>slm restart</code> to apply.
+                                </div>
+                                <div class="form-check form-switch mb-2">
                                     <input class="form-check-input" type="checkbox" id="opt-cache-enabled">
                                     <label class="form-check-label" for="opt-cache-enabled">Cache Enabled</label>
                                 </div>
@@ -1263,25 +1273,13 @@
                                 <div class="mb-2">
                                     <label for="opt-compress-mode" class="form-label">Compression Mode</label>
                                     <select class="form-select form-select-sm" id="opt-compress-mode">
-                                        <option value="safe">Safe</option>
-                                        <option value="aggressive">Aggressive</option>
+                                        <option value="safe">Safe (lossless)</option>
+                                        <option value="aggressive">Aggressive (LLMLingua-2, prose only)</option>
                                     </select>
-                                </div>
-                                <div class="form-check form-switch mb-2">
-                                    <input class="form-check-input" type="checkbox" id="opt-compress-code">
-                                    <label class="form-check-label" for="opt-compress-code">Code Compression</label>
                                 </div>
                                 <div class="form-check form-switch mb-2">
                                     <input class="form-check-input" type="checkbox" id="opt-compress-prose">
                                     <label class="form-check-label" for="opt-compress-prose">Prose Compression</label>
-                                </div>
-                                <div class="form-check form-switch mb-2">
-                                    <input class="form-check-input" type="checkbox" id="opt-compress-ccr">
-                                    <label class="form-check-label" for="opt-compress-ccr">CCR</label>
-                                </div>
-                                <div class="form-check form-switch mb-2">
-                                    <input class="form-check-input" type="checkbox" id="opt-compress-align">
-                                    <label class="form-check-label" for="opt-compress-align">Alignment Compression</label>
                                 </div>
                             </div>
                             <div class="col-md-6">
@@ -1299,6 +1297,12 @@
                                 <div class="small text-muted">Config version: <span id="opt-config-version">-</span></div>
                                 <div id="opt-stale-warning" class="text-warning small mt-1"></div>
                                 <button class="btn btn-sm btn-outline-primary mt-2" id="opt-copy-url">Copy URL</button>
+                                <div class="mt-2 small text-muted">
+                                    <strong>Point agents at the proxy:</strong><br>
+                                    <code>slm wrap claude</code> — Claude Code<br>
+                                    <code>--openai-api-base http://localhost:8765/v1</code> — Aider<br>
+                                    <code>OPENAI_BASE_URL=http://localhost:8765/v1</code> — OpenAI SDK
+                                </div>
                             </div>
                         </div>
                     </div>

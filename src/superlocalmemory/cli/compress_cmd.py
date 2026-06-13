@@ -2,7 +2,7 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Handlers for ``slm compress status|mode|code|prose|ccr``."""
+"""Handlers for ``slm compress status|mode|prose``."""
 
 from __future__ import annotations
 
@@ -17,11 +17,6 @@ from superlocalmemory.cli.optimize_constants import AGGRESSIVE_MODE_WARNING
 def _get_store():
     from superlocalmemory.optimize.config.store import ConfigStore
     return ConfigStore()
-
-
-def _get_cache_db():
-    from superlocalmemory.optimize.storage.db import CacheDB
-    return CacheDB()
 
 
 def _write_config(**fields) -> None:
@@ -44,18 +39,31 @@ def cmd_compress(args: Namespace) -> None:
     sub = getattr(args, "compress_command", None)
     _dispatch = {
         "status": cmd_compress_status,
-        "mode": cmd_compress_mode,
-        "code": cmd_compress_code,
-        "prose": cmd_compress_prose,
-        "ccr": cmd_compress_ccr,
-        "align": cmd_compress_align,
+        "mode":   cmd_compress_mode,
+        "prose":  cmd_compress_prose,
+        # removed in v3.6.10: code, ccr, align (extractive compressors removed)
+        "code":   _cmd_compress_removed("code"),
+        "ccr":    _cmd_compress_removed("ccr"),
+        "align":  _cmd_compress_removed("align"),
     }
     handler = _dispatch.get(sub or "")
     if handler:
         handler(args)
     else:
-        print("Usage: slm compress status|mode|code|prose|ccr [options]")
+        print("Usage: slm compress status|mode|prose [options]")
         sys.exit(0)
+
+
+def _cmd_compress_removed(name: str):
+    def handler(args: Namespace) -> None:
+        print(
+            f"slm compress {name}: removed in SLM v3.6.10. "
+            f"Extractive {name} compression has been replaced by "
+            f"Layer 1 (lossless whitespace) + Layer 2 (LLMLingua-2 prose). "
+            f"Use 'slm compress prose on' to enable prose compression."
+        )
+        sys.exit(0)
+    return handler
 
 
 def cmd_compress_status(args: Namespace) -> None:
@@ -68,21 +76,19 @@ def cmd_compress_status(args: Namespace) -> None:
             "status": "ok",
             "compress_enabled": cfg.compress_enabled,
             "compress_mode": cfg.compress_mode,
-            "compress_code": cfg.compress_code,
             "compress_prose": cfg.compress_prose,
-            "compress_ccr": cfg.compress_ccr,
+            "compress_protect_recent": cfg.compress_protect_recent,
         }
         print(json.dumps(data, indent=2))
         return
 
     print("Compression status:")
-    print(f"  Enabled:  {'yes' if cfg.compress_enabled else 'no'}")
-    print(f"  Mode:     {cfg.compress_mode}")
-    print(f"  Code:     {'ON' if cfg.compress_code else 'OFF'}"
-          "  (extractive JSON/code — lossless structure)")
-    print(f"  Prose:    {'ON' if cfg.compress_prose else 'OFF'}")
-    print(f"  CCR:      {'ON' if cfg.compress_ccr else 'OFF'}"
-          " (reversible context retrieval)")
+    print(f"  Enabled:         {'yes' if cfg.compress_enabled else 'no'}")
+    print(f"  Mode:            {cfg.compress_mode}")
+    print(f"  Prose (Layer 2): {'ON' if cfg.compress_prose else 'OFF'}"
+          "  (LLMLingua-2, aggressive mode only)")
+    print(f"  Protect recent:  {cfg.compress_protect_recent} user turns")
+    print("  Layer 1 (lossless whitespace normalization) is always ON when enabled.")
 
 
 def cmd_compress_mode(args: Namespace) -> None:
@@ -103,23 +109,8 @@ def cmd_compress_mode(args: Namespace) -> None:
     print("Daemon hot-reload: active within 2s. No restart required.")
 
 
-def cmd_compress_code(args: Namespace) -> None:
-    """Enable or disable code/JSON compression."""
-    use_json = getattr(args, "json", False)
-    value = getattr(args, "code_value", "on")
-
-    _write_config(compress_code=(value == "on"))
-
-    if use_json:
-        print(json.dumps({"status": "ok", "compress_code": value == "on"}))
-        return
-
-    print(f"Code compression: {'ENABLED' if value == 'on' else 'DISABLED'}.")
-    print("Daemon hot-reload: active within 2s.")
-
-
 def cmd_compress_prose(args: Namespace) -> None:
-    """Enable or disable prose compression."""
+    """Enable or disable prose compression (Layer 2, LLMLingua-2)."""
     use_json = getattr(args, "json", False)
     value = getattr(args, "prose_value", "off")
 
@@ -141,39 +132,10 @@ def cmd_compress_prose(args: Namespace) -> None:
         print(json.dumps({"status": "ok", "compress_prose": value == "on"}))
         return
 
-    print(f"Prose compression: {'ENABLED' if value == 'on' else 'DISABLED'}.")
+    print(f"Prose compression (LLMLingua-2): {'ENABLED' if value == 'on' else 'DISABLED'}.")
+    if value == "on":
+        print("  Requires: compress_mode=aggressive and llmlingua package installed.")
+        print("  Run: slm compress mode aggressive  (if not already set)")
     if value == "on" and "compress_enabled" in fields:
         print("  (also enabled global compress)")
-    print("Daemon hot-reload: active within 2s.")
-
-
-def cmd_compress_align(args: Namespace) -> None:
-    """Enable or disable alignment compression."""
-    use_json = getattr(args, "json", False)
-    value = getattr(args, "align_value", "on")
-
-    _write_config(compress_align=(value == "on"))
-
-    if use_json:
-        print(json.dumps({"status": "ok", "compress_align": value == "on"}))
-        return
-
-    print(f"Alignment compression: {'ENABLED' if value == 'on' else 'DISABLED'}.")
-    print("Daemon hot-reload: active within 2s.")
-
-
-def cmd_compress_ccr(args: Namespace) -> None:
-    """Enable or disable CCR (Compressed Context Retrieval)."""
-    use_json = getattr(args, "json", False)
-    value = getattr(args, "ccr_value", "off")
-
-    _write_config(compress_ccr=(value == "on"))
-
-    if use_json:
-        print(json.dumps({"status": "ok", "compress_ccr": value == "on"}))
-        return
-
-    print(f"CCR (Compressed Context Retrieval): {'ENABLED' if value == 'on' else 'DISABLED'}.")
-    if value == "on":
-        print("Originals stored in llmcache.db for reversible retrieval.")
     print("Daemon hot-reload: active within 2s.")

@@ -110,6 +110,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         Extracts atomic facts, resolves entities, builds graph edges,
         and indexes for 4-channel retrieval.
         """
+        # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
+        if agent_id == "mcp_client":
+            from superlocalmemory.mcp.agent_context import get_current_agent_id
+            agent_id = get_current_agent_id()
         meta = {
             "project": project,
             "importance": importance,
@@ -171,6 +175,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         ``CLAUDE_SESSION_ID``. Omitting it degrades to "no closed-loop
         learning for this recall" — the recall itself always works.
         """
+        # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
+        if agent_id == "mcp_client":
+            from superlocalmemory.mcp.agent_context import get_current_agent_id
+            agent_id = get_current_agent_id()
         import asyncio
         try:
             from superlocalmemory.mcp._daemon_proxy import choose_pool
@@ -485,6 +493,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             fact_id: Exact fact ID to delete (from recall or list_recent results).
             agent_id: Identifier of the calling agent (logged for audit).
         """
+        # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
+        if agent_id == "mcp_client":
+            from superlocalmemory.mcp.agent_context import get_current_agent_id
+            agent_id = get_current_agent_id()
         try:
             from superlocalmemory.core.worker_pool import WorkerPool
             pool = WorkerPool.shared()
@@ -519,6 +531,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             content: New content for the memory (cannot be empty).
             agent_id: Identifier of the calling agent (logged for audit).
         """
+        # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
+        if agent_id == "mcp_client":
+            from superlocalmemory.mcp.agent_context import get_current_agent_id
+            agent_id = get_current_agent_id()
         try:
             if not content or not content.strip():
                 return {"success": False, "error": "content cannot be empty"}

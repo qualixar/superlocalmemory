@@ -56,6 +56,23 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 | `semantic_verifier_model` | str | `""` | Optional model for verify path |
 | `semantic_pad_latency_ms` | int | `50` | Randomized padding for CacheAttack mitigation |
 
+> **Tuning the semantic tier (read before enabling).** The semantic cache is
+> **off by default** because, unlike the exact cache, a too-loose threshold can
+> return a *near-duplicate's* answer for a different question (a wrong-answer
+> hit). Recommended rollout:
+> 1. Start at the default `semantic_return_threshold = 0.98` (conservative;
+>    targets a sub-1% false-hit rate).
+> 2. Measure your own false-hit rate before trusting it — enable
+>    `SLM_OPTIMIZE_CAPTURE=1`, collect real traffic, and replay near-duplicate
+>    vs. genuinely-different prompt pairs through `benchmarks/optimize` to see
+>    how often a "hit" would have returned the wrong answer.
+> 3. Only lower the threshold if your measured false-hit rate stays inside
+>    `semantic_error_target`. Raise it (toward 0.99) if you see any wrong hits.
+>
+> The exact cache (always on when `cache_enabled`) has **zero** false-hit risk —
+> it keys on the full system+messages+params hash — so semantic is purely an
+> opt-in recall booster, never a correctness dependency.
+
 ### Cache TTL
 
 | Field | Type | Default | Description |

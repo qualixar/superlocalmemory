@@ -90,3 +90,63 @@ def test_is_cacheable_response_helper() -> None:
     assert _is_cacheable_response({"choices": [{"finish_reason": "length"}]}) is False
     assert _is_cacheable_response({"content": [{"type": "text"}]}) is True
     assert _is_cacheable_response({"content": [{"type": "tool_use"}]}) is False
+
+
+def test_c05_debug_log_on_tool_use_skip(caplog) -> None:
+    """C-05: _is_cacheable_response must emit a debug log when skipping tool_use response."""
+    import logging
+    from superlocalmemory.optimize.cache.exact import _is_cacheable_response
+
+    with caplog.at_level(logging.DEBUG, logger="superlocalmemory.optimize.cache.exact"):
+        result = _is_cacheable_response({"stop_reason": "tool_use"})
+
+    assert result is False
+    assert any("tool_use" in rec.message or "finish_reason" in rec.message
+               for rec in caplog.records), (
+        f"C-05: no debug log emitted for tool_use skip; records={[r.message for r in caplog.records]}"
+    )
+
+
+def test_c09_no_python_ttl_recheck(tmp_cache_db) -> None:
+    """C-09: ExactCache.get() must not call db.delete() on TTL-expired rows.
+
+    The SQL in db.get() already filters ttl_expires > now(), so returned rows
+    are never expired. The Python-side recheck is dead code and was removed.
+    """
+    from unittest.mock import patch
+    ec = ExactCache(tmp_cache_db)
+    payload = {"id": "x", "stop_reason": "end_turn"}
+    ec.set("k-c09", _tenant(1), payload, tags=[], model="m", ttl=300)
+
+    delete_calls = []
+    original_delete = tmp_cache_db.delete
+    with patch.object(tmp_cache_db, "delete", side_effect=lambda *a: delete_calls.append(a) or original_delete(*a)):
+        out = ec.get("k-c09", _tenant(1))
+
+    assert out == payload, "get() must return the cached value"
+    assert len(delete_calls) == 0, (
+        f"C-09: get() must not call db.delete() on a live entry; got {len(delete_calls)} call(s)"
+    )
+
+
+def test_c07_tags_passed_to_db_set(tmp_cache_db) -> None:
+    """C-07: ExactCache.set() must thread actual tags to db.set (not hardcoded [])."""
+    from unittest.mock import patch, MagicMock
+
+    ec = ExactCache(tmp_cache_db)
+    tags = ["model:claude-3", "tenant:abc123"]
+    payload = {"id": "x", "stop_reason": "end_turn"}
+
+    calls = []
+    original_set = tmp_cache_db.set
+    def capturing_set(**kwargs):
+        calls.append(kwargs)
+        return original_set(**kwargs)
+
+    with patch.object(tmp_cache_db, "set", side_effect=capturing_set):
+        ec.set("k-c07", "a" * 64, payload, tags=tags, model="m", ttl=300)
+
+    assert len(calls) == 1
+    assert calls[0]["tags"] == tags, (
+        f"C-07 regression: tags passed to db.set was {calls[0].get('tags')!r}, expected {tags!r}"
+    )

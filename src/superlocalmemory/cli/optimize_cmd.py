@@ -97,9 +97,7 @@ def cmd_optimize_status(args: Namespace) -> None:
           f" semantic: {'OFF' if not cfg.semantic_enabled else f'{cfg.ttl.semantic_seconds}s'})")
     print(f"  Compress:  {'enabled' if cfg.compress_enabled else 'disabled'}"
           f"  (mode: {cfg.compress_mode},"
-          f" code: {'ON' if cfg.compress_code else 'OFF'},"
-          f" prose: {'ON' if cfg.compress_prose else 'OFF'},"
-          f" CCR: {'ON' if cfg.compress_ccr else 'OFF'})")
+          f" prose/L2: {'ON' if cfg.compress_prose else 'OFF'})")
     proxy_status = f"running on :{OPTIMIZE_DEFAULT_PORT}" if proxy_running else "not running"
     print(f"  Proxy:     {proxy_status}")
     print(f"  Config:    ~/.superlocalmemory/optimize.json  (version {cfg.config_version})")

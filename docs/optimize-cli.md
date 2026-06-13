@@ -153,9 +153,11 @@ Note: requires embedding model (~500MB). Run `slm warmup` if not already done.
 
 ## `slm compress` — Compression Control
 
+> **v3.6.10:** the old `slm compress code|ccr|align` subcommands are **removed** — the homegrown extractive JSON/code compressor was lossy and has been deleted. Compression is now `status | mode | prose`. Running a removed subcommand prints a short notice explaining the change.
+
 ### `slm compress status`
 
-Show compression mode, per-channel state.
+Show compression mode and prose state.
 
 ```bash
 slm compress status
@@ -166,10 +168,8 @@ Example output:
 ```
 Compression status:
   Enabled:  yes
-  Mode:     safe
-  Code:     ON  (extractive JSON/code — lossless structure)
-  Prose:    OFF
-  CCR:      OFF (reversible context retrieval)
+  Mode:     safe        (lossless normalization only)
+  Prose:    OFF         (LLMLingua-2, aggressive mode only)
 ```
 
 ### `slm compress mode safe|aggressive`
@@ -177,26 +177,17 @@ Compression status:
 Set compression aggressiveness.
 
 ```bash
-slm compress mode safe          # Default — lossless, structure-preserving
-slm compress mode aggressive    # ⚠ May reduce output fidelity
+slm compress mode safe          # Default — LOSSLESS (whitespace/JSON normalization only; code untouched)
+slm compress mode aggressive    # ⚠ Adds LLMLingua-2 prose compression (prose only)
 ```
 
-**Safe mode** (default): extractive JSON/code compression only — structure-preserving, lossless. Production-safe for all use cases.
+**Safe mode** (default): **lossless** — whitespace collapse + compact-JSON re-serialization only. No content is removed; code, numbers, structured data, and the current turn are never touched. Production-safe for all use cases, and keeps the provider prefix-cache stable.
 
-**Aggressive mode**: also enables LLMLingua-2-style prose compression — may omit nuance, hedges, or low-salience context. Shows a warning before activating. DO NOT use for code generation, legal/compliance text, math, or exact-output tasks.
-
-### `slm compress code on|off`
-
-Enable/disable code/JSON compression (extractive, lossless).
-
-```bash
-slm compress code on
-slm compress code off
-```
+**Aggressive mode**: additionally enables LLMLingua-2 prose compression on **prose blocks only** — may omit nuance, hedges, or low-salience wording. Shows a warning before activating. Never compresses code, math, structured data, instructions, or the latest user turn.
 
 ### `slm compress prose on|off`
 
-Enable/disable prose compression (LLMLingua-2-style extractive summarization).
+Enable/disable LLMLingua-2 prose compression (takes effect in aggressive mode).
 
 ```bash
 slm compress prose on

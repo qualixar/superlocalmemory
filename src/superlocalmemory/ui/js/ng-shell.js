@@ -338,6 +338,9 @@
   // ── Lazy Load Tab Data ─────────────────────────────────────
   function triggerTabLoad(tabId) {
     switch(tabId) {
+      case 'brain-pane':
+        if (typeof loadBrain === 'function') loadBrain();
+        break;
       case 'graph-pane':
         if (typeof loadGraph === 'function') loadGraph();
         // v3.4.4: Initialize chat panel if not already present

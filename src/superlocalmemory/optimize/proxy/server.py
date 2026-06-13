@@ -75,6 +75,24 @@ class ProxyApp:
             self._request_counter += 1
             return f"slm_{int(time.monotonic() * 1000)}_{self._request_counter:06d}"
 
+    def reload_from_config(self, config: OptimizeConfig) -> None:
+        """Hot-swap cache/compress behavior when optimize.json changes (v3.6.10).
+
+        Called by the ConfigStore change-callback (UI save → immediate; external
+        file/CLI edit → within the 2s watchdog poll). Rebuilds the HookChain so
+        ``cache_enabled`` and ``compress_enabled`` can be toggled INDEPENDENTLY
+        at runtime with no daemon restart. Note: ``proxy_enabled`` (whether the
+        proxy claims /v1/* at all) is a startup decision and is NOT changed here.
+        """
+        self.config = config
+        self.hooks = _load_hooks(config)
+        logger.info(
+            "slm.optimize.proxy reloaded (config v%s): cache=%s compress=%s",
+            getattr(config, "config_version", "?"),
+            type(self.hooks.cache).__name__ if self.hooks.cache else "None",
+            type(self.hooks.compress).__name__ if self.hooks.compress else "None",
+        )
+
 
 def build_proxy_router(proxy: ProxyApp) -> APIRouter:
     """Build and return the FastAPI router for all proxy surfaces."""
@@ -132,6 +150,17 @@ def build_proxy_router(proxy: ProxyApp) -> APIRouter:
 
 
 def _load_hooks(config: OptimizeConfig) -> HookChain:
+    # v3.6.10 shadow-capture (plan §7): capture mode is PURE passthrough — no
+    # cache, no compression — so the corpus records only authentic upstream
+    # exchanges. This is defense-in-depth alongside the per-surface guard.
+    from superlocalmemory.optimize.proxy.capture import capture_enabled
+    if capture_enabled():
+        logger.info(
+            "slm.optimize.proxy: SLM_OPTIMIZE_CAPTURE on — cache/compress "
+            "DISABLED, recording exchanges to optimize_capture.jsonl"
+        )
+        return HookChain.empty()
+
     cache_hook = None
     compress_hook = None
 

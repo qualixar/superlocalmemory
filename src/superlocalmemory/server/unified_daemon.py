@@ -1183,18 +1183,31 @@ def create_app() -> FastAPI:
     # API keys (x-api-key, Authorization), NOT the SLM API key. Auth-exempt
     # path prefixes are configured below in the auth_middleware block.
     try:
-        from superlocalmemory.optimize.config.store import ConfigStore
+        from superlocalmemory.optimize.config import _set_config_store, get_shared_store
         from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
 
-        _opt_cfg = ConfigStore().get()
+        # ONE shared ConfigStore for daemon + routes + watchdog + proxy reload
+        # (fixes W-05 fresh-store-per-request; powers runtime hot-reload).
+        _opt_store = get_shared_store()
+        _set_config_store(_opt_store)
+        _opt_cfg = _opt_store.get()
+        # W-03 fix: the proxy path is gated by proxy_enabled ALONE. The master
+        # `enabled` gates only the SDK adapter, never the proxy mount.
         if _opt_cfg.proxy_enabled:
             _proxy = ProxyApp(config=_opt_cfg)
             application.state.optimize_proxy = _proxy
             _proxy_router = build_proxy_router(_proxy)
             # prefix="" — proxy claims /v1/*, /v1beta/* directly.
             application.include_router(_proxy_router, prefix="")
+            # v3.6.10: runtime hot-reload — rebuild the proxy HookChain whenever
+            # optimize.json changes so cache_enabled / compress_enabled can be
+            # toggled INDEPENDENTLY from the UI with no restart. UI save fires the
+            # callback immediately; external edits are caught by the 2s watchdog.
+            _opt_store.register_change_callback(_proxy.reload_from_config)
+            _opt_store.start_watchdog()
             logger.info(
-                "optimize.proxy mounted on /v1/*, /v1beta/*  port=8765"
+                "optimize.proxy mounted on /v1/*, /v1beta/*  port=8765 "
+                "(runtime cache/compress hot-reload enabled)"
             )
         else:
             application.state.optimize_proxy = None
@@ -1246,8 +1259,16 @@ def create_app() -> FastAPI:
             logger.info("MCP transport security: allowed_hosts=%r", _mcp_allowed)
         global _mcp_app
         _mcp_app = _mcp_fastmcp.streamable_http_app()
-        application.mount("/mcp", _mcp_app)
-        logger.info("MCP HTTP transport mounted at /mcp (Streamable HTTP, port 8765)")
+
+        # v3.6.10: per-agent-ID routing — /mcp/{agent_id} extracts the agent
+        # identity from the URL path and places it in a ContextVar so all MCP
+        # tools (remember, recall, etc.) automatically use the correct namespace.
+        # AgentIDExtractorASGI lives in mcp/agent_context so it is unit-testable
+        # (tests/test_mcp/test_agent_context.py) rather than buried inline here.
+        from superlocalmemory.mcp.agent_context import AgentIDExtractorASGI
+
+        application.mount("/mcp", AgentIDExtractorASGI(_mcp_app))
+        logger.info("MCP HTTP transport mounted at /mcp (Streamable HTTP, port 8765; per-agent routing enabled)")
     except Exception as _mcp_exc:  # pragma: no cover — defensive
         logger.warning("MCP HTTP mount failed (non-fatal, stdio still works): %s", _mcp_exc)
 

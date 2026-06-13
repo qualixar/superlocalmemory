@@ -720,3 +720,131 @@ def test_metrics_hit_rate_zero() -> None:
     from superlocalmemory.optimize.cache.manager import CacheMetrics
     m = CacheMetrics()
     assert m.hit_rate() == 0.0
+
+
+# ---- C-01: semantic lookup wired into get() ----
+
+class _HitSemantic(SemanticTier):
+    """Stub that always returns a fake CachedResponse hit."""
+    def __init__(self, hit_data: bytes):
+        from superlocalmemory.optimize.proxy.lifecycle import CachedResponse
+        self._hit = CachedResponse(hit=True, data=hit_data, cache_key="sem-key", ttl_seconds=0)
+        self.lookup_calls = 0
+        self.index_calls = 0
+
+    def lookup(self, req, tenant_id, embed):
+        self.lookup_calls += 1
+        return self._hit
+
+    def learn(self, entry_id, similarity, was_correct):
+        pass
+
+    def index_entry(self, req, tenant_id, embed, resp):
+        self.index_calls += 1
+
+    def is_enabled(self):
+        return True
+
+
+def test_c01_get_calls_semantic_lookup_on_exact_miss(tmp_cache_db) -> None:
+    """C-01: get() must call _semantic.lookup() on exact cache miss."""
+    import json
+    sem = _HitSemantic(b'{"id":"sem","stop_reason":"end_turn"}')
+    cm = CacheManager(tmp_cache_db, semantic_tier=sem)
+
+    req = {"model": "claude", "messages": [{"role": "user", "content": "sem test"}]}
+    result = cm.get(req, tenant_id=_tenant(99))
+
+    assert sem.lookup_calls == 1, "semantic.lookup() must be called on exact miss"
+    assert result is not None and result.hit is True
+    assert cm.metrics.semantic_hits == 1
+
+
+def test_c01_get_no_semantic_on_exact_hit(tmp_cache_db) -> None:
+    """C-01: get() must NOT call semantic.lookup() when exact cache hits."""
+    import json
+    sem = _HitSemantic(b'{"id":"sem"}')
+    cm = CacheManager(tmp_cache_db, semantic_tier=sem)
+
+    # Pre-populate exact cache
+    payload = {"id": "x", "stop_reason": "end_turn"}
+    req = {"model": "claude", "messages": [{"role": "user", "content": "exact hit"}]}
+    cm.set(req, payload, tenant_id=_tenant(1))
+
+    result = cm.get(req, tenant_id=_tenant(1))
+    assert result is not None and result.hit is True
+    assert sem.lookup_calls == 0, "semantic.lookup() must NOT be called on exact hit"
+
+
+def test_c01_semantic_lookup_fail_open(tmp_cache_db) -> None:
+    """C-01: get() must fail-open if semantic.lookup() raises."""
+    class _BrokenSemantic(SemanticTier):
+        def lookup(self, req, tenant_id, embed): raise RuntimeError("explode")
+        def learn(self, *a): pass
+        def index_entry(self, *a): pass
+        def is_enabled(self): return True
+
+    cm = CacheManager(tmp_cache_db, semantic_tier=_BrokenSemantic())
+    req = {"model": "claude", "messages": [{"role": "user", "content": "boom"}]}
+    result = cm.get(req, tenant_id=_tenant(5))
+    # Must return miss CachedResponse (not raise)
+    assert result is not None
+    assert result.hit is False
+
+
+# ---- C-02: semantic index_entry wired into set() ----
+
+def test_c02_set_calls_semantic_index_entry(tmp_cache_db) -> None:
+    """C-02: set() must call _semantic.index_entry() after exact write."""
+    sem = _HitSemantic(b'{}')
+    cm = CacheManager(tmp_cache_db, semantic_tier=sem)
+
+    req = {"model": "claude", "messages": [{"role": "user", "content": "index me"}]}
+    payload = {"id": "z", "stop_reason": "end_turn"}
+    cm.set(req, payload, tenant_id=_tenant(10))
+
+    assert sem.index_calls == 1, "semantic.index_entry() must be called after exact set()"
+
+
+def test_c02_set_semantic_index_fail_open(tmp_cache_db) -> None:
+    """C-02: set() must fail-open if semantic.index_entry() raises."""
+    class _IndexBroken(SemanticTier):
+        def lookup(self, *a): return None
+        def learn(self, *a): pass
+        def index_entry(self, *a): raise RuntimeError("index fail")
+        def is_enabled(self): return True
+
+    cm = CacheManager(tmp_cache_db, semantic_tier=_IndexBroken())
+    req = {"model": "claude", "messages": [{"role": "user", "content": "boom index"}]}
+    cm.set(req, {"id": "y", "stop_reason": "end_turn"}, tenant_id=_tenant(11))
+    # Must not raise
+
+
+# ---- C-08: precomputed default tenant hash ----
+
+def test_c08_default_tenant_hash_constant() -> None:
+    """C-08: _DEFAULT_TENANT_HASH must equal sha256('default')."""
+    import hashlib
+    from superlocalmemory.optimize.cache.manager import _DEFAULT_TENANT_HASH
+    expected = hashlib.sha256(b"default").hexdigest()
+    assert _DEFAULT_TENANT_HASH == expected, (
+        f"_DEFAULT_TENANT_HASH mismatch: got {_DEFAULT_TENANT_HASH!r}, expected {expected!r}"
+    )
+
+
+def test_c08_check_uses_precomputed_hash(tmp_cache_db) -> None:
+    """C-08: check() must build the same key as direct get() with 'default' tenant."""
+    from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest
+    from superlocalmemory.optimize.cache.manager import _DEFAULT_TENANT_HASH
+
+    cm = CacheManager(tmp_cache_db)
+    req = ProxyRequest(
+        provider="anthropic", method="POST", path="/v1/messages",
+        headers={}, body={"model": "claude", "messages": [{"role": "user", "content": "hash-test"}]},
+        body_bytes=b"{}", request_id="t", stream=False, has_tools=False,
+    )
+    key_from_check = cm.build_key(req, tenant_id=_DEFAULT_TENANT_HASH)
+    key_from_default_str = cm.build_key(req, tenant_id="default")
+    assert key_from_check == key_from_default_str, (
+        "C-08 regression: _DEFAULT_TENANT_HASH and 'default' string build different keys"
+    )

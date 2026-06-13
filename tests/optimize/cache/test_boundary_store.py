@@ -318,6 +318,44 @@ def test_boundary_store_load_all_skip_empty_eid(tmp_path):
         store._db.get_all_boundaries = original
 
 
+def test_c03_cold_start_exploits_when_above_return_threshold():
+    """C-03: compute_tau returns 0.0 (exploit) during cold start when query_sim >= return_threshold."""
+    rec = PerItemBoundaryRecord(entry_id="e_c03", samples=[])
+    # n=0, query_sim=0.99 >= return_threshold=0.98 → exploit (τ̂=0.0)
+    tau = rec.compute_tau(query_sim=0.99, return_threshold=0.98)
+    assert tau == 0.0, f"C-03: expected 0.0 (exploit) for high-similarity cold start, got {tau}"
+
+    # exactly at threshold → exploit
+    tau_at = rec.compute_tau(query_sim=0.98, return_threshold=0.98)
+    assert tau_at == 0.0, f"C-03: expected 0.0 at exactly return_threshold, got {tau_at}"
+
+
+def test_c03_cold_start_explores_when_below_return_threshold():
+    """C-03: compute_tau returns 1.0 (explore) during cold start when query_sim < return_threshold."""
+    rec = PerItemBoundaryRecord(entry_id="e_c03b", samples=[(0.9, 1), (0.8, 0)])  # n=2
+    # query_sim=0.97 < return_threshold=0.98 → explore (τ̂=1.0)
+    tau = rec.compute_tau(query_sim=0.97, return_threshold=0.98)
+    assert tau == 1.0, f"C-03: expected 1.0 (explore) for below-threshold cold start, got {tau}"
+
+
+def test_c03_cold_start_default_return_threshold_explores():
+    """C-03: default return_threshold=1.0 means cold start always explores (backward compat)."""
+    rec = PerItemBoundaryRecord(entry_id="e_c03c", samples=[])
+    # default return_threshold=1.0, query_sim can never reach 1.0 in practice
+    tau = rec.compute_tau(query_sim=0.999)
+    assert tau == 1.0, f"C-03: default return_threshold=1.0 should always explore, got {tau}"
+
+
+def test_c03_should_explore_false_above_return_threshold():
+    """C-03: should_explore returns False (exploit) during cold start when sim >= return_threshold."""
+    from superlocalmemory.optimize.cache import boundary_store as _bs
+    _bs._RNG.seed(0)  # deterministic — _RNG.random() will not be called when tau=0.0
+    rec = PerItemBoundaryRecord(entry_id="e_c03d", samples=[])
+    # With tau=0.0, random() <= 0.0 is always False, so should_explore=False (exploit)
+    result = rec.should_explore(query_sim=0.99, return_threshold=0.98)
+    assert result is False, f"C-03: should_explore must return False (exploit) above threshold, got {result}"
+
+
 def test_compute_tau_seeded_rng():
     """compute_tau determinism with seeded RNG."""
     from superlocalmemory.optimize.cache import boundary_store as _bs

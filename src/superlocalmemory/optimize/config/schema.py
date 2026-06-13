@@ -89,15 +89,10 @@ class OptimizeConfig:
     semantic_centroid_min_similarity: float = 0.85
 
     # Compress
-    compress_enabled: bool = True
+    compress_enabled: bool = False
     compress_mode: str = "safe"
-    compress_code: bool = True
-    compress_json: bool = True
     compress_prose: bool = False
-    compress_ccr: bool = True
-    compress_align: bool = True
     compress_protect_recent: int = 4
-    compress_llmlingua_allow_download: bool = False
 
     # TTL + providers + pricing
     ttl_seconds: int = 86400
@@ -182,17 +177,10 @@ class OptimizeConfig:
             semantic_centroid_min_similarity=float(
                 d.get("semantic_centroid_min_similarity", 0.85)
             ),
-            compress_enabled=bool(d.get("compress_enabled", True)),
+            compress_enabled=bool(d.get("compress_enabled", False)),
             compress_mode=str(d.get("compress_mode", "safe")),
-            compress_code=bool(d.get("compress_code", True)),
-            compress_json=bool(d.get("compress_json", True)),
             compress_prose=bool(d.get("compress_prose", False)),
-            compress_ccr=bool(d.get("compress_ccr", True)),
-            compress_align=bool(d.get("compress_align", True)),
             compress_protect_recent=int(d.get("compress_protect_recent", 4)),
-            compress_llmlingua_allow_download=bool(
-                d.get("compress_llmlingua_allow_download", False)
-            ),
             ttl_seconds=int(d.get("ttl_seconds", 86400)),
             providers=providers,
             pricing=dict(d.get("pricing", {})),
@@ -230,13 +218,8 @@ class OptimizeConfig:
             "semantic_centroid_min_similarity": self.semantic_centroid_min_similarity,
             "compress_enabled": self.compress_enabled,
             "compress_mode": self.compress_mode,
-            "compress_code": self.compress_code,
-            "compress_json": self.compress_json,
             "compress_prose": self.compress_prose,
-            "compress_ccr": self.compress_ccr,
-            "compress_align": self.compress_align,
             "compress_protect_recent": self.compress_protect_recent,
-            "compress_llmlingua_allow_download": self.compress_llmlingua_allow_download,
             "ttl_seconds": self.ttl_seconds,
             "providers": {k: v.as_dict() for k, v in self.providers.items()},
             "pricing": self.pricing,

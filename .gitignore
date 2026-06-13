@@ -184,3 +184,13 @@ graphify-out/
 
 # Internal-only intelligence audits (never publish)
 docs/SLM-INTELLIGENCE-AUDIT-*.md
+
+# Internal development plans and fixplans (never publish)
+V3.6.10-PLAN.md
+ISSUES-*-FIXPLAN-*.md
+*-FIXPLAN-*.md
+AUDIT-*.md
+
+# Optimize shadow-capture dogfood corpus (local-only; may contain prompts)
+optimize_capture.jsonl
+**/optimize_capture.jsonl

@@ -47,7 +47,10 @@ from superlocalmemory.optimize.proxy._helpers import (
     _safe_compress,
     _stream_and_cache_forward,
     _stream_forward,
+    capture_passthrough_forward,
 )
+from superlocalmemory.optimize.proxy.capture import capture_enabled
+from superlocalmemory.optimize.proxy.openai_surface import _parse_openai_sse_to_json
 from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse, ProxyRequest
 
 logger = logging.getLogger("slm.optimize.proxy.gemini")
@@ -238,6 +241,24 @@ async def handle_gemini_native(
         stream = "streamGenerateContent" in model_and_method
         has_tools = _body_has_tools(body)
 
+        # v3.6.10 shadow-capture (plan §7): pure passthrough + corpus record.
+        if capture_enabled():
+            cap_model = model_and_method.split(":", 1)[0].replace("models/", "")
+            cap_url = upstream_url
+            if stream:
+                _allowed = {
+                    k: v for k, v in request.query_params.items()
+                    if k.lower() in _GEMINI_ALLOWED_QUERY_PARAMS
+                }
+                _allowed["alt"] = "sse"
+                cap_url = f"{upstream_url}?{urllib.parse.urlencode(_allowed)}"
+            return await capture_passthrough_forward(
+                proxy, request, provider="gemini", upstream_url=cap_url,
+                allowed_headers=_GEMINI_NATIVE_FORWARD_HEADERS, request_id=request_id,
+                model_hint=cap_model,
+                sse_parser=_parse_gemini_sse_to_json, is_stream=stream,
+            )
+
         ctx = ProxyRequest(
             provider="gemini",
             method="POST",
@@ -406,6 +427,16 @@ async def handle_gemini_openai_compat(proxy: object, request: Request) -> Respon
 
         has_tools = _body_has_tools(body)
         stream = bool(body.get("stream", False))
+
+        # v3.6.10 shadow-capture (plan §7): pure passthrough + corpus record.
+        if capture_enabled():
+            return await capture_passthrough_forward(
+                proxy, request, provider="gemini-openai-compat",
+                upstream_url=upstream_url,
+                allowed_headers=_GEMINI_OPENAI_COMPAT_FORWARD_HEADERS,
+                request_id=request_id, model_hint=str(body.get("model", "")),
+                sse_parser=_parse_openai_sse_to_json, is_stream=stream,
+            )
 
         ctx = ProxyRequest(
             provider="gemini-openai-compat",

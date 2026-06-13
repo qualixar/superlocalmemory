@@ -81,6 +81,47 @@ SLM_DAEMON_URL=http://192.168.50.144:8765
 
 ---
 
+## Per-agent identity over HTTP — `/mcp/{agent_id}` (v3.6.10+)
+
+The HTTP MCP endpoint accepts an **agent-id path segment** so that every AI tool
+sharing the one daemon gets its own memory attribution — without spawning a
+separate `slm mcp` stdio process per tool (which wastes RAM).
+
+| URL | Resolved `agent_id` |
+|-----|---------------------|
+| `http://127.0.0.1:8765/mcp/` | `mcp_client` (default, backward compatible) |
+| `http://127.0.0.1:8765/mcp/claude` | `claude` |
+| `http://127.0.0.1:8765/mcp/hermes` | `hermes` |
+| `http://127.0.0.1:8765/mcp/gemini` | `gemini` |
+| `http://127.0.0.1:8765/mcp/codex` | `codex` |
+| `http://127.0.0.1:8765/mcp/kimi` | `kimi` |
+
+The daemon extracts the segment from the URL path into a per-request
+`ContextVar`, so `remember`, `recall`, `observe`, `delete_memory`,
+`update_memory`, `session_init`, and event emission all tag the correct agent —
+no MCP-protocol changes, works with any HTTP MCP client.
+
+**Precedence:** URL path segment → `SLM_AGENT_ID` env var (stdio) → `mcp_client`.
+The bare `/mcp/` endpoint is unchanged, so existing configs keep working.
+
+### Client config examples
+
+Claude Code / Claude Desktop (`~/.claude.json` → `mcpServers`):
+
+```json
+"superlocalmemory": { "type": "http", "url": "http://127.0.0.1:8765/mcp/claude" }
+```
+
+Gemini CLI / Codex / Kimi — point each tool's MCP HTTP URL at its own segment
+(`/mcp/gemini`, `/mcp/codex`, `/mcp/kimi`). Any string is accepted as the
+agent id; pick a stable, lowercase name per tool.
+
+> **Rollout order matters:** point a client at `/mcp/{agent_id}` only after the
+> daemon is running **v3.6.10+** (`slm --version`). An older daemon mounts a bare
+> `/mcp` without the extractor and will not recognise the extra path segment.
+
+---
+
 ## Complete `SLM_*` environment variable reference
 
 > Generated from source at v3.6.9. **NEW** marks variables added in this release.

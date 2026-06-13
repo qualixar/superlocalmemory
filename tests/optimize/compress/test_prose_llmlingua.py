@@ -60,17 +60,16 @@ def test_empty_input_returns_original() -> None:
     assert result == '', f'Expected empty string passthrough, got {result!r}'
 
 
-def test_hf_download_blocked_raises_import_error(monkeypatch) -> None:
-    """SLM_DISABLE_HF_DOWNLOAD=1 must raise ImportError, not silently pass."""
-    monkeypatch.setenv('SLM_DISABLE_HF_DOWNLOAD', '1')
-    # Force re-import by removing any cached module
-    import sys
-    sys.modules.pop('superlocalmemory.optimize.compress.prose_llmlingua', None)
-    from superlocalmemory.optimize.compress import prose_llmlingua as _mod
-    import importlib
-    importlib.reload(_mod)
-    with pytest.raises(ImportError, match='SLM_DISABLE_HF_DOWNLOAD'):
-        _mod.LLMLinguaCompressor()
+def test_default_model_is_xlm_roberta() -> None:
+    """Default model must be xlm-roberta-large (compulsory per LOCKED DECISION)."""
+    from superlocalmemory.optimize.compress.prose_llmlingua import _MODEL_XLM, LLMLinguaCompressor
+    import inspect
+    sig = inspect.signature(LLMLinguaCompressor.__init__)
+    default = sig.parameters["model_name"].default
+    assert default == _MODEL_XLM, (
+        f"Default model must be {_MODEL_XLM!r}, got {default!r}. "
+        "The xlm-roberta-large model is compulsory — do not revert."
+    )
 
 
 def test_compress_fail_open_when_compressor_raises() -> None:
@@ -142,7 +141,7 @@ def test_constructor_with_mocked_llmlingua_import(monkeypatch) -> None:
         assert comp._compressor is fake_compressor_instance
         assert comp._rate == 0.5
         fake_compressor_class.assert_called_once_with(
-            model_name='microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank',
+            model_name='microsoft/llmlingua-2-xlm-roberta-large-meetingbank',
             use_llmlingua2=True,
             device_map='cpu',
         )

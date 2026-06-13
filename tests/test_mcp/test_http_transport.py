@@ -278,3 +278,92 @@ def test_mcp_requests_fail_before_lifespan_start():
 
     with pytest.raises(RuntimeError, match="[Tt]ask group"):
         asyncio.run(_probe())
+
+
+# ---------------------------------------------------------------------------
+# (f) v3.6.10 per-agent-ID routing: real FastMCP via /mcp/{agent_id}
+# ---------------------------------------------------------------------------
+
+def test_mcp_per_agent_url_initialize_real_fastmcp():
+    """POST /mcp/claude on the REAL FastMCP app (wrapped + mounted exactly like
+    unified_daemon) must 200 AND set the agent-id ContextVar to 'claude'.
+
+    This is the end-to-end proof that the per-agent URL wiring is complete:
+    FastAPI mount → AgentIDExtractorASGI (root_path-aware) → FastMCP route '/'.
+    """
+    from fastapi import FastAPI
+    from mcp.server.fastmcp import FastMCP
+    from starlette.testclient import TestClient
+
+    from superlocalmemory.mcp.agent_context import (
+        AgentIDExtractorASGI,
+        get_current_agent_id,
+    )
+
+    seen_agent: list[str] = []
+
+    s = FastMCP("slm-peragent-test")
+
+    @s.tool()
+    async def whoami() -> dict:
+        """Return the resolved agent id (proves ContextVar reached the tool)."""
+        aid = get_current_agent_id()
+        seen_agent.append(aid)
+        return {"agent_id": aid}
+
+    # Mirror create_app(): streamable route is '/', mounted under /mcp.
+    s.settings.streamable_http_path = "/"
+    mcp_app = s.streamable_http_app()
+
+    # Mirror unified_daemon.lifespan(): start FastMCP's session manager via the
+    # inner app's lifespan_context (the wrapper is a transparent ASGI passthrough).
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(_app):
+        async with mcp_app.router.lifespan_context(mcp_app):
+            yield
+
+    app = FastAPI(lifespan=_lifespan)
+    app.mount("/mcp", AgentIDExtractorASGI(mcp_app))
+
+    with TestClient(app, base_url="http://localhost:8765") as client:
+        init = client.post(
+            "/mcp/claude",
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "probe", "version": "1"},
+                },
+            },
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        assert init.status_code == 200, f"init failed: {init.status_code} {init.text[:300]}"
+        session_id = init.headers.get("mcp-session-id")
+        assert session_id, "no session id from /mcp/claude initialize"
+
+        # Notifications/initialized then the tool call.
+        client.post(
+            "/mcp/claude",
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "mcp-session-id": session_id,
+            },
+        )
+        call = client.post(
+            "/mcp/claude",
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "whoami", "arguments": {}},
+            },
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "mcp-session-id": session_id,
+            },
+        )
+
+    assert call.status_code == 200, f"tools/call failed: {call.status_code} {call.text[:300]}"
+    # The tool ran with agent_id resolved from the URL path, not 'mcp_client'.
+    assert "claude" in seen_agent, f"agent_id not propagated to tool: {seen_agent}"

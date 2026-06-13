@@ -32,16 +32,10 @@ class LLMLinguaCompressor:
 
     def __init__(
         self,
-        model_name: str = _MODEL_BERT,
+        model_name: str = _MODEL_XLM,
         device_map: str = "cpu",
         rate: float = _DEFAULT_RATE,
     ) -> None:
-        import os
-        if os.environ.get("SLM_DISABLE_HF_DOWNLOAD", "0") == "1":
-            raise ImportError(
-                "LLMLingua-2 model download blocked: SLM_DISABLE_HF_DOWNLOAD=1. "
-                "Set compress_llmlingua_allow_download=true in optimize.json."
-            )
         try:
             from llmlingua import PromptCompressor  # type: ignore[import]
         except ImportError as e:

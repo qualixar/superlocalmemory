@@ -43,32 +43,31 @@ def test_compress_mode_aggressive_json_has_warning(capsys, _isolate):
     assert "WARNING" in out
 
 
-def test_compress_code_on(_isolate):
-    from superlocalmemory.cli.compress_cmd import cmd_compress_code
-
-    cmd_compress_code(Namespace(json=False, code_value="on"))
-    assert _isolate.get().compress_code is True
-
-
-def test_compress_code_off(_isolate):
-    from superlocalmemory.cli.compress_cmd import cmd_compress_code
-
-    cmd_compress_code(Namespace(json=False, code_value="off"))
-    assert _isolate.get().compress_code is False
+def test_compress_code_removed_prints_notice(capsys, _isolate):
+    """slm compress code must print removal notice (extractive code removed in v3.6.10)."""
+    from superlocalmemory.cli.compress_cmd import cmd_compress
+    with pytest.raises(SystemExit):
+        cmd_compress(Namespace(compress_command="code", json=False, code_value="on"))
+    out = capsys.readouterr().out
+    assert "removed" in out.lower() or "v3.6.10" in out
 
 
-def test_compress_ccr_on(_isolate):
-    from superlocalmemory.cli.compress_cmd import cmd_compress_ccr
+def test_compress_ccr_removed_prints_notice(capsys, _isolate):
+    """slm compress ccr must print removal notice (extractive ccr removed in v3.6.10)."""
+    from superlocalmemory.cli.compress_cmd import cmd_compress
+    with pytest.raises(SystemExit):
+        cmd_compress(Namespace(compress_command="ccr", json=False, ccr_value="on"))
+    out = capsys.readouterr().out
+    assert "removed" in out.lower() or "v3.6.10" in out
 
-    cmd_compress_ccr(Namespace(json=False, ccr_value="on"))
-    assert _isolate.get().compress_ccr is True
 
-
-def test_compress_ccr_off(_isolate):
-    from superlocalmemory.cli.compress_cmd import cmd_compress_ccr
-
-    cmd_compress_ccr(Namespace(json=False, ccr_value="off"))
-    assert _isolate.get().compress_ccr is False
+def test_compress_align_removed_prints_notice(capsys, _isolate):
+    """slm compress align must print removal notice (extractive align removed in v3.6.10)."""
+    from superlocalmemory.cli.compress_cmd import cmd_compress
+    with pytest.raises(SystemExit):
+        cmd_compress(Namespace(compress_command="align", json=False, align_value="on"))
+    out = capsys.readouterr().out
+    assert "removed" in out.lower() or "v3.6.10" in out
 
 
 def test_compress_prose_enables_compress(_isolate):

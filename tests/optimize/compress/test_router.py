@@ -81,23 +81,34 @@ def test_compress_has_tools_returns_passthrough() -> None:
     assert result is req
 
 
-def test_compress_json_content_uses_extractive() -> None:
+def test_compress_json_content_passthrough() -> None:
+    """K-01: JSON content must NEVER be compressed (structured data is protected)."""
     router = CompressRouter()
     large_json_text = json.dumps({"key": "v" * 200, "items": list(range(100))})
     req = _make_req_with_content(large_json_text)
     result = router.compress(req)
-    if result is not req and result.body_bytes != req.body_bytes:
-        # Strategy info is tracked internally; JSON content should compress
-        assert result.body_bytes < req.body_bytes
+    # JSON content must pass through unchanged
+    assert result is req or result.body_bytes == req.body_bytes
 
 
-def test_compress_code_content_uses_extractive() -> None:
+def test_compress_code_content_passthrough() -> None:
+    """K-02: Code content must NEVER be compressed (structured data is protected)."""
     router = CompressRouter()
-    # Python function with long body — language detection should work
     code = "import os\n\ndef foo(x: int) -> int:\n" + "    pass\n" * 20 + "    return x\n"
     req = _make_req_with_content(code)
     result = router.compress(req)
-    # Code may or may not compress depending on ratio; shouldn't error
+    # Code content must pass through unchanged
+    assert result is req or result.body_bytes == req.body_bytes
+
+
+def test_compress_layer1_normalizes_prose_whitespace() -> None:
+    """Layer 1: lossless whitespace normalization applies to prose text."""
+    router = CompressRouter()
+    # Prose with excessive blank lines and trailing whitespace
+    prose_with_bloat = ("This is a sentence.   \n" * 20) + "\n\n\n\n" + ("Another paragraph.   \n" * 20)
+    req = _make_req(body={"messages": [{"role": "assistant", "content": prose_with_bloat}]})
+    result = router.compress(req)
+    # Should not error; may or may not produce shorter content
     assert result is not None
 
 
@@ -124,26 +135,20 @@ def test_compress_prose_aggressive_mode_uses_llmlingua() -> None:
 
 
 def test_compress_never_routes_json_to_llmlingua() -> None:
-    """CRITICAL: JSON MUST NOT go through LLMLingua even in aggressive mode."""
+    """CRITICAL: JSON MUST pass through unchanged even in aggressive mode (K-01)."""
     router = CompressRouter()
     cfg = router._get_config()
-    cfg = type(cfg).from_dict({**cfg.as_dict(), "compress_mode": "aggressive"})
+    cfg = type(cfg).from_dict({**cfg.as_dict(), "compress_mode": "aggressive", "compress_prose": True})
 
     large_json_text = json.dumps({"key": "v" * 200, "items": list(range(100))})
     req = _make_req_with_content(large_json_text)
 
     with patch.object(router, "_get_config", return_value=cfg):
         result = router.compress(req)
-    # If it compressed, the compressed output should still be valid JSON
-    if result is not req and result.body_bytes != req.body_bytes:
-        compressed_body = result.body
-        for msg in compressed_body.get("messages", []):
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                try:
-                    json.loads(content)
-                except json.JSONDecodeError:
-                    pytest.fail(f"LLMLingua was applied to JSON: {content[:200]}")
+    # JSON content must be fully preserved — no compression at all
+    assert result is req or result.body_bytes == req.body_bytes, (
+        "JSON content was compressed when it must be passed through unchanged"
+    )
 
 
 def test_compress_user_messages_never_compressed() -> None:
@@ -202,26 +207,28 @@ def test_compress_tool_result_history_passthrough() -> None:
 
 
 def test_on_compress_called_on_success() -> None:
+    """on_compress fires when Layer 1 normalization reduces tokens."""
     router = CompressRouter()
     calls: list = []
     router.on_compress = lambda b, a, l: calls.append((b, a, l))
 
-    large_json_text = json.dumps({"key": "v" * 200, "items": list(range(100))})
-    req = _make_req_with_content(large_json_text)
+    # Prose with excessive whitespace bloat — Layer 1 should normalize it
+    bloated_prose = ("word " * 50 + "   \n") * 30 + "\n\n\n\n" + ("more prose " * 50 + "   \n") * 30
+    req = _make_req(body={"messages": [{"role": "assistant", "content": bloated_prose}]})
     result = router.compress(req)
     if result is not req:
         assert len(calls) == 1, "on_compress must be called exactly once per successful compress"
         before, after, lossy = calls[0]
-        assert before > after
+        assert before >= after
         assert lossy is False
 
 
 def test_compress_text_convenience_method() -> None:
     """M-06: compress_text() public convenience method."""
     router = CompressRouter()
-    large_json_text = json.dumps({"key": "v" * 200, "items": list(range(100))})
-    result = router.compress_text(large_json_text)
-    assert result.strategy in ("extractive_json", "none")
+    prose = "word " * 200
+    result = router.compress_text(prose)
+    assert result.strategy in ("normalize", "llmlingua2_prose", "none")
     assert result.tokens_before >= 0
     assert result.tokens_after >= 0
 
@@ -319,7 +326,7 @@ def test_compress_content_block_non_dict() -> None:
 
 
 def test_compress_tool_result_text_block() -> None:
-    """tool_result blocks with text get compressed."""
+    """tool_result blocks with text are handled; JSON content passes through (K-01)."""
     router = CompressRouter()
     large_json = json.dumps({"key": "v" * 200, "items": list(range(100))})
     req = ProxyRequest(
@@ -543,13 +550,6 @@ def test_llmlingua_import_error_non_fatal() -> None:
 def test_lazy_loaders_cached() -> None:
     """Lazy loaders return same instance on second call."""
     router = CompressRouter()
-    a1 = router._get_json_compressor()
-    a2 = router._get_json_compressor()
-    assert a1 is a2
-
-    b1 = router._get_code_compressor()
-    b2 = router._get_code_compressor()
-    assert b1 is b2
 
     c1 = router._get_ccr_store()
     c2 = router._get_ccr_store()
@@ -968,12 +968,6 @@ def test_token_estimate_empty() -> None:
     assert _token_estimate("") == 0
 
 
-def test_token_estimate_structured_empty() -> None:
-    """_token_estimate_structured returns 0 for empty string."""
-    from superlocalmemory.optimize.compress.router import _token_estimate_structured
-    assert _token_estimate_structured("") == 0
-
-
 # ---- on_compress with no counters ----
 
 def test_on_compress_no_counters_registered() -> None:
@@ -1218,3 +1212,475 @@ def test_tool_role_message_skipped_but_others_compress() -> None:
     )
     result = router.compress(req)
     assert result is not None
+
+
+def test_k08_json_probe_catches_only_json_decode_error(caplog) -> None:
+    """K-08: JSON probe catches json.JSONDecodeError narrowly; does not silence other exceptions."""
+    import logging
+    router = CompressRouter()
+    # Must be >= _MIN_CHARS_FOR_COMPRESSION (500) so it reaches the JSON probe
+    # Starts with "[" but is not valid JSON — must be treated as prose, not crash
+    tricky = "[" + ("word " * 120)  # ~601 chars — clears the 500-char guard
+    with caplog.at_level(logging.DEBUG, logger="superlocalmemory.optimize.compress.router"):
+        result = router.compress_text(tricky)
+    assert result is not None, "K-08: compress_text must not raise on invalid JSON-looking input"
+
+
+def test_k08_unexpected_exception_logged_as_warning(caplog, monkeypatch) -> None:
+    """K-08: Generic Exception in JSON probe must log WARNING, not silently swallow."""
+    import json as json_mod
+    import logging
+    router = CompressRouter()
+    original_loads = json_mod.loads
+
+    def _raise_unexpected(s, **kw):
+        stripped = s.strip() if isinstance(s, str) else s
+        if isinstance(stripped, str) and stripped.startswith("["):
+            raise ValueError("simulated internal JSON error")
+        return original_loads(s, **kw)
+
+    monkeypatch.setattr(json_mod, "loads", _raise_unexpected)
+    # Must be >= 500 chars and start with "[" to reach the JSON probe
+    tricky = "[" + ("word " * 120)
+    with caplog.at_level(logging.WARNING, logger="superlocalmemory.optimize.compress.router"):
+        result = router.compress_text(tricky)
+    assert result is not None, "K-08: must not raise on unexpected JSON probe error"
+    assert any("unexpected error probing JSON" in r.message for r in caplog.records), \
+        "K-08: unexpected exception must emit WARNING log"
+
+
+def test_k10_compress_text_result_has_lossy_field() -> None:
+    """K-10: CompressTextResult must expose a lossy bool field."""
+    from superlocalmemory.optimize.compress.router import CompressTextResult
+    r = CompressTextResult(compressed_text="x", strategy="normalize", tokens_before=5, tokens_after=4)
+    assert hasattr(r, "lossy"), "K-10: CompressTextResult must have lossy field"
+    assert r.lossy is False
+
+
+def test_k10_lossy_false_for_lossless_strategies() -> None:
+    """K-10: lossy must be False for 'normalize' and 'none' strategies."""
+    from superlocalmemory.optimize.compress.router import CompressTextResult
+    for strategy in ("normalize", "none"):
+        r = CompressTextResult(compressed_text="x", strategy=strategy,
+                               tokens_before=5, tokens_after=4)
+        assert r.lossy is False, f"K-10: expected lossy=False for strategy={strategy!r}"
+
+
+# ── Stage 7 coverage gap tests ──────────────────────────────────────────────
+
+def test_compress_request_body_with_enabled_config() -> None:
+    """Cover compress_request() body (lines 72-113): compress_enabled=True; mocked messages.
+
+    protect_recent=1 with a 2-msg conversation ensures idx 0 (assistant) is NOT protected.
+    _compress_messages is mocked to return fewer tokens so the on_compress branch executes.
+    """
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+
+    bloated = ("word " * 60 + "   \n") * 15
+    msgs = [
+        {"role": "assistant", "content": bloated},   # idx 0 — eligible for compression
+        {"role": "user", "content": "follow up"},    # idx 1 — protected (last user + last msg)
+    ]
+    req = _make_req(body={"messages": msgs})
+
+    mock_msgs = [dict(m) for m in msgs]
+    # Return a mock that pretends compression saved tokens
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        with patch.object(router, "_compress_messages",
+                          return_value=(mock_msgs, 100, 70, "normalize")):
+            result = router.compress(req)
+
+    assert result is not None
+
+
+def test_compress_request_no_improvement_returns_req() -> None:
+    """Cover compress_request() line 103-104: no improvement → return original req."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 0,
+    })
+
+    msgs = [{"role": "assistant", "content": "word " * 110}]
+    req = _make_req(body={"messages": msgs})
+
+    # Return same token count → no improvement → req returned unchanged
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        with patch.object(router, "_compress_messages",
+                          return_value=(msgs, 110, 110, "none")):
+            result = router.compress(req)
+
+    assert result is not None
+
+
+def test_compress_messages_loop_body_covers_content_block() -> None:
+    """Cover _compress_messages lines 180-194: assistant msg NOT in protect set gets compressed."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+
+    bloated = ("word " * 60 + "   \n") * 12
+    msgs = [
+        {"role": "assistant", "content": bloated},  # idx 0: eligible
+        {"role": "user", "content": "follow up"},   # idx 1: protected
+    ]
+    req = _make_req(body={"messages": msgs})
+
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+
+    assert result is not None
+
+
+def test_compress_content_block_list_with_enabled_config() -> None:
+    """Cover _compress_content_block list branch (lines 206-241): content as list of blocks."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+
+    bloated_text = ("word " * 60 + "   \n") * 12
+    content_blocks = [
+        {"type": "text", "text": bloated_text},
+        {"type": "image", "source": {}},           # non-text block → passthrough
+        {"not_a_dict": True},                       # non-dict item → passthrough
+    ]
+    msgs = [
+        {"role": "assistant", "content": content_blocks},  # idx 0: eligible
+        {"role": "user", "content": "follow up"},          # idx 1: protected
+    ]
+    req = _make_req(body={"messages": msgs})
+
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+
+    assert result is not None
+
+
+def test_compress_text_large_valid_json_passthrough() -> None:
+    """Cover _compress_text line 261: valid JSON >= 500 chars → early passthrough."""
+    router = CompressRouter()
+    # Valid JSON that's >= 500 chars
+    large_json = json.dumps({"key": "v" * 200, "items": list(range(80))})
+    assert len(large_json) >= 500, "test prerequisite: json must be >= 500 chars"
+    result = router.compress_text(large_json)
+    assert result.strategy == "none", "Valid JSON must always be passed through unchanged"
+
+
+def test_compress_text_large_code_passthrough() -> None:
+    """Cover _compress_text line 268: code >= 500 chars → passthrough via code detection."""
+    router = CompressRouter()
+    code_block = "\n".join(f"def fn_{i}(x: int) -> int:\n    return x + {i}" for i in range(40))
+    assert len(code_block) >= 500
+    result = router.compress_text(code_block)
+    assert result is not None
+
+
+def test_compress_content_block_non_dict_item_in_list() -> None:
+    """Cover _compress_content_block line 216-217: non-dict item in list → passthrough."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+    # Non-dict items in content list (e.g. raw strings)
+    content_with_non_dict = [
+        "raw string item",  # non-dict → triggers line 216-217
+        {"type": "text", "text": "word " * 20},
+    ]
+    msgs = [
+        {"role": "assistant", "content": content_with_non_dict},
+        {"role": "user", "content": "follow up"},
+    ]
+    req = _make_req(body={"messages": msgs})
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_content_block_short_text_in_list() -> None:
+    """Cover _compress_content_block line 222-223: text block < 500 chars → skip."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+    # Short text block in a list (below _MIN_CHARS_FOR_COMPRESSION)
+    content_short = [
+        {"type": "text", "text": "short"},  # < 500 chars → line 222-223
+    ]
+    msgs = [
+        {"role": "assistant", "content": content_short},
+        {"role": "user", "content": "follow up"},
+    ]
+    req = _make_req(body={"messages": msgs})
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_content_block_non_string_non_list() -> None:
+    """Cover _compress_content_block line 241: content not str/list → (content, 0, 0, 'none')."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+    # Integer content — unusual but must not crash
+    msgs = [
+        {"role": "assistant", "content": 42},
+        {"role": "user", "content": "follow up"},
+    ]
+    req = _make_req(body={"messages": msgs})
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_request_messages_not_list_returns_req() -> None:
+    """Cover compress_request() line 75: messages not a list → return req immediately."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({**cfg.as_dict(), "compress_enabled": True})
+    req = _make_req(body={"messages": "not_a_list"})
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is req
+
+
+def test_compress_request_system_prompt_with_enabled() -> None:
+    """Cover compress_request() lines 80-83: system prompt present → CacheAligner runs."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_protect_recent": 0,
+    })
+    bloated = ("Today's date is 2026-06-13. " * 40)  # volatile date token
+    req = _make_req(body={
+        "system": bloated,
+        "messages": [{"role": "user", "content": "what day is it?"}],
+    })
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_messages_primary_strategy_update() -> None:
+    """Cover _compress_messages line 190: primary_strategy updated when strat != 'none'."""
+    from unittest.mock import patch, MagicMock
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_protect_recent": 1,
+    })
+    bloated = "word " * 200
+    msgs = [
+        {"role": "assistant", "content": bloated},
+        {"role": "user", "content": "hi"},
+    ]
+    req = _make_req(body={"messages": msgs})
+    # Mock _compress_content_block to return strat != "none"
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        with patch.object(router, "_compress_content_block",
+                          return_value=(bloated, 200, 150, "normalize")):
+            result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_content_block_list_primary_strat_update() -> None:
+    """Cover _compress_content_block line 230: primary updated for text block in list."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_protect_recent": 1,
+    })
+    long_text = "word " * 200
+    content_list = [{"type": "text", "text": long_text}]
+    msgs = [
+        {"role": "assistant", "content": content_list},
+        {"role": "user", "content": "hi"},
+    ]
+    req = _make_req(body={"messages": msgs})
+    # Mock _compress_text to return strat != "none"
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        with patch.object(router, "_compress_text",
+                          return_value=(long_text[:800], 200, 150, "normalize")):
+            result = router.compress(req)
+    assert result is not None
+
+
+def test_compress_content_block_tool_result_in_list() -> None:
+    """Cover _compress_content_block line 235: tool_result block in list gets text replaced."""
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_protect_recent": 1,
+    })
+    long_output = "output line " * 100  # >= 500 chars
+    content_list = [{"type": "tool_result", "tool_use_id": "t1", "content": long_output}]
+    msgs = [
+        {"role": "user", "content": content_list},  # idx 0: tool_result in user msg
+        {"role": "user", "content": "final"},       # idx 1: protected
+    ]
+    req = _make_req(body={"messages": msgs})
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+    assert result is not None
+
+
+def test_msg_has_tool_result_tool_use_id_branch() -> None:
+    """Cover _msg_has_tool_result line 403: detect tool_use_id key in content block."""
+    from superlocalmemory.optimize.compress.router import _msg_has_tool_result
+    msg_with_tool_use_id = {
+        "role": "user",
+        "content": [{"type": "text", "tool_use_id": "call_abc123", "text": "result"}],
+    }
+    assert _msg_has_tool_result(msg_with_tool_use_id) is True
+
+
+def test_msg_has_tool_result_non_dict_item_skipped() -> None:
+    """Cover _msg_has_tool_result line 406: non-dict item in content list → continue."""
+    from superlocalmemory.optimize.compress.router import _msg_has_tool_result
+    msg_with_non_dict = {
+        "role": "user",
+        "content": ["raw string item", {"type": "tool_result"}],
+    }
+    assert _msg_has_tool_result(msg_with_non_dict) is True
+
+
+# ── Stage 8 fixes ────────────────────────────────────────────────────────────
+
+def test_s01_layer1_normalize_strategy_is_returned_for_whitespace_bloat() -> None:
+    """S-01 fix: Layer 1 'normalize' strategy must fire on prose with whitespace bloat.
+
+    _token_estimate() is word-count — normalization can't reduce it.
+    The fix changed the decision to len(normalized) < len(text) (character count).
+    """
+    router = CompressRouter()
+    # Prose with trailing spaces and 3+ blank lines — normalization removes these chars
+    bloated = ("sentence here.   \n") * 40 + "\n\n\n\n" + ("another sentence.   \n") * 40
+    assert len(bloated) >= 500, "test prerequisite: must exceed min compression threshold"
+    result = router.compress_text(bloated)
+    assert result.strategy == "normalize", (
+        f"S-01: Layer 1 normalize must activate on whitespace-bloated prose; "
+        f"got strategy={result.strategy!r}"
+    )
+    assert len(result.compressed_text) < len(bloated), "normalize must actually shorten the text"
+    assert result.lossy is False, "Layer 1 normalization is lossless"
+
+
+def test_s01_clean_prose_returns_none_strategy() -> None:
+    """S-01: clean prose with no excess whitespace must return strategy='none'."""
+    router = CompressRouter()
+    # " ".join guarantees no trailing spaces; rstrip() leaves it identical → no savings
+    clean = " ".join(["word"] * 120)
+    normalized = router._normalize_whitespace(clean)
+    assert len(normalized) == len(clean), "test prerequisite: text must already be normalized"
+    result = router.compress_text(clean)
+    assert result.strategy == "none"
+
+
+def test_perf02_large_json_uses_structural_fast_path() -> None:
+    """PERF-02: JSON > 8KB with matching brackets must skip json.loads() parsing."""
+    router = CompressRouter()
+    # Build a large JSON dict that's definitely > 8192 chars
+    large_json = json.dumps({"key_" + str(i): "v" * 50 for i in range(200)})
+    assert len(large_json) > 8192, "test prerequisite: must exceed 8KB for fast-path"
+    assert large_json[0] == "{" and large_json[-1] == "}"
+    result = router.compress_text(large_json)
+    assert result.strategy == "none", "PERF-02: large JSON must be passed through unchanged"
+    assert result.compressed_text == large_json
+
+
+def test_stage9_layer1_normalization_works_end_to_end_through_compress_request() -> None:
+    """Stage 9: Layer 1 normalize must work through compress_request(), not just compress_text().
+
+    Before Stage 9 fix: compress_request() checked token_after >= token_before.
+    Layer 1 normalization saves characters not word-count tokens, so tokens are equal.
+    The guard discarded the normalized body every time — S-01 fix was incomplete.
+
+    After fix: build new_bytes first, check actual byte savings in the guard.
+    """
+    from unittest.mock import patch
+    router = CompressRouter()
+    cfg = router._get_config()
+    cfg_enabled = type(cfg).from_dict({
+        **cfg.as_dict(),
+        "compress_enabled": True,
+        "compress_mode": "safe",
+        "compress_protect_recent": 1,
+    })
+    # Whitespace-bloated text: lots of trailing spaces and 4+ blank lines
+    bloated = ("sentence with trailing spaces.   \n") * 40 + "\n\n\n\n\n" + ("more prose.   \n") * 40
+    original_body = {"messages": [
+        {"role": "assistant", "content": bloated},
+        {"role": "user", "content": "hi"},
+    ]}
+    import json as _json
+    original_bytes = _json.dumps(original_body, ensure_ascii=False, separators=(",", ":")).encode()
+    req = _make_req(body=original_body)
+    # Manually set body_bytes to the correct serialized size so the guard uses accurate baseline
+    req = ProxyRequest(
+        provider=req.provider, method=req.method, path=req.path, headers=req.headers,
+        body=req.body, body_bytes=original_bytes,
+        request_id=req.request_id, stream=req.stream, has_tools=req.has_tools,
+    )
+
+    with patch.object(router, "_get_config", return_value=cfg_enabled):
+        result = router.compress(req)
+
+    # Normalization must produce a shorter body
+    assert result is not req, (
+        "Stage 9: compress_request() must return a new (shorter) ProxyRequest "
+        "after Layer 1 normalization, not the original req"
+    )
+    assert len(result.body_bytes) < len(req.body_bytes), (
+        "Stage 9: normalized body must be smaller in bytes than original"
+    )

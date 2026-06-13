@@ -5,6 +5,43 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.10] - 2026-06-14 — Optimize correctness (cache + lossless compression) · MCP per-agent identity · runtime toggles · benchmark + shadow-capture · Issue #38
+
+This release makes the **Optimize** subsystem (the HTTP proxy that caches and compresses LLM API calls) correct, observable, and **independently controllable at runtime**, adds **per-agent identity** to the HTTP MCP transport, ships a **benchmark + shadow-capture** harness that proves the cache and compression behaviour, and fixes GitHub issue #38. Cache and compression remain **default-OFF** and are now separately toggleable from the dashboard.
+
+### Added — Independent runtime control of cache vs compression
+
+- **Cache and compression are separate switches**, both live at runtime from the dashboard — enable caching only, compression only, both, or neither, without restarting the daemon. The config watchdog rebuilds the proxy hook chain in place on change.
+
+### Added — MCP per-agent identity over HTTP (`/mcp/{agent_id}`)
+
+- **Per-agent attribution without per-agent processes.** The HTTP MCP endpoint accepts an agent-id path segment — `http://127.0.0.1:8765/mcp/claude`, `/mcp/hermes`, `/mcp/gemini`, etc. The daemon extracts it (root_path-aware ASGI wrapper) into a per-request `ContextVar`, so `remember`, `recall`, `observe`, `delete_memory`, `update_memory`, `session_init`, and event emission all tag the correct agent. Many agents share one daemon instead of one `slm mcp` stdio process each. Bare `/mcp/` is unchanged → default `mcp_client` (backward compatible). Precedence: URL path → `SLM_AGENT_ID` env (stdio) → `mcp_client`. URL agent-ids are sanitized (charset-restricted, 64-char cap). See `docs/distributed-deployment.md`.
+
+### Added — Benchmark + shadow-capture (`benchmarks/optimize/`)
+
+- **Correctness benchmark** drives the shipped cache + compression code: exact-cache replay is 100% hit + byte-identical, exact false-hit rate is **0** (the wrong-answer guard), semantic-tier wiring honours its threshold, and safe-mode compression is **lossless** for JSON/code/prose (code forwarded unchanged). Enforced in CI by `tests/optimize/test_benchmark.py`.
+- **Shadow-capture mode** (`SLM_OPTIMIZE_CAPTURE=1`): pure-passthrough proxy records real `{request, response, model, tokens, content_type}` exchanges to `~/.superlocalmemory/optimize_capture.jsonl` (0600, `O_NOFOLLOW`, git-ignored, 1 MB/side cap, secrets never recorded) for replay into the benchmark. No cache/compress while capturing.
+
+### Changed — Compression rebuilt on a research-backed layered design
+
+- **Removed the homegrown extractive JSON/code compressors** (they truncated JSON strings, capped arrays, and stubbed code bodies — lossy and unsafe). Safe mode is now **lossless** (whitespace + compact-JSON normalization only; code untouched). Aggressive mode adds **LLMLingua-2** (`microsoft/llmlingua-2-xlm-roberta-large-meetingbank`) for **prose only** — never code, numbers, structured data, instructions, or the current turn. Dead `compress_json`/`compress_code` toggles removed.
+
+### Fixed — Cache correctness & observability
+
+- **Semantic cache tier is now wired** into the proxy `get/check/set` path (was dead code); default-off, conservative 0.98 return threshold, benchmarked false-hit guard. See `docs/optimize-config.md` for threshold-tuning guidance.
+- **Token accounting corrected** — input tokens (the biggest save) and real output tokens are now counted on cache hits instead of 0/estimates.
+- **Cache survives machine-id changes** — the AES-GCM key/salt is persisted (0600), fixing the total-miss after VM clone / container / OS reinstall.
+- **UI opt-in is real** — a `proxy_enabled` toggle now actually mounts the proxy.
+
+### Fixed — Issue #38 (frontend)
+
+- **Brain page no longer stuck on "Couldn't load Brain"** on a healthy backend — pane activation fires `fetchBrain` and reads the install token from the same source as the working endpoints.
+- **"Test Connection" no longer 401s on an empty API key** in no-auth (Mode B) — when the key is empty no `Authorization` header is sent.
+
+### Security (v3.6.10 audit, Stage 8/9)
+
+- Capture file: `O_NOFOLLOW` + unconditional `0600` (symlink-append + TOCTOU closed); in-memory stream accumulator bounded (CWE-400); synchronous capture writes offloaded off the event loop; `extract_usage` uses an explicit provider allowlist (no silent mis-parse). URL agent-ids sanitized at the single extraction chokepoint.
+
 ## [3.6.9] - 2026-06-11 — Full 7-layer recall quality · event-loop safety · health watchdog
 
 This release fixes seven GitHub issues, one critical production incident, five post-implementation audit bugs, and two event-loop deadlocks introduced in v3.6.7. All 7 retrieval layers (semantic, BM25, temporal, spreading activation, Hopfield, entity graph, cross-encoder reranker) now operate at full designed quality with no capability tradeoffs.

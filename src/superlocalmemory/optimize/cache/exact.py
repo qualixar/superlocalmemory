@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
 from superlocalmemory.optimize.cache.key_builder import CacheConfig
 
+logger = logging.getLogger(__name__)
 
 _NON_CACHEABLE_FINISH_REASONS: frozenset[str] = frozenset({
     "tool_use",
@@ -20,17 +22,21 @@ _NON_CACHEABLE_FINISH_REASONS: frozenset[str] = frozenset({
 def _is_cacheable_response(response: dict) -> bool:
     finish = response.get("stop_reason") or response.get("finish_reason") or ""
     if finish in _NON_CACHEABLE_FINISH_REASONS:
+        logger.debug("exact: skip cache (finish_reason=%r)", finish)
         return False
     choices = response.get("choices") or []
     for choice in choices:
         fr = (choice.get("finish_reason") or "")
         if fr in _NON_CACHEABLE_FINISH_REASONS:
+            logger.debug("exact: skip cache (choice.finish_reason=%r)", fr)
             return False
         msg = choice.get("message") or {}
         if msg.get("tool_calls"):
+            logger.debug("exact: skip cache (choice.message.tool_calls present)")
             return False
     for block in response.get("content") or []:
         if isinstance(block, dict) and block.get("type") == "tool_use":
+            logger.debug("exact: skip cache (tool_use content block)")
             return False
     return True
 
@@ -45,9 +51,6 @@ class ExactCache:
     def get(self, key: str, tenant_id: str) -> dict | None:
         row = self._db.get(key, tenant_id)
         if row is None:
-            return None
-        if row.ttl_expires is not None and row.ttl_expires < time.time():
-            self._db.delete(key, tenant_id)
             return None
         return json.loads(row.value.decode("utf-8"))
 
@@ -74,7 +77,7 @@ class ExactCache:
             value=encoded,
             model=model,
             ttl_expires=expires_at,
-            tags=[],
+            tags=tags,
         )
         return True
 

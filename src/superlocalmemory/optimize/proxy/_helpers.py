@@ -358,6 +358,7 @@ async def _stream_and_cache_forward(
     body_bytes: bytes,
     upstream_url: str,
     on_complete: "Callable[[bytes], Any] | None" = None,
+    max_accumulate: int | None = None,
 ) -> Response | StreamingResponse:
     """Stream-forward with optional post-stream cache-store callback.
 
@@ -388,10 +389,12 @@ async def _stream_and_cache_forward(
         )
 
     acc: list[bytes] = []
+    acc_bytes = 0
+    acc_capped = False
     complete_called = False
 
     async def _generate() -> AsyncIterator[bytes]:
-        nonlocal complete_called
+        nonlocal complete_called, acc_bytes, acc_capped
         stream_error = False
         try:
             async with proxy.http_client.stream(
@@ -399,7 +402,17 @@ async def _stream_and_cache_forward(
             ) as upstream_resp:
                 async for chunk in upstream_resp.aiter_bytes():
                     if chunk:
-                        acc.append(chunk)
+                        # Always forward to the client; only bound what we hold
+                        # in memory for the on_complete callback (CWE-400).
+                        if max_accumulate is None or acc_bytes < max_accumulate:
+                            acc.append(chunk)
+                            acc_bytes += len(chunk)
+                        elif not acc_capped:
+                            acc_capped = True
+                            logger.debug(
+                                "[%s] stream accumulator capped at %d bytes",
+                                request_id, max_accumulate,
+                            )
                         yield chunk
         except httpx.RemoteProtocolError as exc:
             stream_error = True
@@ -444,6 +457,91 @@ async def _stream_and_cache_forward(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+async def capture_passthrough_forward(
+    proxy: Any,
+    request: Request,
+    *,
+    provider: str,
+    upstream_url: str,
+    allowed_headers: frozenset,
+    request_id: str,
+    model_hint: str = "",
+    sse_parser: "Callable[[bytes], bytes | None] | None" = None,
+    is_stream: bool = False,
+) -> Response | StreamingResponse:
+    """Shadow-capture passthrough (v3.6.10, plan §7).
+
+    Pure passthrough to upstream + record the exchange to the capture corpus.
+    NO cache, NO compression — capture mode observes only authentic traffic.
+    Fail-open: a capture or forward error degrades to a normal forward/error
+    response; the user's request is never blocked by capture.
+    """
+    from superlocalmemory.optimize.proxy.capture import (
+        extract_usage,
+        record_exchange_async,
+    )
+
+    body_bytes = await request.body()
+    fwd_headers = _build_forward_headers(request, allowed_headers)
+    fwd_headers["content-length"] = str(len(body_bytes))
+
+    if is_stream:
+        async def _on_complete(acc: bytes) -> None:
+            parsed = sse_parser(acc) if sse_parser else None
+            payload = parsed if parsed is not None else acc
+            itok, otok, mdl = extract_usage(provider, parsed)
+            await record_exchange_async(
+                provider=provider,
+                model=mdl or model_hint,
+                request_body=body_bytes,
+                response_body=payload,
+                content_type="text/event-stream",
+                input_tokens=itok,
+                output_tokens=otok,
+                status_code=200,
+                stream=True,
+            )
+
+        # Bound the in-memory accumulator (CWE-400): the corpus only keeps the
+        # first 1 MB per side anyway, so cap accumulation there.
+        from superlocalmemory.optimize.proxy.capture import _MAX_CAPTURE_BODY_BYTES
+        return await _stream_and_cache_forward(
+            proxy, request_id, fwd_headers, body_bytes, upstream_url,
+            on_complete=_on_complete,
+            max_accumulate=_MAX_CAPTURE_BODY_BYTES,
+        )
+
+    if proxy.http_client is None:
+        return await _fail_open_forward(proxy, request, upstream_url)
+    try:
+        upstream_resp = await proxy.http_client.post(
+            upstream_url, content=body_bytes, headers=fwd_headers,
+        )
+    except Exception as exc:
+        logger.error("[%s] capture passthrough upstream error: %r", request_id, exc)
+        return await _fail_open_forward(proxy, request, upstream_url)
+
+    resp_bytes = upstream_resp.content
+    itok, otok, mdl = extract_usage(provider, resp_bytes)
+    await record_exchange_async(
+        provider=provider,
+        model=mdl or model_hint,
+        request_body=body_bytes,
+        response_body=resp_bytes,
+        content_type="application/json",
+        input_tokens=itok,
+        output_tokens=otok,
+        status_code=upstream_resp.status_code,
+        stream=False,
+    )
+    return Response(
+        content=resp_bytes,
+        status_code=upstream_resp.status_code,
+        media_type="application/json",
+        headers=_filter_response_headers(dict(upstream_resp.headers)),
     )
 
 

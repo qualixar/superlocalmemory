@@ -53,6 +53,7 @@ _DDL_STATEMENTS: tuple[str, ...] = (
         vector_blob     BLOB    NOT NULL,
         vector_dim      INTEGER NOT NULL DEFAULT 768,
         model_name      TEXT    NOT NULL DEFAULT 'nomic-ai/nomic-embed-text-v1.5',
+        context_fp      TEXT    NOT NULL DEFAULT '',
         created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
     """,
@@ -127,10 +128,20 @@ def create_all_tables(conn: sqlite3.Connection) -> None:
 
     Safe to call repeatedly — all DDL uses IF NOT EXISTS.
     Also seeds the single llmcache_metrics row (id=1) via INSERT OR IGNORE.
+    C-10: adds context_fp column to existing DBs via ALTER TABLE migration.
     """
     for stmt in _DDL_STATEMENTS:
         conn.execute(stmt)
     conn.execute("INSERT OR IGNORE INTO llmcache_metrics(id) VALUES (1)")
+    # C-10 migration: add context_fp column if missing (existing installs pre-v3.6.10)
+    existing_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(llmcache_semantic_vectors)")
+    }
+    if "context_fp" not in existing_cols:
+        conn.execute(
+            "ALTER TABLE llmcache_semantic_vectors ADD COLUMN context_fp TEXT NOT NULL DEFAULT ''"
+        )
     row = conn.execute(
         "SELECT 1 FROM llmcache_schema_version WHERE version = ?",
         (CACHE_SCHEMA_VERSION,),

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib as _hashlib
+import json as _json_mod
 import logging
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable
+
+# C-08: precomputed hash for the common "default" tenant — avoids sha256 on every request
+_DEFAULT_TENANT_HASH: str = _hashlib.sha256(b"default").hexdigest()
 
 from superlocalmemory.optimize.cache.exact import ExactCache
 from superlocalmemory.optimize.cache.invalidation import InvalidationEngine
@@ -230,6 +235,26 @@ class CacheManager:
                 ttl_seconds=0,
             )
         self._metrics.exact_misses += 1
+
+        # C-01: semantic fallback on exact miss (only when explicitly enabled)
+        if self._semantic.is_enabled():
+            try:
+                sem_result = self._semantic.lookup(req, tenant_id, None)
+                if sem_result is not None:
+                    self._metrics.semantic_hits += 1
+                    if isinstance(sem_result, CachedResponse):
+                        return sem_result
+                    # VCacheSemantic may return a response dict — wrap it
+                    return CachedResponse(
+                        hit=True,
+                        data=_json_mod.dumps(sem_result, ensure_ascii=False).encode(),
+                        cache_key=key,
+                        ttl_seconds=0,
+                    )
+            except Exception as exc:
+                logger.warning("SemanticTier.lookup raised (fail-open): %s", exc)
+            self._metrics.semantic_misses += 1
+
         # Return miss WITH the key so callers can use it for cache storage.
         return CachedResponse(hit=False, data=None, cache_key=key, ttl_seconds=0)
 
@@ -258,6 +283,13 @@ class CacheManager:
         self._invalidation.register(key, tenant_id, tags)
         self._metrics.sets += 1
 
+        # C-02: index in semantic tier after exact write (fail-open)
+        if self._semantic.is_enabled():
+            try:
+                self._semantic.index_entry(req, tenant_id, None, response_dict)
+            except Exception as exc:
+                logger.warning("SemanticTier.index_entry raised (fail-open): %s", exc)
+
     # ---- CacheHook protocol implementation (INTERFACE-CONTRACT §3) ----
 
     def check(self, req: ProxyRequest) -> "CachedResponse | None":
@@ -269,7 +301,7 @@ class CacheManager:
         cache-miss result.
         """
         try:
-            result = self.get(req, tenant_id="default")
+            result = self.get(req, tenant_id=_DEFAULT_TENANT_HASH)
             if result is not None and not result.hit:
                 MetricsCollector.get_instance().on_miss()
             return result
@@ -280,21 +312,51 @@ class CacheManager:
     def store(self, req: ProxyRequest, resp: ProviderResponse) -> None:
         """CacheHook.store() — persist response; fail-open on error."""
         try:
-            self.set(req, resp, tenant_id="default")
+            self.set(req, resp, tenant_id=_DEFAULT_TENANT_HASH)
         except Exception as exc:
             logger.warning("CacheManager.store raised (fail-open): %s", exc)
 
     def on_hit(self, req: ProxyRequest, resp: bytes, tokens_saved: int) -> None:
         """CacheHook.on_hit() — forward token savings to MetricsCollector.
-        
-        Contract §7: cache skip saves BOTH input+output tokens (whole call avoided).
-        tokens_saved = input tokens saved (from request).
-        Output tokens estimated from response body size (~4 bytes per token).
+
+        M-01: compute input tokens from request body when caller passes 0.
+        M-02: parse real output tokens from cached response usage field.
+        All counts are estimates for display — not billing-accurate.
         """
+        import json as _json
+
+        # M-01: estimate input tokens from message content
+        if tokens_saved == 0 and isinstance(req, ProxyRequest):
+            try:
+                body = req.body or {}
+                total_chars = 0
+                for m in (body.get("messages") or []):
+                    c = m.get("content", "")
+                    if isinstance(c, str):
+                        total_chars += len(c)
+                    elif isinstance(c, list):
+                        for blk in c:
+                            if isinstance(blk, dict):
+                                total_chars += len(blk.get("text", "") or "")
+                total_chars += len(body.get("system", "") or "")
+                tokens_saved = max(0, total_chars // 4)
+            except Exception:
+                pass
+
+        # M-02: parse real output tokens from stored response
         output_tokens = 0
         if resp:
-            # Rough estimate: 4 bytes per token for English text
-            output_tokens = len(resp) // 4
+            try:
+                data = _json.loads(resp)
+                usage = data.get("usage") or {}
+                output_tokens = (
+                    usage.get("output_tokens")
+                    or usage.get("completion_tokens")
+                    or 0
+                )
+            except Exception:
+                output_tokens = len(resp) // 4  # fallback byte-estimate
+
         MetricsCollector.get_instance().on_hit(
             tokens_saved_input=tokens_saved,
             tokens_saved_output=output_tokens,

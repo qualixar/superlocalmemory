@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DETERMINISTIC_PARAMS: frozenset[str] = frozenset({
     "max_tokens", "stop", "stop_sequences", "top_p", "top_k",
@@ -62,6 +65,16 @@ class KeyBuilder:
             temperature = 0.0
 
         if temperature != 0 and not self._config.allow_nonzero_temperature_cache:
+            logger.debug(
+                "cache skip: temperature=%.2f allow_nonzero=%s",
+                temperature,
+                self._config.allow_nonzero_temperature_cache,
+            )
+            try:
+                from superlocalmemory.optimize.metrics.counters import MetricsCollector
+                MetricsCollector.get_instance().increment_skipped_temperature()
+            except Exception:
+                pass
             return None
 
         deterministic_params: dict[str, Any] = {}

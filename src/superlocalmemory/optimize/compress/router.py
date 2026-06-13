@@ -26,7 +26,6 @@ from superlocalmemory.optimize.config.store import ConfigStore
 logger = logging.getLogger("slm.optimize.compress.router")
 
 _MIN_CHARS_FOR_COMPRESSION: int = 500
-_MIN_RATIO_STRUCTURED: float = 0.60
 
 
 class CompressRouter:
@@ -50,8 +49,6 @@ class CompressRouter:
         return cls._instance
 
     def __init__(self) -> None:
-        self._json_compressor: "JSONCompressor | None" = None
-        self._code_compressor: "CodeCompressor | None" = None
         self._llmlingua_compressor: "LLMLinguaCompressor | None" = None
         self._ccr_store: "CCRStore | None" = None
         self._aligner: "CacheAligner | None" = None
@@ -103,11 +100,16 @@ class CompressRouter:
                 tenant_id="default",
             )
 
-            if tokens_after >= tokens_before:
-                return req  # no improvement
-
+            # S-01/Stage-9 fix: build new_bytes BEFORE the improvement guard.
+            # Layer 1 normalization saves characters (not word-count tokens), so
+            # tokens_after == tokens_before for "normalize" strategy. Checking byte
+            # length of the serialized body correctly detects Layer 1 savings.
             body["messages"] = new_messages
             new_bytes = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+
+            bytes_saved = len(req.body_bytes) - len(new_bytes)
+            if bytes_saved <= 0 and tokens_after >= tokens_before:
+                return req  # neither bytes nor tokens improved
 
             # CONTRACT §3: fire on_compress metrics callback
             lossy = strategy == "llmlingua2_prose"
@@ -160,7 +162,12 @@ class CompressRouter:
         primary_strategy = "none"
         new_messages: list[dict[str, Any]] = []
 
-        protect_indices = set(range(max(0, len(messages) - protect_recent), len(messages)))
+        # K-05: protect last N *user* turns, not last N messages of any role
+        user_indices = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+        protect_indices: set[int] = set(user_indices[-protect_recent:]) if protect_recent > 0 else set()
+        # Always protect the very last message (current turn, any role)
+        if messages:
+            protect_indices.add(len(messages) - 1)
 
         for idx, msg in enumerate(messages):
             role = msg.get("role", "")
@@ -248,96 +255,77 @@ class CompressRouter:
     ) -> tuple[str, int, int, str]:
         tokens_before = _token_estimate(text)
 
-        # JSON detection
-        stripped = text.strip()
-        if stripped.startswith(("{", "[")):
-            try:
-                parsed = json.loads(stripped)
-                compressor = self._get_json_compressor()
-                compressed = compressor.compress(parsed)
-                tokens_after = _token_estimate_structured(compressed)
-                tokens_before_adj = _token_estimate_structured(text)
-                ratio = tokens_after / tokens_before_adj if tokens_before_adj else 1.0
-                if ratio < _MIN_RATIO_STRUCTURED:
-                    # B-03: store-before-compress
-                    ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
-                    if ccr_id:
-                        try:
-                            obj = json.loads(compressed)
-                            if isinstance(obj, dict):
-                                obj["__slm_ccr__"] = ccr_id
-                                compressed = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-                            elif isinstance(obj, list):
-                                # RB-02: list-root embedding
-                                wrapper = {"__slm_ccr__": ccr_id, "__slm_data__": obj}
-                                compressed = json.dumps(wrapper, ensure_ascii=False, separators=(",", ":"))
-                        except Exception:
-                            pass
-                        self._ccr_update_compressed(ccr_id, compressed.encode())
-                    logger.debug("[%s] JSON compressed %.2f ratio ccr_id=%s", request_id, ratio, ccr_id)
-                    return compressed, tokens_before_adj, tokens_after, "extractive_json"
-                return text, tokens_before, tokens_before, "none"
-            except (json.JSONDecodeError, Exception):
-                pass
-
-        # Code detection
-        lang = _detect_language(text)
-        if lang is not None:
-            compressor = self._get_code_compressor()
-            # RB-03: compress first, compute ratio, then store CCR only if beneficial
-            compressed_probe = compressor.compress(text, language=lang, ccr_id="")
-            tokens_after = _token_estimate(compressed_probe)
-            ratio = tokens_after / tokens_before if tokens_before else 1.0
-            if ratio < _MIN_RATIO_STRUCTURED:
-                # B-03: store-before-compress
-                ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
-                compressed = compressor.compress(text, language=lang, ccr_id=ccr_id)
-                if ccr_id:
-                    self._ccr_update_compressed(ccr_id, compressed.encode())
-                logger.debug("[%s] Code compressed lang=%s ratio=%.2f ccr_id=%s",
-                             request_id, lang, ratio, ccr_id)
-                return compressed, tokens_before, tokens_after, "extractive_code"
+        if len(text) < _MIN_CHARS_FOR_COMPRESSION:
             return text, tokens_before, tokens_before, "none"
 
-        # Prose: only if aggressive mode AND compress_prose is enabled
-        # (Phase 3 — opt-in prose tier; off by default; gated by config
-        # field compress_prose added in LLD-04 INTERFACE-CONTRACT v2.)
+        # K-01/K-02/K-03: NEVER compress structured content (JSON or code)
+        stripped = text.strip()
+        if stripped.startswith(("{", "[")):
+            # PERF-02: for large content, structural bracket-match avoids O(n) json.loads().
+            # Conservative: matching outer brackets → treat as JSON and skip compression.
+            # K-01 mandate is safety-first: false-positive (non-JSON treated as JSON) is
+            # safe; false-negative (JSON compressed) would be a correctness violation.
+            _last = stripped[-1] if stripped else ""
+            if len(stripped) > 8192 and (
+                (stripped[0] == "{" and _last == "}") or (stripped[0] == "[" and _last == "]")
+            ):
+                return text, tokens_before, tokens_before, "none"  # large JSON → passthrough
+            try:
+                json.loads(stripped)
+                return text, tokens_before, tokens_before, "none"  # valid JSON → passthrough
+            except json.JSONDecodeError:
+                pass  # not valid JSON — treat as prose
+            except Exception as exc:
+                logger.warning("compress: unexpected error probing JSON content: %s", exc)
+
+        if _detect_language(text) is not None:
+            return text, tokens_before, tokens_before, "none"  # code → passthrough
+
+        # Layer 1 — lossless whitespace normalization (always-on, safe)
+        normalized = self._normalize_whitespace(text)
+        tokens_after_l1 = _token_estimate(normalized)
+
+        # Layer 2 — LLMLingua-2 prose compression (aggressive + opt-in only)
         cfg = self._get_config()
         prose_enabled = bool(getattr(cfg, "compress_prose", False))
-        if aggressive and prose_enabled:
+        if aggressive and prose_enabled:  # pragma: no cover — LLMLingua optional dep
             compressor = self._get_llmlingua_compressor()
             if compressor is not None:
-                # B-03: store-before-compress
+                # B-03: store original BEFORE lossy compression
                 ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
-                compressed = compressor.compress(text)
+                compressed = compressor.compress(normalized)
                 if ccr_id:
                     self._ccr_update_compressed(ccr_id, compressed.encode())
-                tokens_after = _token_estimate(compressed)
-                logger.info(
-                    "[%s] LLMLingua-2 prose compressed rate=%.2f ccr_id=%s (LOSSY)",
-                    request_id,
-                    tokens_after / tokens_before if tokens_before else 1.0,
-                    ccr_id,
-                )
-                return compressed, tokens_before, tokens_after, "llmlingua2_prose"
+                tokens_after_l2 = _token_estimate(compressed)
+                if tokens_after_l2 < tokens_before:
+                    logger.info(
+                        "[%s] LLMLingua-2 prose compressed rate=%.2f ccr_id=%s (LOSSY)",
+                        request_id,
+                        tokens_after_l2 / tokens_before if tokens_before else 1.0,
+                        ccr_id,
+                    )
+                    return compressed, tokens_before, tokens_after_l2, "llmlingua2_prose"
+
+        # S-01 fix: compare character length, not word count.
+        # _token_estimate() is word-count — whitespace normalization saves characters/bytes
+        # but never removes words, so token counts are identical before and after Layer 1.
+        # Character comparison correctly detects when normalization reduced the body size.
+        if len(normalized) < len(text):
+            return normalized, tokens_before, tokens_after_l1, "normalize"
 
         return text, tokens_before, tokens_before, "none"
 
+    @staticmethod
+    def _normalize_whitespace(text: str) -> str:
+        """Layer 1 lossless: collapse excess blank lines, strip trailing spaces per line."""
+        import re
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        lines = [line.rstrip() for line in text.split("\n")]
+        return "\n".join(lines)
+
     # ── Lazy loaders ─────────────────────────────────────────────────────
 
-    def _get_json_compressor(self) -> "JSONCompressor":
-        if self._json_compressor is None:
-            from superlocalmemory.optimize.compress.extractive_json import JSONCompressor
-            self._json_compressor = JSONCompressor()
-        return self._json_compressor
-
-    def _get_code_compressor(self) -> "CodeCompressor":
-        if self._code_compressor is None:
-            from superlocalmemory.optimize.compress.extractive_code import CodeCompressor
-            self._code_compressor = CodeCompressor()
-        return self._code_compressor
-
-    def _get_llmlingua_compressor(self) -> "LLMLinguaCompressor | None":
+    def _get_llmlingua_compressor(self) -> "LLMLinguaCompressor | None":  # pragma: no cover
         if self._llmlingua_compressor is None:
             try:
                 from superlocalmemory.optimize.compress.prose_llmlingua import LLMLinguaCompressor
@@ -396,31 +384,38 @@ class CompressRouter:
             return CompressTextResult(
                 compressed_text=compressed, strategy=strat,
                 tokens_before=tb, tokens_after=ta,
+                lossy=strat == "llmlingua2_prose",
             )
         except Exception as exc:
             logger.debug("compress_text failed (non-fatal): %s", exc)
+            t = _token_estimate(text)
             return CompressTextResult(
                 compressed_text=text, strategy="none",
-                tokens_before=len(text.split()), tokens_after=len(text.split()),
+                tokens_before=t, tokens_after=t,
+                lossy=False,
             )
 
 
 @dataclass
 class CompressTextResult:
+    """Result of a compress_text() call.
+
+    UX-02 note: lossy=True only when strategy="llmlingua2_prose" (Layer 2).
+    In the default install (LLMLingua optional dep not installed), lossy is
+    always False — install `llmlingua>=0.2.0` and set compress_prose=True +
+    compress_mode="aggressive" to activate lossy compression.
+    """
     compressed_text: str
-    strategy: str  # "extractive_json" | "extractive_code" | "llmlingua2_prose" | "none"
+    strategy: str  # "normalize" | "llmlingua2_prose" | "none"
     tokens_before: int
     tokens_after: int
+    lossy: bool = False  # K-10: True only for llmlingua2_prose (Layer 2)
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
 def _token_estimate(text: str) -> int:
     return len(text.split()) if text else 0
-
-
-def _token_estimate_structured(text: str) -> int:
-    return max(1, len(text) // 4) if text else 0
 
 
 def _msg_has_tool_result(msg: dict) -> bool:

@@ -324,10 +324,12 @@ async function testConnection() {
     if (resultEl) { resultEl.textContent = 'Testing...'; resultEl.className = 'ms-2 small text-muted'; }
 
     try {
+        var testBody = {provider: provider, model: model};
+        if (apiKey) testBody.api_key = apiKey;
         var resp = await fetch('/api/v3/provider/test', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({provider: provider, model: model, api_key: apiKey})
+            body: JSON.stringify(testBody)
         });
         var data = await resp.json();
         if (data.success) {

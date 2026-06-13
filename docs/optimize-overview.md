@@ -9,8 +9,10 @@ It sits between your application and your LLM provider (Anthropic, OpenAI, Gemin
 | Lever | Mechanism | Saving | Off by default? |
 |-------|-----------|--------|:---------------:|
 | **Cache** | Skip the call entirely on repeats — exact-match → vCache-gated semantic | **100% on a hit** | Cache ON, Semantic OFF |
-| **Compress** | Shrink the prompt before sending — extractive structured + LLMLingua-2 prose + CCR reversible | **60–95% on a miss** | Safe mode ON, Aggressive OFF |
+| **Compress** | Shrink the prompt before sending — **safe = lossless** normalization; **aggressive = LLMLingua-2 prose only** (opt-in) | Safe: small + lossless · Aggressive: large on prose | Safe mode ON, Aggressive OFF |
 | **Align** | Stabilize the prompt prefix to maximize native provider prefix-cache discounts | Lossless extra | ON when compression is ON |
+
+> **v3.6.10:** Cache and Compress are **independent runtime switches** — enable one, both, or neither from the dashboard, applied live with no restart. Compression was rebuilt: the old extractive JSON-string/array/code-body truncation is **removed** (it was lossy); safe mode is now genuinely lossless, and aggressive mode applies LLMLingua-2 to **prose only** — never code, numbers, structured data, instructions, or the current turn.
 
 **Memory** (SLM v3.5's existing engine) is a fourth, parallel lever — it shapes *what is in* the prompt (relevant facts); Optimize decides *whether and how* it is sent. They share plumbing (SQLite engine, embedder), **never share data** (separate `llmcache.db`).
 
@@ -22,9 +24,11 @@ It sits between your application and your LLM provider (Anthropic, OpenAI, Gemin
 |---------|-------------|--------------|
 | **Exact Cache** | Byte-identical repeat calls served from local SQLite — zero provider tokens consumed | Save 100% on repeated prompts |
 | **Semantic Cache** (opt-in) | vCache-powered learned thresholds with SAFE-CACHE centroid defense — near-duplicate queries return cached results within error bound | Save 100% on near-repeats with verified accuracy |
-| **Extractive Compression** | Structure-preserving compression for JSON, code, and tool outputs — lossless, reversible | 60–95% fewer input tokens, zero accuracy regression |
-| **LLMLingua-2 Prose** (opt-in, warned) | Extractive prose summarization for open-ended chat and brainstorming | Additional savings on prose workloads |
-| **CCR (Compressed Context Retrieval)** | Pre-compression originals stored and retrievable byte-exact via UUID | Reverse any compression with full fidelity |
+| **Lossless safe compression** | Whitespace + compact-JSON normalization only — never removes content; code untouched | Small, zero-risk token reduction; provider prefix-cache stays stable |
+| **LLMLingua-2 Prose** (opt-in, aggressive) | Token-classification prose compression (`microsoft/llmlingua-2-xlm-roberta-large-meetingbank`) — prose ONLY, never code/numbers/structured/current-turn | Large savings on prose-heavy workloads |
+| **CCR (Compressed Context Retrieval)** | Pre-compression originals stored, retrievable byte-exact via UUID (best-effort) | Safety net for aggressive prose compression |
+| **Independent runtime toggles** (v3.6.10) | Cache and Compress flip on/off live from the dashboard — no restart | Run cache-only, compress-only, both, or neither, per your workload |
+| **Per-agent MCP identity** (v3.6.10) | `http://127.0.0.1:8765/mcp/{agent_id}` attributes memory per AI client | Many agents share one daemon with separate identities |
 | **CacheAligner** | Detects volatile tokens (UUIDs, timestamps) in system prompts — logs stability score | Maximizes native provider prefix-cache discounts (Anthropic 90%, OpenAI 50%) |
 | **Interception Proxy** | HTTP proxy on port 8765 serving Anthropic, OpenAI, and Gemini surfaces | Zero-code integration — just set `base_url` |
 | **SDK Wrappers** | `withSLM(OpenAI())` — in-process interception, no network hop | Drop-in for existing SDK code |
@@ -60,7 +64,7 @@ It sits between your application and your LLM provider (Anthropic, OpenAI, Gemin
 
 1. Your app sends an LLM request (via proxy, SDK wrapper, or agent wrapping)
 2. **Cache check** — if an exact match exists in `llmcache.db`, the cached response returns immediately — **zero provider tokens consumed**
-3. **Compression** — on cache miss, the prompt is compressed (extractive JSON/code → LLMLingua-2 prose → alignment), then forwarded to the provider
+3. **Compression** — on cache miss, the prompt is compressed (safe = lossless normalization + align; aggressive adds LLMLingua-2 on prose only), then forwarded to the provider
 4. **Cache store** — the provider response is cached for future hits
 5. **Savings tracked** — every hit, miss, compression, and alignment event is counted and displayed in the dashboard
 
@@ -197,7 +201,7 @@ No data loss. No downtime. Zero configuration changes needed.
 | Concern | Mitigation |
 |---------|------------|
 | **Adversarial cache poisoning (CacheAttack)** | Tag-based invalidation, tenant isolation, AES-256-GCM integrity protection. Semantic tier blocks 86% hijack class via SAFE-CACHE centroid defense |
-| **Compression fidelity loss** | Safe mode = extractive only (structure-preserving, lossless). Aggressive mode shows ⚠ warning before enabling. CCR stores originals for byte-exact reversal |
+| **Compression fidelity loss** | Safe mode = lossless normalization only (no content removed; code untouched). Aggressive mode applies LLMLingua-2 to prose only, shows ⚠ warning before enabling, and CCR stores originals for byte-exact reversal |
 | **API key leak** | Header redaction in proxy logs, SSRF allowlist on upstream URLs |
 | **Data contamination** | Separate `llmcache.db` with `assert_no_memory_db_tables()` guard |
 | **Corruption recovery** | Invalid SQLite files moved to `.corrupt` sidecar — fresh DB created automatically |

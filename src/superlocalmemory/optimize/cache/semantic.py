@@ -294,7 +294,8 @@ class VCacheSemantic(SemanticTier):
         # Step 5: vCache exploit/explore (MLE τ̂ via record_outcome updates)
         record = self._boundary_store.get(best_entry_id)
         delta = float(getattr(cfg, "semantic_error_target", _DEFAULT_ERROR_TARGET))
-        if record.should_explore(best_score, delta=delta):
+        sem_return_threshold = float(getattr(cfg, "semantic_return_threshold", _DEFAULT_RETURN_THRESHOLD))
+        if record.should_explore(best_score, delta=delta, return_threshold=sem_return_threshold):
             logger.debug(
                 "VCacheSemantic: explore (score=%.4f entry=%s t_hat=%.4f)",
                 best_score, best_entry_id, record.t_hat,
@@ -363,11 +364,11 @@ class VCacheSemantic(SemanticTier):
                     self._index[tenant_id] = []
                 return
             entries: list[tuple[str, str, np.ndarray]] = []
-            for entry_id, blob in rows:
+            for entry_id, blob, ctx_fp in rows:  # C-10: unpack persisted context_fp
                 try:
                     v = np.frombuffer(blob, dtype=np.float32).copy()
                     if v.shape[0] == _EMBED_DIM:
-                        entries.append((entry_id, "", v))
+                        entries.append((entry_id, ctx_fp, v))
                 except Exception:
                     continue
             with self._index_lock:
@@ -422,13 +423,17 @@ class VCacheSemantic(SemanticTier):
             )
             return
 
-        # Store vector in DB
+        # Store vector in DB — C-10: persist context_fp alongside the vector
         vec_bytes = vec.tobytes()
         self._db.vec_add(
             entry_id=entry_id,
             tenant_id=tenant_id,
             vector=vec_bytes,
-            meta={"model": "nomic-ai/nomic-embed-text-v1.5", "dim": _EMBED_DIM},
+            meta={
+                "model": "nomic-ai/nomic-embed-text-v1.5",
+                "dim": _EMBED_DIM,
+                "context_fp": context_fp,
+            },
         )
 
         # Initialize boundary record if new

@@ -33,6 +33,7 @@ import dataclasses
 import json
 import logging
 import os
+import re
 import sqlite3
 import struct
 import time
@@ -52,6 +53,25 @@ from superlocalmemory.optimize.storage import schema as _schema
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TENANT: str = "default"
+_TENANT_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def _normalize_tenant_id(tenant_id: str) -> str:
+    """Match CacheManager.build_key tenant normalization (v3.6.10 fix).
+
+    The proxy stores entries under SHA-256(tenant) when the tenant is not
+    already a 64-char hex digest. Public tenant-scoped helpers (entry_count,
+    clear_tenant, entry_exists) MUST apply the same hashing or they query the
+    wrong tenant — the cause of the dashboard reporting "0 entries" while the
+    cache is in fact populated.
+    """
+    tid = tenant_id or _DEFAULT_TENANT
+    if _TENANT_HEX64.fullmatch(tid):
+        return tid
+    import hashlib as _hashlib
+    return _hashlib.sha256(tid.encode()).hexdigest()
+
+
 _ZLIB_LEVEL: int = 6
 _AES_NONCE_BYTES: int = 12
 _PBKDF2_ITERATIONS: int = 100_000
@@ -60,6 +80,9 @@ LLMCACHE_DIRNAME: str = ".superlocalmemory"
 LLMCACHE_DBNAME: str = "llmcache.db"
 MID_FILENAME: str = ".llmcache_key"
 SALT_PREFIX: str = "salt:"
+
+# C-06: persisted AES key — survives machine-id changes after first run
+_KEY_FILE: Path = Path.home() / LLMCACHE_DIRNAME / "opt-key.bin"
 
 _FORBIDDEN_MEMORY_TABLES: frozenset[str] = frozenset({
     "memories", "atomic_facts", "profiles", "canonical_entities",
@@ -74,7 +97,13 @@ _FORBIDDEN_MEMORY_TABLES: frozenset[str] = frozenset({
 
 @dataclass
 class MetricsSnapshot:
-    """Mirror of llmcache_metrics columns — names MUST match exactly."""
+    """Mirror of llmcache_metrics columns — names MUST match exactly.
+
+    S-03 / M-03 note: compress_bytes_original and compress_bytes_after store
+    WORD-COUNT proxy values (len(text.split())), NOT byte counts. The column
+    names use "bytes" for DB schema backward compatibility. Treat these fields
+    as token-count proxies, not literal byte measurements.
+    """
     id: int = 1
     hits: int = 0
     misses: int = 0
@@ -86,8 +115,8 @@ class MetricsSnapshot:
     latency_overhead_ms_sum: float = 0.0
     latency_samples: int = 0
     compress_runs: int = 0
-    compress_bytes_original: int = 0
-    compress_bytes_after: int = 0
+    compress_bytes_original: int = 0  # unit: word-count proxy (see S-03 note above)
+    compress_bytes_after: int = 0     # unit: word-count proxy (see S-03 note above)
     cache_size_bytes: int = 0
     cache_entry_count: int = 0
     updated_at: float = 0.0
@@ -209,8 +238,7 @@ class CacheDB:
         except OSError as exc:
             logger.warning("CacheDB: could not chmod 600 on %s: %s", self._db_path, exc)
         self._salt = self._load_or_create_salt()
-        machine_id = self._get_machine_id()
-        self._aes_key = self._derive_aes_key(machine_id, self._salt)
+        self._aes_key = self._get_or_persist_aes_key(self._salt)
         self.assert_no_memory_db_tables()
 
     # ---- context manager ----
@@ -291,6 +319,33 @@ class CacheDB:
                 except OSError as exc:
                     logger.warning("CacheDB: could not persist machine id: %s", exc)
         return mid
+
+    def _get_or_persist_aes_key(self, salt: bytes) -> bytes:
+        """C-06: Load persisted key from disk, or derive + persist on first run.
+
+        Surviving a machine-id change: after first derivation the key is saved to
+        opt-key.bin (0600). On subsequent starts the file is read directly,
+        so changing the underlying machine-id string cannot invalidate existing
+        cache entries.
+        """
+        try:
+            if _KEY_FILE.exists():
+                key = _KEY_FILE.read_bytes()
+                if len(key) == 32:
+                    return key
+        except Exception as exc:
+            logger.warning("CacheDB: could not read persisted AES key: %s", exc)
+
+        # First run (or corrupted file): derive from machine-id and persist.
+        machine_id = self._get_machine_id()
+        key = self._derive_aes_key(machine_id, salt)
+        try:
+            _KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _KEY_FILE.write_bytes(key)
+            os.chmod(_KEY_FILE, 0o600)
+        except Exception as exc:
+            logger.warning("CacheDB: could not persist AES key (fail-open): %s", exc)
+        return key
 
     def _derive_aes_key(self, machine_id: str, salt: bytes) -> bytes:
         kdf = PBKDF2HMAC(
@@ -626,11 +681,12 @@ class CacheDB:
         try:
             dim = int(meta.get("dim", len(vector) // 4))
             model_name = str(meta.get("model", "nomic-ai/nomic-embed-text-v1.5"))
+            context_fp = str(meta.get("context_fp", ""))  # C-10: persist context fingerprint
             self._db.execute(
                 "INSERT OR REPLACE INTO llmcache_semantic_vectors "
-                "(entry_id, tenant_id, vector_blob, vector_dim, model_name) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (entry_id, tenant_id, vector, dim, model_name),
+                "(entry_id, tenant_id, vector_blob, vector_dim, model_name, context_fp) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (entry_id, tenant_id, vector, dim, model_name, context_fp),
             )
         except sqlite3.Error as exc:
             logger.warning("CacheDB.vec_add failed: %s", exc)
@@ -855,14 +911,22 @@ class CacheDB:
 
     # ---- v2 additions ----
 
-    def get_all_vectors(self, tenant_id: str) -> list[tuple[str, bytes]]:
+    def get_all_vectors(self, tenant_id: str) -> list[tuple[str, bytes, str]]:
+        """Return (entry_id, vector_blob, context_fp) for all vectors in a tenant.
+
+        C-10: context_fp is included so _lazy_warm_tenant() can restore it without
+        recomputing embeddings from messages that may no longer be in scope.
+        """
         try:
             rows = self._db.execute(
-                "SELECT entry_id, vector_blob FROM llmcache_semantic_vectors "
+                "SELECT entry_id, vector_blob, context_fp FROM llmcache_semantic_vectors "
                 "WHERE tenant_id = ?",
                 (tenant_id,),
             )
-            return [(dict(r)["entry_id"], dict(r)["vector_blob"]) for r in rows]
+            return [
+                (dict(r)["entry_id"], dict(r)["vector_blob"], dict(r).get("context_fp", ""))
+                for r in rows
+            ]
         except sqlite3.Error as exc:
             logger.warning("CacheDB.get_all_vectors failed: %s", exc)
             return []
@@ -919,6 +983,7 @@ class CacheDB:
     # ---- convenience / non-contract helpers ----
 
     def entry_exists(self, cache_key: str, tenant_id: str = _DEFAULT_TENANT) -> bool:
+        tenant_id = _normalize_tenant_id(tenant_id)
         try:
             rows = self._db.execute(
                 "SELECT 1 FROM llmcache_entries WHERE cache_key = ? AND tenant_id = ? LIMIT 1",
@@ -929,6 +994,7 @@ class CacheDB:
             return False
 
     def clear_tenant(self, tenant_id: str) -> int:
+        tenant_id = _normalize_tenant_id(tenant_id)
         try:
             with self._db.transaction():
                 rows = self._db.execute(
@@ -955,6 +1021,7 @@ class CacheDB:
             return 0
 
     def entry_count(self, tenant_id: str = _DEFAULT_TENANT) -> int:
+        tenant_id = _normalize_tenant_id(tenant_id)
         try:
             rows = self._db.execute(
                 "SELECT COUNT(*) AS n FROM llmcache_entries "
