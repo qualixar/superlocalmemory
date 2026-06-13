@@ -3,7 +3,10 @@
 > **Five years of daily AI use. Your system won't feel it.**
 > *Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.*
 
-SuperLocalMemory gives AI assistants persistent memory across sessions. **v3.4.5 "Scale-Ready"** — 1 million memories. Zero slowdown. No cloud. No APIs. No data leaves your machine.
+SuperLocalMemory gives AI assistants persistent memory across sessions. **v3.6.11 "Optimize Everywhere"** — cache, compress, and remember on any plan, no proxy required. No cloud. No APIs. No data leaves your machine.
+
+### v3.6.11 "Optimize Everywhere" — Three Surfaces. No Proxy Required.
+**Cache. Compress. Remember.** SLM v3.6.11 delivers compression + caching across three surfaces: **proxy** (full-turn caching via `slm wrap claude`), **MCP tools** (5 new tools in `slm mcp`, full 1M window preserved), or **skill** (`~/.claude/skills/slm-optimize/`, zero-config auto-compress). Every setup covered — with or without a proxy. Install once with `pip install -U superlocalmemory`. [View details →](https://superlocalmemory.com/optimize-everywhere)
 
 ### v3.4.5 "Scale-Ready" — 1 Million Memories. Zero Slowdown.
 **Tiered storage auto-classifies every memory as active, warm, cold, or archived.** Graph pruning removes redundant connections. Optional acceleration backends (CozoDB, LanceDB) for graph + vector operations. Tested on **1.18 million real graph edges** with under 2-second recall. Migration is automatic: `pip install -U superlocalmemory && slm restart`. [View details →](https://superlocalmemory.com/scale-ready)

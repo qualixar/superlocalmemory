@@ -5,6 +5,40 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.11] - 2026-06-14 — Optimize Everywhere: three surfaces (proxy · MCP tools · skill)
+
+Cache + compress across **every setup** — proxy, MCP tools, or skill. Five new MCP tools land directly inside `slm mcp` (no proxy, full 1M context window preserved). A new `slm-optimize` skill makes compression and routed-result caching zero-config for Claude Code users. Overclaim in prior docs fixed; three-surfaces table added.
+
+### Added — Surface B: MCP Optimize Tools (proxy-free)
+
+Five new tools registered in `slm mcp` from v3.6.11+:
+
+- **`slm_compress`** — compress text or tool output. `mode=normalize` is lossless whitespace normalization; `mode=auto`/`aggressive` delegates to the existing CompressRouter engine. Lossy + reversible stores the original in CCR and returns a `ccr_id`. Content >1 MB is stored unreversed. All fail-open.
+- **`slm_retrieve`** — recover the exact original bytes from a `ccr_id` UUID4 returned by `slm_compress`. Validates UUID format before lookup.
+- **`slm_cache_set`** — cache any string result the agent routes through SLM (file reads, bash output, search results, sub-model calls). Key is SHA-256 namespaced `mcpkv:{agent_id}:{key}` — no cross-agent collisions. TTL default 24 h.
+- **`slm_cache_get`** — retrieve a cached result by key. Returns `hit:True/False`. Increments in-module `_kv_hits`/`_kv_misses` counters for stats.
+- **`slm_optimize_stats`** — session compression + cache statistics. Proxy counters read from `CacheDB.metrics_load()` (daemon-persisted, accurate across restarts); KV counters are in-module for this MCP process session.
+
+All five are **fail-open**: any internal error returns `{ok: False, note: <error>}` with the original content unchanged — never raises to the agent.
+
+### Added — Surface C: slm-optimize Skill (zero-config)
+
+- **`skills/slm-optimize/SKILL.md`** and **`ide/skills/slm-optimize/SKILL.md`** — agent-behavior instruction file. Eight behavioral rules: compress CLAUDE.md at session start, compress large tool outputs via `slm_compress`, KV-cache repeated file reads and bash/search results, recover originals with `slm_retrieve`, never-compress list (secrets, JSON, code/Edit/Write outputs), emit stats on request, fail-open on `ok:False`. Compatible with Claude Code, Cursor, Antigravity, Codex, and any IDE that supports MCP tool calls.
+- **`skills/slm-optimize/README.md`** — human install guide: prerequisites, install steps, activation options, feature table, and explicit "what it does NOT do" section.
+
+### Changed — `CacheDB` (new public method)
+
+- **`CacheDB.get_value(cache_key, tenant_id)`** added to `optimize/storage/db.py` — pure `SELECT` lookup with no `hit_count` side-effect (unlike `get()`). Used by `slm_cache_get` to avoid inflating proxy cache counters when agents read KV entries. Fail-open: returns `None` on any SQLite/decryption/zlib error.
+
+### Changed — MCP server registration
+
+- Five optimize tool names added to `_ESSENTIAL_TOOLS` frozenset in `mcp/server.py` (v3.6.11 Surface B). Without this the `_FilteredServer` wrapper silently drops tools whose names are not in the set.
+- `register_optimize_tools(_target)` call added after other `register_*` calls.
+
+### Fixed — Overclaim in README / docs
+
+- Replaced "Save up to 90% on every LLM API call" headline with accurate three-surfaces framing: proxy (full-turn caching on metered API), MCP tools (routed-result caching + compression), skill (auto-applied compression). Hard constraint documented: primary Claude conversation turn cannot be cached without a proxy — never implied otherwise.
+
 ## [3.6.10] - 2026-06-14 — Optimize correctness (cache + lossless compression) · MCP per-agent identity · runtime toggles · benchmark + shadow-capture · Issue #38
 
 This release makes the **Optimize** subsystem (the HTTP proxy that caches and compresses LLM API calls) correct, observable, and **independently controllable at runtime**, adds **per-agent identity** to the HTTP MCP transport, ships a **benchmark + shadow-capture** harness that proves the cache and compression behaviour, and fixes GitHub issue #38. Cache and compression remain **default-OFF** and are now separately toggleable from the dashboard.

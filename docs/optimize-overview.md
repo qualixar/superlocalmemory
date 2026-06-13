@@ -1,10 +1,47 @@
-# Optimize Overview — v3.6
+# Optimize Overview — v3.6.11
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SLM v3.6 **Optimize** is a local-first LLM cost-reduction layer that SKIPS, SHRINKS, and DISCOUNTS every LLM call — and remembers — in one install.
+SLM v3.6.11 **"Optimize Everywhere"** delivers compression + caching across **three surfaces** — proxy, MCP tools, or skill — so every Claude user gets savings regardless of subscription or proxy preference.
 
-It sits between your application and your LLM provider (Anthropic, OpenAI, Gemini), intercepting every API call and applying three levers before the call reaches the provider:
+## Three Surfaces
+
+| Surface | Entry point | Proxy required? | Context window | Cache scope |
+|---------|------------|:---------------:|:--------------:|-------------|
+| **A — Proxy** | `slm wrap claude` / `ANTHROPIC_BASE_URL` | Yes | Shrinks (intercepts full context) | Full Claude turn |
+| **B — MCP tools** | 5 tools in `slm mcp` | **No** | **Full 1M preserved** | Results you route through SLM |
+| **C — Skill** | `~/.claude/skills/slm-optimize/` | **No** | **Full 1M preserved** | Auto-applied by agent per skill rules |
+
+**Hard constraint:** The primary Claude conversation turn cannot be cached without a proxy. Surfaces B and C cache results you explicitly route through SLM — not the Claude turn itself.
+
+### Surface B: MCP Optimize Tools (v3.6.11)
+
+Five new MCP tools, included in `slm mcp` from v3.6.11+:
+
+| Tool | What it does |
+|------|-------------|
+| `slm_compress` | Compress text/tool-output. `mode=normalize` (lossless), `auto`, or `aggressive`. Returns `ccr_id` when lossy + reversible. |
+| `slm_retrieve` | Recover exact original from `ccr_id` (CCR round-trip). |
+| `slm_cache_set` | Cache any string result the agent routes through SLM (file reads, bash output, search results). |
+| `slm_cache_get` | Retrieve cached result by key. Returns `hit:True/False`. |
+| `slm_optimize_stats` | Session compression + cache statistics. |
+
+All five are **fail-open**: any internal error returns `ok:False` with the original unchanged — never raises to the agent.
+
+### Surface C: slm-optimize Skill (v3.6.11)
+
+An agent-behavior instruction file the agent reads and follows. Install:
+
+```bash
+mkdir -p ~/.claude/skills/slm-optimize
+cp skills/slm-optimize/SKILL.md ~/.claude/skills/slm-optimize/SKILL.md
+```
+
+The skill instructs the agent to: compress CLAUDE.md at session start, compress large tool outputs, cache repeated file reads and bash results, and recover originals via `slm_retrieve`. Fail-open always — optimization never blocks the primary task.
+
+---
+
+SLM v3.6 **Optimize** is a local-first cost-reduction layer. Surface A sits between your application and your LLM provider, intercepting every API call. Surfaces B/C work at the agent layer with no network interception.
 
 | Lever | Mechanism | Saving | Off by default? |
 |-------|-----------|--------|:---------------:|

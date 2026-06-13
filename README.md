@@ -2,18 +2,18 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.6</h1>
-<p align="center"><strong>Save up to 90% on every LLM API call. Cache. Compress. Remember.</strong><br/><em>The only local-first memory system that SKIPS repeat calls (100% saved), SHRINKS prompts 60-95%, and REMEMBERS everything — locally, for free. For Claude Code, Cursor, Windsurf, and any AI client.</em></p>
-<p align="center"><code>v3.6.0 "Optimize"</code> — <strong>Cache & Compress & Align. Save up to 90% on every LLM API call — locally.</strong> One command: <code>slm wrap claude</code><br>Also includes v3.5 Scale-Ready: 6-channel recall &lt;1s, CozoDB + LanceDB, Core Memory Block. Your database auto-migrates.</p>
+<h1 align="center">SuperLocalMemory V3.6.11</h1>
+<p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/><em>The only local-first layer that pairs persistent memory with compression + caching across every Claude plan. Full 1M window preserved in MCP and skill mode.</em></p>
+<p align="center"><code>v3.6.11 "Optimize Everywhere"</code> — <strong>Compress + cache on any plan, three ways in.</strong><br/>Proxy (full-turn cache): <code>slm wrap claude</code> &nbsp;·&nbsp; MCP (proxy-free): add <code>slm_compress</code> to your MCP config &nbsp;·&nbsp; Skill (zero-config): <code>~/.claude/skills/slm-optimize/</code></p>
 <p align="center"><strong>Backed by 3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
-  <code>Saves up to 90% on LLM API costs</code> &nbsp;·&nbsp; <code>+10.6pp vs Mem0 zero-LLM</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
+  <code>Proxy · MCP tools · Skill — three surfaces</code> &nbsp;·&nbsp; <code>+10.6pp vs Mem0 zero-LLM</code> &nbsp;·&nbsp; <code>85% Open-Domain (best zero-LLM score)</code> &nbsp;·&nbsp; <code>EU AI Act Ready</code>
 </p>
 
 <p align="center">
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
-  <a href="https://img.shields.io/badge/Saves_90%25_on_LLM_Costs-22c55e?style=for-the-badge"><img src="https://img.shields.io/badge/Saves_90%25_on_LLM_Costs-22c55e?style=for-the-badge" alt="Saves 90% on LLM Costs"/></a>
+  <a href="#three-surfaces-proxy--mcp-tools--skill"><img src="https://img.shields.io/badge/Proxy_|_MCP_|_Skill-22c55e?style=for-the-badge" alt="Three Surfaces: Proxy, MCP Tools, Skill"/></a>
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
@@ -33,7 +33,9 @@
 <details>
 <summary><strong>What's New in V3.6 — Optimize: SKIP, SHRINK, DISCOUNT, REMEMBER</strong> (click to expand)</summary>
 
-> V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% saved on a hit), SHRINKS prose prompts (compress: lossless-by-default, opt-in LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install. **Your first cache hit pays for the install time. Hours of coding on repeat, minimal API cost.**
+> V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% on a hit), SHRINKS tool outputs and injected context (compress: lossless-by-default, opt-in LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install.
+>
+> **v3.6.11 "Optimize Everywhere":** Three surfaces. **Proxy** (Surface A) — full-turn cache + compress on transport; needs `ANTHROPIC_BASE_URL`, shrinks the context window. **MCP tools** (Surface B) — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`; no proxy, no window shrink, works on any Claude subscription. **Skill** (Surface C) — `slm-optimize` installs in `~/.claude/skills/`; zero-config auto-compress for large tool outputs and CLAUDE.md. No proxy, full 1M window. [See Three Surfaces →](#three-surfaces-proxy--mcp-tools--skill)
 >
 > **v3.6.10:** cache and compression are now **independent runtime switches** (cache-only, compress-only, both, or neither — toggle live from the dashboard, no restart). Compression was rebuilt to be **lossless by default** (the old string/array/code truncation is gone); aggressive mode adds LLMLingua-2 for **prose only** — never code, numbers, structured data, or the current turn.
 
@@ -117,6 +119,57 @@ Full docs:
 - [Website: v3.6 Optimize](https://superlocalmemory.com/optimize)
 
 </details>
+
+---
+
+## Three Surfaces: Proxy · MCP Tools · Skill
+
+v3.6.11 delivers one engine across **three ways in** — choose the surface that fits your setup:
+
+| Surface | How you use it | Requires proxy? | Window effect | Cache scope |
+|---------|---------------|:---------------:|:-------------:|-------------|
+| **A — Proxy** | `slm wrap claude` or `ANTHROPIC_BASE_URL=http://127.0.0.1:8765` | **Yes** | Shrinks (proxy intercepts full context) | Full-turn cache — every Claude call |
+| **B — MCP tools** | Add 5 tools to MCP config; call `slm_compress`, `slm_cache_set/get` | **No** | **Preserved** (full 1M) | Results you explicitly route through SLM |
+| **C — Skill** | Copy `skills/slm-optimize/SKILL.md` → `~/.claude/skills/` | **No** | **Preserved** (full 1M) | Auto-applied by the agent per skill rules |
+
+**How to choose:**
+- On a **metered API** (pay-per-token) and want to cache every call → **Proxy (A)**
+- On a **Pro/Max/Team subscription** or any plan where you can't or won't run a proxy → **MCP tools (B)** or **Skill (C)**
+- Want zero configuration → **Skill (C)**: install once, auto-compresses CLAUDE.md and large outputs
+- Want agent-controlled caching of repeated file reads and tool outputs → **MCP tools (B)**
+
+**The hard constraint:** The primary Claude conversation turn cannot be cached without a proxy — the MCP/skill path caches results you explicitly route through SLM (tool outputs, file reads, sub-model calls).
+
+### MCP Tools Setup (Surface B)
+
+Add to your `claude_desktop_config.json` or IDE MCP config alongside your existing SLM entry:
+
+```json
+{
+  "mcpServers": {
+    "superlocalmemory": {
+      "command": "slm",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The 5 optimize tools (`slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`) are included automatically from v3.6.11+. Verify with `slm_optimize_stats()`.
+
+### Skill Setup (Surface C)
+
+```bash
+mkdir -p ~/.claude/skills/slm-optimize
+cp $(pip show superlocalmemory | grep Location | awk '{print $2}')/superlocalmemory/skills/slm-optimize/SKILL.md \
+   ~/.claude/skills/slm-optimize/SKILL.md
+```
+
+Then reference in your `CLAUDE.md`:
+```markdown
+## Context Management
+Use the `slm-optimize` skill to compress large outputs and cache repeated reads.
+```
 
 ---
 
@@ -296,6 +349,7 @@ No manual commands. No data loss. Zero downtime.
 
 | Version | Codename | Key Features |
 |---|---|---|
+| **v3.6.11** | Optimize Everywhere | **Three surfaces** — Proxy (A: full-turn cache), MCP tools (B: `slm_compress`/`slm_retrieve`/`slm_cache_set`/`slm_cache_get`/`slm_optimize_stats` — proxy-free, 1M window), Skill (C: `slm-optimize` zero-config). `CacheDB.get_value()` (pure KV lookup). 23 new tests. Links: [Three Surfaces →](#three-surfaces-proxy--mcp-tools--skill) · [docs/optimize-overview.md](docs/optimize-overview.md) |
 | **v3.6.0** | Optimize | **Cache** (skip repeat calls, 100% on hit) · **Compress** (shrink prompts 60-95%) · **Align** (KV-cache stabilization) · `slm optimize\|cache\|compress\|proxy\|wrap` CLI · Live savings dashboard (USD/INR/tokens) · Hot-reload config · Safe defaults · Links: [docs/optimize-overview.md](docs/optimize-overview.md) · [V3.6 Wiki](https://github.com/qualixar/superlocalmemory/wiki/V3.6-Overview) |
 | **v3.5.0** | Scale-Ready + Context Injection v2 | CozoDB/LanceDB migration, 6-channel recall <1s, Core Memory Block, BM25→FTS5, context injection v2, score normalization |
 | **v3.4.5** | Scale-Ready (foundation) | Tiered storage (active/warm/cold), graph pruning, BackendOrchestrator scaffolding, CozoDB + LanceDB init + migration code (read path wired in v3.5.0) |

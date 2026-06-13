@@ -421,6 +421,30 @@ class CacheDB:
             logger.warning("CacheDB.get failed (cache miss): %s", exc)
             return None
 
+    def get_value(self, cache_key: str, tenant_id: str) -> bytes | None:
+        """Pure value lookup — no hit_count increment (unlike get()).
+
+        Used by MCP KV tools which manage their own hit/miss counters.
+        Caller must have already normalized tenant_id. Fail-open: returns None on error.
+        """
+        try:
+            rows = self._db.execute(
+                "SELECT value_blob, compressed FROM llmcache_entries "
+                "WHERE cache_key = ? AND tenant_id = ? "
+                "AND (ttl_expires IS NULL OR ttl_expires > ?) LIMIT 1",
+                (cache_key, tenant_id, time.time()),
+            )
+            if not rows:
+                return None
+            row = dict(rows[0])
+            plaintext = self._decrypt(row["value_blob"])
+            if row.get("compressed", 0):
+                plaintext = zlib.decompress(plaintext)
+            return plaintext
+        except (sqlite3.Error, ValueError, zlib.error) as exc:
+            logger.warning("CacheDB.get_value failed (fail-open): %s", exc)
+            return None
+
     def set(
         self,
         key: str,

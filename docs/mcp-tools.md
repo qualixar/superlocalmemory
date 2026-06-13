@@ -2,7 +2,9 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SuperLocalMemory exposes 33 tools and 7 resources via the Model Context Protocol (MCP). Any MCP-compatible AI assistant can use these automatically.
+SuperLocalMemory exposes 38 tools and 7 resources via the Model Context Protocol (MCP). Any MCP-compatible AI assistant can use these automatically.
+
+> **v3.6.11:** Five new **Optimize tools** — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`. Proxy-free compression + routed-result caching. Full 1M context window preserved. [See Three Surfaces →](optimize-overview.md)
 
 ## Connecting
 
@@ -232,6 +234,67 @@ MCP resources provide read-only data that AI assistants can access passively.
 | `slm://identity` | Learned user preferences and patterns |
 | `slm://learning` | Current state of the adaptive learning system |
 | `slm://engagement` | Usage statistics and interaction patterns |
+
+---
+
+## Optimize Tools (v3.6.11 — Surface B)
+
+Proxy-free compression and routed-result caching. All five are **fail-open** — any internal error returns `ok:False` with the original content unchanged.
+
+### `slm_compress`
+
+Compress text or tool output to reduce context window usage.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `content` | string | required | Text to compress (max 1MB) |
+| `mode` | string | `"auto"` | `"normalize"` (lossless whitespace) · `"auto"` · `"aggressive"` |
+| `reversible` | boolean | `true` | If lossy, store original in CCR and return `ccr_id` |
+| `ttl_seconds` | integer | `86400` | CCR original lifetime (seconds) |
+
+**Returns:** `{ok, compressed, strategy, tokens_before, tokens_after, ratio, lossy, ccr_id, note}`
+
+### `slm_retrieve`
+
+Recover the exact original bytes stored during a lossy `slm_compress` call.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `ccr_id` | string | UUID4 returned by `slm_compress` when `reversible=True` |
+
+**Returns:** `{ok, content, size_bytes, error}`
+
+### `slm_cache_set`
+
+Cache a string result the agent wants to reuse (file reads, bash output, search results, sub-model calls). Does **not** cache the Claude conversation turn.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | string | required | Cache key (max 512 chars, namespaced per agent) |
+| `value` | string | required | Value to store (max 1MB) |
+| `ttl_seconds` | integer | `86400` | Time-to-live in seconds |
+
+**Returns:** `{ok, stored, note}`
+
+### `slm_cache_get`
+
+Retrieve a previously cached result.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Same key used in `slm_cache_set` |
+
+**Returns:** `{ok, hit, value, note}`
+
+### `slm_optimize_stats`
+
+Return compression and cache statistics for the current session.
+
+*No parameters.*
+
+**Returns:** `{ok, compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses, ccr_note, note}`
+
+> **Note:** Proxy stats are daemon-persisted (accurate across restarts). KV stats (`cache_kv_hits`, `cache_kv_misses`) are in-module counters for this MCP process session only.
 
 ---
 

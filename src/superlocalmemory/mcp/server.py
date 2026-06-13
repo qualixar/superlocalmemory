@@ -104,6 +104,8 @@ _ESSENTIAL_TOOLS: set[str] = {
     "reinforce_assertion", "contradict_assertion",
     # v3.4.11: Skill evolution (3)
     "evolve_skill", "skill_health", "skill_lineage",
+    # v3.6.11: Surface B Optimize tools (5)
+    "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
 }
 
 # v3.4.4: Mesh tools — enabled if mesh_enabled in config or SLM_MCP_MESH_TOOLS=1
@@ -189,6 +191,8 @@ register_code_graph_tools(_target, get_engine)  # CodeGraph: filtered like other
 register_mesh_tools(_target, get_engine)  # v3.4.4: Mesh P2P tools — ships with SLM, no separate slm-mesh needed
 register_learning_tools(_target, get_engine)  # v3.4.7: Two-way learning tools
 register_evolution_tools(_target, get_engine)  # v3.4.11: Skill evolution tools
+from superlocalmemory.mcp.tools_optimize import register_optimize_tools
+register_optimize_tools(_target)  # v3.6.11: Surface B Optimize tools (proxy-free)
 
 
 # V3.3.21: Eager engine warmup — start initializing BEFORE first tool call.

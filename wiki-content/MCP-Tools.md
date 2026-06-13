@@ -1,6 +1,8 @@
 # MCP Tools
 
-SuperLocalMemory exposes 27 tools and 7 resources via the Model Context Protocol (MCP). These are what your IDE uses to interact with the memory system.
+SuperLocalMemory exposes 32 tools and 7 resources via the Model Context Protocol (MCP). These are what your IDE uses to interact with the memory system.
+
+> **v3.6.11 New:** 5 Optimize tools — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`. Proxy-free compression + routed-result caching. Full 1M context window preserved.
 
 > **V3.1 New:** 3 Active Memory tools (`session_init`, `observe`, `report_feedback`) and 1 resource (`slm://context`) for automatic learning and context injection.
 
@@ -83,6 +85,20 @@ MCP resources provide read-only data streams that IDEs can subscribe to.
 | System Health | `memory://health` | Database status, math layer scores |
 | Knowledge Graph | `memory://graph` | Graph summary (nodes, edges, communities) |
 | Learning State | `memory://learning` | ML model state and learned patterns |
+
+## Optimize Tools (v3.6.11)
+
+Proxy-free compression and routed-result caching. All five are **fail-open** — any internal error returns `ok:False` with the original content unchanged; the agent always continues.
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `slm_compress` | `content`, `mode?`, `reversible?`, `ttl_seconds?` | Compress text. `mode`: `normalize` (lossless), `auto`, `aggressive`. Returns `ccr_id` when lossy+reversible. |
+| `slm_retrieve` | `ccr_id` | Recover exact original from a lossy compress. |
+| `slm_cache_set` | `key`, `value`, `ttl_seconds?` | Cache any string result (file read, bash output, search). Namespaced per agent. |
+| `slm_cache_get` | `key` | Retrieve cached result. Returns `hit:True/False`. |
+| `slm_optimize_stats` | — | Compression + cache statistics for the current session. |
+
+> **Hard constraint:** Surfaces B and C cache results you explicitly route through SLM — not the Claude conversation turn. Full-turn caching requires Surface A (proxy).
 
 ## How MCP Integration Works
 
