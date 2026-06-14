@@ -281,10 +281,13 @@ class MeshBroker:
         try:
             now = datetime.now(timezone.utc).isoformat()
             # Direct messages to this peer
+            # v3.6.12 (mesh-3): only UNREAD direct messages — was returning read
+            # ones too, so every poll re-listed already-read messages until the
+            # 24h cleanup (broadcast/project already filter unread via mesh_reads).
             direct = conn.execute(
                 "SELECT id, from_peer, to_peer, msg_type, content, read, created_at, "
                 "target_type, project_path FROM mesh_messages "
-                "WHERE to_peer=? AND target_type='peer' "
+                "WHERE to_peer=? AND target_type='peer' AND COALESCE(read, 0) = 0 "
                 "AND (expires_at IS NULL OR expires_at > ?) "
                 "ORDER BY created_at DESC LIMIT 100",
                 (peer_id, now),
@@ -411,10 +414,18 @@ class MeshBroker:
                 return {"ok": True, "action": "acquired"}
 
             elif action == "release":
-                conn.execute("DELETE FROM mesh_locks WHERE file_path=? AND locked_by=?",
-                             (file_path, locked_by))
+                # v3.6.12 (mesh-2): report whether we actually released. The
+                # DELETE is correctly owner-scoped, but it previously returned
+                # released=ok:true even when a NON-owner released nothing.
+                cur = conn.execute(
+                    "DELETE FROM mesh_locks WHERE file_path=? AND locked_by=?",
+                    (file_path, locked_by),
+                )
                 conn.commit()
-                return {"ok": True, "action": "released"}
+                if cur.rowcount and cur.rowcount > 0:
+                    return {"ok": True, "action": "released"}
+                return {"ok": False, "action": "not_released",
+                        "error": "no lock held by this peer for that file"}
 
             elif action == "query":
                 row = conn.execute(

@@ -138,7 +138,13 @@ class LLMBackbone:
             return False
         if self._provider == "ollama":
             return True
-        return bool(self._api_key)
+        # v3.6.12 (modeb-1): a custom local OpenAI-compatible endpoint
+        # (llama.cpp, LM Studio, vLLM) needs NO API key — _build_openai already
+        # omits the Authorization header when the key is empty. Treat a
+        # configured base_url as sufficient, otherwise Mode B silently falls
+        # back to Mode A extraction for keyless local endpoints.
+        _base = getattr(self, "_base_url", "") or getattr(self, "_api_base", "")
+        return bool(self._api_key) or bool(_base)
 
     @property
     def provider(self) -> str:

@@ -317,11 +317,16 @@ class CompressRouter:
 
     @staticmethod
     def _normalize_whitespace(text: str) -> str:
-        """Layer 1 lossless: collapse excess blank lines, strip trailing spaces per line."""
+        """Layer 1 safe: collapse runs of 3+ blank lines to a single blank line.
+
+        v3.6.12 (normalize-1): no longer rstrips trailing spaces per line — that
+        is LOSSY for Markdown hard breaks (two trailing spaces) and padded string
+        literals, which broke the 'lossless/safe' guarantee that callers (incl.
+        slm_compress mode=normalize) rely on. Only collapsing excess blank lines
+        remains, which is semantically safe.
+        """
         import re
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        lines = [line.rstrip() for line in text.split("\n")]
-        return "\n".join(lines)
+        return re.sub(r"\n{3,}", "\n\n", text)
 
     # ── Lazy loaders ─────────────────────────────────────────────────────
 

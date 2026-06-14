@@ -433,8 +433,9 @@ class TestToolsCoreAgentIdResolution:
         delete_fn = srv._tools["delete_memory"]
 
         monkeypatch.setenv("SLM_AGENT_ID", "stdio-claude")
-        # Ensure ContextVar is at default
-        assert _current_agent_id.get() == "mcp_client"
+        # Ensure ContextVar is at default (v3.6.12 parity-1: default is now ""
+        # — the "no agent routed" sentinel — not the user-visible "mcp_client").
+        assert _current_agent_id.get() == ""
 
         mock_pool = MagicMock()
         mock_pool._send = MagicMock(return_value={"ok": True})

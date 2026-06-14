@@ -114,6 +114,7 @@ def dispatch(args: Namespace) -> None:
         "list": cmd_list,
         "remember": cmd_remember,
         "recall": cmd_recall,
+        "search": cmd_recall,  # v3.6.12 (parity-3): MCP exposes a `search` verb; give the CLI parity (recall is multi-channel incl. BM25/keyword).
         "forget": cmd_forget,
         "delete": cmd_delete,
         "update": cmd_update,

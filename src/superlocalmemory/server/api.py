@@ -108,12 +108,20 @@ def create_app() -> FastAPI:
     # Rate limiting (graceful)
     try:
         from superlocalmemory.infra.rate_limiter import RateLimiter
-        _write_limiter = RateLimiter(max_requests=30, window_seconds=60)
-        _read_limiter = RateLimiter(max_requests=120, window_seconds=60)
+        from superlocalmemory.core.remote_mode import (
+            rate_limit_config,
+            is_rate_limit_exempt,
+        )
+        # v3.6.12 (issue #40): env-tunable thresholds (defaults unchanged).
+        _rl_write, _rl_read, _rl_window = rate_limit_config()
+        _write_limiter = RateLimiter(max_requests=_rl_write, window_seconds=_rl_window)
+        _read_limiter = RateLimiter(max_requests=_rl_read, window_seconds=_rl_window)
 
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"
+            if is_rate_limit_exempt(client_ip):
+                return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             limiter = _write_limiter if is_write else _read_limiter
             allowed, remaining = limiter.is_allowed(client_ip)
@@ -122,7 +130,7 @@ def create_app() -> FastAPI:
                 return JSONResponse(
                     status_code=429,
                     content={"error": "Too many requests."},
-                    headers={"Retry-After": str(limiter.window_seconds)},
+                    headers={"Retry-After": str(limiter.window)},
                 )
             response = await call_next(request)
             response.headers["X-RateLimit-Remaining"] = str(remaining)

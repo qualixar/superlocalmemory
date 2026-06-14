@@ -590,12 +590,21 @@ class DatabaseManager:
 
     def search_facts_fts(self, query: str, profile_id: str, limit: int = 20) -> list[AtomicFact]:
         """Full-text search via FTS5, joined to facts table for reconstruction."""
+        # v3.6.12 (search-1): the raw query was passed straight into FTS5 MATCH,
+        # so any '?', '-', quote, or trailing boolean keyword (AND/OR/NOT) raised
+        # an FTS5 syntax error. Tokenize to word characters, quote each token,
+        # and OR-join — mirrors the recall BM25 channel's safe MATCH expression.
+        import re as _re
+        tokens = [t for t in _re.findall(r"\w+", query.lower()) if t]
+        if not tokens:
+            return []
+        match_expr = " OR ".join(f'"{t}"' for t in tokens)
         rows = self.execute(
             """SELECT f.* FROM atomic_facts_fts AS fts
                JOIN atomic_facts AS f ON f.fact_id = fts.fact_id
                WHERE fts.atomic_facts_fts MATCH ? AND f.profile_id = ?
                ORDER BY fts.rank LIMIT ?""",
-            (query, profile_id, limit),
+            (match_expr, profile_id, limit),
         )
         return [self._row_to_fact(r) for r in rows]
 

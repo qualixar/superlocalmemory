@@ -35,6 +35,8 @@
 
 > V3.6 is the only local-first layer that SKIPS repeat LLM calls (cache: 100% on a hit), SHRINKS tool outputs and injected context (compress: lossless-by-default, opt-in LLMLingua-2), and DISCOUNTS prefix costs (align: native KV-cache) — and remembers everything — in one install.
 >
+> **v3.6.12 "Distributed-ready":** Run SLM on a server and reach it across your LAN. `SLM_REMOTE=1` (default off) lets the dashboard load from a remote browser, lets MCP gateways/hubs forward tool calls, and makes custom local LLM endpoints (llama.cpp / LM Studio / Azure) configurable right from the dashboard — plus a batch of stability and security fixes. See [`docs/distributed-deployment.md`](docs/distributed-deployment.md).
+>
 > **v3.6.11 "Optimize Everywhere":** Three surfaces. **Proxy** (Surface A) — full-turn cache + compress on transport; needs `ANTHROPIC_BASE_URL`, shrinks the context window. **MCP tools** (Surface B) — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`; no proxy, no window shrink, works on any Claude subscription. **Skill** (Surface C) — `slm-optimize` installs in `~/.claude/skills/`; zero-config auto-compress for large tool outputs and CLAUDE.md. No proxy, full 1M window. [See Three Surfaces →](#three-surfaces-proxy--mcp-tools--skill)
 >
 > **v3.6.10:** cache and compression are now **independent runtime switches** (cache-only, compress-only, both, or neither — toggle live from the dashboard, no restart). Compression was rebuilt to be **lossless by default** (the old string/array/code truncation is gone); aggressive mode adds LLMLingua-2 for **prose only** — never code, numbers, structured data, or the current turn.

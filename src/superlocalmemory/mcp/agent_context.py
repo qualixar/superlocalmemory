@@ -15,8 +15,12 @@ import contextvars
 import os
 import re
 
+# v3.6.12 (parity-1): default is "" (the "no agent routed" sentinel), NOT the
+# user-visible "mcp_client". Sanitized agent ids are [A-Za-z0-9._-], so "" can
+# never collide — a client that explicitly routes to /mcp/mcp_client is now
+# distinguishable from a bare /mcp/ request with no agent segment.
 _current_agent_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "slm_agent_id", default="mcp_client"
+    "slm_agent_id", default=""
 )
 
 # Agent ids arrive from an untrusted URL path segment. They are ATTRIBUTION
@@ -42,8 +46,8 @@ def get_current_agent_id(env_fallback: bool = True) -> str:
     fall through to the SLM_AGENT_ID env var instead.
     """
     ctx_id = _current_agent_id.get()
-    if ctx_id != "mcp_client":
-        return ctx_id
+    if ctx_id:
+        return ctx_id  # an explicitly-routed agent id (incl. "mcp_client")
     if env_fallback:
         return os.environ.get("SLM_AGENT_ID", "mcp_client")
     return "mcp_client"

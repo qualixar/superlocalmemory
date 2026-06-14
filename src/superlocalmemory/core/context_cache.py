@@ -205,7 +205,10 @@ class ContextCache:
         Does NOT run LRU sweep inline (PERF-01-07) — that's a background
         task on the daemon.
         """
-        content = redact_secrets(entry.content)[:MAX_CONTENT_CHARS]
+        # v3.6.12 (redact-1): scrub dashboard/cached content at HIGH aggression
+        # so Bearer/GitHub-PAT/Anthropic/OpenAI/GENERIC_KEY patterns are caught
+        # (the default 'normal' skipped them, leaking those shapes to the UI).
+        content = redact_secrets(entry.content, aggression="high")[:MAX_CONTENT_CHARS]
         fact_ids_json = json.dumps(list(entry.fact_ids))
         byte_size = (
             len(content.encode("utf-8"))

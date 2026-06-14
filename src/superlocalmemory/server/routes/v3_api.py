@@ -189,12 +189,20 @@ async def set_full_config(request: Request):
         from superlocalmemory.server.routes.helpers import log_mode_change
         old = SLMConfig.load()
         old_mode = old.mode.value
+        # v3.6.12 (settings-2): honor a custom endpoint for ANY provider — the
+        # old code forced api_base="" for everything except ollama, so a
+        # llama.cpp / LM Studio / Azure-OpenAI endpoint configured in the
+        # dashboard could never be saved (Test Connection then probed the wrong
+        # URL → 401). Accept both base_url and endpoint; default ollama locally.
+        _endpoint = (body.get("base_url", "") or body.get("endpoint", "")).strip()
+        if not _endpoint and provider == "ollama":
+            _endpoint = "http://localhost:11434"
         config = SLMConfig.for_mode(
             Mode(new_mode),
             llm_provider=provider if provider != "none" else "",
             llm_model=model,
             llm_api_key=api_key,
-            llm_api_base="http://localhost:11434" if provider == "ollama" else "",
+            llm_api_base=_endpoint,
             embedding_provider=body.get("embedding_provider", ""),
             embedding_endpoint=body.get("embedding_endpoint", ""),
             embedding_key=body.get("embedding_key", ""),
@@ -202,7 +210,10 @@ async def set_full_config(request: Request):
             embedding_dimension=int(body.get("embedding_dimension", 0) or 0),
         )
         config.active_profile = old.active_profile
-        config.save()
+        # v3.6.12 (settings-1): an explicit user-driven mode switch must persist.
+        # save() without mode_change=True hits the guard that PRESERVES the old
+        # mode, so /mode/set silently no-op'd the switch while returning success.
+        config.save(mode_change=True)
 
         log_mode_change(
             old_mode, new_mode,
@@ -410,6 +421,39 @@ async def embed_texts(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _validate_provider_url(url: str, client_host: str) -> str | None:
+    """SSRF guard for outbound provider-test fetches (v3.6.12 ssrf-1).
+
+    Returns an error string if ``url`` is unsafe, else None. ALWAYS blocks
+    non-http(s) and cloud-metadata hosts. A LOOPBACK caller (the local
+    dashboard) may legitimately test local/LAN LLM endpoints, so private IPs
+    are allowed for it. A NON-loopback caller may not make the server fetch
+    private/loopback/link-local/reserved targets — that is the SSRF abuse.
+    """
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        return "Only http/https endpoints are supported"
+    host = p.hostname or ""
+    if host.lower() in ("169.254.169.254", "metadata.google.internal", "metadata"):
+        return "Cloud metadata endpoints are not allowed"
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return None  # local dashboard may target its own local/LAN endpoints
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(host))
+        except Exception:
+            return None  # unresolvable — let the HTTP client fail normally
+    if (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast):
+        return "Internal/private endpoints are not allowed from a remote client"
+    return None
+
+
 @router.post("/provider/test")
 async def test_provider(request: Request):
     """Test connectivity to an LLM provider."""
@@ -419,9 +463,13 @@ async def test_provider(request: Request):
         provider = body.get("provider", "")
         model = body.get("model", "")
         api_key = body.get("api_key", "")
+        _client_host = request.client.host if request.client else ""
 
         if provider == "ollama":
             endpoint = body.get("endpoint", "http://localhost:11434")
+            _err = _validate_provider_url(endpoint, _client_host)
+            if _err:
+                return {"success": False, "error": _err}
             with httpx.Client(timeout=httpx.Timeout(5.0)) as c:
                 resp = c.get(f"{endpoint}/api/tags")
                 resp.raise_for_status()
@@ -448,6 +496,9 @@ async def test_provider(request: Request):
             # V3.5.9: custom/local endpoint — api_key is optional (llama.cpp, LM Studio etc.)
             custom_endpoint = body.get("base_url", "").strip() or body.get("endpoint", "").strip()
             if custom_endpoint:
+                _err = _validate_provider_url(custom_endpoint, _client_host)
+                if _err:
+                    return {"success": False, "error": _err}
                 headers_test = {"Content-Type": "application/json"}
                 if api_key:
                     headers_test["Authorization"] = f"Bearer {api_key}"
@@ -730,23 +781,38 @@ async def trust_dashboard(request: Request):
 async def math_health(request: Request):
     """Mathematical layer health: Fisher, sheaf, Langevin status. Queries DB directly."""
     try:
-        engine = None  # Engine runs in subprocess; query DB directly below
-
+        # v3.6.12 (math-1): report CONFIG-DERIVED status, not a hardcoded
+        # "active"/"healthy" for every layer. The old code had a dead `if engine:`
+        # (engine was always None) and returned all-green unconditionally — a
+        # false-assurance pane. We can't probe the recall subprocess from here,
+        # so report the real configured mode/threshold/temperature and label the
+        # status "configured" (or "unknown" if config can't load).
+        from superlocalmemory.core.config import SLMConfig
+        config = SLMConfig.load()
+        math = getattr(config, "math", None)
+        _status = "configured" if math is not None else "unknown"
         health = {
-            "fisher": {"status": "active", "description": "Fisher-Rao information geometry for similarity"},
-            "sheaf": {"status": "active", "description": "Sheaf cohomology for consistency detection"},
-            "langevin": {"status": "active", "description": "Riemannian Langevin dynamics for lifecycle"},
+            "fisher": {
+                "status": _status,
+                "description": "Fisher-Rao information geometry for similarity",
+                "mode": getattr(math, "fisher_mode", None) if math else None,
+            },
+            "sheaf": {
+                "status": _status,
+                "description": "Sheaf cohomology for consistency detection",
+                "threshold": getattr(math, "sheaf_contradiction_threshold", None) if math else None,
+            },
+            "langevin": {
+                "status": _status,
+                "description": "Riemannian Langevin dynamics for lifecycle",
+                "temperature": getattr(math, "langevin_temperature", None) if math else None,
+            },
         }
-
-        # Check if math layers are configured
-        if engine:
-            from superlocalmemory.core.config import SLMConfig
-            config = SLMConfig.load()
-            health["fisher"]["mode"] = config.math.fisher_mode
-            health["sheaf"]["threshold"] = config.math.sheaf_contradiction_threshold
-            health["langevin"]["temperature"] = config.math.langevin_temperature
-
-        return {"health": health, "overall": "healthy"}
+        return {
+            "health": health,
+            "overall": _status,
+            "note": "config-derived; not a live runtime probe",
+        }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

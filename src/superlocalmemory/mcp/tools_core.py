@@ -309,7 +309,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             pid = profile_id or engine.profile_id
-            facts = engine._db.get_all_facts(pid)[:limit]
+            # v3.6.12 (search-2): push the limit into the query — was loading the
+            # ENTIRE facts table (deserializing every 768-float embedding) just
+            # to return the top N. get_all_facts preserves created_at DESC order.
+            facts = engine._db.get_all_facts(pid, limit=limit)
             items = []
             for f in facts:
                 items.append({
@@ -400,6 +403,15 @@ def register_core_tools(server, get_engine: Callable) -> None:
             except ImportError:
                 # Dashboard not installed — profile switch still works for MCP/CLI
                 logger.debug("Dashboard routes not available, profile set in engine only")
+
+            # v3.6.12 (search-3): recall/delete run in a separate worker
+            # subprocess that caches its engine (and profile_id) at init. Recycle
+            # it so the NEXT recall uses the new profile instead of the stale one.
+            try:
+                from superlocalmemory.core.worker_pool import WorkerPool
+                WorkerPool.shared().shutdown()
+            except Exception:
+                logger.debug("worker-pool recycle on profile switch skipped")
 
             return {
                 "success": True,

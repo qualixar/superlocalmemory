@@ -95,6 +95,18 @@ def test_loopback_with_localhost_origin_returns_token(
     assert resp.json()["token"] == install_token
 
 
+def test_https_loopback_origin_returns_token(
+    client: TestClient, install_token: str,
+) -> None:
+    """v3.6.12: HTTPS loopback origin is accepted (forward-compat with TLS dev)."""
+    resp = client.get(
+        "/internal/token",
+        headers={"Origin": "https://127.0.0.1:8765"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["token"] == install_token
+
+
 def test_foreign_origin_rejected(
     client: TestClient, install_token: str,
 ) -> None:
@@ -142,3 +154,52 @@ def test_empty_token_file_returns_500(
     resp = client.get("/internal/token")
     assert resp.status_code == 500
     assert resp.json()["error"] == "token_unavailable"
+
+
+# -- v3.6.12 (issue #39): SLM_REMOTE LAN-allow path --------------------------
+
+def test_lan_client_denied_without_remote_mode(
+    app: FastAPI,
+    install_token: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-loopback client is still 403 when SLM_REMOTE is off (default)."""
+    monkeypatch.setattr(auth_mod, "is_loopback", lambda _host: False)
+    monkeypatch.delenv("SLM_REMOTE", raising=False)
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "*")
+    resp = TestClient(app).get("/internal/token")
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "loopback only"
+
+
+def test_lan_client_allowed_in_remote_mode(
+    app: FastAPI,
+    install_token: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allowlisted LAN client gets the token when SLM_REMOTE=1."""
+    monkeypatch.setattr(auth_mod, "is_loopback", lambda _host: False)
+    monkeypatch.setenv("SLM_REMOTE", "1")
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "*")
+    # In remote mode the LAN origin must also be accepted.
+    resp = TestClient(app).get(
+        "/internal/token",
+        headers={"Origin": "http://192.168.50.144:8765"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["token"] == install_token
+
+
+def test_lan_client_denied_when_not_in_allowlist(
+    app: FastAPI,
+    install_token: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote mode ON but client IP not in the allowlist → still 403."""
+    monkeypatch.setattr(auth_mod, "is_loopback", lambda _host: False)
+    monkeypatch.setenv("SLM_REMOTE", "1")
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "10.0.0.5:*")
+    # TestClient's client host is "testclient" → not in allowlist.
+    resp = TestClient(app).get("/internal/token")
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "loopback only"

@@ -367,7 +367,10 @@ def _summarize_with_ollama(
         if config and hasattr(config, 'llm'):
             api_base = getattr(config.llm, 'api_base', api_base) or api_base
             model = getattr(config.llm, 'model', model) or model
-            timeout = getattr(config.llm, 'timeout', timeout) or timeout
+            # v3.6.12 (modeb-4): the LLMConfig field is `timeout_seconds`, not
+            # `timeout` — the old read always missed and silently used 30s.
+            timeout = getattr(config.llm, 'timeout_seconds', None) or \
+                getattr(config.llm, 'timeout', None) or timeout
 
         fact_texts = "\n".join(f"- {f['content']}" for f in facts[:_MAX_CLUSTER_SIZE])
         prompt = (

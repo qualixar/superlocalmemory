@@ -76,7 +76,7 @@ def _mesh_request(method: str, path: str, body: dict | None = None) -> dict | No
 
 def _ensure_registered() -> None:
     """Register this session with the mesh broker if not already."""
-    global _REGISTERED, _PROJECT_PATH
+    global _REGISTERED, _PROJECT_PATH, _PEER_ID
     if _REGISTERED:
         return
 
@@ -89,6 +89,11 @@ def _ensure_registered() -> None:
         "agent_type": os.environ.get("CLAUDE_AGENT_TYPE", "claude_code"),
     })
     if result:
+        # v3.6.12 (mesh-1): the broker mints its OWN peer_id (RegisterRequest has
+        # no peer_id field, so our body value is dropped by pydantic). Adopt the
+        # broker's id BEFORE starting the heartbeat, otherwise heartbeat/send/
+        # inbox all target a non-existent peer → 404s and the session is reaped.
+        _PEER_ID = result.get("peer_id", _PEER_ID)
         _REGISTERED = True
         _start_heartbeat()
         pending = result.get("pending_messages", 0)
@@ -191,7 +196,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             _mesh_request, "POST", "/send",
             {"from_peer": _PEER_ID, "to_peer": to, "content": message},
         )
-        return result or {"error": "Failed to send message"}
+        return result or {"ok": False, "error": "Failed to send message"}
 
     @server.tool()
     async def mesh_inbox() -> dict:
@@ -207,8 +212,11 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             _mesh_request, "GET", f"/inbox/{_PEER_ID}?project_path={project}",
         )
         msg_list = (messages or {}).get("messages", [])
-        # Auto-mark unread messages as read
-        unread_ids = [m["id"] for m in msg_list if not m.get("read")]
+        # Auto-mark unread messages as read. v3.6.12 (failopen-2): use .get("id")
+        # — a malformed broker message without an "id" key used to raise KeyError
+        # out to the agent, violating the never-raise contract.
+        unread_ids = [m["id"] for m in msg_list
+                      if not m.get("read") and m.get("id") is not None]
         if unread_ids:
             await asyncio.to_thread(
                 _mesh_request, "POST", f"/inbox/{_PEER_ID}/read",
@@ -239,7 +247,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
                 _mesh_request, "POST", "/state",
                 {"key": key, "value": value, "set_by": _PEER_ID},
             )
-            return result or {"error": "Failed to set state"}
+            return result or {"ok": False, "error": "Failed to set state"}
 
         if key:
             result = await asyncio.to_thread(_mesh_request, "GET", f"/state/{key}")
@@ -266,7 +274,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             _mesh_request, "POST", "/lock",
             {"file_path": file_path, "action": action, "locked_by": _PEER_ID},
         )
-        return result or {"error": "Lock operation failed"}
+        return result or {"ok": False, "error": "Lock operation failed"}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def mesh_events() -> dict:

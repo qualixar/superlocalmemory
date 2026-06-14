@@ -33,8 +33,11 @@ router = APIRouter(tags=["internal"])
 
 _ALLOWED_ORIGIN_PREFIXES = (
     "http://127.0.0.1",
+    "https://127.0.0.1",
     "http://localhost",
+    "https://localhost",
     "http://[::1]",
+    "https://[::1]",
 )
 
 
@@ -57,13 +60,22 @@ async def get_token(request: Request) -> JSONResponse:
         logger.debug("token: primitives unimportable: %s", exc)
         return JSONResponse({"error": "server_error"}, status_code=500)
 
+    # v3.6.12 (issue #39): in SLM_REMOTE mode, also serve the token to
+    # explicitly-allowlisted LAN clients so a remote-browser dashboard can load
+    # the Brain page. Default stays loopback-only — remote_mode helpers return
+    # False unless SLM_REMOTE=1 AND the client IP is in SLM_MCP_ALLOWED_HOSTS.
+    from superlocalmemory.core.remote_mode import (
+        is_lan_client_allowed,
+        is_remote_origin_allowed,
+    )
+
     client_host = request.client.host if request.client else ""
-    if not is_loopback(client_host):
+    if not is_loopback(client_host) and not is_lan_client_allowed(client_host):
         return JSONResponse({"error": "loopback only"}, status_code=403)
 
     headers = {k.lower(): v for k, v in request.headers.items()}
     origin = headers.get("origin", "")
-    if not _origin_is_loopback(origin):
+    if not _origin_is_loopback(origin) and not is_remote_origin_allowed(origin):
         return JSONResponse(
             {"error": "origin not allowed"}, status_code=403,
         )

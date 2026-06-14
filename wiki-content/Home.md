@@ -5,6 +5,9 @@
 
 SuperLocalMemory gives AI assistants persistent memory across sessions. **v3.6.11 "Optimize Everywhere"** — cache, compress, and remember on any plan, no proxy required. No cloud. No APIs. No data leaves your machine.
 
+### v3.6.12 "Distributed-ready" — Run SLM across your LAN
+Deploy SLM on a server and reach it from other machines. **`SLM_REMOTE=1`** (default off) lets the dashboard load from a remote browser, lets MCP gateways/hubs forward tool calls, and makes custom local LLM endpoints (llama.cpp / LM Studio / Azure) configurable from the dashboard — plus a batch of stability and security fixes. LAN access stays gated by `SLM_MCP_ALLOWED_HOSTS`. See the [Distributed Deployment guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/distributed-deployment.md).
+
 ### v3.6.11 "Optimize Everywhere" — Three Surfaces. No Proxy Required.
 **Cache. Compress. Remember.** SLM v3.6.11 delivers compression + caching across three surfaces: **proxy** (full-turn caching via `slm wrap claude`), **MCP tools** (5 new tools in `slm mcp`, full 1M window preserved), or **skill** (`~/.claude/skills/slm-optimize/`, zero-config auto-compress). Every setup covered — with or without a proxy. Install once with `pip install -U superlocalmemory`. [View details →](https://superlocalmemory.com/optimize-everywhere)
 

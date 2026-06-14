@@ -170,6 +170,20 @@ async function loadModeSettings() {
         // Show provider panel and populate model dropdown
         updateModeUI();
 
+        // v3.6.12 (issue #39/#40): populate the endpoint field from the SAVED
+        // config endpoint. updateProviderUI() above sets the field to the
+        // provider's DEFAULT (e.g. https://api.openai.com/v1), which hides the
+        // user's real custom endpoint (llama.cpp/LM Studio) and makes Test
+        // Connection probe the wrong URL → 401. Override with data.endpoint here.
+        if (data.endpoint) {
+            setTimeout(function() {
+                var epEl = document.getElementById('settings-endpoint');
+                if (epEl) epEl.value = data.endpoint;
+                var epRow = document.getElementById('settings-endpoint-row');
+                if (epRow) epRow.style.display = 'block';
+            }, 0);
+        }
+
         // After provider UI updates, set the saved model value
         if (model) {
             setTimeout(function() {
@@ -314,6 +328,11 @@ async function testConnection() {
     var provider = document.getElementById('settings-provider')?.value || '';
     var model = document.getElementById('settings-model')?.value || '';
     var apiKey = document.getElementById('settings-api-key')?.value || '';
+    // v3.6.12 (issue #39): include the configured custom endpoint. Without this
+    // the backend never sees base_url, treats a custom llama.cpp/LM-Studio server
+    // as official OpenAI, and 401s on an empty key. Was the real cause of the
+    // "Test Connection fails / API key required" report against Mode B.
+    var endpoint = document.getElementById('settings-endpoint')?.value || '';
     var resultEl = document.getElementById('settings-test-result');
 
     if (!provider) {
@@ -326,6 +345,7 @@ async function testConnection() {
     try {
         var testBody = {provider: provider, model: model};
         if (apiKey) testBody.api_key = apiKey;
+        if (endpoint) { testBody.base_url = endpoint; testBody.endpoint = endpoint; }
         var resp = await fetch('/api/v3/provider/test', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -348,6 +368,9 @@ async function saveAllSettings() {
     if (mode === 'a') provider = 'none';
     var model = document.getElementById('settings-model')?.value || '';
     var apiKey = document.getElementById('settings-api-key')?.value || '';
+    // v3.6.12 (settings-2): persist the custom endpoint too, else a llama.cpp/
+    // LM-Studio/Azure endpoint can never be saved (backend reads base_url).
+    var endpoint = document.getElementById('settings-endpoint')?.value || '';
 
     var statusEl = document.getElementById('settings-save-status');
     var saveBtn = document.getElementById('settings-save-all');
@@ -358,6 +381,7 @@ async function saveAllSettings() {
         // V3.4.24: Include embedding params in save payload
         var embParams = getEmbeddingParams();
         var payload = Object.assign({mode: mode, provider: provider, model: model, api_key: apiKey}, embParams);
+        if (endpoint) { payload.base_url = endpoint; payload.endpoint = endpoint; }
         var modeResp = await fetch('/api/v3/mode/set', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

@@ -5,7 +5,38 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.6.11] - 2026-06-14 — Optimize Everywhere: three surfaces (proxy · MCP tools · skill)
+## [3.6.12] - 2026-06-14 — Distributed-ready + stability fixes
+
+Makes SuperLocalMemory work correctly across a LAN / distributed deployment (issues #39, #40) and fixes a set of stability and security defects. Default single-machine behavior is unchanged.
+
+### Added
+
+- **`SLM_REMOTE=1` — one-switch LAN mode** (default OFF). When enabled, SLM serves the dashboard install token to allowlisted LAN clients, runs the MCP transport statelessly so a gateway/hub can forward tool calls, allows trusted LAN dashboard origins, and exempts the trusted LAN dashboard from rate limiting. LAN access stays gated by `SLM_MCP_ALLOWED_HOSTS`. Granular flags: `SLM_MCP_STATELESS=1`, and tunable rate limits `SLM_RATE_LIMIT_WRITE` / `SLM_RATE_LIMIT_READ` / `SLM_RATE_LIMIT_WINDOW`. See `docs/distributed-deployment.md`.
+- **`slm search`** CLI command (parity with the MCP `search` tool).
+
+### Fixed — Distributed / LAN (#39, #40)
+
+- **The Brain page now loads from a remote browser** on the LAN (the install-token endpoint serves allowlisted LAN clients in remote mode instead of being loopback-only).
+- **Mesh tools no longer fail with `-32600 Session not found`** when called through an MCP gateway/hub (the transport can now run stateless so the session id need not be replayed).
+- **Custom LLM endpoints (llama.cpp / LM Studio / Azure) can now be configured from the dashboard** — the Settings page shows, sends, and saves the endpoint, and switching mode actually persists.
+- **The dashboard rate limit (`429 Too Many Requests`) is now configurable** and trusted LAN clients are exempt in remote mode.
+
+### Fixed — Stability & security
+
+- **Authentication now fails closed.** A failure to install the auth gate could previously leave write endpoints unauthenticated; it now logs and denies non-loopback writes instead.
+- **Mesh peer registration fixed** — sessions now register with the correct peer id, so heartbeat, direct messages, and inbox work reliably (previously they could silently target a non-existent peer).
+- **`SLM_MESH_SHARED_SECRET` is now enforced** on inbound mesh requests from non-loopback callers.
+- **The cache no longer raises on a corrupted or wrong-key entry** — it degrades to a cache miss.
+- **SSRF protection** added to the provider connection test (cloud-metadata and internal addresses are blocked for remote callers; the local dashboard can still test local/LAN endpoints).
+- **Mode B no longer silently falls back to Mode A** when using a keyless local LLM endpoint.
+- **Memory search no longer errors on punctuation** (`?`, `-`, quotes, etc.).
+- **Mode B honors the configured LLM endpoint and timeout** in summarization and consolidation (previously hardcoded to localhost).
+- **Math-health dashboard reports real status** instead of always showing green.
+- Mesh lock release and inbox now behave correctly (no false success, no re-listing of already-read messages); switching profile takes effect immediately for recall.
+
+### Removed
+
+- Removed legacy dead code (an unused in-process daemon handler and superseded duplicate API routes) for a cleaner, more maintainable codebase. No functional change. — Optimize Everywhere: three surfaces (proxy · MCP tools · skill)
 
 Cache + compress across **every setup** — proxy, MCP tools, or skill. Five new MCP tools land directly inside `slm mcp` (no proxy, full 1M context window preserved). A new `slm-optimize` skill makes compression and routed-result caching zero-config for Claude Code users. Overclaim in prior docs fixed; three-surfaces table added.
 

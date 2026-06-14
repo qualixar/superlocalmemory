@@ -124,8 +124,11 @@ class Summarizer:
         """
         import httpx
         model = getattr(self._config.llm, 'model', None) or "llama3.1:8b"
+        # v3.6.12 (modeb-2): honor the configured endpoint instead of hardcoding
+        # localhost:11434, so a remote/non-default Ollama host works in Mode B.
+        _base = (getattr(self._config.llm, 'api_base', '') or "http://localhost:11434").rstrip("/")
         with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
-            resp = client.post("http://localhost:11434/api/generate", json={
+            resp = client.post(f"{_base}/api/generate", json={
                 "model": model,
                 "prompt": prompt,
                 "stream": False,

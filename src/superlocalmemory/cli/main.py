@@ -183,7 +183,9 @@ def main() -> None:
         help="Wait for completion (default: async background processing)",
     )
 
-    recall_p = sub.add_parser("recall", help="Semantic search with 4-channel retrieval")
+    # v3.6.12 (parity-3): `search` is an alias of `recall` so the CLI has the
+    # same search verb the MCP exposes (handlers dict maps both to cmd_recall).
+    recall_p = sub.add_parser("recall", aliases=["search"], help="Semantic search with 4-channel retrieval")
     recall_p.add_argument("query", help="Search query")
     recall_p.add_argument("--limit", type=int, default=10, help="Max results (default 10)")
     recall_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")

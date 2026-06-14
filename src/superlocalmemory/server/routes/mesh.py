@@ -77,6 +77,19 @@ def _get_broker(request: Request):
     config = getattr(request.app.state, 'config', None)
     if config and not getattr(config, 'mesh_enabled', True):
         raise HTTPException(503, detail="Mesh disabled in config")
+    # v3.6.12 (mesh-1 security): SLM_MESH_SHARED_SECRET was read by the broker but
+    # never verified on inbound mesh HTTP calls. When a secret is configured,
+    # require it (constant-time) from NON-loopback callers via X-Mesh-Secret.
+    # The local MCP client always calls over loopback and is exempt, so this is
+    # zero-change for single-machine use and closes the LAN mesh auth bypass.
+    secret = getattr(broker, "_shared_secret", None)
+    if secret:
+        client_host = request.client.host if request.client else ""
+        if client_host not in ("127.0.0.1", "::1", "localhost"):
+            import hmac
+            presented = request.headers.get("x-mesh-secret", "")
+            if not hmac.compare_digest(presented, secret):
+                raise HTTPException(401, detail="invalid or missing mesh secret")
     return broker
 
 

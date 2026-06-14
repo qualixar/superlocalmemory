@@ -14,7 +14,12 @@ REUSE: DatabaseManager from superlocalmemory/src/superlocalmemory/storage/databa
 ENCRYPTION (resolves SEC-C-01 / CWE-312, NEW-M-01, NEW-M-02):
   - All value BLOBs (llmcache_entries.value_blob) are AES-256-GCM encrypted.
   - CCR original_blob is ALSO AES-256-GCM encrypted.
-  - Key derivation: PBKDF2-HMAC-SHA256(password=machine_id, salt=_per_db_salt, iter=100_000)
+  - Key storage: a single MACHINE-WIDE key file (~/.superlocalmemory/opt-key.bin,
+    0o600) is generated once and reused for all cache DBs on the machine. (The
+    per-DB salt below is persisted for provenance but does NOT make the AES key
+    per-DB — a single install has one llmcache.db, so a machine-wide key is the
+    intended model. A tampered/rotated key now degrades to a cache MISS, not a
+    crash — see _decrypt fail-open, v3.6.12 cache-1.)
   - Salt: os.urandom(32) generated ONCE at DB creation, stored in
     llmcache_schema_version.description='salt:<hex>'. NO hardcoded salt.
   - Nonce (12 bytes random) prepended to each ciphertext.
@@ -43,6 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -368,7 +374,15 @@ class CacheDB:
         nonce = blob[:_AES_NONCE_BYTES]
         ciphertext = blob[_AES_NONCE_BYTES:]
         aesgcm = AESGCM(self._aes_key)
-        return aesgcm.decrypt(nonce, ciphertext, associated_data=None)
+        # v3.6.12 (cache-1): AES-GCM raises cryptography.exceptions.InvalidTag
+        # (NOT a ValueError subclass) on a tampered/wrong-key blob. Every caller
+        # catches ValueError to fail-open; convert InvalidTag -> ValueError here
+        # at the single chokepoint so a corrupt/rotated-key cache entry degrades
+        # to a miss instead of raising out of get()/get_value()/ccr_get().
+        try:
+            return aesgcm.decrypt(nonce, ciphertext, associated_data=None)
+        except InvalidTag as exc:
+            raise ValueError(f"AES-GCM authentication failed: {exc}") from exc
 
     # ---- assertion ----
 

@@ -1257,6 +1257,32 @@ def create_app() -> FastAPI:
                     allowed_origins=[f"http://{h}" for h in _hosts],
                 )
             logger.info("MCP transport security: allowed_hosts=%r", _mcp_allowed)
+        # v3.6.12 (issue #39): stateless MCP transport for distributed/gateway
+        # deployments. SLM's Streamable-HTTP is stateful by default — every call
+        # must replay the Mcp-Session-Id from the initialize handshake. A gateway
+        # (MCP Hub, LAN forwarder) that doesn't replay it gets "-32600 Session
+        # not found" (the mesh-tools symptom in #39). Stateless mode treats each
+        # request independently so any forwarder works. Default OFF (loopback
+        # clients keep full stateful sessions); enabled by SLM_REMOTE=1 or
+        # SLM_MCP_STATELESS=1. Per-agent /mcp/{agent_id} routing is unaffected
+        # (path-based, not session-based).
+        from superlocalmemory.core.remote_mode import mcp_stateless, is_remote_mode
+        if mcp_stateless():
+            _mcp_fastmcp.settings.stateless_http = True
+            _mcp_fastmcp.settings.json_response = True
+            if is_remote_mode():
+                logger.warning(
+                    "MCP transport: STATELESS mode ON (SLM_REMOTE) — LAN "
+                    "gateways/hubs may forward tool calls without a session id. "
+                    "Per-session isolation is relaxed; intended for trusted networks."
+                )
+            else:
+                logger.warning(
+                    "MCP transport: STATELESS mode ON (SLM_MCP_STATELESS alone) "
+                    "— session isolation relaxed for LOOPBACK clients. Intended "
+                    "for a local gateway/hub (e.g. MCP Hub) on 127.0.0.1 only; "
+                    "the token endpoint stays loopback-only without SLM_REMOTE."
+                )
         global _mcp_app
         _mcp_app = _mcp_fastmcp.streamable_http_app()
 
@@ -1285,20 +1311,30 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Rate limiting (graceful)
     try:
         from superlocalmemory.infra.rate_limiter import RateLimiter
-        _write_limiter = RateLimiter(max_requests=30, window_seconds=60)
-        _read_limiter = RateLimiter(max_requests=120, window_seconds=60)
+        from superlocalmemory.core.remote_mode import (
+            rate_limit_config,
+            is_rate_limit_exempt,
+        )
+        # v3.6.12 (issue #40): thresholds are env-tunable (SLM_RATE_LIMIT_WRITE/
+        # READ/WINDOW) so distributed/LAN operators can raise them. Defaults
+        # unchanged (30 writes / 120 reads per 60s) for the local case.
+        _rl_write, _rl_read, _rl_window = rate_limit_config()
+        _write_limiter = RateLimiter(max_requests=_rl_write, window_seconds=_rl_window)
+        _read_limiter = RateLimiter(max_requests=_rl_read, window_seconds=_rl_window)
 
         # S9-DASH-09: loopback (127.0.0.1 / ::1) is always the dashboard
         # itself — it legitimately makes many rapid reads (Brain + tabs +
         # polling). Rate-limiting our own UI produces 429s that cascade
         # into blank panels. CORS already restricts origins to localhost,
         # so we don't lose the anti-abuse posture for external callers.
-        _LOOPBACK_IPS = frozenset({"127.0.0.1", "::1", "localhost"})
+        # v3.6.12 (issue #40): in SLM_REMOTE mode an allowlisted LAN browser is
+        # the user's own dashboard doing the same rapid polling, so it is exempt
+        # too (is_rate_limit_exempt) — otherwise normal polling trips 429.
 
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"
-            if client_ip in _LOOPBACK_IPS:
+            if is_rate_limit_exempt(client_ip):
                 return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             limiter = _write_limiter if is_write else _read_limiter
@@ -1313,8 +1349,11 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             response = await call_next(request)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
             return response
-    except (ImportError, Exception):
-        pass
+    except Exception as _rl_exc:
+        # v3.6.12 (failopen-4): don't silently swallow — a missing rate limiter
+        # is anti-abuse degradation worth a log line (unlike auth, this may
+        # fail-open: rate limiting is not a security boundary).
+        logger.warning("Rate-limit middleware not installed (%s)", _rl_exc)
 
     # Auth middleware (graceful)
     try:
@@ -1336,6 +1375,28 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                 return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             headers = dict(request.headers)
+            # v3.6.12 (csrf-1): defense-in-depth CSRF/DNS-rebinding guard on
+            # state-changing requests. A cross-origin browser Origin is rejected;
+            # loopback origins (the local dashboard) always pass, and LAN origins
+            # pass only when explicitly allowlisted in SLM_REMOTE mode. Non-browser
+            # clients (CLI/MCP/curl) send no Origin and are unaffected.
+            if is_write:
+                _origin = headers.get("origin", "") or headers.get("Origin", "")
+                if _origin:
+                    _ok_origin = any(_origin.startswith(p) for p in (
+                        "http://127.0.0.1", "https://127.0.0.1",
+                        "http://localhost", "https://localhost",
+                        "http://[::1]", "https://[::1]",
+                    ))
+                    if not _ok_origin:
+                        from superlocalmemory.core.remote_mode import is_remote_origin_allowed
+                        _ok_origin = is_remote_origin_allowed(_origin)
+                    if not _ok_origin:
+                        from fastapi.responses import JSONResponse
+                        return JSONResponse(
+                            status_code=403,
+                            content={"error": "cross-origin request rejected"},
+                        )
             if not check_api_key(headers, is_write=is_write):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(
@@ -1343,8 +1404,35 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                     content={"error": "Invalid or missing API key."},
                 )
             return await call_next(request)
-    except (ImportError, Exception):
-        pass
+    except Exception as _auth_exc:
+        # v3.6.12 (failopen-1): security middleware must NEVER fail open silently.
+        # The old `except (ImportError, Exception): pass` meant any failure to
+        # install the auth gate left ALL write endpoints unauthenticated. Instead
+        # log critically and install a fail-CLOSED fallback: writes from
+        # non-loopback clients are rejected (loopback dashboard keeps working).
+        logger.critical(
+            "Auth middleware failed to install (%s) — installing fail-CLOSED "
+            "fallback; non-loopback writes will be rejected.", _auth_exc,
+        )
+        try:
+            from superlocalmemory.hooks.prewarm_auth import is_loopback as _is_lb
+        except Exception:
+            def _is_lb(h: str) -> bool:
+                return h in ("127.0.0.1", "::1", "localhost")
+
+        @application.middleware("http")
+        async def _failclosed_auth(request, call_next):
+            if request.url.path.startswith(("/v1/", "/v1beta/", "/mcp")):
+                return await call_next(request)
+            is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+            client_host = request.client.host if request.client else ""
+            if is_write and not _is_lb(client_host):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Auth subsystem unavailable; writes disabled."},
+                )
+            return await call_next(request)
 
     # Static files
     from fastapi.staticfiles import StaticFiles
@@ -1462,158 +1550,6 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                 "has_key": False, "running": False, "models": [],
             })
         return {"providers": providers}
-
-    @application.get("/api/v3/mode")
-    async def v3_get_mode():
-        """Get current mode and available modes."""
-        from superlocalmemory.core.config import SLMConfig
-        from superlocalmemory.storage.models import Mode as _M
-        _base = Path.home() / ".superlocalmemory"
-        current = SLMConfig.read_current_mode(_base)
-        modes = {}
-        for _m in (_M.A, _M.B, _M.C):
-            _name = _m.value.lower()
-            _path = SLMConfig._mode_config_path(_base, _m)
-            _cfg = None
-            if _path.exists():
-                try:
-                    _cfg = SLMConfig.load(_path)
-                except Exception:
-                    pass
-            modes[_name] = {
-                "label": {"a": "Zero-Cloud", "b": "Local AI", "c": "Cloud Power"}[_name],
-                "config_exists": _path.exists(),
-                "embedding_provider": getattr(_cfg.embedding, "provider", "") if _cfg else "",
-                "embedding_model": getattr(_cfg.embedding, "model_name", "") if _cfg else "",
-                "llm_provider": getattr(_cfg.llm, "provider", "") if _cfg else "",
-                "llm_model": getattr(_cfg.llm, "model", "") if _cfg else "",
-                "reranker": _cfg.retrieval.use_cross_encoder if _cfg else True,
-            }
-        return {"current_mode": current, "modes": modes}
-
-    @application.post("/api/v3/mode/set")
-    async def v3_set_mode(request: Request):
-        """Switch mode and optionally update provider/model. Body matches
-        the auto-settings.js saveSettings() payload."""
-        from superlocalmemory.core.config import SLMConfig
-        try:
-            body = await request.json()
-            new_mode = (body.get("mode") or body.get("settings_mode") or "").lower().strip()
-            if new_mode not in ("a", "b", "c"):
-                return JSONResponse(
-                    {"ok": False, "error": "mode must be a, b, or c"},
-                    status_code=400,
-                )
-            config = SLMConfig.switch_mode(new_mode)
-
-            # If provider/model were sent, update the saved config
-            provider = body.get("provider", "").strip()
-            if provider and new_mode != "a":
-                _base = Path.home() / ".superlocalmemory"
-                from superlocalmemory.core.config import LLMConfig, EmbeddingConfig
-                # Update LLM
-                model = body.get("model", "").strip()
-                api_key = body.get("api_key", "").strip()
-                endpoint = body.get("endpoint", "").strip()
-                if provider or model:
-                    config.llm = LLMConfig(
-                        provider=provider or config.llm.provider,
-                        model=model or config.llm.model,
-                        api_key=api_key or config.llm.api_key,
-                        api_base=endpoint or config.llm.api_base,
-                    )
-                # Update embedding
-                emb_provider = body.get("embedding_provider", "").strip()
-                emb_model = body.get("embedding_model", "").strip()
-                emb_key = body.get("embedding_key", "").strip()
-                if emb_provider or emb_model:
-                    config.embedding = EmbeddingConfig(
-                        provider=emb_provider or config.embedding.provider,
-                        model_name=emb_model or config.embedding.model_name,
-                        dimension=config.embedding.dimension,
-                        api_key=emb_key or config.embedding.api_key,
-                    )
-                config.save(mode_change=True)
-
-            return {
-                "ok": True, "mode": new_mode,
-                "embedding": f"{config.embedding.provider}/{config.embedding.model_name}",
-                "llm": f"{config.llm.provider}/{config.llm.model}",
-                "message": f"Switched to Mode {new_mode.upper()}. Run slm restart to apply.",
-            }
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-
-    @application.get("/api/v3/ollama/status")
-    async def v3_ollama_status():
-        """Check if Ollama is running and list available models."""
-        try:
-            import httpx as _hx
-            _r = _hx.get("http://localhost:11434/api/tags", timeout=3.0)
-            if _r.status_code == 200:
-                _data = _r.json()
-                return {
-                    "running": True,
-                    "models": [{"name": m["name"], "size": m.get("size", 0)}
-                               for m in _data.get("models", [])],
-                }
-        except Exception:
-            pass
-        return {"running": False, "models": []}
-
-    @application.post("/api/v3/provider/test")
-    async def v3_provider_test(request: Request):
-        """Test a provider connection. Body: {provider, api_key, endpoint}."""
-        try:
-            body = await request.json()
-            provider = body.get("provider", "")
-            api_key = body.get("api_key", "")
-            endpoint = body.get("endpoint", "")
-            if provider == "ollama":
-                import httpx as _hx
-                _r = _hx.get(f"{endpoint or 'http://localhost:11434'}/api/tags", timeout=3.0)
-                return {"ok": _r.status_code == 200, "message": "Ollama reachable" if _r.status_code == 200 else f"HTTP {_r.status_code}"}
-            if provider in ("openai", "openrouter"):
-                import httpx as _hx
-                _url = f"{endpoint or 'https://api.openai.com/v1'}/models"
-                _headers = {"Authorization": f"Bearer {api_key}"}
-                _r = _hx.get(_url, headers=_headers, timeout=5.0)
-                return {"ok": _r.status_code == 200, "message": "API key valid" if _r.status_code == 200 else f"HTTP {_r.status_code}: {_r.text[:200]}"}
-            return {"ok": False, "message": f"Unknown provider: {provider}"}
-        except Exception as exc:
-            return {"ok": False, "message": str(exc)}
-
-    @application.get("/api/v3/embedding/config")
-    async def v3_get_embedding_config():
-        """Get current embedding configuration."""
-        engine = getattr(application.state, "engine", None)
-        if engine is None:
-            return JSONResponse({"ok": False, "error": "engine not initialized"}, status_code=503)
-        config = getattr(engine, "_config", None)
-        if config is None:
-            return JSONResponse({"ok": False, "error": "no config loaded"}, status_code=503)
-        return {
-            "provider": getattr(config.embedding, "provider", ""),
-            "model_name": getattr(config.embedding, "model_name", ""),
-            "dimension": getattr(config.embedding, "dimension", 0),
-        }
-
-    @application.post("/api/v3/embedding/test")
-    async def v3_embedding_test(request: Request):
-        """Test embedding with current config. Body: {text: \"test\"}."""
-        try:
-            body = await request.json()
-            text = body.get("text", "test embedding")
-            engine = getattr(application.state, "engine", None)
-            if engine is None:
-                return {"ok": False, "error": "engine not initialized"}
-            embedder = getattr(engine, "_embedder", None)
-            if embedder is None:
-                return {"ok": False, "error": "embedder not available"}
-            vec = embedder.embed(text)
-            return {"ok": True, "dimensions": len(vec) if vec else 0}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
 
     @application.get("/", response_class=HTMLResponse)
     async def root():
