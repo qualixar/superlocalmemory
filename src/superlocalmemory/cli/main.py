@@ -79,33 +79,46 @@ def main() -> None:
     from superlocalmemory.cli.json_output import _get_version
     _ver = _get_version()
 
+    # v3.6.13 (CRITICAL): the `mcp` stdio transport requires stdout to carry
+    # ONLY JSON-RPC. The post-upgrade banner + migration notice below must NEVER
+    # run on that path, or the first post-upgrade `slm mcp` launch pollutes
+    # stdout and the MCP client (Claude Desktop / Cursor) rejects the stream as
+    # "not valid JSON". Skip the whole block for `mcp`; the next human `slm`
+    # command emits the banner (to stderr) and writes the version marker.
+    _is_mcp_stdio = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
+
     # One-time post-upgrade banner — silent for fresh installs and
     # same-version runs. Guarded against I/O errors internally.
-    from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
-    if check_and_emit_upgrade_banner(_ver):
-        # First post-upgrade invocation: apply the data-dir migration if
-        # it's safe. When the previous-version daemon is still running
-        # we defer — the next daemon start picks it up.
-        try:
-            import logging as _logging
-            from pathlib import Path as _P
-            from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
-                migrate_if_safe as _migrate_if_safe,
-            )
-            _data = _P(_os.environ.get("SLM_DATA_DIR")
-                       or _P.home() / ".superlocalmemory")
-            _res = _migrate_if_safe(_data)
-            if _res.get("status") == "deferred":
-                print(
-                    "  note: data migration deferred — the running SLM "
-                    "daemon will apply it on its next restart."
+    if not _is_mcp_stdio:
+        from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
+        if check_and_emit_upgrade_banner(_ver):
+            # First post-upgrade invocation: apply the data-dir migration if
+            # it's safe. When the previous-version daemon is still running
+            # we defer — the next daemon start picks it up.
+            try:
+                import logging as _logging
+                from pathlib import Path as _P
+                from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+                    migrate_if_safe as _migrate_if_safe,
                 )
-        except Exception as _mig_exc:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "v3.4.26 migrate_if_safe failed: %s — run `slm doctor`", _mig_exc,
-            )
-            print("  note: data migration check failed — run `slm doctor` to diagnose.")
+                _data = _P(_os.environ.get("SLM_DATA_DIR")
+                           or _P.home() / ".superlocalmemory")
+                _res = _migrate_if_safe(_data)
+                if _res.get("status") == "deferred":
+                    print(
+                        "  note: data migration deferred — the running SLM "
+                        "daemon will apply it on its next restart.",
+                        file=sys.stderr,
+                    )
+            except Exception as _mig_exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "v3.4.26 migrate_if_safe failed: %s — run `slm doctor`", _mig_exc,
+                )
+                print(
+                    "  note: data migration check failed — run `slm doctor` to diagnose.",
+                    file=sys.stderr,
+                )
 
     parser = argparse.ArgumentParser(
         prog="slm",

@@ -5,6 +5,12 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.13] - 2026-06-14 — Hotfix: MCP server failed to start after upgrade
+
+### Fixed
+
+- **MCP server (`slm mcp`) failed to start in Claude Desktop / Cursor right after an upgrade** with errors like `Unexpected token 'S', "SuperLocal"... is not valid JSON`. The one-time post-upgrade banner (and the data-migration notice) were written to **stdout**, which corrupts the MCP stdio JSON-RPC stream on the first `slm mcp` launch after a version change. The banner now goes to **stderr** and is skipped entirely on the `slm mcp` path, so stdout carries only JSON-RPC. Added a regression test. (Anyone hit by this on 3.6.12: `pip install -U superlocalmemory` / `npm i -g superlocalmemory` then restart your MCP client.)
+
 ## [3.6.12] - 2026-06-14 — Distributed-ready + stability fixes
 
 Makes SuperLocalMemory work correctly across a LAN / distributed deployment (issues #39, #40) and fixes a set of stability and security defects. Default single-machine behavior is unchanged.

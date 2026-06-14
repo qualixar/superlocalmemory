@@ -167,8 +167,12 @@ def check_and_emit_upgrade_banner(current: str) -> bool:
             if read_marker_version() == current:
                 return False
 
-            sys.stdout.write(_banner(prior, current))
-            sys.stdout.flush()
+            # v3.6.13 (CRITICAL): write to STDERR, never stdout. On the `slm mcp`
+            # stdio transport, ANY stdout byte that isn't JSON-RPC corrupts the
+            # stream and the MCP client (e.g. Claude Desktop) rejects every
+            # message as "not valid JSON". The banner is a human notice → stderr.
+            sys.stderr.write(_banner(prior, current))
+            sys.stderr.flush()
             write_marker_version(current)
             return True
         finally:
