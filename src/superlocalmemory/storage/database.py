@@ -43,6 +43,43 @@ _MAX_RETRIES = 5            # retry on transient SQLITE_BUSY
 _RETRY_BASE_DELAY = 0.1    # seconds — exponential backoff base
 
 
+def _scope_where(
+    profile_id: str,
+    *,
+    include_global: bool = True,
+    include_shared: bool = True,
+    prefix: str = "",
+) -> tuple[str, list]:
+    """Build scope-filtering WHERE clause for multi-scope retrieval.
+
+    Returns ``(where_clause, params)`` for splicing into SQL queries.
+
+    When ``include_global=True``, facts with ``scope='global'`` are included
+    regardless of profile. When ``include_shared=True``, facts explicitly
+    shared with this profile (via ``shared_with`` JSON array) are also
+    included.
+
+    Backward-compatible defaults mean existing callers automatically pick up
+    global+shared facts once those exist. Until then (PR-A has schema with
+    DEFAULT 'personal'), the OR branches are harmless no-ops.
+    """
+    table = f"{prefix}." if prefix else ""
+    clauses = [f"({table}profile_id = ?)"]
+    params: list = [profile_id]
+
+    if include_global:
+        clauses.append(f"({table}scope = 'global')")
+
+    if include_shared:
+        clauses.append(
+            f"({table}scope = 'shared' AND {table}shared_with LIKE ?)"
+        )
+        params.append(f'%"{profile_id}"%')
+
+    where = "(" + " OR ".join(clauses) + ")"
+    return where, params
+
+
 class DatabaseManager:
     """Concurrent-safe SQLite manager with WAL, profile isolation, and FTS5.
 
@@ -290,17 +327,29 @@ class DatabaseManager:
             (1 if pinned else 0, fact_id),
         )
 
-    def get_pinned(self, profile_id: str) -> list[AtomicFact]:
+    def get_pinned(
+        self, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[AtomicFact]:
         """Return all pinned facts for a profile, highest-importance first."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE profile_id = ? AND pinned = 1 "
+            f"SELECT * FROM atomic_facts WHERE {where} AND pinned = 1 "
             "ORDER BY importance DESC",
-            (profile_id,),
+            (*params,),
         )
         return [self._row_to_fact(r) for r in rows]
 
     def get_all_facts(
         self, profile_id: str, limit: int | None = None,
+        *,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> list[AtomicFact]:
         """All facts for a profile, newest first.
 
@@ -308,22 +357,31 @@ class DatabaseManager:
         most-recent N (e.g. the Hopfield channel's 5000 cap) don't deserialize
         the entire table into AtomicFact objects. Default (None) = all facts.
         """
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         if limit is not None:
             rows = self.execute(
-                "SELECT * FROM atomic_facts WHERE profile_id = ? "
+                f"SELECT * FROM atomic_facts WHERE {where} "
                 "ORDER BY created_at DESC LIMIT ?",
-                (profile_id, int(limit)),
+                (*params, int(limit)),
             )
         else:
             rows = self.execute(
-                "SELECT * FROM atomic_facts WHERE profile_id = ? ORDER BY created_at DESC",
-                (profile_id,),
+                f"SELECT * FROM atomic_facts WHERE {where} ORDER BY created_at DESC",
+                (*params,),
             )
         return [self._row_to_fact(r) for r in rows]
 
     _MAX_FACTS_PER_ENTITY_LOOKUP: int = 100
 
-    def get_facts_by_entity(self, entity_id: str, profile_id: str) -> list[AtomicFact]:
+    def get_facts_by_entity(
+        self, entity_id: str, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[AtomicFact]:
         """Facts whose canonical_entities JSON array contains *entity_id*.
 
         V3.3.14: LIMIT to _MAX_FACTS_PER_ENTITY_LOOKUP (100) to prevent
@@ -331,19 +389,33 @@ class DatabaseManager:
         facts for popular entities (500+) causing 17GB+ memory usage.
         Ordered by created_at DESC so newest facts are always included.
         """
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE profile_id = ? AND canonical_entities_json LIKE ? "
+            f"SELECT * FROM atomic_facts WHERE {where} AND canonical_entities_json LIKE ? "
             "ORDER BY created_at DESC LIMIT ?",
-            (profile_id, f'%"{entity_id}"%', self._MAX_FACTS_PER_ENTITY_LOOKUP),
+            (*params, f'%"{entity_id}"%', self._MAX_FACTS_PER_ENTITY_LOOKUP),
         )
         return [self._row_to_fact(r) for r in rows]
 
-    def get_facts_by_type(self, fact_type: FactType, profile_id: str) -> list[AtomicFact]:
+    def get_facts_by_type(
+        self, fact_type: FactType, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[AtomicFact]:
         """All facts of a given type for a profile."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE profile_id = ? AND fact_type = ? "
+            f"SELECT * FROM atomic_facts WHERE {where} AND fact_type = ? "
             "ORDER BY created_at DESC",
-            (profile_id, fact_type.value),
+            (*params, fact_type.value),
         )
         return [self._row_to_fact(r) for r in rows]
 
@@ -411,10 +483,19 @@ class DatabaseManager:
             )
         return n
 
-    def get_fact_count(self, profile_id: str) -> int:
+    def get_fact_count(
+        self, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> int:
         """Total fact count for a profile."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT COUNT(*) AS c FROM atomic_facts WHERE profile_id = ?", (profile_id,),
+            f"SELECT COUNT(*) AS c FROM atomic_facts WHERE {where}", (*params,),
         )
         return int(rows[0]["c"]) if rows else 0
 
@@ -481,12 +562,19 @@ class DatabaseManager:
 
     def get_facts_by_memory_id(
         self, memory_id: str, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> list[AtomicFact]:
         """Get all atomic facts for a given memory_id."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE memory_id = ? AND profile_id = ? "
+            f"SELECT * FROM atomic_facts WHERE memory_id = ? AND {where} "
             "ORDER BY confidence DESC",
-            (memory_id, profile_id),
+            (memory_id, *params),
         )
         return [self._row_to_fact(r) for r in rows]
 
@@ -522,12 +610,21 @@ class DatabaseManager:
         )
         return edge.edge_id
 
-    def get_edges_for_node(self, node_id: str, profile_id: str) -> list[GraphEdge]:
+    def get_edges_for_node(
+        self, node_id: str, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[GraphEdge]:
         """All edges where node_id is source or target."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM graph_edges WHERE profile_id = ? "
+            f"SELECT * FROM graph_edges WHERE {where} "
             "AND (source_id = ? OR target_id = ?)",
-            (profile_id, node_id, node_id),
+            (*params, node_id, node_id),
         )
         return [
             GraphEdge(
@@ -553,12 +650,21 @@ class DatabaseManager:
         )
         return event.event_id
 
-    def get_temporal_events(self, entity_id: str, profile_id: str) -> list[TemporalEvent]:
+    def get_temporal_events(
+        self, entity_id: str, profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[TemporalEvent]:
         """All temporal events for an entity, newest first."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM temporal_events WHERE profile_id = ? AND entity_id = ? "
+            f"SELECT * FROM temporal_events WHERE {where} AND entity_id = ? "
             "ORDER BY observation_date DESC",
-            (profile_id, entity_id),
+            (*params, entity_id),
         )
         return [
             TemporalEvent(
@@ -588,7 +694,11 @@ class DatabaseManager:
         )
         return {dict(r)["fact_id"]: json.loads(dict(r)["tokens"]) for r in rows}
 
-    def search_facts_fts(self, query: str, profile_id: str, limit: int = 20) -> list[AtomicFact]:
+    def search_facts_fts(
+        self, query: str, profile_id: str, limit: int = 20,
+        include_global: bool = True,
+        include_shared: bool = True,
+    ) -> list[AtomicFact]:
         """Full-text search via FTS5, joined to facts table for reconstruction."""
         # v3.6.12 (search-1): the raw query was passed straight into FTS5 MATCH,
         # so any '?', '-', quote, or trailing boolean keyword (AND/OR/NOT) raised
@@ -599,12 +709,18 @@ class DatabaseManager:
         if not tokens:
             return []
         match_expr = " OR ".join(f'"{t}"' for t in tokens)
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+            prefix="f",
+        )
         rows = self.execute(
-            """SELECT f.* FROM atomic_facts_fts AS fts
+            f"""SELECT f.* FROM atomic_facts_fts AS fts
                JOIN atomic_facts AS f ON f.fact_id = fts.fact_id
-               WHERE fts.atomic_facts_fts MATCH ? AND f.profile_id = ?
+               WHERE fts.atomic_facts_fts MATCH ? AND {where}
                ORDER BY fts.rank LIMIT ?""",
-            (match_expr, profile_id, limit),
+            (match_expr, *params, limit),
         )
         return [self._row_to_fact(r) for r in rows]
 
@@ -641,15 +757,22 @@ class DatabaseManager:
 
     def get_facts_by_ids(
         self, fact_ids: list[str], profile_id: str,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> list[AtomicFact]:
         """Get multiple facts by their IDs, scoped to a profile."""
         if not fact_ids:
             return []
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         placeholders = ",".join("?" for _ in fact_ids)
         rows = self.execute(
             f"SELECT * FROM atomic_facts WHERE fact_id IN ({placeholders}) "
-            f"AND profile_id = ? ORDER BY created_at DESC",
-            (*fact_ids, profile_id),
+            f"AND {where} ORDER BY created_at DESC",
+            (*fact_ids, *params),
         )
         return [self._row_to_fact(r) for r in rows]
 
@@ -820,14 +943,21 @@ class DatabaseManager:
 
     def get_temporal_events_by_range(
         self, profile_id: str, start_date: str, end_date: str,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> list[TemporalEvent]:
         """Temporal events within a date range (inclusive)."""
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         rows = self.execute(
-            "SELECT * FROM temporal_events WHERE profile_id = ? "
+            f"SELECT * FROM temporal_events WHERE {where} "
             "AND (referenced_date BETWEEN ? AND ? "
             "     OR observation_date BETWEEN ? AND ?) "
             "ORDER BY observation_date DESC",
-            (profile_id, start_date, end_date, start_date, end_date),
+            (*params, start_date, end_date, start_date, end_date),
         )
         return [
             TemporalEvent(
