@@ -248,7 +248,11 @@ class HopfieldChannel:
 
         # Stage 2: Load candidate facts
         candidate_ids = [fid for fid, _ in knn_results]
-        candidates = self._db.get_facts_by_ids(candidate_ids, profile_id)
+        candidates = self._db.get_facts_by_ids(
+            candidate_ids, profile_id,
+            include_global=getattr(self, 'include_global', True),
+            include_shared=getattr(self, 'include_shared', True),
+        )
         if not candidates:
             return []
 
@@ -304,7 +308,11 @@ class HopfieldChannel:
         # Step 2: Load facts (V3.3.12: cap to most recent 5000 to bound memory)
         # memory-bounding-02: push the cap into SQL (LIMIT) so we don't
         # deserialize the whole table just to slice it.
-        facts = self._db.get_all_facts(profile_id, limit=5000)
+        facts = self._db.get_all_facts(
+            profile_id, limit=5000,
+            include_global=getattr(self, 'include_global', True),
+            include_shared=getattr(self, 'include_shared', True),
+        )
         if not facts:
             return (None, [])
 

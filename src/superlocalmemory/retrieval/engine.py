@@ -117,8 +117,14 @@ class RetrievalEngine:
         mode: Mode = Mode.A, limit: int = 20,
         *,
         extra_disabled_channels: set[str] | None = None,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
+
+        Multi-scope: ``include_global`` / ``include_shared`` control which
+        scopes participate in retrieval. Both default to True for backward
+        compatibility (existing data has scope='personal' — no effect).
 
         V3.4.40 (2026-05-09): ``extra_disabled_channels`` allows callers to
         skip specific channels for a single recall (e.g. SpreadingActivation
@@ -126,6 +132,15 @@ class RetrievalEngine:
         """
         t0 = time.monotonic()
         self._extra_disabled = set(extra_disabled_channels or ())
+
+        # Multi-scope: set scope flags on channels before parallel execution.
+        for ch in (self._semantic, self._bm25, self._entity, self._temporal,
+                   self._hopfield, self._spreading_activation, self._profile_channel):
+            if ch is not None:
+                ch.include_global = include_global
+                ch.include_shared = include_shared
+        self._include_global = include_global
+        self._include_shared = include_shared
 
         # v3.5.0 diagnostic: stage timing inside retrieval (SLM_RECALL_TIMING=1).
         import os as _os_e
@@ -657,7 +672,11 @@ class RetrievalEngine:
         needed = [fr.fact_id for fr in fused]
         if not needed:
             return {}
-        facts = self._db.get_facts_by_ids(needed, profile_id)
+        facts = self._db.get_facts_by_ids(
+            needed, profile_id,
+            include_global=getattr(self, '_include_global', True),
+            include_shared=getattr(self, '_include_shared', True),
+        )
         return {f.fact_id: f for f in facts}
 
     # -- Cross-encoder rerank -----------------------------------------------
