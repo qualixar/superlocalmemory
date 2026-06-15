@@ -904,6 +904,8 @@ def cmd_remember(args: Namespace) -> None:
 
     use_json = getattr(args, 'json', False)
     sync_mode = getattr(args, 'sync_mode', False)
+    scope = getattr(args, 'scope', 'personal')
+    shared_with = getattr(args, 'shared_with', None)
 
     # V3.3.21: Route through daemon for instant remember (no cold start).
     # If daemon is running, send request directly (~0.1s).
@@ -916,6 +918,8 @@ def cmd_remember(args: Namespace) -> None:
                 result = daemon_request("POST", "/remember", {
                     "content": args.content,
                     "tags": args.tags or "",
+                    "scope": scope,
+                    "shared_with": shared_with,
                 })
                 if result and "fact_ids" in result:
                     if use_json:
@@ -952,7 +956,10 @@ def cmd_remember(args: Namespace) -> None:
         engine.initialize()
 
         metadata = {"tags": args.tags} if args.tags else {}
-        fact_ids = engine.store(args.content, metadata=metadata)
+        fact_ids = engine.store(
+            args.content, metadata=metadata,
+            scope=scope, shared_with=shared_with,
+        )
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -975,6 +982,8 @@ def cmd_remember(args: Namespace) -> None:
 def cmd_recall(args: Namespace) -> None:
     """Search memories via the engine — routes through daemon if available."""
     use_json = getattr(args, 'json', False)
+    include_global = getattr(args, 'include_global', True)
+    include_shared = getattr(args, 'include_shared', True)
 
     # V3.3.21: Route through daemon for instant response (no cold start).
     # Falls back to direct engine if daemon not running.
@@ -988,10 +997,11 @@ def cmd_recall(args: Namespace) -> None:
             from urllib.parse import quote
             session_id = f"cli:{os.getppid()}"
             fast_qs = "&fast=true" if getattr(args, "fast", False) else ""
+            scope_qs = f"&include_global={str(include_global).lower()}&include_shared={str(include_shared).lower()}"
             result = daemon_request(
                 "GET",
                 f"/recall?q={quote(args.query)}&limit={args.limit}"
-                f"&session_id={quote(session_id)}{fast_qs}",
+                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response

@@ -104,11 +104,17 @@ def register_core_tools(server, get_engine: Callable) -> None:
         content: str, tags: str = "", project: str = "",
         importance: int = 5, session_id: str = "",
         agent_id: str = "mcp_client",
+        scope: str = "personal",
+        shared_with: str = "",
     ) -> dict:
         """Store content to memory with intelligent indexing.
 
         Extracts atomic facts, resolves entities, builds graph edges,
         and indexes for 4-channel retrieval.
+
+        Multi-scope: ``scope`` sets visibility (personal/shared/global).
+        ``shared_with`` is a comma-separated list of profile_ids for
+        shared scope.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -120,6 +126,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
             "agent_id": agent_id,
             "session_id": session_id,
         }
+        # Parse shared_with from comma-separated string
+        _shared_list = [s.strip() for s in shared_with.split(",") if s.strip()] if shared_with else None
         # v3.5.5 WRITE-THROUGH: route through the daemon's /remember, which does
         # a synchronous verbatim insert (memory is keyword/BM25-recallable the
         # instant this returns) and enqueues async enrichment. This closes the
@@ -134,6 +142,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             if await _asyncio.to_thread(is_daemon_running):
                 resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
                     "content": content, "tags": tags, "metadata": meta,
+                    "scope": scope, "shared_with": _shared_list,
                 })
                 if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
                     fids = resp.get("fact_ids") or []
@@ -166,6 +175,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
     async def recall(
         query: str, limit: int = 10, agent_id: str = "mcp_client",
         session_id: str = "", fast: bool = False,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> dict:
         """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking.
 
@@ -174,6 +185,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
         engagement signals to this recall. Claude Code should pass its
         ``CLAUDE_SESSION_ID``. Omitting it degrades to "no closed-loop
         learning for this recall" — the recall itself always works.
+
+        Multi-scope: ``include_global`` / ``include_shared`` control
+        which scopes participate in retrieval.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -228,6 +242,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
             result = await asyncio.to_thread(
                 pool.recall, query, limit=limit, session_id=effective_sid,
                 fast=bool(fast),
+                include_global=include_global,
+                include_shared=include_shared,
             )
             if result.get("ok"):
                 # Record implicit feedback: every returned result is a recall_hit

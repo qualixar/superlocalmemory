@@ -186,15 +186,18 @@ class DatabaseManager:
 
     def store_memory(self, record: MemoryRecord) -> str:
         """Persist a raw memory record. Returns memory_id."""
+        _scope = getattr(record, 'scope', None) or 'personal'
+        _shared = _jd(getattr(record, 'shared_with', None))
         self.execute(
             """INSERT OR REPLACE INTO memories
                (memory_id, profile_id, content, session_id, speaker,
-                role, session_date, created_at, metadata_json)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                role, session_date, created_at, metadata_json,
+                scope, shared_with)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (record.memory_id, record.profile_id, record.content,
              record.session_id, record.speaker, record.role,
              record.session_date, record.created_at,
-             json.dumps(record.metadata)),
+             json.dumps(record.metadata), _scope, _shared),
         )
         return record.memory_id
 
@@ -266,6 +269,8 @@ class DatabaseManager:
                 # orphaned id that was never inserted.
                 fact.fact_id = canonical_id
                 return canonical_id
+        _scope = getattr(fact, 'scope', None) or 'personal'
+        _shared = _jd(getattr(fact, 'shared_with', None))
         self.execute(
             """INSERT OR REPLACE INTO atomic_facts
                (fact_id, memory_id, profile_id, content, fact_type,
@@ -275,8 +280,9 @@ class DatabaseManager:
                 source_turn_ids_json, session_id,
                 embedding, fisher_mean, fisher_variance,
                 lifecycle, langevin_position,
-                emotional_valence, emotional_arousal, signal_type, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                emotional_valence, emotional_arousal, signal_type, created_at,
+                scope, shared_with)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (fact.fact_id, fact.memory_id, fact.profile_id, fact.content,
              fact.fact_type.value,
              json.dumps(fact.entities), json.dumps(fact.canonical_entities),
@@ -287,7 +293,7 @@ class DatabaseManager:
              _jd(fact.embedding), _jd(fact.fisher_mean), _jd(fact.fisher_variance),
              fact.lifecycle.value, _jd(fact.langevin_position),
              fact.emotional_valence, fact.emotional_arousal,
-             fact.signal_type.value, fact.created_at),
+             fact.signal_type.value, fact.created_at, _scope, _shared),
         )
         return fact.fact_id
 
@@ -317,6 +323,8 @@ class DatabaseManager:
             emotional_arousal=d.get("emotional_arousal", 0.0),
             signal_type=SignalType(d["signal_type"]) if d.get("signal_type") else SignalType.FACTUAL,
             pinned=bool(d.get("pinned", 0)),
+            scope=d.get("scope", "personal"),
+            shared_with=_jl(d.get("shared_with"), None),
             created_at=d["created_at"],
         )
 
@@ -601,12 +609,15 @@ class DatabaseManager:
                 (edge.weight, canonical_id),
             )
             return canonical_id
+        _scope = getattr(edge, 'scope', None) or 'personal'
+        _shared = _jd(getattr(edge, 'shared_with', None))
         self.execute(
             """INSERT OR REPLACE INTO graph_edges
-               (edge_id, profile_id, source_id, target_id, edge_type, weight, created_at)
-               VALUES (?,?,?,?,?,?,?)""",
+               (edge_id, profile_id, source_id, target_id, edge_type, weight, created_at,
+                scope, shared_with)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (edge.edge_id, edge.profile_id, edge.source_id, edge.target_id,
-             edge.edge_type.value, edge.weight, edge.created_at),
+             edge.edge_type.value, edge.weight, edge.created_at, _scope, _shared),
         )
         return edge.edge_id
 
@@ -638,15 +649,18 @@ class DatabaseManager:
 
     def store_temporal_event(self, event: TemporalEvent) -> str:
         """Persist a temporal event. Returns event_id."""
+        _scope = getattr(event, 'scope', None) or 'personal'
+        _shared = _jd(getattr(event, 'shared_with', None))
         self.execute(
             """INSERT OR REPLACE INTO temporal_events
                (event_id, profile_id, entity_id, fact_id,
                 observation_date, referenced_date, interval_start, interval_end,
-                description)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                description, scope, shared_with)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (event.event_id, event.profile_id, event.entity_id, event.fact_id,
              event.observation_date, event.referenced_date,
-             event.interval_start, event.interval_end, event.description),
+             event.interval_start, event.interval_end, event.description,
+             _scope, _shared),
         )
         return event.event_id
 

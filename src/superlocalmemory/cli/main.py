@@ -195,6 +195,14 @@ def main() -> None:
         "--sync", dest="sync_mode", action="store_true",
         help="Wait for completion (default: async background processing)",
     )
+    remember_p.add_argument(
+        "--scope", default="personal", choices=("personal", "shared", "global"),
+        help="Memory scope: personal, shared, or global (default: personal)",
+    )
+    remember_p.add_argument(
+        "--shared-with", default=None,
+        help="Comma-separated profile IDs for shared scope",
+    )
 
     # v3.6.12 (parity-3): `search` is an alias of `recall` so the CLI has the
     # same search verb the MCP exposes (handlers dict maps both to cmd_recall).
@@ -207,6 +215,22 @@ def main() -> None:
         help="Skip SpreadingActivation 5th channel for sub-second response. "
              "Other 4 channels (semantic, lexical, temporal, structural) still run. "
              "Use when you need recall before a tool call (e.g. before WebSearch).",
+    )
+    recall_p.add_argument(
+        "--include-global", dest="include_global", action="store_true", default=True,
+        help="Include global-scope facts in retrieval (default: True)",
+    )
+    recall_p.add_argument(
+        "--no-global", dest="include_global", action="store_false",
+        help="Exclude global-scope facts from retrieval",
+    )
+    recall_p.add_argument(
+        "--include-shared", dest="include_shared", action="store_true", default=True,
+        help="Include shared-scope facts in retrieval (default: True)",
+    )
+    recall_p.add_argument(
+        "--no-shared", dest="include_shared", action="store_false",
+        help="Exclude shared-scope facts from retrieval",
     )
 
     forget_p = sub.add_parser("forget", help="Delete memories matching a query (fuzzy)")
