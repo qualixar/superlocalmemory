@@ -38,6 +38,7 @@ from superlocalmemory.optimize.proxy._helpers import (
     _GEMINI_NATIVE_FORWARD_HEADERS,
     _GEMINI_OPENAI_COMPAT_FORWARD_HEADERS,
     _body_has_tools,
+    _derive_tenant_id,
     _fail_open_forward,
     _filter_response_headers,
     _redact_headers,
@@ -259,6 +260,14 @@ async def handle_gemini_native(
                 sse_parser=_parse_gemini_sse_to_json, is_stream=stream,
             )
 
+        # SECURITY (WP-D): derive tenant BEFORE _redact_headers strips the key.
+        # Gemini uses x-goog-api-key; OAuth uses authorization bearer.
+        _raw_key = (
+            request.headers.get("x-goog-api-key")
+            or request.headers.get("authorization")
+        )
+        _tenant_id = _derive_tenant_id("gemini", _raw_key)
+
         ctx = ProxyRequest(
             provider="gemini",
             method="POST",
@@ -279,7 +288,7 @@ async def handle_gemini_native(
         if stream:
             # ── 1. Cache check ──────────────────────────────────────────────
             if proxy.hooks.cache:
-                cache_result = await _safe_cache_check(proxy.hooks, ctx)
+                cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
                 if cache_result and cache_result.hit and cache_result.data:
                     logger.debug(
                         "[%s] Gemini native streaming cache HIT key=%s",
@@ -314,6 +323,7 @@ async def handle_gemini_native(
             if proxy.hooks.cache:
                 _hooks = proxy.hooks
                 _ctx = ctx
+                _tid = _tenant_id
 
                 async def _store_from_gemini_sse(sse_bytes: bytes) -> None:
                     parsed = _parse_gemini_sse_to_json(sse_bytes)
@@ -323,7 +333,7 @@ async def handle_gemini_native(
                         modified=False, body={}, body_bytes=parsed,
                         tokens_before=0, tokens_after=0, strategy="none",
                     )
-                    await _safe_cache_store(_hooks, _ctx, prov)
+                    await _safe_cache_store(_hooks, _ctx, prov, tenant_id=_tid)
 
                 store_callback = _store_from_gemini_sse
 
@@ -335,7 +345,7 @@ async def handle_gemini_native(
         # ── Non-streaming path ──────────────────────────────────────────────
         cache_result = None
         if proxy.hooks.cache:
-            cache_result = await _safe_cache_check(proxy.hooks, ctx)
+            cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
             if cache_result.hit and cache_result.data:
                 await _safe_cache_hit_callbacks(
                     proxy.hooks, ctx, cache_result.data, tokens_saved=0
@@ -369,7 +379,7 @@ async def handle_gemini_native(
                 modified=False, body={}, body_bytes=resp_bytes,
                 tokens_before=0, tokens_after=0, strategy="none",
             )
-            await _safe_cache_store(proxy.hooks, ctx, prov_resp)
+            await _safe_cache_store(proxy.hooks, ctx, prov_resp, tenant_id=_tenant_id)
 
         return Response(
             content=resp_bytes,
@@ -438,6 +448,13 @@ async def handle_gemini_openai_compat(proxy: object, request: Request) -> Respon
                 sse_parser=_parse_openai_sse_to_json, is_stream=stream,
             )
 
+        # SECURITY (WP-D): derive tenant BEFORE _redact_headers strips the key.
+        _raw_key_compat = (
+            request.headers.get("x-goog-api-key")
+            or request.headers.get("authorization")
+        )
+        _tenant_id_compat = _derive_tenant_id("gemini-openai-compat", _raw_key_compat)
+
         ctx = ProxyRequest(
             provider="gemini-openai-compat",
             method="POST",
@@ -453,7 +470,7 @@ async def handle_gemini_openai_compat(proxy: object, request: Request) -> Respon
         # Cache check
         cache_result = None
         if proxy.hooks.cache:
-            cache_result = await _safe_cache_check(proxy.hooks, ctx)
+            cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id_compat)
             if cache_result.hit and cache_result.data:
                 await _safe_cache_hit_callbacks(
                     proxy.hooks, ctx, cache_result.data, tokens_saved=0
@@ -495,7 +512,7 @@ async def handle_gemini_openai_compat(proxy: object, request: Request) -> Respon
                 modified=False, body={}, body_bytes=resp_bytes,
                 tokens_before=0, tokens_after=0, strategy="none",
             )
-            await _safe_cache_store(proxy.hooks, ctx, prov_resp)
+            await _safe_cache_store(proxy.hooks, ctx, prov_resp, tenant_id=_tenant_id_compat)
 
         return Response(
             content=resp_bytes,

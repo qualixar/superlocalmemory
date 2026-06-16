@@ -28,6 +28,7 @@ from fastapi.responses import Response
 
 from superlocalmemory.optimize.proxy._helpers import (
     _VERTEX_FORWARD_HEADERS,
+    _derive_tenant_id,
     _fail_open_forward,
     _filter_response_headers,
     _redact_headers,
@@ -164,6 +165,12 @@ async def handle_vertex_generative(
         # SECURITY (AC-3): headers stored in ProxyRequest are redacted.
         # Bearer token is structurally excluded from the cache key because
         # build_key reads only body-derived fields (key_builder.py:90-105).
+        #
+        # SECURITY (WP-D): derive tenant BEFORE _redact_headers strips the
+        # bearer token.  Vertex uses Authorization bearer.
+        _raw_key = request.headers.get("authorization")
+        _tenant_id = _derive_tenant_id("vertex", _raw_key)
+
         ctx = ProxyRequest(
             provider="vertex",
             method="POST",
@@ -185,7 +192,7 @@ async def handle_vertex_generative(
         # ── Cache check ────────────────────────────────────────────────────
         cache_result = None
         if proxy.hooks.cache:
-            cache_result = await _safe_cache_check(proxy.hooks, ctx)
+            cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
             if cache_result and cache_result.hit and cache_result.data:
                 logger.debug(
                     "[%s] Vertex cache HIT key=%s",
@@ -223,7 +230,7 @@ async def handle_vertex_generative(
                 tokens_after=0,
                 strategy="none",
             )
-            await _safe_cache_store(proxy.hooks, ctx, prov_resp)
+            await _safe_cache_store(proxy.hooks, ctx, prov_resp, tenant_id=_tenant_id)
 
         return Response(
             content=resp_bytes,

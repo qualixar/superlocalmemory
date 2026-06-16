@@ -15,6 +15,7 @@ from superlocalmemory.optimize.proxy._helpers import (
     _MAX_REQUEST_BODY_BYTES,
     _body_has_tools,
     _build_forward_headers,
+    _derive_tenant_id,
     _fail_open_forward,
     _filter_response_headers,
     _parse_sse_to_json,
@@ -204,6 +205,14 @@ async def handle_messages(proxy: object, request: Request) -> Response:
                 sse_parser=_parse_sse_to_json, is_stream=stream,
             )
 
+        # SECURITY (WP-D): derive tenant BEFORE _redact_headers strips the key.
+        # x-api-key is the primary Anthropic credential; fall back to authorization.
+        _raw_key = (
+            request.headers.get("x-api-key")
+            or request.headers.get("authorization")
+        )
+        _tenant_id = _derive_tenant_id("anthropic", _raw_key)
+
         ctx = ProxyRequest(
             provider="anthropic",
             method="POST",
@@ -225,7 +234,7 @@ async def handle_messages(proxy: object, request: Request) -> Response:
             #    accumulated and stored, return it as a proper SSE stream rather
             #    than forwarding to Anthropic at all.
             if proxy.hooks.cache:
-                cache_result = await _safe_cache_check(proxy.hooks, ctx)
+                cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
                 if cache_result and cache_result.hit and cache_result.data:
                     logger.debug(
                         "[%s] streaming cache HIT key=%s",
@@ -261,6 +270,7 @@ async def handle_messages(proxy: object, request: Request) -> Response:
             if proxy.hooks.cache:
                 _hooks = proxy.hooks
                 _ctx = ctx
+                _tid = _tenant_id
                 async def _store_from_sse(sse_bytes: bytes) -> None:
                     parsed = _parse_sse_to_json(sse_bytes)
                     if parsed is None:
@@ -269,7 +279,7 @@ async def handle_messages(proxy: object, request: Request) -> Response:
                         modified=False, body={}, body_bytes=parsed,
                         tokens_before=0, tokens_after=0, strategy="none",
                     )
-                    await _safe_cache_store(_hooks, _ctx, prov)
+                    await _safe_cache_store(_hooks, _ctx, prov, tenant_id=_tid)
                 store_callback = _store_from_sse
 
             return await _stream_and_cache_forward(
@@ -279,7 +289,7 @@ async def handle_messages(proxy: object, request: Request) -> Response:
 
         cache_result = None
         if proxy.hooks.cache:
-            cache_result = await _safe_cache_check(proxy.hooks, ctx)
+            cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
             if cache_result.hit and cache_result.data:
                 logger.debug("[%s] cache HIT key=%s", request_id, cache_result.cache_key)
                 await _safe_cache_hit_callbacks(
@@ -315,7 +325,7 @@ async def handle_messages(proxy: object, request: Request) -> Response:
                 modified=False, body={}, body_bytes=resp_bytes,
                 tokens_before=0, tokens_after=0, strategy="none",
             )
-            await _safe_cache_store(proxy.hooks, ctx, _prov_resp)
+            await _safe_cache_store(proxy.hooks, ctx, _prov_resp, tenant_id=_tenant_id)
 
         return Response(
             content=resp_bytes,

@@ -319,16 +319,28 @@ class CacheManager:
 
     # ---- CacheHook protocol implementation (INTERFACE-CONTRACT §3) ----
 
-    def check(self, req: ProxyRequest) -> "CachedResponse | None":
+    def check(
+        self, req: ProxyRequest, tenant_id: "str | None" = _DEFAULT_TENANT_HASH
+    ) -> "CachedResponse | None":
         """CacheHook.check() — look up by ProxyRequest; fail-open on error.
 
         BUG-FIX (v3.6.3): on_miss() was never called from the proxy path,
         so MetricsCollector.misses stayed at 0 and the dashboard always showed
         0 misses.  Fixed by calling on_miss() here whenever get() returns a
         cache-miss result.
+
+        SECURITY (WP-D): tenant_id is now optional.  Surface handlers pass the
+        credential-derived tenant so that different API keys never share a cache
+        entry.  When tenant_id is None (unauthenticated / no credential) the
+        cache is SKIPPED entirely — returns None without reading the store.
+        The default preserves backward compatibility for callers that do not
+        pass a tenant_id.
         """
+        if tenant_id is None:
+            # No credential → refuse to serve or populate the cache.
+            return None
         try:
-            result = self.get(req, tenant_id=_DEFAULT_TENANT_HASH)
+            result = self.get(req, tenant_id=tenant_id)
             if result is not None and not result.hit:
                 MetricsCollector.get_instance().on_miss()
             return result
@@ -336,10 +348,20 @@ class CacheManager:
             logger.warning("CacheManager.check raised (fail-open): %s", exc)
             return None
 
-    def store(self, req: ProxyRequest, resp: ProviderResponse) -> None:
-        """CacheHook.store() — persist response; fail-open on error."""
+    def store(
+        self, req: ProxyRequest, resp: ProviderResponse,
+        tenant_id: "str | None" = _DEFAULT_TENANT_HASH,
+    ) -> None:
+        """CacheHook.store() — persist response; fail-open on error.
+
+        SECURITY (WP-D): tenant_id is now optional.  When None (unauthenticated)
+        the store is silently skipped to prevent anonymous requests from
+        populating the cache and leaking responses to other tenants.
+        """
+        if tenant_id is None:
+            return
         try:
-            self.set(req, resp, tenant_id=_DEFAULT_TENANT_HASH)
+            self.set(req, resp, tenant_id=tenant_id)
         except Exception as exc:
             logger.warning("CacheManager.store raised (fail-open): %s", exc)
 

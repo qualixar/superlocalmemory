@@ -108,6 +108,28 @@ def _redact_headers(headers: dict) -> dict:
     }
 
 
+def _derive_tenant_id(provider: str, raw_credential: "str | None") -> "str | None":
+    """Derive a per-tenant isolation key from the raw (un-redacted) credential.
+
+    SECURITY (WP-D): Called at the surface-handler layer BEFORE _redact_headers
+    strips the credential from ProxyRequest.headers.  The derived id is threaded
+    into CacheManager.check() / .store() so that two users sharing the same
+    prompt but using different API keys receive independent cache namespaces.
+
+    Returns None when no credential is present — callers must SKIP caching
+    (never collapse to the default tenant) to prevent cross-tenant disclosure.
+
+    Output: 64-char lowercase hex SHA-256 of ``f"{provider}:{raw_credential}"``.
+    Provider is folded in so anthropic:K and openai:K are distinct tenants even
+    if the literal key string coincidentally matches.
+    """
+    import hashlib as _hashlib
+
+    if not raw_credential:
+        return None
+    return _hashlib.sha256(f"{provider}:{raw_credential}".encode()).hexdigest()
+
+
 def _body_has_tools(body: dict) -> bool:
     tools = body.get("tools")
     return isinstance(tools, list) and len(tools) > 0
@@ -555,12 +577,39 @@ async def capture_passthrough_forward(
     )
 
 
-async def _safe_cache_check(hooks: HookChain, ctx: ProxyRequest) -> CachedResponse:
+async def _safe_cache_check(
+    hooks: HookChain,
+    ctx: ProxyRequest,
+    tenant_id: "str | None" = None,
+) -> CachedResponse:
+    """Invoke cache.check(); fail-open on error.
+
+    SECURITY (WP-D): tenant_id is forwarded to the CacheHook so that the
+    credential-derived namespace is used.  None signals "skip caching" — the
+    cache hook must not collapse to a default tenant for unauthenticated
+    requests.  When tenant_id is None, return an empty miss immediately.
+
+    Backward compat: if the hook's check() does not accept tenant_id (old
+    third-party or test hook), the call is retried without the kwarg so that
+    existing callers are not broken.
+    """
+    if tenant_id is None:
+        return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
     try:
-        result = hooks.cache.check(ctx)
+        result = hooks.cache.check(ctx, tenant_id=tenant_id)
         return result if result is not None else CachedResponse(
             hit=False, data=None, cache_key="", ttl_seconds=0
         )
+    except TypeError:
+        # Hook predates tenant_id param — fall back to legacy call.
+        try:
+            result = hooks.cache.check(ctx)
+            return result if result is not None else CachedResponse(
+                hit=False, data=None, cache_key="", ttl_seconds=0
+            )
+        except Exception as exc:
+            logger.warning("cache.check failed (fail-open): %s", exc)
+            return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
     except Exception as exc:
         logger.warning("cache.check failed (fail-open): %s", exc)
         return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
@@ -570,9 +619,25 @@ async def _safe_cache_store(
     hooks: HookChain,
     ctx: ProxyRequest,
     resp: ProviderResponse,
+    tenant_id: "str | None" = None,
 ) -> None:
+    """Invoke cache.store(); fail-open on error.
+
+    SECURITY (WP-D): tenant_id is forwarded.  None means skip (unauthenticated).
+
+    Backward compat: if the hook's store() does not accept tenant_id (old
+    third-party or test hook), the call is retried without the kwarg.
+    """
+    if tenant_id is None:
+        return
     try:
-        hooks.cache.store(ctx, resp)
+        hooks.cache.store(ctx, resp, tenant_id=tenant_id)
+    except TypeError:
+        # Hook predates tenant_id param — fall back to legacy call.
+        try:
+            hooks.cache.store(ctx, resp)
+        except Exception as exc:
+            logger.warning("cache.store failed (fail-open): %s", exc)
     except Exception as exc:
         logger.warning("cache.store failed (fail-open): %s", exc)
 

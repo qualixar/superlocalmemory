@@ -24,6 +24,7 @@ from superlocalmemory.optimize.proxy._helpers import (
     _OPENAI_FORWARD_HEADERS,
     _body_has_tools,
     _build_forward_headers,
+    _derive_tenant_id,
     _fail_open_forward,
     _filter_response_headers,
     _redact_headers,
@@ -328,6 +329,10 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
                 sse_parser=_parse_openai_sse_to_json, is_stream=stream,
             )
 
+        # SECURITY (WP-D): derive tenant BEFORE _redact_headers strips the key.
+        _raw_key = request.headers.get("authorization")
+        _tenant_id = _derive_tenant_id("openai", _raw_key)
+
         ctx = ProxyRequest(
             provider="openai", method="POST", path="/v1/chat/completions",
             headers=_redact_headers(dict(request.headers)),
@@ -343,7 +348,7 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
 
             # 1. Cache check
             if proxy.hooks.cache:
-                cache_result = await _safe_cache_check(proxy.hooks, ctx)
+                cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
                 if cache_result and cache_result.hit and cache_result.data:
                     logger.debug(
                         "[%s] OpenAI streaming cache HIT key=%s",
@@ -371,6 +376,7 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
             if proxy.hooks.cache:
                 _hooks = proxy.hooks
                 _ctx = ctx
+                _tid = _tenant_id
                 async def _store_from_openai_sse(sse_bytes: bytes) -> None:
                     parsed = _parse_openai_sse_to_json(sse_bytes)
                     if parsed is None:
@@ -379,7 +385,7 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
                         modified=False, body={}, body_bytes=parsed,
                         tokens_before=0, tokens_after=0, strategy="none",
                     )
-                    await _safe_cache_store(_hooks, _ctx, prov)
+                    await _safe_cache_store(_hooks, _ctx, prov, tenant_id=_tid)
                 store_callback = _store_from_openai_sse
 
             return await _stream_and_cache_forward(
@@ -390,7 +396,7 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
         # --- Non-streaming path ---
         cache_result = None
         if proxy.hooks.cache:
-            cache_result = await _safe_cache_check(proxy.hooks, ctx)
+            cache_result = await _safe_cache_check(proxy.hooks, ctx, tenant_id=_tenant_id)
             if cache_result.hit and cache_result.data:
                 await _safe_cache_hit_callbacks(
                     proxy.hooks, ctx, cache_result.data, 0
@@ -425,7 +431,7 @@ async def handle_chat_completions(proxy: object, request: Request) -> Response:
                 modified=False, body={}, body_bytes=resp_bytes,
                 tokens_before=0, tokens_after=0, strategy="none",
             )
-            await _safe_cache_store(proxy.hooks, ctx, _prov_resp)
+            await _safe_cache_store(proxy.hooks, ctx, _prov_resp, tenant_id=_tenant_id)
 
         return Response(
             content=resp_bytes,
