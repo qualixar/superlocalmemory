@@ -780,8 +780,97 @@ def _cmd_context_dispatch(args: Namespace) -> None:
     cmd_context(args)
 
 
+def _agents_md_source_factory():
+    """Return a callable that reads the WP-05 AGENTS.md content, or None on failure.
+
+    Source: plugin-src/rules/AGENTS.md (relative to package root).
+    Gracefully skips if absent — never fails the MCP write.
+    """
+    from pathlib import Path
+
+    # Resolve relative to the package root (src/superlocalmemory/../../)
+    _pkg_root = Path(__file__).resolve().parents[3]
+    _agents_src = _pkg_root / "plugin-src" / "rules" / "AGENTS.md"
+
+    def _read() -> str | None:
+        if _agents_src.exists():
+            return _agents_src.read_text(encoding="utf-8")
+        logger.warning(
+            "WP-05 AGENTS.md not found at %s — skipping AGENTS.md write", _agents_src
+        )
+        return None
+
+    return _read
+
+
 def cmd_connect(args: Namespace) -> None:
-    """Configure IDE integrations. V3.4.22: ``--cross-platform`` uses LLD-05."""
+    """Configure IDE integrations.
+
+    Dispatch priority (WP-08):
+    1. ``slm connect <ide>`` where ide ∈ IDE_MATRIX → portable_kit.connect_ide
+       (MCP-wiring + AGENTS.md; includes claude-code short-circuit to WP-06).
+    2. ``--cross-platform`` / ``--disable`` → LLD-05 CrossPlatformConnector.
+    3. Bare ``slm connect`` / ``--list`` → legacy IDEConnector (markdown-rules).
+    """
+    ide_arg = getattr(args, "ide", None)
+
+    # WP-08: intercept known IDE_MATRIX ids before legacy branches (CRIT-1)
+    if ide_arg is not None:
+        from superlocalmemory.hooks.portable_kit import (
+            IDE_MATRIX,
+            connect_ide,
+            supported_ides,
+        )
+
+        if ide_arg in IDE_MATRIX:
+            here = getattr(args, "here", False)
+            profile = getattr(args, "profile", None)
+            project = None
+            if here:
+                import pathlib
+                project = pathlib.Path.cwd()
+
+            result = connect_ide(
+                ide_arg,
+                home=None,
+                project=project,
+                here=here,
+                profile=profile,
+                agents_md_source=_agents_md_source_factory(),
+            )
+
+            if getattr(args, "json", False):
+                from superlocalmemory.cli.json_output import json_print
+                json_print("connect", data=result)
+                return
+
+            if result["error"]:
+                print(f"Error: {result['error']}", file=sys.stderr)
+                print(
+                    f"Supported IDEs: {', '.join(supported_ides())}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            status_sym = {"wrote": "[+]", "merged": "[~]", "unchanged": "[=]",
+                          "skipped": "[s]", "error": "[!]"}.get(
+                result["mcp_config"], "[?]"
+            )
+            print(
+                f"{status_sym} {ide_arg}: mcp_config={result['mcp_config']} "
+                f"path={result['mcp_path']}"
+            )
+            print(f"    agents_md={result['agents_md']}")
+            return
+
+        # Unknown ide — list supported and exit non-zero
+        from superlocalmemory.hooks.portable_kit import supported_ides
+        print(
+            f"Unknown IDE '{ide_arg}'.\nSupported: {', '.join(supported_ides())}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Route --disable <name> and --cross-platform to the LLD-05 orchestrator.
     if getattr(args, "disable", None) or getattr(args, "cross_platform", False):
         from superlocalmemory.cli.context_commands import (

@@ -178,11 +178,32 @@ def main() -> None:
     )
 
     connect_p = sub.add_parser("connect", help="Auto-configure IDE integrations (17+ IDEs)")
-    connect_p.add_argument("ide", nargs="?", help="Specific IDE to configure")
+    connect_p.add_argument("ide", nargs="?", help="Specific IDE to configure (e.g. cursor, codex, continue)")
     connect_p.add_argument(
         "--list", action="store_true", help="List all supported IDEs",
     )
     connect_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
+    # WP-08 CRIT-1: declare missing flags so cmd_connect can read them without getattr fallback
+    connect_p.add_argument(
+        "--here", action="store_true", default=False,
+        help="Write config relative to current working directory (project scope)",
+    )
+    connect_p.add_argument(
+        "--cross-platform", action="store_true", dest="cross_platform", default=False,
+        help="Use LLD-05 cross-platform adapter orchestrator",
+    )
+    connect_p.add_argument(
+        "--disable", metavar="ADAPTER", default=None,
+        help="Disable a specific cross-platform adapter by name",
+    )
+    connect_p.add_argument(
+        "--profile", metavar="PROFILE", default=None,
+        help="Inject SLM_MCP_PROFILE env var into the MCP server block (WP-01)",
+    )
+    connect_p.add_argument(
+        "--dry-run", action="store_true", dest="dry_run", default=False,
+        help="Show what would be written without making changes",
+    )
 
     migrate_p = sub.add_parser("migrate", help="Migrate data from V2 to V3 schema")
     migrate_p.add_argument(
