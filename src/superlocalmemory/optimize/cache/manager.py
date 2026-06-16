@@ -185,6 +185,17 @@ class CacheManager:
             # ONE key → first response poisons every subsequent prompt.
             body = req.body or {}
             model_id = _vertex_model_from_path(req.path)
+            # SECURITY (Stage-8 audit): fold project + region into the model
+            # identity so two GCP projects (or regions) issuing the same prompt
+            # never collide to one cache entry → no cross-tenant response leakage.
+            # Model name alone is insufficient (the same model exists in every
+            # project). key_builder whitelist-filters raw_params, so extra param
+            # keys would be dropped — model_id IS hashed. _KEY_SCHEMA_VERSION
+            # unchanged (vertex is a new provider; no live vertex cache; the
+            # non-vertex branches are untouched).
+            _vproj, _vloc = _vertex_project_location_from_path(req.path)
+            if _vproj or _vloc:
+                model_id = f"vertex:{_vproj}:{_vloc}:{model_id}"
             messages = body.get("contents", []) or []
             system_raw = body.get("systemInstruction", "") or ""
             if isinstance(system_raw, (dict, list)):
@@ -587,6 +598,21 @@ def json_dumps_bytes(d: dict) -> bytes:
 # ---------------------------------------------------------------------------
 # Vertex helpers (WP-11 / CRIT-2)
 # ---------------------------------------------------------------------------
+
+def _vertex_project_location_from_path(path: str) -> tuple[str, str]:
+    """Extract (project, location) from a Vertex proxy path for cache isolation.
+
+    Without project+region in the cache key, two GCP projects (or regions)
+    issuing an identical prompt collide to one entry → cross-tenant response
+    leakage (Stage-8 security finding). Returns ("", "") on parse failure.
+    """
+    import re as _re
+    m = _re.search(
+        r"projects/([a-zA-Z0-9._\-]{1,63})/locations/([a-z0-9\-]{1,40})/",
+        path or "",
+    )
+    return (m.group(1), m.group(2)) if m else ("", "")
+
 
 def _vertex_model_from_path(path: str) -> str:
     """Extract the model name from a Vertex proxy path.
