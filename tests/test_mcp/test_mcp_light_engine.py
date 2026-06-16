@@ -132,7 +132,12 @@ def test_subprocess_does_not_import_onnxruntime():
         capture_output=True, text=True, timeout=60,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
              "SLM_DISABLE_WARMUP_SIDE_EFFECTS": "1",
-             "SLM_SKIP_DEP_CHECK": "1"},
+             "SLM_SKIP_DEP_CHECK": "1",
+             # src/ on the child path: subprocesses don't inherit pytest's
+             # pythonpath=["src"], so a source checkout can't import otherwise.
+             "PYTHONPATH": os.path.join(
+                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                 "src") + os.pathsep + os.environ.get("PYTHONPATH", "")},
     )
     if proc.returncode != 0:
         pytest.fail(f"subprocess failed:\nstdout:{proc.stdout}\nstderr:{proc.stderr}")

@@ -56,14 +56,15 @@ class TestUpgradePath:
             check_and_emit_upgrade_banner,
         )
         first = check_and_emit_upgrade_banner("3.4.26")
-        out1 = capsys.readouterr().out
+        # v3.6.13: banner emits to STDERR (stdout reserved for MCP JSON-RPC).
+        err1 = capsys.readouterr().err
         assert first is True
-        assert "3.4.26" in out1
+        assert "3.4.26" in err1
 
         second = check_and_emit_upgrade_banner("3.4.26")
-        out2 = capsys.readouterr().out
+        err2 = capsys.readouterr().err
         assert second is False
-        assert out2 == ""
+        assert err2 == ""
 
     def test_memory_db_bytes_unchanged_through_migration(
         self, v3_4_25_data_dir, monkeypatch,

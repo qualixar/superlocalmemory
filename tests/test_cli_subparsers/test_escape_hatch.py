@@ -13,6 +13,7 @@ confirms the subparser exists.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -124,9 +125,14 @@ def test_benchmark_json_path(
 
 def test_subparsers_registered() -> None:
     """End-to-end: argparse accepts each escape-hatch subcommand."""
+    # src/ on the child path: subprocesses don't inherit pytest's
+    # pythonpath=["src"], so a source checkout can't import otherwise.
+    _env = dict(os.environ)
+    _src = str(Path(__file__).resolve().parents[2] / "src")
+    _env["PYTHONPATH"] = _src + (os.pathsep + _env["PYTHONPATH"] if _env.get("PYTHONPATH") else "")
     result = subprocess.run(
         [sys.executable, "-m", "superlocalmemory.cli.main", "--help"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, timeout=10, env=_env,
     )
     help_text = result.stdout
     for word in ("disable", "enable", "clear-cache",

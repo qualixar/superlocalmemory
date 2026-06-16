@@ -57,23 +57,24 @@ class TestUpgradeBannerEmission:
         emitted = check_and_emit_upgrade_banner(current="3.4.26")
         captured = capsys.readouterr()
         assert emitted is True
-        assert "3.4.26" in captured.out
+        # v3.6.13: banner emits to STDERR (stdout is reserved for MCP JSON-RPC).
+        assert "3.4.26" in captured.err
         # Idempotent — the marker is now at current version.
         assert read_marker_version() == "3.4.26"
 
-        # Second call is silent.
+        # Second call is silent (no banner on stderr).
         emitted2 = check_and_emit_upgrade_banner(current="3.4.26")
         captured2 = capsys.readouterr()
         assert emitted2 is False
-        assert captured2.out == ""
+        assert captured2.err == ""
 
     def test_explicit_version_upgrade_shows_from_to(self, slm_home, capsys):
         write_marker_version("3.4.25")
         emitted = check_and_emit_upgrade_banner(current="3.4.26")
         captured = capsys.readouterr()
         assert emitted is True
-        assert "3.4.25" in captured.out
-        assert "3.4.26" in captured.out
+        assert "3.4.25" in captured.err
+        assert "3.4.26" in captured.err
         assert read_marker_version() == "3.4.26"
 
     def test_same_version_no_banner(self, slm_home, capsys):
@@ -87,14 +88,15 @@ class TestUpgradeBannerEmission:
         write_marker_version("3.4.25")
         check_and_emit_upgrade_banner(current="3.4.26")
         captured = capsys.readouterr()
-        assert "slm doctor" in captured.out
+        assert "slm doctor" in captured.err
 
     def test_banner_does_not_leak_internal_jargon(self, slm_home, capsys):
         """Lean copy — no Stage-N IDs, no plan-doc references,
         no competitor names. This is user-visible text."""
         write_marker_version("3.4.25")
         check_and_emit_upgrade_banner(current="3.4.26")
-        captured = capsys.readouterr().out.lower()
+        # Banner is on stderr (v3.6.13) — read it there, not the empty stdout.
+        captured = capsys.readouterr().err.lower()
         for forbidden in ("stage 8", "stage-8", "path a", "path b",
                           "qdrant", "mem0", "supermemory"):
             assert forbidden not in captured
@@ -140,14 +142,19 @@ class TestSecurityHardening:
 
 
 class TestBannerOutput:
-    """Banner output goes to stdout, not stderr."""
+    """Banner output goes to stderr, NOT stdout (v3.6.13).
 
-    def test_banner_goes_to_stdout_not_stderr(self, slm_home, capsys):
+    On the `slm mcp` stdio transport, any non-JSON-RPC byte on stdout corrupts
+    the stream and the MCP client rejects it. The human upgrade notice must go
+    to stderr only. See version_banner.py:170-175.
+    """
+
+    def test_banner_goes_to_stderr_not_stdout(self, slm_home, capsys):
         (slm_home / "memory.db").write_bytes(b"SQLite format 3\x00")
         check_and_emit_upgrade_banner(current="3.4.30")
         captured = capsys.readouterr()
-        assert captured.out, "banner must write to stdout"
-        assert captured.err == "", "banner must not write to stderr"
+        assert captured.err, "banner must write to stderr"
+        assert captured.out == "", "banner must NOT write to stdout (MCP stdio safety)"
 
 
 class TestIdempotencyAndFailureMode:
