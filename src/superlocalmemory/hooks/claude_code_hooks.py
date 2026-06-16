@@ -266,7 +266,12 @@ def _remove_slm_hooks(settings: dict) -> dict:
 
 
 def _read_settings() -> dict:
-    """Read Claude Code settings.json, return empty dict if missing."""
+    """Read Claude Code settings.json, return empty dict if missing.
+
+    Raises:
+        json.JSONDecodeError: propagated as-is when the file exists but is
+            malformed, so callers can distinguish 'missing' from 'corrupt'.
+    """
     if CLAUDE_SETTINGS.exists():
         return json.loads(CLAUDE_SETTINGS.read_text())
     return {}
@@ -356,6 +361,8 @@ def check_status() -> dict:
 
     hook_types_found: list[str] = []
     has_gate = False
+    parse_error: str | None = None
+
     try:
         settings = _read_settings()
         for hook_type, entries in settings.get("hooks", {}).items():
@@ -373,12 +380,26 @@ def check_status() -> dict:
                     break
             if has_gate:
                 break
+    except json.JSONDecodeError as exc:
+        # File exists but is malformed — report indeterminate state so callers
+        # do not conflate 'corrupt' with 'not installed'. Claude Code reads the
+        # file independently; hooks may still be firing even though we cannot
+        # parse the file here (split-brain scenario).
+        parse_error = f"JSON parse error in settings.json: {exc}"
+        logger.warning("SLM: %s", parse_error)
     except Exception:
         pass
 
-    installed = len(hook_types_found) >= 3
+    # Three-valued installed:
+    #   True  — enough SLM hook types found (≥3)
+    #   False — file missing or parseable but no SLM hooks
+    #   None  — file exists but is corrupt (indeterminate)
+    if parse_error is not None:
+        installed: bool | None = None
+    else:
+        installed = len(hook_types_found) >= 3
 
-    return {
+    result: dict = {
         "installed": installed,
         "version": installed_version,
         "latest_version": HOOKS_VERSION,
@@ -386,6 +407,9 @@ def check_status() -> dict:
         "hook_types": hook_types_found,
         "gate_enabled": has_gate,
     }
+    if parse_error is not None:
+        result["error"] = parse_error
+    return result
 
 
 def upgrade_hooks() -> dict:

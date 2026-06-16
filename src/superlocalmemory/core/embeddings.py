@@ -601,8 +601,13 @@ class EmbeddingService:
     def _cloud_embed_batch(
         self, texts: list[str], *, max_retries: int = 3,
     ) -> list[list[float]]:
-        """Encode via Azure OpenAI embedding API with retry."""
-        import httpx
+        """Encode via Azure OpenAI embedding API with retry.
+
+        V3.6.14: Reuses self._get_http_client() (shared persistent connection)
+        instead of creating a fresh httpx.Client per call/retry.  resp.json()
+        is now called inside the try block while the response object is still
+        in scope, eliminating reliance on httpx body-buffering after close.
+        """
         url = (
             f"{self._config.api_endpoint.rstrip('/')}/openai/deployments/"
             f"{self._config.deployment_name}/embeddings"
@@ -613,12 +618,12 @@ class EmbeddingService:
             "api-key": self._config.api_key,
         }
         body = {"input": texts, "model": self._config.deployment_name}
+        client = self._get_http_client()
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
-                with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
-                    resp = client.post(url, headers=headers, json=body)
-                    resp.raise_for_status()
+                resp = client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
                 data = resp.json()
                 results = []
                 for item in sorted(data["data"], key=lambda d: d["index"]):

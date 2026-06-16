@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
+import tempfile
 from datetime import datetime, UTC, timezone
 from pathlib import Path
 from typing import Any
@@ -35,15 +37,59 @@ KEYRING_SERVICE = "superlocalmemory"
 
 
 def _get_credential_store() -> Path:
-    """Fallback encrypted credential file for systems without a keychain."""
+    """Fallback plaintext-local-file credential store for systems without a keychain."""
     return MEMORY_DIR / ".credentials.json"
+
+
+def _atomic_write_creds(store_path: Path, data: dict) -> None:
+    """Write credential data atomically at 0o600 from creation.
+
+    Uses os.open with O_CREAT|O_WRONLY|O_TRUNC|O_NOFOLLOW and mode 0o600 so
+    the file is never world-readable — not even for an instant.  The payload
+    is written to a temp file in the SAME directory (guaranteeing same device),
+    fsynced, and then renamed into place via os.replace() so the old store
+    survives any crash between write and rename (atomic on POSIX).
+
+    Mirrors the pattern used in optimize/proxy/capture.py:111-112.
+    """
+    parent = store_path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    # Ensure the directory itself is private — 0o700 (owner rwx only)
+    try:
+        os.chmod(parent, 0o700)
+    except OSError:
+        pass  # Best-effort; existing dirs may be fine already
+
+    payload = json.dumps(data).encode()
+
+    # Write to a temp file in the SAME directory (same filesystem → atomic rename)
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=parent, prefix=".creds-")
+    try:
+        # Re-open with 0o600; mkstemp already creates with 0o600 on POSIX.
+        # Use os.open with O_NOFOLLOW on the temp name to refuse symlink tricks.
+        os.close(tmp_fd)
+        flags = os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(tmp_name, flags, 0o600)
+        try:
+            os.write(fd, payload)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp_name, store_path)
+    except Exception:
+        # Clean up the temp file if rename failed; let caller log & re-raise
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _store_credential(key: str, value: str) -> bool:
     """Store a credential in the OS keychain (macOS/Windows/Linux).
 
-    Falls back to an encrypted local file on headless Linux or if
-    the keyring backend is unavailable.
+    Falls back to a plaintext local file (owner read/write only, 0o600) on
+    headless Linux or if the keyring backend is unavailable.
     """
     # Try OS keychain first (macOS Keychain, Windows Credential Locker, Linux SecretService)
     try:
@@ -56,15 +102,19 @@ def _store_credential(key: str, value: str) -> bool:
     except Exception as exc:
         logger.debug("Keyring store failed, using fallback: %s", exc)
 
-    # Fallback: local file with restricted permissions (0600)
+    # Fallback: plaintext local file, atomic write at 0o600 from creation
     try:
         store_path = _get_credential_store()
-        existing = {}
+        existing: dict = {}
         if store_path.exists():
-            existing = json.loads(store_path.read_text())
+            try:
+                existing = json.loads(store_path.read_text())
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Credential store corrupt (JSON decode error), starting fresh: %s", exc
+                )
         existing[key] = value
-        store_path.write_text(json.dumps(existing))
-        store_path.chmod(0o600)  # Owner read/write only
+        _atomic_write_creds(store_path, existing)
         return True
     except Exception as exc:
         logger.warning("Failed to store credential '%s': %s", key, exc)
@@ -85,12 +135,20 @@ def _get_credential(key: str) -> str | None:
     except Exception:
         pass
 
-    # Fallback: local file
+    # Fallback: plaintext local file
     try:
         store_path = _get_credential_store()
         if store_path.exists():
-            data = json.loads(store_path.read_text())
-            return data.get(key)
+            try:
+                data = json.loads(store_path.read_text())
+                return data.get(key)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Credential store corrupt (JSON decode error), cannot read key '%s': %s",
+                    key,
+                    exc,
+                )
+                return None
     except Exception:
         pass
 
@@ -111,18 +169,25 @@ def _delete_credential(key: str) -> bool:
     except Exception:
         pass
 
-    # Also clean from fallback
+    # Also clean from fallback store — atomic write at 0o600
     try:
         store_path = _get_credential_store()
         if store_path.exists():
-            data = json.loads(store_path.read_text())
+            try:
+                data = json.loads(store_path.read_text())
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Credential store corrupt (JSON decode error) during delete of '%s': %s",
+                    key,
+                    exc,
+                )
+                return deleted
             if key in data:
                 del data[key]
-                store_path.write_text(json.dumps(data))
-                store_path.chmod(0o600)
+                _atomic_write_creds(store_path, data)
                 deleted = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to delete credential '%s' from fallback store: %s", key, exc)
 
     return deleted
 
