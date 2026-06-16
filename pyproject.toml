@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.6.13"
+version = "3.6.14"
 description = "Information-geometric agent memory with mathematical guarantees"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -48,6 +48,10 @@ dependencies = [
     "zeroconf>=0.140",
     "lightgbm==4.6.0",
     "orjson==3.11.9",
+    # TOML writer for portable-kit IDE config (codex uses .codex/config.toml).
+    # stdlib tomllib is read-only; without this, connect_ide('codex') silently
+    # fails to write the MCP server block.
+    "tomli-w==1.2.0",
     "tree-sitter==0.25.2",
     "tree-sitter-language-pack==0.13.0",
     "rustworkx==0.17.1",
