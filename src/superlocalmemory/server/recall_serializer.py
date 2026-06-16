@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+
 
 # ---------------------------------------------------------------------------
 # F-2: Per-fact content clamp
@@ -161,7 +163,7 @@ def apply_source_content_discipline(
 def serialize_recall_response(
     response: Any,
     *,
-    limit: int = 10,
+    limit: int = CANONICAL_RECALL_LIMIT,
     memory_map: dict[str, str] | None = None,
     per_fact_max: int = 2400,
     total_max: int = 12000,

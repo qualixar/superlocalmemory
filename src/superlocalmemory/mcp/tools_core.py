@@ -19,6 +19,8 @@ from typing import Callable
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+
 logger = logging.getLogger(__name__)
 
 _DB_PATH = str(Path.home() / ".superlocalmemory" / "memory.db")
@@ -164,7 +166,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def recall(
-        query: str, limit: int = 10, agent_id: str = "mcp_client",
+        query: str, limit: int = CANONICAL_RECALL_LIMIT, agent_id: str = "mcp_client",
         session_id: str = "", fast: bool = False,
     ) -> dict:
         """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking.
@@ -331,6 +333,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
     async def get_status() -> dict:
         """Get memory system status: fact count, entity count, mode, profile, db size."""
         try:
+            import os
             engine = get_engine()
             pid = engine.profile_id
             fact_count = engine._db.get_fact_count(pid)
@@ -345,20 +348,25 @@ def register_core_tools(server, get_engine: Callable) -> None:
             )
             edge_count = int(dict(edges[0])["c"]) if edges else 0
 
-            import os
             db_size_mb = 0.0
             db_path = engine._db.db_path
             if db_path.exists():
                 db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
 
+            # WP-02 D8: additive canonical key set — provider/base_dir/db_path added.
+            # All pre-existing keys are preserved (zero removals).
+            cfg = engine._config
             return {
                 "success": True,
-                "mode": engine._config.mode.value,
+                "mode": cfg.mode.value,
+                "provider": cfg.llm.provider or "none",
                 "profile": pid,
+                "base_dir": str(cfg.base_dir),
+                "db_path": str(db_path),
+                "db_size_mb": db_size_mb,
                 "fact_count": fact_count,
                 "entity_count": entity_count,
                 "edge_count": edge_count,
-                "db_size_mb": db_size_mb,
             }
         except Exception as exc:
             logger.exception("get_status failed")

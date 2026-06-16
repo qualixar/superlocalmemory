@@ -50,6 +50,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
+from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+
 logger = logging.getLogger("superlocalmemory.unified_daemon")
 
 _DEFAULT_PORT = 8765
@@ -1620,7 +1622,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
     @application.get("/recall")
     async def recall(
         request: Request,
-        q: str = "", query: str = "", limit: int = 20,
+        q: str = "", query: str = "", limit: int = CANONICAL_RECALL_LIMIT,
         session_id: str = "",
         fast: bool = False,
         full: bool = False,

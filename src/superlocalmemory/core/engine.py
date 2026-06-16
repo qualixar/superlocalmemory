@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from superlocalmemory.core.config import SLMConfig
+from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT, SLMConfig
 from superlocalmemory.core.engine_capabilities import Capabilities, CapabilityError
 from superlocalmemory.core.modes import get_capabilities
 from superlocalmemory.storage.models import (
@@ -507,7 +507,7 @@ class MemoryEngine:
 
     def recall(
         self, query: str, profile_id: str | None = None,
-        mode: Mode | None = None, limit: int = 20,
+        mode: Mode | None = None, limit: int = CANONICAL_RECALL_LIMIT,
         agent_id: str = "unknown",
         session_id: str | None = None,
         fast: bool = False,

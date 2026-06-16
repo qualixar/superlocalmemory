@@ -24,6 +24,8 @@ _os.environ.setdefault('TORCH_DEVICE', 'cpu')
 import argparse
 import sys
 
+from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+
 _HELP_EPILOG = """\
 operating modes:
   Mode A  Local Guardian — Zero cloud, zero LLM. All processing stays on
@@ -200,7 +202,10 @@ def main() -> None:
     # same search verb the MCP exposes (handlers dict maps both to cmd_recall).
     recall_p = sub.add_parser("recall", aliases=["search"], help="Semantic search with 4-channel retrieval")
     recall_p.add_argument("query", help="Search query")
-    recall_p.add_argument("--limit", type=int, default=10, help="Max results (default 10)")
+    recall_p.add_argument(
+        "--limit", type=int, default=CANONICAL_RECALL_LIMIT,
+        help=f"Max results (default {CANONICAL_RECALL_LIMIT})",
+    )
     recall_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
     recall_p.add_argument(
         "--fast", action="store_true",

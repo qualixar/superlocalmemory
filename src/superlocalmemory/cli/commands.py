@@ -1318,14 +1318,60 @@ def cmd_status(args: Namespace) -> None:
 
     if getattr(args, 'json', False):
         from superlocalmemory.cli.json_output import json_print
+
+        # WP-02 D8: canonical key set — db_size_mb always present (0.0 if absent).
+        db_size_mb = 0.0
+        if config.db_path.exists():
+            db_size_mb = round(config.db_path.stat().st_size / 1024 / 1024, 2)
+
+        # Open engine for counts (json branch only — LLD Decision B).
+        # Fail-open to 0 on any error; status must never crash.
+        # Guard on db existence: `slm status --json` must stay observational —
+        # opening the engine on a fresh install would create + migrate the db
+        # (MemoryEngine.initialize → DatabaseManager mkdir/connect/DDL). A
+        # previously read-only command must not acquire a write side-effect.
+        fact_count = 0
+        entity_count = 0
+        edge_count = 0
+        eng = None
+        if config.db_path.exists():
+            try:
+                from superlocalmemory.core.engine import MemoryEngine
+                from superlocalmemory.core.engine_capabilities import Capabilities
+                eng = MemoryEngine(config, capabilities=Capabilities.LIGHT)
+                eng.initialize()
+                pid = config.active_profile
+                fact_count = eng._db.get_fact_count(pid)
+                rows = eng._db.execute(
+                    "SELECT COUNT(*) AS c FROM canonical_entities WHERE profile_id = ?",
+                    (pid,),
+                )
+                entity_count = int(dict(rows[0])["c"]) if rows else 0
+                rows2 = eng._db.execute(
+                    "SELECT COUNT(*) AS c FROM graph_edges WHERE profile_id = ?",
+                    (pid,),
+                )
+                edge_count = int(dict(rows2[0])["c"]) if rows2 else 0
+            except Exception:
+                logger.debug("cmd_status: engine count query failed; using 0s", exc_info=True)
+            finally:
+                if eng is not None:
+                    try:
+                        eng.close()
+                    except Exception:
+                        pass
+
         data = {
             "mode": config.mode.value.upper(),
             "provider": config.llm.provider or "none",
+            "profile": config.active_profile,
             "base_dir": str(config.base_dir),
             "db_path": str(config.db_path),
+            "db_size_mb": db_size_mb,
+            "fact_count": fact_count,
+            "entity_count": entity_count,
+            "edge_count": edge_count,
         }
-        if config.db_path.exists():
-            data["db_size_mb"] = round(config.db_path.stat().st_size / 1024 / 1024, 2)
         json_print("status", data=data, next_actions=[
             {"command": "slm health --json", "description": "Check math layer health"},
             {"command": "slm list --json", "description": "List recent memories"},

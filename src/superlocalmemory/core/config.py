@@ -22,6 +22,16 @@ from superlocalmemory.storage.models import Mode
 
 
 # ---------------------------------------------------------------------------
+# Canonical limits (WP-02 — single source of truth across all surfaces)
+# ---------------------------------------------------------------------------
+
+#: Default number of results returned by recall across MCP, CLI, daemon, and
+#: engine.  All surfaces bind their ``limit`` defaults to this constant so a
+#: single change is sufficient to keep the full stack in sync.
+CANONICAL_RECALL_LIMIT: int = 20
+
+
+# ---------------------------------------------------------------------------
 # Default Paths
 # ---------------------------------------------------------------------------
 
