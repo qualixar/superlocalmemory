@@ -1452,6 +1452,63 @@ def cmd_health(args: Namespace) -> None:
     print(f"  Mode: {config.mode.value.upper()}")
 
 
+def _gather_optimize_surface_b() -> dict:
+    """Gather Surface-B health data for slm doctor.
+
+    Pure data-gather — never raises, never prints, never starts the
+    ConfigStore watchdog thread. Reads daemon-persisted metrics only
+    (CacheDB.metrics_load), never the in-process KV counters.
+
+    Returns a dict with keys:
+        enabled, cache_enabled, compress_enabled, proxy_enabled,
+        compress_runs, tokens_saved, cache_hits, cache_misses,
+        db_present, error
+    """
+    from pathlib import Path
+    from superlocalmemory.optimize.storage.db import CacheDB
+
+    result: dict = {
+        "enabled": False,
+        "cache_enabled": False,
+        "compress_enabled": False,
+        "proxy_enabled": False,
+        "compress_runs": 0,
+        "tokens_saved": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "db_present": False,
+        "error": "",
+    }
+
+    # Step 1: read optimize config — NO watchdog start.
+    try:
+        from superlocalmemory.optimize.config.store import ConfigStore
+        cfg = ConfigStore().get()
+        result["enabled"] = cfg.enabled
+        result["cache_enabled"] = cfg.cache_enabled
+        result["compress_enabled"] = cfg.compress_enabled
+        result["proxy_enabled"] = cfg.proxy_enabled
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = str(exc)
+        # enabled stays False — safe default
+
+    # Step 2: read persisted metrics from llmcache.db (daemon-flushed, ≤60s stale).
+    try:
+        db_path = Path.home() / ".superlocalmemory" / "llmcache.db"
+        result["db_present"] = db_path.exists()
+        if result["db_present"]:
+            snap = CacheDB.get_default().metrics_load()
+            result["compress_runs"] = snap.compress_runs
+            result["tokens_saved"] = snap.tokens_saved_compress
+            result["cache_hits"] = snap.hits
+            result["cache_misses"] = snap.misses
+    except Exception as exc:  # noqa: BLE001
+        prior = result["error"]
+        result["error"] = (prior + "; " if prior else "") + "metrics read failed"
+
+    return result
+
+
 def cmd_doctor(args: Namespace) -> None:
     """Comprehensive pre-flight check — verify everything works.
 
@@ -1725,6 +1782,63 @@ def cmd_doctor(args: Namespace) -> None:
             _check("Database", "FAIL", str(exc))
     else:
         _check("Database", "PASS", "not yet created (will initialize on first use)")
+
+    # 11. Optimize (Surface B) — reads daemon-persisted metrics (≤60s stale).
+    info = _gather_optimize_surface_b()
+    _enabled = info["enabled"]
+    _error = info.get("error", "")
+    if not _enabled:
+        _check(
+            "Optimize (Surface B)",
+            "WARN",
+            "disabled (optimize.json enabled=false) — caching/compression not active"
+            + (f" [{_error}]" if _error else ""),
+            fix="Enable via dashboard Optimize tab or set enabled=true"
+            " in ~/.superlocalmemory/optimize.json",
+        )
+    else:
+        _surfaces = []
+        if info["cache_enabled"]:
+            _surfaces.append("cache")
+        if info["compress_enabled"]:
+            _surfaces.append("compress")
+        if info["proxy_enabled"]:
+            _surfaces.append("proxy")
+        _stats = (
+            f"compress_runs={info['compress_runs']}"
+            f" tokens_saved={info['tokens_saved']}"
+            f" cache_hits={info['cache_hits']}"
+            f" cache_misses={info['cache_misses']}"
+        )
+        _surface_str = ",".join(_surfaces) if _surfaces else "(none)"
+        if not _surfaces:
+            _check(
+                "Optimize (Surface B)",
+                "WARN",
+                f"enabled [{_surface_str}] but no surface active"
+                + (f" [{_error}]" if _error else ""),
+            )
+        elif not info["db_present"]:
+            _check(
+                "Optimize (Surface B)",
+                "WARN",
+                f"enabled [{_surface_str}] {_stats}"
+                " but no metrics yet (llmcache.db not created)"
+                + (f" [{_error}]" if _error else ""),
+                fix="slm serve start",
+            )
+        elif _error:
+            _check(
+                "Optimize (Surface B)",
+                "WARN",
+                f"enabled [{_surface_str}] {_stats} (partial: {_error})",
+            )
+        else:
+            _check(
+                "Optimize (Surface B)",
+                "PASS",
+                f"enabled [{_surface_str}] {_stats}",
+            )
 
     # Summary
     if use_json:
