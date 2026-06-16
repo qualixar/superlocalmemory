@@ -109,6 +109,9 @@ def build_proxy_router(proxy: ProxyApp) -> APIRouter:
         handle_chat_completions,
         handle_embeddings,
     )
+    from superlocalmemory.optimize.proxy.vertex_surface import (
+        handle_vertex_generative,
+    )
 
     router = APIRouter(tags=["slm-optimize-proxy"])
 
@@ -145,6 +148,14 @@ def build_proxy_router(proxy: ProxyApp) -> APIRouter:
     @router.get("/v1beta/openai/models")
     async def gemini_openai_models_route(request: Request) -> Response:
         return await handle_gemini_openai_compat(proxy, request)
+
+    # WP-11: Vertex AI passthrough — must be registered AFTER exact /v1/* routes
+    # to avoid shadowing /v1/messages, /v1/chat/completions, /v1/embeddings, etc.
+    # FastAPI resolves routes in registration order; the exact routes above are
+    # declared before this catch-path, so there is no shadowing.
+    @router.post("/v1/projects/{vertex_path:path}")
+    async def vertex_route(request: Request, vertex_path: str) -> Response:
+        return await handle_vertex_generative(proxy, request, vertex_path)
 
     return router
 

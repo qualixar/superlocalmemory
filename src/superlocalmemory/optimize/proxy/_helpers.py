@@ -76,6 +76,16 @@ _OPENAI_FORWARD_HEADERS = frozenset([
 _GEMINI_NATIVE_FORWARD_HEADERS = frozenset([
     "x-goog-api-key",
     "content-type",
+    "authorization",  # WP-11a: Antigravity ADC/OAuth bearer was dropped; add it back
+])
+
+# WP-11: Vertex AI forward headers — Authorization passed untouched (AC-2).
+# x-goog-user-project required for quota attribution on Vertex calls.
+_VERTEX_FORWARD_HEADERS = frozenset([
+    "authorization",
+    "content-type",
+    "x-goog-api-key",
+    "x-goog-user-project",
 ])
 
 _GEMINI_OPENAI_COMPAT_FORWARD_HEADERS = frozenset([

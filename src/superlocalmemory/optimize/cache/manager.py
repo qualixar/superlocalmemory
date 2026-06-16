@@ -178,7 +178,23 @@ class CacheManager:
         if not _HEX64.fullmatch(tenant_id or ""):
             tenant_id = _hashlib.sha256(tenant_id.encode()).hexdigest()
 
-        if isinstance(req, ProxyRequest):
+        if isinstance(req, ProxyRequest) and req.provider == "vertex":
+            # CRIT-2 (WP-11, LOCKED): Vertex bodies have NO model/messages/system.
+            # Model is in the PATH; prompts are under 'contents'; system under
+            # 'systemInstruction'. Without this branch ALL Vertex requests hash to
+            # ONE key → first response poisons every subsequent prompt.
+            body = req.body or {}
+            model_id = _vertex_model_from_path(req.path)
+            messages = body.get("contents", []) or []
+            system_raw = body.get("systemInstruction", "") or ""
+            if isinstance(system_raw, (dict, list)):
+                system = _json.dumps(system_raw, sort_keys=True, separators=(",", ":"))
+            else:
+                system = str(system_raw)
+            # params: everything except the fields extracted above and stream flag.
+            _SKIP_VERTEX = frozenset({"contents", "systemInstruction", "stream"})
+            params = {k: v for k, v in body.items() if k not in _SKIP_VERTEX}
+        elif isinstance(req, ProxyRequest):
             # Extract semantic fields from the parsed JSON body.
             body = req.body or {}
             model_id = body.get("model", "") or ""
@@ -566,3 +582,25 @@ class _TenantScopedManager:
 def json_dumps_bytes(d: dict) -> bytes:
     import json as _json
     return _json.dumps(d, separators=(",", ":"), default=str).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Vertex helpers (WP-11 / CRIT-2)
+# ---------------------------------------------------------------------------
+
+def _vertex_model_from_path(path: str) -> str:
+    """Extract the model name from a Vertex proxy path.
+
+    Handles both the FastAPI path parameter form:
+      /v1/projects/{project}/locations/{loc}/publishers/google/models/{model}:{method}
+    and the raw vertex_path parameter:
+      {project}/locations/{loc}/publishers/google/models/{model}:{method}
+
+    Returns empty string on parse failure (key_builder treats it as uncacheable-neutral).
+    """
+    import re as _re
+    _MODEL_RE = _re.compile(r"/models/([a-zA-Z0-9._\-]{1,128}):")
+    m = _MODEL_RE.search(path)
+    if m:
+        return m.group(1)
+    return ""
