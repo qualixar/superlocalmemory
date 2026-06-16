@@ -93,6 +93,18 @@ class CCRStore:
             logger.warning("CCRStore.retrieve failed (ccr_id=%s): %s", ccr_id, exc)
             return None
 
+    def delete(self, ccr_id: str) -> None:
+        """Delete a CCR row by ccr_id. Idempotent — never raises.
+
+        WP-10 D6: defensive infra. Deleting a non-existent ccr_id is a no-op.
+        """
+        try:
+            db = self._get_db()
+            db.ccr_delete(ccr_id)
+            logger.debug("CCR deleted ccr_id=%s", ccr_id)
+        except Exception as exc:
+            logger.warning("CCRStore.delete failed (non-fatal): %s", exc)
+
     def get_mcp_tool_definition(self) -> dict:
         return {
             "name": "headroom_retrieve",

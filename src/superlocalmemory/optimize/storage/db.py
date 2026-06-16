@@ -947,6 +947,36 @@ class CacheDB:
         except sqlite3.Error as exc:
             logger.warning("CacheDB.ccr_update_compressed failed: %s", exc)
 
+    def ccr_delete(self, ccr_id: str) -> None:
+        """Delete a CCR row by ccr_id. Idempotent — warns on sqlite error, never raises.
+
+        WP-10 D6: defensive infra + sweep parity. Deleting a non-existent row is a no-op.
+        """
+        try:
+            self._db.execute(
+                "DELETE FROM llmcache_ccr_originals WHERE ccr_id = ?",
+                (ccr_id,),
+            )
+        except sqlite3.Error as exc:
+            logger.warning("CacheDB.ccr_delete failed (non-fatal): %s", exc)
+
+    def ccr_count(self) -> int:
+        """Return UNFILTERED count of rows in llmcache_ccr_originals.
+
+        WP-10 CRIT-2: Do NOT reuse TTL-filtered count at :646. A fresh no-expiry row
+        has ttl_expires=None, so the TTL filter returns 0 and D6 orphan tests would
+        falsely pass. This unfiltered count is test infrastructure only.
+        """
+        try:
+            rows = self._db.execute(
+                "SELECT COUNT(*) AS n FROM llmcache_ccr_originals",
+                (),
+            )
+            return int(dict(rows[0])["n"]) if rows else 0
+        except sqlite3.Error as exc:
+            logger.warning("CacheDB.ccr_count failed: %s", exc)
+            return 0
+
     # ---- v2 additions ----
 
     def get_all_vectors(self, tenant_id: str) -> list[tuple[str, bytes, str]]:

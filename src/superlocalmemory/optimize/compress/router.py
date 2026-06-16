@@ -98,6 +98,7 @@ class CompressRouter:
                 request_id=req.request_id,
                 model=body.get("model", ""),
                 tenant_id="default",
+                is_proxy=True,  # D5-B: proxy path — Layer 2 lossy disabled
             )
 
             # S-01/Stage-9 fix: build new_bytes BEFORE the improvement guard.
@@ -156,6 +157,7 @@ class CompressRouter:
         request_id: str,
         model: str,
         tenant_id: str,
+        is_proxy: bool = False,
     ) -> tuple[list[dict[str, Any]], int, int, str]:
         total_before = 0
         total_after = 0
@@ -188,6 +190,7 @@ class CompressRouter:
                 request_id=request_id,
                 model=model,
                 tenant_id=tenant_id,
+                is_proxy=is_proxy,
             )
             total_before += before
             total_after += after
@@ -207,9 +210,12 @@ class CompressRouter:
         request_id: str,
         model: str,
         tenant_id: str,
+        is_proxy: bool = False,
     ) -> tuple[Any, int, int, str]:
         if isinstance(content, str):
-            return self._compress_text(content, aggressive, request_id, model, tenant_id)
+            return self._compress_text(
+                content, aggressive, request_id, model, tenant_id, is_proxy=is_proxy
+            )
 
         if isinstance(content, list):
             new_blocks: list[Any] = []
@@ -227,7 +233,8 @@ class CompressRouter:
                         new_blocks.append(block)
                         continue
                     new_text, before, after, strat = self._compress_text(
-                        text, aggressive, request_id, model, tenant_id
+                        text, aggressive, request_id, model, tenant_id,
+                        is_proxy=is_proxy,
                     )
                     total_before += before
                     total_after += after
@@ -252,6 +259,7 @@ class CompressRouter:
         request_id: str,
         model: str,
         tenant_id: str,
+        is_proxy: bool = False,
     ) -> tuple[str, int, int, str]:
         tokens_before = _token_estimate(text)
 
@@ -286,18 +294,22 @@ class CompressRouter:
         tokens_after_l1 = _token_estimate(normalized)
 
         # Layer 2 — LLMLingua-2 prose compression (aggressive + opt-in only)
+        # D5-B: proxy path SKIPS Layer 2 entirely — only Layer 1 lossless normalize
+        # runs on proxy (ProxyRequest has no response/rehydration hook for CCR markers).
         cfg = self._get_config()
         prose_enabled = bool(getattr(cfg, "compress_prose", False))
-        if aggressive and prose_enabled:  # pragma: no cover — LLMLingua optional dep
+        if aggressive and prose_enabled and not is_proxy:  # pragma: no cover — LLMLingua optional dep
             compressor = self._get_llmlingua_compressor()
             if compressor is not None:
-                # B-03: store original BEFORE lossy compression
-                ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
+                # D6: compress FIRST, store ONLY inside the reduction branch.
+                # Old code stored before compress → orphan row when no reduction occurred.
                 compressed = compressor.compress(normalized)
-                if ccr_id:
-                    self._ccr_update_compressed(ccr_id, compressed.encode())
                 tokens_after_l2 = _token_estimate(compressed)
                 if tokens_after_l2 < tokens_before:
+                    # Reduction confirmed — now safe to store (no orphan possible)
+                    ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
+                    if ccr_id:
+                        self._ccr_update_compressed(ccr_id, compressed.encode())
                     logger.info(
                         "[%s] LLMLingua-2 prose compressed rate=%.2f ccr_id=%s (LOSSY)",
                         request_id,
@@ -305,6 +317,7 @@ class CompressRouter:
                         ccr_id,
                     )
                     return compressed, tokens_before, tokens_after_l2, "llmlingua2_prose"
+                # No reduction — fall through, NOTHING stored → zero orphans by construction
 
         # S-01 fix: compare character length, not word count.
         # _token_estimate() is word-count — whitespace normalization saves characters/bytes
@@ -375,6 +388,19 @@ class CompressRouter:
             store.update_compressed(ccr_id, compressed_bytes)
         except Exception as exc:
             logger.debug("CCR update_compressed failed (non-fatal): %s", exc)
+
+    def _ccr_delete(self, ccr_id: str) -> None:
+        """WP-10 D6: Defensive delete — idempotent, never raises.
+
+        Used to clean up a CCR row if post-store processing fails. In the
+        store-after-success D6 path this should never be needed (no orphans
+        by construction), but kept as defensive infra + sweep parity.
+        """
+        try:
+            store = self._get_ccr_store()
+            store.delete(ccr_id)
+        except Exception as exc:
+            logger.debug("CCR delete failed (non-fatal): %s", exc)
 
     # ── Public convenience method (M-06) ──────────────────────────────────
 
