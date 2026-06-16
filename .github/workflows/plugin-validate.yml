@@ -1,0 +1,41 @@
+# WP-06: Claude Code plugin validation CI gate (AC-1)
+# Runs: build the plugin then validate schema with `claude plugin validate`
+name: Plugin Validate
+
+on:
+  push:
+    paths:
+      - 'plugin-src/**'
+      - 'scripts/build-plugin.js'
+      - '.github/workflows/plugin-validate.yml'
+  pull_request:
+    paths:
+      - 'plugin-src/**'
+      - 'scripts/build-plugin.js'
+      - '.github/workflows/plugin-validate.yml'
+
+jobs:
+  validate:
+    name: Build and validate Claude Code plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Build plugin
+        run: npm run build:plugin
+
+      - name: Verify build is in-sync
+        run: node scripts/build-plugin.js --check
+
+      - name: Validate plugin manifest (AC-1)
+        # Validate from repo root; claude plugin validate finds .claude-plugin/marketplace.json
+        run: claude plugin validate .

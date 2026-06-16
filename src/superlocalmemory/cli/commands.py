@@ -2274,41 +2274,7 @@ def cmd_hooks(args: Namespace) -> None:
             if include_gate:
                 print("  Gate: ON (enforces session_init — experimental)")
             print("  SLM: Hooks installed into Claude Code (slm hooks remove to undo)")
-            # S9-DASH-11: also install skills so /slm-recall, /slm-remember
-            # etc. are available immediately in Claude Code regardless of
-            # whether the user installed via npm or pip.
-            try:
-                import importlib.resources as _ir
-                import importlib.util as _iu
-                import shutil as _sh
-                from pathlib import Path as _P
 
-                claude_skills_dir = _P.home() / ".claude" / "skills"
-                claude_skills_dir.mkdir(parents=True, exist_ok=True)
-
-                # Try Python-package bundled skills first (works for both
-                # pip and npm users who have the Python pkg installed).
-                pkg_skills: _P | None = None
-                spec = _iu.find_spec("superlocalmemory")
-                if spec and spec.submodule_search_locations:
-                    candidate = _P(list(spec.submodule_search_locations)[0]) / "skills"
-                    if candidate.is_dir():
-                        pkg_skills = candidate
-
-                if pkg_skills:
-                    installed_skills = 0
-                    for d in pkg_skills.iterdir():
-                        if d.is_dir():
-                            src_skill = d / "SKILL.md"
-                            if src_skill.exists():
-                                dst = claude_skills_dir / (d.name + ".md")
-                                _sh.copy2(str(src_skill), str(dst))
-                                installed_skills += 1
-                    if installed_skills:
-                        print(f"  Skills: {installed_skills} skills installed → {claude_skills_dir}")
-                        print("           Use /slm-recall, /slm-remember, /slm-status in Claude Code")
-            except Exception as _skill_exc:
-                pass  # non-fatal — skills can be installed via install-skills.sh
         else:
             print(f"Installation failed: {result['errors']}")
     elif action == "remove":

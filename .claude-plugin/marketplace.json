@@ -1,14 +1,17 @@
 {
-  "name": "superlocalmemory",
+  "name": "qualixar",
   "owner": {
-    "name": "qualixar"
+    "email": "varun.pratap.bhardwaj@gmail.com",
+    "name": "Qualixar"
   },
   "plugins": [
     {
-      "description": "SuperLocalMemory skill plugin for Claude Code",
+      "author": {
+        "name": "Qualixar"
+      },
+      "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server. 20-tool code profile with graph intelligence.",
       "name": "superlocalmemory",
-      "source": "./",
-      "version": "3.6.14"
+      "source": "./plugin"
     }
   ]
 }

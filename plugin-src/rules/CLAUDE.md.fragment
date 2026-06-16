@@ -30,10 +30,10 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 `slm recall "<q>" --limit N` · `slm search "<q>"` · `slm remember "<c>" --tags t --importance N` · `slm list --limit N` · `slm forget` (preview first) · `slm status` · `slm optimize status`
 
 ### Skills
-slm-recall · slm-remember · slm-status · slm-optimize · slm-build-graph · slm-list-recent · slm-show-patterns · slm-switch-profile
+slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-compress · slm-graph
 
 ### Commands
-/slm-recall · /slm-remember · /slm-optimize · /slm-status
+/superlocalmemory:slm-recall · /superlocalmemory:slm-remember · /superlocalmemory:slm-session · /superlocalmemory:slm-status · /superlocalmemory:slm-cache · /superlocalmemory:slm-compress · /superlocalmemory:slm-graph
 
 ### Subagents
 slm-memory-advisor (memory decisions, session hygiene) · slm-optimize-advisor (context compression + KV cache)

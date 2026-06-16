@@ -1,8 +1,8 @@
 /**
- * build-plugin.test.mjs — WP-04 TDD test suite (node:test, mkdtemp fixtures)
+ * build-plugin.test.mjs — DOC-CORRECT layout TDD test suite (node:test, mkdtemp fixtures)
  *
- * 18 LLD §6 tests + 2 regression tests (root-skills-unchanged; partial-target-no-cross-delete)
- * + author.url assertion.
+ * v3.6.14: single plugin/ target, 7 new skills, no ide/pkg/commands targets.
+ * Layout: .claude-plugin/marketplace.json (repo root) + plugin/ (plugin root).
  *
  * Run: node --test scripts/__tests__/build-plugin.test.mjs
  */
@@ -52,36 +52,40 @@ function readFile(p) {
   return fs.readFileSync(p, 'utf8');
 }
 
-// Minimal fixture manifest for test isolation
+// The 7 new skills
+const NEW_SKILLS = [
+  'slm-cache',
+  'slm-compress',
+  'slm-graph',
+  'slm-recall',
+  'slm-remember',
+  'slm-session',
+  'slm-status',
+];
+
+// Minimal fixture manifest — DOC-CORRECT layout
 function makeManifest(overrides = {}) {
   return {
     version: '3.6.14',
     pluginName: 'superlocalmemory',
-    skills: [
-      { name: 'slm-recall', hasReadme: false },
-      { name: 'slm-remember', hasReadme: false },
-      { name: 'slm-status', hasReadme: false },
-      { name: 'slm-list-recent', hasReadme: false },
-      { name: 'slm-switch-profile', hasReadme: false },
-      { name: 'slm-build-graph', hasReadme: false },
-      { name: 'slm-show-patterns', hasReadme: false },
-      { name: 'slm-optimize', hasReadme: true },
-    ],
+    displayName: 'SuperLocalMemory',
+    repository: 'https://github.com/qualixar/superlocalmemory',
+    keywords: ['memory', 'mcp', 'agents', 'local-first', 'context-compression'],
+    skills: NEW_SKILLS.map(name => ({ name, hasReadme: false })),
     targets: {
-      ide: 'ide/skills',
-      pkg: 'src/superlocalmemory/skills',
-      plugin: '.claude-plugin/skills',
+      plugin: 'plugin/.claude-plugin/plugin.json',
     },
     marketplace: {
       owner: 'qualixar',
+      ownerEmail: 'varun.pratap.bhardwaj@gmail.com',
       repo: 'superlocalmemory',
-      description: 'SuperLocalMemory skill plugin for Claude Code',
+      description: 'Local-first agent memory + reversible context compression and KV cache, as an MCP server. 20-tool code profile with graph intelligence.',
     },
     ...overrides,
   };
 }
 
-// Minimal skill body (with old attribution footer)
+// Minimal skill body with frontmatter version (for stamp tests)
 const OLD_ATTRIBUTION_BLOCK = `
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
 **Project:** SuperLocalMemory V2
@@ -117,6 +121,36 @@ function makeSkillBody(name, version = '3.4.23') {
   ].join('\n');
 }
 
+// Skill body WITHOUT a version line (new-style skills)
+function makeSkillBodyNoVersion(name) {
+  return [
+    '---',
+    `name: ${name}`,
+    `description: Test skill ${name}`,
+    'allowed-tools: Bash',
+    '---',
+    '',
+    `# ${name}`,
+    '',
+    'Body text.',
+  ].join('\n');
+}
+
+// Setup fixture with all 7 skills + optional extras
+function setupFixture(tmp, overrides = {}) {
+  const manifest = makeManifest(overrides);
+  for (const skill of manifest.skills) {
+    writeFile(tmp, `plugin-src/skills/${skill.name}/SKILL.md`, makeSkillBody(skill.name));
+  }
+  writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
+  writeFile(tmp, 'plugin-src/hooks/hooks.json', '{"hooks":{"SessionStart":[]}}\n');
+  writeFile(tmp, 'plugin-src/.mcp.json', '{"mcpServers":{"superlocalmemory":{"command":"${CLAUDE_PLUGIN_DATA}/venv/bin/slm","args":["mcp"],"env":{"SLM_MCP_PROFILE":"code","SLM_DATA_DIR":"${CLAUDE_PLUGIN_DATA}"}}}}\n');
+  writeFile(tmp, 'plugin-src/settings.json', '{"permissions":{"allow":[]}}\n');
+  writeFile(tmp, 'plugin-src/requirements.txt', 'superlocalmemory>=3.6.14\n');
+  writeFile(tmp, 'plugin-src/rules/CLAUDE.md.fragment', '<!-- SLM -->\n');
+  return manifest;
+}
+
 // ---------------------------------------------------------------------------
 // TEST 1 — stampVersion replaces only frontmatter version line
 // ---------------------------------------------------------------------------
@@ -124,16 +158,12 @@ describe('stampVersion', () => {
   test('replaces only frontmatter version line (body v3.4.22 untouched)', async () => {
     const { stampVersion } = await getModule();
     const body = makeSkillBody('slm-recall', '3.4.22');
-    // body contains "(v3.4.22)" in some text too
     const bodyWithVersion = body + '\n\nSome note about (v3.4.22) API\n';
     const result = stampVersion(bodyWithVersion, '3.6.14');
-    // frontmatter version updated
     assert.match(result, /^---\n[\s\S]*?version: "3\.6\.14"/m);
-    // body prose reference preserved
     assert.match(result, /\(v3\.4\.22\)/);
   });
 
-  // TEST 2 — idempotent
   test('stampVersion is idempotent', async () => {
     const { stampVersion } = await getModule();
     const body = makeSkillBody('slm-recall', '3.4.23');
@@ -142,7 +172,6 @@ describe('stampVersion', () => {
     assert.equal(once, twice);
   });
 
-  // TEST 3 — throws if no version line in frontmatter
   test('throws if frontmatter has no version line', async () => {
     const { stampVersion } = await getModule();
     const noVersion = '---\nname: foo\n---\n\n# Foo\n';
@@ -151,19 +180,36 @@ describe('stampVersion', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TEST 4 — renderPluginJson deterministic + sorted + author.url preserved
+// TEST — renderSkillFile: skills without version line are copied verbatim
+// ---------------------------------------------------------------------------
+describe('renderSkillFile no-version', () => {
+  test('skill without version: line in frontmatter copied verbatim (no stamp error)', async () => {
+    const { renderSkillFile } = await getModule();
+    const body = makeSkillBodyNoVersion('slm-graph');
+    // Must not throw
+    const result = renderSkillFile(body, '3.6.14');
+    assert.ok(result.includes('slm-graph'), 'skill name preserved');
+    assert.ok(!result.includes('version: "3.6.14"'), 'no version stamp injected');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 2 — renderPluginJson: sorted, author.url, mcpServers/hooks pointers
 // ---------------------------------------------------------------------------
 describe('renderPluginJson', () => {
-  test('deterministic sorted output + author.url survives', async () => {
+  test('deterministic sorted output + author.url + pointers', async () => {
     const { renderPluginJson } = await getModule();
     const manifest = makeManifest();
     const json = renderPluginJson(manifest);
     const parsed = JSON.parse(json);
-    // required field
     assert.equal(parsed.name, 'superlocalmemory');
     assert.equal(parsed.version, '3.6.14');
+    assert.equal(parsed.author.name, 'Qualixar');
     // REGRESSION: author.url must NOT be silently dropped
-    assert.equal(parsed.author.url, 'https://github.com/qualixar');
+    assert.equal(parsed.author.url, 'https://github.com/qualixar/superlocalmemory');
+    // pointers relative to plugin root
+    assert.ok(parsed.hooks && parsed.hooks.includes('hooks.json'), 'hooks pointer present');
+    assert.ok(parsed.mcpServers && parsed.mcpServers.includes('.mcp.json'), 'mcpServers pointer present');
     // keys must be sorted at top level
     const keys = Object.keys(parsed);
     assert.deepEqual(keys, [...keys].sort());
@@ -177,115 +223,233 @@ describe('renderPluginJson', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TEST 5 — renderMarketplaceJson deterministic + sorted
+// TEST 3 — renderMarketplaceJson: source="./plugin", no version in plugin entry
 // ---------------------------------------------------------------------------
 describe('renderMarketplaceJson', () => {
-  test('deterministic sorted + has required fields', async () => {
+  test('source="./plugin", no version in plugin entry, owner.name=Qualixar', async () => {
     const { renderMarketplaceJson } = await getModule();
     const manifest = makeManifest();
     const json = renderMarketplaceJson(manifest);
     const parsed = JSON.parse(json);
-    assert.equal(parsed.name, 'superlocalmemory');
-    assert.ok(parsed.owner);
-    assert.equal(parsed.owner.name, 'qualixar');
+    assert.equal(parsed.name, 'qualixar');
+    assert.equal(parsed.owner.name, 'Qualixar');
     assert.ok(Array.isArray(parsed.plugins));
     assert.equal(parsed.plugins.length, 1);
     assert.equal(parsed.plugins[0].name, 'superlocalmemory');
-    assert.equal(parsed.plugins[0].source, './');
+    // DOC-CORRECT: source must be "./plugin" not "./"
+    assert.equal(parsed.plugins[0].source, './plugin', 'source must be ./plugin');
+    // AC-3: NO version key in plugin entry
+    assert.equal(parsed.plugins[0].version, undefined, 'plugin entry must have no version key');
   });
 });
 
 // ---------------------------------------------------------------------------
-// TEST 6 — buildPlan all target = 8×3 + readmes + banners + 2 json
+// TEST 4 — buildPlan: 7 skills in plugin/skills/, no commands/, marketplace at root
 // ---------------------------------------------------------------------------
 describe('buildPlan', () => {
-  test('all target builds 8x3 skill files + 2 json + banners + readme', async () => {
+  test('builds 7 skills in plugin/skills/ + plugin.json + marketplace.json + agents + extras', async () => {
     const { buildPlan } = await getModule();
     const tmp = makeTmp();
-    // create plugin-src structure
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    // agents, commands, rules (skip .gitkeep)
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall cmd\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
+    const manifest = setupFixture(tmp);
+    const plan = buildPlan(tmp, manifest);
 
-    const manifest = makeManifest();
-    const plan = buildPlan(tmp, manifest, 'all');
-
-    // 8 skills × 3 targets = 24 skill files
+    // 7 skill SKILL.md files
     const skillFiles = [...plan.keys()].filter(k => k.endsWith('SKILL.md'));
-    assert.equal(skillFiles.length, 24);
+    assert.equal(skillFiles.length, 7, `expected 7 SKILL.md, got ${skillFiles.length}`);
 
-    // 1 README × 3 targets = 3
-    const readmeFiles = [...plan.keys()].filter(k => k.endsWith('README.md'));
-    assert.equal(readmeFiles.length, 3);
+    // All in plugin/skills/
+    for (const f of skillFiles) {
+      assert.ok(f.includes(`plugin${path.sep}skills${path.sep}`), `SKILL.md must be in plugin/skills/: ${f}`);
+    }
 
-    // 2 JSON files
-    const jsonFiles = [...plan.keys()].filter(k => k.endsWith('.json'));
-    assert.equal(jsonFiles.length, 2);
+    // plugin/.claude-plugin/plugin.json
+    const pluginJsonFiles = [...plan.keys()].filter(k => k.endsWith('plugin.json'));
+    assert.equal(pluginJsonFiles.length, 1);
+    assert.ok(pluginJsonFiles[0].includes(`plugin${path.sep}.claude-plugin`), 'plugin.json must be in plugin/.claude-plugin/');
 
-    // 3 _GENERATED.md banners (one per managed root)
+    // marketplace.json at repo .claude-plugin/ (not plugin/)
+    const marketplaceFiles = [...plan.keys()].filter(k => k.endsWith('marketplace.json'));
+    assert.equal(marketplaceFiles.length, 1);
+    // must be in <root>/.claude-plugin/marketplace.json
+    const mf = marketplaceFiles[0];
+    assert.ok(mf.startsWith(path.join(tmp, '.claude-plugin')), `marketplace.json must be at repo root .claude-plugin/, got ${mf}`);
+
+    // NO commands/ entries
+    const commandFiles = [...plan.keys()].filter(k => k.includes(`${path.sep}commands${path.sep}`));
+    assert.equal(commandFiles.length, 0, 'no commands/ dir in output');
+
+    // _GENERATED.md banner
     const banners = [...plan.keys()].filter(k => k.endsWith('_GENERATED.md'));
-    assert.equal(banners.length, 3);
+    assert.equal(banners.length, 1, 'exactly 1 _GENERATED.md banner in plugin root');
   });
 
-  // TEST 7 — target=ide scoped (only ide/skills written)
-  test('target=ide scopes to ide only', async () => {
-    const { buildPlan } = await getModule();
+  test('manifest.targets.plugin validation: throws on missing plugin key', async () => {
+    const { loadManifest } = await getModule();
     const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    const plan = buildPlan(tmp, manifest, 'ide');
-
-    // only ide target paths
-    const nonIde = [...plan.keys()].filter(k =>
-      !k.includes('ide/skills') && !k.endsWith('_GENERATED.md'));
-    // non-ide entries: could have JSON for plugin target but ide-only should have none
-    // ide target = only ide/skills
-    const ideFiles = [...plan.keys()].filter(k => k.includes('ide/skills'));
-    assert.ok(ideFiles.length > 0, 'ide/skills must have entries');
-
-    // must NOT have src/ or .claude-plugin/skills/ entries
-    const srcFiles = [...plan.keys()].filter(k => k.includes('src/superlocalmemory/skills'));
-    const pluginFiles = [...plan.keys()].filter(k => k.includes('.claude-plugin/skills'));
-    assert.equal(srcFiles.length, 0, 'no src files for ide-only target');
-    assert.equal(pluginFiles.length, 0, 'no .claude-plugin files for ide-only target');
+    const bad = makeManifest({ targets: {} });
+    writeFile(tmp, 'plugin-src/manifest.json', JSON.stringify(bad, null, 2));
+    assert.throws(() => loadManifest(tmp), /targets\.plugin/i);
   });
 });
 
 // ---------------------------------------------------------------------------
-// TEST 8 — GOLDEN snapshot: rendered SKILL.md has correct version + attribution
+// TEST 5 — derivePluginRoot returns plugin/ given targets.plugin
+// ---------------------------------------------------------------------------
+describe('derivePluginRoot', () => {
+  test('derives plugin/ from targets.plugin="plugin/.claude-plugin/plugin.json"', async () => {
+    const { derivePluginRoot } = await getModule();
+    const manifest = makeManifest();
+    const tmp = '/tmp/testrepo';
+    const result = derivePluginRoot(tmp, manifest);
+    assert.equal(result, path.resolve(tmp, 'plugin'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 6 — build-twice = 0 writes (idempotent applyPlan)
+// ---------------------------------------------------------------------------
+describe('applyPlan idempotent', () => {
+  test('second build writes 0 files', async () => {
+    const { buildPlan, applyPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    const plan1 = buildPlan(tmp, manifest);
+    const wrote1 = applyPlan(plan1);
+    assert.ok(wrote1 > 0, 'first build should write something');
+
+    const plan2 = buildPlan(tmp, manifest);
+    const wrote2 = applyPlan(plan2);
+    assert.equal(wrote2, 0, 'second build must write 0 files (idempotent)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 7 — checkPlan: in-sync, stale, missing, extra
+// ---------------------------------------------------------------------------
+describe('checkPlan', () => {
+  test('checkPlan returns empty arrays when in sync', async () => {
+    const { buildPlan, applyPlan, checkPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    applyPlan(buildPlan(tmp, manifest));
+    const { stale, missing, extra } = checkPlan(buildPlan(tmp, manifest), tmp, manifest);
+    assert.equal(stale.length, 0);
+    assert.equal(missing.length, 0);
+    assert.equal(extra.length, 0);
+  });
+
+  test('checkPlan detects stale file', async () => {
+    const { buildPlan, applyPlan, checkPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    applyPlan(buildPlan(tmp, manifest));
+    // tamper with a generated file
+    const skillFile = path.join(tmp, 'plugin', 'skills', 'slm-recall', 'SKILL.md');
+    fs.writeFileSync(skillFile, 'STALE CONTENT\n', 'utf8');
+    const { stale } = checkPlan(buildPlan(tmp, manifest), tmp, manifest);
+    assert.ok(stale.length > 0, 'should detect stale file');
+  });
+
+  test('checkPlan detects missing file', async () => {
+    const { buildPlan, applyPlan, checkPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    applyPlan(buildPlan(tmp, manifest));
+    fs.unlinkSync(path.join(tmp, 'plugin', 'skills', 'slm-recall', 'SKILL.md'));
+    const { missing } = checkPlan(buildPlan(tmp, manifest), tmp, manifest);
+    assert.ok(missing.length > 0, 'should detect missing file');
+  });
+
+  test('checkPlan detects extra orphan file in plugin/', async () => {
+    const { buildPlan, applyPlan, checkPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    applyPlan(buildPlan(tmp, manifest));
+    // add orphan in plugin/skills/
+    writeFile(tmp, 'plugin/skills/slm-orphan/SKILL.md', '# orphan\n');
+    const { extra } = checkPlan(buildPlan(tmp, manifest), tmp, manifest);
+    assert.ok(extra.length > 0, 'should detect extra orphan');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 8 — pruneOrphans: removes orphan, escape guard holds
+// ---------------------------------------------------------------------------
+describe('pruneOrphans', () => {
+  test('prunes removed skill from plugin/, plugin-src untouched', async () => {
+    const { buildPlan, applyPlan, pruneOrphans, deriveManagedRoots } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    applyPlan(buildPlan(tmp, manifest));
+
+    // Simulate skill removed: build without slm-status
+    const reducedManifest = makeManifest({
+      skills: manifest.skills.filter(s => s.name !== 'slm-status'),
+    });
+    // Copy remaining skill sources (slm-status source stays — plugin-src untouched)
+    const reducedPlan = buildPlan(tmp, reducedManifest);
+    const roots = deriveManagedRoots(tmp, reducedManifest);
+    assert.ok(reducedPlan.size > 0, 'plan must not be empty');
+
+    pruneOrphans(tmp, reducedPlan, roots);
+
+    // slm-status removed from plugin/
+    assert.ok(!fs.existsSync(path.join(tmp, 'plugin', 'skills', 'slm-status')));
+    // plugin-src untouched
+    assert.ok(fs.existsSync(path.join(tmp, 'plugin-src', 'skills', 'slm-status', 'SKILL.md')));
+  });
+
+  test('pruneOrphans: escape guard never exits plugin/ root', async () => {
+    const { deriveManagedRoots, pruneOrphans } = await getModule();
+    const tmp = makeTmp();
+    const manifest = makeManifest();
+    // Plant sentinel outside managed roots
+    writeFile(tmp, 'ide/configs/settings.json', '{"protected":true}');
+    const sentinelPath = path.join(tmp, 'ide', 'configs', 'settings.json');
+    const before = fs.readFileSync(sentinelPath, 'utf8');
+
+    // Empty plugin/ (no orphans, roots don't exist yet — prune is a no-op)
+    const roots = deriveManagedRoots(tmp, manifest);
+    // Build a minimal non-empty plan
+    const fakePlan = new Map([[path.join(tmp, 'plugin', 'dummy.txt'), 'x\n']]);
+    pruneOrphans(tmp, fakePlan, roots);
+
+    // sentinel untouched
+    assert.equal(fs.readFileSync(sentinelPath, 'utf8'), before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 9 — SLM_MCP_PROFILE=code in .mcp.json
+// ---------------------------------------------------------------------------
+describe('.mcp.json profile=code', () => {
+  test('plan includes .mcp.json with SLM_MCP_PROFILE=code', async () => {
+    const { buildPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    const plan = buildPlan(tmp, manifest);
+
+    const mcpEntry = [...plan.entries()].find(([k]) => k.endsWith('.mcp.json') && k.includes(`plugin${path.sep}.mcp`));
+    assert.ok(mcpEntry, 'plan must include plugin/.mcp.json');
+    const content = JSON.parse(mcpEntry[1]);
+    const server = Object.values(content.mcpServers)[0];
+    assert.equal(server.env.SLM_MCP_PROFILE, 'code', 'SLM_MCP_PROFILE must be "code"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 10 — renderSkillFile golden snapshot
 // ---------------------------------------------------------------------------
 describe('renderSkillFile', () => {
   test('stamps version 3.6.14 and normalizes OQ-2 attribution', async () => {
     const { renderSkillFile } = await getModule();
     const body = makeSkillBody('slm-recall', '3.4.23');
     const result = renderSkillFile(body, '3.6.14');
-
-    // version stamped
     assert.match(result, /version: "3\.6\.14"/);
-    // V2 → v3.6.14 in attribution footer
     assert.match(result, /SuperLocalMemory v3\.6\.14/);
-    // MIT → AGPL-3.0-or-later in attribution footer
     assert.match(result, /AGPL-3\.0-or-later/);
-    // repo updated in attribution footer
     assert.match(result, /qualixar\/superlocalmemory/);
-    // body prose NOT mutated ("API v2" should be untouched)
     assert.match(result, /API v2/);
-    // "Uses the MIT license approach" in body NOT mutated
     assert.match(result, /Uses the MIT license approach/);
   });
 
@@ -299,251 +463,14 @@ describe('renderSkillFile', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TEST 9 — build-twice = 0 writes (idempotent applyPlan)
-// ---------------------------------------------------------------------------
-describe('applyPlan idempotent', () => {
-  test('second build writes 0 files', async () => {
-    const { buildPlan, applyPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    const plan1 = buildPlan(tmp, manifest, 'all');
-    const wrote1 = applyPlan(plan1);
-    assert.ok(wrote1 > 0, 'first build should write something');
-
-    const plan2 = buildPlan(tmp, manifest, 'all');
-    const wrote2 = applyPlan(plan2);
-    assert.equal(wrote2, 0, 'second build must write 0 files (idempotent)');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TEST 10 — --check exits 0 when in-sync
-// ---------------------------------------------------------------------------
-describe('checkPlan', () => {
-  test('checkPlan returns empty arrays when in sync', async () => {
-    const { buildPlan, applyPlan, checkPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-
-    const { stale, missing, extra } = checkPlan(buildPlan(tmp, manifest, 'all'), tmp, manifest, 'all');
-    assert.equal(stale.length, 0);
-    assert.equal(missing.length, 0);
-    assert.equal(extra.length, 0);
-  });
-
-  // TEST 11 — --check exits 2 when stale
-  test('checkPlan detects stale file', async () => {
-    const { buildPlan, applyPlan, checkPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-    // tamper with a generated file
-    const ideSkill = path.join(tmp, 'ide/skills/slm-recall/SKILL.md');
-    fs.writeFileSync(ideSkill, 'STALE CONTENT\n', 'utf8');
-
-    const { stale } = checkPlan(buildPlan(tmp, manifest, 'all'), tmp, manifest, 'all');
-    assert.ok(stale.length > 0, 'should detect stale file');
-  });
-
-  // TEST 12 — --check detects missing file
-  test('checkPlan detects missing file', async () => {
-    const { buildPlan, applyPlan, checkPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-    // delete a file
-    fs.unlinkSync(path.join(tmp, 'ide/skills/slm-recall/SKILL.md'));
-
-    const { missing } = checkPlan(buildPlan(tmp, manifest, 'all'), tmp, manifest, 'all');
-    assert.ok(missing.length > 0, 'should detect missing file');
-  });
-
-  // TEST 13 — --check detects extra/orphan
-  test('checkPlan detects extra orphan file', async () => {
-    const { buildPlan, applyPlan, checkPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-    // add orphan file
-    writeFile(tmp, 'ide/skills/slm-orphan/SKILL.md', '# orphan\n');
-
-    const { extra } = checkPlan(buildPlan(tmp, manifest, 'all'), tmp, manifest, 'all');
-    assert.ok(extra.length > 0, 'should detect extra orphan');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TEST 14 — prune removes removed skill, escape guard never exits managed roots
-// ---------------------------------------------------------------------------
-describe('pruneOrphans', () => {
-  test('prunes removed skill but guard never exits managed roots', async () => {
-    const { buildPlan, applyPlan, pruneOrphans, deriveManagedRoots } = await getModule();
-    const tmp = makeTmp();
-    const allSkills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                       'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of allSkills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-
-    // Simulate a skill being removed: build plan without slm-status
-    const reducedManifest = makeManifest({
-      skills: manifest.skills.filter(s => s.name !== 'slm-status'),
-    });
-    const reducedPlan = buildPlan(tmp, reducedManifest, 'all');
-    const roots = deriveManagedRoots(tmp, reducedManifest, 'all');
-
-    // must not prune when plan is empty (guard)
-    assert.ok(reducedPlan.size > 0, 'plan must not be empty');
-
-    pruneOrphans(tmp, reducedPlan, roots);
-
-    // slm-status should be removed from all managed dirs
-    assert.ok(!fs.existsSync(path.join(tmp, 'ide/skills/slm-status')));
-    assert.ok(!fs.existsSync(path.join(tmp, 'src/superlocalmemory/skills/slm-status')));
-    assert.ok(!fs.existsSync(path.join(tmp, '.claude-plugin/skills/slm-status')));
-
-    // plugin-src must be untouched (not a managed root)
-    assert.ok(fs.existsSync(path.join(tmp, 'plugin-src/skills/slm-status/SKILL.md')));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TEST 15 — does NOT touch ide/configs (AC-8)
-// ---------------------------------------------------------------------------
-describe('AC-8 non-touch', () => {
-  test('build does not touch ide/configs', async () => {
-    const { buildPlan, applyPlan, pruneOrphans, deriveManagedRoots } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    // plant a sentinel in ide/configs
-    writeFile(tmp, 'ide/configs/settings.json', '{"protected":true}');
-    const sentinelContent = readFile(path.join(tmp, 'ide/configs/settings.json'));
-
-    const manifest = makeManifest();
-    const plan = buildPlan(tmp, manifest, 'all');
-    applyPlan(plan);
-    const roots = deriveManagedRoots(tmp, manifest, 'all');
-    pruneOrphans(tmp, plan, roots);
-
-    // sentinel must be unchanged
-    const afterContent = readFile(path.join(tmp, 'ide/configs/settings.json'));
-    assert.equal(afterContent, sentinelContent);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TEST 16 — README verbatim no-stamp
-// ---------------------------------------------------------------------------
-describe('README verbatim', () => {
-  test('README.md is copied verbatim without version stamp', async () => {
-    const { buildPlan, applyPlan } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    const readmeContent = '# README\n\nversion: "OLD"\n\nSome text.\n';
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', readmeContent);
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-
-    // Check one generated README
-    const genReadme = path.join(tmp, 'ide/skills/slm-optimize/README.md');
-    const content = readFile(genReadme);
-    // must be identical to source (no stamp applied)
-    assert.equal(content, readmeContent);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TEST 17 — main exits 1 on missing manifest
+// TEST 11 — main exits 1 on missing manifest
 // ---------------------------------------------------------------------------
 describe('main exit codes', () => {
   test('main exits 1 when manifest is missing', async () => {
     const tmp = makeTmp();
     const result = spawnSync(
       process.execPath,
-      [SCRIPT_PATH, '--target', 'all', '--quiet'],
+      [SCRIPT_PATH, '--quiet'],
       { cwd: tmp, encoding: 'utf8' }
     );
     assert.equal(result.status, 1, 'should exit 1 on missing manifest');
@@ -551,130 +478,136 @@ describe('main exit codes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TEST 18 — LF + single trailing newline
+// TEST 12 — LF + single trailing newline
 // ---------------------------------------------------------------------------
 describe('output format', () => {
   test('generated SKILL.md uses LF and ends with single newline', async () => {
-    const { renderSkillFile, normalizeNewlines } = await getModule();
+    const { renderSkillFile } = await getModule();
     const body = makeSkillBody('slm-recall', '3.4.23');
     const result = renderSkillFile(body, '3.6.14');
-    // no CRLF
     assert.ok(!result.includes('\r'), 'must not contain CR');
-    // ends with exactly one newline
     assert.ok(result.endsWith('\n'), 'must end with newline');
     assert.ok(!result.endsWith('\n\n'), 'must not end with double newline');
   });
 });
 
 // ---------------------------------------------------------------------------
-// REGRESSION TEST A — root skills/ BYTE-IDENTICAL after full build
+// TEST 13 — REGRESSION: marketplace.json source is "./plugin" not "./"
 // ---------------------------------------------------------------------------
-describe('REGRESSION: root skills/ read-only', () => {
-  test('full build leaves root skills/*/SKILL.md byte-identical (BUG-2 regression)', async () => {
-    // Capture sha256 of all root skills SKILL.md before invoking build
-    const rootSkillsDir = path.join(REPO_ROOT, 'skills');
-    const skillDirs = fs.readdirSync(rootSkillsDir).filter(d =>
-      fs.statSync(path.join(rootSkillsDir, d)).isDirectory()
+describe('REGRESSION: marketplace source="./plugin"', () => {
+  test('renderMarketplaceJson source is ./plugin (DOC-CORRECT)', async () => {
+    const { renderMarketplaceJson } = await getModule();
+    const manifest = makeManifest();
+    const parsed = JSON.parse(renderMarketplaceJson(manifest));
+    assert.equal(parsed.plugins[0].source, './plugin', 'source must be ./plugin per DOC-CORRECT layout');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 14 — REGRESSION: no ide/ or src/ targets in plan
+// ---------------------------------------------------------------------------
+describe('REGRESSION: no multi-skill-target', () => {
+  test('plan contains NO ide/skills or src/superlocalmemory/skills entries', async () => {
+    const { buildPlan } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
+    const plan = buildPlan(tmp, manifest);
+
+    const ideFiles = [...plan.keys()].filter(k => k.includes('ide/skills') || k.includes('ide\\skills'));
+    const srcFiles = [...plan.keys()].filter(k =>
+      k.includes('src/superlocalmemory/skills') || k.includes('src\\superlocalmemory\\skills')
     );
+    assert.equal(ideFiles.length, 0, 'no ide/skills entries allowed');
+    assert.equal(srcFiles.length, 0, 'no src/superlocalmemory/skills entries allowed');
+  });
+});
 
-    const before = {};
-    for (const d of skillDirs) {
-      const p = path.join(rootSkillsDir, d, 'SKILL.md');
-      if (fs.existsSync(p)) {
-        before[p] = sha256(fs.readFileSync(p));
-      }
-    }
+// ---------------------------------------------------------------------------
+// TEST 15 — REGRESSION: partial-target no cross-delete (now: prune scoped to plugin/)
+// ---------------------------------------------------------------------------
+describe('REGRESSION: prune scoped to plugin/ only', () => {
+  test('pruneOrphans only touches plugin/, not other dirs', async () => {
+    const { buildPlan, applyPlan, pruneOrphans, deriveManagedRoots } = await getModule();
+    const tmp = makeTmp();
+    const manifest = setupFixture(tmp);
 
-    // Run the full build (uses real REPO_ROOT)
+    // Plant files in a non-managed dir
+    writeFile(tmp, 'ide/configs/settings.json', '{"protected":true}');
+    writeFile(tmp, 'some-other-dir/file.txt', 'content\n');
+
+    applyPlan(buildPlan(tmp, manifest));
+
+    const plan = buildPlan(tmp, manifest);
+    const roots = deriveManagedRoots(tmp, manifest);
+    pruneOrphans(tmp, plan, roots);
+
+    // Non-managed dirs untouched
+    assert.ok(fs.existsSync(path.join(tmp, 'ide', 'configs', 'settings.json')));
+    assert.ok(fs.existsSync(path.join(tmp, 'some-other-dir', 'file.txt')));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 16 — Full build on real REPO_ROOT succeeds + --check exits 0
+// ---------------------------------------------------------------------------
+describe('Integration: real repo build', () => {
+  test('node build-plugin.js succeeds on real repo', () => {
     const result = spawnSync(
       process.execPath,
-      [SCRIPT_PATH, '--target', 'all', '--quiet'],
+      [SCRIPT_PATH, '--quiet'],
       { cwd: REPO_ROOT, encoding: 'utf8' }
     );
-
-    // Build should succeed
     if (result.status !== 0) {
       console.error('STDOUT:', result.stdout);
       console.error('STDERR:', result.stderr);
     }
     assert.equal(result.status, 0, `build exited ${result.status}: ${result.stderr}`);
+  });
 
-    // Check all root SKILL.md files are unchanged
-    const after = {};
-    for (const d of skillDirs) {
-      const p = path.join(rootSkillsDir, d, 'SKILL.md');
-      if (fs.existsSync(p)) {
-        after[p] = sha256(fs.readFileSync(p));
-      }
-    }
+  test('--check exits 0 after build', () => {
+    const result = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, '--check', '--quiet'],
+      { cwd: REPO_ROOT, encoding: 'utf8' }
+    );
+    assert.equal(result.status, 0, `--check exited ${result.status}: ${result.stdout}${result.stderr}`);
+  });
 
-    for (const [p, hash] of Object.entries(before)) {
-      assert.equal(after[p], hash, `REGRESSION BUG-2: root ${p} was modified by build`);
+  test('plugin/.claude-plugin/plugin.json exists with version=3.6.14', () => {
+    const p = path.join(REPO_ROOT, 'plugin', '.claude-plugin', 'plugin.json');
+    assert.ok(fs.existsSync(p), 'plugin/.claude-plugin/plugin.json must exist');
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert.equal(parsed.version, '3.6.14');
+    assert.equal(parsed.author.name, 'Qualixar');
+    assert.ok(parsed.author.url, 'author.url must be present');
+  });
+
+  test('.claude-plugin/marketplace.json has source="./plugin"', () => {
+    const p = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.json');
+    assert.ok(fs.existsSync(p), '.claude-plugin/marketplace.json must exist');
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert.equal(parsed.plugins[0].source, './plugin');
+    assert.equal(parsed.plugins[0].version, undefined, 'no version in marketplace plugin entry');
+  });
+
+  test('plugin/.mcp.json has SLM_MCP_PROFILE=code', () => {
+    const p = path.join(REPO_ROOT, 'plugin', '.mcp.json');
+    assert.ok(fs.existsSync(p), 'plugin/.mcp.json must exist');
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const server = Object.values(parsed.mcpServers)[0];
+    assert.equal(server.env.SLM_MCP_PROFILE, 'code', 'SLM_MCP_PROFILE must be code');
+  });
+
+  test('all 7 skills exist in plugin/skills/', () => {
+    const skills = ['slm-cache', 'slm-compress', 'slm-graph', 'slm-recall', 'slm-remember', 'slm-session', 'slm-status'];
+    for (const s of skills) {
+      const p = path.join(REPO_ROOT, 'plugin', 'skills', s, 'SKILL.md');
+      assert.ok(fs.existsSync(p), `plugin/skills/${s}/SKILL.md must exist`);
     }
   });
-});
 
-// ---------------------------------------------------------------------------
-// REGRESSION TEST B — partial target (--target ide) leaves src/ and .claude-plugin/ untouched
-// ---------------------------------------------------------------------------
-describe('REGRESSION: partial target no cross-delete (BUG-1 regression)', () => {
-  test('--target ide leaves src/ and .claude-plugin/ skills byte-unchanged', async () => {
-    const { buildPlan, applyPlan, pruneOrphans, deriveManagedRoots } = await getModule();
-    const tmp = makeTmp();
-    const skills = ['slm-recall', 'slm-remember', 'slm-status', 'slm-list-recent',
-                    'slm-switch-profile', 'slm-build-graph', 'slm-show-patterns', 'slm-optimize'];
-    for (const s of skills) {
-      writeFile(tmp, `plugin-src/skills/${s}/SKILL.md`, makeSkillBody(s));
-    }
-    writeFile(tmp, 'plugin-src/skills/slm-optimize/README.md', '# README\n');
-    writeFile(tmp, 'plugin-src/agents/slm-memory-advisor.md', '# Advisor\n');
-    writeFile(tmp, 'plugin-src/commands/slm-recall.md', '# recall\n');
-    writeFile(tmp, 'plugin-src/rules/AGENTS.md', '# AGENTS\n');
-    writeFile(tmp, 'plugin-src/hooks/.gitkeep', '');
-
-    const manifest = makeManifest();
-
-    // First: build ALL to populate src/ and .claude-plugin/
-    applyPlan(buildPlan(tmp, manifest, 'all'));
-
-    // Capture hashes of src/ and .claude-plugin/ skills
-    const srcRoot = path.join(tmp, 'src/superlocalmemory/skills');
-    const pluginRoot = path.join(tmp, '.claude-plugin/skills');
-
-    function captureHashes(dir) {
-      const hashes = {};
-      if (!fs.existsSync(dir)) return hashes;
-      for (const d of fs.readdirSync(dir)) {
-        const sub = path.join(dir, d);
-        if (!fs.statSync(sub).isDirectory()) continue;
-        for (const f of fs.readdirSync(sub)) {
-          const fp = path.join(sub, f);
-          hashes[fp] = sha256(fs.readFileSync(fp));
-        }
-      }
-      return hashes;
-    }
-
-    const srcBefore = captureHashes(srcRoot);
-    const pluginBefore = captureHashes(pluginRoot);
-
-    // Now build with --target ide ONLY (prune only ide/skills)
-    const idePlan = buildPlan(tmp, manifest, 'ide');
-    applyPlan(idePlan);
-    const ideRoots = deriveManagedRoots(tmp, manifest, 'ide');
-    pruneOrphans(tmp, idePlan, ideRoots);
-
-    // src/ and .claude-plugin/ must be unchanged
-    const srcAfter = captureHashes(srcRoot);
-    const pluginAfter = captureHashes(pluginRoot);
-
-    for (const [p, h] of Object.entries(srcBefore)) {
-      assert.equal(srcAfter[p], h, `REGRESSION BUG-1: src/ file ${p} was modified by --target ide`);
-      assert.ok(srcAfter[p] !== undefined, `REGRESSION BUG-1: src/ file ${p} was deleted by --target ide`);
-    }
-    for (const [p, h] of Object.entries(pluginBefore)) {
-      assert.equal(pluginAfter[p], h, `REGRESSION BUG-1: .claude-plugin/ file ${p} was modified by --target ide`);
-      assert.ok(pluginAfter[p] !== undefined, `REGRESSION BUG-1: .claude-plugin/ file ${p} was deleted by --target ide`);
-    }
+  test('no commands/ dir exists in plugin/', () => {
+    const commandsDir = path.join(REPO_ROOT, 'plugin', 'commands');
+    assert.ok(!fs.existsSync(commandsDir), 'plugin/commands/ must not exist');
   });
 });

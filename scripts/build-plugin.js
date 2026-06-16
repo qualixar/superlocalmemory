@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 /**
- * build-plugin.js — WP-04 SLM plugin-src single-source build generator
+ * build-plugin.js — SLM v3.6.14 plugin-src single-source build generator
+ *
+ * DOC-CORRECT layout (verified from official Claude Code plugin docs):
+ *   .claude-plugin/marketplace.json   (repo root; source:"./plugin")
+ *   plugin/                           (PLUGIN ROOT)
+ *     .claude-plugin/plugin.json      (manifest ONLY here; version ONLY here)
+ *     skills/<7>/SKILL.md
+ *     agents/<2>.md
+ *     .mcp.json                       (SLM_MCP_PROFILE=code)
+ *     hooks/hooks.json
+ *     scripts/ensure-venv.sh          (+x)
+ *     settings.json · requirements.txt · CLAUDE.md
  *
  * Node >= 18. Zero external dependencies (only node:fs/path/crypto/process).
  * Exit codes: 0 = success/in-sync  1 = fatal error  2 = --check drift detected
  *
  * Usage:
- *   node scripts/build-plugin.js [--check] [--target ide|pkg|plugin|marketplace|all] [--quiet] [--help]
+ *   node scripts/build-plugin.js [--check] [--quiet] [--help]
  */
 
 'use strict';
@@ -135,20 +146,26 @@ function normalizeAttribution(md, ver) {
 
 /**
  * Full skill file rendering: normalizeNewlines → stampVersion → normalizeAttribution → normalizeNewlines.
+ * Skills without a `version:` line in frontmatter are copied verbatim (no stamp).
  * @param {string} src raw source content
  * @param {string} ver version to stamp
  * @returns {string}
  */
 export function renderSkillFile(src, ver) {
   let out = normalizeNewlines(src);
-  out = stampVersion(out, ver);
+  // Only stamp if there is a version: line in frontmatter — new skills may not have one
+  const fmMatch = out.match(/^(---\n)([\s\S]*?)(^---\n)/m);
+  if (fmMatch && /^version:/m.test(fmMatch[2])) {
+    out = stampVersion(out, ver);
+  }
   out = normalizeAttribution(out, ver);
   out = normalizeNewlines(out);
   return out;
 }
 
 /**
- * Render plugin.json (minimal WP-04, WP-06 extends).
+ * Render plugin.json — full §5 schema. version ONLY here.
+ * Paths are relative to the plugin root (= plugin/).
  * Uses stableStringify — no nested key dropping.
  * @param {object} manifest
  * @returns {string}
@@ -156,33 +173,44 @@ export function renderSkillFile(src, ver) {
 export function renderPluginJson(manifest) {
   const obj = {
     author: {
-      name: 'Varun Pratap Bhardwaj',
-      url: 'https://github.com/qualixar',
+      name: 'Qualixar',
+      url: manifest.repository || 'https://github.com/qualixar/superlocalmemory',
     },
     description: manifest.marketplace.description,
+    displayName: manifest.displayName || manifest.pluginName,
+    hooks: './.mcp.json' === manifest.targets.plugin ? './hooks/hooks.json' : './hooks/hooks.json',
+    keywords: manifest.keywords || [],
+    mcpServers: './.mcp.json',
     name: manifest.pluginName,
+    repository: manifest.repository || '',
     version: manifest.version,
   };
+  // hooks pointer is always ./hooks/hooks.json relative to plugin root
+  obj.hooks = './hooks/hooks.json';
+  obj.mcpServers = './.mcp.json';
   return stableStringify(obj);
 }
 
 /**
- * Render marketplace.json (minimal WP-04).
+ * Render marketplace.json — at repo root .claude-plugin/marketplace.json.
+ * NO version key in plugin entry. source = "./plugin".
  * @param {object} manifest
  * @returns {string}
  */
 export function renderMarketplaceJson(manifest) {
+  const ownerObj = { name: 'Qualixar' };
+  if (manifest.marketplace.ownerEmail) {
+    ownerObj.email = manifest.marketplace.ownerEmail;
+  }
   const obj = {
-    name: manifest.pluginName,
-    owner: {
-      name: manifest.marketplace.owner,
-    },
+    name: 'qualixar',
+    owner: ownerObj,
     plugins: [
       {
+        author: { name: 'Qualixar' },
         description: manifest.marketplace.description,
         name: manifest.pluginName,
-        source: './',
-        version: manifest.version,
+        source: './plugin',
       },
     ],
   };
@@ -224,52 +252,47 @@ export function loadManifest(root) {
   if (!manifest.targets || typeof manifest.targets !== 'object') {
     throw new Error('loadManifest: manifest.targets must be an object');
   }
-
-  // Validate targets: each value must be non-empty and NOT absolute (else repo root catastrophe)
-  for (const [key, val] of Object.entries(manifest.targets)) {
-    if (typeof val !== 'string' || val.trim() === '') {
-      throw new Error(`loadManifest: manifest.targets.${key} must be a non-empty string`);
-    }
-    if (path.isAbsolute(val)) {
-      throw new Error(
-        `loadManifest: manifest.targets.${key} must be relative (absolute paths forbidden)`
-      );
-    }
+  if (!manifest.targets.plugin || typeof manifest.targets.plugin !== 'string') {
+    throw new Error('loadManifest: manifest.targets.plugin is required and must be a string');
+  }
+  if (path.isAbsolute(manifest.targets.plugin)) {
+    throw new Error('loadManifest: manifest.targets.plugin must be relative (absolute paths forbidden)');
   }
 
   return manifest;
 }
 
 // ---------------------------------------------------------------------------
-// Core: deriveManagedRoots — RESPECTS --target
+// Core: derivePluginRoot — the plugin/ subdir from targets.plugin
 // ---------------------------------------------------------------------------
 
 /**
- * Return the set of absolute managed root directories for the given target.
- * Prune ONLY iterates these. This prevents BUG-1 (cross-target deletion).
+ * Derive the plugin root directory (plugin/) from manifest.targets.plugin.
+ * targets.plugin = "plugin/.claude-plugin/plugin.json"
+ * pluginRoot = path.resolve(root, "plugin")
  * @param {string} root
  * @param {object} manifest
- * @param {string} target
+ * @returns {string} absolute path to plugin root
+ */
+export function derivePluginRoot(root, manifest) {
+  // targets.plugin = "plugin/.claude-plugin/plugin.json"
+  // dirname twice: "plugin/.claude-plugin" -> "plugin"
+  const pluginJsonRel = manifest.targets.plugin; // "plugin/.claude-plugin/plugin.json"
+  const pluginClaudeDir = path.dirname(pluginJsonRel); // "plugin/.claude-plugin"
+  const pluginRootRel = path.dirname(pluginClaudeDir); // "plugin"
+  return path.resolve(root, pluginRootRel);
+}
+
+/**
+ * Return the set of absolute managed root directories.
+ * Now only manages plugin/ dir.
+ * @param {string} root
+ * @param {object} manifest
  * @returns {Set<string>}
  */
-export function deriveManagedRoots(root, manifest, target) {
+export function deriveManagedRoots(root, manifest) {
   const roots = new Set();
-  const addRoot = (rel) => roots.add(path.resolve(root, rel));
-
-  if (target === 'ide' || target === 'all') {
-    addRoot(manifest.targets.ide);
-  }
-  if (target === 'pkg' || target === 'all') {
-    addRoot(manifest.targets.pkg);
-  }
-  if (target === 'plugin' || target === 'marketplace' || target === 'all') {
-    addRoot(path.join(path.dirname(manifest.targets.plugin), 'skills'));
-    // For plugin target, the skills subdir IS manifest.targets.plugin
-    // Use manifest.targets.plugin directly since it already points to .claude-plugin/skills
-    roots.delete(path.resolve(root, path.join(path.dirname(manifest.targets.plugin), 'skills')));
-    addRoot(manifest.targets.plugin);
-  }
-
+  roots.add(derivePluginRoot(root, manifest));
   return roots;
 }
 
@@ -279,24 +302,21 @@ export function deriveManagedRoots(root, manifest, target) {
 
 /**
  * Build the full plan as a Map from absolute path to file content.
- * Pure: no IO side effects.
+ * Pure: no IO side effects (reads plugin-src source files).
  * @param {string} root repository root
  * @param {object} manifest parsed manifest
- * @param {string} target 'ide'|'pkg'|'plugin'|'marketplace'|'all'
  * @returns {Map<string, string>}
  */
-export function buildPlan(root, manifest, target) {
+export function buildPlan(root, manifest) {
   const plan = new Map();
+
+  const pluginRoot = derivePluginRoot(root, manifest);
+  const pluginClaudeDir = path.join(pluginRoot, '.claude-plugin');
 
   const sortedSkills = [...manifest.skills].sort((a, b) => a.name.localeCompare(b.name));
 
-  // Determine which targets to include
-  const doIde = target === 'ide' || target === 'all';
-  const doPkg = target === 'pkg' || target === 'all';
-  const doPlugin = target === 'plugin' || target === 'marketplace' || target === 'all';
-
   // ---------------------------------------------------------------------------
-  // Skills
+  // Skills → plugin/skills/<name>/SKILL.md
   // ---------------------------------------------------------------------------
   for (const skill of sortedSkills) {
     const srcSkillDir = path.join(root, 'plugin-src', 'skills', skill.name);
@@ -310,18 +330,9 @@ export function buildPlan(root, manifest, target) {
     }
 
     const rendered = renderSkillFile(srcContent, manifest.version);
+    plan.set(path.join(pluginRoot, 'skills', skill.name, 'SKILL.md'), rendered);
 
-    if (doIde) {
-      plan.set(path.join(root, manifest.targets.ide, skill.name, 'SKILL.md'), rendered);
-    }
-    if (doPkg) {
-      plan.set(path.join(root, manifest.targets.pkg, skill.name, 'SKILL.md'), rendered);
-    }
-    if (doPlugin) {
-      plan.set(path.join(root, manifest.targets.plugin, skill.name, 'SKILL.md'), rendered);
-    }
-
-    // README verbatim (no stamp)
+    // README verbatim (no stamp) if present
     if (skill.hasReadme) {
       const srcReadme = path.join(srcSkillDir, 'README.md');
       let readmeContent;
@@ -330,62 +341,86 @@ export function buildPlan(root, manifest, target) {
       } catch (err) {
         throw new Error(`buildPlan: cannot read README ${srcReadme}: ${err.message}`);
       }
-      if (doIde) {
-        plan.set(path.join(root, manifest.targets.ide, skill.name, 'README.md'), readmeContent);
-      }
-      if (doPkg) {
-        plan.set(path.join(root, manifest.targets.pkg, skill.name, 'README.md'), readmeContent);
-      }
-      if (doPlugin) {
-        plan.set(
-          path.join(root, manifest.targets.plugin, skill.name, 'README.md'),
-          readmeContent
-        );
-      }
+      plan.set(path.join(pluginRoot, 'skills', skill.name, 'README.md'), readmeContent);
     }
   }
 
   // ---------------------------------------------------------------------------
-  // _GENERATED.md banners — one per managed root (CRIT-2: in-plan for --check)
+  // _GENERATED.md banner in plugin root
   // ---------------------------------------------------------------------------
-  const managedRoots = deriveManagedRoots(root, manifest, target);
-  for (const managedRoot of managedRoots) {
-    plan.set(path.join(managedRoot, '_GENERATED.md'), GENERATED_BANNER);
+  plan.set(path.join(pluginRoot, '_GENERATED.md'), GENERATED_BANNER);
+
+  // ---------------------------------------------------------------------------
+  // plugin/.claude-plugin/plugin.json
+  // ---------------------------------------------------------------------------
+  plan.set(path.join(pluginClaudeDir, 'plugin.json'), renderPluginJson(manifest));
+
+  // ---------------------------------------------------------------------------
+  // .claude-plugin/marketplace.json at REPO ROOT (not plugin root)
+  // ---------------------------------------------------------------------------
+  plan.set(path.join(root, '.claude-plugin', 'marketplace.json'), renderMarketplaceJson(manifest));
+
+  // ---------------------------------------------------------------------------
+  // Agents (verbatim, no commands/)
+  // ---------------------------------------------------------------------------
+  const agentsSrcPath = path.join(root, 'plugin-src', 'agents');
+  if (fs.existsSync(agentsSrcPath)) {
+    for (const fname of fs.readdirSync(agentsSrcPath)) {
+      if (fname === '.gitkeep') continue;
+      const srcFile = path.join(agentsSrcPath, fname);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      const content = fs.readFileSync(srcFile, 'utf8');
+      plan.set(path.join(pluginRoot, 'agents', fname), content);
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // JSON outputs (plugin + marketplace targets)
+  // hooks: plugin/hooks/
   // ---------------------------------------------------------------------------
-  if (doPlugin) {
-    const pluginRoot = path.resolve(root, path.dirname(manifest.targets.plugin));
-    plan.set(path.join(pluginRoot, 'plugin.json'), renderPluginJson(manifest));
-    plan.set(path.join(pluginRoot, 'marketplace.json'), renderMarketplaceJson(manifest));
-
-    // Copy WP-05 agents, commands, rules (skip .gitkeep) verbatim
-    const wp05Sources = ['agents', 'commands', 'rules'];
-    for (const srcDir of wp05Sources) {
-      const srcPath = path.join(root, 'plugin-src', srcDir);
-      if (!fs.existsSync(srcPath)) continue;
-      for (const fname of fs.readdirSync(srcPath)) {
-        if (fname === '.gitkeep') continue;
-        const srcFile = path.join(srcPath, fname);
-        if (!fs.statSync(srcFile).isFile()) continue;
-        const content = fs.readFileSync(srcFile, 'utf8');
-        plan.set(path.join(pluginRoot, srcDir, fname), content);
-      }
+  const hooksPath = path.join(root, 'plugin-src', 'hooks');
+  if (fs.existsSync(hooksPath)) {
+    for (const fname of fs.readdirSync(hooksPath)) {
+      if (fname === '.gitkeep') continue;
+      const srcFile = path.join(hooksPath, fname);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      const content = fs.readFileSync(srcFile, 'utf8');
+      plan.set(path.join(pluginRoot, 'hooks', fname), content);
     }
+  }
 
-    // hooks: copy non-.gitkeep files if any (hooks dir may only have .gitkeep)
-    const hooksPath = path.join(root, 'plugin-src', 'hooks');
-    if (fs.existsSync(hooksPath)) {
-      for (const fname of fs.readdirSync(hooksPath)) {
-        if (fname === '.gitkeep') continue;
-        const srcFile = path.join(hooksPath, fname);
-        if (!fs.statSync(srcFile).isFile()) continue;
-        const content = fs.readFileSync(srcFile, 'utf8');
-        plan.set(path.join(pluginRoot, 'hooks', fname), content);
-      }
+  // ---------------------------------------------------------------------------
+  // Root-level plugin-src files → plugin/ (.mcp.json, settings.json, requirements.txt)
+  // ---------------------------------------------------------------------------
+  const rootFiles = ['.mcp.json', 'settings.json', 'requirements.txt'];
+  for (const fname of rootFiles) {
+    const srcFile = path.join(root, 'plugin-src', fname);
+    if (fs.existsSync(srcFile)) {
+      const content = fs.readFileSync(srcFile, 'utf8');
+      plan.set(path.join(pluginRoot, fname), content);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // scripts/ → plugin/scripts/
+  // ---------------------------------------------------------------------------
+  const scriptsSrcPath = path.join(root, 'plugin-src', 'scripts');
+  if (fs.existsSync(scriptsSrcPath)) {
+    for (const fname of fs.readdirSync(scriptsSrcPath)) {
+      if (fname === '.gitkeep') continue;
+      const srcFile = path.join(scriptsSrcPath, fname);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      const content = fs.readFileSync(srcFile, 'utf8');
+      plan.set(path.join(pluginRoot, 'scripts', fname), content);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // CLAUDE.md from rules/CLAUDE.md.fragment → plugin/CLAUDE.md
+  // ---------------------------------------------------------------------------
+  const claudeFragmentPath = path.join(root, 'plugin-src', 'rules', 'CLAUDE.md.fragment');
+  if (fs.existsSync(claudeFragmentPath)) {
+    const fragmentContent = fs.readFileSync(claudeFragmentPath, 'utf8');
+    plan.set(path.join(pluginRoot, 'CLAUDE.md'), fragmentContent);
   }
 
   return plan;
@@ -399,8 +434,7 @@ export function buildPlan(root, manifest, target) {
  * Apply the plan: write files only when content has changed (by sha256).
  * Creates parent directories as needed.
  * IMPORTANT: If the target path is a symlink, unlink it first before writing.
- * This prevents writes from propagating through symlinks to legacy source files
- * (e.g., ide/skills/slm-optimize/SKILL.md → skills/slm-optimize/SKILL.md).
+ * This prevents writes from propagating through symlinks to legacy source files.
  * @param {Map<string, string>} plan
  * @returns {number} number of files written
  */
@@ -425,7 +459,18 @@ export function applyPlan(plan) {
     if (existingHash !== newHash) {
       fs.mkdirSync(path.dirname(absPath), { recursive: true });
       fs.writeFileSync(absPath, content, 'utf8');
+      // Preserve executable bit for shell scripts
+      if (absPath.endsWith('.sh')) {
+        const mode = fs.statSync(absPath).mode;
+        fs.chmodSync(absPath, mode | 0o111);
+      }
       written++;
+    } else if (absPath.endsWith('.sh')) {
+      // Ensure executable bit even if content unchanged
+      const mode = fs.statSync(absPath).mode;
+      if (!(mode & 0o100)) {
+        fs.chmodSync(absPath, mode | 0o111);
+      }
     }
   }
   return written;
@@ -444,10 +489,9 @@ function sha256(content) {
  * @param {Map<string, string>} plan
  * @param {string} root
  * @param {object} manifest
- * @param {string} target
  * @returns {{ stale: string[], missing: string[], extra: string[] }}
  */
-export function checkPlan(plan, root, manifest, target) {
+export function checkPlan(plan, root, manifest) {
   const stale = [];
   const missing = [];
   const extra = [];
@@ -462,8 +506,8 @@ export function checkPlan(plan, root, manifest, target) {
     }
   }
 
-  // Find extra files in managed roots
-  const managedRoots = deriveManagedRoots(root, manifest, target);
+  // Find extra files in managed roots (only plugin/)
+  const managedRoots = deriveManagedRoots(root, manifest);
   for (const managedRoot of managedRoots) {
     if (!fs.existsSync(managedRoot)) continue;
     for (const absPath of walkDir(managedRoot)) {
@@ -477,7 +521,7 @@ export function checkPlan(plan, root, manifest, target) {
 }
 
 // ---------------------------------------------------------------------------
-// IO: pruneOrphans — GUARDED: plan.size>0, path in managed root, not in --check
+// IO: pruneOrphans — GUARDED: plan.size>0, path in managed root
 // ---------------------------------------------------------------------------
 
 /**
@@ -556,15 +600,14 @@ function cleanEmptyDirs(dir, stopAt) {
 // ---------------------------------------------------------------------------
 
 /**
- * List all files in managed roots (not in plan).
+ * List all files in managed roots.
  * @param {string} root
  * @param {object} manifest
- * @param {string} target
  * @returns {string[]}
  */
-export function listTargetFiles(root, manifest, target) {
+export function listTargetFiles(root, manifest) {
   const result = [];
-  for (const managedRoot of deriveManagedRoots(root, manifest, target)) {
+  for (const managedRoot of deriveManagedRoots(root, manifest)) {
     for (const f of walkDir(managedRoot)) {
       result.push(f);
     }
@@ -589,9 +632,16 @@ Usage: node scripts/build-plugin.js [options]
 
 Options:
   --check              Check if generated files are in-sync (exit 2 if not)
-  --target <t>         ide|pkg|plugin|marketplace|all (default: all)
   --quiet              Suppress non-error output
   --help, -h           Show this help
+
+Output topology:
+  .claude-plugin/marketplace.json   (repo root; source:"./plugin")
+  plugin/                           (plugin root)
+    .claude-plugin/plugin.json      (manifest; version only here)
+    skills/<7>/SKILL.md
+    agents/*.md
+    .mcp.json  hooks/  scripts/  settings.json  requirements.txt  CLAUDE.md
 
 Exit codes: 0=success/in-sync  1=fatal  2=check-drift
 `.trimStart());
@@ -600,14 +650,6 @@ Exit codes: 0=success/in-sync  1=fatal  2=check-drift
 
   const isCheck = args.includes('--check');
   const isQuiet = args.includes('--quiet');
-  const targetIdx = args.indexOf('--target');
-  const target = targetIdx >= 0 ? args[targetIdx + 1] : 'all';
-
-  const validTargets = new Set(['ide', 'pkg', 'plugin', 'marketplace', 'all']);
-  if (!validTargets.has(target)) {
-    console.error(`build-plugin: unknown target "${target}". Use: ${[...validTargets].join('|')}`);
-    process.exit(1);
-  }
 
   const root = process.cwd();
 
@@ -621,7 +663,7 @@ Exit codes: 0=success/in-sync  1=fatal  2=check-drift
 
   let plan;
   try {
-    plan = buildPlan(root, manifest, target);
+    plan = buildPlan(root, manifest);
   } catch (err) {
     console.error(`build-plugin: ${err.message}`);
     process.exit(1);
@@ -629,7 +671,7 @@ Exit codes: 0=success/in-sync  1=fatal  2=check-drift
 
   if (isCheck) {
     // Never prune in --check mode
-    const { stale, missing, extra } = checkPlan(plan, root, manifest, target);
+    const { stale, missing, extra } = checkPlan(plan, root, manifest);
     if (stale.length > 0 || missing.length > 0 || extra.length > 0) {
       if (!isQuiet) {
         if (stale.length) console.log('STALE:\n' + stale.map(f => `  ${f}`).join('\n'));
@@ -651,9 +693,9 @@ Exit codes: 0=success/in-sync  1=fatal  2=check-drift
     process.exit(1);
   }
 
-  // Prune orphans (CRIT-1: guarded inside pruneOrphans)
+  // Prune orphans in plugin/ (CRIT-1: guarded inside pruneOrphans)
   try {
-    const managedRoots = deriveManagedRoots(root, manifest, target);
+    const managedRoots = deriveManagedRoots(root, manifest);
     pruneOrphans(root, plan, managedRoots);
   } catch (err) {
     console.error(`build-plugin: pruneOrphans failed: ${err.message}`);
@@ -661,7 +703,7 @@ Exit codes: 0=success/in-sync  1=fatal  2=check-drift
   }
 
   if (!isQuiet) {
-    console.log(`build-plugin: done (${written} file(s) written, target=${target})`);
+    console.log(`build-plugin: done (${written} file(s) written)`);
   }
   process.exit(0);
 }

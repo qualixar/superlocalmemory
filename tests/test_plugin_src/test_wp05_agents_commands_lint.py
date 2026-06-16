@@ -48,9 +48,15 @@ ALLOWED_TOOLS: frozenset[str] = CORE_TOOLS | BUILTINS
 
 REAL_SKILLS: frozenset[str] = frozenset(
     {
+        # v3.6.14 new skills (7)
+        "slm-cache",
+        "slm-compress",
+        "slm-graph",
         "slm-recall",
         "slm-remember",
+        "slm-session",
         "slm-status",
+        # retired skills (kept for backward-compat lint of older files)
         "slm-optimize",
         "slm-build-graph",
         "slm-list-recent",

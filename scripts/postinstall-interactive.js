@@ -689,33 +689,6 @@ async function main() {
     return 4;
   }
 
-  // S9-DASH-11: auto-install SLM skills into ~/.claude/skills/ so
-  // /slm-recall, /slm-remember, /slm-status etc. appear immediately
-  // in Claude Code without a manual step.
-  try {
-    const skillsSrc = path.join(__dirname, '..', 'skills');
-    const claudeSkillsDir = path.join(os.homedir(), '.claude', 'skills');
-    if (fs.existsSync(skillsSrc)) {
-      fs.mkdirSync(claudeSkillsDir, { recursive: true, mode: 0o700 });
-      const skillDirs = fs.readdirSync(skillsSrc);
-      let installed = 0;
-      for (const d of skillDirs) {
-        const src = path.join(skillsSrc, d, 'SKILL.md');
-        if (fs.existsSync(src)) {
-          const dst = path.join(claudeSkillsDir, d + '.md');
-          fs.copyFileSync(src, dst);
-          installed += 1;
-        }
-      }
-      if (installed > 0) {
-        console.log('SLM: installed ' + installed + ' skills → ' + claudeSkillsDir);
-        console.log('     Use /slm-recall, /slm-remember, /slm-status in Claude Code');
-      }
-    }
-  } catch (e) {
-    // Non-fatal — skills can be installed manually via install-skills.sh
-    console.log('SLM: skill install skipped (' + e.message + ')');
-  }
 
   // UX-G2: show the one-screen delta banner so upgraders see what shipped.
   printLivingBrainDelta();

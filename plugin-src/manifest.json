@@ -1,24 +1,25 @@
 {
   "version": "3.6.14",
   "pluginName": "superlocalmemory",
+  "displayName": "SuperLocalMemory",
+  "repository": "https://github.com/qualixar/superlocalmemory",
+  "keywords": ["memory", "mcp", "agents", "local-first", "context-compression"],
   "skills": [
-    { "name": "slm-build-graph", "hasReadme": false },
-    { "name": "slm-list-recent", "hasReadme": false },
-    { "name": "slm-optimize", "hasReadme": true },
+    { "name": "slm-cache", "hasReadme": false },
+    { "name": "slm-compress", "hasReadme": false },
+    { "name": "slm-graph", "hasReadme": false },
     { "name": "slm-recall", "hasReadme": false },
     { "name": "slm-remember", "hasReadme": false },
-    { "name": "slm-show-patterns", "hasReadme": false },
-    { "name": "slm-status", "hasReadme": false },
-    { "name": "slm-switch-profile", "hasReadme": false }
+    { "name": "slm-session", "hasReadme": false },
+    { "name": "slm-status", "hasReadme": false }
   ],
   "targets": {
-    "ide": "ide/skills",
-    "pkg": "src/superlocalmemory/skills",
-    "plugin": ".claude-plugin/skills"
+    "plugin": "plugin/.claude-plugin/plugin.json"
   },
   "marketplace": {
     "owner": "qualixar",
+    "ownerEmail": "varun.pratap.bhardwaj@gmail.com",
     "repo": "superlocalmemory",
-    "description": "SuperLocalMemory skill plugin for Claude Code"
+    "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server. 20-tool code profile with graph intelligence."
   }
 }
