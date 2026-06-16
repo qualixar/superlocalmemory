@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "superlocalmemory": {
-      "command": "${CLAUDE_PLUGIN_DATA}/venv/bin/slm",
-      "args": [
-        "mcp"
-      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/slm-launch",
+      "args": [],
       "env": {
         "SLM_MCP_PROFILE": "code",
         "SLM_DATA_DIR": "${CLAUDE_PLUGIN_DATA}"

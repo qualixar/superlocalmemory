@@ -427,6 +427,30 @@ export function buildPlan(root, manifest) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure utility: _isExecutable — determines if a file should have +x bit set.
+// Shell scripts (.sh) and extensionless launcher scripts (e.g. slm-launch)
+// in scripts/ directories need the executable bit.
+// ---------------------------------------------------------------------------
+
+/**
+ * Return true if the file at absPath should receive the executable (+x) bit.
+ * Rules:
+ *  - Any file ending in .sh
+ *  - Any extensionless file inside a scripts/ directory (cross-platform launchers)
+ * @param {string} absPath
+ * @returns {boolean}
+ */
+function _isExecutable(absPath) {
+  if (absPath.endsWith('.sh')) return true;
+  // Extensionless files in a scripts/ directory (e.g. slm-launch)
+  const base = path.basename(absPath);
+  if (!base.includes('.') && absPath.includes(`${path.sep}scripts${path.sep}`)) {
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // IO: applyPlan — write-only-if-changed via sha256
 // ---------------------------------------------------------------------------
 
@@ -459,13 +483,13 @@ export function applyPlan(plan) {
     if (existingHash !== newHash) {
       fs.mkdirSync(path.dirname(absPath), { recursive: true });
       fs.writeFileSync(absPath, content, 'utf8');
-      // Preserve executable bit for shell scripts
-      if (absPath.endsWith('.sh')) {
+      // Preserve executable bit for shell scripts and extensionless launchers
+      if (_isExecutable(absPath)) {
         const mode = fs.statSync(absPath).mode;
         fs.chmodSync(absPath, mode | 0o111);
       }
       written++;
-    } else if (absPath.endsWith('.sh')) {
+    } else if (_isExecutable(absPath)) {
       // Ensure executable bit even if content unchanged
       const mode = fs.statSync(absPath).mode;
       if (!(mode & 0o100)) {

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# slm-launch — WP-F SuperLocalMemory MCP launcher (POSIX)
+#
+# Cross-platform counterpart: slm-launch.bat (Windows)
+# Referenced by plugin/.mcp.json as the MCP server command.
+#
+# Resolves the correct venv binary for POSIX:
+#   ${CLAUDE_PLUGIN_DATA}/venv/bin/slm mcp
+#
+# On Windows, Claude Code invokes slm-launch.bat instead (same-stem, .bat extension).
+#
+# Environment:
+#   CLAUDE_PLUGIN_DATA — persistent data dir where venv lives
+
+exec "${CLAUDE_PLUGIN_DATA}/venv/bin/slm" mcp

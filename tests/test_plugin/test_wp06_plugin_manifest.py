@@ -161,26 +161,50 @@ class TestMcpJson:
             ".mcp.json not found at plugin/.mcp.json (must be at plugin root)"
         )
 
-    def test_mcp_command_ends_with_venv_bin_slm(self) -> None:
+    def test_mcp_command_resolves_slm_launcher(self) -> None:
+        """WP-F cross-platform fix: command must reference the slm-launch wrapper
+        (not the hardcoded POSIX-only venv/bin/slm path).
+        The launcher resolves venv/bin/slm on POSIX and venv\\Scripts\\slm.exe on Windows."""
         server = self._get_server()
         assert "command" in server, ".mcp.json server missing 'command'"
         cmd = server["command"]
-        assert cmd.endswith("/venv/bin/slm"), (
-            f"command must end with /venv/bin/slm, got {cmd!r}"
+        # Must reference the cross-platform launcher, not the POSIX-only venv/bin/slm
+        assert "slm-launch" in cmd or cmd.endswith("/venv/bin/slm"), (
+            f"command must reference slm-launch launcher or venv/bin/slm, got {cmd!r}"
+        )
+        # Must NOT be the bare POSIX venv path (that is the defect we fixed)
+        assert cmd != "${CLAUDE_PLUGIN_DATA}/venv/bin/slm", (
+            "command must not be the bare POSIX-only path ${CLAUDE_PLUGIN_DATA}/venv/bin/slm "
+            "(Windows uses venv\\Scripts\\slm.exe; use slm-launch wrapper instead)"
         )
 
-    def test_mcp_command_contains_claude_plugin_data(self) -> None:
+    def test_mcp_command_contains_claude_plugin_root_or_data(self) -> None:
+        """Command must contain a plugin runtime env variable for portability."""
         server = self._get_server()
         cmd = server["command"]
-        assert "${CLAUDE_PLUGIN_DATA}" in cmd, (
-            f"command must contain ${{CLAUDE_PLUGIN_DATA}} variable, got {cmd!r}"
+        has_env_var = "${CLAUDE_PLUGIN_DATA}" in cmd or "${CLAUDE_PLUGIN_ROOT}" in cmd
+        assert has_env_var, (
+            f"command must contain ${{CLAUDE_PLUGIN_DATA}} or ${{CLAUDE_PLUGIN_ROOT}} variable, got {cmd!r}"
         )
 
-    def test_mcp_args_equals_mcp(self) -> None:
+    def test_mcp_args_empty_or_mcp(self) -> None:
+        """WP-F: With the slm-launch wrapper, the launcher passes 'mcp' internally,
+        so args can be [] or ['mcp']. Both are valid; bare 'slm' needs 'mcp' somewhere."""
         server = self._get_server()
-        assert server.get("args") == ["mcp"], (
-            f"args must be ['mcp'], got {server.get('args')!r}"
-        )
+        args = server.get("args", [])
+        cmd = server.get("command", "")
+        # If command is a launcher wrapper, args can be empty
+        # If command is the direct slm binary, args must include 'mcp'
+        if "slm-launch" in cmd:
+            # Launcher passes mcp internally — args should be empty
+            assert args == [] or args == ["mcp"], (
+                f"With slm-launch wrapper, args must be [] or ['mcp'], got {args!r}"
+            )
+        else:
+            # Direct binary — must pass 'mcp'
+            assert args == ["mcp"], (
+                f"args must be ['mcp'] when command is direct slm binary, got {args!r}"
+            )
 
     def test_mcp_command_is_not_bare_slm(self) -> None:
         """Command must NOT be the bare string 'slm' (must be absolute venv path)."""
