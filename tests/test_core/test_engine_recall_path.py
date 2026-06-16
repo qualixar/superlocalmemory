@@ -195,20 +195,21 @@ class TestRecallAdaptiveRanking:
     """Verify adaptive ranking phases."""
 
     def test_recall_phase1_no_reranking(
-        self, engine_with_mock_deps: MemoryEngine,
+        self, engine_with_mock_deps: MemoryEngine, tmp_path: Path,
     ) -> None:
         """With < 50 feedback signals, adaptive ranking returns response unchanged."""
         fact = _make_fact("rank-f1")
         mock_response = _make_recall_response(facts=[fact])
         re = engine_with_mock_deps._retrieval_engine
 
+        # Use a real tmp_path as the fake home so that all paths derived from
+        # Path.home() (learning.db, .install_token, etc.) resolve to real
+        # temp-dir locations. This prevents os.open(str(MagicMock())) from
+        # creating stray "<MagicMock id='...'>" files in the repo root.
+        fake_home = tmp_path / "fake_home"
+        fake_home.mkdir()
         with patch.object(re, 'recall', return_value=mock_response):
-            # Patch pathlib.Path inside the function (imported locally at line 634)
-            with patch("pathlib.Path.home") as mock_home:
-                mock_learning = MagicMock()
-                mock_learning.exists.return_value = False
-                mock_home.return_value.__truediv__ = MagicMock(return_value=mock_learning)
-                mock_learning.__truediv__ = MagicMock(return_value=mock_learning)
+            with patch("pathlib.Path.home", return_value=fake_home):
                 result = engine_with_mock_deps.recall("rank query")
                 # Result should still have the fact (no crash, response unchanged)
                 assert len(result.results) >= 0
