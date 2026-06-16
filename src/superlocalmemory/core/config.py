@@ -749,7 +749,14 @@ class SLMConfig:
     @classmethod
     def load(cls, config_path: Path | None = None) -> SLMConfig:
         """Load config from JSON file. Returns default Mode A if file doesn't exist."""
-        path = config_path or (DEFAULT_BASE_DIR / "config.json")
+        # WP-07: resolve base dir through slm_home() at call time so all 3 env
+        # aliases (SLM_DATA_DIR → SL_MEMORY_PATH → SLM_HOME) are honoured.
+        try:
+            from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+            _runtime_base = _slm_home()
+        except Exception:
+            _runtime_base = DEFAULT_BASE_DIR
+        path = config_path or (_runtime_base / "config.json")
         if not path.exists():
             return cls.for_mode(Mode.A)
         import json
@@ -759,7 +766,7 @@ class SLMConfig:
         emb_data = data.get("embedding", {})
         # V3.5.9: read base_dir before constructing config so for_mode() builds
         # db_path from the user's directory, not DEFAULT_BASE_DIR.
-        raw_base_dir = Path(data.get("base_dir", str(DEFAULT_BASE_DIR)))
+        raw_base_dir = Path(data.get("base_dir", str(_runtime_base)))
         config = cls.for_mode(
             mode,
             llm_provider=llm_data.get("provider", ""),
@@ -997,7 +1004,15 @@ class SLMConfig:
         embedding_dimension: int = 0,
     ) -> SLMConfig:
         """Create config with mode-appropriate defaults."""
-        _base = base_dir or DEFAULT_BASE_DIR
+        # WP-07: resolve base dir via slm_home() at call time when not explicit.
+        if base_dir is None:
+            try:
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _base = _slm_home()
+            except Exception:
+                _base = DEFAULT_BASE_DIR
+        else:
+            _base = base_dir
 
         if mode == Mode.A:
             # V3.4.24: If user chose "openai" provider, honour their custom
@@ -1140,7 +1155,15 @@ class SLMConfig:
 
         Returns ``\"b\"`` (the default) if the file doesn't exist.
         """
-        _base = base_dir or DEFAULT_BASE_DIR
+        # WP-07: resolve via slm_home() at call time when base_dir not explicit.
+        if base_dir is None:
+            try:
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _base = _slm_home()
+            except Exception:
+                _base = DEFAULT_BASE_DIR
+        else:
+            _base = base_dir
         _f = _base / CURRENT_MODE_FILE
         try:
             return _f.read_text(encoding="utf-8").strip().lower() or "b"
@@ -1150,7 +1173,15 @@ class SLMConfig:
     @staticmethod
     def write_current_mode(mode: str, base_dir: Path | None = None) -> None:
         """Write the current mode letter to ``current_mode``."""
-        _base = base_dir or DEFAULT_BASE_DIR
+        # WP-07: resolve via slm_home() at call time when base_dir not explicit.
+        if base_dir is None:
+            try:
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _base = _slm_home()
+            except Exception:
+                _base = DEFAULT_BASE_DIR
+        else:
+            _base = base_dir
         _base.mkdir(parents=True, exist_ok=True)
         (_base / CURRENT_MODE_FILE).write_text(
             mode.lower().strip(), encoding="utf-8",
@@ -1185,7 +1216,15 @@ class SLMConfig:
         import dataclasses
 
         from superlocalmemory.storage.models import Mode as _M
-        _base = base_dir or DEFAULT_BASE_DIR
+        # WP-07: resolve via slm_home() at call time when base_dir not explicit.
+        if base_dir is None:
+            try:
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _base = _slm_home()
+            except Exception:
+                _base = DEFAULT_BASE_DIR
+        else:
+            _base = base_dir
         _base.mkdir(parents=True, exist_ok=True)
 
         old_config = cls.load(_base / "config.json")
@@ -1252,7 +1291,15 @@ class SLMConfig:
         Called on daemon boot. Idempotent — if ``current_mode`` already
         exists, this is a no-op. Returns True if migration was performed.
         """
-        _base = base_dir or DEFAULT_BASE_DIR
+        # WP-07: resolve via slm_home() at call time when base_dir not explicit.
+        if base_dir is None:
+            try:
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _base = _slm_home()
+            except Exception:
+                _base = DEFAULT_BASE_DIR
+        else:
+            _base = base_dir
         _current = _base / CURRENT_MODE_FILE
         if _current.exists():
             return False  # already migrated

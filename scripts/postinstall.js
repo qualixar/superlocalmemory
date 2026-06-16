@@ -131,12 +131,31 @@ if (pipInstallPkg.status === 0) {
         if (retryResult.status === 0) {
             console.log('✓ SuperLocalMemory Python package installed (--user)');
         } else {
-            console.log('⚠ Could not pip install the package. The Node.js wrapper (slm-npm)');
-            console.log('  sets PYTHONPATH automatically, so CLI will still work.');
+            // WP-07: --user also failed — try --break-system-packages last-resort,
+            // then surface the pipx hint (PEP 668 advisory).
+            const retryBsp = spawnSync(pythonParts[0], [
+                ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet',
+                '--disable-pip-version-check', '--break-system-packages', pkgRoot,
+            ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
+            if (retryBsp.status === 0) {
+                console.log('✓ SuperLocalMemory Python package installed (--break-system-packages)');
+            } else {
+                console.log('⚠ pip install failed (PEP 668 — externally managed Python).');
+                console.log('  The Node.js wrapper (slm-npm) sets PYTHONPATH automatically,');
+                console.log('  so the CLI will still work via npm.');
+                console.log('');
+                console.log('  To install into an isolated environment (recommended):');
+                console.log('    pipx install superlocalmemory');
+                console.log('  Last resort (may break OS packages):');
+                console.log('    pip install --break-system-packages superlocalmemory');
+            }
         }
     } else {
         console.log('⚠ Could not pip install the package. The Node.js wrapper (slm-npm)');
         console.log('  sets PYTHONPATH automatically, so CLI will still work.');
+        console.log('');
+        console.log('  If you see a PEP 668 error in future, install via:');
+        console.log('    pipx install superlocalmemory');
     }
 }
 

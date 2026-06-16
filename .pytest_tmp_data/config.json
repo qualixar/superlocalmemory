@@ -1,0 +1,44 @@
+{
+  "mode": "a",
+  "active_profile": "default",
+  "base_dir": "/Users/varunpratapbhardwaj/Documents/work/varun-world/Agentic_official/superlocalmemory/.pytest_tmp_data",
+  "llm": {
+    "provider": "",
+    "model": "",
+    "api_key": "",
+    "base_url": ""
+  },
+  "embedding": {
+    "model_name": "nomic-ai/nomic-embed-text-v1.5",
+    "dimension": 768,
+    "provider": "sentence-transformers",
+    "api_endpoint": "",
+    "api_key": "",
+    "deployment_name": ""
+  },
+  "retrieval": {
+    "use_cross_encoder": true,
+    "cross_encoder_model": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    "cross_encoder_backend": ""
+  },
+  "evolution": {
+    "enabled": false,
+    "backend": "auto",
+    "max_evolutions_per_cycle": 3
+  },
+  "injection": {
+    "enabled": true,
+    "total_budget_tokens_a": 2000,
+    "total_budget_tokens_b": 4000,
+    "total_budget_tokens_c": 8000,
+    "per_memory_max_tokens": 600,
+    "core_block_enabled": true,
+    "core_block_max_facts": 5,
+    "core_block_max_tokens": 1000,
+    "core_block_importance_min": 0.8,
+    "core_block_min_access_count": 2,
+    "edge_ordering": true,
+    "trust_first_party": false,
+    "prestage_max_response_bytes": 65536
+  }
+}

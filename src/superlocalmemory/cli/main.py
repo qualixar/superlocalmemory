@@ -78,6 +78,17 @@ def main() -> None:
         handle_hook(sys.argv[2])
         return
 
+    # WP-07: lazy first-run init — runs after hook/mcp fast-paths so stdout
+    # is never polluted on those paths (CRIT-3, MCP JSON-RPC purity).
+    # Guarded: any failure must not crash the CLI (AC4).
+    _is_mcp_cmd = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
+    if not _is_mcp_cmd:
+        try:
+            from superlocalmemory.cli._lazy_init import _ensure_initialized
+            _ensure_initialized()
+        except Exception:
+            pass
+
     from superlocalmemory.cli.json_output import _get_version
     _ver = _get_version()
 
@@ -103,8 +114,9 @@ def main() -> None:
                 from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
                     migrate_if_safe as _migrate_if_safe,
                 )
-                _data = _P(_os.environ.get("SLM_DATA_DIR")
-                           or _P.home() / ".superlocalmemory")
+                # WP-07: route through slm_home() so all 3 env aliases are honoured.
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                _data = _slm_home()
                 _res = _migrate_if_safe(_data)
                 if _res.get("status") == "deferred":
                     print(
@@ -141,6 +153,11 @@ def main() -> None:
     init_p.add_argument(
         "--gate", action="store_true",
         help="Enable PreToolUse gate (experimental — blocks tools until session_init)",
+    )
+    # WP-07: non-interactive auto setup (pip post-install, CI, scripts).
+    init_p.add_argument(
+        "--auto", action="store_true",
+        help="Non-interactive setup: mode A + hooks (no TTY required, for CI/scripts)",
     )
 
     setup_p = sub.add_parser("setup", help="Interactive first-time setup wizard")

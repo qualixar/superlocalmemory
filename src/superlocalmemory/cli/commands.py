@@ -1783,7 +1783,33 @@ def cmd_doctor(args: Namespace) -> None:
     else:
         _check("Database", "PASS", "not yet created (will initialize on first use)")
 
-    # 11. Optimize (Surface B) — reads daemon-persisted metrics (≤60s stale).
+    # 11. PEP 668 advisory — WP-07: detect EXTERNALLY-MANAGED marker and
+    #     recommend pipx when the system Python is managed by the OS package
+    #     manager (e.g. Homebrew, Debian/Ubuntu, Fedora 38+).
+    try:
+        import sysconfig as _sc
+        _stdlib = _sc.get_path("stdlib")
+        if _stdlib:
+            _em_marker = Path(_stdlib) / "EXTERNALLY-MANAGED"
+            if _em_marker.exists():
+                _check(
+                    "PEP 668 / Install method",
+                    "WARN",
+                    "System Python is externally managed (EXTERNALLY-MANAGED marker found). "
+                    "pip install may fail with PEP 668 error.",
+                    "Use pipx for an isolated install: pipx install superlocalmemory  "
+                    "(last-resort only: pip install --break-system-packages superlocalmemory)",
+                )
+            else:
+                _check(
+                    "PEP 668 / Install method",
+                    "PASS",
+                    "No EXTERNALLY-MANAGED marker — standard pip install supported",
+                )
+    except Exception:
+        pass  # advisory only — never fail doctor on this check
+
+    # 12. Optimize (Surface B) — reads daemon-persisted metrics (≤60s stale).
     info = _gather_optimize_surface_b()
     _enabled = info["enabled"]
     _error = info.get("error", "")
@@ -2163,14 +2189,82 @@ def cmd_profile(args: Namespace) -> None:
 # -- Active Memory commands (V3.1) ------------------------------------------
 
 
+def _cmd_init_auto(
+    args: Namespace,
+    slm_data_dir: "Path",
+    config_exists: bool,
+    force: bool,
+) -> None:
+    """WP-07: non-interactive --auto branch for slm init.
+
+    Best-effort at every step; only exits non-zero when config save fails.
+    No TTY required.  Does NOT run IDE connect (AC6).
+    """
+    from pathlib import Path
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.storage.models import Mode
+    from superlocalmemory.cli.setup_wizard import _mark_complete
+
+    # Step 1: write mode-A config (create-if-absent or --force).
+    # Pass slm_data_dir explicitly so env-overridden paths are respected even
+    # when DEFAULT_BASE_DIR was evaluated before the env var was set (e.g. tests).
+    if force or not config_exists:
+        try:
+            cfg = SLMConfig.for_mode(Mode.A, base_dir=slm_data_dir)
+            cfg.save(mode_change=True)
+        except Exception as exc:
+            print(f"[ERROR] slm init --auto: config save failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    # Step 2: mark complete (write .setup-complete sentinel).
+    # Write the sentinel directly using slm_data_dir to avoid the module-level
+    # _SLM_HOME resolved at import time (tests set the env var after import).
+    try:
+        import platform
+        import time as _time
+        sentinel = slm_data_dir / ".setup-complete"
+        slm_data_dir.mkdir(parents=True, exist_ok=True)
+        sentinel.write_text(
+            f"setup_completed={_time.strftime('%Y-%m-%dT%H:%M:%S')}\n"
+            f"python={sys.executable}\n"
+            f"platform={platform.system()}\n"
+            f"version={platform.python_version()}\n"
+        )
+    except Exception:
+        pass  # best-effort — sentinel is advisory only
+
+    # Step 3: install hooks if ~/.claude exists.
+    try:
+        claude_dir = Path.home() / ".claude"
+        if claude_dir.exists():
+            from superlocalmemory.hooks.claude_code_hooks import install_hooks
+            install_hooks(include_gate=getattr(args, "gate", False))
+    except Exception:
+        pass  # best-effort
+
+    # Step 4: warmup best-effort (don't block if models not present).
+    # Skipped in --auto to keep startup fast for CI; user can run slm warmup.
+
+    print("[OK] slm init --auto: setup complete (mode A, non-interactive)", file=sys.stderr)
+
+
 def cmd_init(args: Namespace) -> None:
     """One-command setup: mode + hooks + IDE connect + warmup."""
     from pathlib import Path
+    from superlocalmemory.cli._lazy_init import slm_home
     from superlocalmemory.core.config import SLMConfig
 
     force = getattr(args, "force", False)
+    auto = getattr(args, "auto", False)
 
-    config_exists = (Path.home() / ".superlocalmemory" / "config.json").exists()
+    slm_data_dir = slm_home()
+    config_exists = (slm_data_dir / "config.json").exists()
+
+    # WP-07: --auto branch — fully non-interactive, no TTY required (AC6).
+    if auto:
+        os.environ["SLM_NON_INTERACTIVE"] = "1"
+        _cmd_init_auto(args, slm_data_dir, config_exists, force)
+        return
 
     print()
     print("SuperLocalMemory — One-Time Setup")

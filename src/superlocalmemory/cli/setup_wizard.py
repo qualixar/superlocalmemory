@@ -28,7 +28,17 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-_SLM_HOME = Path(os.environ.get("SL_MEMORY_PATH", Path.home() / ".superlocalmemory"))
+# WP-07: resolve via slm_home() so all 3 env aliases are honoured.
+# Fallback keeps stdlib-only path if the import fails during early bootstrap.
+def _resolve_slm_home() -> Path:
+    try:
+        from superlocalmemory.cli._lazy_init import slm_home
+        return slm_home()
+    except Exception:
+        return Path(os.environ.get("SL_MEMORY_PATH", "") or Path.home() / ".superlocalmemory")
+
+
+_SLM_HOME = _resolve_slm_home()
 _SETUP_MARKER = _SLM_HOME / ".setup-complete"
 _EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
@@ -703,14 +713,18 @@ def check_first_use(command: str) -> None:
     if is_setup_complete():
         return
 
-    # Non-interactive: use defaults silently, don't block the command
+    # Non-interactive: use defaults silently, don't block the command.
+    # CRIT-1: only save config when it does NOT already exist — lazy-init may
+    # have already written a valid config.json; overwriting it here would clobber
+    # any lazy-init content (e.g. a pre-existing mode-A skeleton).
     if not is_interactive():
-        # Just create config with defaults and mark complete
         try:
-            from superlocalmemory.core.config import SLMConfig
+            from superlocalmemory.core.config import SLMConfig, DEFAULT_BASE_DIR
             from superlocalmemory.storage.models import Mode
-            config = SLMConfig.for_mode(Mode.A)
-            config.save(mode_change=True)
+            config_path = DEFAULT_BASE_DIR / "config.json"
+            if not config_path.exists():
+                cfg = SLMConfig.for_mode(Mode.A)
+                cfg.save(mode_change=True)
             _mark_complete()
         except Exception:
             pass
