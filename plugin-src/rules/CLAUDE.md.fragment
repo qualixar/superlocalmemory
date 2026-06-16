@@ -1,0 +1,43 @@
+<!-- BEGIN SuperLocalMemory v3.6.14 -->
+
+## SuperLocalMemory (SLM) — Agent Rules
+
+SLM is local-first memory for agents. All tools run on the user's machine; no cloud calls.
+
+### Session start
+Call `session_init(project_path, query)` ONCE per fresh session before any recall/remember. Never twice.
+
+### Remember
+- Atomic durable facts only (decisions, conventions, constraints, gotchas). One fact per call.
+- Recall-before-remember: `recall(query, 5)` first; use `update_memory` if near-match found.
+- Always supply tags + project + importance (7–10 for blockers/security/architecture).
+- Never dump a whole file; never claim "saved" without success:true.
+
+### Recall
+- `recall` for conceptual/semantic queries; `search` for exact keywords.
+- Phrase as concepts; pass session_id when available. Never fabricate.
+
+### Optimize (fail-open)
+- Output >2000 chars → `slm_compress(mode="auto", reversible=True)`; keep ccr_id if lossy.
+- Repeated reads → `slm_cache_get("file:<path>")` first; on miss cache with ttl=1800.
+- NEVER compress/cache: code-for-edit, JSON-to-parse, secrets, ccr_ids, <500 chars.
+- If ok:false → continue with original; never block the task.
+
+### Session end
+`close_session(session_id)` when work is meaningfully complete.
+
+### CLI fallback (MCP down)
+`slm recall "<q>" --limit N` · `slm search "<q>"` · `slm remember "<c>" --tags t --importance N` · `slm list --limit N` · `slm forget` (preview first) · `slm status` · `slm optimize status`
+
+### Skills
+slm-recall · slm-remember · slm-status · slm-optimize · slm-build-graph · slm-list-recent · slm-show-patterns · slm-switch-profile
+
+### Commands
+/slm-recall · /slm-remember · /slm-optimize · /slm-status
+
+### Subagents
+slm-memory-advisor (memory decisions, session hygiene) · slm-optimize-advisor (context compression + KV cache)
+
+<!-- END SuperLocalMemory v3.6.14 -->
+
+SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later
