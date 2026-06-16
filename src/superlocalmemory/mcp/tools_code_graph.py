@@ -4,9 +4,9 @@
 
 """22 MCP tools for CodeGraph: 17 graph + 5 bridge.
 
-Registered against `server` (NOT `_target`) so they are always visible
-when the code-graph extra is installed. Each tool self-guards (returns
-error if graph not built) — no risk of confusing users.
+Registered against `_target` (filtered like all other tools) — set
+SLM_MCP_ALL_TOOLS=1 or use a profile containing code-graph names to expose
+them. Each tool self-guards (returns error if graph not built).
 
 All tools return {"success": bool, ...} envelope. Never raise.
 """

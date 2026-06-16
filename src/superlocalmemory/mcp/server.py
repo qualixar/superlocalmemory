@@ -135,6 +135,73 @@ _all_tools = _os_reg.environ.get("SLM_MCP_ALL_TOOLS") == "1"
 # exactly the tools they invoke. Falls back to _ESSENTIAL_TOOLS when unset.
 _user_allowlist_str = _os_reg.environ.get("SLM_MCP_TOOLS", "").strip()
 
+# ---------------------------------------------------------------------------
+# v3.6.14 WP-01: Named profile definitions
+# ---------------------------------------------------------------------------
+
+_PROFILE_CORE = frozenset({  # 14
+    "remember", "recall", "search", "fetch", "list_recent", "update_memory", "forget",
+    "session_init", "close_session",
+    "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
+})
+_PROFILE_CODE = _PROFILE_CORE | frozenset({  # 20
+    "build_code_graph", "get_blast_radius", "query_graph",
+    "semantic_search_code", "get_review_context", "detect_changes",
+})
+_PROFILE_FULL_MESH = frozenset({  # 8
+    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
+    "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
+})
+_PROFILE_FULL = frozenset({  # 30 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
+    "remember", "recall", "search", "fetch", "list_recent", "delete_memory", "update_memory",
+    "get_status", "session_init", "observe", "close_session", "report_feedback", "forget",
+    "run_maintenance", "consolidate_cognitive", "get_soft_prompts", "set_mode", "report_outcome",
+    "log_tool_event", "get_assertions", "reinforce_assertion", "contradict_assertion",
+    "evolve_skill", "skill_health", "skill_lineage",
+    "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
+}) | _PROFILE_FULL_MESH  # 38
+_PROFILE_POWER = _PROFILE_FULL | frozenset({  # 50
+    "get_version", "get_mode", "health", "consistency_check", "recall_trace",
+    "get_lifecycle_status", "set_retention_policy", "compact_memories",
+    "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",
+})
+_PROFILE_MESH = _PROFILE_FULL_MESH  # 8
+
+_PROFILE_DEFINITIONS: dict[str, frozenset[str]] = {
+    "core": _PROFILE_CORE,
+    "code": _PROFILE_CODE,
+    "full": _PROFILE_FULL,
+    "power": _PROFILE_POWER,
+    "mesh": _PROFILE_MESH,
+}  # "whole" intentionally absent — maps to raw server (D-2 LOCKED)
+
+_profile = _os_reg.environ.get("SLM_MCP_PROFILE", "").strip().lower()
+
+
+def _resolve_profile_allowed(
+    profile: str,
+    definitions: dict[str, frozenset[str]],
+    essential: frozenset[str],
+) -> frozenset[str] | None:
+    """Resolve a profile name to its allowed tool frozenset, or None for raw-server routes.
+
+    Returns:
+        None  — for "" (no selection) or "whole" (raw server, all tools).
+        frozenset — the profile's tool set for known profiles.
+        essential — fail-open fallback for unknown non-empty profiles (+ warning).
+    """
+    if not profile or profile == "whole":
+        return None
+    if profile in definitions:
+        return definitions[profile]
+    logger.warning(
+        "SLM_MCP_PROFILE=%r is not a recognised profile "
+        "(valid: %s, whole); falling back to essential tools.",
+        profile,
+        ", ".join(sorted(definitions)),
+    )
+    return essential
+
 
 class _FilteredServer:
     """Wraps FastMCP to only register essential tools.
@@ -161,14 +228,18 @@ class _FilteredServer:
         return getattr(self._server, name)
 
 
-# Choose registration target (precedence: ALL > user allowlist > essential)
+# Choose registration target (precedence: ALL > user allowlist > profile > essential)
 if _all_tools:
-    _target = server
+    _target = server                                                              # tier1 (unchanged)
 elif _user_allowlist_str:
     _user_allowlist = frozenset(t.strip() for t in _user_allowlist_str.split(",") if t.strip())
-    _target = _FilteredServer(server, _user_allowlist)
+    _target = _FilteredServer(server, _user_allowlist)                           # tier2 (unchanged)
+elif _profile == "whole":
+    _target = server                                                              # NEW raw-server
+elif _profile:
+    _target = _FilteredServer(server, _resolve_profile_allowed(_profile, _PROFILE_DEFINITIONS, _ESSENTIAL_TOOLS))  # NEW
 else:
-    _target = _FilteredServer(server, _ESSENTIAL_TOOLS)
+    _target = _FilteredServer(server, _ESSENTIAL_TOOLS)                          # default (unchanged)
 
 from superlocalmemory.mcp.tools_core import register_core_tools
 from superlocalmemory.mcp.tools_v28 import register_v28_tools
