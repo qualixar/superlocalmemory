@@ -24,6 +24,7 @@ import logging
 import math
 import random
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,12 @@ except ImportError:  # pragma: no cover
     _sp_minimize = None  # type: ignore[assignment]
 
 _BOUNCE_EPS: float = 1e-9
+
+# LRU cap for the in-memory write-through cache.  Records are durable in
+# SQLite (boundary_upsert), so eviction from _cache is lossless — a miss
+# simply falls back to DB.get().  50 000 covers the practical warm-cache
+# footprint without unbounded growth on long-running ingest.
+_BOUNDARY_CACHE_MAX: int = 50_000
 _OVERFLOW_GUARD: float = 500.0
 
 # z_{1 - ε/2} for common ε (avoids scipy.stats dependency)
@@ -341,9 +348,11 @@ class BoundaryStore:
         self._ceiling = ceiling
         self._step = step
         self._epsilon = epsilon
-        # In-memory write-through cache. Populated by load_all() at warm.
+        # In-memory write-through LRU cache.  Populated by load_all() at warm.
         # get() checks here first (O(1) hot path), then falls back to DB.
-        self._cache: dict[str, PerItemBoundaryRecord] = {}
+        # Capped at _BOUNDARY_CACHE_MAX entries; oldest is evicted on overflow.
+        # Records are always durable in SQLite so eviction is lossless.
+        self._cache: OrderedDict[str, PerItemBoundaryRecord] = OrderedDict()
 
     def get(self, entry_id: str) -> PerItemBoundaryRecord:
         """Return the MLE model record for an entry, or a cold-start default.
@@ -352,6 +361,8 @@ class BoundaryStore:
         Never raises.
         """
         if entry_id in self._cache:
+            # LRU promotion: move to end (most-recently used).
+            self._cache.move_to_end(entry_id)
             return self._cache[entry_id]
         try:
             row = self._db.boundary_get(entry_id)
@@ -406,8 +417,11 @@ class BoundaryStore:
                 updated_at=record.last_updated or time.time(),
             )
             self._db.boundary_upsert(record.entry_id, row)
-            # In-memory write-through (RA-15)
+            # LRU write-through (RA-15): insert / refresh position, then evict oldest.
             self._cache[record.entry_id] = record
+            self._cache.move_to_end(record.entry_id)
+            if len(self._cache) > _BOUNDARY_CACHE_MAX:
+                self._cache.popitem(last=False)  # evict LRU (oldest) entry
         except Exception as exc:
             logger.warning("BoundaryStore.save failed (fail-open): %s", exc)
 
@@ -432,7 +446,7 @@ class BoundaryStore:
         self.save(updated)
         return updated
 
-    def load_all(self) -> dict[str, PerItemBoundaryRecord]:
+    def load_all(self) -> OrderedDict[str, PerItemBoundaryRecord]:
         """Load all boundary records into memory (warm-start).
 
         Returns:
@@ -443,7 +457,9 @@ class BoundaryStore:
         """
         try:
             rows = self._db.get_all_boundaries()
-            result: dict[str, PerItemBoundaryRecord] = {}
+            # Return an OrderedDict so the caller assignment
+            # (self._boundary_store._cache = load_all()) preserves LRU semantics.
+            result: OrderedDict[str, PerItemBoundaryRecord] = OrderedDict()
             for r in rows:
                 eid = r.get("entry_id")
                 if not eid:
@@ -455,10 +471,13 @@ class BoundaryStore:
                     samples=[],
                     last_updated=float(r.get("updated_at", 0.0)),
                 )
+            # Cap at _BOUNDARY_CACHE_MAX — trim oldest if DB has more.
+            while len(result) > _BOUNDARY_CACHE_MAX:
+                result.popitem(last=False)
             return result
         except Exception as exc:
             logger.warning("BoundaryStore.load_all failed (fail-open): %s", exc)
-            return {}
+            return OrderedDict()
 
     def delete(self, entry_id: str) -> None:
         """Remove boundary record for a deleted cache entry. Fail-open."""

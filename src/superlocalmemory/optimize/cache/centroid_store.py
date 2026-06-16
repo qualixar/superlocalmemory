@@ -70,7 +70,7 @@ class CentroidStore:
                     self._counts.pop(tenant_id, None)
                 return
             vectors: list[np.ndarray] = []
-            for _entry_id, blob in rows:
+            for _entry_id, blob, _ctx_fp in rows:
                 try:
                     vec = np.frombuffer(blob, dtype=np.float32).copy()
                     if vec.shape[0] == _EMBED_DIM:

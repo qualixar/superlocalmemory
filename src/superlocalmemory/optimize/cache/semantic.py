@@ -444,13 +444,19 @@ class VCacheSemantic(SemanticTier):
             # Persist the cold-start record only if it isn't already in DB
             self._boundary_store.save(existing)
 
-        # Update in-memory index (dedupe)
+        # Update in-memory index (dedupe + size cap)
+        max_entries: int = int(
+            getattr(self._config, "semantic_max_index_entries", 10000)
+        )
         with self._index_lock:
             tenant_index = self._index.setdefault(tenant_id, [])
             self._index[tenant_id] = [
                 e for e in tenant_index if e[0] != entry_id
             ]
             self._index[tenant_id].append((entry_id, context_fp, vec))
+            # Cap: evict oldest entries first (lossless — DB is source of truth)
+            if len(self._index[tenant_id]) > max_entries:
+                self._index[tenant_id] = self._index[tenant_id][-max_entries:]
 
         # Update centroid
         self._centroid_store.update(tenant_id, vec)

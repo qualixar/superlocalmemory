@@ -87,6 +87,7 @@ class OptimizeConfig:
     semantic_verifier_model: str = ""
     semantic_pad_latency_ms: float = 0.0
     semantic_centroid_min_similarity: float = 0.85
+    semantic_max_index_entries: int = 10000
 
     # Compress
     compress_enabled: bool = False
@@ -177,6 +178,7 @@ class OptimizeConfig:
             semantic_centroid_min_similarity=float(
                 d.get("semantic_centroid_min_similarity", 0.85)
             ),
+            semantic_max_index_entries=int(d.get("semantic_max_index_entries", 10000)),
             compress_enabled=bool(d.get("compress_enabled", False)),
             compress_mode=str(d.get("compress_mode", "safe")),
             compress_prose=bool(d.get("compress_prose", False)),
@@ -216,6 +218,7 @@ class OptimizeConfig:
             "semantic_verifier_model": self.semantic_verifier_model,
             "semantic_pad_latency_ms": self.semantic_pad_latency_ms,
             "semantic_centroid_min_similarity": self.semantic_centroid_min_similarity,
+            "semantic_max_index_entries": self.semantic_max_index_entries,
             "compress_enabled": self.compress_enabled,
             "compress_mode": self.compress_mode,
             "compress_prose": self.compress_prose,
