@@ -200,6 +200,104 @@ function showEmpty(containerId, icon, message) {
 }
 
 // ============================================================================
+// Pane error state — WP-12
+// showPaneError / clearPaneError / paneErrorMessage
+// ============================================================================
+
+/**
+ * Map an HTTP status (or 0 for network failure) to a user-readable message.
+ * @param {number} status  0 = network/abort, ≥400 = HTTP error
+ * @returns {string}
+ */
+function paneErrorMessage(status) {
+    if (!status || status === 0) {
+        return 'Service unavailable — check network connection';
+    }
+    if (status >= 500) {
+        return 'Server error ' + status + ' — daemon may be down';
+    }
+    return 'Request failed ' + status;
+}
+
+/**
+ * Render an inline error banner inside a pane container.
+ *
+ * slotMode=false (container panes — math-health, ide-status):
+ *   Clears the container and appends the error div directly.
+ *
+ * slotMode=true (field-scatter panes — dashboard, trust, optimize):
+ *   Inserts/replaces a #<containerId>-error-slot div at the top of the
+ *   container, leaving existing field values visible.
+ *
+ * @param {string}        containerId  - getElementById target
+ * @param {string}        message      - user-facing message (set via textContent — XSS-safe)
+ * @param {Function|null} onRetry      - callback for Retry button; null = no button
+ * @param {boolean}       slotMode     - true for field-scatter panes
+ */
+function showPaneError(containerId, message, onRetry, slotMode) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+
+    // Build the error div
+    var errDiv = document.createElement('div');
+    errDiv.className = 'pane-error';
+    errDiv.setAttribute('role', 'alert');
+
+    var icon = document.createElement('i');
+    icon.className = 'bi bi-exclamation-triangle';
+    errDiv.appendChild(icon);
+
+    var p = document.createElement('p');
+    p.textContent = message; // textContent — no XSS risk
+    errDiv.appendChild(p);
+
+    if (typeof onRetry === 'function') {
+        var btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-outline-danger pane-error-retry';
+        btn.textContent = 'Retry';
+        // Capture onRetry lexically to avoid closure issues in IIFEs (CRIT-1)
+        (function(cb) {
+            btn.addEventListener('click', function() { cb(); });
+        }(onRetry));
+        errDiv.appendChild(btn);
+    }
+
+    if (slotMode) {
+        // Insert/replace error slot at top of container
+        var slotId = containerId + '-error-slot';
+        errDiv.id = slotId;
+        var existing = document.getElementById(slotId);
+        if (existing) {
+            existing.parentNode.replaceChild(errDiv, existing);
+        } else {
+            el.insertBefore(errDiv, el.firstChild);
+        }
+    } else {
+        // Replace container contents
+        el.textContent = '';
+        el.appendChild(errDiv);
+    }
+}
+
+/**
+ * Remove the error state previously set by showPaneError.
+ *
+ * @param {string}  containerId - getElementById target
+ * @param {boolean} slotMode    - must match the slotMode used in showPaneError
+ */
+function clearPaneError(containerId, slotMode) {
+    if (slotMode) {
+        var slot = document.getElementById(containerId + '-error-slot');
+        if (slot && slot.parentNode) slot.parentNode.removeChild(slot);
+    } else {
+        var el = document.getElementById(containerId);
+        if (!el) return;
+        var err = el.querySelector('.pane-error');
+        if (err) el.removeChild(err);
+    }
+}
+
+// ============================================================================
 // Safe HTML builder — tagged template for escaped interpolation
 // ============================================================================
 

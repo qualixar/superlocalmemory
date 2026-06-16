@@ -2,15 +2,26 @@
 // Displays status of Fisher-Rao, sheaf cohomology, and Langevin dynamics layers.
 
 async function loadMathHealth() {
+    var CID = 'math-health-cards';
     try {
         var response = await fetch('/api/v3/math/health');
-        if (!response.ok) return;
+        if (!response.ok) {
+            showPaneError(CID, paneErrorMessage(response.status), loadMathHealth, false);
+            return;
+        }
         var data = await response.json();
 
-        var container = document.getElementById('math-health-cards');
+        var layers = data.health || {};
+
+        // AC5: empty object → empty state
+        if (!layers || Object.keys(layers).length === 0) {
+            showEmpty(CID, 'calculator', 'No math health data available');
+            return;
+        }
+
+        var container = document.getElementById(CID);
         container.textContent = '';
 
-        var layers = data.health || {};
         var colors = { fisher: 'primary', sheaf: 'success', langevin: 'info' };
         var icons = { fisher: 'bi-graph-up', sheaf: 'bi-diagram-3', langevin: 'bi-activity' };
 
@@ -91,6 +102,7 @@ async function loadMathHealth() {
             container.appendChild(col);
         });
     } catch (e) {
+        showPaneError('math-health-cards', paneErrorMessage(0), loadMathHealth, false);
         console.log('Math health error:', e);
     }
 }

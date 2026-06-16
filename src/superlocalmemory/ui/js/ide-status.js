@@ -2,14 +2,26 @@
 // Displays detected IDEs and allows connecting them to SLM.
 
 async function loadIDEStatus() {
+    var CID = 'ide-list-body';
     try {
         var response = await fetch('/api/v3/ide/status');
-        if (!response.ok) return;
+        if (!response.ok) {
+            showPaneError(CID, paneErrorMessage(response.status), loadIDEStatus, false);
+            return;
+        }
         var data = await response.json();
 
-        var tbody = document.getElementById('ide-list-body');
+        var ides = data.ides || [];
+
+        // AC5: empty array → empty state
+        if (ides.length === 0) {
+            showEmpty(CID, 'laptop', 'No IDEs detected');
+            return;
+        }
+
+        var tbody = document.getElementById(CID);
         tbody.textContent = '';
-        (data.ides || []).forEach(function(ide) {
+        ides.forEach(function(ide) {
             var tr = document.createElement('tr');
 
             // IDE name cell
@@ -52,6 +64,7 @@ async function loadIDEStatus() {
             tbody.appendChild(tr);
         });
     } catch (e) {
+        showPaneError('ide-list-body', paneErrorMessage(0), loadIDEStatus, false);
         console.log('IDE status error:', e);
     }
 }

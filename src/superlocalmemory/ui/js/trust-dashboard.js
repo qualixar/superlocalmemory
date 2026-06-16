@@ -127,11 +127,19 @@
         if (next) next.disabled = STATE.page >= maxPage;
     }
 
+    var TRUST_PANE_ID = 'operations-pane';
+
     async function loadTrustDashboard() {
         try {
             var resp = await fetch('/api/v3/trust/dashboard');
-            if (!resp.ok) return;
+            if (!resp.ok) {
+                // CRIT-1: pass lexically-scoped loadTrustDashboard (inside IIFE)
+                showPaneError(TRUST_PANE_ID, paneErrorMessage(resp.status), loadTrustDashboard, true);
+                return;
+            }
             var data = await resp.json();
+
+            clearPaneError(TRUST_PANE_ID, true);
 
             var agents = data.agents || [];
             STATE.agents = agents;
@@ -154,6 +162,7 @@
 
             _renderPage();
         } catch (e) {
+            showPaneError(TRUST_PANE_ID, paneErrorMessage(0), loadTrustDashboard, true);
             if (window.console && window.console.debug) {
                 window.console.debug('Trust dashboard error:', e);
             }

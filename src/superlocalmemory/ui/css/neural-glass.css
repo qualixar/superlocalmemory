@@ -1586,3 +1586,8 @@ body.ng-privacy-blur::before {
     max-width: 1600px;
   }
 }
+
+/* WP-12 — pane-error dark-mode override */
+.ng-dark .pane-error {
+  color: var(--ng-status-error);
+}

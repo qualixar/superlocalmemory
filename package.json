@@ -51,7 +51,7 @@
     "prepack": "node scripts/build-plugin.js && node scripts/prepack.js",
     "postinstall": "node scripts/postinstall.js",
     "preuninstall": "node scripts/preuninstall.js",
-    "test": "echo \"Run: npm install -g . && slm status\" && exit 0"
+    "test": "node --test 'tests/ui/*.mjs'"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -91,5 +91,8 @@
   ],
   "dependencies": {
     "docx": "^9.5.1"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }

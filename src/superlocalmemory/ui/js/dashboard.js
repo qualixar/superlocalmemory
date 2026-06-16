@@ -17,10 +17,16 @@ window.addEventListener('hashchange', function() {
 window.addEventListener('focus', function() { loadDashboard(); });
 
 async function loadDashboard() {
+    var PANE_ID = 'dashboard-pane';
     try {
         var response = await fetch('/api/v3/dashboard');
-        if (!response.ok) return;
+        if (!response.ok) {
+            showPaneError(PANE_ID, paneErrorMessage(response.status), loadDashboard, true);
+            return;
+        }
         var data = await response.json();
+
+        clearPaneError(PANE_ID, true);
 
         document.getElementById('dashboard-mode').textContent = 'Mode ' + data.mode.toUpperCase();
         document.getElementById('dashboard-mode-desc').textContent = data.mode_name + (data.provider !== 'none' ? ' — ' + data.provider : '');
@@ -44,6 +50,7 @@ async function loadDashboard() {
             btn.classList.toggle('active', btn.dataset.mode === data.mode);
         });
     } catch (e) {
+        showPaneError(PANE_ID, paneErrorMessage(0), loadDashboard, true);
         console.log('Dashboard load error:', e);
     }
 }

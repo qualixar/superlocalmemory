@@ -17,11 +17,17 @@
     _pollTimer = setInterval(_loadSavings, 10000);
   }
 
+  var CFG_CARD = 'optimize-config-card';
+
   async function _loadOptimizeConfig() {
     try {
       var resp = await fetch('/api/optimize/config');
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        showPaneError(CFG_CARD, paneErrorMessage(resp.status), _loadOptimizeConfig, true);
+        return;
+      }
       var cfg = await resp.json();
+      clearPaneError(CFG_CARD, true);
       _setToggle('opt-enabled', cfg.enabled);
       _setToggle('opt-proxy-enabled', cfg.proxy_enabled);
       _setToggle('opt-cache-enabled', cfg.cache_enabled);
@@ -32,15 +38,23 @@
       var verEl = document.getElementById('opt-config-version');
       if (verEl) verEl.textContent = cfg.config_version || '-';
     } catch (e) {
+      showPaneError(CFG_CARD, paneErrorMessage(0), _loadOptimizeConfig, true);
       console.log('Optimize config load error:', e);
     }
   }
 
+  var SAV_CARD = 'optimize-savings-card';
+
   async function _loadSavings() {
     try {
       var resp = await fetch('/api/optimize/savings');
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        // D-3: no Retry on polling loader \u2014 auto-heals on next poll
+        showPaneError(SAV_CARD, paneErrorMessage(resp.status), null, true);
+        return;
+      }
       var data = await resp.json();
+      clearPaneError(SAV_CARD, true);
       var tokensSaved = (data.tokens_saved_input || 0) + (data.tokens_saved_output || 0) + (data.tokens_saved_compress || 0);
       _setText('opt-tokens-saved', tokensSaved.toLocaleString());
       var costSaved = data.cost_saved || {};
@@ -57,6 +71,8 @@
         _setText('opt-stale-warning', 'Pricing data may be outdated');
       }
     } catch (e) {
+      // D-3: no Retry on polling loader
+      showPaneError(SAV_CARD, paneErrorMessage(0), null, true);
       console.log('Savings load error:', e);
     }
   }
