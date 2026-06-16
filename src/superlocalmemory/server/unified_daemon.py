@@ -239,16 +239,28 @@ class ObserveBuffer:
         try:
             from superlocalmemory.hooks.auto_capture import AutoCapture
             auto = AutoCapture(engine=self._engine)
+            successful_count = 0
+            failed_count = 0
             for content in batch:
                 try:
                     decision = auto.evaluate(content)
                     if decision.capture:
                         auto.capture(content, category=decision.category)
-                except Exception:
-                    pass
-            logger.info("Observe debounce: processed %d observations", len(batch))
-        except Exception:
-            pass
+                    successful_count += 1
+                except Exception as exc:
+                    failed_count += 1
+                    logger.warning(
+                        "ObserveBuffer: auto.capture failed for content %.40r: %s",
+                        content,
+                        exc,
+                    )
+            logger.info(
+                "Observe debounce: processed %d observations, failed=%d",
+                successful_count,
+                failed_count,
+            )
+        except Exception as exc:
+            logger.error("ObserveBuffer: flush batch failed: %s", exc)
 
     def flush_sync(self) -> None:
         """Force flush for shutdown."""
