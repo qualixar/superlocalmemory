@@ -1,7 +1,7 @@
 ---
 name: slm-remember
 description: Save content to SuperLocalMemory with intelligent indexing and knowledge graph integration. Use when the user wants to remember information, save context, store coding decisions, or persist knowledge for future sessions. Automatically indexes, graphs, and learns patterns.
-version: "3.6.14"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:
@@ -187,8 +187,8 @@ slm remember "Commit: $commit_msg (${commit_hash:0:7})" \
 ---
 
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
-**Project:** SuperLocalMemory v3.6.14
-**License:** AGPL-3.0-or-later)
-**Repository:** https://github.com/qualixar/superlocalmemory
+**Project:** SuperLocalMemory V2
+**License:** MIT (see [LICENSE](../../LICENSE))
+**Repository:** https://github.com/varun369/SuperLocalMemoryV2
 
 *Open source doesn't mean removing credit. Attribution must be preserved per MIT License terms.*

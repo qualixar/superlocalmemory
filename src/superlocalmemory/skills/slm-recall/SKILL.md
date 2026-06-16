@@ -1,7 +1,7 @@
 ---
 name: slm-recall
 description: Search SuperLocalMemory for relevant facts, decisions, and past context. Use when the user asks to recall, search, find, or retrieve stored information. Invokes 5-channel retrieval with LightGBM reranking via MCP.
-version: "3.4.22"
+version: "3.6.14"
 license: AGPL-3.0-or-later
 compatibility: "SuperLocalMemory v3.4.22 — MCP (preferred) or CLI fallback"
 attribution:
@@ -84,7 +84,8 @@ slm recall "API design" --project myapp
 |----------|------|----------|---------|-------------|
 | `<query>` | string | Yes | - | Search query |
 | `--limit` | integer | No | 10 | Max results to return |
-| `--min-score` | float | No | 0.3 | Minimum relevance (0.0-1-tags` | string | No | None | Filter by tags (comma-separated) |
+| `--min-score` | float | No | 0.3 | Minimum relevance (0.0-1.0) |
+| `--tags` | string | No | None | Filter by tags (comma-separated) |
 | `--project` | string | No | None | Filter by project |
 
 ## Search Methods Used
@@ -319,9 +320,9 @@ slm recall "query" --format csv
 ---
 
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
-**Project:** SuperLocalMemory V2
-**License:** MIT (see [LICENSE](../../LICENSE))
-**Repository:** https://github.com/varun369/SuperLocalMemoryV2
+**Project:** SuperLocalMemory v3.6.14
+**License:** AGPL-3.0-or-later)
+**Repository:** https://github.com/qualixar/superlocalmemory
 
 *Open source doesn't mean removing credit. Attribution must be preserved per MIT License terms.*
 

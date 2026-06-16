@@ -1,7 +1,7 @@
 ---
 name: slm-list-recent
 description: List most recent memories in chronological order. Use when the user wants to see what was recently saved, review recent conversations, check what they worked on today, or browse memory history. Shows memories sorted by creation time (newest first).
-version: "3.4.22"
+version: "3.6.14"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:
@@ -341,8 +341,8 @@ date
 ---
 
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
-**Project:** SuperLocalMemory V2
-**License:** MIT (see [LICENSE](../../LICENSE))
-**Repository:** https://github.com/varun369/SuperLocalMemoryV2
+**Project:** SuperLocalMemory v3.6.14
+**License:** AGPL-3.0-or-later)
+**Repository:** https://github.com/qualixar/superlocalmemory
 
 *Open source doesn't mean removing credit. Attribution must be preserved per MIT License terms.*

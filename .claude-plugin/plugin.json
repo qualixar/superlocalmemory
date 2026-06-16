@@ -1,0 +1,9 @@
+{
+  "author": {
+    "name": "Varun Pratap Bhardwaj",
+    "url": "https://github.com/qualixar"
+  },
+  "description": "SuperLocalMemory skill plugin for Claude Code",
+  "name": "superlocalmemory",
+  "version": "3.6.14"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "superlocalmemory",
+  "owner": {
+    "name": "qualixar"
+  },
+  "plugins": [
+    {
+      "description": "SuperLocalMemory skill plugin for Claude Code",
+      "name": "superlocalmemory",
+      "source": "./",
+      "version": "3.6.14"
+    }
+  ]
+}

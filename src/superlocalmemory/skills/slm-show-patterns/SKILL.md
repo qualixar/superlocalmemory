@@ -1,7 +1,7 @@
 ---
 name: slm-show-patterns
 description: Show what SuperLocalMemory has learned about your preferences, workflow patterns, and project context. Use when the user asks "what have you learned about me?" or wants to see their coding identity patterns. Shows tech preferences, workflow sequences, and engagement health.
-version: "2.7.0"
+version: "3.6.14"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2.7+ with learning features"
 attribution:
@@ -217,8 +217,8 @@ slm engagement
 ---
 
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
-**Project:** SuperLocalMemory V2
-**License:** MIT (see [LICENSE](../../LICENSE))
-**Repository:** https://github.com/varun369/SuperLocalMemoryV2
+**Project:** SuperLocalMemory v3.6.14
+**License:** AGPL-3.0-or-later)
+**Repository:** https://github.com/qualixar/superlocalmemory
 
 *Open source doesn't mean removing credit. Attribution must be preserved per MIT License terms.*

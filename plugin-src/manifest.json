@@ -1,0 +1,24 @@
+{
+  "version": "3.6.14",
+  "pluginName": "superlocalmemory",
+  "skills": [
+    { "name": "slm-build-graph", "hasReadme": false },
+    { "name": "slm-list-recent", "hasReadme": false },
+    { "name": "slm-optimize", "hasReadme": true },
+    { "name": "slm-recall", "hasReadme": false },
+    { "name": "slm-remember", "hasReadme": false },
+    { "name": "slm-show-patterns", "hasReadme": false },
+    { "name": "slm-status", "hasReadme": false },
+    { "name": "slm-switch-profile", "hasReadme": false }
+  ],
+  "targets": {
+    "ide": "ide/skills",
+    "pkg": "src/superlocalmemory/skills",
+    "plugin": ".claude-plugin/skills"
+  },
+  "marketplace": {
+    "owner": "qualixar",
+    "repo": "superlocalmemory",
+    "description": "SuperLocalMemory skill plugin for Claude Code"
+  }
+}

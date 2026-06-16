@@ -6,7 +6,7 @@ description: >
   recovers originals via slm_retrieve. Works on any Claude plan, no proxy,
   full context window preserved.
   Requires SuperLocalMemory v3.6.11+ with optimize MCP tools enabled.
-version: "3.6.14"
+version: "3.6.11"
 license: AGPL-3.0-or-later
 triggers:
   - "slm-optimize"
