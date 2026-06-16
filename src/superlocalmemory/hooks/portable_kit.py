@@ -497,5 +497,10 @@ def _handle_agents_md(
         f"{SLM_MARKER_END}\n"
     )
     agents_path.parent.mkdir(parents=True, exist_ok=True)
-    agents_path.write_text(existing + section, encoding="utf-8")
+    # Atomic write: agents_path is the user's hand-written rules file
+    # (.cursorrules, AGENTS.md, copilot-instructions.md, ...). A crash mid-write
+    # must NOT truncate it. tmp in the same dir → os.replace is atomic.
+    _tmp = agents_path.with_suffix(agents_path.suffix + ".tmp")
+    _tmp.write_text(existing + section, encoding="utf-8")
+    os.replace(_tmp, agents_path)
     return "wrote"

@@ -760,7 +760,15 @@ class SLMConfig:
         if not path.exists():
             return cls.for_mode(Mode.A)
         import json
-        data = json.loads(path.read_text())
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            # An already-corrupt/truncated config.json must NOT brick every `slm`
+            # call — degrade to the Mode-A default and warn rather than raise.
+            logger.warning(
+                "config.json unreadable/corrupt (%s) — using Mode A default", exc
+            )
+            return cls.for_mode(Mode.A)
         mode = Mode(data.get("mode", "a"))
         llm_data = data.get("llm", {})
         emb_data = data.get("embedding", {})
@@ -949,7 +957,12 @@ class SLMConfig:
             if key in existing:
                 data[key] = existing[key]
 
-        path.write_text(json.dumps(data, indent=2))
+        # Atomic write: a crash mid-write must NOT leave a truncated/corrupt
+        # config.json (which would make every subsequent `slm` call fail to load).
+        import os as _os
+        _tmp = path.with_suffix(path.suffix + ".tmp")
+        _tmp.write_text(json.dumps(data, indent=2))
+        _os.replace(_tmp, path)
 
     @staticmethod
     def provider_presets() -> dict[str, dict[str, str]]:

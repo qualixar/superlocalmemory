@@ -310,14 +310,21 @@ class CompressRouter:
                     ccr_id = self._ccr_store_original(text.encode(), model, tenant_id)
                     if ccr_id:
                         self._ccr_update_compressed(ccr_id, compressed.encode())
-                    logger.info(
-                        "[%s] LLMLingua-2 prose compressed rate=%.2f ccr_id=%s (LOSSY)",
-                        request_id,
-                        tokens_after_l2 / tokens_before if tokens_before else 1.0,
-                        ccr_id,
+                        logger.info(
+                            "[%s] LLMLingua-2 prose compressed rate=%.2f ccr_id=%s (LOSSY)",
+                            request_id,
+                            tokens_after_l2 / tokens_before if tokens_before else 1.0,
+                            ccr_id,
+                        )
+                        return compressed, tokens_before, tokens_after_l2, "llmlingua2_prose"
+                    # CCR store FAILED → no recoverable id. Returning the lossy form
+                    # now would destroy the original irreversibly. Refuse it and fall
+                    # through to lossless Layer 1 (data-safety over compression ratio).
+                    logger.warning(
+                        "[%s] CCR store failed — refusing irreversible lossy "
+                        "compression, falling back to lossless Layer 1", request_id,
                     )
-                    return compressed, tokens_before, tokens_after_l2, "llmlingua2_prose"
-                # No reduction — fall through, NOTHING stored → zero orphans by construction
+                # No reduction (or store-failed) — fall through to lossless Layer 1.
 
         # S-01 fix: compare character length, not word count.
         # _token_estimate() is word-count — whitespace normalization saves characters/bytes

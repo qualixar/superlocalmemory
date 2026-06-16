@@ -100,7 +100,9 @@ def _write_minimal_config(home: Path, config: Path) -> None:
     Uses a .tmp file inside the same directory so os.replace() is always
     on the same filesystem (no cross-FS rename).  Never writes to /tmp.
     """
-    tmp_path = home / ".config.json.tmp"
+    # PID-namespaced tmp so two `slm` processes first-running concurrently don't
+    # clobber each other's tmp (which would make one os.replace fail mid-race).
+    tmp_path = home / f".config.json.tmp.{os.getpid()}"
     try:
         payload = json.dumps(_MINIMAL_CONFIG, indent=2)
         tmp_path.write_text(payload, encoding="utf-8")
