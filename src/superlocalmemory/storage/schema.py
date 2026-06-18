@@ -110,6 +110,8 @@ _SQL_MEMORIES: Final[str] = """
 CREATE TABLE IF NOT EXISTS memories (
     memory_id    TEXT PRIMARY KEY,
     profile_id   TEXT NOT NULL DEFAULT 'default',
+    scope        TEXT NOT NULL DEFAULT 'personal',
+    shared_with  TEXT,
     content      TEXT NOT NULL,
     session_id   TEXT NOT NULL DEFAULT '',
     speaker      TEXT NOT NULL DEFAULT '',
@@ -128,6 +130,10 @@ CREATE INDEX IF NOT EXISTS idx_memories_session
     ON memories (profile_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created
     ON memories (created_at);
+CREATE INDEX IF NOT EXISTS idx_memories_scope
+    ON memories (scope);
+CREATE INDEX IF NOT EXISTS idx_memories_profile_scope
+    ON memories (profile_id, scope);
 """
 
 
@@ -140,6 +146,8 @@ CREATE TABLE IF NOT EXISTS atomic_facts (
     fact_id            TEXT PRIMARY KEY,
     memory_id          TEXT NOT NULL,
     profile_id         TEXT NOT NULL DEFAULT 'default',
+    scope              TEXT NOT NULL DEFAULT 'personal',
+    shared_with        TEXT,
     content            TEXT NOT NULL,
     fact_type          TEXT NOT NULL DEFAULT 'semantic'
                             CHECK (fact_type IN (
@@ -209,6 +217,10 @@ CREATE INDEX IF NOT EXISTS idx_facts_referenced_date
 CREATE INDEX IF NOT EXISTS idx_facts_interval
     ON atomic_facts (profile_id, interval_start, interval_end)
     WHERE interval_start IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_atomic_facts_scope
+    ON atomic_facts (scope);
+CREATE INDEX IF NOT EXISTS idx_atomic_facts_profile_scope
+    ON atomic_facts (profile_id, scope);
 """
 
 
@@ -287,6 +299,8 @@ _SQL_CANONICAL_ENTITIES: Final[str] = """
 CREATE TABLE IF NOT EXISTS canonical_entities (
     entity_id       TEXT PRIMARY KEY,
     profile_id      TEXT NOT NULL DEFAULT 'default',
+    scope           TEXT NOT NULL DEFAULT 'personal',
+    shared_with     TEXT,
     canonical_name  TEXT NOT NULL,
     entity_type     TEXT NOT NULL DEFAULT '',
     first_seen      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -303,6 +317,10 @@ CREATE INDEX IF NOT EXISTS idx_entities_name_lower
     ON canonical_entities (profile_id, canonical_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_entities_type
     ON canonical_entities (profile_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_canonical_entities_scope
+    ON canonical_entities (scope);
+CREATE INDEX IF NOT EXISTS idx_canonical_entities_profile_scope
+    ON canonical_entities (profile_id, scope);
 """
 
 
@@ -386,6 +404,8 @@ _SQL_TEMPORAL_EVENTS: Final[str] = """
 CREATE TABLE IF NOT EXISTS temporal_events (
     event_id         TEXT PRIMARY KEY,
     profile_id       TEXT NOT NULL DEFAULT 'default',
+    scope            TEXT NOT NULL DEFAULT 'personal',
+    shared_with      TEXT,
     entity_id        TEXT NOT NULL,
     fact_id          TEXT NOT NULL,
     observation_date TEXT,
@@ -409,6 +429,10 @@ CREATE INDEX IF NOT EXISTS idx_tevents_entity
 CREATE INDEX IF NOT EXISTS idx_tevents_date_range
     ON temporal_events (profile_id, referenced_date)
     WHERE referenced_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_temporal_events_scope
+    ON temporal_events (scope);
+CREATE INDEX IF NOT EXISTS idx_temporal_events_profile_scope
+    ON temporal_events (profile_id, scope);
 """
 
 
@@ -420,6 +444,8 @@ _SQL_GRAPH_EDGES: Final[str] = """
 CREATE TABLE IF NOT EXISTS graph_edges (
     edge_id     TEXT PRIMARY KEY,
     profile_id  TEXT NOT NULL DEFAULT 'default',
+    scope       TEXT NOT NULL DEFAULT 'personal',
+    shared_with TEXT,
     source_id   TEXT NOT NULL,
     target_id   TEXT NOT NULL,
     edge_type   TEXT NOT NULL DEFAULT 'entity'
@@ -444,6 +470,10 @@ CREATE INDEX IF NOT EXISTS idx_edges_type
     ON graph_edges (profile_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_exists_check
     ON graph_edges (profile_id, source_id, target_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_scope
+    ON graph_edges (scope);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_profile_scope
+    ON graph_edges (profile_id, scope);
 """
 
 
