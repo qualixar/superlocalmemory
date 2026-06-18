@@ -130,6 +130,33 @@ class ChannelWeights:
 
 
 # ---------------------------------------------------------------------------
+# Scope Weights
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ScopeWeights:
+    """RRF fusion weights for multi-scope retrieval.
+
+    Personal scope has highest weight (most relevant to current profile).
+    Shared scope has medium weight (team/group memories).
+    Global scope has lowest weight (public/common knowledge).
+    """
+
+    personal: float = 1.0
+    shared: float = 0.7
+    global_: float = 0.5  # trailing underscore avoids Python keyword
+
+    def __post_init__(self) -> None:
+        for name in ("personal", "shared", "global_"):
+            val = getattr(self, name)
+            if val < 0:
+                raise ValueError(f"ScopeWeights values must be non-negative, got {name}={val}")
+
+    def as_dict(self) -> dict[str, float]:
+        return {"personal": self.personal, "shared": self.shared, "global": self.global_}
+
+
+# ---------------------------------------------------------------------------
 # Encoding Config
 # ---------------------------------------------------------------------------
 
@@ -702,6 +729,7 @@ class SLMConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     channel_weights: ChannelWeights = field(default_factory=ChannelWeights)
+    scope_weights: ScopeWeights = field(default_factory=ScopeWeights)
     encoding: EncodingConfig = field(default_factory=EncodingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     math: MathConfig = field(default_factory=MathConfig)
@@ -860,6 +888,14 @@ class SLMConfig:
             prestage_max_response_bytes=int(inj.get("prestage_max_response_bytes", 64 * 1024)),
         )
 
+        # Multi-scope memory: scope weights
+        sw = data.get("scope_weights", {})
+        if sw:
+            config.scope_weights = ScopeWeights(**{
+                k: v for k, v in sw.items()
+                if k in ScopeWeights.__dataclass_fields__
+            })
+
         return config
 
     def save(
@@ -950,6 +986,13 @@ class SLMConfig:
             "edge_ordering": self.injection.edge_ordering,
             "trust_first_party": self.injection.trust_first_party,
             "prestage_max_response_bytes": self.injection.prestage_max_response_bytes,
+        }
+
+        # Multi-scope memory: scope weights
+        data["scope_weights"] = {
+            "personal": self.scope_weights.personal,
+            "shared": self.scope_weights.shared,
+            "global_": self.scope_weights.global_,
         }
 
         # Preserve existing V3.3 config sections that aren't in for_mode()

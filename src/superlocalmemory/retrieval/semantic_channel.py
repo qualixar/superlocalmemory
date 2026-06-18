@@ -168,7 +168,11 @@ class SemanticChannel:
         # Step 2: Load only the candidate facts (NOT all facts)
         candidate_ids = [fid for fid, _ in knn_results]
         knn_scores = {fid: score for fid, score in knn_results}
-        facts = self._db.get_facts_by_ids(candidate_ids, profile_id)
+        facts = self._db.get_facts_by_ids(
+            candidate_ids, profile_id,
+            include_global=getattr(self, 'include_global', True),
+            include_shared=getattr(self, 'include_shared', True),
+        )
 
         if not facts:
             return [(fid, score) for fid, score in knn_results[:top_k]]
@@ -230,7 +234,11 @@ class SemanticChannel:
             q_mean = np.array(qm, dtype=np.float32)
             q_var = np.array(qv, dtype=np.float32)
 
-        facts = self._db.get_all_facts(profile_id)
+        facts = self._db.get_all_facts(
+            profile_id,
+            include_global=getattr(self, 'include_global', True),
+            include_shared=getattr(self, 'include_shared', True),
+        )
 
         scored: list[tuple[str, float]] = []
         for fact in facts:
