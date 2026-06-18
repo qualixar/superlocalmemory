@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from typing import Any, AsyncIterator, Callable
@@ -21,6 +22,39 @@ from superlocalmemory.optimize.proxy.lifecycle import (
 _get_running_loop = asyncio.get_running_loop
 
 logger = logging.getLogger("slm.optimize.proxy.helpers")
+
+# Per-callable cache of "does this hook method accept a tenant_id kwarg?".
+# Keyed by id() of the bound method's __func__ so it is stable per hook class.
+_HOOK_TENANT_SUPPORT: dict[int, bool] = {}
+
+
+def _accepts_tenant_id(fn: Callable) -> bool:
+    """Return True if a hook method accepts a ``tenant_id`` keyword argument.
+
+    SECURITY (Stage-9 R1): the original WP-D shim used ``except TypeError`` to
+    detect legacy hooks, but that clause is structurally unable to tell a
+    signature mismatch from a TypeError raised *inside* a tenant-aware hook —
+    so an internal bug silently downgraded an authenticated request onto the
+    shared (tenant-less) path, re-opening cross-tenant disclosure.  We instead
+    probe the signature ONCE (cached): a hook is treated as tenant-aware if it
+    has an explicit ``tenant_id`` parameter or accepts ``**kwargs``.  A
+    tenant-aware hook is NEVER retried without the tenant_id; any error it
+    raises fails open to a cache MISS, never the shared namespace.
+    """
+    target = getattr(fn, "__func__", fn)
+    key = id(target)
+    cached = _HOOK_TENANT_SUPPORT.get(key)
+    if cached is None:
+        try:
+            params = inspect.signature(fn).parameters
+            cached = "tenant_id" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+        except (ValueError, TypeError):
+            # Builtins / C callables without a signature — assume legacy.
+            cached = False
+        _HOOK_TENANT_SUPPORT[key] = cached
+    return cached
 
 # SEC-M-02 (CWE-400): reject oversized bodies to prevent compression-bomb DoS.
 _MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -589,30 +623,25 @@ async def _safe_cache_check(
     cache hook must not collapse to a default tenant for unauthenticated
     requests.  When tenant_id is None, return an empty miss immediately.
 
-    Backward compat: if the hook's check() does not accept tenant_id (old
-    third-party or test hook), the call is retried without the kwarg so that
-    existing callers are not broken.
+    Backward compat: a genuinely legacy hook (no tenant_id parameter and no
+    **kwargs) is called without the kwarg.  A tenant-aware hook is NEVER
+    downgraded to the tenant-less path — see _accepts_tenant_id (Stage-9 R1).
     """
+    miss = CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
     if tenant_id is None:
-        return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
+        return miss
     try:
-        result = hooks.cache.check(ctx, tenant_id=tenant_id)
-        return result if result is not None else CachedResponse(
-            hit=False, data=None, cache_key="", ttl_seconds=0
-        )
-    except TypeError:
-        # Hook predates tenant_id param — fall back to legacy call.
-        try:
+        if _accepts_tenant_id(hooks.cache.check):
+            result = hooks.cache.check(ctx, tenant_id=tenant_id)
+        else:
+            # Genuine legacy hook — no tenant_id support at all.
             result = hooks.cache.check(ctx)
-            return result if result is not None else CachedResponse(
-                hit=False, data=None, cache_key="", ttl_seconds=0
-            )
-        except Exception as exc:
-            logger.warning("cache.check failed (fail-open): %s", exc)
-            return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
+        return result if result is not None else miss
     except Exception as exc:
-        logger.warning("cache.check failed (fail-open): %s", exc)
-        return CachedResponse(hit=False, data=None, cache_key="", ttl_seconds=0)
+        # SECURITY: a tenant-aware hook that errors must fail-open to a MISS,
+        # never be retried on the shared (tenant-less) namespace.
+        logger.warning("cache.check failed (fail-open miss): %s", exc)
+        return miss
 
 
 async def _safe_cache_store(
@@ -625,20 +654,19 @@ async def _safe_cache_store(
 
     SECURITY (WP-D): tenant_id is forwarded.  None means skip (unauthenticated).
 
-    Backward compat: if the hook's store() does not accept tenant_id (old
-    third-party or test hook), the call is retried without the kwarg.
+    Backward compat: a genuinely legacy hook (no tenant_id parameter and no
+    **kwargs) is called without the kwarg.  A tenant-aware hook is NEVER
+    downgraded to the tenant-less path — see _accepts_tenant_id (Stage-9 R1).
     """
     if tenant_id is None:
         return
     try:
-        hooks.cache.store(ctx, resp, tenant_id=tenant_id)
-    except TypeError:
-        # Hook predates tenant_id param — fall back to legacy call.
-        try:
+        if _accepts_tenant_id(hooks.cache.store):
+            hooks.cache.store(ctx, resp, tenant_id=tenant_id)
+        else:
             hooks.cache.store(ctx, resp)
-        except Exception as exc:
-            logger.warning("cache.store failed (fail-open): %s", exc)
     except Exception as exc:
+        # SECURITY: never retry a tenant-aware hook without tenant_id.
         logger.warning("cache.store failed (fail-open): %s", exc)
 
 
