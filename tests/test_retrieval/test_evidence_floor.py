@@ -35,7 +35,7 @@ def _mock_db(facts: list[AtomicFact] | None = None) -> MagicMock:
     db = MagicMock()
     _facts = facts or []
     # _load_facts calls get_facts_by_ids which returns a list of AtomicFact
-    db.get_facts_by_ids.side_effect = lambda ids, pid: [
+    db.get_facts_by_ids.side_effect = lambda ids, pid, **kwargs: [
         f for f in _facts if f.fact_id in ids
     ]
     db.get_scenes_for_facts_batch.return_value = {}

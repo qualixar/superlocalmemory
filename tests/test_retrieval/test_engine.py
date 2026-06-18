@@ -51,7 +51,11 @@ def _mock_db(facts: list[AtomicFact] | None = None) -> MagicMock:
     db = MagicMock()
     _facts = facts or []
     db.get_all_facts.return_value = _facts
-    db.get_facts_by_ids.side_effect = lambda ids, pid: [f for f in _facts if f.fact_id in ids]
+    # **kwargs absorbs the multi-scope include_global/include_shared params that
+    # the real DatabaseManager.get_facts_by_ids now accepts (defaulted, additive).
+    db.get_facts_by_ids.side_effect = (
+        lambda ids, pid, **kwargs: [f for f in _facts if f.fact_id in ids]
+    )
     db.get_scenes_for_fact.return_value = []
     return db
 
