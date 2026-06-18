@@ -348,8 +348,15 @@ class MemoryEngine:
         speaker: str = "",
         role: str = "user",
         metadata: dict[str, Any] | None = None,
+        *,
+        scope: str = "personal",
+        shared_with: list[str] | None = None,
     ) -> list[str]:
-        """Store content and extract structured facts. Returns fact_ids."""
+        """Store content and extract structured facts. Returns fact_ids.
+
+        Multi-scope: ``scope`` sets the visibility (personal/shared/global).
+        ``shared_with`` is a list of profile_ids for shared scope.
+        """
         self._require_full("store")
         self._ensure_init()
 
@@ -358,6 +365,7 @@ class MemoryEngine:
             content, self._profile_id,
             session_id=session_id, session_date=session_date,
             speaker=speaker, role=role, metadata=metadata,
+            scope=scope, shared_with=shared_with,
             config=self._config, db=self._db,
             embedder=self._embedder,
             fact_extractor=self._fact_extractor,
@@ -511,6 +519,9 @@ class MemoryEngine:
         agent_id: str = "unknown",
         session_id: str | None = None,
         fast: bool = False,
+        *,
+        include_global: bool = True,
+        include_shared: bool = True,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -526,6 +537,10 @@ class MemoryEngine:
         neighbor-cache fix; fast=True is slower than fast=False and reduces
         recall quality. The parameter is accepted for backward compatibility
         but is silently treated as False.
+
+        Multi-scope: ``include_global`` / ``include_shared`` control which
+        scopes participate in retrieval. Both default to True (backward
+        compatible — all existing data is scope='personal').
         """
         self._require_full("recall")
         self._ensure_init()
@@ -552,6 +567,8 @@ class MemoryEngine:
             access_log=self._access_log,
             auto_linker=self._auto_linker,
             fast=fast,
+            include_global=include_global,
+            include_shared=include_shared,
         )
 
         # S9-DASH-02: enqueue for pending_outcomes. Non-blocking; errors
