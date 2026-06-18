@@ -115,6 +115,28 @@ class DatabaseManager:
                 self._txn_conn = None
                 conn.close()
 
+    @contextmanager
+    def raw_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Yield a live sqlite3.Connection for code that needs one directly.
+
+        For callers (e.g. schema migrations) that must hold a real connection
+        rather than going through execute(). Commits on success, rolls back on
+        error, and always closes — mirroring transaction(). This is the public
+        way to obtain a connection; there is no `.conn` attribute.
+        """
+        with self._lock:
+            conn = self._connect()
+            self._txn_conn = conn
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                self._txn_conn = None
+                conn.close()
+
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         """Execute SQL with automatic retry on SQLITE_BUSY.
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 import sqlite3
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch, PropertyMock
 
 from superlocalmemory.core.backend_orchestrator import (
@@ -27,10 +28,20 @@ class MockConfig:
 
 
 class MockDB:
+    """Faithful double of DatabaseManager's surface used by BackendOrchestrator.
+
+    The real DatabaseManager has NO `.conn` attribute — it exposes execute()
+    and raw_connection(). The old mock exposed `.conn` (and nothing else),
+    which is exactly why issue #47 escaped: the test validated the buggy
+    `self._db.conn` access that fails in production. This mock now mirrors the
+    real contract.
+    """
+
     def __init__(self):
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("""
+        self._conn = sqlite3.connect(":memory:")
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS backend_status (
                 backend_name TEXT PRIMARY KEY,
                 status TEXT DEFAULT 'not_initialized',
@@ -39,9 +50,24 @@ class MockDB:
                 error_message TEXT DEFAULT ''
             )
         """)
+        self._conn.commit()
+
+    def execute(self, sql, params=()):
+        rows = self._conn.execute(sql, params).fetchall()
+        self._conn.commit()
+        return rows
+
+    @contextmanager
+    def raw_connection(self):
+        try:
+            yield self._conn
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def close(self):
-        self.conn.close()
+        self._conn.close()
 
 
 @pytest.fixture
@@ -81,11 +107,11 @@ class TestLifecycle:
         orch._update_status("cozo", "active", 100)
         assert orch._cozo_status() == "active"
 
-        row = orch._db.conn.execute(
+        rows = orch._db.execute(
             "SELECT status, record_count FROM backend_status WHERE backend_name = 'cozo'"
-        ).fetchone()
-        assert row[0] == "active"
-        assert row[1] == 100
+        )
+        assert rows[0][0] == "active"
+        assert rows[0][1] == 100
 
 
 class TestIncrementalSync:

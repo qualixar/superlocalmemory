@@ -342,15 +342,15 @@ class BackendOrchestrator:
                         count: int = 0, error: str = "") -> None:
         self._backend_cache[name] = status
         try:
-            self._db.conn.execute(
+            # #47 fix: DatabaseManager has no `.conn`; execute() commits itself.
+            self._db.execute(
                 "INSERT OR REPLACE INTO backend_status "
                 "(backend_name, status, record_count, error_message, last_sync_at) "
                 "VALUES (?, ?, ?, ?, datetime('now'))",
                 (name, status, count, error),
             )
-            self._db.conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("backend_status update failed for %s: %s", name, exc)
 
     # ------------------------------------------------------------------
     # Internal: Schema
@@ -361,10 +361,14 @@ class BackendOrchestrator:
             from superlocalmemory.storage.schema_v345 import (
                 apply_migration, schema_version_applied,
             )
-            if not schema_version_applied(self._db.conn):
-                result = apply_migration(self._db.conn)
-                if result.get("errors"):
-                    logger.warning("Schema v3.4.5 had errors: %s", result["errors"])
+            # #47 fix: use raw_connection() — DatabaseManager has no `.conn`,
+            # so the old code raised AttributeError that was silently swallowed,
+            # leaving the v3.4.5 migration (access_count_30d) permanently unapplied.
+            with self._db.raw_connection() as conn:
+                if not schema_version_applied(conn):
+                    result = apply_migration(conn)
+                    if result.get("errors"):
+                        logger.warning("Schema v3.4.5 had errors: %s", result["errors"])
         except ImportError:
             logger.debug("schema_v345 not found — skipping")
         except Exception as exc:
