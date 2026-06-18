@@ -64,6 +64,10 @@ def is_pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
+        except ProcessLookupError:
+            return False  # ESRCH — no such process
+        except PermissionError:
+            return True   # EPERM — process EXISTS, we just can't signal it
         except OSError:
             return False
     try:
@@ -73,6 +77,10 @@ def is_pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
+        except ProcessLookupError:
+            return False  # ESRCH — no such process
+        except PermissionError:
+            return True   # EPERM — process EXISTS, we just can't signal it
         except OSError:
             return False
 
