@@ -157,6 +157,45 @@ class ScopeWeights:
 
 
 # ---------------------------------------------------------------------------
+# Scope Config (multi-scope memory behaviour defaults)
+# ---------------------------------------------------------------------------
+
+_VALID_SCOPES = ("personal", "shared", "global")
+
+
+@dataclass
+class ScopeConfig:
+    """User-facing defaults for multi-scope (shared) memory.
+
+    All defaults reproduce 3.6.14 behaviour exactly:
+      - new memories are ``personal`` unless the caller passes --scope;
+      - recall includes global + shared facts (a no-op until any exist).
+
+    The CLI/MCP boundary consults these when the user doesn't override
+    per-call, so an existing user can opt into stricter isolation
+    (recall_include_global/shared = false) or a more open default by editing
+    config.json / mode_a|b|c.json, and the installer can write the choice.
+    """
+
+    default_scope: str = "personal"        # scope assigned to new memories
+    recall_include_global: bool = True     # include scope='global' facts in recall
+    recall_include_shared: bool = True     # include scope='shared' facts in recall
+
+    def __post_init__(self) -> None:
+        if self.default_scope not in _VALID_SCOPES:
+            raise ValueError(
+                f"default_scope must be one of {_VALID_SCOPES}, got {self.default_scope!r}"
+            )
+
+    def as_dict(self) -> dict:
+        return {
+            "default_scope": self.default_scope,
+            "recall_include_global": self.recall_include_global,
+            "recall_include_shared": self.recall_include_shared,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Encoding Config
 # ---------------------------------------------------------------------------
 
@@ -730,6 +769,7 @@ class SLMConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     channel_weights: ChannelWeights = field(default_factory=ChannelWeights)
     scope_weights: ScopeWeights = field(default_factory=ScopeWeights)
+    scope: ScopeConfig = field(default_factory=ScopeConfig)
     encoding: EncodingConfig = field(default_factory=EncodingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     math: MathConfig = field(default_factory=MathConfig)
@@ -896,6 +936,14 @@ class SLMConfig:
                 if k in ScopeWeights.__dataclass_fields__
             })
 
+        # Multi-scope memory: behaviour defaults (default scope + recall visibility)
+        sc = data.get("scope", {})
+        if sc:
+            config.scope = ScopeConfig(**{
+                k: v for k, v in sc.items()
+                if k in ScopeConfig.__dataclass_fields__
+            })
+
         return config
 
     def save(
@@ -994,6 +1042,9 @@ class SLMConfig:
             "shared": self.scope_weights.shared,
             "global_": self.scope_weights.global_,
         }
+
+        # Multi-scope memory: behaviour defaults
+        data["scope"] = self.scope.as_dict()
 
         # Preserve existing V3.3 config sections that aren't in for_mode()
         for key in ("forgetting", "quantization", "sagq", "embedding_signature", "auto_invoke"):
