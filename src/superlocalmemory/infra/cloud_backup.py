@@ -31,6 +31,20 @@ MEMORY_DIR = Path.home() / ".superlocalmemory"
 DB_PATH = MEMORY_DIR / "memory.db"
 KEYRING_SERVICE = "superlocalmemory"
 
+# Stage-9 fix: hoist NoKeyringError to module scope.  Previously each function
+# did `from keyring.errors import NoKeyringError` INSIDE the same try whose
+# `import keyring` could fail — leaving the name unbound when the `except
+# (ImportError, NoKeyringError)` tuple was evaluated, which raised
+# UnboundLocalError on every keyring-free host (headless Linux / minimal
+# Docker) and made the plaintext fallback unreachable.  A sentinel subclass is
+# used when keyring is absent so the except-tuple is always valid and simply
+# never matches.
+try:
+    from keyring.errors import NoKeyringError as _NoKeyringError
+except Exception:  # keyring not installed at all
+    class _NoKeyringError(Exception):
+        """Sentinel — keyring unavailable; this is never raised."""
+
 # ---------------------------------------------------------------------------
 # Credential management (OS keychain)
 # ---------------------------------------------------------------------------
@@ -94,10 +108,9 @@ def _store_credential(key: str, value: str) -> bool:
     # Try OS keychain first (macOS Keychain, Windows Credential Locker, Linux SecretService)
     try:
         import keyring
-        from keyring.errors import NoKeyringError
         keyring.set_password(KEYRING_SERVICE, key, value)
         return True
-    except (ImportError, NoKeyringError):
+    except (ImportError, _NoKeyringError):
         pass  # No keyring backend — use fallback
     except Exception as exc:
         logger.debug("Keyring store failed, using fallback: %s", exc)
@@ -126,11 +139,10 @@ def _get_credential(key: str) -> str | None:
     # Try OS keychain first
     try:
         import keyring
-        from keyring.errors import NoKeyringError
         val = keyring.get_password(KEYRING_SERVICE, key)
         if val is not None:
             return val
-    except (ImportError, NoKeyringError):
+    except (ImportError, _NoKeyringError):
         pass
     except Exception:
         pass
@@ -161,10 +173,9 @@ def _delete_credential(key: str) -> bool:
 
     try:
         import keyring
-        from keyring.errors import NoKeyringError
         keyring.delete_password(KEYRING_SERVICE, key)
         deleted = True
-    except (ImportError, NoKeyringError):
+    except (ImportError, _NoKeyringError):
         pass
     except Exception:
         pass

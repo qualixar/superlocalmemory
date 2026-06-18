@@ -239,14 +239,17 @@ class ObserveBuffer:
         try:
             from superlocalmemory.hooks.auto_capture import AutoCapture
             auto = AutoCapture(engine=self._engine)
-            successful_count = 0
+            captured_count = 0
             failed_count = 0
             for content in batch:
                 try:
                     decision = auto.evaluate(content)
                     if decision.capture:
                         auto.capture(content, category=decision.category)
-                    successful_count += 1
+                        # Stage-9: count only what was actually WRITTEN to memory.
+                        # The prior 'processed N' counted skipped (capture=False)
+                        # items as successes — a false-positive write count.
+                        captured_count += 1
                 except Exception as exc:
                     failed_count += 1
                     logger.warning(
@@ -255,8 +258,9 @@ class ObserveBuffer:
                         exc,
                     )
             logger.info(
-                "Observe debounce: processed %d observations, failed=%d",
-                successful_count,
+                "Observe debounce: evaluated=%d captured=%d failed=%d",
+                len(batch),
+                captured_count,
                 failed_count,
             )
         except Exception as exc:

@@ -101,10 +101,10 @@ def test_flush_summary_reports_failed_count(caplog):
     # Accept formats like "failed=1", "failed: 1", "1 failed", etc.
     summary_records = [
         r for r in caplog.records
-        if r.levelno == logging.INFO and "processed" in r.getMessage().lower()
+        if r.levelno == logging.INFO and "observe debounce" in r.getMessage().lower()
     ]
     assert summary_records, (
-        "Expected a summary INFO log with 'processed', "
+        "Expected a summary INFO log with 'Observe debounce', "
         f"caplog messages: {[r.getMessage() for r in caplog.records]}"
     )
     summary_text = summary_records[0].getMessage()
@@ -158,7 +158,7 @@ def test_flush_summary_reports_zero_failed_on_success(caplog):
 
     summary_records = [
         r for r in caplog.records
-        if r.levelno == logging.INFO and "processed" in r.getMessage().lower()
+        if r.levelno == logging.INFO and "observe debounce" in r.getMessage().lower()
     ]
     assert summary_records, (
         f"Expected summary INFO log. Got: {[r.getMessage() for r in caplog.records]}"

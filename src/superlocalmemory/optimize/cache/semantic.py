@@ -448,15 +448,28 @@ class VCacheSemantic(SemanticTier):
         max_entries: int = int(
             getattr(self._config, "semantic_max_index_entries", 10000)
         )
+        max_tenants: int = int(
+            getattr(self._config, "semantic_max_tenants", 10000)
+        )
         with self._index_lock:
             tenant_index = self._index.setdefault(tenant_id, [])
             self._index[tenant_id] = [
                 e for e in tenant_index if e[0] != entry_id
             ]
             self._index[tenant_id].append((entry_id, context_fp, vec))
-            # Cap: evict oldest entries first (lossless — DB is source of truth)
+            # Cap entries per tenant: evict oldest first (lossless — DB is truth).
             if len(self._index[tenant_id]) > max_entries:
                 self._index[tenant_id] = self._index[tenant_id][-max_entries:]
+            # Stage-9: cap the NUMBER of tenant shards too. Without this, _index
+            # grew once per distinct tenant forever on a shared proxy. Evict the
+            # oldest-inserted shard (dict preserves insertion order); the evicted
+            # tenant rebuilds lazily from the DB on next access. Never evict the
+            # shard we just wrote.
+            if len(self._index) > max_tenants:
+                for _old in list(self._index):
+                    if _old != tenant_id:
+                        del self._index[_old]
+                        break
 
         # Update centroid
         self._centroid_store.update(tenant_id, vec)

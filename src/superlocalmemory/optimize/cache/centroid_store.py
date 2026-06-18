@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -32,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 _VARIANCE_FLOOR: float = 1e-6
 _EMBED_DIM: int = 768
+
+# Stage-9 fix: cap the NUMBER of tenants held in memory.  The per-tenant entry
+# caps (WP-A/B) bound depth, but _centroids/_counts grew once per distinct
+# tenant forever (~3 KB/centroid → ~292 MB at 100k tenants on a shared proxy).
+# Evicted tenants rebuild lazily from the DB via rebuild_from_db(), so eviction
+# is lossless.  Irrelevant to single-tenant local installs.
+_MAX_TENANTS: int = 10_000
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -51,10 +59,18 @@ class CentroidStore:
     Centroid update rule (Welford running mean — exact, O(1) per update):
         new_centroid = old_centroid * (n / (n+1)) + new_vec * (1 / (n+1))
     """
-    def __init__(self) -> None:
-        self._centroids: dict[str, np.ndarray] = {}  # tenant_id → float32 vec
-        self._counts: dict[str, int] = {}            # tenant_id → count
+    def __init__(self, max_tenants: int = _MAX_TENANTS) -> None:
+        # OrderedDict for O(1) LRU eviction by tenant count.
+        self._centroids: "OrderedDict[str, np.ndarray]" = OrderedDict()  # tenant → vec
+        self._counts: "OrderedDict[str, int]" = OrderedDict()            # tenant → count
+        self._max_tenants = max_tenants
         self._lock = threading.RLock()
+
+    def _evict_tenants_if_needed(self) -> None:
+        """Evict least-recently-updated tenants beyond the cap. Caller holds _lock."""
+        while len(self._centroids) > self._max_tenants:
+            old_tenant, _ = self._centroids.popitem(last=False)
+            self._counts.pop(old_tenant, None)
 
     def rebuild_from_db(self, db: "CacheDB", tenant_id: str) -> None:
         """Rebuild centroid for a tenant from all stored vectors.
@@ -83,6 +99,9 @@ class CentroidStore:
             with self._lock:
                 self._centroids[tenant_id] = centroid
                 self._counts[tenant_id] = len(vectors)
+                self._centroids.move_to_end(tenant_id)
+                self._counts.move_to_end(tenant_id)
+                self._evict_tenants_if_needed()
             logger.debug(
                 "CentroidStore: rebuilt tenant=%s centroid from %d vectors",
                 tenant_id, len(vectors),
@@ -101,6 +120,7 @@ class CentroidStore:
                 if tenant_id not in self._centroids:
                     self._centroids[tenant_id] = vec.copy()
                     self._counts[tenant_id] = 1
+                    self._evict_tenants_if_needed()
                 else:
                     n = self._counts[tenant_id]
                     old = self._centroids[tenant_id]
@@ -108,6 +128,9 @@ class CentroidStore:
                         old * (n / (n + 1)) + vec * (1.0 / (n + 1))
                     ).astype(np.float32)
                     self._counts[tenant_id] = n + 1
+                    # LRU: mark this tenant most-recently used.
+                    self._centroids.move_to_end(tenant_id)
+                    self._counts.move_to_end(tenant_id)
         except Exception as exc:
             logger.warning("CentroidStore.update failed (fail-open): %s", exc)
 
