@@ -380,6 +380,22 @@ def main() -> None:
     )
     ctx_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
+    # #49: local session open/close (for hooks; no model roundtrip)
+    session_p = sub.add_parser(
+        "session", help="Open/close a session locally (for hooks; no model roundtrip)"
+    )
+    session_sub = session_p.add_subparsers(dest="session_command", title="session actions")
+    sopen_p = session_sub.add_parser("open", help="Warm session context")
+    sopen_p.add_argument("--project-path", default="", help="Project path to derive the warm query")
+    sopen_p.add_argument("--query", default="", help="Explicit warm query")
+    sopen_p.add_argument("--max-results", type=int, default=10, help="Max memories to warm (default 10)")
+    sclose_p = session_sub.add_parser(
+        "close", help="Close session, create temporal summaries"
+    )
+    sclose_p.add_argument(
+        "--session-id", default="", help="Session to close (default: most recent)"
+    )
+
     obs_p = sub.add_parser("observe", help="Auto-capture content (pipe or argument)")
     obs_p.add_argument("content", nargs="?", default="", help="Content to evaluate")
 

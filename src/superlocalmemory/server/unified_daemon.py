@@ -70,6 +70,19 @@ class RememberRequest(BaseModel):
     metadata: dict | None = None  # v3.4.26: pass-through from MCP pool_store
 
 
+class SessionOpenRequest(BaseModel):
+    # #49: local session-open warm (no model roundtrip needed)
+    project_path: str = ""
+    query: str = ""
+    max_results: int = 10
+
+
+class SessionCloseRequest(BaseModel):
+    # #49: local session-close (e.g. a Claude /quit hook). Empty session_id
+    # closes the most recent real session.
+    session_id: str = ""
+
+
 class ObserveRequest(BaseModel):
     content: str
 
@@ -876,8 +889,14 @@ async def lifespan(application: FastAPI):
         from superlocalmemory.optimize.storage.db import CacheDB
         application.include_router(optimize_router)
 
-        # Restore persisted metrics counters on startup
-        MetricsPersistence().load(MetricsCollector.get_instance(), CacheDB())
+        # Restore persisted metrics counters on startup.
+        # #48 fix: build ONE CacheDB + MetricsPersistence and reuse them for the
+        # life of the daemon. The old code constructed a new CacheDB() on every
+        # 60s flush, which re-ran schema init ("Schema initialized" log spam),
+        # the corruption check, and AES-key derivation on every tick.
+        _metrics_db = CacheDB()
+        _metrics_persistence = MetricsPersistence()
+        _metrics_persistence.load(MetricsCollector.get_instance(), _metrics_db)
 
         # Periodic flush — every 60s (OPT-005: guard + task ref for shutdown)
         _metrics_flush_task = getattr(application.state, "_optimize_flush_task", None)
@@ -886,8 +905,8 @@ async def lifespan(application: FastAPI):
                 while True:
                     await asyncio.sleep(60)
                     try:
-                        MetricsPersistence().flush(
-                            MetricsCollector.get_instance(), CacheDB()
+                        _metrics_persistence.flush(
+                            MetricsCollector.get_instance(), _metrics_db
                         )
                     except Exception as e:
                         logger.warning("metrics flush error: %s", e)
@@ -1900,6 +1919,65 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # Signal uvicorn to shut down gracefully
         os.kill(os.getpid(), signal.SIGTERM)
         return {"status": "stopping"}
+
+    @application.post("/session/open")
+    async def session_open(req: SessionOpenRequest):
+        """#49: Open a session locally — warm recall context with no model
+        roundtrip, so a shell/session-start hook can call it directly
+        (`slm session open`) instead of going through the MCP tool.
+        """
+        _update_activity()
+        engine = _get_engine_or_503()
+        if req.query:
+            query = req.query
+        elif req.project_path:
+            query = f"project context {req.project_path}"
+        else:
+            query = "recent important decisions"
+        try:
+            resp = engine.recall(query, limit=req.max_results)
+            results = (
+                getattr(resp, "results", None)
+                or getattr(resp, "memories", None)
+                or []
+            )
+            return {"ok": True, "query": query, "warmed": len(results)}
+        except Exception as exc:
+            # Warming is best-effort — never fail the session-open hook.
+            return {"ok": True, "query": query, "warmed": 0, "warning": str(exc)}
+
+    @application.post("/session/close")
+    async def session_close(req: SessionCloseRequest):
+        """#49: Close a session locally (e.g. a Claude /quit hook calling
+        `slm session close`). Creates per-entity temporal summary events.
+        An empty session_id closes the most recent real session.
+        """
+        _update_activity()
+        engine = _get_engine_or_503()
+        sid = req.session_id
+        if not sid:
+            # Fall back to the most recent session that has memories.
+            try:
+                db = getattr(engine, "_db", None) or getattr(engine, "db", None)
+                if db is not None and hasattr(db, "execute"):
+                    rows = db.execute(
+                        "SELECT session_id FROM memories "
+                        "WHERE session_id != '' ORDER BY created_at DESC LIMIT 1",
+                        (),
+                    )
+                    if rows:
+                        sid = str(rows[0][0])
+            except Exception as exc:
+                logger.debug("session_close fallback lookup failed: %s", exc)
+        if not sid:
+            return {"ok": True, "session_id": "", "summary_events_created": 0,
+                    "message": "no session to close"}
+        try:
+            created = engine.close_session(sid)
+            return {"ok": True, "session_id": sid,
+                    "summary_events_created": int(created)}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
 
 
 def _update_activity():

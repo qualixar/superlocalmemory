@@ -94,6 +94,48 @@ def _cmd_help_optimize(args: Namespace) -> None:
 # ---- end SLM v3.6 Optimize dispatch functions ----
 
 
+def cmd_session(args: Namespace) -> None:
+    """#49: Open/close a session locally via the daemon — no model roundtrip,
+    so a shell hook (e.g. Claude session-start / /quit) can call it directly.
+    """
+    from superlocalmemory.cli.daemon import (
+        daemon_request, ensure_daemon, is_daemon_running,
+    )
+
+    action = getattr(args, "session_command", None)
+    if action not in ("open", "close"):
+        print("Usage: slm session {open|close} "
+              "[--session-id ID] [--project-path PATH] [--query Q]")
+        return
+
+    if not is_daemon_running():
+        ensure_daemon()
+
+    if action == "open":
+        body = {
+            "project_path": getattr(args, "project_path", "") or "",
+            "query": getattr(args, "query", "") or "",
+            "max_results": int(getattr(args, "max_results", 10) or 10),
+        }
+        resp = daemon_request("POST", "/session/open", body)
+        if resp and resp.get("ok"):
+            print(f"Session opened — warmed {resp.get('warmed', 0)} memories "
+                  f"(query: {resp.get('query', '')})")
+        else:
+            print("Session open failed (daemon unreachable?)")
+        return
+
+    # close
+    body = {"session_id": getattr(args, "session_id", "") or ""}
+    resp = daemon_request("POST", "/session/close", body)
+    if resp and resp.get("ok"):
+        sid = resp.get("session_id") or "(most recent)"
+        print(f"Session closed: {sid} — "
+              f"{resp.get('summary_events_created', 0)} summary event(s) created")
+    else:
+        print("Session close failed (daemon unreachable?)")
+
+
 def dispatch(args: Namespace) -> None:
     """Route CLI command to the appropriate handler."""
     # Auto-install/upgrade hooks on version change (single file read, ~0.1ms)
@@ -128,6 +170,7 @@ def dispatch(args: Namespace) -> None:
         "profile": cmd_profile,
         "hooks": cmd_hooks,
         "session-context": cmd_session_context,
+        "session": cmd_session,  # #49: local session open/close for hooks
         "observe": cmd_observe,
         # V3.3 commands
         "decay": cmd_decay,
