@@ -129,12 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_profile
 CREATE INDEX IF NOT EXISTS idx_memories_session
     ON memories (profile_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created
-    ON memories (created_at);
-CREATE INDEX IF NOT EXISTS idx_memories_scope
-    ON memories (scope);
-CREATE INDEX IF NOT EXISTS idx_memories_profile_scope
-    ON memories (profile_id, scope);
-"""
+    ON memories (created_at);"""
 
 
 # ---------------------------------------------------------------------------
@@ -216,12 +211,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_referenced_date
     WHERE referenced_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_facts_interval
     ON atomic_facts (profile_id, interval_start, interval_end)
-    WHERE interval_start IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_atomic_facts_scope
-    ON atomic_facts (scope);
-CREATE INDEX IF NOT EXISTS idx_atomic_facts_profile_scope
-    ON atomic_facts (profile_id, scope);
-"""
+    WHERE interval_start IS NOT NULL;"""
 
 
 # ---------------------------------------------------------------------------
@@ -316,12 +306,7 @@ CREATE INDEX IF NOT EXISTS idx_entities_profile
 CREATE INDEX IF NOT EXISTS idx_entities_name_lower
     ON canonical_entities (profile_id, canonical_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_entities_type
-    ON canonical_entities (profile_id, entity_type);
-CREATE INDEX IF NOT EXISTS idx_canonical_entities_scope
-    ON canonical_entities (scope);
-CREATE INDEX IF NOT EXISTS idx_canonical_entities_profile_scope
-    ON canonical_entities (profile_id, scope);
-"""
+    ON canonical_entities (profile_id, entity_type);"""
 
 
 # ---------------------------------------------------------------------------
@@ -428,12 +413,7 @@ CREATE INDEX IF NOT EXISTS idx_tevents_entity
     ON temporal_events (profile_id, entity_id);
 CREATE INDEX IF NOT EXISTS idx_tevents_date_range
     ON temporal_events (profile_id, referenced_date)
-    WHERE referenced_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_temporal_events_scope
-    ON temporal_events (scope);
-CREATE INDEX IF NOT EXISTS idx_temporal_events_profile_scope
-    ON temporal_events (profile_id, scope);
-"""
+    WHERE referenced_date IS NOT NULL;"""
 
 
 # ---------------------------------------------------------------------------
@@ -469,12 +449,7 @@ CREATE INDEX IF NOT EXISTS idx_edges_target
 CREATE INDEX IF NOT EXISTS idx_edges_type
     ON graph_edges (profile_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_exists_check
-    ON graph_edges (profile_id, source_id, target_id, edge_type);
-CREATE INDEX IF NOT EXISTS idx_graph_edges_scope
-    ON graph_edges (scope);
-CREATE INDEX IF NOT EXISTS idx_graph_edges_profile_scope
-    ON graph_edges (profile_id, scope);
-"""
+    ON graph_edges (profile_id, source_id, target_id, edge_type);"""
 
 
 # ---------------------------------------------------------------------------
