@@ -5,6 +5,34 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.14] - 2026-06-18 — Audit-hardened: memory bounds, cross-tenant cache isolation, atomic credentials
+
+Shipped through two adversarial audit passes (Qualixar Iron Pattern Stages 8–9), validated against a green 5933-test suite under the real 3.12 runtime. Default single-machine behavior is unchanged.
+
+### Security
+
+- **Cross-tenant cache isolation.** The optimize proxy cache now derives a per-credential tenant from the raw inbound API key (before header redaction); two users sending the same prompt with different keys never share a cache entry, and requests with no credential are never cached. Previously every proxy response was keyed under a single shared `default` tenant — on a LAN-shared proxy that could serve user A's completion to user B.
+- **Hardened the isolation against internal hook errors.** A tenant-aware cache hook is never silently downgraded to the shared namespace when it raises an internal error — the safe path is a cache miss, decided by signature inspection rather than catching an ambiguous `TypeError`.
+- **Vertex cache keys isolate by project + region.**
+
+### Fixed — memory (bounded-memory lifeline)
+
+- **Bounded the optimize caches.** Per-tenant LRU caps on the semantic vector index and the boundary-MLE cache, plus a cap on the *number* of tenants held in memory (centroid + index shards). Eviction is lossless — the DB remains the source of truth and evicted tenants rebuild on next access. Prevents unbounded RAM growth on long-lived shared-proxy daemons.
+- **Restored the SAFE-CACHE adversarial defense**, which a 3-tuple unpack bug had been silently disabling on every warm-start with vectors present.
+
+### Fixed — reliability
+
+- **Atomic, 0600 credential writes** (`cloud_backup`): no world-readable window, no torn-write corruption of the credential store, and a fixed `UnboundLocalError` that broke the credential fallback entirely on keyring-less hosts (headless Linux / minimal Docker).
+- **ObserveBuffer** surfaces flush failures and reports an honest `evaluated/captured/failed` count instead of treating skipped items as successes.
+- **Cloud embedding** reuses a pooled HTTP client instead of opening a fresh TLS connection per call.
+- **`check_status`** distinguishes a corrupt `settings.json` (`installed=None`) from "not installed".
+
+### Fixed — packaging / platform
+
+- **Cross-platform plugin launcher** (POSIX + Windows) and a Windows venv bootstrap, so the plugin's MCP server resolves the correct `slm` binary on Windows (`Scripts/slm.exe`) as well as POSIX.
+- **Declared `tomli-w`** so the codex IDE integration can write its `.codex/config.toml`; previously `connect_ide('codex')` failed silently because the TOML writer was never a declared dependency.
+- Version reconciled to **3.6.14** across `package.json`, `pyproject.toml`, and `__init__.py`; a consistency test guards against future skew.
+
 ## [3.6.13] - 2026-06-14 — Hotfix: MCP server failed to start after upgrade
 
 ### Fixed
