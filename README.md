@@ -162,7 +162,7 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 |:-----|:--------|:-----|
 | **npm** (recommended) | `npm install -g superlocalmemory` | Node 14+, installs Python deps automatically |
 | **pip** | `pip install superlocalmemory` | Python 3.11+, direct install |
-| **Claude Code Plugin** (WP-06) | `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core |
+| **Claude Code Plugin** (WP-06) | `/plugin marketplace add qualixar/superlocalmemory` then `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core. Ships the skills/agents/hooks/commands |
 | **Portable / IDE connect** (WP-08) | `slm connect <ide> [--here]` | Wire any IDE without reinstalling; `slm connect claude-code` → plugin pointer |
 
 After any install path: `slm setup` → `slm doctor` → `slm warmup` (optional, pre-downloads ~500MB embedding model).
@@ -218,18 +218,31 @@ Per-IDE configs available for Claude Code, Cursor, Windsurf, VS Code Copilot, Co
 
 ## Claude Code Plugin
 
-Install directly in Claude Code without a system-level npm/pip install:
+Install directly in Claude Code — no system-level npm/pip needed. This is how you
+get the **skills, agents, hooks, commands, and rules** (the MCP server is
+bootstrapped automatically). It is a two-step flow — add the marketplace once,
+then install:
 
 ```bash
+# 1. Add the Qualixar marketplace (one-time — the repo IS the marketplace)
+/plugin marketplace add qualixar/superlocalmemory
+
+# 2. Install the plugin
 /plugin install superlocalmemory@qualixar
 ```
 
 - Self-bootstraps a Python venv, installs all deps in an isolated `SLM_DATA_DIR`
-- Registers 14-tool core MCP surface (`core14` profile by default)
+- Registers the 14-tool core MCP surface (`core14` profile by default)
+- Ships the SLM skills / agents / hooks / commands / rules
 - Additive — does not replace an existing SLM install
 - `slm connect claude-code` detects an existing plugin install and links them
 
-See [docs/getting-started.md](docs/getting-started.md) for full plugin walkthrough.
+> **Plugin vs `pip`/`npm`:** `pip install superlocalmemory` / `npm i -g superlocalmemory`
+> give you the `slm` CLI + the MCP server (the *tools*). The **skills/agents/hooks/
+> commands** come only through the plugin above. Use the plugin for Claude Code; use
+> pip/npm for the CLI or other IDEs.
+
+To update later: `/plugin marketplace update qualixar` then `/plugin install superlocalmemory@qualixar`.
 
 ---
 
