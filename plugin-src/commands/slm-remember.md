@@ -13,4 +13,4 @@ Save to SuperLocalMemory: $ARGUMENTS
 5. Confirm only on success:true. If success is not true, report the error — never claim "saved."
 6. MCP unavailable → CLI fallback: `slm remember "$ARGUMENTS" --tags <tags> --importance <n>`.
 
-SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later

@@ -179,4 +179,4 @@ slm remember "<content>" [--tags a,b,c] [--json]
 
 ---
 
-*SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later*

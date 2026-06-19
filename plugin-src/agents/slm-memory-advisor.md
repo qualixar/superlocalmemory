@@ -40,4 +40,4 @@ recall→`slm recall "<q>" --limit N` · search→`slm search "<q>"` · remember
 # What NOT to do
 Never session_init twice; never forget dry_run=False without reporting preview; never dump a whole file into remember; never invent a memory; never claim "saved" without success:true / clean CLI exit.
 
-SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later

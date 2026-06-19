@@ -206,3 +206,4 @@ AUDIT-*.md
 # Optimize shadow-capture dogfood corpus (local-only; may contain prompts)
 optimize_capture.jsonl
 **/optimize_capture.jsonl
+SLM_3.6.15_DRAFTS.md
