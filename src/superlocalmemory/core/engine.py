@@ -332,7 +332,25 @@ class MemoryEngine:
         logger.info("Processing %d pending memories from async store", len(pending))
         for item in pending:
             try:
-                self.store(item["content"])
+                # v3.6.15 multi-scope: the pending row carries a metadata JSON
+                # blob that may hold scope/shared_with (written by the async
+                # /remember path). Replay them so a queued ``--scope global``
+                # write lands as global, not silently downgraded to personal.
+                import json as _json
+                meta = item.get("metadata")
+                if isinstance(meta, str):
+                    try:
+                        meta = _json.loads(meta) if meta else {}
+                    except (ValueError, TypeError):
+                        meta = {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                _scope = meta.get("scope") or "personal"
+                _shared = meta.get("shared_with")
+                self.store(
+                    item["content"], metadata=meta or None,
+                    scope=_scope, shared_with=_shared,
+                )
                 mark_done(item["id"], base_dir)
             except Exception as exc:
                 logger.warning("Pending memory %d failed: %s", item["id"], exc)
@@ -405,7 +423,10 @@ class MemoryEngine:
             vector_store=self._vector_store,
         )
 
-    def store_fast(self, content: str, metadata: dict[str, Any] | None = None) -> list[str]:
+    def store_fast(
+        self, content: str, metadata: dict[str, Any] | None = None,
+        *, scope: str = "personal", shared_with: list[str] | None = None,
+    ) -> list[str]:
         """v3.5.5 WRITE-THROUGH: synchronous verbatim insert for IMMEDIATE recall.
 
         Full ``store()`` blocks 30-180s on LLM fact-extraction + Ollama embedding
@@ -463,6 +484,7 @@ class MemoryEngine:
             session_date=now[:10],
             session_id=(metadata or {}).get("session_id", ""),
             metadata=metadata or {},
+            scope=scope, shared_with=shared_with,
         )
         self._db.store_memory(record)
         # Lightweight regex entities (matches store_pipeline verbatim path) so
@@ -493,6 +515,7 @@ class MemoryEngine:
             observation_date=now[:10], confidence=0.7, importance=0.5,
             embedding=emb, fisher_mean=fmean, fisher_variance=fvar,
             created_at=now,
+            scope=scope, shared_with=shared_with,
         )
         self._db.store_fact(fact)  # FTS5 trigger → immediately BM25-recallable
         # Upsert to vector store so the semantic channel finds it now.
@@ -520,8 +543,8 @@ class MemoryEngine:
         session_id: str | None = None,
         fast: bool = False,
         *,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -539,11 +562,23 @@ class MemoryEngine:
         but is silently treated as False.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
-        scopes participate in retrieval. Both default to True (backward
-        compatible — all existing data is scope='personal').
+        scopes participate in retrieval. ``None`` (the default) means "use the
+        configured ScopeConfig default", which ships OFF — shared memory is
+        opt-in (v3.6.15). Personal facts are ALWAYS returned regardless, so a
+        config of False reproduces 3.6.14 pure-isolation behaviour exactly.
+        This is the single policy chokepoint: every recall path (CLI, MCP,
+        daemon HTTP, in-process adapter) flows through here, so a caller that
+        forgets to thread the flag still gets the safe configured default.
         """
         self._require_full("recall")
         self._ensure_init()
+
+        # Resolve None → configured ScopeConfig default (shared-off by default).
+        _scope_cfg = getattr(self._config, "scope", None)
+        if include_global is None:
+            include_global = bool(getattr(_scope_cfg, "recall_include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(_scope_cfg, "recall_include_shared", False))
 
         if fast:
             logger.warning(

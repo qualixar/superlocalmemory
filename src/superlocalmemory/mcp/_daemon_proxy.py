@@ -46,13 +46,23 @@ class DaemonPoolProxy:
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
         fast: bool = False,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> dict[str, Any]:
-        params = urllib.parse.urlencode({
+        _params: dict[str, Any] = {
             "q": query,
             "limit": limit,
             "session_id": session_id or "",
             "fast": "true" if fast else "false",
-        })
+        }
+        # v3.6.15 multi-scope: only send the scope flags when explicitly set, so
+        # an unset value lets the daemon resolve the configured default (shared
+        # is opt-in). "None" must NOT become the string "none" on the wire.
+        if include_global is not None:
+            _params["include_global"] = "true" if include_global else "false"
+        if include_shared is not None:
+            _params["include_shared"] = "true" if include_shared else "false"
+        params = urllib.parse.urlencode(_params)
         try:
             with urllib.request.urlopen(
                 self._url(f"/recall?{params}"), timeout=self._timeout,

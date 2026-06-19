@@ -236,8 +236,9 @@ def main() -> None:
         help="Wait for completion (default: async background processing)",
     )
     remember_p.add_argument(
-        "--scope", default="personal", choices=("personal", "shared", "global"),
-        help="Memory scope: personal, shared, or global (default: personal)",
+        "--scope", default=None, choices=("personal", "shared", "global"),
+        help="Memory scope: personal, shared, or global. Unset uses the "
+             "configured default_scope (personal). Shared memory is opt-in.",
     )
     remember_p.add_argument(
         "--shared-with", default=None,
@@ -259,20 +260,24 @@ def main() -> None:
              "Other 4 channels (semantic, lexical, temporal, structural) still run. "
              "Use when you need recall before a tool call (e.g. before WebSearch).",
     )
+    # v3.6.15: shared memory is opt-in. Unset (None) → resolve the configured
+    # default (recall_include_global/shared, both False by default). Explicit
+    # flags override per-call. default=None on BOTH members of each pair so the
+    # store_false's implicit default=True can't sneak back in.
     recall_p.add_argument(
-        "--include-global", dest="include_global", action="store_true", default=True,
-        help="Include global-scope facts in retrieval (default: True)",
+        "--include-global", dest="include_global", action="store_true", default=None,
+        help="Include global-scope facts in retrieval (opt-in; default off)",
     )
     recall_p.add_argument(
-        "--no-global", dest="include_global", action="store_false",
+        "--no-global", dest="include_global", action="store_false", default=None,
         help="Exclude global-scope facts from retrieval",
     )
     recall_p.add_argument(
-        "--include-shared", dest="include_shared", action="store_true", default=True,
-        help="Include shared-scope facts in retrieval (default: True)",
+        "--include-shared", dest="include_shared", action="store_true", default=None,
+        help="Include facts shared with this profile (opt-in; default off)",
     )
     recall_p.add_argument(
-        "--no-shared", dest="include_shared", action="store_false",
+        "--no-shared", dest="include_shared", action="store_false", default=None,
         help="Exclude shared-scope facts from retrieval",
     )
 

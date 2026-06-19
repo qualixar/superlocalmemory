@@ -61,10 +61,15 @@ def _get_engine():
 
 def _handle_recall(
     query: str, limit: int, session_id: str = "", fast: bool = False,
+    include_global: bool | None = None, include_shared: bool | None = None,
 ) -> dict:
     engine = _get_engine()
+    # v3.6.15 multi-scope: None flags let engine.recall resolve the configured
+    # default (shared-off). The subprocess loads its own SLMConfig, so the
+    # resolution is identical to the in-process / daemon paths.
     response = engine.recall(
         query, limit=limit, session_id=session_id or None, fast=bool(fast),
+        include_global=include_global, include_shared=include_shared,
     )
 
     # Batch-fetch original memory text for all results
@@ -285,6 +290,8 @@ def _worker_main() -> None:
                 result = _handle_recall(
                     req.get("query", ""), req.get("limit", 10),
                     req.get("session_id", ""), bool(req.get("fast", False)),
+                    include_global=req.get("include_global"),
+                    include_shared=req.get("include_shared"),
                 )
                 _respond(result)
             elif cmd == "store":

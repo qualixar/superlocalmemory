@@ -167,19 +167,26 @@ _VALID_SCOPES = ("personal", "shared", "global")
 class ScopeConfig:
     """User-facing defaults for multi-scope (shared) memory.
 
-    All defaults reproduce 3.6.14 behaviour exactly:
-      - new memories are ``personal`` unless the caller passes --scope;
-      - recall includes global + shared facts (a no-op until any exist).
+    SHARED MEMORY IS OPT-IN — NOT a default feature (v3.6.15 product decision).
+    The defaults below make a fresh / unconfigured install behave EXACTLY like
+    3.6.14: every write is ``personal`` and recall returns only this profile's
+    own facts. Another profile's ``global``/``shared`` facts never leak into
+    recall until the user explicitly turns sharing on.
 
-    The CLI/MCP boundary consults these when the user doesn't override
-    per-call, so an existing user can opt into stricter isolation
-    (recall_include_global/shared = false) or a more open default by editing
-    config.json / mode_a|b|c.json, and the installer can write the choice.
+      - ``default_scope='personal'``      → writes stay private by default;
+      - ``recall_include_global=False``   → don't surface other profiles' global;
+      - ``recall_include_shared=False``   → don't surface facts shared *to* me.
+
+    Turning it on is a deliberate act, done either per-call (``--scope`` /
+    ``--include-global`` / MCP args) or persistently by editing config.json /
+    mode_a|b|c.json (the installer can also write the choice). The CLI/MCP
+    boundary passes ``None`` ("not specified") so the engine resolves these
+    config values as the effective default.
     """
 
-    default_scope: str = "personal"        # scope assigned to new memories
-    recall_include_global: bool = True     # include scope='global' facts in recall
-    recall_include_shared: bool = True     # include scope='shared' facts in recall
+    default_scope: str = "personal"         # scope assigned to new memories
+    recall_include_global: bool = False     # surface scope='global' facts in recall
+    recall_include_shared: bool = False     # surface scope='shared' facts in recall
 
     def __post_init__(self) -> None:
         if self.default_scope not in _VALID_SCOPES:

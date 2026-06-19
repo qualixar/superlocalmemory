@@ -160,6 +160,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
         try:
             from superlocalmemory.cli.pending_store import store_pending
+            # v3.6.15: preserve a non-personal scope through the offline path so
+            # the materializer replays the right visibility (else --scope global
+            # would silently downgrade to personal when the daemon is offline).
+            if scope and scope != "personal":
+                meta = {**meta, "scope": scope}
+                if _shared_list:
+                    meta["shared_with"] = _shared_list
             pending_id = store_pending(content, tags=tags, metadata=meta)
             return {
                 "success": True,
@@ -177,8 +184,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
     async def recall(
         query: str, limit: int = CANONICAL_RECALL_LIMIT, agent_id: str = "mcp_client",
         session_id: str = "", fast: bool = False,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> dict:
         """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking.
 
@@ -188,8 +195,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         ``CLAUDE_SESSION_ID``. Omitting it degrades to "no closed-loop
         learning for this recall" — the recall itself always works.
 
-        Multi-scope: ``include_global`` / ``include_shared`` control
-        which scopes participate in retrieval.
+        Multi-scope: ``include_global`` / ``include_shared`` control which
+        scopes participate in retrieval. Leave them unset (``None``) to use the
+        configured default — shared memory is OPT-IN, so by default recall
+        returns only this profile's own facts. Pass ``True`` to opt in per call.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":

@@ -100,8 +100,16 @@ def enrich_fact(
         emotional_valence=emotion.valence, emotional_arousal=emotion.arousal,
         signal_type=signal, created_at=fact.created_at,
         pinned=getattr(fact, 'pinned', False),
-        scope=getattr(fact, 'scope', 'personal'),
-        shared_with=getattr(fact, 'shared_with', None),
+        # v3.6.15 multi-scope: scope is a per-MEMORY property — every fact
+        # derived from a memory inherits the memory's scope. The record is
+        # authoritative; fact-extractor output never carries scope, so reading
+        # it off the fact (as before) silently downgraded extracted facts to
+        # 'personal' and broke `--scope global` on the common extraction path.
+        scope=(getattr(record, 'scope', None)
+               or getattr(fact, 'scope', None) or 'personal'),
+        shared_with=(getattr(record, 'shared_with', None)
+                     if getattr(record, 'scope', None) in ('shared', 'global')
+                     else getattr(fact, 'shared_with', None)),
     )
 
 

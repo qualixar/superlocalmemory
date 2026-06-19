@@ -68,6 +68,11 @@ class RememberRequest(BaseModel):
     content: str
     tags: str = ""
     metadata: dict | None = None  # v3.4.26: pass-through from MCP pool_store
+    # v3.6.15 multi-scope: visibility of the new memory. ``None`` scope means
+    # "use the configured default_scope" (personal). shared_with is the list of
+    # profile_ids for scope='shared'.
+    scope: str | None = None
+    shared_with: list[str] | None = None
 
 
 class SessionOpenRequest(BaseModel):
@@ -1662,6 +1667,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         fast: bool = False,
         full: bool = False,
         include_source: bool = False,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -1697,6 +1704,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 engine.recall,
                 search_query, limit=limit, session_id=effective_sid,
                 fast=fast,
+                include_global=include_global,
+                include_shared=include_shared,
             )
             # v3.4.26: return the same field shape as recall_worker so
             # MCP processes proxying through the daemon get recall_trace-
@@ -1758,13 +1767,23 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         engine = _get_engine_or_503()
 
+        # v3.6.15 multi-scope: resolve the write scope. ``None`` (not specified
+        # by the caller) → the configured default_scope (personal). Shared
+        # memory is opt-in, so the default keeps every write private.
+        _scope_cfg = getattr(engine._config, "scope", None)
+        scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
+        shared_with = req.shared_with
+
         if wait:
             try:
                 metadata = {"tags": req.tags} if req.tags else {}
                 extra = getattr(req, "metadata", None)
                 if isinstance(extra, dict):
                     metadata.update(extra)
-                fact_ids = engine.store(req.content, metadata=metadata)
+                fact_ids = engine.store(
+                    req.content, metadata=metadata,
+                    scope=scope, shared_with=shared_with,
+                )
                 return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
             except Exception as exc:
                 raise HTTPException(500, detail=str(exc))
@@ -1777,13 +1796,25 @@ def _register_daemon_routes(application: FastAPI) -> None:
             extra = getattr(req, "metadata", None)
             if isinstance(extra, dict):
                 meta.update(extra)
+            # v3.6.15 multi-scope: persist the resolved scope INSIDE the pending
+            # metadata so the materializer (_process_pending_memories) replays
+            # the write with the correct visibility instead of defaulting to
+            # personal. Non-personal only — keeps personal rows byte-identical
+            # to pre-3.6.15 so nothing downstream sees a new key by default.
+            if scope and scope != "personal":
+                meta["scope"] = scope
+                if shared_with:
+                    meta["shared_with"] = shared_with
             # v3.5.5 WRITE-THROUGH: synchronous verbatim insert → the memory is
             # keyword/BM25-recallable the instant this returns (~ms). Closes the
             # recall window so a parallel/next agent finds memories saved seconds
             # ago. Embedding/graph enrichment is deferred to the materializer.
             fact_ids: list[str] = []
             try:
-                fact_ids = engine.store_fast(req.content, metadata=meta)
+                fact_ids = engine.store_fast(
+                    req.content, metadata=meta,
+                    scope=scope, shared_with=shared_with,
+                )
             except Exception as fexc:
                 logger.warning("store_fast failed, falling back to pending-only: %s", fexc)
             # Enqueue for async enrichment (embedding + entities + graph). The
