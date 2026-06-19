@@ -379,6 +379,33 @@ def run_wizard(auto: bool = False) -> None:
     mode_map = {"a": Mode.A, "b": Mode.B, "c": Mode.C}
     config = SLMConfig.for_mode(mode_map[choice])
 
+    # -- Multi-scope (shared memory) opt-in — v3.6.15 --
+    # OFF by default: your memories stay private to this profile (3.6.14 behaviour).
+    # Enabling only turns ON recall VISIBILITY of other profiles' shared/global facts;
+    # your own writes still default to 'personal' (mark a memory shared/global per call
+    # with --scope). Existing users can flip this later in the `scope` section of
+    # mode_a/b/c.json. See docs/shared-memory.md.
+    print()
+    print("  Shared memory lets other local profiles' 'shared'/'global' memories")
+    print("  appear in your recall. It is OFF by default — your memories stay private.")
+    if interactive:
+        sm_choice = _prompt(
+            "  See shared/global memories from other profiles by default? [y/N] (default: N): ",
+            "n",
+        ).lower()
+    else:
+        sm_choice = "n"
+    if sm_choice in ("y", "yes"):
+        from superlocalmemory.core.config import ScopeConfig
+        config.scope = ScopeConfig(
+            default_scope="personal",
+            recall_include_global=True,
+            recall_include_shared=True,
+        )
+        print("  ✓ Shared-memory recall ENABLED (your own writes still default to personal).")
+    else:
+        print("  ✓ Shared memory OFF (default) — enable later in mode_*.json if needed.")
+
     if choice == "b":
         print()
         if shutil.which("ollama"):

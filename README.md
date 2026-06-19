@@ -100,6 +100,8 @@ Three mathematical contributions replace cloud LLM dependency:
 
 Auto-capture hooks (`slm hooks install`) fire only on real signals — topic pivot, web call, file edit — never on a timer. Fail-open, <10ms p99 hot path.
 
+**Multi-scope memory (v3.6.15, opt-in):** keep memories `personal` (default), `shared` with named profiles, or `global` across the machine. Off by default — recall only ever returns your own facts until you turn sharing on, per call or in config. See **[docs/shared-memory.md](docs/shared-memory.md)**.
+
 <a id="multilingual-embedding-support"></a>
 
 **Multilingual:** plug in any OpenAI-compatible embedding endpoint — Ollama, vLLM, LiteLLM, `bge-m3`, `multilingual-e5`, `Qwen3-Embedding`. The math layer is language-agnostic; 30+ languages work at full retrieval quality. No cloud dependency, no code changes.
@@ -292,6 +294,7 @@ slm dashboard    # Opens at http://localhost:8765
 
 | Version | Codename | Key Features |
 |---|---|---|
+| **v3.6.15** | Multi-scope | **Opt-in [shared memory](docs/shared-memory.md)** (personal/shared/global, off by default), default-deny scope at every read path, recall scope-race fix, contributor PRs #42/#43/#44, fixes #46–#49 |
 | **v3.6.14** | Plugin-native | Claude Code Plugin (WP-06), MCP profiles (WP-01), IDE connect (WP-08), asset consolidation, UI polish (WP-12) |
 | **v3.6.x** | Optimize Everywhere / Distributed-ready | Three surfaces (proxy/MCP/skill), `SLM_REMOTE=1` LAN mode, remote dashboard, custom LLM endpoints |
 | **v3.5.0** | Scale-Ready | CozoDB/LanceDB, 6-channel recall <1s, Core Memory Block, context injection v2, score normalization |

@@ -164,6 +164,9 @@ No benchmark numbers are cited here; performance is workload-dependent.
 # Multi-channel semantic recall
 slm recall "<query>" [--limit N] [--fast] [--json]
 
+# Opt into shared/global facts for one query (v3.6.15 — off by default)
+slm recall "<query>" --include-global --include-shared
+
 # Keyword/FTS5 search (alias: slm search)
 slm search "<query>" [--limit N] [--json]
 
@@ -175,10 +178,15 @@ slm list [--limit N] [--json]
 ```
 
 Flags verified in source (main.py):
-- `slm recall`: `--limit`, `--fast`, `--json`
+- `slm recall`: `--limit`, `--fast`, `--json`, `--include-global` / `--no-global`, `--include-shared` / `--no-shared`
 - `slm search`: `--limit`, `--json`
 - `slm trace`: `--limit`, `--json`
 - `slm list`: `--limit` / `-n`, `--json`
+
+> **Multi-scope (v3.6.15, opt-in):** recall is shared-OFF by default — it returns only
+> this profile's facts. Pass `--include-global` / `--include-shared` (or the MCP
+> `include_global` / `include_shared` args) to opt in for a query, or set the defaults in
+> your `mode_a/b/c.json` config. See [docs/shared-memory.md](../../../docs/shared-memory.md).
 
 **Flags that do NOT exist** (fabricated in old skills — never write these):
 `--min-score`, `--format`, `--project`, `--tags` on recall or search.
