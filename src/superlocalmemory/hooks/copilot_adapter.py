@@ -8,9 +8,15 @@ LLD-05 §6. Verified (verification-2026-04-17.md claim 5): plain markdown,
 no frontmatter, soft 2 KB / hard 4 KB cap. Adapter is INACTIVE when the
 project has no ``.github/`` directory — we do not create it ourselves.
 
+v3.4.23 fix: the SLM-managed content is wrapped in
+``<!-- SLM-START -->`` / ``<!-- SLM-END -->`` markers and merged into the
+host file rather than overwriting it. ``.github/copilot-instructions.md``
+is typically a curated, project-specific document; destructive rewrites
+deleted the user's prose.
+
 Hard rules covered here:
   - A1 / A2 / A3 / A7: via ``adapter_base.atomic_write``.
-  - A4: soft 2 KB + hard 4 KB cap enforcement.
+  - A4: soft 2 KB + hard 4 KB cap enforcement on the SLM section.
 """
 
 from __future__ import annotations
@@ -39,6 +45,12 @@ from superlocalmemory.hooks.context_payload import (
     format_topics,
     truncate_payload_for_cap,
 )
+from superlocalmemory.hooks.memory_protocol import (
+    SLM_MARKER_END,
+    SLM_MARKER_START,
+    memory_protocol_markdown,
+    strip_slm_block as _strip_existing_block,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +64,37 @@ _BODY_TEMPLATE = (
     "## Entities\n{entities}\n\n"
     "## Never do\n"
     "- Do not modify files under `.slm/`\n"
-    "- Do not commit `*.slm-cache.db`\n"
+    "- Do not commit `*.slm-cache.db`\n\n"
 )
 
 
 def render_copilot(payload: ContextPayload) -> bytes:
-    return _BODY_TEMPLATE.format(
+    # Two-stage assembly: format the dynamic header (which contains {}
+    # placeholders), then concatenate the static memory-protocol block
+    # verbatim. The memory-protocol block legitimately contains literal
+    # braces (JSON-shaped argument examples for the agent) which must not
+    # be interpreted as format fields.
+    header = _BODY_TEMPLATE.format(
         version=payload.version,
         topics=format_topics(payload),
         entities=format_entities(payload),
-    ).encode("utf-8")
+    )
+    return (header + memory_protocol_markdown()).encode("utf-8")
+
+
+def _wrap_managed(rendered: bytes) -> str:
+    """Wrap rendered SLM content in ``<!-- SLM-START -->`` markers."""
+    return (
+        f"{SLM_MARKER_START}\n"
+        "<!-- Managed by SuperLocalMemory. Edits between SLM-START and "
+        "SLM-END will be overwritten. -->\n\n"
+        f"{rendered.decode('utf-8')}\n"
+        f"{SLM_MARKER_END}\n"
+    )
 
 
 class CopilotAdapter:
-    """Project-scope Copilot adapter."""
+    """Project-scope Copilot adapter (marker-bounded merge)."""
 
     def __init__(
         self,
@@ -124,8 +153,39 @@ class CopilotAdapter:
             )
             rendered = truncate_to_cap(rendered, cap=self._hard_cap)
 
+        # Marker-bounded merge — preserve any user-curated content in the
+        # host file. Strip any prior SLM block(s) and re-append a fresh one.
+        existing = ""
+        if resolved.exists():
+            try:
+                existing = resolved.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.warning(
+                    "copilot: cannot read %s: %s", resolved, exc,
+                )
+                return False
+
+        # Orphaned start marker — refuse to write rather than corrupt.
+        if (SLM_MARKER_START in existing
+                and SLM_MARKER_END not in existing):
+            logger.warning(
+                "copilot: %s present but %s missing in %s; refusing to write",
+                SLM_MARKER_START, SLM_MARKER_END, resolved,
+            )
+            return False
+
+        stripped = _strip_existing_block(existing)
+        section = _wrap_managed(rendered)
+        if stripped:
+            if not stripped.endswith("\n"):
+                stripped += "\n"
+            # One blank line between user content and the managed section.
+            new_content = stripped + "\n" + section
+        else:
+            new_content = section
+
         result: WriteResult = atomic_write(
-            resolved, rendered,
+            resolved, new_content.encode("utf-8"),
             adapter_name=self.name,
             profile_id=self._profile_id,
             sync_log_db=self._sync_log_db,
@@ -137,11 +197,20 @@ class CopilotAdapter:
             resolved = self.target_path
         except PathTraversalError:
             return
+        # Marker-bounded strip — never delete the host file (user-owned).
         if resolved.exists():
             try:
-                resolved.unlink()
-            except OSError:  # pragma: no cover
-                pass
+                existing = resolved.read_text(encoding="utf-8")
+            except OSError:
+                existing = ""
+            stripped = _strip_existing_block(existing)
+            if stripped != existing:
+                try:
+                    resolved.write_text(stripped, encoding="utf-8")
+                except OSError as exc:  # pragma: no cover
+                    logger.warning(
+                        "copilot: failed to strip on disable: %s", exc,
+                    )
         record_disable(
             resolved,
             adapter_name=self.name,
