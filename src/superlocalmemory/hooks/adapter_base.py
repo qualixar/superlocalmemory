@@ -217,9 +217,16 @@ def atomic_write(
     prev = sync_log_last_content_sha256(sync_log_db, adapter_name, target_sha)
 
     if prev == new_hash and resolved_path.exists():
-        # Durable skip — no write, no new sync-log row (the prior row still
-        # reflects on-disk truth).
-        return WriteResult(wrote=False, bytes_written=0, content_sha256=new_hash)
+        # Durable skip only if the on-disk content also matches the new hash.
+        # The sync-log row alone is not authoritative: the file may have been
+        # mutated out-of-band (e.g. ``git restore``, manual edit) since the
+        # last sync. Re-hash the file and re-write if it diverges.
+        try:
+            disk_hash = hashlib.sha256(resolved_path.read_bytes()).hexdigest()
+        except OSError:
+            disk_hash = None
+        if disk_hash == new_hash:
+            return WriteResult(wrote=False, bytes_written=0, content_sha256=new_hash)
 
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = resolved_path.with_suffix(resolved_path.suffix + ".slm-tmp")
