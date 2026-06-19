@@ -204,4 +204,4 @@ slm doctor [--json]    # preflight check including daemon and embedding worker
 
 ---
 
-*SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.6.16 · Qualixar · AGPL-3.0-or-later*

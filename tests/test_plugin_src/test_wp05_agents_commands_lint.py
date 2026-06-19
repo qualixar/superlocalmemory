@@ -287,6 +287,6 @@ def test_skill_refs_are_real(md_path: Path) -> None:
 @pytest.mark.parametrize("md_path", ALL_MD_FILES, ids=lambda p: p.name)
 def test_attribution_line(md_path: Path) -> None:
     text = md_path.read_text(encoding="utf-8")
-    assert "SuperLocalMemory v3.6.15" in text and "Qualixar" in text, (
-        f"{md_path.name}: missing attribution line 'SuperLocalMemory v3.6.15 · Qualixar'"
+    assert "SuperLocalMemory v3.6.16" in text and "Qualixar" in text, (
+        f"{md_path.name}: missing attribution line 'SuperLocalMemory v3.6.16 · Qualixar'"
     )
