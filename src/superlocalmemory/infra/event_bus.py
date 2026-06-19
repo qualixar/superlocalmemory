@@ -32,6 +32,10 @@ VALID_EVENT_TYPES = frozenset([
     "memory.updated",       # Existing memory modified
     "memory.deleted",       # Memory removed
     "memory.recalled",      # Memory retrieved by an agent
+    "memory.observed",      # /observe accepted content into the debounce buffer
+    "memory.captured",      # AutoCapture matched a buffered observation
+    "memory.dropped",       # AutoCapture rejected a buffered observation
+    "memory.queued",        # /remember accepted content into pending.db (async)
     "graph.updated",        # Knowledge graph rebuilt
     "pattern.learned",      # New pattern detected
     "agent.connected",      # New agent connects

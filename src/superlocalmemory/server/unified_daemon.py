@@ -171,6 +171,33 @@ from superlocalmemory.core.recall_gate import (
 # daemon startup via engine._process_pending_memories().
 _engine = None
 
+
+def _emit_event(
+    event_type: str,
+    payload: dict | None = None,
+    *,
+    source_agent: str = "http_client",
+) -> None:
+    """Emit a best-effort EventBus event from an HTTP write path.
+
+    Mirrors mcp.shared.emit_event but tags source_protocol="http" so the
+    dashboard can distinguish HTTP traffic from MCP tool calls. Never raises
+    — a bus failure must not affect the caller's response.
+    """
+    try:
+        from superlocalmemory.infra.event_bus import EventBus
+        from superlocalmemory.server.routes.helpers import DB_PATH
+        bus = EventBus.get_instance(DB_PATH)
+        bus.emit(
+            event_type,
+            payload=payload,
+            source_agent=source_agent,
+            source_protocol="http",
+        )
+    except Exception as exc:
+        logger.debug("EventBus emit failed (%s): %s", event_type, exc)
+
+
 # v3.4.53: Limit concurrent full (non-fast) recalls. Without this, N parallel
 # /recall calls spawn N × 6-channel threads → Ollama serialises, reranker
 # lock queues, and total wall time is N × single-recall-time. 3 concurrent
@@ -240,6 +267,14 @@ class ObserveBuffer:
             self._timer = threading.Timer(self._debounce_sec, self._flush)
             self._timer.daemon = True
             self._timer.start()
+        _emit_event(
+            "memory.observed",
+            payload={
+                "content_hash": content_hash,
+                "content_preview": content[:120],
+                "buffer_size": buf_size,
+            },
+        )
         return {"captured": True, "queued": True, "buffer_size": buf_size}
 
     def _flush(self) -> None:
@@ -268,6 +303,22 @@ class ObserveBuffer:
                         # The prior 'processed N' counted skipped (capture=False)
                         # items as successes — a false-positive write count.
                         captured_count += 1
+                        _emit_event(
+                            "memory.captured",
+                            payload={
+                                "category": decision.category,
+                                "confidence": getattr(decision, "confidence", None),
+                                "content_preview": content[:120],
+                            },
+                        )
+                    else:
+                        _emit_event(
+                            "memory.dropped",
+                            payload={
+                                "reason": getattr(decision, "reason", "no patterns matched"),
+                                "content_preview": content[:120],
+                            },
+                        )
                 except Exception as exc:
                     failed_count += 1
                     logger.warning(
@@ -1784,6 +1835,15 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     req.content, metadata=metadata,
                     scope=scope, shared_with=shared_with,
                 )
+                _emit_event(
+                    "memory.stored",
+                    payload={
+                        "fact_ids": list(fact_ids) if fact_ids else [],
+                        "count": len(fact_ids) if fact_ids else 0,
+                        "path": "remember_sync",
+                        "content_preview": req.content[:120],
+                    },
+                )
                 return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
             except Exception as exc:
                 raise HTTPException(500, detail=str(exc))
@@ -1822,6 +1882,14 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # it in place rather than duplicating.
             pending_id = store_pending(
                 req.content, tags=req.tags or "", metadata=meta,
+            )
+            _emit_event(
+                "memory.queued",
+                payload={
+                    "pending_id": pending_id,
+                    "tags": req.tags or "",
+                    "content_preview": req.content[:120],
+                },
             )
             return {
                 "ok": True,
@@ -2196,6 +2264,16 @@ def _start_pending_materializer() -> None:
                         )
                         engine.store_fact_direct(fact)
                         mark_done(item["id"])
+                        _emit_event(
+                            "memory.stored",
+                            payload={
+                                "pending_id": item["id"],
+                                "memory_id": mem_id,
+                                "path": "materializer_drain",
+                                "content_preview": content[:120],
+                            },
+                            source_agent="materializer",
+                        )
                     except Exception as exc:
                         logger.warning(
                             "Pending %d failed: %s", item["id"], exc,
