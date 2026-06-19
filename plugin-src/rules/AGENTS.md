@@ -18,6 +18,7 @@ Call `session_init(project_path, query, max_results, max_age_days)` **once** at 
 - **Recall before remember** — call `recall(query, 5)` first. If a near-identical memory exists, use `update_memory(fact_id, content)` to correct it; never duplicate.
 - **Tags + project + importance** — always supply meaningful tags and the project name. Use importance 7–10 for blockers, security findings, and architecture decisions; 5 for general facts.
 - **Never dump a whole file** — extract only the durable decision or constraint; store the path reference if needed.
+- **Scope is opt-in (v3.6.15)** — memories are `personal` (private to this profile) by default. Only pass `scope="shared"/"global"` (or recall's `include_global`/`include_shared`) when the user EXPLICITLY asks to share across local profiles. Never opt in on your own; the default is identical to single-profile SLM.
 
 ---
 
@@ -56,7 +57,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 |------------------------|-----------------------------------------------------------|
 | `recall`               | `slm recall "<query>" --limit N`                          |
 | `search`               | `slm search "<query>"`                                    |
-| `remember`             | `slm remember "<content>" --tags a,b --project p --importance N` |
+| `remember`             | `slm remember "<content>" --tags a,b` (project/importance are MCP-only) |
 | `list_recent`          | `slm list --limit N`                                      |
 | `forget`               | `slm forget` (always preview first)                       |
 | `slm_optimize_stats`   | `slm optimize status` / `slm optimize savings`            |
@@ -72,8 +73,8 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 
 | Tool               | Signature (key params)                                                         | Notes                              |
 |--------------------|--------------------------------------------------------------------------------|------------------------------------|
-| `remember`         | `content, tags="", project="", importance=5, session_id="", agent_id`         | Store atomic fact                  |
-| `recall`           | `query, limit=10, agent_id, session_id="", fast=False`                         | Multi-channel semantic retrieval   |
+| `remember`         | `content, tags="", project="", importance=5, session_id="", scope="personal", shared_with=""` | Store atomic fact. `scope` opt-in (personal default) |
+| `recall`           | `query, limit=10, agent_id, session_id="", fast=False, include_global, include_shared`         | Multi-channel retrieval. Scope flags off by default |
 | `search`           | `query, limit=10, profile_id=""`                                               | FTS5 BM25 keyword search           |
 | `fetch`            | `url, ...`                                                                     | Fetch remote content               |
 | `list_recent`      | `limit=20, profile_id=""`                                                      | Newest memories first              |

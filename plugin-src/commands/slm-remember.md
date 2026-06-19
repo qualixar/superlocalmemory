@@ -11,6 +11,6 @@ Save to SuperLocalMemory: $ARGUMENTS
 3. Determine importance: use 8 for blockers/security/architecture decisions; use 7 for conventions and constraints; use 5 for general facts.
 4. Call `remember(content="$ARGUMENTS", tags=<extracted tags>, importance=<n>)`.
 5. Confirm only on success:true. If success is not true, report the error — never claim "saved."
-6. MCP unavailable → CLI fallback: `slm remember "$ARGUMENTS" --tags <tags> --importance <n>`.
+6. MCP unavailable → CLI fallback: `slm remember "$ARGUMENTS" --tags <tags>` (note: `--importance` is MCP-only, not a CLI flag).
 
 SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later
