@@ -18,6 +18,8 @@ Backward-compat guarantee under test:
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from superlocalmemory.cli import pending_store
@@ -121,6 +123,54 @@ class TestRecallSharedOffByDefault:
         forced = {r.fact.fact_id for r in eng.recall(
             "octopus", include_global=True, include_shared=True).results}
         assert default == forced
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — scope flags must not leak across concurrent recalls that share
+# the same (singleton) channel instances. Guards the self._scope_lock fix.
+# ---------------------------------------------------------------------------
+
+class TestConcurrentRecallScopeIsolation:
+    def test_concurrent_recalls_keep_their_own_scope(self, engine_with_mock_deps):
+        eng = engine_with_mock_deps
+        eng.store_fast("zebra concurrency probe")
+        re = eng._retrieval_engine
+        observations: list[tuple[bool, bool]] = []
+        obs_lock = threading.Lock()
+        orig = re._run_channels
+
+        def _spy(query, profile_id, strat):
+            # Capture the scope flag visible on a shared channel AT execution
+            # time, with a tiny stall to widen the interleaving window. Under
+            # the scope-lock this must always equal the calling recall's flag.
+            ch = re._semantic
+            seen_g = getattr(ch, "include_global", None)
+            import time as _t
+            _t.sleep(0.002)
+            seen_s = getattr(ch, "include_shared", None)
+            with obs_lock:
+                observations.append((seen_g, seen_s))
+            return orig(query, profile_id, strat)
+
+        re._run_channels = _spy
+        try:
+            def _recall(flag):
+                for _ in range(10):
+                    eng.recall("zebra", include_global=flag, include_shared=flag)
+
+            t_true = threading.Thread(target=_recall, args=(True,))
+            t_false = threading.Thread(target=_recall, args=(False,))
+            t_true.start(); t_false.start()
+            t_true.join(); t_false.join()
+        finally:
+            re._run_channels = orig
+
+        # Every observation must be internally consistent: a recall that set
+        # include_global also set include_shared to the same value, and the two
+        # flags were never a torn (True, False) / (False, True) mix from an
+        # interleaved concurrent recall.
+        assert observations
+        assert all(g == s for g, s in observations), observations
 
 
 # ---------------------------------------------------------------------------

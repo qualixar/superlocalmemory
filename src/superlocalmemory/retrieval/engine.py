@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -84,6 +85,12 @@ class RetrievalEngine:
         self._profile_channel = profile_channel
         self._bridge = bridge_discovery
         self._trust_scorer = trust_scorer
+        # v3.6.15: serialise the per-recall scope-flag set + channel execution.
+        # Channel instances are SHARED across concurrent recalls (the daemon runs
+        # several in parallel); without this, recall B's flags could overwrite
+        # recall A's mid-flight on the shared channels. Uncontended for a single
+        # recall (~0 cost); only the channel phase of concurrent recalls serialises.
+        self._scope_lock = threading.Lock()
 
         # V3.3.4: LRU cache for query embeddings (avoids redundant Ollama API calls)
         # V3.4.40 (2026-05-09): bumped 64 -> 512. Each cached embedding is ~3KB
@@ -133,12 +140,9 @@ class RetrievalEngine:
         t0 = time.monotonic()
         self._extra_disabled = set(extra_disabled_channels or ())
 
-        # Multi-scope: set scope flags on channels before parallel execution.
-        for ch in (self._semantic, self._bm25, self._entity, self._temporal,
-                   self._hopfield, self._spreading_activation, self._profile_channel):
-            if ch is not None:
-                ch.include_global = include_global
-                ch.include_shared = include_shared
+        # Multi-scope: scope flags are set on the (shared) channel instances +
+        # the channels executed atomically under self._scope_lock — see the
+        # `# 3. Run channels` block below. (profile_channel does not read scope.)
         self._include_global = include_global
         self._include_shared = include_shared
 
@@ -174,8 +178,18 @@ class RetrievalEngine:
         # Dynamic top-k for aggregation queries
         effective_limit = 100 if strat.query_type == "aggregation" else limit
 
-        # 3. Run 4 channels
-        ch_results = self._run_channels(query, profile_id, strat)
+        # 3. Run channels. Set the scope flags on the shared channel instances
+        # and execute them under self._scope_lock so a concurrent recall can't
+        # interleave its scope visibility onto these channels mid-flight. The
+        # worker threads spawned inside _run_channels are joined before the lock
+        # releases, so every channel read sees THIS recall's flags.
+        with self._scope_lock:
+            for ch in (self._semantic, self._bm25, self._entity, self._temporal,
+                       self._hopfield, self._spreading_activation):
+                if ch is not None:
+                    ch.include_global = include_global
+                    ch.include_shared = include_shared
+            ch_results = self._run_channels(query, profile_id, strat)
         _em("run_channels")
         if profile_hits:
             ch_results["profile"] = profile_hits

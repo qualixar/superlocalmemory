@@ -222,8 +222,10 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             # v3.4.26: prefer the daemon's /consolidate/cognitive endpoint
             # so the heavy CognitiveConsolidator import stays out of the
             # MCP process. Fall back to local import only if no daemon.
-            daemon_result = _try_daemon_post(
-                "/consolidate/cognitive", {"profile_id": pid},
+            import asyncio
+            # blocking urllib (60s timeout) — keep it off the MCP event loop.
+            daemon_result = await asyncio.to_thread(
+                _try_daemon_post, "/consolidate/cognitive", {"profile_id": pid},
             )
             if daemon_result is not None:
                 _emit_event("ccq.consolidation_complete", {
@@ -434,8 +436,10 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             # v3.4.26: prefer the daemon so ForgettingScheduler /
             # ConsolidationWorker / EbbinghausCurve don't load inside
             # the MCP process.
-            daemon_result = _try_daemon_post(
-                "/maintenance/run", {"profile_id": pid},
+            import asyncio
+            # blocking urllib — keep it off the MCP event loop.
+            daemon_result = await asyncio.to_thread(
+                _try_daemon_post, "/maintenance/run", {"profile_id": pid},
             )
             if daemon_result is not None:
                 daemon_result.setdefault("success", True)
