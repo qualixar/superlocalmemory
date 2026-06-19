@@ -56,6 +56,20 @@ def test_config_file_roundtrip():
     }
 
 
+def test_invalid_scope_in_config_does_not_brick_load():
+    # A typo'd default_scope in config.json must NOT raise out of load() and
+    # crash every `slm` command — it falls back to the safe (shared-off) default.
+    d = Path(tempfile.mkdtemp())
+    (d / "config.json").write_text(json.dumps({
+        "mode": "a",
+        "scope": {"default_scope": "bogus"},
+        "scope_weights": {"personal": -5.0},
+    }))
+    c = SLMConfig.load(d / "config.json")  # must not raise
+    assert c.scope.default_scope == "personal"
+    assert c.scope.recall_include_global is False
+
+
 def test_absent_scope_section_uses_defaults():
     d = Path(tempfile.mkdtemp())
     (d / "config.json").write_text(json.dumps({"mode": "a"}))

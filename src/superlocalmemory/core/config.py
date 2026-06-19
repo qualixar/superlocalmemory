@@ -938,18 +938,32 @@ class SLMConfig:
         # Multi-scope memory: scope weights
         sw = data.get("scope_weights", {})
         if sw:
-            config.scope_weights = ScopeWeights(**{
-                k: v for k, v in sw.items()
-                if k in ScopeWeights.__dataclass_fields__
-            })
+            # v3.6.15: a malformed value (e.g. negative weight) must NOT brick
+            # every `slm` command via an uncaught ValueError out of load().
+            # Fall back to defaults and warn — the config is recoverable.
+            try:
+                config.scope_weights = ScopeWeights(**{
+                    k: v for k, v in sw.items()
+                    if k in ScopeWeights.__dataclass_fields__
+                })
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "Ignoring invalid scope_weights in config (%s) — using defaults", exc
+                )
 
         # Multi-scope memory: behaviour defaults (default scope + recall visibility)
         sc = data.get("scope", {})
         if sc:
-            config.scope = ScopeConfig(**{
-                k: v for k, v in sc.items()
-                if k in ScopeConfig.__dataclass_fields__
-            })
+            # Same guard: a typo'd default_scope must not crash the whole CLI.
+            try:
+                config.scope = ScopeConfig(**{
+                    k: v for k, v in sc.items()
+                    if k in ScopeConfig.__dataclass_fields__
+                })
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "Ignoring invalid scope config (%s) — using shared-off defaults", exc
+                )
 
         return config
 

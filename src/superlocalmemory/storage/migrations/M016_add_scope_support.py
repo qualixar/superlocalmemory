@@ -96,12 +96,25 @@ def verify(conn: sqlite3.Connection) -> bool:
     Checking the index (not just the column) ensures apply() still runs on a
     fresh install where create_all_tables created the column but not the index.
     """
-    try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(atomic_facts)").fetchall()}
-    except sqlite3.Error:
-        return False
-    if "scope" not in cols:
-        return False
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_atomic_facts_scope'"
-    ).fetchone() is not None
+    # v3.6.15: verify EVERY core table apply() touches — not just atomic_facts.
+    # A partial apply (scope added to atomic_facts but not the other tables) must
+    # NOT false-pass, or M016 is marked done and the remaining tables are left
+    # permanently without the scope column. Absent tables are skipped, matching
+    # apply()'s own skip-missing-table contract.
+    for t in TABLES:
+        try:
+            info = conn.execute(f"PRAGMA table_info({t})").fetchall()
+        except sqlite3.Error:
+            return False
+        if not info:
+            continue  # table absent on this DB — apply() skips it too
+        cols = {r[1] for r in info}
+        if "scope" not in cols:
+            return False
+        idx = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+            (f"idx_{t}_scope",),
+        ).fetchone()
+        if idx is None:
+            return False
+    return True
