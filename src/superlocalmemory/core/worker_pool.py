@@ -68,6 +68,8 @@ class WorkerPool:
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
         fast: bool = False,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> dict:
         """Run recall in worker subprocess. Returns result dict.
 
@@ -75,11 +77,21 @@ class WorkerPool:
         so the outcome-queue gets a pending_outcomes row for this
         recall. Without it, hook-based signals have no outcome to
         attach to.
+
+        v3.6.15 multi-scope: ``include_global``/``include_shared`` are forwarded
+        to the worker (and on to ``engine.recall``). ``None`` is sent verbatim
+        so the worker-side engine resolves the configured default — shared
+        memory is opt-in.
         """
-        return self._send({
+        msg = {
             "cmd": "recall", "query": query, "limit": limit,
             "session_id": session_id or "", "fast": bool(fast),
-        })
+        }
+        if include_global is not None:
+            msg["include_global"] = bool(include_global)
+        if include_shared is not None:
+            msg["include_shared"] = bool(include_shared)
+        return self._send(msg)
 
     def store(self, content: str, metadata: dict | None = None) -> dict:
         """Run store in worker subprocess. Returns result dict."""

@@ -99,6 +99,17 @@ def enrich_fact(
         langevin_position=langevin_pos,
         emotional_valence=emotion.valence, emotional_arousal=emotion.arousal,
         signal_type=signal, created_at=fact.created_at,
+        pinned=getattr(fact, 'pinned', False),
+        # v3.6.15 multi-scope: scope is a per-MEMORY property — every fact
+        # derived from a memory inherits the memory's scope. The record is
+        # authoritative; fact-extractor output never carries scope, so reading
+        # it off the fact (as before) silently downgraded extracted facts to
+        # 'personal' and broke `--scope global` on the common extraction path.
+        scope=(getattr(record, 'scope', None)
+               or getattr(fact, 'scope', None) or 'personal'),
+        shared_with=(getattr(record, 'shared_with', None)
+                     if getattr(record, 'scope', None) in ('shared', 'global')
+                     else getattr(fact, 'shared_with', None)),
     )
 
 
@@ -146,6 +157,8 @@ def run_store(
     role: str = "user",
     metadata: dict[str, Any] | None = None,
     *,
+    scope: str = "personal",
+    shared_with: list[str] | None = None,
     config: SLMConfig,
     db: DatabaseManager,
     embedder: Any,
@@ -169,7 +182,11 @@ def run_store(
     context_generator: Any = None,
     consolidation_engine: Any = None,
 ) -> list[str]:
-    """Store content and extract structured facts. Returns fact_ids."""
+    """Store content and extract structured facts. Returns fact_ids.
+
+    Multi-scope: ``scope`` sets visibility (personal/shared/global).
+    ``shared_with`` is a list of profile_ids for shared scope.
+    """
     # Pre-operation hooks (trust gate, ABAC, rate limiter)
     hook_ctx = {
         "operation": "store",
@@ -203,6 +220,7 @@ def run_store(
         profile_id=profile_id, content=content,
         session_id=session_id, speaker=speaker, role=role,
         session_date=parsed_date, metadata=metadata or {},
+        scope=scope, shared_with=shared_with,
     )
     db.store_memory(record)
 
@@ -259,6 +277,8 @@ def run_store(
             observation_date=parsed_date,
             confidence=0.9,
             importance=0.5,
+            scope=scope,
+            shared_with=shared_with,
         )
         # Avoid duplicate if extraction already produced the exact same text
         extracted_texts = {f.content.strip().lower() for f in facts}
@@ -280,6 +300,8 @@ def run_store(
             observation_date=parsed_date,
             confidence=0.7,
             importance=0.3,
+            scope=scope,
+            shared_with=shared_with,
         )]
 
     if not facts:

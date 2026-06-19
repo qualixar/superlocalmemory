@@ -80,12 +80,21 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
 
     Raises :class:`PoolError` on worker death or any non-ok envelope.
     """
-    raw = _pool().recall(
-        query=query,
-        limit=limit,
-        session_id=str(kwargs.get("session_id") or ""),
-        fast=bool(kwargs.get("fast", False)),
-    )
+    # v3.6.15 multi-scope: forward the scope-visibility flags when the caller
+    # set them. ``None`` (the default) is passed through so the daemon/engine
+    # resolves the configured default — shared memory is opt-in, so omitting
+    # them keeps recall scoped to this profile only.
+    _recall_kwargs: dict[str, Any] = {
+        "query": query,
+        "limit": limit,
+        "session_id": str(kwargs.get("session_id") or ""),
+        "fast": bool(kwargs.get("fast", False)),
+    }
+    if "include_global" in kwargs:
+        _recall_kwargs["include_global"] = kwargs["include_global"]
+    if "include_shared" in kwargs:
+        _recall_kwargs["include_shared"] = kwargs["include_shared"]
+    raw = _pool().recall(**_recall_kwargs)
     _unwrap_error(raw, "recall")
     items = raw.get("results", []) if isinstance(raw, dict) else []
     results = [

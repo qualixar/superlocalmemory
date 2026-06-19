@@ -51,6 +51,7 @@ from superlocalmemory.storage.migrations import (
     M013_bi_temporal_columns as _M013,
     M014_v345_scale_ready as _M014,
     M015_add_pinned_column as _M015,
+    M016_add_scope_support as _M016,
 )
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
@@ -71,6 +72,7 @@ _MODULES = {
     _M013.NAME: _M013,
     _M014.NAME: _M014,
     _M015.NAME: _M015,
+    _M016.NAME: _M016,
 }
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,9 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     Migration(name=_M014.NAME, db_target="memory", ddl=_M014.DDL),
     # M015 adds pinned column to atomic_facts (v3.4.65 core-memory pins).
     Migration(name=_M015.NAME, db_target="memory", ddl=_M015.DDL),
+    # M016 adds scope and shared_with columns to 5 core tables for
+    # multi-scope memory support (personal/global/shared).
+    Migration(name=_M016.NAME, db_target="memory", ddl=_M016.DDL),
 ]
 
 
@@ -266,7 +271,18 @@ def _apply_single(
         return ("failed", f"cannot record in_progress: {exc}")
 
     try:
-        conn.executescript(migration.ddl)
+        # A migration module may ship a custom apply(conn) for conditional logic
+        # that static DDL can't express (e.g. SQLite has no ADD COLUMN IF NOT
+        # EXISTS, and ALTER on a missing/already-altered table can't be guarded
+        # in one executescript). If present, it runs instead of the DDL string;
+        # otherwise the DDL is applied as before. Pure-DDL migrations are
+        # unaffected.
+        _mod = _MODULES.get(migration.name)
+        _apply_fn = getattr(_mod, "apply", None) if _mod is not None else None
+        if callable(_apply_fn):
+            _apply_fn(conn)
+        else:
+            conn.executescript(migration.ddl)
     except sqlite3.Error as exc:
         # Best-effort rollback.
         try:

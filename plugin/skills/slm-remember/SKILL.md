@@ -103,8 +103,15 @@ remember(
   project: str = "",  # project scope, e.g. "superlocalmemory"
   importance: int = 5,# 1–10; see scale below
   session_id: str = "",# from session_init; attributes the write to this session
+  scope: str = None,   # v3.6.15 multi-scope: "personal" (default) | "shared" | "global"
+  shared_with: str = "",# comma-separated profile_ids for scope="shared"
 )
 ```
+
+> **Multi-scope (v3.6.15, opt-in):** leave `scope` unset for `personal` (private to
+> this profile — the default, identical to 3.6.14). `"global"` is visible to every
+> profile on the machine; `"shared"` is visible to the profiles in `shared_with`.
+> See [docs/shared-memory.md](../../../docs/shared-memory.md).
 
 **importance scale:**
 - 1–3: Low — passing notes, ideas, soft preferences
@@ -159,8 +166,13 @@ Always run `--dry-run` first and review the preview before passing `--yes`.
 # Store a fact
 slm remember "<content>" [--tags a,b,c] [--json]
 
-# Flags verified in source (main.py): --tags, --json, --sync
+# Store a shared/global fact (v3.6.15, opt-in)
+slm remember "<content>" --scope global
+slm remember "<content>" --scope shared --shared-with alice,bob
+
+# Flags verified in source (main.py): --tags, --json, --sync, --scope, --shared-with
 # --sync: wait for full enrichment before returning (default is async)
+# --scope: personal (default) | shared | global ; --shared-with: profile ids for shared
 ```
 
 **Flags that do NOT exist** on `slm remember`:
@@ -179,4 +191,4 @@ slm remember "<content>" [--tags a,b,c] [--json]
 
 ---
 
-*SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later*

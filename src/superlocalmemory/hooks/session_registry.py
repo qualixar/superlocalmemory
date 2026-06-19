@@ -28,10 +28,14 @@ lost (reaper finalizes everything at neutral 0.5).
   MCP uses this as the default when the tool caller omits
   ``session_id``.
 
-Concurrency: one reader/writer lock (``fcntl.flock``) serialises
-updates. Rollover: entries older than 1 hour are pruned on every
-write. Fail-soft: every error path returns empty or the passed
-default — the learning loop must never crash the hot path.
+Concurrency: each write is atomic via write-temp + ``os.replace`` (atomic on
+POSIX/Windows), so a concurrent reader never sees a half-written file —
+last-writer-wins. This is best-effort, not lock-serialised: a concurrent
+read-modify-write may lose an interleaved update, which is acceptable because
+the registry only drives session attribution for closed-loop learning, not
+memory correctness. Rollover: entries older than 1 hour are pruned on every
+write. Fail-soft: every error path returns empty or the passed default — the
+learning loop must never crash the hot path.
 
 This is not a perfect correlation channel; two Claude sessions
 typing in the same second can race. For single-user workstations

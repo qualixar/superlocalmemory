@@ -94,6 +94,14 @@ class TestIsPidAlive:
     def test_parent_process_is_alive(self) -> None:
         assert is_pid_alive(os.getppid()) is True
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="EPERM semantics are POSIX")
+    def test_unsignalable_but_existing_pid_is_alive(self) -> None:
+        # PID 1 (init/launchd) exists but a normal user cannot signal it ->
+        # os.kill(1, 0) raises EPERM. is_pid_alive must treat EPERM as ALIVE,
+        # not dead (regression: it used to catch all OSError and return False,
+        # which also made the parent-pid test flaky under reparenting to init).
+        assert is_pid_alive(1) is True
+
 
 class TestKillProcess:
     """Process termination."""

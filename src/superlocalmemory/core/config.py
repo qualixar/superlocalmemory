@@ -130,6 +130,79 @@ class ChannelWeights:
 
 
 # ---------------------------------------------------------------------------
+# Scope Weights
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ScopeWeights:
+    """RRF fusion weights for multi-scope retrieval.
+
+    Personal scope has highest weight (most relevant to current profile).
+    Shared scope has medium weight (team/group memories).
+    Global scope has lowest weight (public/common knowledge).
+    """
+
+    personal: float = 1.0
+    shared: float = 0.7
+    global_: float = 0.5  # trailing underscore avoids Python keyword
+
+    def __post_init__(self) -> None:
+        for name in ("personal", "shared", "global_"):
+            val = getattr(self, name)
+            if val < 0:
+                raise ValueError(f"ScopeWeights values must be non-negative, got {name}={val}")
+
+    def as_dict(self) -> dict[str, float]:
+        return {"personal": self.personal, "shared": self.shared, "global": self.global_}
+
+
+# ---------------------------------------------------------------------------
+# Scope Config (multi-scope memory behaviour defaults)
+# ---------------------------------------------------------------------------
+
+_VALID_SCOPES = ("personal", "shared", "global")
+
+
+@dataclass
+class ScopeConfig:
+    """User-facing defaults for multi-scope (shared) memory.
+
+    SHARED MEMORY IS OPT-IN — NOT a default feature (v3.6.15 product decision).
+    The defaults below make a fresh / unconfigured install behave EXACTLY like
+    3.6.14: every write is ``personal`` and recall returns only this profile's
+    own facts. Another profile's ``global``/``shared`` facts never leak into
+    recall until the user explicitly turns sharing on.
+
+      - ``default_scope='personal'``      → writes stay private by default;
+      - ``recall_include_global=False``   → don't surface other profiles' global;
+      - ``recall_include_shared=False``   → don't surface facts shared *to* me.
+
+    Turning it on is a deliberate act, done either per-call (``--scope`` /
+    ``--include-global`` / MCP args) or persistently by editing config.json /
+    mode_a|b|c.json (the installer can also write the choice). The CLI/MCP
+    boundary passes ``None`` ("not specified") so the engine resolves these
+    config values as the effective default.
+    """
+
+    default_scope: str = "personal"         # scope assigned to new memories
+    recall_include_global: bool = False     # surface scope='global' facts in recall
+    recall_include_shared: bool = False     # surface scope='shared' facts in recall
+
+    def __post_init__(self) -> None:
+        if self.default_scope not in _VALID_SCOPES:
+            raise ValueError(
+                f"default_scope must be one of {_VALID_SCOPES}, got {self.default_scope!r}"
+            )
+
+    def as_dict(self) -> dict:
+        return {
+            "default_scope": self.default_scope,
+            "recall_include_global": self.recall_include_global,
+            "recall_include_shared": self.recall_include_shared,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Encoding Config
 # ---------------------------------------------------------------------------
 
@@ -702,6 +775,8 @@ class SLMConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     channel_weights: ChannelWeights = field(default_factory=ChannelWeights)
+    scope_weights: ScopeWeights = field(default_factory=ScopeWeights)
+    scope: ScopeConfig = field(default_factory=ScopeConfig)
     encoding: EncodingConfig = field(default_factory=EncodingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     math: MathConfig = field(default_factory=MathConfig)
@@ -860,6 +935,36 @@ class SLMConfig:
             prestage_max_response_bytes=int(inj.get("prestage_max_response_bytes", 64 * 1024)),
         )
 
+        # Multi-scope memory: scope weights
+        sw = data.get("scope_weights", {})
+        if sw:
+            # v3.6.15: a malformed value (e.g. negative weight) must NOT brick
+            # every `slm` command via an uncaught ValueError out of load().
+            # Fall back to defaults and warn — the config is recoverable.
+            try:
+                config.scope_weights = ScopeWeights(**{
+                    k: v for k, v in sw.items()
+                    if k in ScopeWeights.__dataclass_fields__
+                })
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "Ignoring invalid scope_weights in config (%s) — using defaults", exc
+                )
+
+        # Multi-scope memory: behaviour defaults (default scope + recall visibility)
+        sc = data.get("scope", {})
+        if sc:
+            # Same guard: a typo'd default_scope must not crash the whole CLI.
+            try:
+                config.scope = ScopeConfig(**{
+                    k: v for k, v in sc.items()
+                    if k in ScopeConfig.__dataclass_fields__
+                })
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "Ignoring invalid scope config (%s) — using shared-off defaults", exc
+                )
+
         return config
 
     def save(
@@ -951,6 +1056,16 @@ class SLMConfig:
             "trust_first_party": self.injection.trust_first_party,
             "prestage_max_response_bytes": self.injection.prestage_max_response_bytes,
         }
+
+        # Multi-scope memory: scope weights
+        data["scope_weights"] = {
+            "personal": self.scope_weights.personal,
+            "shared": self.scope_weights.shared,
+            "global_": self.scope_weights.global_,
+        }
+
+        # Multi-scope memory: behaviour defaults
+        data["scope"] = self.scope.as_dict()
 
         # Preserve existing V3.3 config sections that aren't in for_mode()
         for key in ("forgetting", "quantization", "sagq", "embedding_signature", "auto_invoke"):

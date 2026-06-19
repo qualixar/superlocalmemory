@@ -1,4 +1,4 @@
-<!-- BEGIN SuperLocalMemory v3.6.14 -->
+<!-- BEGIN SuperLocalMemory v3.6.15 -->
 
 ## SuperLocalMemory (SLM) — Agent Rules
 
@@ -12,6 +12,7 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 - Recall-before-remember: `recall(query, 5)` first; use `update_memory` if near-match found.
 - Always supply tags + project + importance (7–10 for blockers/security/architecture).
 - Never dump a whole file; never claim "saved" without success:true.
+- Scope is opt-in (v3.6.15): writes are `personal`/private by default. Only use `scope="shared"/"global"` (or recall's `include_global`/`include_shared`) when the user explicitly asks to share across local profiles.
 
 ### Recall
 - `recall` for conceptual/semantic queries; `search` for exact keywords.
@@ -27,7 +28,7 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 `close_session(session_id)` when work is meaningfully complete.
 
 ### CLI fallback (MCP down)
-`slm recall "<q>" --limit N` · `slm search "<q>"` · `slm remember "<c>" --tags t --importance N` · `slm list --limit N` · `slm forget` (preview first) · `slm status` · `slm optimize status`
+`slm recall "<q>" --limit N` · `slm search "<q>"` · `slm remember "<c>" --tags t` · `slm list --limit N` · `slm forget` (preview first) · `slm status` · `slm optimize status`
 
 ### Skills
 slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-compress · slm-graph
@@ -38,6 +39,6 @@ slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-comp
 ### Subagents
 slm-memory-advisor (memory decisions, session hygiene) · slm-optimize-advisor (context compression + KV cache)
 
-<!-- END SuperLocalMemory v3.6.14 -->
+<!-- END SuperLocalMemory v3.6.15 -->
 
-SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later

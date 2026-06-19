@@ -587,8 +587,13 @@ def run_recall(
     access_log: Any = None,
     auto_linker: Any = None,
     fast: bool = False,
+    include_global: bool = False,
+    include_shared: bool = False,
 ) -> RecallResponse:
     """Recall relevant facts for a query.
+
+    Multi-scope: ``include_global`` / ``include_shared`` control which
+    scopes participate in retrieval (passed through to retrieval engine).
 
     Pipeline: retrieval -> agentic sufficiency (if configured) -> post-recall updates.
 
@@ -623,6 +628,8 @@ def run_recall(
     response = retrieval_engine.recall(
         query, profile_id, m, limit,
         extra_disabled_channels=extra_disabled,
+        include_global=include_global,
+        include_shared=include_shared,
     )
     _mark("retrieval(chan+rerank)")
 

@@ -297,4 +297,4 @@ Without this, the six graph tools are not registered and will appear as unknown 
 
 ---
 
-SuperLocalMemory v3.6.14 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.15 · Qualixar · AGPL-3.0-or-later

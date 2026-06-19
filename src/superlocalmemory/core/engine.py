@@ -164,6 +164,25 @@ class MemoryEngine:
         except Exception as exc:
             logger.warning("V3.4.6 schema migration failed: %s", exc)
 
+        # v3.6.15: apply ALL pending migrations — including DEFERRED ones like
+        # M016 (scope/shared_with columns) — for DIRECT-engine usage: `slm
+        # remember --sync`, the Python API, and LangChain/CrewAI integrations.
+        # Previously only the daemon lifespan ran apply_deferred, so an existing
+        # pre-3.6.15 database used WITHOUT the daemon hit
+        # "table memories has no column named scope" on the first scoped write.
+        # Idempotent (skips applied migrations) + non-fatal; mirrors the daemon.
+        try:
+            from superlocalmemory.storage.migration_runner import (
+                apply_all, apply_deferred,
+            )
+            _base = self._config.base_dir
+            _learning_db = _base / "learning.db"
+            _memory_db = self._db.db_path
+            apply_all(_learning_db, _memory_db)
+            apply_deferred(_learning_db, _memory_db)
+        except Exception as exc:
+            logger.warning("v3.6.15 deferred migration apply failed: %s", exc)
+
         # V3.4.7: Apply "Learning Brain" schema (tool_events, behavioral_assertions)
         try:
             from superlocalmemory.storage.schema_v347 import apply_v347_schema
@@ -332,7 +351,25 @@ class MemoryEngine:
         logger.info("Processing %d pending memories from async store", len(pending))
         for item in pending:
             try:
-                self.store(item["content"])
+                # v3.6.15 multi-scope: the pending row carries a metadata JSON
+                # blob that may hold scope/shared_with (written by the async
+                # /remember path). Replay them so a queued ``--scope global``
+                # write lands as global, not silently downgraded to personal.
+                import json as _json
+                meta = item.get("metadata")
+                if isinstance(meta, str):
+                    try:
+                        meta = _json.loads(meta) if meta else {}
+                    except (ValueError, TypeError):
+                        meta = {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                _scope = meta.get("scope") or "personal"
+                _shared = meta.get("shared_with")
+                self.store(
+                    item["content"], metadata=meta or None,
+                    scope=_scope, shared_with=_shared,
+                )
                 mark_done(item["id"], base_dir)
             except Exception as exc:
                 logger.warning("Pending memory %d failed: %s", item["id"], exc)
@@ -348,8 +385,15 @@ class MemoryEngine:
         speaker: str = "",
         role: str = "user",
         metadata: dict[str, Any] | None = None,
+        *,
+        scope: str = "personal",
+        shared_with: list[str] | None = None,
     ) -> list[str]:
-        """Store content and extract structured facts. Returns fact_ids."""
+        """Store content and extract structured facts. Returns fact_ids.
+
+        Multi-scope: ``scope`` sets the visibility (personal/shared/global).
+        ``shared_with`` is a list of profile_ids for shared scope.
+        """
         self._require_full("store")
         self._ensure_init()
 
@@ -358,6 +402,7 @@ class MemoryEngine:
             content, self._profile_id,
             session_id=session_id, session_date=session_date,
             speaker=speaker, role=role, metadata=metadata,
+            scope=scope, shared_with=shared_with,
             config=self._config, db=self._db,
             embedder=self._embedder,
             fact_extractor=self._fact_extractor,
@@ -397,7 +442,10 @@ class MemoryEngine:
             vector_store=self._vector_store,
         )
 
-    def store_fast(self, content: str, metadata: dict[str, Any] | None = None) -> list[str]:
+    def store_fast(
+        self, content: str, metadata: dict[str, Any] | None = None,
+        *, scope: str = "personal", shared_with: list[str] | None = None,
+    ) -> list[str]:
         """v3.5.5 WRITE-THROUGH: synchronous verbatim insert for IMMEDIATE recall.
 
         Full ``store()`` blocks 30-180s on LLM fact-extraction + Ollama embedding
@@ -455,6 +503,7 @@ class MemoryEngine:
             session_date=now[:10],
             session_id=(metadata or {}).get("session_id", ""),
             metadata=metadata or {},
+            scope=scope, shared_with=shared_with,
         )
         self._db.store_memory(record)
         # Lightweight regex entities (matches store_pipeline verbatim path) so
@@ -485,6 +534,7 @@ class MemoryEngine:
             observation_date=now[:10], confidence=0.7, importance=0.5,
             embedding=emb, fisher_mean=fmean, fisher_variance=fvar,
             created_at=now,
+            scope=scope, shared_with=shared_with,
         )
         self._db.store_fact(fact)  # FTS5 trigger → immediately BM25-recallable
         # Upsert to vector store so the semantic channel finds it now.
@@ -511,6 +561,9 @@ class MemoryEngine:
         agent_id: str = "unknown",
         session_id: str | None = None,
         fast: bool = False,
+        *,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -526,9 +579,25 @@ class MemoryEngine:
         neighbor-cache fix; fast=True is slower than fast=False and reduces
         recall quality. The parameter is accepted for backward compatibility
         but is silently treated as False.
+
+        Multi-scope: ``include_global`` / ``include_shared`` control which
+        scopes participate in retrieval. ``None`` (the default) means "use the
+        configured ScopeConfig default", which ships OFF — shared memory is
+        opt-in (v3.6.15). Personal facts are ALWAYS returned regardless, so a
+        config of False reproduces 3.6.14 pure-isolation behaviour exactly.
+        This is the single policy chokepoint: every recall path (CLI, MCP,
+        daemon HTTP, in-process adapter) flows through here, so a caller that
+        forgets to thread the flag still gets the safe configured default.
         """
         self._require_full("recall")
         self._ensure_init()
+
+        # Resolve None → configured ScopeConfig default (shared-off by default).
+        _scope_cfg = getattr(self._config, "scope", None)
+        if include_global is None:
+            include_global = bool(getattr(_scope_cfg, "recall_include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(_scope_cfg, "recall_include_shared", False))
 
         if fast:
             logger.warning(
@@ -552,6 +621,8 @@ class MemoryEngine:
             access_log=self._access_log,
             auto_linker=self._auto_linker,
             fast=fast,
+            include_global=include_global,
+            include_shared=include_shared,
         )
 
         # S9-DASH-02: enqueue for pending_outcomes. Non-blocking; errors

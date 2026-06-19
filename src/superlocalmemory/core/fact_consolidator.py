@@ -190,7 +190,8 @@ def _consolidate_cluster(
     # Load fact contents including canonical_entities_json
     placeholders = ",".join("?" * len(fact_ids))
     facts = c.execute(
-        f"SELECT fact_id, content, confidence, created_at, canonical_entities_json "
+        f"SELECT fact_id, content, confidence, created_at, canonical_entities_json, "
+        f"scope, shared_with "
         f"FROM atomic_facts "
         f"WHERE fact_id IN ({placeholders}) ORDER BY created_at",
         fact_ids,
@@ -214,6 +215,21 @@ def _consolidate_cluster(
         new_fact_id = uuid.uuid4().hex[:16]
         now = datetime.now(timezone.utc).isoformat()
         avg_confidence = sum(f["confidence"] or 0.5 for f in facts) / len(facts)
+
+        # v3.6.15 multi-scope: a summary must never be MORE visible than its
+        # sources, or it would leak a private fact into a shared/global summary.
+        # Preserve scope only when the whole cluster agrees; any mix (or shared
+        # facts with differing targets) falls back to 'personal' — the most
+        # restrictive scope. All-personal clusters (the common case) are
+        # unchanged. shared_with is preserved only for a uniform shared cluster.
+        _src_scopes = {(f["scope"] or "personal") for f in facts}
+        _src_shared = {f["shared_with"] for f in facts}
+        if _src_scopes == {"global"}:
+            _sum_scope, _sum_shared = "global", None
+        elif _src_scopes == {"shared"} and len(_src_shared) == 1:
+            _sum_scope, _sum_shared = "shared", facts[0]["shared_with"]
+        else:
+            _sum_scope, _sum_shared = "personal", None
 
         # Collect entities from ALL source facts (already in the SELECT)
         all_entities = set()
@@ -253,13 +269,14 @@ def _consolidate_cluster(
                 (fact_id, memory_id, profile_id, content, fact_type,
                  entities_json, canonical_entities_json,
                  confidence, importance, evidence_count, access_count,
-                 created_at, lifecycle)
-                VALUES (?, '', ?, ?, 'semantic', ?, ?, ?, 0.8, ?, 0, ?, 'active')
+                 created_at, lifecycle, scope, shared_with)
+                VALUES (?, '', ?, ?, 'semantic', ?, ?, ?, 0.8, ?, 0, ?, 'active', ?, ?)
             """, (
                 new_fact_id, profile_id, summary,
                 json.dumps(list(all_entities)),
                 json.dumps(list(all_entities)),
                 round(avg_confidence, 3), len(facts), now,
+                _sum_scope, _sum_shared,
             ))
 
         # Record the consolidation

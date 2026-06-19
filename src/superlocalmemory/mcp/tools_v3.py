@@ -289,8 +289,13 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             limit: Maximum results (default 10).
         """
         try:
+            import asyncio
             from superlocalmemory.mcp._daemon_proxy import choose_pool
-            raw = choose_pool().recall(query=query, limit=limit)
+            # choose_pool().recall uses blocking urllib; run off the event loop
+            # so recall_trace doesn't stall the MCP server for other tools.
+            raw = await asyncio.to_thread(
+                lambda: choose_pool().recall(query=query, limit=limit)
+            )
             items = raw.get("results", []) if isinstance(raw, dict) else []
             results = []
             for item in items[:limit]:

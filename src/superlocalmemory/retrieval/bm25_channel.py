@@ -86,9 +86,15 @@ class BM25Channel:
             return
 
         token_map = self._db.get_all_bm25_tokens(profile_id)
+        _inc_global = getattr(self, 'include_global', False)
+        _inc_shared = getattr(self, 'include_shared', False)
         if not token_map:
             # Fallback: tokenize facts directly if no pre-stored tokens
-            facts = self._db.get_all_facts(profile_id)
+            facts = self._db.get_all_facts(
+                profile_id,
+                include_global=_inc_global,
+                include_shared=_inc_shared,
+            )
             for fact in facts:
                 if fact.fact_id in self._fact_id_set:
                     continue
@@ -104,7 +110,11 @@ class BM25Channel:
             # Load raw texts for phrase matching (V3.3.12)
             fact_content_map = {}
             try:
-                facts = self._db.get_all_facts(profile_id)
+                facts = self._db.get_all_facts(
+                    profile_id,
+                    include_global=_inc_global,
+                    include_shared=_inc_shared,
+                )
                 fact_content_map = {f.fact_id: f.content for f in facts}
             except Exception:
                 pass

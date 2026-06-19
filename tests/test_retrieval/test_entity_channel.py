@@ -138,7 +138,7 @@ class TestEntityGraphChannelSearch:
         # Alice directly linked to f1
         db.get_facts_by_entity.return_value = [_mock_fact("f1")]
         # f1 has edge to f2
-        db.get_edges_for_node.side_effect = lambda fid, pid: (
+        db.get_edges_for_node.side_effect = lambda fid, pid, **kwargs: (
             [_mock_edge("f1", "f2")] if fid == "f1" else []
         )
         # f2 has canonical entities -> discover new entities
@@ -155,7 +155,7 @@ class TestEntityGraphChannelSearch:
         db = MagicMock()
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
         db.get_facts_by_entity.return_value = [_mock_fact("f1")]
-        db.get_edges_for_node.side_effect = lambda fid, pid: (
+        db.get_edges_for_node.side_effect = lambda fid, pid, **kwargs: (
             [_mock_edge("f1", "f2")] if fid == "f1" else []
         )
         db.execute.return_value = []
@@ -208,7 +208,7 @@ class TestEntityGraphChannelSearch:
     def test_discover_entities_from_facts(self) -> None:
         db = MagicMock()
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
-        db.get_facts_by_entity.side_effect = lambda eid, pid: (
+        db.get_facts_by_entity.side_effect = lambda eid, pid, **kwargs: (
             [_mock_fact("f1", ["e_alice"])] if eid == "e_alice"
             else [_mock_fact("f3", ["e_bob"])] if eid == "e_bob"
             else []

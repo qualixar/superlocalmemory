@@ -113,23 +113,25 @@ def test_single_quick_start():
 
 
 # ---------------------------------------------------------------------------
-# AC3: version 3.6.14 only
+# AC3: current hero version is 3.6.15
 # ---------------------------------------------------------------------------
 
 
-def test_version_3614_only():
-    """AC3: No 3.6.10/11/12/13; at least one 3.6.14; h1 contains V3.6.14."""
+def test_version_3615_only():
+    """AC3: no pre-current stragglers (3.6.10-13) in hero; at least one 3.6.15;
+    h1 contains V3.6.15. The release-history table may still list older versions
+    (e.g. the v3.6.14 row) as legitimate history."""
     text = _readme_text()
     stale = re.findall(r"3\.6\.1[0-3]", text)
     assert not stale, (
-        f"Found stale version strings: {stale}. All version refs must be 3.6.14 (LLD AC3)."
+        f"Found stale version strings: {stale}. Hero version refs must be 3.6.15 (LLD AC3)."
     )
-    assert "3.6.14" in text, "README must contain at least one '3.6.14' (LLD AC3)."
+    assert "3.6.15" in text, "README must contain at least one '3.6.15' (LLD AC3)."
     # h1 check — first heading
     lines = _readme_lines()
     h1_lines = [l for l in lines if l.startswith("# ") or l.startswith("<h1")]
-    assert any("3.6.14" in l or "V3.6.14" in l for l in h1_lines[:5]), (
-        "h1 / hero must reference V3.6.14 (LLD AC3)."
+    assert any("3.6.15" in l or "V3.6.15" in l for l in h1_lines[:5]), (
+        "h1 / hero must reference V3.6.15 (LLD AC3)."
     )
 
 

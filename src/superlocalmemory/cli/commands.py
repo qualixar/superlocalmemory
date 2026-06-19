@@ -1036,6 +1036,19 @@ def cmd_remember(args: Namespace) -> None:
 
     use_json = getattr(args, 'json', False)
     sync_mode = getattr(args, 'sync_mode', False)
+    # v3.6.15 multi-scope: scope=None means "not specified" → resolve to the
+    # configured default_scope (personal) at the daemon / engine boundary.
+    # Shared memory is opt-in, so an unset --scope always stays private.
+    scope = getattr(args, 'scope', None)
+    # v3.6.15: --shared-with is a comma-separated string on the CLI, but the
+    # daemon (RememberRequest) and engine expect list[str]. Parse here so an
+    # explicit `--shared-with a,b` doesn't 422 at the daemon and silently fall
+    # back to a personal write.
+    _sw_raw = getattr(args, 'shared_with', None)
+    shared_with = (
+        [s.strip() for s in _sw_raw.split(",") if s.strip()]
+        if isinstance(_sw_raw, str) and _sw_raw.strip() else _sw_raw
+    )
 
     # V3.3.21: Route through daemon for instant remember (no cold start).
     # If daemon is running, send request directly (~0.1s).
@@ -1048,6 +1061,8 @@ def cmd_remember(args: Namespace) -> None:
                 result = daemon_request("POST", "/remember", {
                     "content": args.content,
                     "tags": args.tags or "",
+                    "scope": scope,
+                    "shared_with": shared_with,
                 })
                 if result and "fact_ids" in result:
                     if use_json:
@@ -1063,9 +1078,20 @@ def cmd_remember(args: Namespace) -> None:
         # NO subprocess spawn. Daemon's background loop picks up pending memories.
         from superlocalmemory.cli.pending_store import store_pending
 
+        # v3.6.15 multi-scope: carry an explicit non-personal scope into the
+        # pending row's metadata so the materializer replays the right
+        # visibility. Unset / personal carries nothing — byte-identical to
+        # pre-3.6.15 pending rows.
+        _pending_meta = None
+        if scope and scope != "personal":
+            _pending_meta = {"scope": scope}
+            if shared_with:
+                _pending_meta["shared_with"] = shared_with
+
         row_id = store_pending(
             content=args.content,
             tags=args.tags or "",
+            metadata=_pending_meta,
         )
 
         if use_json:
@@ -1083,8 +1109,13 @@ def cmd_remember(args: Namespace) -> None:
         engine = MemoryEngine(config)
         engine.initialize()
 
+        # v3.6.15: resolve an unset scope to the configured default_scope.
+        _scope = scope or getattr(getattr(config, "scope", None), "default_scope", "personal")
         metadata = {"tags": args.tags} if args.tags else {}
-        fact_ids = engine.store(args.content, metadata=metadata)
+        fact_ids = engine.store(
+            args.content, metadata=metadata,
+            scope=_scope, shared_with=shared_with,
+        )
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -1107,6 +1138,11 @@ def cmd_remember(args: Namespace) -> None:
 def cmd_recall(args: Namespace) -> None:
     """Search memories via the engine — routes through daemon if available."""
     use_json = getattr(args, 'json', False)
+    # v3.6.15: None = "not specified" → daemon/engine resolves the configured
+    # default (shared-off). Only an explicit --include-global / --no-global
+    # produces True/False here.
+    include_global = getattr(args, 'include_global', None)
+    include_shared = getattr(args, 'include_shared', None)
 
     # V3.3.21: Route through daemon for instant response (no cold start).
     # Falls back to direct engine if daemon not running.
@@ -1120,10 +1156,18 @@ def cmd_recall(args: Namespace) -> None:
             from urllib.parse import quote
             session_id = f"cli:{os.getppid()}"
             fast_qs = "&fast=true" if getattr(args, "fast", False) else ""
+            # Only send scope flags when the user set them explicitly; absent =
+            # let the daemon resolve the configured default. (Never emit
+            # "none" — that would parse as a missing/false value.)
+            scope_qs = ""
+            if include_global is not None:
+                scope_qs += f"&include_global={str(include_global).lower()}"
+            if include_shared is not None:
+                scope_qs += f"&include_shared={str(include_shared).lower()}"
             result = daemon_request(
                 "GET",
                 f"/recall?q={quote(args.query)}&limit={args.limit}"
-                f"&session_id={quote(session_id)}{fast_qs}",
+                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response
@@ -1157,6 +1201,8 @@ def cmd_recall(args: Namespace) -> None:
         response = engine.recall(
             args.query, limit=args.limit,
             fast=getattr(args, "fast", False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
     except Exception as exc:
         if use_json:

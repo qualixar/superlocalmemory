@@ -213,7 +213,10 @@ class TestSemanticChannelSearch:
         db = _mock_db([])
         channel = SemanticChannel(db)
         channel.search([1.0], "work_profile")
-        db.get_all_facts.assert_called_once_with("work_profile")
+        # v3.6.15: profile is threaded; scope flags default to shared-OFF (opt-in).
+        db.get_all_facts.assert_called_once_with(
+            "work_profile", include_global=False, include_shared=False
+        )
 
     def test_fisher_variance_wrong_length_falls_back(self) -> None:
         facts = [
