@@ -295,7 +295,14 @@ class LLMBackbone:
         }
         if system:
             payload["system"] = system
-        return _ANTHROPIC_URL, headers, payload
+        # Respect custom base_url (e.g. Anthropic-compatible proxy).
+        # Append /v1/messages to the root URL, mirroring how _build_openai
+        # handles api_base. Falls back to the official Anthropic endpoint.
+        url = (
+            self._base_url.rstrip("/") + "/v1/messages"
+            if self._base_url else _ANTHROPIC_URL
+        )
+        return url, headers, payload
 
     def _build_azure(
         self, prompt: str, system: str, max_tokens: int, temperature: float,
