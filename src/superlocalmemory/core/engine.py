@@ -164,6 +164,25 @@ class MemoryEngine:
         except Exception as exc:
             logger.warning("V3.4.6 schema migration failed: %s", exc)
 
+        # v3.6.15: apply ALL pending migrations — including DEFERRED ones like
+        # M016 (scope/shared_with columns) — for DIRECT-engine usage: `slm
+        # remember --sync`, the Python API, and LangChain/CrewAI integrations.
+        # Previously only the daemon lifespan ran apply_deferred, so an existing
+        # pre-3.6.15 database used WITHOUT the daemon hit
+        # "table memories has no column named scope" on the first scoped write.
+        # Idempotent (skips applied migrations) + non-fatal; mirrors the daemon.
+        try:
+            from superlocalmemory.storage.migration_runner import (
+                apply_all, apply_deferred,
+            )
+            _base = self._config.base_dir
+            _learning_db = _base / "learning.db"
+            _memory_db = self._db.db_path
+            apply_all(_learning_db, _memory_db)
+            apply_deferred(_learning_db, _memory_db)
+        except Exception as exc:
+            logger.warning("v3.6.15 deferred migration apply failed: %s", exc)
+
         # V3.4.7: Apply "Learning Brain" schema (tool_events, behavioral_assertions)
         try:
             from superlocalmemory.storage.schema_v347 import apply_v347_schema
