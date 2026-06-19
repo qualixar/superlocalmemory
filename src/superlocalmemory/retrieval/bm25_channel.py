@@ -86,8 +86,8 @@ class BM25Channel:
             return
 
         token_map = self._db.get_all_bm25_tokens(profile_id)
-        _inc_global = getattr(self, 'include_global', True)
-        _inc_shared = getattr(self, 'include_shared', True)
+        _inc_global = getattr(self, 'include_global', False)
+        _inc_shared = getattr(self, 'include_shared', False)
         if not token_map:
             # Fallback: tokenize facts directly if no pre-stored tokens
             facts = self._db.get_all_facts(

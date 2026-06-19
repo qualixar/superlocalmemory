@@ -170,8 +170,8 @@ class SemanticChannel:
         knn_scores = {fid: score for fid, score in knn_results}
         facts = self._db.get_facts_by_ids(
             candidate_ids, profile_id,
-            include_global=getattr(self, 'include_global', True),
-            include_shared=getattr(self, 'include_shared', True),
+            include_global=getattr(self, 'include_global', False),
+            include_shared=getattr(self, 'include_shared', False),
         )
 
         if not facts:
@@ -236,8 +236,8 @@ class SemanticChannel:
 
         facts = self._db.get_all_facts(
             profile_id,
-            include_global=getattr(self, 'include_global', True),
-            include_shared=getattr(self, 'include_shared', True),
+            include_global=getattr(self, 'include_global', False),
+            include_shared=getattr(self, 'include_shared', False),
         )
 
         scored: list[tuple[str, float]] = []

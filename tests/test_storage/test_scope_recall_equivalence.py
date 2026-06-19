@@ -75,18 +75,19 @@ def test_profile_isolation_preserved(db):
 def test_global_scope_is_the_only_new_visibility(db):
     _insert_fact(db, "mine", "default")
     _insert_fact(db, "glob", "other", scope="global")   # global from another profile
-    got = {f.fact_id for f in db.get_all_facts("default")}
-    # additive: global becomes visible; personal isolation still holds
+    # v3.6.15: shared-off by DEFAULT (opt-in). A bare call returns only my own.
+    assert {f.fact_id for f in db.get_all_facts("default")} == {"mine"}
+    # opting in (include_global=True) makes the global fact visible — additive.
+    got = {f.fact_id for f in db.get_all_facts("default", include_global=True)}
     assert got == {"mine", "glob"}
-    # and with include_global=False we get back the strict old behaviour
-    strict = {f.fact_id for f in db.get_all_facts("default", include_global=False, include_shared=False)}
-    assert strict == {"mine"}
 
 
 def test_shared_scope_visibility(db):
     _insert_fact(db, "s1", "other", scope="shared", shared_with='["default"]')
     _insert_fact(db, "s2", "other", scope="shared", shared_with='["someone_else"]')
-    got = {f.fact_id for f in db.get_all_facts("default")}
+    # v3.6.15: shared is opt-in — bare call sees nobody else's shared facts.
+    assert {f.fact_id for f in db.get_all_facts("default")} == set()
+    got = {f.fact_id for f in db.get_all_facts("default", include_shared=True)}
     assert "s1" in got and "s2" not in got   # only facts shared WITH default
 
 

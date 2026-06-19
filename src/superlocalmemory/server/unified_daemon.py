@@ -2125,10 +2125,14 @@ def _start_pending_materializer() -> None:
                         # embedding, ENRICH it in place (compute embedding +
                         # upsert vector store) rather than skipping — otherwise
                         # the fact would never be semantically searchable.
+                        # v3.6.15: scope the dedup to THIS profile. Without the
+                        # profile_id filter, a memory whose verbatim text matches
+                        # another profile's fact was treated as a duplicate and
+                        # silently dropped — cross-profile data loss + leakage.
                         dup = engine._db.execute(
                             "SELECT fact_id, embedding FROM atomic_facts "
-                            "WHERE content = ? LIMIT 1",
-                            (content,),
+                            "WHERE content = ? AND profile_id = ? LIMIT 1",
+                            (content, engine._profile_id),
                         )
                         if dup:
                             try:
@@ -2159,6 +2163,12 @@ def _start_pending_materializer() -> None:
                             md = {}
                         if item.get("tags"):
                             md.setdefault("tags", item["tags"])
+                        # v3.6.15: replay the scope the async /remember path
+                        # stashed in metadata, so a queued non-personal write
+                        # materializes with the right visibility (not personal).
+                        _mscope = md.get("scope") or "personal"
+                        _mshared = md.get("shared_with")
+                        _shared_json = _json.dumps(_mshared) if _mshared else None
                         # Create memory row (FK target for atomic_facts)
                         from datetime import datetime, timezone
                         from superlocalmemory.storage.models import (
@@ -2169,17 +2179,20 @@ def _start_pending_materializer() -> None:
                             "INSERT OR IGNORE INTO memories "
                             "(memory_id, profile_id, content, "
                             "session_id, speaker, role, created_at, "
-                            "metadata_json) VALUES (?,?,?,?,?,?,?,?)",
+                            "metadata_json, scope, shared_with) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
                             (mem_id, engine._profile_id, content,
                              "", "", "user",
                              datetime.now(timezone.utc).isoformat(),
-                             _json.dumps(md)),
+                             _json.dumps(md), _mscope, _shared_json),
                         )
                         fact = AtomicFact(
                             content=content,
                             fact_type=FactType.EPISODIC,
                             memory_id=mem_id,
                             profile_id=engine._profile_id,
+                            scope=_mscope,
+                            shared_with=_mshared,
                         )
                         engine.store_fact_direct(fact)
                         mark_done(item["id"])

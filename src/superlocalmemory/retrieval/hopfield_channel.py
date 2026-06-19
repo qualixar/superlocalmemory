@@ -250,8 +250,8 @@ class HopfieldChannel:
         candidate_ids = [fid for fid, _ in knn_results]
         candidates = self._db.get_facts_by_ids(
             candidate_ids, profile_id,
-            include_global=getattr(self, 'include_global', True),
-            include_shared=getattr(self, 'include_shared', True),
+            include_global=getattr(self, 'include_global', False),
+            include_shared=getattr(self, 'include_shared', False),
         )
         if not candidates:
             return []
@@ -310,8 +310,8 @@ class HopfieldChannel:
         # deserialize the whole table just to slice it.
         facts = self._db.get_all_facts(
             profile_id, limit=5000,
-            include_global=getattr(self, 'include_global', True),
-            include_shared=getattr(self, 'include_shared', True),
+            include_global=getattr(self, 'include_global', False),
+            include_shared=getattr(self, 'include_shared', False),
         )
         if not facts:
             return (None, [])

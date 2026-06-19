@@ -1040,7 +1040,15 @@ def cmd_remember(args: Namespace) -> None:
     # configured default_scope (personal) at the daemon / engine boundary.
     # Shared memory is opt-in, so an unset --scope always stays private.
     scope = getattr(args, 'scope', None)
-    shared_with = getattr(args, 'shared_with', None)
+    # v3.6.15: --shared-with is a comma-separated string on the CLI, but the
+    # daemon (RememberRequest) and engine expect list[str]. Parse here so an
+    # explicit `--shared-with a,b` doesn't 422 at the daemon and silently fall
+    # back to a personal write.
+    _sw_raw = getattr(args, 'shared_with', None)
+    shared_with = (
+        [s.strip() for s in _sw_raw.split(",") if s.strip()]
+        if isinstance(_sw_raw, str) and _sw_raw.strip() else _sw_raw
+    )
 
     # V3.3.21: Route through daemon for instant remember (no cold start).
     # If daemon is running, send request directly (~0.1s).

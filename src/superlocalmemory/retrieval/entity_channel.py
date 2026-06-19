@@ -283,7 +283,7 @@ class EntityGraphChannel:
                 for fid in self._entity_to_facts.get(eid, ()):
                     activation[fid] = max(activation[fid], 1.0)
             else:
-                for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', True), include_shared=getattr(self, 'include_shared', True)):
+                for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', False), include_shared=getattr(self, 'include_shared', False)):
                     activation[fact.fact_id] = max(activation[fact.fact_id], 1.0)
 
         # Spreading activation through graph edges (all in-memory O(1) lookups)
@@ -317,7 +317,7 @@ class EntityGraphChannel:
                     # NOTE: SQL fallback path does NOT use graph intelligence (P1/P2/P3).
                     # Graph intelligence is only available on the in-memory cache path.
                     # This fallback exists for mock/test DBs. See Phase 7 LLD H-01.
-                    for edge in self._db.get_edges_for_node(fid, profile_id, include_global=getattr(self, 'include_global', True), include_shared=getattr(self, 'include_shared', True)):
+                    for edge in self._db.get_edges_for_node(fid, profile_id, include_global=getattr(self, 'include_global', False), include_shared=getattr(self, 'include_shared', False)):
                         neighbor = edge.target_id if edge.source_id == fid else edge.source_id
                         propagated = activation[fid] * self._decay
                         if propagated >= self._threshold and propagated > activation.get(neighbor, 0.0):
@@ -342,7 +342,7 @@ class EntityGraphChannel:
                 new_eids_sql = self._discover_entities(frontier, profile_id, visited_entities)
                 for eid in new_eids_sql:
                     visited_entities.add(eid)
-                    for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', True), include_shared=getattr(self, 'include_shared', True)):
+                    for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', False), include_shared=getattr(self, 'include_shared', False)):
                         if hop_decay > activation.get(fact.fact_id, 0.0):
                             activation[fact.fact_id] = hop_decay
                             next_frontier.add(fact.fact_id)
@@ -438,7 +438,7 @@ class EntityGraphChannel:
                 for fid in self._entity_to_facts.get(eid, ()):
                     activation[fid] = max(activation[fid], 1.0)
             else:
-                for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', True), include_shared=getattr(self, 'include_shared', True)):
+                for fact in self._db.get_facts_by_entity(eid, profile_id, include_global=getattr(self, 'include_global', False), include_shared=getattr(self, 'include_shared', False)):
                     activation[fact.fact_id] = max(activation[fact.fact_id], 1.0)
 
         frontier = set(activation.keys())
@@ -628,7 +628,7 @@ class EntityGraphChannel:
             # Map entity scores to fact scores
             fact_scores: list[tuple[str, float]] = []
             for entity_id, score in scored:
-                facts = self._db.get_facts_by_entity(entity_id, profile_id, include_global=getattr(self, 'include_global', True), include_shared=getattr(self, 'include_shared', True))
+                facts = self._db.get_facts_by_entity(entity_id, profile_id, include_global=getattr(self, 'include_global', False), include_shared=getattr(self, 'include_shared', False))
                 for fact in facts:
                     fact_scores.append((fact.fact_id, score))
 

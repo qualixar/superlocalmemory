@@ -46,8 +46,8 @@ _RETRY_BASE_DELAY = 0.1    # seconds — exponential backoff base
 def _scope_where(
     profile_id: str,
     *,
-    include_global: bool = True,
-    include_shared: bool = True,
+    include_global: bool = False,
+    include_shared: bool = False,
     prefix: str = "",
 ) -> tuple[str, list]:
     """Build scope-filtering WHERE clause for multi-scope retrieval.
@@ -59,9 +59,11 @@ def _scope_where(
     shared with this profile (via ``shared_with`` JSON array) are also
     included.
 
-    Backward-compatible defaults mean existing callers automatically pick up
-    global+shared facts once those exist. Until then (PR-A has schema with
-    DEFAULT 'personal'), the OR branches are harmless no-ops.
+    v3.6.15: defaults are SHARED-OFF (include_global/include_shared=False) so
+    any DIRECT caller (search, list_recent, fetch, resources) is private by
+    default — shared memory is opt-in. The recall channels pass explicit
+    resolved flags, so opt-in recall is unaffected. With both False the clause
+    collapses to ``profile_id = ?`` — identical to 3.6.14 isolation.
     """
     table = f"{prefix}." if prefix else ""
     clauses = [f"({table}profile_id = ?)"]
@@ -71,10 +73,14 @@ def _scope_where(
         clauses.append(f"({table}scope = 'global')")
 
     if include_shared:
+        # Match the profile_id as a quoted JSON-array element. ESCAPE the LIKE
+        # metacharacters in profile_id so a profile id containing % or _ cannot
+        # false-positive-match another profile's shared_with list.
+        _esc = profile_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         clauses.append(
-            f"({table}scope = 'shared' AND {table}shared_with LIKE ?)"
+            f"({table}scope = 'shared' AND {table}shared_with LIKE ? ESCAPE '\\')"
         )
-        params.append(f'%"{profile_id}"%')
+        params.append(f'%"{_esc}"%')
 
     where = "(" + " OR ".join(clauses) + ")"
     return where, params
@@ -359,8 +365,8 @@ class DatabaseManager:
 
     def get_pinned(
         self, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """Return all pinned facts for a profile, highest-importance first."""
         where, params = _scope_where(
@@ -378,8 +384,8 @@ class DatabaseManager:
     def get_all_facts(
         self, profile_id: str, limit: int | None = None,
         *,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """All facts for a profile, newest first.
 
@@ -409,8 +415,8 @@ class DatabaseManager:
 
     def get_facts_by_entity(
         self, entity_id: str, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """Facts whose canonical_entities JSON array contains *entity_id*.
 
@@ -433,8 +439,8 @@ class DatabaseManager:
 
     def get_facts_by_type(
         self, fact_type: FactType, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """All facts of a given type for a profile."""
         where, params = _scope_where(
@@ -515,8 +521,8 @@ class DatabaseManager:
 
     def get_fact_count(
         self, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> int:
         """Total fact count for a profile."""
         where, params = _scope_where(
@@ -592,8 +598,8 @@ class DatabaseManager:
 
     def get_facts_by_memory_id(
         self, memory_id: str, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """Get all atomic facts for a given memory_id."""
         where, params = _scope_where(
@@ -645,8 +651,8 @@ class DatabaseManager:
 
     def get_edges_for_node(
         self, node_id: str, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[GraphEdge]:
         """All edges where node_id is source or target."""
         where, params = _scope_where(
@@ -688,8 +694,8 @@ class DatabaseManager:
 
     def get_temporal_events(
         self, entity_id: str, profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[TemporalEvent]:
         """All temporal events for an entity, newest first."""
         where, params = _scope_where(
@@ -732,8 +738,8 @@ class DatabaseManager:
 
     def search_facts_fts(
         self, query: str, profile_id: str, limit: int = 20,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """Full-text search via FTS5, joined to facts table for reconstruction."""
         # v3.6.12 (search-1): the raw query was passed straight into FTS5 MATCH,
@@ -793,8 +799,8 @@ class DatabaseManager:
 
     def get_facts_by_ids(
         self, fact_ids: list[str], profile_id: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[AtomicFact]:
         """Get multiple facts by their IDs, scoped to a profile."""
         if not fact_ids:
@@ -979,8 +985,8 @@ class DatabaseManager:
 
     def get_temporal_events_by_range(
         self, profile_id: str, start_date: str, end_date: str,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[TemporalEvent]:
         """Temporal events within a date range (inclusive)."""
         where, params = _scope_where(

@@ -106,7 +106,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         content: str, tags: str = "", project: str = "",
         importance: int = 5, session_id: str = "",
         agent_id: str = "mcp_client",
-        scope: str = "personal",
+        scope: str | None = None,
         shared_with: str = "",
     ) -> dict:
         """Store content to memory with intelligent indexing.

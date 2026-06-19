@@ -587,8 +587,8 @@ def run_recall(
     access_log: Any = None,
     auto_linker: Any = None,
     fast: bool = False,
-    include_global: bool = True,
-    include_shared: bool = True,
+    include_global: bool = False,
+    include_shared: bool = False,
 ) -> RecallResponse:
     """Recall relevant facts for a query.
 
