@@ -96,6 +96,37 @@ def test_atomic_write_rewrites_on_content_change(tmp_path):
     assert target.read_bytes() == b"second"
 
 
+def test_atomic_write_rewrites_after_out_of_band_mutation(tmp_path):
+    """Sync-log skip must not fire when the file was mutated out-of-band.
+
+    Regression guard: git restore / manual edit changes the on-disk content
+    after a successful sync. Without on-disk re-hash, the next sync would
+    compare new_hash against the stale sync-log row (which matches) and skip
+    the write — leaving the file in its diverged state forever.
+    """
+    target = tmp_path / "f.txt"
+    content = b"slm-managed content"
+    db = tmp_path / "m.db"
+
+    r1 = atomic_write(target, content, adapter_name="test", profile_id="p",
+                      sync_log_db=db)
+    assert r1.wrote
+
+    # Second sync — content unchanged, durable skip should fire.
+    r2 = atomic_write(target, content, adapter_name="test", profile_id="p",
+                      sync_log_db=db)
+    assert not r2.wrote
+
+    # Out-of-band mutation (simulates ``git restore`` or manual edit).
+    target.write_bytes(b"user has edited this file manually")
+
+    # Third sync — sync-log says skip, but on-disk truth differs. Must re-write.
+    r3 = atomic_write(target, content, adapter_name="test", profile_id="p",
+                      sync_log_db=db)
+    assert r3.wrote
+    assert target.read_bytes() == content
+
+
 # ---------------------------------------------------------------------------
 # antigravity
 # ---------------------------------------------------------------------------
