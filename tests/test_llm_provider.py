@@ -38,6 +38,31 @@ def test_anthropic_provider_init():
     assert backbone.is_available()
 
 
+def test_anthropic_provider_respects_api_base():
+    """api_base must be used as the request URL for the anthropic provider.
+
+    Regression guard: _base_url is stored from config.api_base in __init__
+    but _build_anthropic previously ignored it, always returning
+    _ANTHROPIC_URL. This test verifies the built URL uses api_base when set.
+    """
+    proxy = "https://my-proxy.example.com"
+    config = LLMConfig(
+        provider="anthropic", model="claude-sonnet-4-6",
+        api_key="sk-ant-test", api_base=proxy,
+    )
+    backbone = LLMBackbone(config)
+    url, _, _ = backbone._build_anthropic("hi", "", 100, 0.0)
+    assert url == proxy + "/v1/messages"
+
+
+def test_anthropic_provider_default_url_without_api_base():
+    from superlocalmemory.llm.backbone import _ANTHROPIC_URL
+    config = LLMConfig(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant-test")
+    backbone = LLMBackbone(config)
+    url, _, _ = backbone._build_anthropic("hi", "", 100, 0.0)
+    assert url == _ANTHROPIC_URL
+
+
 def test_ollama_provider_no_key_needed():
     config = LLMConfig(provider="ollama", model="llama3.2")
     backbone = LLMBackbone(config)
