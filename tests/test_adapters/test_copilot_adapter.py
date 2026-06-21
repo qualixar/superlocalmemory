@@ -31,7 +31,9 @@ def test_writes_to_github_copilot_instructions_md(tmp_path, fake_recall):
     adapter.sync()
     path = tmp_path / TARGET_REL
     assert path.exists()
-    assert path.read_text().startswith("# SLM Active Brain Context")
+    content = path.read_text()
+    assert "# SLM Active Brain Context" in content
+    assert content.startswith("<!-- SLM-START -->")
 
 
 def test_size_soft_cap_2kb(tmp_path, fake_recall):
@@ -81,7 +83,10 @@ def test_disable(tmp_path, fake_recall):
     path = tmp_path / TARGET_REL
     assert path.exists()
     adapter.disable()
-    assert not path.exists()
+    # Marker-bounded: disable() strips the SLM block but does not delete the
+    # file — copilot-instructions.md is user-owned and may contain other content.
+    assert path.exists()
+    assert "<!-- SLM-START -->" not in path.read_text()
     assert adapter.is_active() is False
 
 
