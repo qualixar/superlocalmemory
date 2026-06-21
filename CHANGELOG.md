@@ -5,6 +5,31 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.17] - 2026-06-21 — Community PR round + dashboard-feedback fix + SQLite tuning
+
+Eight community pull requests merged after line-by-line review, plus fixes for the open issues. Every change was validated against the full test suite under the real 3.12 runtime; default single-machine behavior is unchanged.
+
+### Added
+
+- **HTTP write-path observability** (PR #52, @barrygfox). The HTTP fast paths (`/observe`, `/remember`, the AutoCapture pipeline, the materializer) now emit `EventBus` events tagged `source_protocol="http"`, so the dashboard event stream is no longer structurally empty. New event types: `memory.observed`, `memory.captured`, `memory.dropped`, `memory.queued`. Emission is best-effort and never affects the caller's response.
+- **Marker-bounded adapter writes** (PR #54, @barrygfox). `CopilotAdapter` now wraps its content in `<!-- SLM-START -->` / `<!-- SLM-END -->` markers and merges into `.github/copilot-instructions.md` instead of overwriting it, preserving user- and agent-curated content. `disable()` strips the SLM block instead of deleting the file. New `hooks/memory_protocol.py` is the shared single source of truth for the marker contract.
+
+### Fixed
+
+- **Dashboard feedback was completely broken** (issues #53/#59). The dashboard thumbs-up/down/pin and dwell handlers called `FeedbackCollector.record_dashboard_feedback()` — a method that did not exist, so every write raised `AttributeError` (caught by the route, so no lock leak, but the feature was dead). Implemented the method, mapping the dashboard vocabulary onto stored `(signal_type, value)` pairs; the raw query is hashed, never stored.
+- **NULL columns reloaded as `[]` instead of `None`** (PR #50, @barrygfox). `_jl()` collapsed "no default" and explicit `default=None`, defeating downstream `is None` guards and causing `Mean of empty slice` warnings in the Fisher–Langevin coupling. Fixed with a `_MISSING` sentinel + an empty-array guard.
+- **Lifecycle hooks hard-coded daemon port `:8765`** (PR #51, @barrygfox). Hooks now resolve the port from the per-user `~/.superlocalmemory/daemon.port` file; the non-loopback SSRF guard on `SLM_HOOK_DAEMON_URL` is preserved.
+- **`atomic_write` honored a stale sync-log skip** (PR #55, @barrygfox). The on-disk file is re-hashed before a durable skip, so an out-of-band edit (`git restore`, manual edit) is no longer silently ignored.
+- **Embedding/reranker workers ran single-threaded** (PR #56, @barrygfox). `OMP_NUM_THREADS` is restored in those subprocess workers (which load torch but never lightgbm, so the libomp SIGSEGV cannot occur).
+- **Anthropic provider ignored `api_base`** (PR #57, @barrygfox). The Anthropic backbone now honors a configured base URL (Anthropic-compatible proxy), mirroring the OpenAI provider.
+- **Dashboard screenshot committed as a raw binary** (PR #58, @MelleKoning). Converted to a Git LFS pointer per the existing `.gitattributes` rule.
+- **"Test Connection" blocked for remote dashboards** (issue #40 residue). In `SLM_REMOTE` mode, an allowlisted LAN client may probe its own LAN LLM endpoint, exactly like the loopback dashboard. The SSRF guard is not relaxed for any non-allowlisted caller.
+
+### Changed
+
+- **SQLite endurance knobs are env-tunable** (issue #53). `SLM_DB_BUSY_TIMEOUT_MS`, `SLM_DB_MAX_RETRIES`, and `SLM_DB_RETRY_BASE_DELAY` override the defaults for operators on slow/contended I/O. Unset env is byte-identical to the prior hard-coded constants.
+- **`outcome_queue` polling backs off when idle** (issue #53). The drain worker now relaxes its 0.25s poll (doubling, capped at 2s) when the queue drains empty and snaps back to 0.25s the instant there is work, reducing idle contention on the shared SQLite file.
+
 ## [3.6.14] - 2026-06-18 — Audit-hardened: memory bounds, cross-tenant cache isolation, atomic credentials
 
 Shipped through two adversarial audit passes (Qualixar Iron Pattern Stages 8–9), validated against a green 5933-test suite under the real 3.12 runtime. Default single-machine behavior is unchanged.

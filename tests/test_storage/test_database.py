@@ -671,3 +671,37 @@ class TestJlSentinel:
         assert _jl("[1, 2, 3]") == [1, 2, 3]
         assert _jl("[1, 2, 3]", None) == [1, 2, 3]
         assert _jl('{"a": 1}', None) == {"a": 1}
+
+
+# ---------------------------------------------------------------------------
+# Env-tunable SQLite endurance knobs (#53) — bad/absent env must fall back to
+# the documented defaults so unset config is byte-identical to the old code.
+# ---------------------------------------------------------------------------
+
+class TestDbEnvTuning:
+    def test_env_int_absent_returns_default(self, monkeypatch) -> None:
+        from superlocalmemory.storage.database import _env_int
+        monkeypatch.delenv("SLM_DB_BUSY_TIMEOUT_MS", raising=False)
+        assert _env_int("SLM_DB_BUSY_TIMEOUT_MS", 10_000) == 10_000
+
+    def test_env_int_valid_override(self, monkeypatch) -> None:
+        from superlocalmemory.storage.database import _env_int
+        monkeypatch.setenv("SLM_DB_BUSY_TIMEOUT_MS", "30000")
+        assert _env_int("SLM_DB_BUSY_TIMEOUT_MS", 10_000) == 30_000
+
+    def test_env_int_garbage_falls_back(self, monkeypatch) -> None:
+        from superlocalmemory.storage.database import _env_int
+        monkeypatch.setenv("SLM_DB_MAX_RETRIES", "not-a-number")
+        assert _env_int("SLM_DB_MAX_RETRIES", 5) == 5
+
+    def test_env_int_nonpositive_falls_back(self, monkeypatch) -> None:
+        from superlocalmemory.storage.database import _env_int
+        monkeypatch.setenv("SLM_DB_MAX_RETRIES", "0")
+        assert _env_int("SLM_DB_MAX_RETRIES", 5) == 5
+
+    def test_env_float_valid_and_garbage(self, monkeypatch) -> None:
+        from superlocalmemory.storage.database import _env_float
+        monkeypatch.setenv("SLM_DB_RETRY_BASE_DELAY", "0.5")
+        assert _env_float("SLM_DB_RETRY_BASE_DELAY", 0.1) == 0.5
+        monkeypatch.setenv("SLM_DB_RETRY_BASE_DELAY", "nope")
+        assert _env_float("SLM_DB_RETRY_BASE_DELAY", 0.1) == 0.1

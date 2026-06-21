@@ -325,6 +325,7 @@ async def record_feedback(data: dict):
 
         row_id = feedback.record_dashboard_feedback(
             memory_id=str(memory_id), query=query, feedback_type=feedback_type,
+            profile_id=get_active_profile() or "default",
         )
 
         return {
@@ -369,6 +370,7 @@ async def record_dwell(data: dict):
 
         row_id = feedback.record_dashboard_feedback(
             memory_id=str(memory_id), query=query, feedback_type=feedback_type,
+            profile_id=get_active_profile() or "default",
         )
 
         return {

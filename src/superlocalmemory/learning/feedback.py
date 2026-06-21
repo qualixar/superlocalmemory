@@ -41,6 +41,18 @@ SIGNAL_VALUES: Dict[str, float] = {
     "access_pattern": 0.6,
 }
 
+# Dashboard UI vocabulary -> (signal_type, signal_value). The dashboard speaks
+# thumbs_up/thumbs_down/pin (explicit) and dwell_positive/dwell_negative
+# (derived from modal dwell time). Unknown types fall back to a neutral
+# user_correction signal rather than being dropped.
+_DASHBOARD_SIGNAL_MAP: Dict[str, tuple[str, float]] = {
+    "thumbs_up": ("user_positive", 1.0),
+    "thumbs_down": ("user_negative", 0.0),
+    "pin": ("user_pin", 1.0),
+    "dwell_positive": ("dwell_positive", 0.6),
+    "dwell_negative": ("dwell_negative", 0.2),
+}
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS learning_feedback (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,6 +225,53 @@ class FeedbackCollector:
                     "query_hash, created_at, metadata) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (profile_id, fact_id, signal_type, clamped, None, now, None),
+                )
+                conn.commit()
+                return cursor.lastrowid
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Public API: record dashboard feedback
+    # ------------------------------------------------------------------
+
+    def record_dashboard_feedback(
+        self,
+        memory_id: str,
+        query: str = "",
+        feedback_type: str = "",
+        profile_id: str = "default",
+    ) -> Optional[int]:
+        """Record an explicit feedback signal raised from the dashboard UI.
+
+        Maps the dashboard's vocabulary (``thumbs_up``/``thumbs_down``/``pin``
+        and the dwell-derived ``dwell_positive``/``dwell_negative``) onto a
+        stored ``(signal_type, signal_value)`` pair. ``memory_id`` is the fact
+        id; the raw ``query`` is hashed and never stored. Returns the inserted
+        row id, or ``None`` on missing ``memory_id``.
+
+        This method restores the dashboard feedback path: the HTTP routes in
+        ``server/routes/learning.py`` called it before it existed, so every
+        thumbs/pin/dwell write raised ``AttributeError`` (issues #53/#59).
+        """
+        if not memory_id:
+            return None
+        signal_type, value = _DASHBOARD_SIGNAL_MAP.get(
+            feedback_type, ("user_correction", 0.5),
+        )
+        qhash = _hash_query(query) if query else None
+        now = _utcnow_iso()
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO learning_feedback "
+                    "(profile_id, fact_id, signal_type, signal_value, "
+                    "query_hash, created_at, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (profile_id or "default", str(memory_id), signal_type,
+                     value, qhash, now, None),
                 )
                 conn.commit()
                 return cursor.lastrowid

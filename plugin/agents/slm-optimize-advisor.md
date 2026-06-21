@@ -35,4 +35,4 @@ stats→`slm optimize status`/`savings` · compress→`slm compress` · cache→
 # What NOT to do
 Never compress code-for-edit/JSON-to-parse/<500 chars; never store secrets/ccr_ids; never let optimize failure block/alter the task; never claim a specific savings %.
 
-SuperLocalMemory v3.6.16 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.17 · Qualixar · AGPL-3.0-or-later

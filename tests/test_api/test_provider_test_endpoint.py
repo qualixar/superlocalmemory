@@ -95,6 +95,40 @@ def test_ssrf_remote_caller_public_ok() -> None:
     assert v3_api._validate_provider_url("https://api.openai.com/v1", "10.0.0.9") is None
 
 
+def test_ssrf_allowlisted_lan_client_may_target_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#40 residue: in SLM_REMOTE mode an allowlisted LAN dashboard may probe
+    its own LAN LLM endpoint, exactly like the loopback dashboard does."""
+    monkeypatch.setenv("SLM_REMOTE", "1")
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "192.168.50.144")
+    assert v3_api._validate_provider_url(
+        "http://192.168.50.140:8043/v1", "192.168.50.144",
+    ) is None
+
+
+def test_ssrf_non_allowlisted_remote_still_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote mode must NOT open the guard to clients outside the allowlist."""
+    monkeypatch.setenv("SLM_REMOTE", "1")
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "192.168.50.144")
+    assert v3_api._validate_provider_url(
+        "http://192.168.50.140:8043/v1", "10.9.9.9",
+    ) is not None
+
+
+def test_ssrf_allowlist_ignored_when_remote_mode_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With SLM_REMOTE unset, the allowlist is inert and the guard holds."""
+    monkeypatch.delenv("SLM_REMOTE", raising=False)
+    monkeypatch.setenv("SLM_MCP_ALLOWED_HOSTS", "192.168.50.144")
+    assert v3_api._validate_provider_url(
+        "http://192.168.50.140:8043/v1", "192.168.50.144",
+    ) is not None
+
+
 def test_custom_endpoint_empty_key_no_auth_header(client: TestClient) -> None:
     resp = client.post("/api/v3/provider/test", json={
         "provider": "openai",

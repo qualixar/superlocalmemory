@@ -1,6 +1,5 @@
 {
   "name": "qualixar",
-  "description": "Qualixar's marketplace for SuperLocalMemory — local-first agent memory with reversible context compression and KV cache, delivered as a Claude Code plugin + MCP server.",
   "owner": {
     "email": "varun.pratap.bhardwaj@gmail.com",
     "name": "Qualixar"

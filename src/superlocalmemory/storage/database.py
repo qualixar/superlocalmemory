@@ -12,7 +12,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
 from __future__ import annotations
 
-import json, logging, sqlite3, threading, time
+import json, logging, os, sqlite3, threading, time
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -44,9 +44,30 @@ def _jd(val: Any) -> str | None:
     return json.dumps(val) if val is not None else None
 
 
-_BUSY_TIMEOUT_MS = 10_000   # 10 seconds — wait for other writers
-_MAX_RETRIES = 5            # retry on transient SQLITE_BUSY
-_RETRY_BASE_DELAY = 0.1    # seconds — exponential backoff base
+def _env_int(name: str, default: int) -> int:
+    """Read a positive int from the environment, falling back on bad/absent."""
+    try:
+        val = int(os.environ.get(name, "").strip())
+        return val if val > 0 else default
+    except (ValueError, AttributeError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a positive float from the environment, falling back on bad/absent."""
+    try:
+        val = float(os.environ.get(name, "").strip())
+        return val if val > 0 else default
+    except (ValueError, AttributeError):
+        return default
+
+
+# SQLite endurance tuning. Defaults preserve prior hard-coded behaviour exactly;
+# operators on slow/contended I/O can raise them via env (issue #53) without a
+# code change. Unset env => byte-identical to the previous constants.
+_BUSY_TIMEOUT_MS = _env_int("SLM_DB_BUSY_TIMEOUT_MS", 10_000)   # wait for writers
+_MAX_RETRIES = _env_int("SLM_DB_MAX_RETRIES", 5)                # retry on SQLITE_BUSY
+_RETRY_BASE_DELAY = _env_float("SLM_DB_RETRY_BASE_DELAY", 0.1)  # backoff base (s)
 
 
 def _scope_where(

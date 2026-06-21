@@ -441,6 +441,17 @@ def _validate_provider_url(url: str, client_host: str) -> str | None:
         return "Cloud metadata endpoints are not allowed"
     if client_host in ("127.0.0.1", "::1", "localhost"):
         return None  # local dashboard may target its own local/LAN endpoints
+    # SLM_REMOTE residue (#40): an allowlisted LAN dashboard is trusted exactly
+    # like the loopback one and may probe its own LAN LLM endpoint. This does
+    # NOT relax the SSRF guard for arbitrary remote callers —
+    # is_lan_client_allowed is False unless remote mode is ON *and* the client
+    # IP is in SLM_MCP_ALLOWED_HOSTS.
+    try:
+        from superlocalmemory.core.remote_mode import is_lan_client_allowed
+        if is_lan_client_allowed(client_host):
+            return None
+    except Exception:  # pragma: no cover — defensive, never weaken on import error
+        pass
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:

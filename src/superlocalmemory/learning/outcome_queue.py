@@ -207,11 +207,19 @@ def _worker_loop(memory_db_path: Path, interval_s: float) -> None:
     )
     import time as _time
     next_reap = _time.monotonic() + _REAP_INTERVAL_S
-    while not _stop_event.wait(interval_s):
+    # Adaptive idle back-off: poll at interval_s under load, but relax the wait
+    # (doubling, capped) when the queue drains empty so an idle daemon stops
+    # contending on the shared SQLite file every 0.25s (issue #53). Snaps back
+    # to interval_s the instant there is work again.
+    _idle_cap = max(interval_s, 2.0)
+    cur_wait = interval_s
+    while not _stop_event.wait(cur_wait):
         try:
-            _drain_once(memory_db_path)
+            drained = _drain_once(memory_db_path)
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("outcome_queue drain crashed: %s", exc)
+            drained = 0
+        cur_wait = interval_s if drained else min(cur_wait * 2.0, _idle_cap)
         # Periodic reaper for CLI/dashboard outcomes that no Stop hook
         # will ever finalize. Runs OFF the drain path so a busy queue
         # doesn't starve the reaper.
