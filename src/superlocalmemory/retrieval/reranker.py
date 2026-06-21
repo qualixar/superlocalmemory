@@ -197,6 +197,11 @@ class CrossEncoderReranker:
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
                 "ORT_DISABLE_COREML": "1",
+                # Restore parallel OpenMP. The package caps OMP_NUM_THREADS
+                # globally to avoid a torch+lightgbm libomp SIGSEGV in the
+                # main process. This worker loads torch but never lightgbm,
+                # so there is no collision risk and full parallelism is safe.
+                "OMP_NUM_THREADS": str(os.cpu_count() or 4),
             }
             from superlocalmemory.core.platform_utils import popen_platform_kwargs
             self._worker_proc = subprocess.Popen(
