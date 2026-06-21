@@ -27,10 +27,16 @@ from superlocalmemory.storage.models import (
 
 logger = logging.getLogger(__name__)
 
-def _jl(raw: Any, default: Any = None) -> Any:
-    """JSON-load a value, returning *default* on None/empty."""
+_MISSING = object()
+
+def _jl(raw: Any, default: Any = _MISSING) -> Any:
+    """JSON-load a value, returning *default* on None/empty.
+
+    _jl(raw)       -> [] when raw is None/empty  (list fields)
+    _jl(raw, None) -> None when raw is None/empty (optional fields)
+    """
     if raw is None or raw == "":
-        return default if default is not None else []
+        return [] if default is _MISSING else default
     return json.loads(raw)
 
 def _jd(val: Any) -> str | None:

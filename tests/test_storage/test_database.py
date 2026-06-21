@@ -635,3 +635,39 @@ class TestStoreFactIdempotent:
             (c,),
         )
         assert dict(rows[0])["c"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _jl sentinel — explicit default=None must round-trip as None, not []
+# ---------------------------------------------------------------------------
+
+class TestJlSentinel:
+    """Regression: _jl(raw, None) must return None for NULL/empty raw.
+
+    The pre-fix implementation collapsed "no default supplied" and "explicit
+    None default" into the same branch (`default if default is not None else
+    []`), so optional-list/optional-vector columns like fisher_variance,
+    embedding, langevin_position, shared_with loaded as [] instead of None,
+    defeating downstream `is None` guards.
+    """
+
+    def test_no_default_returns_empty_list_for_null(self) -> None:
+        from superlocalmemory.storage.database import _jl
+        assert _jl(None) == []
+        assert _jl("") == []
+
+    def test_explicit_none_default_returns_none_for_null(self) -> None:
+        from superlocalmemory.storage.database import _jl
+        assert _jl(None, None) is None
+        assert _jl("", None) is None
+
+    def test_explicit_other_default_preserved(self) -> None:
+        from superlocalmemory.storage.database import _jl
+        assert _jl(None, 0) == 0
+        assert _jl(None, {"k": "v"}) == {"k": "v"}
+
+    def test_non_null_raw_always_parsed(self) -> None:
+        from superlocalmemory.storage.database import _jl
+        assert _jl("[1, 2, 3]") == [1, 2, 3]
+        assert _jl("[1, 2, 3]", None) == [1, 2, 3]
+        assert _jl('{"a": 1}', None) == {"a": 1}

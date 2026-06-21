@@ -111,6 +111,8 @@ class FisherLangevinCoupling:
             CouplingState with derived temperature, direction, and weight.
         """
         var_arr = np.asarray(fisher_variance, dtype=np.float64)
+        if var_arr.size == 0:
+            return CouplingState()
 
         # Step 1: Fisher confidence from variance
         # Low variance = high confidence (memory is well-characterized)
@@ -203,6 +205,8 @@ class FisherLangevinCoupling:
             return self._base_temp
 
         var_arr = np.asarray(fisher_variance, dtype=np.float64)
+        if var_arr.size == 0:
+            return self._base_temp
         avg_var = float(np.mean(np.clip(var_arr, 1e-8, None)))
         fisher_conf = min(1.0, 1.0 / (1.0 + avg_var) + min(access_count * 0.02, 0.2))
         return self._base_temp / (fisher_conf + self._epsilon)
