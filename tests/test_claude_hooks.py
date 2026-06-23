@@ -169,7 +169,11 @@ class TestHookDefinitions:
 
     def test_session_start_has_timeout(self):
         defs = hooks_mod._hook_definitions()
-        start_hook = defs["SessionStart"][0]["hooks"][0]
+        # v3.6.18: [0] = mandate (5000ms), [1] = start (15000ms)
+        mandate_hook = defs["SessionStart"][0]["hooks"][0]
+        assert mandate_hook["timeout"] == 5000
+        assert mandate_hook["type"] == "command"
+        start_hook = defs["SessionStart"][1]["hooks"][0]
         assert start_hook["timeout"] == 15000
         assert start_hook["type"] == "command"
 
@@ -258,8 +262,8 @@ class TestMergeHooks:
         hook_defs = hooks_mod._hook_definitions()
         result = hooks_mod._merge_hooks(settings, hook_defs)
 
-        # Should have exactly 1 SessionStart entry (replaced, not duplicated)
-        assert len(result["hooks"]["SessionStart"]) == 1
+        # v3.6.18: 2 SessionStart entries after merge — mandate + start (not triplicated)
+        assert len(result["hooks"]["SessionStart"]) == 2
 
     def test_preserves_non_hook_settings(self):
         settings = {"allowedTools": ["Bash"], "hooks": {}}
@@ -348,7 +352,8 @@ class TestInstallHooks:
         hooks_mod.install_hooks()
         hooks_mod.install_hooks()
         data = _read_settings(settings_path)
-        assert len(data["hooks"]["SessionStart"]) == 1
+        # v3.6.18: 2 SessionStart entries — mandate (first) + start
+        assert len(data["hooks"]["SessionStart"]) == 2
         assert len(data["hooks"]["Stop"]) == 1
 
     def test_install_no_errors_on_success(self):

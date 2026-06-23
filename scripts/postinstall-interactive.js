@@ -489,17 +489,87 @@ async function runInteractiveFlow(rl, recommendedProfile) {
 // under 60 LOC per Stage-8 G2 scope.
 function printLivingBrainDelta() {
   console.log('');
-  console.log('What\'s new in v3.4.21 FINAL:');
-  console.log('  + Engagement reward model (action_outcomes populated)');
-  console.log('  + Online LightGBM retrain (shadow-tested, auto-rollback)');
-  console.log('  + Real consolidation (hnswlib, reversible merges)');
-  console.log('  + Inline entity detection (<2 ms trigram lookup)');
-  console.log('  + Opt-in skill evolution (Haiku 4.5 default)');
-  console.log('  + Evo-Memory public benchmark');
+  console.log('What\'s new in v3.6.18:');
+  console.log('  + session_init mandate hook — Claude calls ToolSearch→session_init first, every session');
+  console.log('  + Plugin auto-install on npm/pip install — skills, agents, hooks wired automatically');
+  console.log('  + M017 migration — ccq_consolidated_blocks gets scope column (no more silent CCQ scope drop)');
+  console.log('  + GC-safe test flags baked into pyproject.toml + Makefile (no more macOS ARM SIGSEGV)');
   console.log('What\'s unchanged:');
   console.log('  * Your memory.db — zero deletes, zero rewrites');
   console.log('  * Your profile settings');
   console.log('  * All CLI commands you already use');
+}
+
+// T1-B: Auto-install the Claude Code plugin after pip/npm install.
+// Best-effort: never fails the installer, never blocks the main flow.
+// Checks for `claude` CLI, then runs:
+//   1. claude plugin marketplace add qualixar/superlocalmemory
+//   2. claude plugin install superlocalmemory@qualixar
+//   3. slm hooks install
+async function tryInstallClaudePlugin() {
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileAsync = promisify(execFile);
+
+  // Find claude binary — try PATH first, then common install locations.
+  const claudeCandidates = ['claude'];
+  if (process.platform !== 'win32') {
+    claudeCandidates.push(
+      '/usr/local/bin/claude',
+      process.env.HOME + '/.npm-global/bin/claude',
+      process.env.HOME + '/.local/bin/claude',
+    );
+  }
+
+  let claudeBin = null;
+  for (const candidate of claudeCandidates) {
+    try {
+      await execFileAsync(candidate, ['--version'], { timeout: 5000 });
+      claudeBin = candidate;
+      break;
+    } catch (_e) { /* keep looking */ }
+  }
+
+  if (!claudeBin) {
+    // Claude Code not installed — print guidance and skip.
+    console.log('SLM: Claude Code CLI not found — skipping plugin auto-install.');
+    console.log('SLM: To install the plugin manually after installing Claude Code:');
+    console.log('SLM:   claude plugin marketplace add qualixar/superlocalmemory');
+    console.log('SLM:   claude plugin install superlocalmemory@qualixar');
+    console.log('SLM:   slm hooks install');
+    return;
+  }
+
+  console.log('SLM: Claude Code found — installing SLM plugin...');
+
+  // Step 1: Add marketplace
+  try {
+    await execFileAsync(claudeBin,
+      ['plugin', 'marketplace', 'add', 'qualixar/superlocalmemory'],
+      { timeout: 30000 });
+    console.log('SLM: marketplace added (qualixar/superlocalmemory)');
+  } catch (e) {
+    // "already exists" or network error — not fatal
+    console.log('SLM: marketplace add note: ' + (e.stderr || e.message || String(e)).trim().split('\n')[0]);
+  }
+
+  // Step 2: Install plugin
+  try {
+    await execFileAsync(claudeBin,
+      ['plugin', 'install', 'superlocalmemory@qualixar'],
+      { timeout: 30000 });
+    console.log('SLM: plugin installed (superlocalmemory@qualixar)');
+  } catch (e) {
+    console.log('SLM: plugin install note: ' + (e.stderr || e.message || String(e)).trim().split('\n')[0]);
+  }
+
+  // Step 3: Install hooks (slm must be in PATH after pip install)
+  try {
+    await execFileAsync('slm', ['hooks', 'install'], { timeout: 15000 });
+    console.log('SLM: hooks installed into Claude Code settings');
+  } catch (e) {
+    console.log('SLM: hooks install note: ' + (e.stderr || e.message || String(e)).trim().split('\n')[0]);
+  }
 }
 
 function printFirstRunChecklist(config) {
@@ -692,6 +762,13 @@ async function main() {
 
   // UX-G2: show the one-screen delta banner so upgraders see what shipped.
   printLivingBrainDelta();
+
+  // T1-B: Auto-install Claude Code plugin + hooks. Best-effort, non-blocking.
+  // Only runs on npm install (not --dry-run), when claude CLI is present.
+  if (!args.dryRun) {
+    await tryInstallClaudePlugin();
+  }
+
   printFirstRunChecklist(config);
   return 0;
 }

@@ -30,7 +30,7 @@ import process from 'node:process';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const VERSION = '3.6.17';
+const VERSION = '3.6.18';
 const MANIFEST_REL = 'plugin-src/manifest.json';
 const GENERATED_BANNER = `# _GENERATED — DO NOT HAND-EDIT
 

@@ -48,6 +48,12 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["ORT_DISABLE_COREML"] = "1"         # Prevent ONNX CoreML 3-5 GB alloc on ARM
+# v3.6.18: malloc allocator prevents jemalloc GC SIGSEGV on macOS ARM.
+# Background: Python's default tcmalloc/jemalloc builds (via CPython extensions)
+# can SIGSEGV when fork()ed inside a test under heavy parallel OpenMP + Rust tokio.
+# PYTHONMALLOC=malloc forces the system allocator — same crash class as
+# OMP_NUM_THREADS=1 but covers a complementary failure path.
+os.environ.setdefault("PYTHONMALLOC", "malloc")
 
 # ---------------------------------------------------------------------------
 # 3. DATA DIR — belt-and-suspenders default (tests/conftest.py overrides

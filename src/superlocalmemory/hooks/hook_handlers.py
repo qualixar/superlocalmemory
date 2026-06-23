@@ -120,6 +120,7 @@ def handle_hook(action: str) -> None:
         sys.exit(_main())
 
     handlers = {
+        "mandate": _hook_mandate,
         "start": _hook_start,
         "gate": _hook_gate,
         "init-done": _hook_init_done,
@@ -165,6 +166,38 @@ def _launch_post_session_evolution(
         {"session_id": session_id, "profile_id": profile_id},
         timeout=2.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# 0. MANDATE — first SessionStart hook; fires before start
+# ---------------------------------------------------------------------------
+
+_MANDATE_TEXT = """<MANDATORY_SESSION_INIT>
+BEFORE writing any text or calling any other tool, you MUST execute these two steps in order:
+
+STEP 1 — Load schema:
+  Call ToolSearch with query: "select:mcp__superlocalmemory__session_init"
+
+STEP 2 — Initialize memory brain:
+  Call mcp__superlocalmemory__session_init with:
+    project_path = your current working directory
+    query = a short description of the session topic (derive from user's first message)
+
+This is non-negotiable. SLM is the brain. Without session_init, you have no 6-channel memory context (Ebbinghaus decay, entity graph, FSRS, spreading activation all go cold).
+DO NOT output any text until session_init has completed.
+</MANDATORY_SESSION_INIT>"""
+
+
+def _hook_mandate() -> None:
+    """Print the session_init mandate. MUST be the FIRST SessionStart hook.
+
+    mcp__superlocalmemory__session_init is DEFERRED at session start — Claude
+    cannot call it without ToolSearch first loading the schema. This hook
+    fires before `slm hook start` and injects the two-step protocol into the
+    system-reminder block so Claude's first action is always ToolSearch →
+    session_init, not a text response with no memory context.
+    """
+    print(_MANDATE_TEXT)
 
 
 # ---------------------------------------------------------------------------

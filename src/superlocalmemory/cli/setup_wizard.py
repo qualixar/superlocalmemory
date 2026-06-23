@@ -789,6 +789,40 @@ def _maybe_install_hooks_on_first_use() -> None:
         # Best-effort: parity-fallback, never block CLI.
         pass
 
+    # T1-B: Auto-install Claude Code plugin (skills, agents, hooks).
+    # Runs after hooks install, best-effort — never blocks CLI startup.
+    _try_install_claude_plugin()
+
+
+def _try_install_claude_plugin() -> None:
+    """Auto-install the Claude Code plugin on first pip/uvx SLM install.
+
+    Runs ``claude plugin marketplace add qualixar/superlocalmemory`` then
+    ``claude plugin install superlocalmemory@qualixar`` if the ``claude``
+    CLI is found in PATH. Silent on any error — plugin install is a
+    convenience, not a hard requirement for SLM to function.
+    """
+    import shutil
+    import subprocess
+
+    claude = shutil.which("claude")
+    if not claude:
+        return  # Claude Code not in PATH — skip silently
+
+    _run = lambda cmd: subprocess.run(  # noqa: E731
+        cmd, capture_output=True, timeout=30, check=False
+    )
+
+    try:
+        _run([claude, "plugin", "marketplace", "add", "qualixar/superlocalmemory"])
+    except Exception:
+        pass
+
+    try:
+        _run([claude, "plugin", "install", "superlocalmemory@qualixar"])
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Mode C provider config (preserved from original)
