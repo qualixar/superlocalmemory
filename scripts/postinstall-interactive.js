@@ -563,10 +563,20 @@ async function tryInstallClaudePlugin() {
     console.log('SLM: plugin install note: ' + (e.stderr || e.message || String(e)).trim().split('\n')[0]);
   }
 
-  // Step 3: Install hooks (slm must be in PATH after pip install)
+  // Step 3: Install hooks (only if not already current — avoids needless writes)
+  // `slm hooks install` uses atomic tmp-then-rename and only touches the SLM
+  // section of settings.json; all other Claude Code settings are preserved.
   try {
-    await execFileAsync('slm', ['hooks', 'install'], { timeout: 15000 });
-    console.log('SLM: hooks installed into Claude Code settings');
+    const statusResult = await execFileAsync('slm', ['hooks', 'status', '--json'],
+      { timeout: 10000 }).catch(() => null);
+    const alreadyCurrent = statusResult &&
+      (() => { try { const s = JSON.parse(statusResult.stdout); return s.installed && !s.needs_upgrade; } catch { return false; } })();
+    if (!alreadyCurrent) {
+      await execFileAsync('slm', ['hooks', 'install'], { timeout: 15000 });
+      console.log('SLM: hooks installed into Claude Code settings');
+    } else {
+      console.log('SLM: hooks already current — skipped');
+    }
   } catch (e) {
     console.log('SLM: hooks install note: ' + (e.stderr || e.message || String(e)).trim().split('\n')[0]);
   }

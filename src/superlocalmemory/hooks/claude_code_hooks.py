@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -291,9 +292,31 @@ def _read_settings() -> dict:
 
 
 def _write_settings(settings: dict) -> None:
-    """Write settings.json with pretty formatting."""
+    """Write settings.json atomically — tmp file + rename.
+
+    Direct .write_text() would truncate the file on a crash mid-write,
+    destroying the user's entire Claude Code configuration. The tmp-then-rename
+    pattern is atomic on POSIX (os.replace) and near-atomic on Windows: either
+    the full new content lands or the original file is untouched.
+
+    Never overwrites non-SLM settings — _merge_hooks() guarantees that only
+    the SLM hooks entries change; all other keys are preserved from the read.
+    """
     CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
+    content = json.dumps(settings, indent=2) + "\n"
+    # Write to a sibling tmp file in the same directory so os.replace is atomic
+    # (cross-device rename would fail; same-dir rename is guaranteed atomic).
+    tmp_path = CLAUDE_SETTINGS.with_suffix(".json.slm_tmp")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, CLAUDE_SETTINGS)
+    except Exception:
+        # Best-effort cleanup of the tmp file on failure
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
