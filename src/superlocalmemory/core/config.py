@@ -1227,9 +1227,15 @@ class SLMConfig:
                 api_key=embedding_key,
             )
         else:
+            # Honour the user's configured embedding model when present on disk.
+            # Default to the local nomic model — Mode C cannot assume the user
+            # has access to an external embeddings endpoint, and the prior
+            # default ("text-embedding-3-large") was an OpenAI cloud model name
+            # that the local sentence-transformers worker cannot resolve.
             _c_emb = EmbeddingConfig(
-                model_name="text-embedding-3-large",
-                dimension=3072,
+                model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
+                dimension=embedding_dimension or 768,
+                provider=_c_emb_provider,
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
                 deployment_name=embedding_deployment,
