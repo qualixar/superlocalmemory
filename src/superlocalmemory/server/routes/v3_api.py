@@ -123,20 +123,17 @@ async def set_mode(request: Request):
                 status_code=400,
             )
 
-        new_config = SLMConfig.for_mode(
-            Mode(new_mode),
-            llm_provider=old_config.llm.provider,
-            llm_model=old_config.llm.model,
-            llm_api_key=old_config.llm.api_key,
-            llm_api_base=old_config.llm.api_base,
-            embedding_provider=old_config.embedding.provider,
-            embedding_endpoint=old_config.embedding.api_endpoint,
-            embedding_key=old_config.embedding.api_key,
-            embedding_model_name=old_config.embedding.model_name,
-            embedding_dimension=old_config.embedding.dimension,
-        )
-        new_config.active_profile = old_config.active_profile
-        new_config.save(mode_change=True)
+        # Apply new mode's structural presets (retrieval, math, channel_weights)
+        # by building a fresh template, then graft them onto the loaded config so
+        # all user-tuned blocks (forgetting, injection, consolidation, scope, …)
+        # are preserved across the mode switch.
+        _template = SLMConfig.for_mode(Mode(new_mode))
+        old_config.mode = Mode(new_mode)
+        old_config.retrieval = _template.retrieval
+        old_config.math = _template.math
+        old_config.channel_weights = _template.channel_weights
+        old_config.save(mode_change=True)
+        new_config = old_config
 
         # Audit the change before we lose context — proves who/when/what.
         # Captures the phantom-write case where `for_mode(C)` auto-defaults
@@ -184,45 +181,52 @@ async def set_full_config(request: Request):
         if new_mode not in ("a", "b", "c"):
             return JSONResponse({"error": "Invalid mode"}, status_code=400)
 
-        from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
+        from superlocalmemory.core.config import SLMConfig, EmbeddingConfig, LLMConfig
         from superlocalmemory.storage.models import Mode
         from superlocalmemory.server.routes.helpers import log_mode_change
-        old = SLMConfig.load()
-        old_mode = old.mode.value
+        config = SLMConfig.load()
+        old_mode = config.mode.value
 
-        # AIDEV-86: Check if embedding fields were explicitly provided in request.
-        # If not, preserve the existing embedding config — otherwise for_mode() wipes
-        # it with hardcoded defaults when dashboard sends empty strings.
-        _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
-                       "embedding_model_name", "embedding_dimension")
-        _preserve_embedding = not any(k in body for k in _emb_fields)
-        # v3.6.12 (settings-2): honor a custom endpoint for ANY provider — the
-        # old code forced api_base="" for everything except ollama, so a
-        # llama.cpp / LM Studio / Azure-OpenAI endpoint configured in the
-        # dashboard could never be saved (Test Connection then probed the wrong
-        # URL → 401). Accept both base_url and endpoint; default ollama locally.
+        # v3.6.12 (settings-2): honor a custom endpoint for ANY provider.
         _endpoint = (body.get("base_url", "") or body.get("endpoint", "")).strip()
         if not _endpoint and provider == "ollama":
             _endpoint = "http://localhost:11434"
-        config = SLMConfig.for_mode(
-            Mode(new_mode),
-            llm_provider=provider if provider != "none" else "",
-            llm_model=model,
-            llm_api_key=api_key,
-            llm_api_base=_endpoint,
-            embedding_provider=body.get("embedding_provider", ""),
-            embedding_endpoint=body.get("embedding_endpoint", ""),
-            embedding_key=body.get("embedding_key", ""),
-            embedding_model_name=body.get("embedding_model", ""),
-            embedding_dimension=int(body.get("embedding_dimension", 0) or 0),
+
+        # Mutate only the fields the dashboard sent — all other config blocks
+        # (forgetting, injection, retrieval, math, consolidation, scope, …) are
+        # preserved because we loaded the full existing config above.
+        config.mode = Mode(new_mode)
+        config.llm = LLMConfig(
+            provider=provider if provider != "none" else "",
+            model=model,
+            api_key=api_key,
+            api_base=_endpoint,
         )
-        # AIDEV-86: Preserve existing embedding config when dashboard omits embedding fields.
-        if _preserve_embedding and old.embedding:
-            config.embedding = old.embedding
-        config.active_profile = old.active_profile
-        # v3.6.12 (settings-1): an explicit user-driven mode switch must persist.
-        # save() without mode_change=True hits the guard that PRESERVES the old
-        # mode, so /mode/set silently no-op'd the switch while returning success.
+
+        # Update embedding only when the dashboard explicitly sent those fields;
+        # absence means "leave it alone" (AIDEV-86 / broader fix).
+        _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
+                       "embedding_model_name", "embedding_dimension")
+        if any(k in body for k in _emb_fields):
+            config.embedding = EmbeddingConfig(
+                provider=body.get("embedding_provider", ""),
+                api_endpoint=body.get("embedding_endpoint", ""),
+                api_key=body.get("embedding_key", ""),
+                model_name=body.get("embedding_model", ""),
+                dimension=int(body.get("embedding_dimension", 0) or 0),
+            )
+
+        # When the mode actually changed, apply the new mode's structural presets
+        # (retrieval topology, math thresholds, channel weights) so the user gets
+        # the right runtime behaviour for their chosen mode.
+        if new_mode != old_mode:
+            _template = SLMConfig.for_mode(Mode(new_mode))
+            config.retrieval = _template.retrieval
+            config.math = _template.math
+            config.channel_weights = _template.channel_weights
+
+        # v3.6.12 (settings-1): mode_change=True is required to persist the new
+        # mode — save() without it hits a guard that preserves the old mode.
         config.save(mode_change=True)
 
         log_mode_change(
@@ -617,8 +621,7 @@ async def set_provider(request: Request):
         model = body.get("model", "")
         base_url = body.get("base_url", "")
 
-        from superlocalmemory.core.config import SLMConfig
-        from superlocalmemory.storage.models import Mode
+        from superlocalmemory.core.config import SLMConfig, LLMConfig
         config = SLMConfig.load()
 
         # Use preset base_url if not provided
@@ -629,15 +632,14 @@ async def set_provider(request: Request):
             if not model:
                 model = preset.get("model", "")
 
-        new_config = SLMConfig.for_mode(
-            config.mode,
-            llm_provider=provider,
-            llm_model=model,
-            llm_api_key=api_key,
-            llm_api_base=base_url,
+        # Mutate only the LLM block — all other config is preserved.
+        config.llm = LLMConfig(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            api_base=base_url,
         )
-        new_config.active_profile = config.active_profile
-        new_config.save()
+        config.save()
 
         return {"success": True, "provider": provider, "model": model}
     except Exception as e:
