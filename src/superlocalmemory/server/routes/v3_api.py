@@ -184,11 +184,18 @@ async def set_full_config(request: Request):
         if new_mode not in ("a", "b", "c"):
             return JSONResponse({"error": "Invalid mode"}, status_code=400)
 
-        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
         from superlocalmemory.storage.models import Mode
         from superlocalmemory.server.routes.helpers import log_mode_change
         old = SLMConfig.load()
         old_mode = old.mode.value
+
+        # AIDEV-86: Check if embedding fields were explicitly provided in request.
+        # If not, preserve the existing embedding config — otherwise for_mode() wipes
+        # it with hardcoded defaults when dashboard sends empty strings.
+        _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
+                       "embedding_model_name", "embedding_dimension")
+        _preserve_embedding = not any(k in body for k in _emb_fields)
         # v3.6.12 (settings-2): honor a custom endpoint for ANY provider — the
         # old code forced api_base="" for everything except ollama, so a
         # llama.cpp / LM Studio / Azure-OpenAI endpoint configured in the
@@ -209,6 +216,9 @@ async def set_full_config(request: Request):
             embedding_model_name=body.get("embedding_model", ""),
             embedding_dimension=int(body.get("embedding_dimension", 0) or 0),
         )
+        # AIDEV-86: Preserve existing embedding config when dashboard omits embedding fields.
+        if _preserve_embedding and old.embedding:
+            config.embedding = old.embedding
         config.active_profile = old.active_profile
         # v3.6.12 (settings-1): an explicit user-driven mode switch must persist.
         # save() without mode_change=True hits the guard that PRESERVES the old
