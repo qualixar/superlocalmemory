@@ -87,22 +87,16 @@ def _get_broker(request: Request):
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "::1", "localhost"):
             import hmac
-            presented = request.headers.get("x-mesh-secret", "")
-            if not hmac.compare_digest(presented, secret):
+            # Accept X-Mesh-Secret (undocumented legacy header, v3.6.12 regression) OR
+            # Authorization: Bearer <secret> (RFC 7617 — canonical; what remote_sync.py
+            # sends and what the docs specify). Both are constant-time compared.
+            presented = (
+                request.headers.get("x-mesh-secret")
+                or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            )
+            if not presented or not hmac.compare_digest(presented, secret):
                 raise HTTPException(401, detail="invalid or missing mesh secret")
     return broker
-
-
-def _validate_remote_auth(request: Request, broker) -> None:
-    """Validate bearer token for cross-machine requests."""
-    if not broker._is_remote:
-        return  # local mode — no auth needed
-    secret = broker._shared_secret
-    if not secret:
-        return
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {secret}":
-        raise HTTPException(401, detail="Unauthorized")
 
 
 # -- Routes --
@@ -130,7 +124,6 @@ async def deregister(req: DeregisterRequest, request: Request):
 @router.get("/peers")
 async def peers(request: Request):
     broker = _get_broker(request)
-    _validate_remote_auth(request, broker)
     return {"peers": broker.list_all_peers()}
 
 

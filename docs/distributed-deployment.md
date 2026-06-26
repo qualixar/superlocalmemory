@@ -204,9 +204,13 @@ agent id; pick a stable, lowercase name per tool.
 |----------|---------|---------|
 | `SLM_MESH_HOST` | Bind address for mesh WebSocket broker | `127.0.0.1` |
 | `SLM_MESH_WS_PORT` | WebSocket port for mesh broker | `8766` |
-| `SLM_MESH_SHARED_SECRET` | Required when `SLM_DAEMON_HOST != 127.0.0.1`; authenticates mesh peers | — |
+| `SLM_MESH_SHARED_SECRET` | Auth secret for the mesh HTTP API. Required when `SLM_MESH_HOST` is not localhost. Send as `Authorization: Bearer <secret>` (canonical) or `X-Mesh-Secret: <secret>` (legacy). | — |
 | `SLM_MESH_PEER_URL` | Explicit peer URL to register with at startup | — |
 | `SLM_MESH_DISCOVERY` | Discovery mode: `local` / `manual` | `local` |
+
+> **Mesh API auth (v3.6.20):** When `SLM_MESH_SHARED_SECRET` is set, non-loopback callers must authenticate every `/mesh/*` request. The canonical header is `Authorization: Bearer <your-secret>` — this is what `RemoteSyncClient` sends automatically. The legacy `X-Mesh-Secret: <your-secret>` header is also accepted for backwards compatibility.
+>
+> Example: `curl http://192.168.50.144:8765/mesh/status -H "Authorization: Bearer <your-secret>"`
 
 > **Note:** The variable is `SLM_MESH_WS_PORT` (not `SLM_MCP_WS_PORT`).
 > `SLM_DAEMON_HOST` is canonical; `SLM_HOST` is the alias (not the other way around).

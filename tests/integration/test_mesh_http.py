@@ -86,3 +86,96 @@ def test_no_secret_allows_all() -> None:
     c = TestClient(app)
     r = c.post("/mesh/register", json={"session_id": "s"})
     assert r.status_code == 200
+
+
+# ── v3.6.20: Bearer token support (issue #60) ───────────────────────────────
+# Root cause: _get_broker (added v3.6.12) required X-Mesh-Secret, but every
+# documented caller uses Authorization: Bearer — remote_sync.py, multi-machine.md,
+# and the old _validate_remote_auth all specified Bearer.  These tests confirm
+# the fix: both headers accepted, security is not weakened.
+
+def test_bearer_token_accepted_for_nonloopback() -> None:
+    # Core regression: Authorization: Bearer must work.
+    # TestClient uses host="testclient" (non-loopback), so the auth gate fires.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.post(
+        "/mesh/register",
+        json={"session_id": "s"},
+        headers={"Authorization": "Bearer topsecret"},
+    )
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+
+
+def test_bearer_token_wrong_secret_rejected() -> None:
+    # A wrong Bearer secret must still 401 — security is not weakened.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.post(
+        "/mesh/register",
+        json={"session_id": "s"},
+        headers={"Authorization": "Bearer wrongsecret"},
+    )
+    assert r.status_code == 401
+
+
+def test_xmesh_secret_still_works_backwards_compat() -> None:
+    # X-Mesh-Secret must still work — backwards compat for callers that
+    # discovered this undocumented header in v3.6.12.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.post(
+        "/mesh/register",
+        json={"session_id": "s"},
+        headers={"X-Mesh-Secret": "topsecret"},
+    )
+    assert r.status_code == 200
+
+
+def test_status_endpoint_bearer_auth() -> None:
+    # /mesh/status is the exact endpoint reported in issue #60.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.get("/mesh/status", headers={"Authorization": "Bearer topsecret"})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    body = r.json()
+    assert body.get("broker_up") is True
+
+
+def test_status_endpoint_blocked_without_auth() -> None:
+    # /mesh/status must 401 when a secret is set and no auth header is provided.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.get("/mesh/status")
+    assert r.status_code == 401
+
+
+def test_peers_endpoint_bearer_auth() -> None:
+    # /mesh/peers is called by RemoteSyncClient._sync_peers_from_remote with Bearer.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    r = c.get("/mesh/peers", headers={"Authorization": "Bearer topsecret"})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    assert "peers" in r.json()
+
+
+def test_send_endpoint_bearer_auth() -> None:
+    # /mesh/send is called by RemoteSyncClient.send_to_remote with Bearer.
+    app, _ = _app_with_broker(secret="topsecret")
+    c = TestClient(app)
+    # Register a recipient peer first (needs Bearer because secret is set)
+    reg = c.post(
+        "/mesh/register",
+        json={"session_id": "receiver"},
+        headers={"Authorization": "Bearer topsecret"},
+    )
+    assert reg.status_code == 200
+    peer_id = reg.json()["peer_id"]
+
+    r = c.post(
+        "/mesh/send",
+        json={"from_peer": "sender", "to_peer": peer_id, "content": "hello", "type": "text"},
+        headers={"Authorization": "Bearer topsecret"},
+    )
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    assert r.json().get("ok") is True
