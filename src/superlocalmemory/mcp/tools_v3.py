@@ -65,25 +65,13 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                     "error": f"Invalid mode '{mode}'. Use 'a', 'b', or 'c'.",
                 }
             from superlocalmemory.core.config import SLMConfig
-            from superlocalmemory.storage.models import Mode
             from superlocalmemory.mcp.server import reset_engine
 
-            mode_enum = Mode(mode_lower)
+            # Use switch_mode() — the correct load-then-patch path that preserves
+            # all user-tuned config blocks (forgetting, injection, retrieval, scope,
+            # math, channel_weights, …). for_mode() resets them to hardcoded defaults.
             old_config = SLMConfig.load()
-            config = SLMConfig.for_mode(
-                mode_enum,
-                llm_provider=old_config.llm.provider,
-                llm_model=old_config.llm.model,
-                llm_api_key=old_config.llm.api_key,
-                llm_api_base=old_config.llm.api_base,
-                embedding_provider=old_config.embedding.provider,
-                embedding_endpoint=old_config.embedding.api_endpoint,
-                embedding_key=old_config.embedding.api_key,
-                embedding_model_name=old_config.embedding.model_name,
-                embedding_dimension=old_config.embedding.dimension,
-            )
-            config.active_profile = old_config.active_profile
-            config.save(mode_change=True)
+            config = SLMConfig.switch_mode(mode_lower)
 
             # V3.3: Check if embedding model changed — flag for re-indexing
             needs_reindex = (
