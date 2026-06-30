@@ -13,6 +13,7 @@ async function loadCompliance() {
         var url = '/api/compliance/status';
         if (filterValue) url += '?event_type=' + encodeURIComponent(filterValue);
         var response = await fetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         var data = await response.json();
         _complianceData = data;
 

@@ -117,6 +117,7 @@ async function loadClusters() {
     }
     try {
         var response = await fetch('/api/clusters');
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         var data = await response.json();
         _CLUSTERS_STATE.clusters = data.clusters || [];
         _CLUSTERS_STATE.page = 0;

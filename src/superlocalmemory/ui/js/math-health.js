@@ -61,7 +61,11 @@ async function loadMathHealth() {
             var liStatus = document.createElement('li');
             liStatus.appendChild(document.createTextNode('Status: '));
             var statusBadge = document.createElement('span');
-            statusBadge.className = 'badge bg-success';
+            var _s = (layer.status || 'active').toLowerCase();
+            var _badgeClass = _s === 'error' || _s === 'critical' ? 'bg-danger' :
+                              _s === 'warning' || _s === 'degraded' ? 'bg-warning text-dark' :
+                              'bg-success';
+            statusBadge.className = 'badge ' + _badgeClass;
             statusBadge.textContent = layer.status || 'active';
             liStatus.appendChild(statusBadge);
             ul.appendChild(liStatus);

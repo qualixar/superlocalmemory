@@ -16,12 +16,16 @@
   function fetchEntityList(offset) {
     offset = offset || 0;
     fetch('/api/entity/list?limit=' + PAGE_SIZE + '&offset=' + offset)
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         allEntities = data.entities || [];
         renderEntityList(allEntities, data.total || 0, offset);
       })
-      .catch(function() {
+      .catch(function(err) {
+        console.error('[entities] fetchEntityList failed:', err);
         renderEntityList([], 0, 0);
       });
   }

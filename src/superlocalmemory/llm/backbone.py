@@ -190,7 +190,7 @@ class LLMBackbone:
                     logger.warning("Content filter or bad request (400). Returning empty.")
                     return ""
                 last_error = exc
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            except (httpx.TimeoutException, httpx.ConnectError, ValueError) as exc:
                 last_error = exc
 
             if attempt < _MAX_RETRIES - 1:
@@ -217,7 +217,14 @@ class LLMBackbone:
             with httpx.Client(timeout=timeout) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                try:
+                    return resp.json()
+                except Exception as exc:
+                    raise ValueError(
+                        f"LLM endpoint returned HTTP {resp.status_code} with "
+                        f"non-JSON body (Content-Length="
+                        f"{resp.headers.get('content-length', '?')}): {exc}"
+                    ) from exc
         finally:
             socket.setdefaulttimeout(old_default)
 
