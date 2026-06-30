@@ -157,7 +157,7 @@ function sendChatQuery(query) {
 
                 var currentEvent = '';
                 for (var i = 0; i < lines.length; i++) {
-                    var line = lines[i];
+                    var line = lines[i].replace(/\r$/, ''); // strip \r from \r\n streams
                     if (line.startsWith('event: ')) {
                         currentEvent = line.substring(7).trim();
                     } else if (line.startsWith('data: ')) {

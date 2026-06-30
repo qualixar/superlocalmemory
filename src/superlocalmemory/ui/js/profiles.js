@@ -210,7 +210,7 @@ async function switchProfile(profileName) {
             showToast('Switched to profile: ' + profileName);
             loadProfiles();
             loadStats();
-            loadGraph();
+            if (typeof loadGraph === 'function') loadGraph();
             loadProfilesTable();
             // v2.7.4: Reload ALL tabs for new profile
             if (typeof loadLearning === 'function') loadLearning();

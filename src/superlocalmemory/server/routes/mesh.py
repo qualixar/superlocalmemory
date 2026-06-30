@@ -87,15 +87,23 @@ def _get_broker(request: Request):
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "::1", "localhost"):
             import hmac
-            # Accept X-Mesh-Secret (undocumented legacy header, v3.6.12 regression) OR
-            # Authorization: Bearer <secret> (RFC 7617 — canonical; what remote_sync.py
-            # sends and what the docs specify). Both are constant-time compared.
+            from superlocalmemory.core.security_primitives import verify_install_token
+
+            # Path 1: install token — dashboard/browser callers hold this and
+            # should not need the mesh secret exposed in JS.
+            install_token = request.headers.get("x-install-token", "")
+            if install_token and verify_install_token(install_token):
+                return broker
+
+            # Path 2: mesh secret — remote agents / remote_sync.py / LAN peers.
+            # Accept X-Mesh-Secret (legacy v3.6.12 header) OR
+            # Authorization: Bearer <secret> (RFC 7617 canonical form).
             presented = (
                 request.headers.get("x-mesh-secret")
                 or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
             )
             if not presented or not hmac.compare_digest(presented, secret):
-                raise HTTPException(401, detail="invalid or missing mesh secret")
+                raise HTTPException(401, detail="invalid or missing credential")
     return broker
 
 

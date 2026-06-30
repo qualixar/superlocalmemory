@@ -206,7 +206,7 @@ async def set_full_config(request: Request):
         # Update embedding only when the dashboard explicitly sent those fields;
         # absence means "leave it alone" (AIDEV-86 / broader fix).
         _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
-                       "embedding_model_name", "embedding_dimension")
+                       "embedding_model", "embedding_dimension")
         if any(k in body for k in _emb_fields):
             config.embedding = EmbeddingConfig(
                 provider=body.get("embedding_provider", ""),

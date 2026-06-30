@@ -618,7 +618,10 @@ function loadGraphSigma() {
     if (typeof showLoadingSpinner === 'function') showLoadingSpinner();
 
     fetch('/api/graph?max_nodes=' + fetchLimit + '&min_importance=' + minImportance)
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
         .then(function(data) {
             // Store in shared globals
             if (typeof window.graphData !== 'undefined') window.graphData = data;

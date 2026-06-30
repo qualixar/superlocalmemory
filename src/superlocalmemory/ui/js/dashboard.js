@@ -63,7 +63,12 @@ document.addEventListener('click', function(e) {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({mode: mode})
-        }).then(function() { loadDashboard(); });
+        }).then(function(r) {
+            if (!r.ok) return r.json().catch(function() { return {}; }).then(function(d) {
+                showToast('Mode switch failed: ' + (d.error || d.detail || r.status), 'error');
+            });
+            return r.json().then(function() { loadDashboard(); });
+        }).catch(function() { showToast('Mode switch failed: network error', 'error'); });
     }
 });
 
@@ -72,15 +77,21 @@ document.getElementById('quick-store-btn')?.addEventListener('click', function()
     var input = document.getElementById('quick-store-input');
     var content = input.value.trim();
     if (!content) return;
-    fetch('/api/memories', {
+    fetch('/remember', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({content: content})
-    }).then(function(r) { return r.json(); }).then(function(data) {
+    }).then(function(r) {
+        if (!r.ok) return r.json().catch(function() { return {}; }).then(function(d) {
+            showToast('Store failed: ' + (d.detail || d.error || r.status), 'error');
+        });
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
         input.value = '';
         loadDashboard();
-        alert('Stored!');
-    });
+        showToast('Stored!');
+    }).catch(function() { showToast('Store failed: network error', 'error'); });
 });
 
 // Quick recall
@@ -91,7 +102,10 @@ document.getElementById('quick-recall-btn')?.addEventListener('click', function(
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({query: query, limit: 5})
-    }).then(function(r) { return r.json(); }).then(function(data) {
+    }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function(data) {
         var div = document.getElementById('quick-recall-results');
         if (!data.results || data.results.length === 0) {
             div.textContent = 'No results found.';
@@ -113,5 +127,8 @@ document.getElementById('quick-recall-btn')?.addEventListener('click', function(
             row.appendChild(scoreSpan);
             div.appendChild(row);
         });
+    }).catch(function(e) {
+        var div = document.getElementById('quick-recall-results');
+        if (div) div.textContent = 'Search failed. Is the daemon running?';
     });
 });

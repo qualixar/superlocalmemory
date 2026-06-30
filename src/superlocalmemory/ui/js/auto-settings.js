@@ -52,17 +52,14 @@ function saveAutoRecallConfig() {
     }).catch(function(e) { console.log('Save auto-recall error:', e); });
 }
 
-// Bind change listeners for auto-capture toggles
-document.querySelectorAll('#auto-capture-toggle, #auto-capture-decisions, #auto-capture-bugs').forEach(function(el) {
-    if (el) {
-        el.addEventListener('change', saveAutoCaptureConfig);
-    }
-});
-
-// Bind change listeners for auto-recall toggles
-document.querySelectorAll('#auto-recall-toggle, #auto-recall-session').forEach(function(el) {
-    if (el) {
-        el.addEventListener('change', saveAutoRecallConfig);
+// Use delegation so listeners work even when the settings pane is injected lazily.
+document.addEventListener('change', function(e) {
+    var id = e.target && e.target.id;
+    if (!id) return;
+    if (id === 'auto-capture-toggle' || id === 'auto-capture-decisions' || id === 'auto-capture-bugs') {
+        saveAutoCaptureConfig();
+    } else if (id === 'auto-recall-toggle' || id === 'auto-recall-session') {
+        saveAutoRecallConfig();
     }
 });
 

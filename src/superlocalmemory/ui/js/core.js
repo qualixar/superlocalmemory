@@ -416,6 +416,9 @@ function refreshDashboard() {
 function populateFilters(categories, projects) {
     var categorySelect = document.getElementById('filter-category');
     var projectSelect = document.getElementById('filter-project');
+    // Clear existing options beyond the first placeholder to prevent duplicates on refresh
+    if (categorySelect) while (categorySelect.options.length > 1) categorySelect.remove(1);
+    if (projectSelect) while (projectSelect.options.length > 1) projectSelect.remove(1);
     categories.forEach(function(cat) {
         if (cat.category) {
             var option = document.createElement('option');

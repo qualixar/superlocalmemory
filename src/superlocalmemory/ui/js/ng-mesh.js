@@ -8,56 +8,123 @@
   var REFRESH_INTERVAL = 5000; // 5 seconds
   var refreshTimer = null;
 
+  // ── Install-token bootstrap (mirrors brain.js) ───────────────
+  // Dashboard callers authenticate with the install token so we never
+  // embed the mesh secret in JS. Token is fetched from /internal/token
+  // (loopback-only endpoint) and cached in sessionStorage for the tab session.
+  var TOKEN_STORAGE_KEY = 'slm_install_token';
+
+  function readToken() {
+    try { return window.sessionStorage ? window.sessionStorage.getItem(TOKEN_STORAGE_KEY) : null; }
+    catch (e) { return null; }
+  }
+
+  function writeToken(value) {
+    try { if (window.sessionStorage) window.sessionStorage.setItem(TOKEN_STORAGE_KEY, value); }
+    catch (e) { /* storage disabled */ }
+  }
+
+  function fetchTokenFromServer() {
+    return fetch('/internal/token', { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        var tok = data && typeof data.token === 'string' ? data.token.trim() : '';
+        if (tok) { writeToken(tok); return tok; }
+        return null;
+      })
+      .catch(function() { return null; });
+  }
+
+  function ensureToken() {
+    var cached = readToken();
+    if (cached) return Promise.resolve(cached);
+    return fetchTokenFromServer();
+  }
+
+  // Authenticated fetch: injects X-Install-Token; retries once on 401
+  // (token may have been rotated since the tab was opened).
+  function meshFetch(url) {
+    return ensureToken().then(function(token) {
+      var opts = token ? { headers: { 'X-Install-Token': token }, credentials: 'same-origin' } : {};
+      return fetch(url, opts).then(function(r) {
+        if (r.status === 401) {
+          return fetchTokenFromServer().then(function(freshToken) {
+            var retryOpts = freshToken
+              ? { headers: { 'X-Install-Token': freshToken }, credentials: 'same-origin' }
+              : {};
+            return fetch(url, retryOpts);
+          });
+        }
+        return r;
+      });
+    });
+  }
+
+  // ── Public entry point ────────────────────────────────────────
   window.loadMeshPeers = function() {
     fetchMeshStatus();
     fetchMeshPeers();
     fetchMeshEvents();
     fetchMeshState();
 
-    // Auto-refresh while tab is active
+    // Auto-refresh while tab is active; stop when pane loses focus
     clearInterval(refreshTimer);
     refreshTimer = setInterval(function() {
       var pane = document.getElementById('mesh-pane');
       if (pane && pane.classList.contains('active')) {
         fetchMeshStatus();
         fetchMeshPeers();
+        fetchMeshEvents();
+        fetchMeshState();
+      } else {
+        // Pane is no longer active — stop the timer to avoid background polling
+        clearInterval(refreshTimer);
+        refreshTimer = null;
       }
     }, REFRESH_INTERVAL);
   };
 
   // Try BOTH brokers: daemon (port 8765 /mesh/*) AND standalone slm-mesh (port 7899 /*)
-  var STANDALONE_PORT = null; // Discovered from port file or default 7899
+  var STANDALONE_PORT = null;
+
+  function fetchStandaloneBroker(path) {
+    var ports = [7899];
+    return fetch('http://127.0.0.1:' + ports[0] + path, { signal: AbortSignal.timeout(2000) })
+      .then(function(r) {
+        if (r.ok) { STANDALONE_PORT = ports[0]; return r.json(); }
+        STANDALONE_PORT = null;
+        return null;
+      })
+      .catch(function() { STANDALONE_PORT = null; return null; });
+  }
 
   function fetchMeshStatus() {
-    // Try daemon broker first, then standalone
     Promise.all([
-      fetch('/mesh/status').then(function(r) { return r.json(); }).catch(function() { return null; }),
+      meshFetch('/mesh/status').then(function(r) {
+        if (!r.ok) return r.status === 401 ? { _auth_error: true } : null;
+        return r.json();
+      }).catch(function() { return null; }),
       fetchStandaloneBroker('/health')
     ]).then(function(results) {
       var daemon = results[0];
-      var standalone = results[1];
-      renderMeshStatus(daemon, standalone);
+      if (daemon && daemon._auth_error) { renderMeshStatusAuthError(); return; }
+      renderMeshStatus(daemon, results[1]);
     });
   }
 
-  function fetchStandaloneBroker(path) {
-    // Try port file first, then default 7899
-    var ports = [7899];
-    return fetch('http://127.0.0.1:' + ports[0] + path, { signal: AbortSignal.timeout(2000) })
-      .then(function(r) { STANDALONE_PORT = ports[0]; return r.json(); })
-      .catch(function() { return null; });
-  }
-
   function fetchMeshPeers() {
-    // Fetch from BOTH brokers and merge
     Promise.all([
-      fetch('/mesh/peers').then(function(r) { return r.json(); }).catch(function() { return { peers: [] }; }),
+      meshFetch('/mesh/peers').then(function(r) {
+        if (!r.ok) return r.status === 401 ? { _auth_error: true } : { peers: [] };
+        return r.json();
+      }).catch(function() { return { peers: [] }; }),
       fetchStandaloneBroker('/peers')
     ]).then(function(results) {
-      var daemonPeers = (results[0] && results[0].peers) || [];
+      var daemonResult = results[0];
+      if (daemonResult && daemonResult._auth_error) { renderMeshPeersAuthError(); return; }
+      var daemonPeers = (daemonResult && daemonResult.peers) || [];
       var standalonePeers = (results[1] && (results[1].peers || results[1])) || [];
       if (!Array.isArray(standalonePeers)) standalonePeers = [];
-      // Merge, dedup by peer_id
       var seen = {};
       var allPeers = [];
       daemonPeers.concat(standalonePeers).forEach(function(p) {
@@ -66,7 +133,8 @@
       });
       renderMeshPeers(allPeers);
     }).catch(function() {
-      document.getElementById('mesh-peers-list').innerHTML =
+      var el = document.getElementById('mesh-peers-list');
+      if (el) el.innerHTML =
         '<div class="text-center" style="padding:24px;color:var(--ng-text-tertiary)">' +
           '<i class="bi bi-wifi-off" style="font-size:2rem;display:block;margin-bottom:8px"></i>' +
           'Mesh broker not reachable' +
@@ -75,15 +143,49 @@
   }
 
   function fetchMeshEvents() {
-    fetch('/mesh/events').then(function(r) { return r.json(); }).then(function(data) {
+    meshFetch('/mesh/events').then(function(r) {
+      if (!r.ok) return { events: [] };
+      return r.json();
+    }).then(function(data) {
       renderMeshEvents(data.events || data || []);
     }).catch(function() {});
   }
 
   function fetchMeshState() {
-    fetch('/mesh/state').then(function(r) { return r.json(); }).then(function(data) {
+    meshFetch('/mesh/state').then(function(r) {
+      if (!r.ok) return { state: {} };
+      return r.json();
+    }).then(function(data) {
       renderMeshState(data.state || data || {});
     }).catch(function() {});
+  }
+
+  // ── Auth-error renderers ──────────────────────────────────────
+  function renderMeshStatusAuthError() {
+    var el = document.getElementById('mesh-status-cards');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="row g-3">' +
+        statusCard('Status', statusDot('error') + ' Auth required', 'bi-lock') +
+        statusCard('Peers', '—', 'bi-people') +
+        statusCard('Uptime', '—', 'bi-clock') +
+        statusCard('Brokers', '—', 'bi-hdd-stack') +
+      '</div>' +
+      '<div style="font-size:0.75rem;color:var(--ng-status-error);margin-top:8px;text-align:center">' +
+        'Mesh endpoints returned 401. The daemon may be starting — retrying automatically.' +
+      '</div>';
+  }
+
+  function renderMeshPeersAuthError() {
+    var el = document.getElementById('mesh-peers-list');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="text-center" style="padding:32px;color:var(--ng-text-tertiary)">' +
+        '<i class="bi bi-lock" style="font-size:2.5rem;display:block;margin-bottom:12px;opacity:0.5"></i>' +
+        '<div style="font-size:0.9375rem;margin-bottom:4px">Authentication required</div>' +
+        '<div style="font-size:0.8125rem">Could not authenticate with the mesh broker. ' +
+        'The dashboard token may still be loading.</div>' +
+      '</div>';
   }
 
   function renderMeshStatus(daemonData, standaloneData) {
