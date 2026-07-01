@@ -45,9 +45,12 @@ except ImportError:
 
 from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
 
-# V3 Paths (migrated from ~/.claude-memory to ~/.superlocalmemory)
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
+# V3 Paths — reuse the lazy resolvers from routes.helpers so the dashboard
+# honours SLM_DATA_DIR / SL_MEMORY_PATH / SLM_HOME / config.json:base_dir
+# exactly like the CLI. Previously this hardcoded ~/.superlocalmemory, which
+# caused dashboard-created profiles to land in a different memory.db than
+# `slm profile list` reads when a custom data dir was configured.
+from superlocalmemory.server.routes.helpers import MEMORY_DIR, DB_PATH
 # V3.3.21: UI shipped inside the package for pip/npm installs.
 # Check package location first, then fall back to repo root for dev mode.
 _PKG_UI = Path(__file__).resolve().parent.parent / "ui"
