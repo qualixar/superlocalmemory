@@ -25,6 +25,17 @@ set -euo pipefail
 exec 1>&2
 
 # ---------------------------------------------------------------------------
+# Skip venv bootstrap if a system SLM daemon is already running, or if
+# SLM_LAUNCHER says we won't use the plugin venv anyway.
+# ponytail: pid-file check avoids PATH-ordering sensitivity; no network needed
+# ---------------------------------------------------------------------------
+_SLM_DATA="${SLM_DATA_DIR:-${HOME}/.superlocalmemory}"
+if { [ -f "${_SLM_DATA}/daemon.pid" ] && kill -0 "$(cat "${_SLM_DATA}/daemon.pid")" 2>/dev/null; } \
+   || { [ -n "${SLM_LAUNCHER:-}" ] && [ "${SLM_LAUNCHER}" != "plugin" ]; }; then
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # Python >= 3.11 guard
 # ---------------------------------------------------------------------------
 if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
