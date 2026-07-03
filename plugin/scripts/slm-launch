@@ -11,5 +11,26 @@
 #
 # Environment:
 #   CLAUDE_PLUGIN_DATA — persistent data dir where venv lives
+#   SLM_LAUNCHER       — optional; controls which slm binary is used:
+#                          plugin (default) — ${CLAUDE_PLUGIN_DATA}/venv/bin/slm
+#                          system           — first slm on PATH
+#                          /path or $VAR    — explicit path, shell-expanded
 
-exec "${CLAUDE_PLUGIN_DATA}/venv/bin/slm" mcp
+case "${SLM_LAUNCHER:-plugin}" in
+    plugin)
+        exec "${CLAUDE_PLUGIN_DATA}/venv/bin/slm" mcp
+        ;;
+    system)
+        exec slm mcp
+        ;;
+    /*|\$*)
+        # ponytail: eval expands $VAR / ${VAR} / ~ before the existence check
+        _SLM_BIN=$(eval echo "$SLM_LAUNCHER")
+        [ -x "$_SLM_BIN" ] || { echo "SLM_LAUNCHER not executable: $_SLM_BIN" >&2; exit 1; }
+        exec "$_SLM_BIN" mcp
+        ;;
+    *)
+        echo "Unknown SLM_LAUNCHER value: ${SLM_LAUNCHER}" >&2
+        exit 1
+        ;;
+esac
