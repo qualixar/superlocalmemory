@@ -287,6 +287,25 @@ class TestMaintenanceBackfill:
         assert "langevin_backfilled" in counts
         assert counts["langevin_backfilled"] == 0
 
+    def test_backfills_facts_with_naive_created_at(self) -> None:
+        """Naive (tz-less) created_at strings must not abort the backfill.
+
+        Regression: some store paths persist created_at without timezone
+        info; subtracting the parsed naive datetime from datetime.now(UTC)
+        raised TypeError, which aborted the whole backfill loop and left
+        every remaining fact unpositioned.
+        """
+        config = self._make_config()
+        db = MagicMock()
+        naive = self._make_fact("f1", langevin_position=None)
+        naive.created_at = datetime.now().isoformat()  # no tzinfo, no Z
+        aware = self._make_fact("f2", langevin_position=None, age_days=30.0)
+        db.get_all_facts.return_value = [naive, aware]
+
+        counts = run_maintenance(db, config, "default")
+
+        assert counts["langevin_backfilled"] == 2
+
     def test_disabled_langevin_skips_backfill(self) -> None:
         """When langevin_persist_positions is False, no backfill occurs."""
         config = self._make_config()
