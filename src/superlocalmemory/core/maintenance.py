@@ -37,6 +37,25 @@ _LANGEVIN_DIM = 8
 _MAX_NORM = 0.99
 
 
+def _age_days(created_at: str | None) -> float:
+    """Age in days from an ISO timestamp.
+
+    Naive timestamps (no offset, no Z) are assumed UTC — some store paths
+    persist created_at without timezone info, and subtracting a naive
+    datetime from datetime.now(UTC) raises TypeError, which previously
+    aborted the whole backfill loop.
+    """
+    if not created_at:
+        return 0.0
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return 0.0
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - created).total_seconds() / 86400.0)
+
+
 def _compute_equilibrium_radius(
     access_count: int,
     age_days: float,
@@ -137,13 +156,7 @@ def run_maintenance(
             for f in facts:
                 if f.langevin_position is not None:
                     continue
-                created = datetime.fromisoformat(
-                    f.created_at.replace("Z", "+00:00")
-                ) if f.created_at else datetime.now(UTC)
-                age_days = max(
-                    0.0,
-                    (datetime.now(UTC) - created).total_seconds() / 86400.0,
-                )
+                age_days = _age_days(f.created_at)
                 # Strategy B: metadata-aware seed position
                 position = _seed_langevin_position(
                     f.access_count, age_days, f.importance,
@@ -183,13 +196,7 @@ def run_maintenance(
             for f in facts:
                 if f.langevin_position is None:
                     continue
-                created = datetime.fromisoformat(
-                    f.created_at.replace("Z", "+00:00")
-                ) if f.created_at else datetime.now(UTC)
-                age_days = max(
-                    0.0,
-                    (datetime.now(UTC) - created).total_seconds() / 86400.0,
-                )
+                age_days = _age_days(f.created_at)
                 fact_dicts.append({
                     "fact_id": f.fact_id,
                     "position": f.langevin_position,
@@ -239,13 +246,7 @@ def run_maintenance(
                         dt=config.math.langevin_dt,
                         temperature=eff_temp,
                     )
-                    created = datetime.fromisoformat(
-                        f.created_at.replace("Z", "+00:00")
-                    ) if f.created_at else datetime.now(UTC)
-                    age_days = max(
-                        0.0,
-                        (datetime.now(UTC) - created).total_seconds() / 86400.0,
-                    )
+                    age_days = _age_days(f.created_at)
                     new_pos, weight = coupled_ld.step(
                         position=f.langevin_position,
                         access_count=f.access_count,
