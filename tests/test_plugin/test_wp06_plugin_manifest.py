@@ -66,6 +66,16 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_plugin_generated() -> None:
+    """Regenerate ignored plugin outputs before checking the plugin layout."""
+    subprocess.run(
+        ["node", "scripts/build-plugin.js", "--quiet"],
+        cwd=REPO,
+        check=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # T1 — plugin.json: at plugin/.claude-plugin/plugin.json
 # ---------------------------------------------------------------------------
