@@ -207,6 +207,29 @@ def test_key_stability_across_reruns(tmp_path: Path) -> None:
     db2.close()
 
 
+def test_machine_id_falls_back_on_windows_without_os_uname(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Windows has no os.uname(); CacheDB must use the persisted uuid fallback."""
+    import os as _os
+    from superlocalmemory.optimize.storage.db import CacheDB
+
+    monkeypatch.setattr(
+        "superlocalmemory.optimize.storage.db.platform.system",
+        lambda: "Windows",
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delattr(_os, "uname", raising=False)
+
+    db = CacheDB.__new__(CacheDB)
+    mid = db._get_machine_id()
+
+    mid_file = tmp_path / ".superlocalmemory" / ".llmcache_key"
+    assert mid
+    assert mid_file.exists()
+    assert mid_file.read_text(encoding="utf-8").strip() == mid
+
+
 def test_ccr_put_get_roundtrip(tmp_cache_db) -> None:
     ccr_id = uuid.uuid4().hex
     original = b"verbatim user context that must be encrypted"

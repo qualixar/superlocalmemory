@@ -16,7 +16,7 @@ from pathlib import Path
 # tests/ -> superlocalmemory/ -> (repo root)
 _REPO_ROOT = Path(__file__).parent.parent
 
-EXPECTED_VERSION = "3.6.22"
+EXPECTED_VERSION = "3.6.23"
 
 
 def _read_package_json_version() -> str:

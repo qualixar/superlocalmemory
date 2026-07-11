@@ -227,6 +227,20 @@ class TestHandleHookDispatch:
         mock_stop.assert_called_once()
 
 
+class TestHookMandate:
+    """mandate hook output must stay advisory, not imperative."""
+
+    def test_prints_advisory_text(self, capsys):
+        handle_hook("mandate")
+
+        out = capsys.readouterr().out
+        assert "SLM_SESSION_INIT_HINT" in out
+        assert "session_init" in out
+        assert "MANDATORY" not in out
+        assert "non-negotiable" not in out
+        assert "MUST" not in out
+
+
 # ───────────────────────────────────────────────────────────────────
 # 1. START handler
 # ───────────────────────────────────────────────────────────────────
@@ -289,13 +303,15 @@ class TestHookStart:
 
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.Popen")
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.run")
-    def test_prints_mandatory_session_init(self, mock_run, mock_popen, capsys):
+    def test_prints_advisory_session_init(self, mock_run, mock_popen, capsys):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         handle_hook("start")
 
         out = capsys.readouterr().out
-        assert "MANDATORY: SLM Session Init" in out
+        assert "SLM Session Init" in out
         assert "session_init" in out
+        assert "MANDATORY" not in out
+        assert "non-negotiable" not in out
 
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.Popen")
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.run")

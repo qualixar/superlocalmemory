@@ -83,8 +83,9 @@ class TestPluginJson:
 
     def test_plugin_json_has_version(self) -> None:
         data = _load_json(PLUGIN_CLAUDE_DIR / "plugin.json")
+        manifest = _load_json(PLUGIN_SRC / "manifest.json")
         assert "version" in data, "plugin.json missing 'version'"
-        assert data["version"] == "3.6.22"
+        assert data["version"] == manifest["version"]
 
     def test_plugin_json_has_description(self) -> None:
         data = _load_json(PLUGIN_CLAUDE_DIR / "plugin.json")

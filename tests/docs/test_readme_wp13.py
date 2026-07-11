@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import os
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,11 @@ def _readme_text() -> str:
 
 def _readme_lines() -> list[str]:
     return _readme_text().splitlines()
+
+
+def _project_version() -> str:
+    with open(REPO_ROOT / "pyproject.toml", "rb") as f:
+        return tomllib.load(f)["project"]["version"]
 
 
 # GitHub slugger: lower-case, strip everything except alphanum + dash, spaces→dash.
@@ -113,25 +119,35 @@ def test_single_quick_start():
 
 
 # ---------------------------------------------------------------------------
-# AC3: current hero version is 3.6.18
+# AC3: current hero version matches pyproject.toml
 # ---------------------------------------------------------------------------
 
 
-def test_version_3616_only():
-    """AC3: no pre-current stragglers (3.6.10-13) in hero; at least one 3.6.18;
-    h1 contains V3.6.18. The release-history table may still list older versions
-    (e.g. the v3.6.14 row) as legitimate history."""
+def test_current_version_in_hero():
+    """AC3: no stale 3.6.10-13 stragglers; h1/hero tracks project version.
+
+    The release-history table may still list older versions as legitimate
+    history, but the current hero must follow pyproject.toml instead of a
+    hard-coded past release.
+    """
     text = _readme_text()
+    current_version = _project_version()
     stale = re.findall(r"3\.6\.1[0-3]", text)
     assert not stale, (
-        f"Found stale version strings: {stale}. Hero version refs must be 3.6.18 (LLD AC3)."
+        f"Found stale version strings: {stale}. Hero version refs must not "
+        "point at pre-3.6.14 releases (LLD AC3)."
     )
-    assert "3.6.18" in text, "README must contain at least one '3.6.18' (LLD AC3)."
+    assert current_version in text, (
+        f"README must contain current project version {current_version!r} (LLD AC3)."
+    )
     # h1 check — first heading
     lines = _readme_lines()
     h1_lines = [l for l in lines if l.startswith("# ") or l.startswith("<h1")]
-    assert any("3.6.18" in l or "V3.6.18" in l for l in h1_lines[:5]), (
-        "h1 / hero must reference V3.6.18 (LLD AC3)."
+    assert any(
+        current_version in l or f"V{current_version}" in l
+        for l in h1_lines[:5]
+    ), (
+        f"h1 / hero must reference V{current_version} (LLD AC3)."
     )
 
 

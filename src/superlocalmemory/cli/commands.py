@@ -1687,6 +1687,38 @@ def _gather_optimize_surface_b() -> dict:
     return result
 
 
+def _readline_with_timeout(
+    stream, timeout_sec: float,
+) -> tuple[str | None, Exception | None]:
+    """Read one line from a pipe-like stream without POSIX-only select().
+
+    Windows select() only accepts sockets, not subprocess pipes. A bounded
+    helper thread keeps the embedding-worker probe cross-platform while
+    preserving the existing timeout behavior.
+    """
+    import threading
+
+    result: dict[str, object] = {}
+
+    def _read() -> None:
+        try:
+            result["line"] = stream.readline()
+        except Exception as exc:  # noqa: BLE001 - returned as probe failure
+            result["exc"] = exc
+
+    reader = threading.Thread(target=_read, daemon=True)
+    reader.start()
+    reader.join(timeout_sec)
+    if reader.is_alive():
+        return None, None
+    line = result.get("line")
+    exc = result.get("exc")
+    return (
+        line if isinstance(line, str) else None,
+        exc if isinstance(exc, Exception) else None,
+    )
+
+
 def cmd_doctor(args: Namespace) -> None:
     """Comprehensive pre-flight check — verify everything works.
 
@@ -1839,10 +1871,11 @@ def cmd_doctor(args: Namespace) -> None:
             proc.stdin.write(_json.dumps({"cmd": "ping"}) + "\n")
             proc.stdin.flush()
 
-            import select as _sel
-            ready, _, _ = _sel.select([proc.stdout], [], [], 30)
-            if ready:
-                resp = _json.loads(proc.stdout.readline())
+            line, read_exc = _readline_with_timeout(proc.stdout, 30)
+            if read_exc is not None:
+                _check("Embedding worker", "FAIL", str(read_exc), "slm warmup")
+            elif line is not None:
+                resp = _json.loads(line or "{}")
                 if resp.get("ok"):
                     _check(
                         "Embedding worker", "PASS",

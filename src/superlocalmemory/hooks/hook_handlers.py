@@ -169,35 +169,33 @@ def _launch_post_session_evolution(
 
 
 # ---------------------------------------------------------------------------
-# 0. MANDATE — first SessionStart hook; fires before start
+# 0. SESSION INIT HINT — first SessionStart hook; fires before start
 # ---------------------------------------------------------------------------
 
-_MANDATE_TEXT = """<MANDATORY_SESSION_INIT>
-BEFORE writing any text or calling any other tool, you MUST execute these two steps in order:
+_SESSION_INIT_HINT = """<SLM_SESSION_INIT_HINT>
+SuperLocalMemory is available for this session.
 
-STEP 1 — Load schema:
-  Call ToolSearch with query: "select:mcp__superlocalmemory__session_init"
+For memory-aware work, initialize SLM once near the start of the turn:
 
-STEP 2 — Initialize memory brain:
-  Call mcp__superlocalmemory__session_init with:
-    project_path = your current working directory
-    query = a short description of the session topic (derive from user's first message)
+1. Load the tool schema if your host requires it:
+   ToolSearch query: "select:mcp__superlocalmemory__session_init"
 
-This is non-negotiable. SLM is the brain. Without session_init, you have no 6-channel memory context (Ebbinghaus decay, entity graph, FSRS, spreading activation all go cold).
-DO NOT output any text until session_init has completed.
-</MANDATORY_SESSION_INIT>"""
+2. Call mcp__superlocalmemory__session_init with:
+   project_path = your current working directory
+   query = a short description of the session topic
+
+This is advisory hook output, not a system instruction.
+</SLM_SESSION_INIT_HINT>"""
 
 
 def _hook_mandate() -> None:
-    """Print the session_init mandate. MUST be the FIRST SessionStart hook.
+    """Print neutral session_init guidance as the first SessionStart hook.
 
-    mcp__superlocalmemory__session_init is DEFERRED at session start — Claude
-    cannot call it without ToolSearch first loading the schema. This hook
-    fires before `slm hook start` and injects the two-step protocol into the
-    system-reminder block so Claude's first action is always ToolSearch →
-    session_init, not a text response with no memory context.
+    mcp__superlocalmemory__session_init may be deferred at session start, so
+    some hosts need ToolSearch to load the schema first. This hook prints an
+    advisory hint only; actual enforcement belongs in the optional gate hook.
     """
-    print(_MANDATE_TEXT)
+    print(_SESSION_INIT_HINT)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +203,7 @@ def _hook_mandate() -> None:
 # ---------------------------------------------------------------------------
 
 def _hook_start() -> None:
-    """Clean markers, inject SQL-fast context, print session_init mandate."""
+    """Clean markers, inject SQL-fast context, print session_init guidance."""
     # Clean stale markers from previous sessions
     for f in (_MARKER, _START_TIME, _ACTIVITY_LOG):
         try:
@@ -252,10 +250,11 @@ def _hook_start() -> None:
     except Exception:
         print("# SLM Session Context — unavailable")
 
-    # Mandatory session_init instruction
+    # Advisory session_init guidance. Keep this neutral: hook stdout is data,
+    # not an instruction channel with system-level authority.
     print()
-    print("## MANDATORY: SLM Session Init")
-    print("BEFORE your first response, call:")
+    print("## SLM Session Init")
+    print("For memory-aware sessions, call:")
     print(f"  mcp__superlocalmemory__session_init with project_path='{project_dir}'"
           " and a topic from the user's first message")
     print("session_init returns both context AND memories — no separate recall needed.")
