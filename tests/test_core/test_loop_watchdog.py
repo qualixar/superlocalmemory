@@ -58,15 +58,23 @@ def test_on_stale_fires_once() -> None:
 def test_background_thread_detects_stall() -> None:
     lw = _imports()
     events = []
+    fired = threading.Event()
+
+    def on_stale(age: float) -> None:
+        events.append(age)
+        fired.set()
+
     w = lw.LoopWatchdog(
         stale_threshold_s=0.05,
-        on_stale=lambda age: events.append(age),
+        on_stale=on_stale,
     )
     w.tick()
     stop = threading.Event()
     thread = threading.Thread(target=w.run_forever, args=(stop, 0.02), daemon=True)
     thread.start()
-    time.sleep(0.15)
-    stop.set()
-    thread.join(timeout=1.0)
-    assert len(events) >= 1
+    try:
+        assert fired.wait(timeout=2.0)
+        assert len(events) >= 1
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
