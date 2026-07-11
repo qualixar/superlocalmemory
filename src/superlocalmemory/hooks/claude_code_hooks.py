@@ -32,7 +32,7 @@ CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 VERSION_DIR = Path.home() / ".superlocalmemory" / "hooks"
 VERSION_FILE = VERSION_DIR / ".version"
 DISABLED_FILE = VERSION_DIR / ".hooks-disabled"
-HOOKS_VERSION = "3.6.18"
+HOOKS_VERSION = "3.6.23"
 
 # Cross-platform temp dir and marker paths
 _TMP = tempfile.gettempdir()
@@ -93,10 +93,9 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
     """
     defs: dict[str, list] = {
         "SessionStart": [
-            # v3.6.18: mandate fires FIRST so session_init is never skipped.
-            # mcp__superlocalmemory__session_init is DEFERRED — Claude must call
-            # ToolSearch before it can invoke the tool. Without this hook,
-            # Claude responds before loading the schema → no 6-channel memory.
+            # v3.6.23: advisory SLM session-init hint fires first.
+            # mcp__superlocalmemory__session_init may be deferred, so some
+            # hosts need ToolSearch before they can invoke the tool.
             {
                 "hooks": [
                     {

@@ -73,12 +73,13 @@ class TestKeylessOpenAI:
                 f"Request path should contain 'chat/completions', got: {last_req.path}"
             )
 
-    def test_no_authorization_header_when_keyless(self) -> None:
+    def test_no_authorization_header_when_keyless(self, monkeypatch) -> None:
         """Keyless OpenAI-compatible request must NOT send Authorization header.
 
         backbone.py V3.5.9: Authorization is omitted when api_key is empty so
         unauthenticated local endpoints don't reject with HTTP 401.
         """
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-env-should-not-leak")
         with StubLLMServer(reply_text="EXTRACTED") as stub:
             backbone = _make_backbone("openai", api_base=f"{stub.url}/v1", api_key="")
             backbone.generate("test prompt")

@@ -38,6 +38,7 @@ import dataclasses
 import json
 import logging
 import os
+import platform
 import re
 import sqlite3
 import struct
@@ -285,7 +286,7 @@ class CacheDB:
 
     def _get_machine_id(self) -> str:
         """Return a stable machine identifier for AES key derivation."""
-        system = os.uname().sysname
+        system = platform.system()
         mid: str | None = None
         if system == "Darwin":
             try:

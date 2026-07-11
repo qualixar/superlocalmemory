@@ -2,10 +2,10 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.6.22</h1>
+<h1 align="center">SuperLocalMemory V3.6.23</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>To the best of our knowledge, the only zero-cloud agent memory that beats Mem0's zero-LLM score on LoCoMo. Mode A: 74.8% vs Mem0 64.2% — no GPU, no API key, on CPU.</em></p>
-<p align="center"><code>v3.6.22</code> — <strong>Plugin-native. Profile-aware. Distributed-ready.</strong><br/>
+<p align="center"><code>v3.6.23</code> — <strong>Plugin-native. Profile-aware. Distributed-ready.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -292,6 +292,7 @@ Built-in compliance tools: GDPR Article 15/17 export + complete erasure, tamper-
 | MCP tools reference | [docs/mcp-tools.md](docs/mcp-tools.md) |
 | Getting started | [docs/getting-started.md](docs/getting-started.md) |
 | IDE setup (15 configs) | [docs/ide-setup.md](docs/ide-setup.md) |
+| pi.dev integration | [docs/pi-dev-integration.md](docs/pi-dev-integration.md) |
 | Skill evolution | [docs/skill-evolution.md](docs/skill-evolution.md) |
 | V2 migration | [docs/migration-from-v2.md](docs/migration-from-v2.md) |
 | Configuration | [docs/configuration.md](docs/configuration.md) |
@@ -307,6 +308,7 @@ slm dashboard    # Opens at http://localhost:8765
 
 | Version | Codename | Key Features |
 |---|---|---|
+| **v3.6.23** | Cross-platform Patch | Windows doctor/cache stats fixes (#65), neutral SLM hook guidance (#64), pi.dev MCP docs (#31), contributor fixes for dashboard profile path resolution (#63) and tz-naive Langevin maintenance backfill (#66) |
 | **v3.6.22** | Stability | backbone.py JSONDecodeError on empty HTTP 200 body (issue #62) — retries 3× then returns "" gracefully; remaining dashboard UI audit: clusters/compliance/entities r.ok guards, math-health status badge colors |
 | **v3.6.21** | Dashboard Audit | Full UI audit across all 7 dashboard tabs — auth fix for mesh panel (issue #60 frontend), Quick Store endpoint, timeline endpoint, r.ok guards, SSE \r fix, event delegation for lazy tabs, optimize toggle revert |
 | **v3.6.20** | Mesh Auth | Remote mesh auth fix (issue #60) — `_get_broker` now accepts Bearer + X-Mesh-Secret from non-loopback callers; config settings preservation (AIDEV-86) |

@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "3.6.22",
+  "version": "3.6.23",
   "description": "Information-geometric agent memory with mathematical guarantees. 4-channel retrieval, Fisher-Rao similarity, zero-LLM mode, EU AI Act compliant. Works with Claude, Cursor, Windsurf, and 17+ AI tools.",
   "keywords": [
     "ai-memory",
@@ -70,6 +70,7 @@
     ".claude-plugin/",
     "plugin/",
     "plugin-src/",
+    "docs/pi-dev-integration.md",
     "pyproject.toml",
     "README.md",
     "LICENSE",
