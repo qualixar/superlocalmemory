@@ -337,11 +337,11 @@ def cmd_restart(args: Namespace) -> None:
     """
     import os
     import time
-    from pathlib import Path
 
     use_json = getattr(args, "json", False)
     open_dashboard = getattr(args, "dashboard", False)
-    slm_dir = Path.home() / ".superlocalmemory"
+    from superlocalmemory.cli._lazy_init import slm_home
+    slm_dir = slm_home()
     steps: list[dict] = []
 
     def _log(step: int, name: str, status: str, detail: str = ""):
@@ -1263,10 +1263,10 @@ def cmd_recall(args: Namespace) -> None:
 
 def _cli_record_signals(config, query, results):
     """Record learning signals from CLI recall (no MCP dependency)."""
-    from pathlib import Path
     from superlocalmemory.learning.feedback import FeedbackCollector
     from superlocalmemory.learning.signals import LearningSignals
-    slm_dir = Path.home() / ".superlocalmemory"
+    from superlocalmemory.cli._lazy_init import slm_home
+    slm_dir = slm_home()
     pid = config.active_profile
     fact_ids = [r.fact.fact_id for r in results[:10]]
     if not fact_ids:

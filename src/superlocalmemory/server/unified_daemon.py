@@ -51,13 +51,16 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.cli._lazy_init import slm_home
 
 logger = logging.getLogger("superlocalmemory.unified_daemon")
 
 _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767
-_PID_FILE = Path.home() / ".superlocalmemory" / "daemon.pid"
-_PORT_FILE = Path.home() / ".superlocalmemory" / "daemon.port"
+# Runtime files resolve via slm_home() (env-only, stdlib) so the daemon and
+# the CLI client (cli/daemon.py) always agree on where pid/port live.
+_PID_FILE = slm_home() / "daemon.pid"
+_PORT_FILE = slm_home() / "daemon.port"
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +454,7 @@ async def lifespan(application: FastAPI):
             _slm_version = _pkg_version("superlocalmemory")
         except Exception:
             _slm_version = "unknown"
-        _version_marker = _VP.home() / ".superlocalmemory" / ".last_version"
+        _version_marker = slm_home() / ".last_version"
         _prev = None
         if _version_marker.exists():
             try:
@@ -488,9 +491,8 @@ async def lifespan(application: FastAPI):
     # engine init so later queries see the expected columns/tables.
     # Non-fatal: any failure here is logged and the daemon still starts.
     try:
-        from pathlib import Path as _P
         from superlocalmemory.storage.migration_runner import apply_all
-        _home = _P.home() / ".superlocalmemory"
+        _home = slm_home()
         _learning_db = _home / "learning.db"
         _memory_db = _home / "memory.db"
         _result = apply_all(_learning_db, _memory_db)
@@ -793,10 +795,9 @@ async def lifespan(application: FastAPI):
         # Previously routed through WorkerPool → recall_worker subprocess,
         # which loaded a duplicate MemoryEngine (~800 MB waste).
         try:
-            from pathlib import Path as _QP
             from superlocalmemory.core.queue_consumer import QueueConsumer
             from superlocalmemory.core.recall_queue import RecallQueue
-            _queue_db = _QP.home() / ".superlocalmemory" / "recall_queue.db"
+            _queue_db = slm_home() / "recall_queue.db"
             _recall_queue = RecallQueue(_queue_db)
             _queue_consumer = QueueConsumer(
                 queue=_recall_queue,
@@ -854,7 +855,7 @@ async def lifespan(application: FastAPI):
         mesh_enabled = getattr(config, 'mesh_enabled', True) if config else True
         if mesh_enabled:
             from superlocalmemory.mesh.broker import MeshBroker
-            db_path = config.db_path if config else Path.home() / ".superlocalmemory" / "memory.db"
+            db_path = config.db_path if config else slm_home() / "memory.db"
             mesh_broker = MeshBroker(str(db_path))
             mesh_broker.start_cleanup()
             application.state.mesh_broker = mesh_broker
@@ -883,8 +884,7 @@ async def lifespan(application: FastAPI):
     if os.environ.get("SLM_SIGNALS_ENABLED", "1") != "0":
         try:
             from superlocalmemory.learning import signal_worker as _sw
-            from pathlib import Path as _P
-            _learning_db = _P.home() / ".superlocalmemory" / "learning.db"
+            _learning_db = slm_home() / "learning.db"
             _sw.start(_learning_db)
             application.state.signal_worker_started = True
             logger.info("signal_worker started on %s", _learning_db)
@@ -2311,8 +2311,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
             is_ready as _is_ready, migrate as _migrate,
         )
-        _data = Path(os.environ.get("SLM_DATA_DIR")
-                     or Path.home() / ".superlocalmemory")
+        _data = slm_home()
         if not _is_ready(_data):
             _migrate(_data)
     except Exception as exc:
@@ -2327,7 +2326,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     # v3.4.32: Continuous pending-queue materializer with recall priority.
     _start_pending_materializer()
 
-    log_dir = Path.home() / ".superlocalmemory" / "logs"
+    log_dir = slm_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Bind address. `SLM_DAEMON_HOST` is the canonical name; `SLM_HOST` is
@@ -2383,7 +2382,7 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
     Keeps one rotated copy (.1). Safe under concurrent start attempts:
     rename is atomic on POSIX, and truncation is idempotent.
     """
-    log_dir = log_dir or (Path.home() / ".superlocalmemory" / "logs")
+    log_dir = log_dir or (slm_home() / "logs")
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception:

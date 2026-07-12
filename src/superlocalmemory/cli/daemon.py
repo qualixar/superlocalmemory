@@ -32,6 +32,8 @@ from pathlib import Path
 import threading
 from threading import Thread
 
+from ._lazy_init import slm_home
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -40,8 +42,10 @@ except ValueError:
     _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767   # backward-compat redirect
 _DEFAULT_IDLE_TIMEOUT = 0  # v3.4.3: 24/7 default (was 1800)
-_PID_FILE = Path.home() / ".superlocalmemory" / "daemon.pid"
-_PORT_FILE = Path.home() / ".superlocalmemory" / "daemon.port"
+# Resolved via slm_home() so the client finds the daemon started by
+# server/unified_daemon.py when SLM_DATA_DIR/SLM_HOME point off-home.
+_PID_FILE = slm_home() / "daemon.pid"
+_PORT_FILE = slm_home() / "daemon.port"
 
 
 # ---------------------------------------------------------------------------

@@ -23,13 +23,12 @@ from pydantic import BaseModel
 import uvicorn
 
 from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
-from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.server.routes.helpers import SLM_VERSION, DB_PATH
 
 logger = logging.getLogger("superlocalmemory.api_server")
 
-# V3 paths
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
+# V3 paths — DB_PATH comes from routes.helpers so this server resolves the
+# data dir the same way as the dashboard routes and the CLI.
 # V3.3.21: UI shipped inside the package for pip/npm installs.
 _PKG_UI = Path(__file__).resolve().parent.parent / "ui"
 _REPO_UI = Path(__file__).resolve().parent.parent.parent.parent / "ui"

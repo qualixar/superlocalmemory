@@ -42,7 +42,8 @@ def _learning_db(config: Any) -> Path:
         cand = getattr(config, "learning_db_path", None)
         if cand is not None:
             return Path(cand)
-    return Path.home() / ".superlocalmemory" / "learning.db"
+    from superlocalmemory.server.routes.helpers import MEMORY_DIR
+    return MEMORY_DIR / "learning.db"
 
 
 def _memory_db(config: Any) -> Path:
@@ -50,7 +51,8 @@ def _memory_db(config: Any) -> Path:
         cand = getattr(config, "db_path", None)
         if cand is not None:
             return Path(cand)
-    return Path.home() / ".superlocalmemory" / "memory.db"
+    from superlocalmemory.server.routes.helpers import MEMORY_DIR
+    return MEMORY_DIR / "memory.db"
 
 
 def _profile_id(config: Any) -> str:

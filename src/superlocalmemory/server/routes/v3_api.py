@@ -712,8 +712,9 @@ async def recall_trace(request: Request):
 def _record_learning_signals(query: str, results: list) -> None:
     """Record feedback + co-retrieval + confidence boost for any recall."""
     from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.server.routes.helpers import MEMORY_DIR
 
-    slm_dir = Path.home() / ".superlocalmemory"
+    slm_dir = MEMORY_DIR
     config = SLMConfig.load()
     pid = config.active_profile
     fact_ids = [r.get("fact_id", "") for r in results[:10] if r.get("fact_id")]

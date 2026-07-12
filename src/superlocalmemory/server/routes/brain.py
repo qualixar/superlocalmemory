@@ -52,6 +52,8 @@ from superlocalmemory.core.security_primitives import (
 from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.features import FEATURE_DIM
 
+from .helpers import MEMORY_DIR
+
 logger = logging.getLogger("superlocalmemory.routes.brain")
 
 router = APIRouter(prefix="/api/v3", tags=["brain"])
@@ -71,9 +73,11 @@ _VERSION: str = "3.4.23"
 # NOTE: do NOT add the literal forbidden-key strings here — the U4 grep
 # guard runs over this file.
 
-# Memory directory (home-dir based). Always resolved at call time so that
-# tests can override via monkeypatch on ``_learning_db_path``.
-_MEMORY_DIR_DEFAULT = Path.home() / ".superlocalmemory"
+# Memory directory — resolved via routes.helpers so the Brain routes agree
+# with the rest of the dashboard (env overrides + config.json:base_dir).
+# Always resolved at call time so that tests can override via monkeypatch
+# on ``_learning_db_path``.
+_MEMORY_DIR_DEFAULT = MEMORY_DIR
 
 
 def _learning_db_path() -> Path:
@@ -565,9 +569,8 @@ def _adapter_last_sync_ago(adapter_name: str) -> int | None:
     try:
         import sqlite3 as _sqlite3
         from datetime import datetime as _dt, timezone as _tz
-        from pathlib import Path as _P
 
-        memory_db = _P.home() / ".superlocalmemory" / "memory.db"
+        memory_db = _memory_db_path()
         if not memory_db.exists():
             return None
         conn = _sqlite3.connect(
@@ -986,7 +989,6 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
     actually flowing: recall → enqueue → persist → finalize.
     """
     import sqlite3
-    from pathlib import Path
     try:
         from superlocalmemory.learning.outcome_queue import (
             get_counters, queue_size,
@@ -995,8 +997,7 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
         qsz = queue_size()
     except Exception:
         counters, qsz = {}, 0
-    home = Path.home() / ".superlocalmemory"
-    db = home / "memory.db"
+    db = _memory_db_path()
     pending_now = 0
     if db.exists():
         try:
@@ -1030,9 +1031,7 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
 def _compute_reward_preview(profile_id: str) -> dict:
     """Reward-tile aggregate — count + mean reward over the last 24h."""
     import sqlite3
-    from pathlib import Path
-    home = Path.home() / ".superlocalmemory"
-    db = home / "memory.db"
+    db = _memory_db_path()
     default = {
         "is_real": False, "rows_24h": 0, "mean_reward_24h": 0.0,
         "source": "action_outcomes",
