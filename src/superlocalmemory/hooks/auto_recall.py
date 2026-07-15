@@ -111,6 +111,23 @@ class AutoRecall:
                         "fact_id": r.fact.fact_id,
                         "content": r.fact.content[:300],
                         "score": round(r.score, 3),
+                        "relevance_score": round(
+                            getattr(r, "relevance_score", r.score) or 0.0, 3
+                        ),
+                        "ranking_score": getattr(r, "ranking_score", None),
+                        "confidence": round(
+                            getattr(
+                                r, "memory_confidence",
+                                getattr(r, "confidence", 0.0),
+                            ) or 0.0, 3
+                        ),
+                        "memory_confidence": round(
+                            getattr(
+                                r, "memory_confidence",
+                                getattr(r, "confidence", 0.0),
+                            ) or 0.0, 3
+                        ),
+                        "rank_position": int(getattr(r, "rank_position", 0) or 0),
                     })
             return results
         except Exception as exc:

@@ -344,20 +344,43 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # content shipped here (one fact was 131K chars → ~124K-token
             # response, defeating the whole token budget). Clamp each content
             # to per_memory_max_tokens, drop junk, and honour max_results.
-            memories = [
-                {
+            contract_by_id = {
+                r.fact.fact_id: r for r in relevant[:max_results]
+            }
+            memories = []
+            for position, m in enumerate(inj_mems[:max_results], start=1):
+                if is_low_quality(m.content):
+                    continue
+                result_contract = contract_by_id.get(m.fact_id)
+                relevance = (
+                    getattr(result_contract, "relevance_score", m.score)
+                    if result_contract is not None else m.score
+                )
+                memory_confidence = (
+                    getattr(result_contract, "memory_confidence", None)
+                    if result_contract is not None else None
+                )
+                memories.append({
                     "fact_id": m.fact_id,
                     "content": clamp_content(
                         sanitize_untrusted_content(m.content), cfg_inj,
                     ),
                     "score": m.score,
+                    "relevance_score": relevance,
+                    "ranking_score": (
+                        getattr(result_contract, "ranking_score", None)
+                        if result_contract is not None else None
+                    ),
+                    "confidence": memory_confidence,
+                    "memory_confidence": memory_confidence,
+                    "rank_position": (
+                        getattr(result_contract, "rank_position", position)
+                        if result_contract is not None else position
+                    ),
                     "is_core": m.is_core,
                     "untrusted": True,
                     "source_type": m.source_type,
-                }
-                for m in inj_mems[:max_results]
-                if not is_low_quality(m.content)
-            ]
+                })
 
             # Get learning status
             feedback_count = 0
@@ -399,6 +422,16 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     if degraded_mode
                     else "hybrid_candidate_fusion"
                 ),
+                "score_contract_version": getattr(
+                    response, "score_contract_version", "2"
+                ),
+                "calibration_status": getattr(
+                    response, "calibration_status", "uncalibrated"
+                ),
+                "calibration_id": getattr(response, "calibration_id", None),
+                "answer_confidence": getattr(response, "answer_confidence", None),
+                "abstained": getattr(response, "abstained", not bool(relevant)),
+                "abstention_reason": getattr(response, "abstention_reason", None),
                 "learning": {
                     "feedback_signals": feedback_count,
                     "phase": 1 if feedback_count < 50 else (2 if feedback_count < 200 else 3),

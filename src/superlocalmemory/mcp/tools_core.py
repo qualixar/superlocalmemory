@@ -670,6 +670,14 @@ def _format_results(results) -> list[dict]:
             "content": r.fact.content,
             "score": round(r.score, 3),
             "confidence": round(r.confidence, 3),
+            "relevance_score": round(
+                getattr(r, "relevance_score", r.score) or 0.0, 3
+            ),
+            "ranking_score": getattr(r, "ranking_score", None),
+            "memory_confidence": round(
+                getattr(r, "memory_confidence", r.confidence) or 0.0, 3
+            ),
+            "rank_position": int(getattr(r, "rank_position", 0) or 0),
             "trust_score": round(r.trust_score, 3),
             "fact_type": r.fact.fact_type.value,
             "channel_scores": {
