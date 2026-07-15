@@ -66,13 +66,19 @@ async def ingest(req: IngestRequest, request: Request):
     try:
         from superlocalmemory.core.engine_ingestion import (
             build_engine_ingestion_command,
-            local_trusted_actor_id,
         )
         from superlocalmemory.core.ingestion_command import (
             IngestionRequest,
             IngestionState,
         )
 
+        from superlocalmemory.server.write_identity import (
+            authenticated_request_actor,
+        )
+        actor_id = authenticated_request_actor(
+            request,
+            actor_kind="http-ingest",
+        )
         command = build_engine_ingestion_command(engine)
         receipt, created = command.submit_with_status(IngestionRequest(
             content=req.content,
@@ -80,7 +86,7 @@ async def ingest(req: IngestRequest, request: Request):
             source_type=req.source_type,
             idempotency_key=req.dedup_key,
             metadata=dict(req.metadata),
-            trusted_actor_id=local_trusted_actor_id("http-ingest"),
+            trusted_actor_id=actor_id,
         ))
         completed = command.materialize(receipt.operation_id)
         if completed.state is not IngestionState.COMPLETE:

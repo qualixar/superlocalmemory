@@ -157,7 +157,6 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
         engine = require_engine(request)
         from superlocalmemory.core.engine_ingestion import (
             build_engine_ingestion_command,
-            local_trusted_actor_id,
         )
         from superlocalmemory.core.ingestion_command import (
             IngestionRequest,
@@ -165,7 +164,13 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
         )
 
         command = build_engine_ingestion_command(engine)
-        actor_id = local_trusted_actor_id("http-import")
+        from superlocalmemory.server.write_identity import (
+            authenticated_request_actor,
+        )
+        actor_id = authenticated_request_actor(
+            request,
+            actor_kind="http-import",
+        )
         file_digest = hashlib.sha256(content).hexdigest()
         imported = 0
         skipped = 0

@@ -126,8 +126,22 @@ def require_http_mutation_actor(
     raise HTTPException(403, detail="Authenticated mutation capability required")
 
 
+def authenticated_request_actor(
+    request: Request,
+    descriptor: Any | None = None,
+    *,
+    actor_kind: str = "http-route",
+) -> str:
+    """Return the middleware-verified principal or verify route credentials."""
+    actor = getattr(request.state, "authenticated_actor", "")
+    if actor:
+        return str(actor)
+    return require_write_actor(request, descriptor, actor_kind=actor_kind)
+
+
 __all__ = [
     "require_daemon_actor",
+    "authenticated_request_actor",
     "require_http_mutation_actor",
     "require_write_actor",
 ]
