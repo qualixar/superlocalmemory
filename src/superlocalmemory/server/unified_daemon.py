@@ -1564,16 +1564,17 @@ def _register_dashboard_routes(application: FastAPI) -> None:
 
     # Auth middleware (graceful)
     try:
-        from superlocalmemory.infra.auth_middleware import check_api_key
+        from superlocalmemory.infra.auth_middleware import (
+            authorize_http_mcp_request,
+            check_api_key,
+        )
 
         # Auth-exempt path prefixes — proxy routes carry provider API keys
         # (x-api-key for Anthropic, Authorization: Bearer for OpenAI, x-goog-api-key
         # for Gemini), never X-SLM-API-Key. Verified: auth_middleware.py:50-82
         # returns False for POST when api_key file exists and X-SLM-API-Key
         # is absent.
-        # v3.6.7: /mcp is also exempt — MCP clients negotiate their own session
-        # via the MCP protocol; they have no knowledge of X-SLM-API-Key.
-        _AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/", "/mcp")
+        _AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/")
 
         @application.middleware("http")
         async def auth_middleware(request, call_next):
@@ -1582,6 +1583,18 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                 return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             headers = dict(request.headers)
+            client_host = request.client.host if request.client else ""
+            if request.url.path.startswith("/mcp") and not authorize_http_mcp_request(
+                headers,
+                client_host=client_host,
+            ):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "Remote HTTP MCP requires a configured SLM API key."
+                    },
+                )
             # v3.6.12 (csrf-1): defense-in-depth CSRF/DNS-rebinding guard on
             # state-changing requests. A cross-origin browser Origin is rejected;
             # loopback origins (the local dashboard) always pass, and LAN origins
@@ -1629,7 +1642,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
 
         @application.middleware("http")
         async def _failclosed_auth(request, call_next):
-            if request.url.path.startswith(("/v1/", "/v1beta/", "/mcp")):
+            if request.url.path.startswith(("/v1/", "/v1beta/")):
                 return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
             client_host = request.client.host if request.client else ""

@@ -66,7 +66,7 @@ def test_loopback_mcp_keeps_local_transport_compatibility(tmp_path) -> None:
 def test_unified_daemon_does_not_exempt_mcp_from_authentication() -> None:
     from superlocalmemory.server import unified_daemon
 
-    source = inspect.getsource(unified_daemon.create_app)
+    source = inspect.getsource(unified_daemon._register_dashboard_routes)
     assert '_AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/")' in source
     assert 'startswith(("/v1/", "/v1beta/", "/mcp"))' not in source
     assert "authorize_http_mcp_request" in source

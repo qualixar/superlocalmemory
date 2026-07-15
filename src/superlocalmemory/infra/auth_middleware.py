@@ -94,3 +94,22 @@ def verify_api_key(
         return False
     actual = hashlib.sha256(presented.encode()).hexdigest()
     return hmac.compare_digest(actual, expected)
+
+
+def authorize_http_mcp_request(
+    request_headers: dict,
+    *,
+    client_host: str,
+    key_file: Optional[Path] = None,
+) -> bool:
+    """Authorize the Streamable-HTTP MCP transport boundary.
+
+    An MCP session identifier is routing state, not authentication.  Loopback
+    keeps the local-first compatibility contract, while every non-loopback
+    peer must present the configured SLM API key.  The LAN allowlist limits
+    reachability but deliberately does not grant a write identity.
+    """
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    provided = request_headers.get("x-slm-api-key", "")
+    return verify_api_key(provided, key_file=key_file)
