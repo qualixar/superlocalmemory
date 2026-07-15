@@ -31,9 +31,18 @@ uniqueness or guaranteed-improvement claim. [Read the limitations →](Active-Me
 ## Quick Start
 
 ```bash
-npm install -g superlocalmemory    # or: pipx/uv tool install superlocalmemory
+npm install -g superlocalmemory    # Primary global CLI path
 slm setup                          # Choose mode A/B/C
 slm warmup                         # Pre-download embedding model (optional)
+```
+
+The second primary path is Python in an activated virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
+slm setup
 ```
 
 Then configure the client you intend to use and verify it with `slm doctor`.

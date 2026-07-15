@@ -2,9 +2,9 @@
 
 > SuperLocalMemory V3 documentation · AGPL-3.0-or-later
 
-The Python API is for applications running inside an isolated Python
-environment. For an end-user CLI install, prefer `uv tool` or `pipx`; for a
-project dependency, create and activate that project's virtual environment.
+The Python API and Python-installed CLI are for applications running inside an
+activated virtual environment. The other primary CLI path is the npm global
+package, which owns its private Python runtime.
 
 ```bash
 python3 -m venv .venv

@@ -122,9 +122,11 @@ surface; this is not a guarantee against transport or provider failure.
 ### Step 1: Install
 
 ```bash
-pipx install superlocalmemory      # or: uv tool install superlocalmemory
-# or: npm i -g superlocalmemory
+npm i -g superlocalmemory
 ```
+
+For the Python primary path, create and activate a virtual environment, then
+run `python -m pip install superlocalmemory`.
 
 ### Step 2: Verify
 
@@ -234,8 +236,11 @@ v3.6 is a **strict superset** of v3.5:
 
 **Migration is a single command:**
 ```bash
-pip install -U superlocalmemory && slm restart
+python -m pip install --upgrade superlocalmemory && slm restart
 ```
+
+Run that command only while the SLM virtual environment is active. npm users
+upgrade with `npm update -g superlocalmemory`.
 
 No data loss. No downtime. Zero configuration changes needed.
 

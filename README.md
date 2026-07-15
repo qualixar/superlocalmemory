@@ -46,7 +46,7 @@ The preprints also contain ablation and mathematical analyses. Treat those as re
 ## Quick Start
 
 ```bash
-# npm (recommended CLI install; Node 18+)
+# Primary path 1 — npm global CLI (Node 18+)
 # Creates a package-owned virtual environment. It does not modify system Python.
 npm install -g superlocalmemory
 slm setup       # Choose mode (A/B/C)
@@ -54,18 +54,12 @@ slm doctor      # Verify everything is working
 ```
 
 ```bash
-# Python CLI (isolated application environment)
-pipx install superlocalmemory
-# Or: uv tool install superlocalmemory
-slm setup
-slm doctor
-```
-
-```bash
-# Python library/SDK (inside your project's Python virtual environment)
+# Primary path 2 — Python CLI + SDK in an activated virtual environment
 python3 -m venv .venv
 source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install superlocalmemory
+slm setup
+slm doctor
 ```
 
 ```bash
@@ -89,9 +83,12 @@ slm wrap claude
 # See savings: slm optimize savings --since 1
 ```
 
-**Upgrading:** use the owner of the installation: `npm update -g superlocalmemory`,
-`pipx upgrade superlocalmemory`, or `uv tool upgrade superlocalmemory`. Then run
-`slm restart && slm doctor`. The installer never moves or deletes memory data.
+**Upgrading:** use the owner of the installation: `npm update -g superlocalmemory`
+or, while the Python virtual environment is active,
+`python -m pip install --upgrade superlocalmemory`. Then run
+`slm restart && slm doctor`. Repository-clone users use the matching `upgrade`
+action in `scripts/install.sh` or `scripts/install.ps1`. Installers never move
+or delete memory data.
 
 ---
 
@@ -201,9 +198,8 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 
 | Path | Command | When |
 |:-----|:--------|:-----|
-| **npm** (recommended CLI path) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified; run `slm setup` explicitly afterward |
-| **Python CLI** | `pipx install superlocalmemory` or `uv tool install superlocalmemory` | Isolated tool environment; clean upgrade and uninstall |
-| **Python library** | Create a Python virtual environment, then `python -m pip install superlocalmemory` | Python 3.11+; import SLM from another Python application |
+| **npm global CLI** (primary) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified; run `slm setup` explicitly afterward |
+| **Python CLI + SDK** (primary) | Activate a Python virtual environment, then `python -m pip install superlocalmemory` | Python 3.11+; the `slm` CLI and importable SDK stay inside that environment |
 | **Repository clone — macOS/Linux** | `./scripts/install.sh install` | Research/contributor path; delegates to an existing uv or pipx installation |
 | **Repository clone — Windows** | `.\scripts\install.ps1 -Action Install` | Research/contributor path; delegates to an existing uv or pipx installation |
 | **Claude Code Plugin** (WP-06) | `/plugin marketplace add qualixar/superlocalmemory` then `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core. Ships the skills/agents/hooks/commands |
@@ -289,7 +285,8 @@ then install:
 - Additive — does not replace an existing SLM install
 - `slm connect claude-code` detects an existing plugin install and links them
 
-> **Plugin vs `pip`/`npm`:** `pip install superlocalmemory` / `npm i -g superlocalmemory`
+> **Plugin vs Python/npm:** `python -m pip install superlocalmemory` inside an
+> activated virtual environment, or `npm i -g superlocalmemory`,
 > give you the `slm` CLI + the MCP server (the *tools*). The **skills/agents/hooks/
 > commands** come only through the plugin above. Use the plugin for Claude Code; use
 > pip/npm for the CLI or other IDEs.

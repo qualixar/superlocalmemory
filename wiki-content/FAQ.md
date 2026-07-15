@@ -42,8 +42,10 @@ npm install -g superlocalmemory
 slm setup
 slm warmup    # Optional — pre-download embedding model
 
-# or pip
-pip install superlocalmemory
+# or inside an activated Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 slm setup
 ```
 
@@ -51,7 +53,8 @@ slm setup
 
 ```bash
 npm install -g superlocalmemory@latest
-# or: pip install --upgrade superlocalmemory
+# or, while the SLM virtual environment is active:
+python -m pip install --upgrade superlocalmemory
 ```
 
 ### I am upgrading from V2. Will I lose my data?

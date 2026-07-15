@@ -10,7 +10,14 @@ Get SuperLocalMemory working in under 5 minutes — whether you're a new user or
 
 ```bash
 npm install -g superlocalmemory
-# or: pip install superlocalmemory
+```
+
+Python alternative: create and activate a virtual environment, then install:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 ```
 
 ### 2. Setup

@@ -1,14 +1,9 @@
 # Installation
 
-SuperLocalMemory V3 provides an npm CLI path, isolated Python CLI paths, a
-Python-library path inside a project virtual environment, repository-clone
-installers, and an optional frozen-wheel macOS DMG. The channels share release
+SuperLocalMemory V3 has two primary paths: an npm global CLI with a
+package-owned Python environment, and a Python CLI + SDK inside an activated
+virtual environment. Repository-clone installers share the same release
 identity but have different ownership and verification contracts.
-
-> **DMG status:** V3.7 has a rebuilt candidate-only DMG contract. A DMG is not
-> distributable until the frozen V3.7 wheel passes Developer ID signing,
-> notarization, stapling, manifest, mount, and Gatekeeper verification. V2 DMG
-> behavior is not a supported V3 contract.
 
 ## Prerequisites
 
@@ -21,7 +16,7 @@ Python 3.11+ is required for the V3 engine. Node.js is only needed if you instal
 
 ---
 
-## Method 1: npm (Recommended)
+## Primary path 1: npm global CLI
 
 This installs the CLI and MCP runtime into a package-owned Python environment.
 
@@ -58,33 +53,20 @@ SuperLocalMemory V3
 
 ---
 
-## Method 2: isolated Python CLI
-
-```bash
-pipx install superlocalmemory
-# or
-uv tool install superlocalmemory
-```
-
-Then run:
-
-```bash
-slm setup
-slm warmup    # Optional — pre-download embedding model
-slm status    # Verify
-```
-
----
-
-## Method 3: Python library in a project environment
+## Primary path 2: Python CLI + SDK in an activated virtual environment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install superlocalmemory
+slm setup
+slm doctor
 ```
 
-## Method 4: repository clone (research and development)
+Keep the environment active whenever you run `slm` or import the SDK. Do not
+use global pip, `sudo pip`, or externally-managed-system-Python overrides.
+
+## Repository clone (research and development)
 
 ```bash
 git clone https://github.com/qualixar/superlocalmemory.git
@@ -211,7 +193,8 @@ See [Migration from V2](Migration-from-V2) for the full guide.
 
 ### `ModuleNotFoundError: No module named 'superlocalmemory'`
 - Ensure Python 3.11+ is the default: `python3 --version`
-- Reinstall: `pip install --force-reinstall superlocalmemory`
+- Activate the environment used for SLM, then reinstall with
+  `python -m pip install --force-reinstall superlocalmemory`.
 
 ### Embedding model fails to download
 - Check internet connection

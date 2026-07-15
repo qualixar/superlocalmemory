@@ -4,7 +4,7 @@ SuperLocalMemory requires Python 3.11–3.14. Installation code and durable memo
 data have separate ownership: installers manage the executable environment;
 `SLM_DATA_DIR` selects memory data. No supported installer moves or deletes data.
 
-## npm interactive path
+## Primary path 1: npm global CLI
 
 Use this when you want the guided profile setup and the `slm` command without
 managing a Python environment yourself.
@@ -19,25 +19,9 @@ Node 18+ is required. npm creates a package-owned Python virtual environment.
 It does not install into the operating system's Python and does not run setup,
 install hooks, start a daemon, or download models during `npm install`.
 
-## Python CLI
+## Primary path 2: Python CLI + SDK in an activated virtual environment
 
-Install the command as an isolated Python application with either tool manager:
-
-```bash
-uv tool install superlocalmemory
-# or
-pipx install superlocalmemory --python python3.11
-
-slm setup
-slm doctor
-```
-
-Install uv or pipx using your operating system package manager and inspect its
-official installation instructions before using another bootstrap method.
-
-## Python library
-
-Use a project virtual environment when importing SLM from Python:
+Use a dedicated virtual environment for both the `slm` command and Python API:
 
 ```bash
 python3.11 -m venv .venv
@@ -51,8 +35,9 @@ install the same `slm` command through multiple tool managers.
 
 ## Repository clone
 
-Researchers and contributors can install the checked-out source through an
-already-installed uv or pipx:
+Researchers and contributors can install the checked-out source through the
+scoped repository lifecycle installer (which delegates to an existing uv or
+pipx installation):
 
 ```bash
 git clone https://github.com/qualixar/superlocalmemory.git

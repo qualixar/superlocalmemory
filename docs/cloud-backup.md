@@ -171,4 +171,6 @@ Check the destination status in **Settings** → **Cloud Backup**. Common causes
 - Check that the SLM daemon is running on port 8765
 
 ### Dashboard freezes during sync
-This was fixed in v3.4.10 — syncs now run in a background thread. If you're on an older version, update: `pip install -U superlocalmemory`
+This was fixed in v3.4.10 — syncs now run in a background thread. If you use
+the Python path, activate the SLM virtual environment and run
+`python -m pip install --upgrade superlocalmemory`.

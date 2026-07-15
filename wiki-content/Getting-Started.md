@@ -15,9 +15,11 @@ Get SuperLocalMemory running in under 5 minutes.
 npm install -g superlocalmemory
 ```
 
-**pip:**
+**Python CLI + SDK (primary activated-venv path):**
 ```bash
-pip install superlocalmemory
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 ```
 
 See [Installation](Installation) for git clone, platform-specific notes, and troubleshooting.

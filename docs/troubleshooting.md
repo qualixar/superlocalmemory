@@ -71,9 +71,10 @@ npm config set prefix '~/.npm-global'
 export PATH=~/.npm-global/bin:$PATH
 npm install -g superlocalmemory
 
-# Option 2: install the isolated Python CLI instead
-uv tool install superlocalmemory
-# or: pipx install superlocalmemory
+# Option 2: install inside an activated Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 ```
 
 ## Recall Issues

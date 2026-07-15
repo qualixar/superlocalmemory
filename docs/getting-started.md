@@ -46,7 +46,7 @@ cross-client behavior for every product that implements MCP.
 > **Linux / Ubuntu 22.04:** Install in a venv to avoid system-Python conflicts:
 > ```bash
 > python3.11 -m venv ~/.slm-venv && source ~/.slm-venv/bin/activate
-> pip install superlocalmemory
+> python -m pip install superlocalmemory
 > ```
 > Then set `SLM_PYTHON=~/.slm-venv/bin/python` so `slm` uses that interpreter.
 

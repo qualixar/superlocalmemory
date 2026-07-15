@@ -54,7 +54,7 @@ def test_primary_docs_lead_with_npm_and_activated_venv_pip() -> None:
 
 def test_active_onboarding_never_recommends_bare_or_privileged_pip_for_slm() -> None:
     unsafe = re.compile(
-        r"(?im)(?:^|[`:\s])(?:sudo\s+)?pip(?:3)?\s+install\b[^\n`]*superlocalmemory"
+        r"(?im)(?<!-m )\b(?:sudo\s+)?pip(?:3)?\s+install\b[^\n`]*superlocalmemory"
     )
     findings: list[str] = []
     for path in ONBOARDING_DOCS:
