@@ -1331,6 +1331,19 @@ def cmd_forget(args: Namespace) -> None:
 
     dry_run = getattr(args, 'dry_run', False)
 
+    def delete_fact_authorized_for_cli(fact_id: str) -> None:
+        from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+        from superlocalmemory.core.mutations import delete_fact_authorized
+
+        result = delete_fact_authorized(
+            engine,
+            fact_id,
+            trusted_actor_id=local_trusted_actor_id("cli"),
+            source_agent_id="cli",
+        )
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error", "delete failed"))
+
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         if not matches:
@@ -1345,7 +1358,7 @@ def cmd_forget(args: Namespace) -> None:
             return
         if getattr(args, 'yes', False):
             for f in matches:
-                engine._db.delete_fact(f.fact_id)
+                delete_fact_authorized_for_cli(f.fact_id)
             json_print("forget", data={
                 "matched_count": len(matches), "deleted_count": len(matches),
                 "deleted": [f.fact_id for f in matches],
@@ -1373,13 +1386,13 @@ def cmd_forget(args: Namespace) -> None:
         return
     if getattr(args, 'yes', False):
         for f in matches:
-            engine._db.delete_fact(f.fact_id)
+            delete_fact_authorized_for_cli(f.fact_id)
         print(f"Deleted {len(matches)} memories.")
         return
     confirm = input(f"Delete {len(matches)} memories? [y/N] ").strip().lower()
     if confirm in ("y", "yes"):
         for f in matches:
-            engine._db.delete_fact(f.fact_id)
+            delete_fact_authorized_for_cli(f.fact_id)
         print(f"Deleted {len(matches)} memories.")
     else:
         print("Cancelled.")
@@ -1417,7 +1430,15 @@ def cmd_delete(args: Namespace) -> None:
             sys.exit(1)
         content = dict(rows[0]).get("content", "")
         if getattr(args, "yes", False):
-            engine._db.delete_fact(fact_id)
+            from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+            from superlocalmemory.core.mutations import delete_fact_authorized
+
+            delete_fact_authorized(
+                engine,
+                fact_id,
+                trusted_actor_id=local_trusted_actor_id("cli"),
+                source_agent_id="cli",
+            )
             json_print("delete", data={"deleted": fact_id, "content": content[:120]},
                        next_actions=[
                            {"command": "slm list --json", "description": "Verify remaining memories"},
@@ -1444,7 +1465,15 @@ def cmd_delete(args: Namespace) -> None:
             print("Cancelled.")
             return
 
-    engine._db.delete_fact(fact_id)
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import delete_fact_authorized
+
+    delete_fact_authorized(
+        engine,
+        fact_id,
+        trusted_actor_id=local_trusted_actor_id("cli"),
+        source_agent_id="cli",
+    )
     print(f"Deleted: {fact_id}")
 
 
@@ -1492,9 +1521,15 @@ def cmd_update(args: Namespace) -> None:
         return
 
     old_content = dict(rows[0]).get("content", "")
-    engine._db.execute(
-        "UPDATE atomic_facts SET content = ? WHERE fact_id = ?",
-        (new_content, fact_id),
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import update_fact_authorized
+
+    update_fact_authorized(
+        engine,
+        fact_id,
+        new_content,
+        trusted_actor_id=local_trusted_actor_id("cli"),
+        source_agent_id="cli",
     )
 
     if use_json:

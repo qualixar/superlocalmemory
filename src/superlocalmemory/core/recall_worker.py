@@ -160,33 +160,15 @@ def _handle_delete_memory(
 ) -> dict:
     """Delete a fact after capability-derived authorization."""
     engine = _get_engine()
-    pid = engine.profile_id
     from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import delete_fact_authorized
 
-    trusted_actor_id = local_trusted_actor_id("recall-worker")
-    hook_context = {
-        "operation": "delete",
-        "agent_id": trusted_actor_id,
-        "source_agent_id": source_agent_id,
-        "profile_id": pid,
-        "fact_id": fact_id,
-    }
-    engine._hooks.run_pre("delete", hook_context)
-    rows = engine._db.execute(
-        "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ? LIMIT 1",
-        (fact_id, pid),
+    return delete_fact_authorized(
+        engine,
+        fact_id,
+        trusted_actor_id=local_trusted_actor_id("recall-worker"),
+        source_agent_id=source_agent_id,
     )
-    if not rows:
-        return {"ok": False, "error": f"Memory {fact_id} not found"}
-    content_preview = dict(rows[0]).get("content", "")[:80]
-    engine._db.delete_fact(fact_id)
-    # Audit log
-    import logging as _logging
-    _logging.getLogger("superlocalmemory.audit").info(
-        "DELETE fact_id=%s actor=%s source_agent=%s content=%s",
-        fact_id[:16], trusted_actor_id, source_agent_id, content_preview,
-    )
-    return {"ok": True, "deleted": fact_id, "content_preview": content_preview}
 
 
 def _handle_update_memory(
@@ -196,54 +178,16 @@ def _handle_update_memory(
 ) -> dict:
     """Update a fact after capability-derived authorization."""
     engine = _get_engine()
-    pid = engine.profile_id
     from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import update_fact_authorized
 
-    trusted_actor_id = local_trusted_actor_id("recall-worker")
-    hook_context = {
-        "operation": "update",
-        "agent_id": trusted_actor_id,
-        "source_agent_id": source_agent_id,
-        "profile_id": pid,
-        "fact_id": fact_id,
-        "content_preview": content[:100],
-    }
-    engine._hooks.run_pre("update", hook_context)
-    rows = engine._db.execute(
-        "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ? LIMIT 1",
-        (fact_id, pid),
+    return update_fact_authorized(
+        engine,
+        fact_id,
+        content,
+        trusted_actor_id=local_trusted_actor_id("recall-worker"),
+        source_agent_id=source_agent_id,
     )
-    if not rows:
-        return {"ok": False, "error": f"Memory {fact_id} not found"}
-    old_content = dict(rows[0]).get("content", "")[:80]
-    # V3.3.12: Re-embed updated content so semantic search + BM25 stay consistent.
-    # Previously only the text column was updated, leaving stale embeddings.
-    updates: dict = {"content": content}
-    if engine._embedder:
-        try:
-            new_emb = engine._embedder.embed(content)
-            if new_emb:
-                updates["embedding"] = new_emb
-                fm, fv = engine._embedder.compute_fisher_params(new_emb)
-                updates["fisher_mean"] = fm
-                updates["fisher_variance"] = fv
-        except Exception:
-            pass
-    engine._db.update_fact(fact_id, updates)
-    # Update BM25 index for the new content
-    if hasattr(engine, '_retrieval_engine') and engine._retrieval_engine:
-        bm25 = getattr(engine._retrieval_engine, '_bm25', None)
-        if bm25:
-            try:
-                bm25.add(fact_id, content, pid)
-            except Exception:
-                pass
-    import logging as _logging
-    _logging.getLogger("superlocalmemory.audit").info(
-        "UPDATE fact_id=%s actor=%s source_agent=%s old=%s new=%s",
-        fact_id[:16], trusted_actor_id, source_agent_id, old_content, content[:80],
-    )
-    return {"ok": True, "fact_id": fact_id, "content": content}
 
 
 def _handle_summarize(texts: list[str], mode: str) -> dict:
