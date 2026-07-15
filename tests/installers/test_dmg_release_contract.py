@@ -124,6 +124,28 @@ def test_sidecar_records_final_dmg_checksum_and_truthful_signing_state(tmp_path)
         helper.validate_release_sidecars(dmg, require_release_ready=True)
 
 
+def test_release_pair_rejects_sidecar_version_not_matching_embedded_wheel(tmp_path):
+    helper = _load_helper()
+    wheel = _wheel(tmp_path)
+    stage = tmp_path / "stage"
+    helper.prepare_stage(wheel=wheel, project_root=ROOT, stage_dir=stage)
+    dmg = tmp_path / "SuperLocalMemory-v9.9.9-macos-universal.dmg"
+    dmg.write_bytes(b"candidate-dmg")
+    helper.write_release_sidecars(
+        dmg=dmg,
+        version="9.9.9",
+        signed=False,
+        notarized=False,
+    )
+
+    with pytest.raises(ValueError, match="mounted wheel version"):
+        helper.validate_release_pair(
+            stage / "SuperLocalMemory",
+            dmg,
+            require_release_ready=False,
+        )
+
+
 @pytest.mark.parametrize("script", [BUILD_SCRIPT, TEST_SCRIPT])
 def test_dmg_scripts_are_strict_and_have_no_legacy_contract(script):
     source = script.read_text(encoding="utf-8")
@@ -160,4 +182,3 @@ def test_test_cli_exposes_explicit_release_ready_gate():
     assert result.returncode == 0, result.stderr
     assert "--dmg" in result.stdout
     assert "--require-release-ready" in result.stdout
-
