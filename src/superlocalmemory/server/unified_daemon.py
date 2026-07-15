@@ -1568,6 +1568,9 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             authorize_http_mcp_request,
             check_api_key,
         )
+        from superlocalmemory.server.write_identity import (
+            require_http_mutation_actor,
+        )
 
         # Auth-exempt path prefixes — proxy routes carry provider API keys
         # (x-api-key for Anthropic, Authorization: Bearer for OpenAI, x-goog-api-key
@@ -1617,6 +1620,26 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                             status_code=403,
                             content={"error": "cross-origin request rejected"},
                         )
+                _mesh_secret = None
+                if request.url.path.startswith("/mesh"):
+                    _mesh_broker = getattr(application.state, "mesh_broker", None)
+                    _mesh_secret = getattr(_mesh_broker, "_shared_secret", None)
+                try:
+                    request.state.authenticated_actor = require_http_mutation_actor(
+                        request,
+                        getattr(application.state, "daemon_descriptor", None),
+                        actor_kind="http-route",
+                        mesh_secret=_mesh_secret,
+                    )
+                except Exception as _identity_exc:
+                    from fastapi import HTTPException as _HTTPException
+                    from fastapi.responses import JSONResponse
+                    if isinstance(_identity_exc, _HTTPException):
+                        return JSONResponse(
+                            status_code=_identity_exc.status_code,
+                            content={"error": str(_identity_exc.detail)},
+                        )
+                    raise
             if not check_api_key(headers, is_write=is_write):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(
