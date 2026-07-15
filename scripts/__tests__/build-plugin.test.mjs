@@ -562,6 +562,11 @@ describe('Integration: real repo build', () => {
       console.error('STDERR:', result.stderr);
     }
     assert.equal(result.status, 0, `build exited ${result.status}: ${result.stderr}`);
+    assert.doesNotMatch(
+      result.stderr,
+      /MODULE_TYPELESS_PACKAGE_JSON/,
+      'plugin builder must use an unambiguous Node module format'
+    );
   });
 
   test('--check exits 0 after build', () => {
