@@ -47,8 +47,13 @@ def test_accepted_item_requires_submit_receipt():
     ):
         auto.return_value.evaluate.return_value = decision
         build.return_value.submit.return_value = receipt
-        result = buf.enqueue("we fixed the durable ingestion bug in the daemon")
+        result = buf.enqueue(
+            "we fixed the durable ingestion bug in the daemon",
+            trusted_actor_id="authenticated:http-observe",
+        )
 
     assert result["captured"] is True
     assert result["durable"] is True
     build.return_value.submit.assert_called_once()
+    submitted = build.return_value.submit.call_args.args[0]
+    assert submitted.trusted_actor_id == "authenticated:http-observe"
