@@ -230,7 +230,7 @@ class TestMeshBroadcast:
         assert inbox[0]["read"] == 0
         broker.mark_read(r2["peer_id"], [inbox[0]["id"]])
         inbox2 = broker.get_inbox(r2["peer_id"])
-        assert inbox2[0]["read"] == 1  # Now marked read via mesh_reads
+        assert inbox2 == []  # Read broadcast is not redelivered.
 
     def test_broadcast_marked_read_is_not_redelivered(self, broker):
         """Inbox is an unread delivery queue, not a permanent event feed."""

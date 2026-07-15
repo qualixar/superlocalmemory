@@ -301,6 +301,7 @@ class MeshBroker:
                 "FROM mesh_messages m "
                 "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
                 "WHERE m.target_type='broadcast' AND m.from_peer != ? "
+                "AND r.peer_id IS NULL "
                 "AND (m.expires_at IS NULL OR m.expires_at > ?) "
                 "ORDER BY m.created_at DESC LIMIT 50",
                 (peer_id, peer_id, now),
@@ -316,6 +317,7 @@ class MeshBroker:
                     "FROM mesh_messages m "
                     "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
                     "WHERE m.target_type='project' AND m.project_path=? AND m.from_peer != ? "
+                    "AND r.peer_id IS NULL "
                     "AND (m.expires_at IS NULL OR m.expires_at > ?) "
                     "ORDER BY m.created_at DESC LIMIT 50",
                     (peer_id, project_path, peer_id, now),
