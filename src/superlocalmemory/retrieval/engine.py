@@ -907,11 +907,14 @@ class RetrievalEngine:
             # boosts push raw scores well above 1 (observed: 27.97). A sigmoid
             # preserves rank (monotonic) while giving users a readable 0-1 range.
             normalized_score = 1.0 / (1.0 + math.exp(-boosted_score * 0.5))
-            confidence = min(1.0, normalized_score * 10.0) * fact.confidence
             results.append(RetrievalResult(
                 fact=fact, score=round(normalized_score, 4),
                 channel_scores=fr.channel_scores,
-                confidence=confidence, evidence_chain=evidence,
+                confidence=fact.confidence,
+                relevance_score=round(normalized_score, 4),
+                ranking_score=boosted_score,
+                memory_confidence=fact.confidence,
+                evidence_chain=evidence,
                 trust_score=raw_trust,
             ))
         return results
@@ -960,10 +963,15 @@ def apply_channel_weights(
         new_score = (base if base > 0.0 else float(c.score)) * ce_bias
         out.append(RetrievalResult(
             fact=c.fact,
-            score=new_score,
+            score=c.score,
             channel_scores=new_cs,
             confidence=c.confidence,
+            relevance_score=c.relevance_score,
+            ranking_score=new_score,
+            memory_confidence=c.memory_confidence,
+            rank_position=c.rank_position,
             evidence_chain=c.evidence_chain,
             trust_score=c.trust_score,
+            marker=c.marker,
         ))
     return out

@@ -290,8 +290,16 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                 results.append({
                     "fact_id": item.get("fact_id", ""),
                     "content": item.get("content", ""),
-                    "final_score": round(float(item.get("score", 0.0)), 4),
+                    "score": round(float(item.get("score", 0.0)), 4),
+                    "relevance_score": round(
+                        float(item.get("relevance_score", item.get("score", 0.0))), 4
+                    ),
+                    "ranking_score": item.get("ranking_score"),
                     "confidence": round(float(item.get("confidence", 0.0)), 3),
+                    "memory_confidence": round(
+                        float(item.get("memory_confidence", item.get("confidence", 0.0))), 3
+                    ),
+                    "rank_position": int(item.get("rank_position", 0)),
                     "trust_score": round(float(item.get("trust_score", 0.0)), 3),
                     "channel_scores": item.get("channel_scores", {}) or {},
                     "evidence_chain": item.get("evidence_chain", []) or [],
@@ -307,6 +315,12 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                 "channel_weights": raw.get("channel_weights", {}) if isinstance(raw, dict) else {},
                 "total_candidates": raw.get("total_candidates", 0) if isinstance(raw, dict) else 0,
                 "retrieval_time_ms": round(float(raw.get("retrieval_time_ms", 0.0)) if isinstance(raw, dict) else 0.0, 1),
+                "score_contract_version": raw.get("score_contract_version", "2") if isinstance(raw, dict) else "2",
+                "calibration_status": raw.get("calibration_status", "uncalibrated") if isinstance(raw, dict) else "uncalibrated",
+                "calibration_id": raw.get("calibration_id") if isinstance(raw, dict) else None,
+                "answer_confidence": raw.get("answer_confidence") if isinstance(raw, dict) else None,
+                "abstained": bool(raw.get("abstained", False)) if isinstance(raw, dict) else False,
+                "abstention_reason": raw.get("abstention_reason") if isinstance(raw, dict) else None,
             }
         except Exception as exc:
             logger.exception("recall_trace failed")

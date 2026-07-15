@@ -312,6 +312,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "retrieval_time_ms": result.get("retrieval_time_ms", 0),
                     # v3.6.6: surface evidence-floor signal to MCP clients.
                     "no_confident_match": result.get("no_confident_match", False),
+                    "score_contract_version": result.get("score_contract_version", "2"),
+                    "calibration_status": result.get("calibration_status", "uncalibrated"),
+                    "calibration_id": result.get("calibration_id"),
+                    "answer_confidence": result.get("answer_confidence"),
+                    "abstained": result.get("abstained", False),
+                    "abstention_reason": result.get("abstention_reason"),
                 }
             return {"success": False, "error": result.get("error", "Recall failed")}
         except Exception as exc:

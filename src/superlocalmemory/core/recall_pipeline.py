@@ -336,6 +336,10 @@ def apply_adaptive_ranking(
     reranked = ranker.rerank(result_dicts, query_context)
 
     # Rebuild response with new ordering
+    for item in reranked:
+        original = item.get("_original")
+        if original is not None and item.get("_adaptive_score") is not None:
+            original.ranking_score = float(item["_adaptive_score"])
     new_results = [d["_original"] for d in reranked]
 
     return RecallResponse(
@@ -429,6 +433,10 @@ def apply_v2_adaptive_ranking(
             "profile_id": profile_id,
         }
         reranked_dicts = ranker.rerank(result_dicts, query_context)
+        for item in reranked_dicts:
+            original = item.get("_original")
+            if original is not None and item.get("_adaptive_score") is not None:
+                original.ranking_score = float(item["_adaptive_score"])
         new_results = [d["_original"] for d in reranked_dicts
                        if "_original" in d]
 
@@ -698,6 +706,9 @@ def run_recall(
                             fact=f, score=1.0 / (i + 1),
                             channel_scores={"agentic": 1.0},
                             confidence=f.confidence,
+                            relevance_score=1.0 / (i + 1),
+                            ranking_score=None,
+                            memory_confidence=f.confidence,
                             evidence_chain=["agentic_round_2"],
                             trust_score=fact_trust,
                         ))
@@ -822,17 +833,8 @@ def run_recall(
     hook_ctx["query_type"] = response.query_type
     hooks.run_post("recall", hook_ctx)
 
-    # v3.5.0 (M2): soft-normalize ALL scores to [0,1] after the full pipeline.
-    # The retrieval engine _build_results normalizes, but the ranking pipeline
-    # (v1/v2/bandit-ensemble) re-weights and may produce scores outside [0,1].
-    # This final sigmoid catches every path (MCP/CLI/Dashboard) and is monotonic.
-    if response.results:
-        import math as _mn
-        max_s = max((r.score for r in response.results), default=1.0)
-        scale = 2.0 / max(1.0, max_s)
-        for r in response.results:
-            r.score = round(1.0 / (1.0 + _mn.exp(-r.score * scale)), 4)
-            r.confidence = min(1.0, r.score * 2.0)
+    from superlocalmemory.core.score_contract import finalize_score_contract
+    finalize_score_contract(response)
 
     # LLD-00 §3 — stamp HMAC markers on every result so post_tool_outcome_hook
     # can validate fact_ids observed in downstream tool output.

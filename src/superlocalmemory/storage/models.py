@@ -402,6 +402,12 @@ class RetrievalResult:
     score: float = 0.0
     channel_scores: dict[str, float] = field(default_factory=dict)
     confidence: float = 0.0
+    # Score Contract v2. Legacy ``score`` and ``confidence`` remain one-release
+    # aliases of relevance_score and memory_confidence respectively.
+    relevance_score: float | None = None
+    ranking_score: float | None = None
+    memory_confidence: float | None = None
+    rank_position: int = 0
     evidence_chain: list[str] = field(default_factory=list)
     trust_score: float = 0.5
     # LLD-00 §3 + P0.4: HMAC marker emitted during recall so post-tool hooks
@@ -424,3 +430,9 @@ class RecallResponse:
     # v3.6.6: Evidence floor. True when floor gates out ALL results.
     # Additive field — backward compatible (defaults to False).
     no_confident_match: bool = False
+    score_contract_version: str = "2"
+    calibration_status: str = "uncalibrated"
+    calibration_id: str | None = None
+    answer_confidence: float | None = None
+    abstained: bool = False
+    abstention_reason: str | None = None

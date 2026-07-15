@@ -78,7 +78,10 @@ def _handle_recall(
 
     # v3.6.6: same shared chokepoint as the daemon HTTP route + CLI fallback,
     # so the MCP WorkerPool subprocess path returns identical budgeted output.
-    from superlocalmemory.server.recall_serializer import serialize_recall_response
+    from superlocalmemory.server.recall_serializer import (
+        recall_response_metadata,
+        serialize_recall_response,
+    )
     _rc = getattr(engine._config, "retrieval", None)
     results, no_confident_match = serialize_recall_response(
         response,
@@ -99,6 +102,7 @@ def _handle_recall(
         "total_candidates": getattr(response, "total_candidates", 0),
         "results": results,
         "no_confident_match": no_confident_match,
+        **recall_response_metadata(response),
     }
 
 

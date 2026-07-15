@@ -1199,7 +1199,10 @@ def cmd_recall(args: Namespace) -> None:
     # v3.6.6: route the direct-fallback path through the SAME shared
     # serializer the daemon uses, so CLI-without-daemon output is identical
     # to CLI/MCP-with-daemon (budget + source discipline + no_confident_match).
-    from superlocalmemory.server.recall_serializer import serialize_recall_response
+    from superlocalmemory.server.recall_serializer import (
+        recall_response_metadata,
+        serialize_recall_response,
+    )
     _rc = getattr(config, "retrieval", None)
     _ser, _no_match = serialize_recall_response(
         response,
@@ -1213,21 +1216,12 @@ def cmd_recall(args: Namespace) -> None:
         from superlocalmemory.cli.json_output import json_print
         items = []
         for d in _ser:
-            item = {
-                "fact_id": d["fact_id"], "content": d["content"],
-                "score": round(d["score"], 3),
-            }
-            if d.get("channel_scores"):
-                item["channel_scores"] = {k: round(v, 3) for k, v in d["channel_scores"].items()}
-            if d.get("truncated"):
-                item["truncated"] = True
-            if d.get("stub"):
-                item["stub"] = True
-            items.append(item)
+            items.append(dict(d))
         json_print("recall", data={
             "results": items, "count": len(items),
             "query_type": getattr(response, "query_type", "unknown"),
             "no_confident_match": _no_match,
+            **recall_response_metadata(response),
         }, next_actions=[
             {"command": "slm list --json", "description": "List recent memories"},
         ])
@@ -1243,7 +1237,7 @@ def cmd_recall(args: Namespace) -> None:
         print("No confident match." if _no_match else "No memories found.")
         return
     for i, d in enumerate(_ser, 1):
-        print(f"  {i}. [{d['score']:.2f}] {d['content']}")
+        print(f"  {i}. [relevance {d['relevance_score']:.2f}] {d['content']}")
 
 
 def _cli_record_signals(config, query, results):

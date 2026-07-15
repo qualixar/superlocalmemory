@@ -101,7 +101,8 @@ def test_apply_channel_weights_cross_encoder_bias_applied():
                "temporal": 1.0, "cross_encoder_bias": 2.0}
     out = apply_channel_weights(original, weights)
     # base = sum of channel weighted = 1.0; × ce_bias 2.0 = 2.0
-    assert out[0].score == pytest.approx(2.0)
+    assert out[0].ranking_score == pytest.approx(2.0)
+    assert out[0].score == original[0].score
 
 
 # ---------------------------------------------------------------------------

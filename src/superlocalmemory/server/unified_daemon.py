@@ -191,6 +191,7 @@ class EngineRecallAdapter:
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
         from superlocalmemory.server.recall_serializer import (
+            recall_response_metadata,
             serialize_recall_response,
         )
         _rc = getattr(self._engine._config, "retrieval", None)
@@ -216,6 +217,7 @@ class EngineRecallAdapter:
             "total_candidates": getattr(response, "total_candidates", 0),
             "results": results,
             "no_confident_match": no_confident_match,
+            **recall_response_metadata(response),
         }
 
 
@@ -1963,6 +1965,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # v3.6.6: single shared serialization chokepoint — budget + source
             # discipline + no_confident_match, identical across every surface.
             from superlocalmemory.server.recall_serializer import (
+                recall_response_metadata,
                 serialize_recall_response,
             )
             _rc = getattr(engine._config, "retrieval", None)
@@ -1991,6 +1994,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "results": results,
                 "count": len(results),
                 "no_confident_match": no_confident_match,
+                **recall_response_metadata(response),
             }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
