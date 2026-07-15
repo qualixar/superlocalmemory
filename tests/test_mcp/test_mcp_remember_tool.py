@@ -102,10 +102,10 @@ class TestRememberTool:
     def test_remember_returns_pending_id(self, mock_emit):
         """Offline canonical ingestion returns a truthful durable receipt.
 
-        Marked ``slow`` (Stage 7 delivery-lead review): spawns a real
-        worker subprocess and blocks ~100s on its ready-signal, which
-        single-handedly doubled the default suite runtime. Runs under
-        ``pytest -m slow``; default config excludes it.
+        The historical regression lived in the real worker slow lane. The
+        suite-level heavy-worker guard now supplies the same public receipt
+        contract without loading models, while the worker receipt itself is
+        covered in ``test_recall_worker_write_identity``.
         """
         remember = _get_remember_tool()
         result = asyncio.run(remember("Test content for pending store"))
@@ -264,3 +264,32 @@ class TestRememberWriteThrough:
         assert result["success"] is True
         assert result["fact_ids"] == ["abc123"]
         assert result["pending"] is False
+
+    def test_complete_empty_write_never_fabricates_pending_fact_id(
+        self, monkeypatch,
+    ) -> None:
+        import superlocalmemory.cli.daemon as _d
+
+        monkeypatch.setattr(_d, "is_daemon_running", lambda *a, **k: True)
+        monkeypatch.setattr(
+            _d,
+            "daemon_request",
+            lambda method, path, body=None: {
+                "ok": True,
+                "fact_ids": [],
+                "count": 0,
+                "operation_id": "operation-empty",
+                "pending_id": None,
+                "materialization_state": "complete",
+            },
+        )
+
+        remember = _get_remember_tool()
+        result = asyncio.run(remember("content rejected after admission"))
+
+        assert result["success"] is True
+        assert result["materialization_state"] == "complete"
+        assert result["pending"] is False
+        assert result["pending_id"] is None
+        assert result["fact_ids"] == []
+        assert result["count"] == 0
