@@ -59,6 +59,29 @@ def test_scanner_allows_stale_license_only_in_historical_archive(tmp_path: Path)
     assert scan_paths([tmp_path]) == []
 
 
+def test_scanner_checks_rendered_html_in_dist_directory(tmp_path: Path) -> None:
+    rendered = tmp_path / "dist" / "index.html"
+    rendered.parent.mkdir()
+    rendered.write_text("<h1>The world's first AI agent memory</h1>\n", encoding="utf-8")
+
+    rule_ids = {finding.rule.rule_id for finding in scan_paths([rendered.parent])}
+
+    assert "unsupported-superlative" in rule_ids
+
+
+def test_scanner_rejects_mit_on_current_product_license_surfaces(tmp_path: Path) -> None:
+    citation = tmp_path / "CITATION.cff"
+    citation.write_text("license: MIT\n", encoding="utf-8")
+    signer = tmp_path / "src" / "superlocalmemory" / "attribution" / "signer.py"
+    signer.parent.mkdir(parents=True)
+    signer.write_text('_LICENSE: str = "MIT"\n', encoding="utf-8")
+
+    findings = scan_paths([tmp_path])
+
+    assert {finding.path.name for finding in findings} >= {"CITATION.cff", "signer.py"}
+    assert {finding.rule.rule_id for finding in findings} == {"license-inconsistency"}
+
+
 def test_current_repository_public_claims_pass_scanner() -> None:
     findings = scan_paths([REPO_ROOT])
     details = "\n".join(

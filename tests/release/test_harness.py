@@ -8,6 +8,21 @@ import sys
 from . import _harness
 
 
+def test_candidate_artifacts_are_selected_from_prebuilt_directory(tmp_path) -> None:
+    dist = tmp_path / "python"
+    dist.mkdir()
+    wheel = dist / "superlocalmemory-3.7.0-py3-none-any.whl"
+    sdist = dist / "superlocalmemory-3.7.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+
+    artifacts = _harness.candidate_artifacts_from_directory(_harness.REPO_ROOT, dist)
+
+    assert artifacts.wheel == wheel
+    assert artifacts.sdist == sdist
+    assert artifacts.output_dir == dist
+
+
 def test_create_venv_stdlib_fallback_avoids_ensurepip(
     tmp_path, monkeypatch,
 ) -> None:
