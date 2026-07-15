@@ -18,6 +18,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT, SLMConfig
@@ -30,6 +31,19 @@ from superlocalmemory.storage.models import (
 logger = logging.getLogger(__name__)
 
 from superlocalmemory.core.hooks import HookRegistry
+
+
+def _verify_ingestion_schema(memory_db: Path) -> bool:
+    """Verify M018 using an explicitly owned SQLite connection."""
+    import sqlite3
+
+    from superlocalmemory.storage.migrations import M018_ingestion_operations
+
+    connection = sqlite3.connect(str(memory_db))
+    try:
+        return bool(M018_ingestion_operations.verify(connection))
+    finally:
+        connection.close()
 
 
 class MemoryEngine:
@@ -174,13 +188,8 @@ class MemoryEngine:
         # prerequisite: allowing initialization to continue without it would
         # make every advertised write path fail after startup.
         try:
-            import sqlite3
-
             from superlocalmemory.storage.migration_runner import (
                 apply_all, apply_deferred,
-            )
-            from superlocalmemory.storage.migrations import (
-                M018_ingestion_operations,
             )
             _base = self._config.base_dir
             _learning_db = _base / "learning.db"
@@ -192,11 +201,10 @@ class MemoryEngine:
             LearningDatabase(_learning_db)
             apply_all(_learning_db, _memory_db)
             apply_deferred(_learning_db, _memory_db)
-            with sqlite3.connect(str(_memory_db)) as migration_conn:
-                if not M018_ingestion_operations.verify(migration_conn):
-                    raise RuntimeError(
-                        "required M018 canonical-ingestion schema is unavailable"
-                    )
+            if not _verify_ingestion_schema(_memory_db):
+                raise RuntimeError(
+                    "required M018 canonical-ingestion schema is unavailable"
+                )
         except Exception as exc:
             raise RuntimeError(
                 "MemoryEngine initialization stopped because the required "
