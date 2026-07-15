@@ -167,7 +167,7 @@ def test_current_license_surfaces_are_agpl() -> None:
 
     assert package["license"] == "AGPL-3.0-or-later"
     assert package_lock["packages"][""]["license"] == "AGPL-3.0-or-later"
-    assert 'license = {text = "AGPL-3.0-or-later"}' in pyproject
+    assert 'license = "AGPL-3.0-or-later"' in pyproject
     assert _read_citation_field("license") == "AGPL-3.0-or-later"
     assert '_LICENSE: str = "AGPL-3.0-or-later"' in signer
 

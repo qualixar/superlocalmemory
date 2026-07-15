@@ -3,7 +3,8 @@ name = "superlocalmemory"
 version = "3.6.23"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
-license = {text = "AGPL-3.0-or-later"}
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11,<3.15"
 authors = [
     {name = "Varun Pratap Bhardwaj", email = "admin@superlocalmemory.com"},
@@ -15,7 +16,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
@@ -137,7 +137,7 @@ Issues = "https://github.com/qualixar/superlocalmemory/issues"
 slm = "superlocalmemory.cli.main:main"
 
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
