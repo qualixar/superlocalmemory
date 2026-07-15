@@ -71,8 +71,9 @@ npm config set prefix '~/.npm-global'
 export PATH=~/.npm-global/bin:$PATH
 npm install -g superlocalmemory
 
-# Option 2: Use sudo (not recommended)
-sudo npm install -g superlocalmemory
+# Option 2: install the isolated Python CLI instead
+uv tool install superlocalmemory
+# or: pipx install superlocalmemory
 ```
 
 ## Recall Issues

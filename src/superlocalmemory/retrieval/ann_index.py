@@ -12,7 +12,7 @@ scale we target (up to 100K facts). At that scale, a single cosine
 scan takes ~5ms on CPU which is well within our latency budget.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

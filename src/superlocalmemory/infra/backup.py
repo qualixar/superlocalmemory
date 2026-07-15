@@ -19,15 +19,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
+
 logger = logging.getLogger("superlocalmemory.backup")
 
 # ---------------------------------------------------------------------------
 # V3 paths
 # ---------------------------------------------------------------------------
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
-BACKUP_DIR = MEMORY_DIR / "backups"
-CONFIG_FILE = MEMORY_DIR / "backup_config.json"
+MEMORY_DIR = DynamicStatePath()
+DB_PATH = DynamicStatePath("memory.db")
+BACKUP_DIR = DynamicStatePath("backups")
+CONFIG_FILE = DynamicStatePath("backup_config.json")
 
 # Defaults
 DEFAULT_INTERVAL_HOURS = 168   # 7 days
@@ -70,7 +72,7 @@ class BackupManager:
         backup_dir: Optional[Path] = None,
         base_dir: Optional[Path] = None,
     ) -> None:
-        self.base_dir = base_dir or MEMORY_DIR
+        self.base_dir = Path(base_dir) if base_dir is not None else canonical_data_root()
         self.db_path = db_path or (self.base_dir / "memory.db")
         self.backup_dir = backup_dir or (self.base_dir / "backups")
         self._config_file = self.base_dir / "backup_config.json"

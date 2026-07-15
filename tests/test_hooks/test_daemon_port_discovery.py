@@ -22,6 +22,7 @@ from superlocalmemory.hooks import hook_handlers, post_tool_async_hook
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     slm_home = tmp_path / ".superlocalmemory"
     slm_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SLM_DATA_DIR", str(slm_home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr("os.path.expanduser", lambda p: p.replace("~", str(tmp_path), 1))
     return slm_home

@@ -160,10 +160,9 @@ class ConsolidationEngine:
                             def mine(self, *a, **kw): return []
                     from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
                     from superlocalmemory.core.config import ParameterizationConfig
-                    from pathlib import Path as _Path
-
                     p_config = getattr(self._slm_config, "parameterization", ParameterizationConfig())
-                    learning_db = str(_Path.home() / ".superlocalmemory" / "learning.db")
+                    from superlocalmemory.infra.data_root import state_path
+                    learning_db = str(state_path("learning.db"))
                     beh_store = BehavioralPatternStore(learning_db)
                     cross_proj = CrossProjectAggregator(self._db)
                     wf_miner = WorkflowMiner(self._db)

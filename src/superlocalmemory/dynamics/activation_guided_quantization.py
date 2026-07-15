@@ -22,7 +22,7 @@ HR-05: All SQL uses parameterized queries.
 HR-07: No-op when config.enabled=False.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

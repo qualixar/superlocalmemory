@@ -38,6 +38,7 @@ from superlocalmemory.hooks import user_prompt_hook, post_tool_async_hook
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     slm_home = tmp_path / ".superlocalmemory"
     slm_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SLM_DATA_DIR", str(slm_home))
     monkeypatch.setattr(sp, "_install_token_path",
                         lambda: slm_home / ".install_token")
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -115,11 +116,11 @@ def test_user_prompt_returns_envelope_on_hit(
     # markers so the downstream LLM can refuse embedded instructions.
     # v3.4.65: softened wrapper wording.
     ac = inner["additionalContext"]
-    assert "[BEGIN MEMORY CONTEXT" in ac
-    assert "[END MEMORY CONTEXT]" in ac
+    assert "[BEGIN UNTRUSTED SLM EVIDENCE v1]" in ac
+    assert "[END UNTRUSTED SLM EVIDENCE v1]" in ac
     # The real content must sit between the markers, not before/after.
-    begin_idx = ac.index("[BEGIN MEMORY CONTEXT")
-    end_idx = ac.index("[END MEMORY CONTEXT]")
+    begin_idx = ac.index("[BEGIN UNTRUSTED SLM EVIDENCE v1]")
+    end_idx = ac.index("[END UNTRUSTED SLM EVIDENCE v1]")
     assert begin_idx < ac.index("prior work") < end_idx
 
 

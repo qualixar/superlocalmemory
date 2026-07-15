@@ -18,27 +18,27 @@ Uses a separate `pending.db` file — never touches memory.db directly.
 Stdlib only — no SLM imports (must be fast).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import time
 from pathlib import Path
 
 
 def _default_dir() -> Path:
-    """Honor SLM_DATA_DIR so tests can isolate via tmp_path."""
-    return Path(os.environ.get("SLM_DATA_DIR") or Path.home() / ".superlocalmemory")
+    """Resolve the pending queue inside the canonical process namespace."""
+    from superlocalmemory.infra.data_root import canonical_data_root
+    return canonical_data_root()
 
 
 _PENDING_DB = "pending.db"
 _MAX_RETRIES = 3
 _STUCK_DAYS = 7
-_DEAD_LETTER_DAYS = 30
+_MAX_RETRY_DELAY_SECONDS = 3600
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_memories (
@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS pending_memories (
     created_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     error TEXT DEFAULT NULL,
-    retry_count INTEGER DEFAULT 0
+    retry_count INTEGER DEFAULT 0,
+    next_retry_at REAL DEFAULT 0
 );
 """
 
@@ -62,6 +63,24 @@ def _get_db(base_dir: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=5)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_SCHEMA)
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
+    }
+    if "next_retry_at" not in columns:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN "
+            "next_retry_at REAL DEFAULT 0"
+        )
+        conn.commit()
+    # Pre-V3.7 rows were terminally hidden after three failures. Restore them
+    # to the retry queue; M018 makes replay idempotent and no raw evidence may
+    # remain stranded solely because an older version exhausted its counter.
+    conn.execute(
+        "UPDATE pending_memories SET status='pending', next_retry_at=0 "
+        "WHERE status='failed'"
+    )
+    conn.commit()
     return conn
 
 
@@ -96,8 +115,9 @@ def get_pending(base_dir: Path | None = None, limit: int = 50) -> list[dict]:
         rows = conn.execute(
             "SELECT id, content, tags, metadata, created_at, retry_count "
             "FROM pending_memories WHERE status = 'pending' "
+            "AND COALESCE(next_retry_at, 0) <= ? "
             "ORDER BY id ASC LIMIT ?",
-            (limit,),
+            (time.time(), limit),
         ).fetchall()
         return [
             {"id": r[0], "content": r[1], "tags": r[2], "metadata": r[3],
@@ -124,20 +144,29 @@ def mark_done(row_id: int, base_dir: Path | None = None) -> None:
 def mark_failed(row_id: int, error: str, base_dir: Path | None = None) -> None:
     """Mark a pending memory as failed with error message.
 
-    v3.4.38: Now retry-aware. If retry_count < _MAX_RETRIES, keeps status as
-    'pending' so the materializer will retry on next iteration. Only marks
-    permanently failed after _MAX_RETRIES (3) attempts. The previous behavior
-    permanently lost 18 memories between April 15-26, 2026 to transient errors.
+    Unprocessed evidence is never deleted or terminally hidden. Failures stay
+    pending with bounded exponential backoff; M018 idempotency makes repeated
+    replay safe once the canonical operation has been created.
     """
     conn = _get_db(base_dir)
     try:
-        # Increment retry count and conditionally update status
+        row = conn.execute(
+            "SELECT retry_count FROM pending_memories WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        if row is None:
+            return
+        next_count = int(row[0] or 0) + 1
+        delay = 0 if next_count == 1 else min(
+            2 ** min(next_count - 1, 12),
+            _MAX_RETRY_DELAY_SECONDS,
+        )
         conn.execute(
             "UPDATE pending_memories SET error = ?, "
             "retry_count = retry_count + 1, "
-            "status = CASE WHEN retry_count + 1 >= ? THEN 'failed' ELSE 'pending' END "
+            "status = 'pending', next_retry_at = ? "
             "WHERE id = ?",
-            (error, _MAX_RETRIES, row_id),
+            (error, time.time() + delay, row_id),
         )
         conn.commit()
     finally:
@@ -179,11 +208,8 @@ def cleanup_done(days: int = 7, base_dir: Path | None = None) -> int:
 def cleanup_stale(base_dir: Path | None = None) -> dict[str, int]:
     """Sweep stale rows from pending.db. Runs periodically from the daemon.
 
-    Removes:
-    - `done` rows older than 7 days (already processed)
-    - `failed` rows that exceeded max retries (moved to dead-letter via deletion)
-    - `pending` rows stuck more than 7 days (test pollution, crashed workers)
-    - Everything older than 30 days regardless of status (hard cap)
+    Deletes only completed receipts. Pending and failed raw evidence is retained
+    regardless of age so maintenance can never become a data-loss path.
     """
     conn = _get_db(base_dir)
     try:
@@ -192,28 +218,18 @@ def cleanup_stale(base_dir: Path | None = None) -> dict[str, int]:
             "AND created_at < datetime('now', ?)",
             (f"-{_STUCK_DAYS} days",),
         ).rowcount
-        failed = conn.execute(
-            "DELETE FROM pending_memories WHERE status = 'failed' "
-            "AND retry_count >= ?",
-            (_MAX_RETRIES,),
-        ).rowcount
-        stuck = conn.execute(
-            "DELETE FROM pending_memories WHERE status = 'pending' "
-            "AND created_at < datetime('now', ?)",
-            (f"-{_STUCK_DAYS} days",),
-        ).rowcount
-        hard_cap = conn.execute(
-            "DELETE FROM pending_memories "
-            "WHERE created_at < datetime('now', ?)",
-            (f"-{_DEAD_LETTER_DAYS} days",),
-        ).rowcount
+        retained = conn.execute(
+            "SELECT COUNT(*) FROM pending_memories "
+            "WHERE status != 'done'"
+        ).fetchone()[0]
         conn.commit()
         return {
             "done": done,
-            "failed_over_retries": failed,
-            "stuck_pending": stuck,
-            "hard_cap_expired": hard_cap,
-            "total": done + failed + stuck + hard_cap,
+            "failed_over_retries": 0,
+            "stuck_pending": 0,
+            "hard_cap_expired": 0,
+            "retained_unprocessed": int(retained),
+            "total": done,
         }
     finally:
         conn.close()

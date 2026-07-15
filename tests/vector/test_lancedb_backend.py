@@ -6,27 +6,28 @@
 
 from __future__ import annotations
 
+import importlib.util
 import numpy as np
 import pytest
 import shutil
 
-from superlocalmemory.vector.lancedb_backend import (
-    LanceDBVectorBackend,
-    _LANCEDB_AVAILABLE,
-)
-
 # LanceDB is an optional backend (pip install superlocalmemory[lancedb]). When
 # it is absent these tests cannot run — skip cleanly instead of erroring at
 # fixture setup, so the suite stays honestly green on installs without it.
-pytestmark = pytest.mark.skipif(
-    not _LANCEDB_AVAILABLE,
-    reason="LanceDB optional dependency not installed (pip install superlocalmemory[lancedb])",
-)
+pytestmark = [
+    pytest.mark.native,
+    pytest.mark.skipif(
+        importlib.util.find_spec("lancedb") is None,
+        reason="LanceDB optional dependency not installed (pip install superlocalmemory[lancedb])",
+    ),
+]
 
 
 @pytest.fixture
 def backend():
     """Create temporary LanceDB backend."""
+    from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
+
     path = "/tmp/test_lancedb_backend"
     be = LanceDBVectorBackend(path)
     yield be
@@ -51,9 +52,14 @@ def _make_vec(seed: float = 0.5) -> list[float]:
 
 class TestLifecycle:
     def test_open_and_close(self):
+        from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
+
         be = LanceDBVectorBackend("/tmp/test_lance_lifecycle")
         health = be.health_check()
         assert health["status"] == "active"
+        be.close()
+        assert be._table is None
+        assert be._db is None
         shutil.rmtree("/tmp/test_lance_lifecycle", ignore_errors=True)
 
     def test_empty_backend_returns_zero(self, backend):

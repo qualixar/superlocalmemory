@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from superlocalmemory.hooks.adapter_base import (
     COPILOT_SOFT_BYTES,
     HARD_BYTES_CAP,
 )
 from superlocalmemory.hooks.copilot_adapter import (
-    CopilotAdapter,
     TARGET_REL,
+    CopilotAdapter,
     render_copilot,
 )
 
@@ -22,7 +20,7 @@ def _setup(tmp_path: Path, *, with_github: bool, recall=None) -> CopilotAdapter:
         (tmp_path / ".github").mkdir()
     return CopilotAdapter(
         base_dir=tmp_path, sync_log_db=tmp_path / "memory.db",
-        recall_fn=recall or (lambda q, l, p: []),
+        recall_fn=recall or (lambda query, limit, profile: []),
     )
 
 
@@ -32,7 +30,7 @@ def test_writes_to_github_copilot_instructions_md(tmp_path, fake_recall):
     path = tmp_path / TARGET_REL
     assert path.exists()
     content = path.read_text()
-    assert "# SLM Active Brain Context" in content
+    assert "# SLM Runtime Memory Protocol" in content
     assert content.startswith("<!-- SLM-START -->")
 
 

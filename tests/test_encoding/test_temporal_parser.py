@@ -210,6 +210,20 @@ class TestBuildTemporalEvent:
         assert event.observation_date == "2026-03-10"
         assert event.referenced_date == "2026-02-15"
 
+    def test_event_inherits_fact_scope_authorization(self) -> None:
+        parser = TemporalParser()
+        fact = AtomicFact(
+            fact_id="f-global", content="Launch on 2026-03-11",
+            profile_id="publisher", scope="shared",
+            shared_with=["requester"],
+        )
+
+        event = parser.build_temporal_event(fact, None, "ent_launch")
+
+        assert event is not None
+        assert event.scope == "shared"
+        assert event.shared_with == ["requester"]
+
 
 # ---------------------------------------------------------------------------
 # build_entity_timeline

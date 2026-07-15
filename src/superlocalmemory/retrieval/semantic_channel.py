@@ -13,7 +13,7 @@ where all variances are identical, Fisher distance degenerates to a
 monotonic transform of Euclidean distance — same ranking as cosine.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -162,6 +162,36 @@ class SemanticChannel:
             knn_results = self._vector_store.search(
                 query_embedding, top_k=top_k * 2, profile_id=profile_id,
             )
+
+        # The vector index is partitioned by owner profile. An opted-in global
+        # or authorized shared fact owned by another profile cannot enter the
+        # local KNN candidate set, so merge the bounded cross-profile visible
+        # supplement using the same canonical DB scope predicate as fallback.
+        include_global = bool(getattr(self, "include_global", False))
+        include_shared = bool(getattr(self, "include_shared", False))
+        external_facts = self._db.get_external_visible_facts(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        external_scores: list[tuple[str, float]] = []
+        for fact in external_facts:
+            if fact.embedding is None:
+                continue
+            fact_vec = np.array(fact.embedding, dtype=np.float32)
+            if fact_vec.shape != q_vec.shape:
+                continue
+            score = (_cosine_similarity(q_vec, fact_vec) + 1.0) / 2.0
+            if score > 0.05:
+                external_scores.append((fact.fact_id, score))
+
+        if external_scores:
+            combined = {fid: score for fid, score in knn_results}
+            for fact_id, score in external_scores:
+                combined[fact_id] = max(combined.get(fact_id, 0.0), score)
+            knn_results = sorted(
+                combined.items(), key=lambda item: item[1], reverse=True,
+            )[:top_k * 2]
         if not knn_results:
             return []  # Caller falls through to full scan
 

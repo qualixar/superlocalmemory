@@ -34,7 +34,7 @@ References:
   TurboQuant (ICLR 2026). Recursive polar quantization.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 IP Novelty: 92% (no prior art for retention-gated consolidation + polar quantization)
 """
 

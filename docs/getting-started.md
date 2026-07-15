@@ -17,9 +17,9 @@ Get your AI's memory system running in under 5 minutes. **V3.1: Now with Active 
 Anthropic's free Claude Memory (March 2026) and Claude Code's Auto-Memory
 are fine defaults. SLM earns the daemon in three places:
 
-- **Local-only by default.** Your memory never leaves your laptop — no
-  cloud sync, no vendor lock-in. (Opt-in skill evolution is the only
-  outbound path, and it is off by default.)
+- **Local core path by default.** Core memory state uses the configured local
+  data root. Optional providers, connectors, backup, model downloads, and
+  skill evolution have separate network behavior and must be enabled or configured.
 - **Shared across tools, not just one chat.** One memory, consumed by
   Claude Code + Cursor + Antigravity + VS Code + Claude Desktop —
   anything that speaks MCP.
@@ -68,7 +68,7 @@ slm setup
 The wizard walks you through three choices:
 
 1. **Pick your mode**
-   - **Mode A** (default) — Zero cloud. All memory stays on your machine. No API key needed.
+   - **Mode A** (default) — Local core memory path. Optional downloads, connectors, backups, and explicitly enabled integrations can use the network.
    - **Mode B** — Local LLM. Uses Ollama on your machine for smarter recall.
    - **Mode C** — Cloud LLM. Uses OpenAI, Anthropic, or another provider for maximum power.
 
@@ -81,14 +81,17 @@ The wizard walks you through three choices:
 ## Store Your First Memory
 
 ```bash
-slm remember "The project uses PostgreSQL 16 on port 5433, not the default 5432"
+slm remember "The project uses PostgreSQL 16 on port 5433, not the default 5432" --json
 ```
 
 You should see:
 
 ```
-Stored memory #1 (Mode A, profile: default)
+{"success":true,"command":"remember","data":{"operation_id":"<opaque-operation-id>","materialization_state":"queryable","fact_ids":["<queryable-fact-id>"],"note":"queryable now; canonical enrichment pending"}}
 ```
+
+The exact identifiers differ on every installation. Use `--sync` if your next
+step requires `complete` rather than the default queryable-first receipt.
 
 ## Recall a Memory
 

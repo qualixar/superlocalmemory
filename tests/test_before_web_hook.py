@@ -183,7 +183,7 @@ class TestMain:
         assert rc == 0
         assert "PRE-WEB RECALL" in out
         assert "MEMORY LINE 1" in out
-        assert "MEMORY CONTEXT" in out  # v3.4.65: softened boundary marker
+        assert "UNTRUSTED SLM EVIDENCE v1" in out
 
     def test_query_preview_in_reminder(self, capsys):
         recalled = "X" * 500

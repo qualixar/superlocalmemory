@@ -25,6 +25,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import state_path
+
 
 _ALLOWED_DAEMON_HOSTS: frozenset[str] = frozenset({
     "127.0.0.1", "localhost", "::1", "[::1]",
@@ -43,7 +45,7 @@ def _port_file_url() -> str:
     """
     port = _DEFAULT_DAEMON_PORT
     try:
-        port = int((Path.home() / ".superlocalmemory" / "daemon.port").read_text().strip())
+        port = int(state_path("daemon.port").read_text().strip())
     except Exception:
         pass
     return f"http://127.0.0.1:{port}"
@@ -86,7 +88,7 @@ _OUTPUT_CAP: int = 4000
 
 def _install_token() -> str:
     """Read the install token. Returns '' on any problem."""
-    path = Path.home() / ".superlocalmemory" / ".install_token"
+    path = state_path(".install_token")
     if not path.exists():
         return ""
     try:

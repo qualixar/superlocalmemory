@@ -110,7 +110,9 @@ def kill_process(pid: int) -> bool:
         return False
 
 
-def start_parent_watchdog() -> None:
+def start_parent_watchdog(
+    *, stop_event: threading.Event | None = None,
+) -> threading.Thread | None:
     """Self-terminate when the parent process dies.
 
     Prevents orphaned workers (500+ MB each) after parent crash/kill.
@@ -124,12 +126,13 @@ def start_parent_watchdog() -> None:
     if parent_pid <= 1:
         return
 
+    stop = stop_event or threading.Event()
+
     def _watch() -> None:
-        import time
-        while True:
-            time.sleep(5)
+        while not stop.wait(5):
             if not is_pid_alive(parent_pid):
                 os._exit(0)
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()
+    return t

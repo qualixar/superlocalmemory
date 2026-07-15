@@ -30,11 +30,9 @@ _ENV_NAME = "SLM_DISABLE"
 
 
 def _slm_home() -> Path:
-    """Return the SLM state directory. Override via ``SLM_HOME`` env."""
-    override = os.environ.get("SLM_HOME")
-    if override:
-        return Path(override)
-    return Path.home() / ".superlocalmemory"
+    """Return the canonical SLM runtime-state directory."""
+    from superlocalmemory.infra.data_root import canonical_data_root
+    return canonical_data_root()
 
 
 def marker_path() -> Path:

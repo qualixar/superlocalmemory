@@ -2,7 +2,7 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SuperLocalMemory is designed for organizations that need to meet data protection and privacy regulations. Mode A satisfies the strictest requirements by keeping all data local.
+SuperLocalMemory exposes local storage, erasure, export, provenance, retention, access-policy, and audit controls. These controls can support a compliance program, but the software does not certify a deployment or replace legal and security review.
 
 ---
 
@@ -10,20 +10,20 @@ SuperLocalMemory is designed for organizations that need to meet data protection
 
 The EU AI Act (Regulation 2024/1689) establishes requirements for AI systems operating in the European Union.
 
-### Mode A: Full Compliance by Architecture
+### Mode A: local core processing
 
-In Mode A, SuperLocalMemory operates as a local data retrieval system with zero cloud dependency:
+In Mode A, core storage and retrieval can run without sending memory content to a cloud model provider. Optional model and dependency downloads, connectors, cloud backup, proxies, and other enabled integrations may still use the network.
 
-| Requirement | How Mode A satisfies it |
-|-------------|------------------------|
-| **Data sovereignty** | All data stored and processed locally. Nothing leaves the device. |
-| **Right to erasure** | `slm forget` deletes data from the local database. No cloud logs exist to purge. |
-| **Transparency** | The retrieval pipeline is fully auditable. No black-box AI decisions. |
-| **Risk classification** | A local retrieval system with no autonomous decision-making qualifies as minimal risk. |
+| Control area | Available technical control | Operator responsibility |
+|--------------|-----------------------------|-------------------------|
+| **Data location** | Configurable local data root for core memory state | Review optional networked features and operating-system access |
+| **Erasure** | `slm forget`, profile deletion, and local export tooling | Include backups, exports, caches, indexes, and provider records in the deletion plan |
+| **Transparency** | Local audit and provenance records | Validate coverage and retention for the released version |
+| **Risk assessment** | Local modes reduce some external data flows | Classify the actual use case and surrounding AI system |
 
-### Mode B: Full Compliance
+### Mode B: local model enrichment
 
-Mode B uses a local LLM (Ollama). Data never leaves the device. Same compliance posture as Mode A.
+Mode B uses an operator-managed Ollama endpoint. Its data path depends on where that endpoint runs and which optional integrations are enabled.
 
 ### Mode C: Shared Responsibility
 
@@ -52,7 +52,7 @@ slm forget --before "2025-01-01"
 slm profile delete client-eu
 ```
 
-Deletion is permanent. In Mode A, there are no cloud copies to worry about.
+Deletion removes the selected local records. Operators must separately account for configured backups, exports, caches, derived indexes, snapshots, and any provider-side records.
 
 ### Data Portability (Article 20)
 
@@ -65,11 +65,14 @@ slm profile export work > work-data.json
 
 ### Data Minimization (Article 5)
 
-The entropy gate in the ingestion pipeline filters out redundant and low-value information automatically. Only memories with sufficient information value are stored.
+Automatic observations are admitted by explicit capture rules. Once accepted,
+raw evidence and a queryable projection can be durable before enrichment runs;
+entropy and consolidation behavior therefore cannot be described as an
+unconditional pre-storage data-minimization guarantee.
 
 ### Purpose Limitation
 
-Profiles enforce purpose limitation. Client A's data is stored in Client A's profile and is never accessible from another profile.
+Profiles are intended to scope data by purpose. Treat them as a product-level policy boundary, not a substitute for operating-system or tenant isolation, until the release's cross-scope security matrix is verified.
 
 ## Retention Policies
 
@@ -152,9 +155,9 @@ This checks the hash chain for tampering. Each entry contains a hash of the prev
 
 ## HIPAA
 
-For healthcare applications:
+For healthcare evaluations, validate the complete deployment with qualified legal and security reviewers. A starting technical checklist is:
 
-1. Use Mode A (zero cloud) to ensure PHI never leaves the device
+1. Inventory and restrict every configured network and backup path
 2. Apply the `hipaa-7y` retention policy
 3. Use per-patient or per-case profiles for isolation
 4. Enable audit trail verification for compliance audits
@@ -179,7 +182,7 @@ SuperLocalMemory supports SOC 2 requirements through:
 | Requirement | Mode A | Mode B | Mode C |
 |-------------|:------:|:------:|:------:|
 | Data stays on device | Yes | Yes | Partial (queries sent to cloud) |
-| No cloud dependency | Yes | Yes | No |
+| Core path without cloud model provider | Available | Available with local Ollama | No |
 | Right to erasure | Yes | Yes | Yes (local); cloud logs depend on provider |
 | Audit trail | Yes | Yes | Yes |
 | Retention policies | Yes | Yes | Yes |

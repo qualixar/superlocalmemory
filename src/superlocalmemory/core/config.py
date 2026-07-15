@@ -16,9 +16,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 from superlocalmemory.storage.models import Mode
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -35,12 +36,17 @@ CANONICAL_RECALL_LIMIT: int = 20
 # Default Paths
 # ---------------------------------------------------------------------------
 
-DEFAULT_BASE_DIR = Path.home() / ".superlocalmemory"
+DEFAULT_BASE_DIR = DynamicStatePath()
 DEFAULT_DB_NAME = "memory.db"
 DEFAULT_PROFILES_FILE = "profiles.json"
 CURRENT_MODE_FILE = "current_mode"
 # Populated lazily in _get_mode_config_path() to avoid circular imports
 _MODE_CONFIG_NAMES: dict | None = None
+
+
+def _runtime_base_dir() -> Path:
+    """Resolve the process namespace when a config root is not explicit."""
+    return canonical_data_root()
 
 
 # ---------------------------------------------------------------------------
@@ -768,7 +774,7 @@ class SLMConfig:
     """
 
     mode: Mode = Mode.A
-    base_dir: Path = DEFAULT_BASE_DIR
+    base_dir: Path = field(default_factory=_runtime_base_dir)
     db_path: Path | None = None    # Computed from base_dir if None
     active_profile: str = "default"
 
@@ -824,16 +830,22 @@ class SLMConfig:
     @classmethod
     def load(cls, config_path: Path | None = None) -> SLMConfig:
         """Load config from JSON file. Returns default Mode A if file doesn't exist."""
-        # WP-07: resolve base dir through slm_home() at call time so all 3 env
-        # aliases (SLM_DATA_DIR → SL_MEMORY_PATH → SLM_HOME) are honoured.
+        # V3.7: process namespace selection is authoritative. A persisted
+        # base_dir may bootstrap a legacy custom root only when no environment
+        # alias selected the process namespace.
         try:
-            from superlocalmemory.cli._lazy_init import slm_home as _slm_home
-            _runtime_base = _slm_home()
+            from superlocalmemory.infra.data_root import (
+                canonical_data_root,
+                environment_data_root,
+            )
+            _environment_base = environment_data_root()
+            _runtime_base = canonical_data_root()
         except Exception:
+            _environment_base = None
             _runtime_base = DEFAULT_BASE_DIR
         path = config_path or (_runtime_base / "config.json")
         if not path.exists():
-            return cls.for_mode(Mode.A)
+            return cls.for_mode(Mode.A, base_dir=_runtime_base)
         import json
         try:
             data = json.loads(path.read_text())
@@ -843,13 +855,21 @@ class SLMConfig:
             logger.warning(
                 "config.json unreadable/corrupt (%s) — using Mode A default", exc
             )
-            return cls.for_mode(Mode.A)
+            return cls.for_mode(Mode.A, base_dir=_runtime_base)
         mode = Mode(data.get("mode", "a"))
         llm_data = data.get("llm", {})
         emb_data = data.get("embedding", {})
         # V3.5.9: read base_dir before constructing config so for_mode() builds
         # db_path from the user's directory, not DEFAULT_BASE_DIR.
-        raw_base_dir = Path(data.get("base_dir", str(_runtime_base)))
+        if _environment_base is not None:
+            raw_base_dir = _environment_base
+        else:
+            try:
+                raw_base_dir = canonical_data_root(
+                    configured_base_dir=data.get("base_dir", _runtime_base),
+                )
+            except Exception:
+                raw_base_dir = _runtime_base
         config = cls.for_mode(
             mode,
             llm_provider=llm_data.get("provider", ""),

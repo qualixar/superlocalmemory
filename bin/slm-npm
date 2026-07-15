@@ -1,103 +1,57 @@
 #!/usr/bin/env node
 /**
- * SuperLocalMemory V3 - NPM Global CLI Wrapper
+ * SuperLocalMemory V3 - NPM CLI wrapper.
+ *
+ * Executes only the Python interpreter installed into this npm package's
+ * private virtual environment. The Python runtime owns canonical data-root
+ * precedence (SLM_DATA_DIR, SL_MEMORY_PATH, SLM_HOME); this wrapper passes the
+ * environment through and performs no durable-data writes.
  *
  * Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
- * Licensed under MIT License (see LICENSE file)
- * Repository: https://github.com/qualixar/superlocalmemory
+ * Licensed under AGPL-3.0-or-later.
  */
+
+'use strict';
 
 const { spawnSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
-// V3 package root (where src/superlocalmemory/ lives)
-const PKG_ROOT = path.join(__dirname, '..');
-const SRC_DIR = path.join(PKG_ROOT, 'src');
-const CLI_MODULE = 'superlocalmemory.cli.main';
+const packageRoot = path.resolve(__dirname, '..');
+const runtimePython = os.platform() === 'win32'
+  ? path.join(packageRoot, '.slm-venv', 'Scripts', 'python.exe')
+  : path.join(packageRoot, '.slm-venv', 'bin', 'python');
 
-// Find Python 3 binary (robust multi-fallback detection)
-function findPython() {
-    const candidates = [
-        'python3',
-        'python',
-        '/opt/homebrew/bin/python3',
-        '/usr/local/bin/python3',
-        '/usr/bin/python3',
-    ];
-
-    // On Windows, also check common locations
-    if (os.platform() === 'win32') {
-        candidates.push(
-            'py -3',
-            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
-            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
-        );
-    }
-
-    for (const candidate of candidates) {
-        try {
-            const parts = candidate.split(' ');
-            const result = spawnSync(parts[0], [...parts.slice(1), '--version'], {
-                stdio: 'pipe',
-                timeout: 5000,
-            });
-            if (result.status === 0) {
-                const version = (result.stdout || '').toString().trim();
-                if (version.includes('3.')) {
-                    return candidate;
-                }
-            }
-        } catch (e) {
-            // Try next candidate
-        }
-    }
-    return null;
+if (!fs.existsSync(runtimePython)) {
+  console.error('SuperLocalMemory npm runtime is missing or incomplete.');
+  console.error(`Expected the package-owned interpreter at: ${runtimePython}`);
+  console.error('Repair it without touching system Python by running:');
+  console.error('  npm rebuild superlocalmemory');
+  console.error('If Python is missing, install Python 3.11-3.14 first.');
+  process.exit(1);
 }
 
-// Ensure ~/.superlocalmemory/ exists
-const SLM_HOME = process.env.SL_MEMORY_PATH || path.join(os.homedir(), '.superlocalmemory');
-if (!fs.existsSync(SLM_HOME)) {
-    fs.mkdirSync(SLM_HOME, { recursive: true });
+const runtimeEnv = {
+  ...process.env,
+  PYTORCH_MPS_HIGH_WATERMARK_RATIO: '0.0',
+  PYTORCH_MPS_MEM_LIMIT: '0',
+  PYTORCH_ENABLE_MPS_FALLBACK: '1',
+  TOKENIZERS_PARALLELISM: 'false',
+  TORCH_DEVICE: 'cpu',
+  CUDA_VISIBLE_DEVICES: '',
+};
+// Never let a caller's development checkout override the npm artifact.
+delete runtimeEnv.PYTHONPATH;
+
+const result = spawnSync(
+  runtimePython,
+  ['-m', 'superlocalmemory.cli.main', ...process.argv.slice(2)],
+  { stdio: 'inherit', env: runtimeEnv },
+);
+
+if (result.error) {
+  console.error(`SuperLocalMemory runtime failed to start: ${result.error.message}`);
+  process.exit(1);
 }
-
-// Find Python
-const python = findPython();
-if (!python) {
-    console.error('Error: Python 3.11+ not found.');
-    console.error('Install Python from https://python.org/downloads/');
-    process.exit(1);
-}
-
-// Handle --version directly from package.json (Python importlib.metadata
-// fails when running via PYTHONPATH instead of pip install)
-const args = process.argv.slice(2);
-if (args.includes('--version') || args.includes('-v')) {
-    const pkg = require(path.join(PKG_ROOT, 'package.json'));
-    console.log(`superlocalmemory ${pkg.version}`);
-    process.exit(0);
-}
-
-// Launch V3 CLI via Python module
-const pythonParts = python.split(' ');
-const result = spawnSync(pythonParts[0], [
-    ...pythonParts.slice(1),
-    '-m', CLI_MODULE, ...args
-], {
-    stdio: 'inherit',
-    env: {
-        ...process.env,
-        PYTHONPATH: SRC_DIR + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : ''),
-        // Prevent PyTorch Metal/MPS GPU memory reservation on Apple Silicon.
-        // Without these, macOS Activity Monitor shows 3-6 GB for a 40 MB process.
-        PYTORCH_MPS_HIGH_WATERMARK_RATIO: '0.0',
-        PYTORCH_MPS_MEM_LIMIT: '0',
-        PYTORCH_ENABLE_MPS_FALLBACK: '1',
-        TOKENIZERS_PARALLELISM: 'false',
-        TORCH_DEVICE: 'cpu',
-        CUDA_VISIBLE_DEVICES: '',
-    },
-});
-
-process.exit(result.status || 0);
+process.exit(Number.isInteger(result.status) ? result.status : 1);

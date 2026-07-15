@@ -14,7 +14,7 @@ Severity = ||delta_0 f(e)|| / (||R_a emb_a|| + ||R_b emb_b||).
 Refs: Curry 2014 (arXiv:1303.3255), Hansen & Ghrist 2019, Robinson 2020.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

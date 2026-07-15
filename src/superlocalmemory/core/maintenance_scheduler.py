@@ -11,7 +11,7 @@ Configurable interval via ForgettingConfig.scheduler_interval_minutes.
 Defaults to 30 min. Disabled during benchmarks (no config.forgetting.enabled).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

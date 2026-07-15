@@ -136,8 +136,7 @@ def test_apply_all_on_fresh_db_applies_all(fresh_dbs: tuple[Path, Path]) -> None
     stats = mr.apply_all(learning_db, memory_db)
     assert stats["applied"]
     assert stats["failed"] == [] or stats["failed"] == 0 or not stats["failed"]
-    # 8 migrations in MIGRATIONS: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(stats["applied"]) == 9
+    assert len(stats["applied"]) == len(mr.MIGRATIONS)
     # migration_log should contain each as complete.
     log_learning = _log_rows(learning_db)
     log_memory = _log_rows(memory_db)
@@ -199,11 +198,10 @@ def test_apply_all_idempotent(fresh_dbs: tuple[Path, Path]) -> None:
     learning_db, memory_db = fresh_dbs
     first = mr.apply_all(learning_db, memory_db)
     second = mr.apply_all(learning_db, memory_db)
-    # 8 migrations: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(first["applied"]) == 9
+    assert len(first["applied"]) == len(mr.MIGRATIONS)
     # Second pass: everything skipped.
     assert len(second["applied"]) == 0
-    assert len(second["skipped"]) == 9
+    assert len(second["skipped"]) == len(mr.MIGRATIONS)
 
 
 def test_apply_all_preserves_model_state_rows(
@@ -731,3 +729,74 @@ def test_all_migrations_idempotent_on_second_run(
         assert name in stats2["skipped"]
     for name in ("M006_action_outcomes_reward", "M011_archive_and_merge"):
         assert name in stats2d["skipped"]
+
+
+# ---------------------------------------------------------------------------
+# V3.7 P0-014 — M017 CCQ scope migration runner registration
+# ---------------------------------------------------------------------------
+
+
+def _create_runtime_schema(memory_db: Path) -> None:
+    """Create the post-engine-bootstrap tables required by deferred migrations."""
+    from superlocalmemory.storage import schema
+
+    with sqlite3.connect(memory_db) as conn:
+        schema.create_all_tables(conn)
+
+
+def test_apply_deferred_registers_m017() -> None:
+    """The shipped M017 module must be scheduled, not left as dead code."""
+    from superlocalmemory.storage.migrations import M017_ccq_scope_column as m017
+
+    names = [migration.name for migration in mr.DEFERRED_MIGRATIONS]
+
+    assert "M017_ccq_scope_column" in names
+    assert mr._MODULES["M017_ccq_scope_column"] is m017
+
+
+def test_apply_deferred_applies_m017_to_fresh_runtime_schema(
+    tmp_path: Path,
+) -> None:
+    """A fresh engine schema gains the CCQ scope column and both indexes."""
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    _create_runtime_schema(memory_db)
+
+    mr.apply_all(learning_db, memory_db)
+    stats = mr.apply_deferred(learning_db, memory_db)
+
+    assert "M017_ccq_scope_column" in stats["applied"]
+    assert "scope" in _table_cols(memory_db, "ccq_consolidated_blocks")
+    indexes = _index_names(memory_db)
+    assert "idx_ccq_consolidated_blocks_scope" in indexes
+    assert "idx_ccq_consolidated_blocks_profile_scope" in indexes
+    assert mr.status(learning_db, memory_db)["M017_ccq_scope_column"] == "complete"
+
+
+def test_apply_deferred_m017_upgrade_preserves_rows_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    """An existing pre-M017 CCQ row survives upgrade; repeat apply is a no-op."""
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    _create_runtime_schema(memory_db)
+    with sqlite3.connect(memory_db) as conn:
+        conn.execute(
+            "INSERT INTO ccq_consolidated_blocks "
+            "(block_id, profile_id, content, cluster_id) VALUES (?, ?, ?, ?)",
+            ("ccq_legacy", "default", "legacy consolidated memory", "cluster_1"),
+        )
+
+    mr.apply_all(learning_db, memory_db)
+    first = mr.apply_deferred(learning_db, memory_db)
+    second = mr.apply_deferred(learning_db, memory_db)
+
+    assert "M017_ccq_scope_column" in first["applied"]
+    assert "M017_ccq_scope_column" in second["skipped"]
+    assert "M017_ccq_scope_column" not in second["failed"]
+    with sqlite3.connect(memory_db) as conn:
+        row = conn.execute(
+            "SELECT content, scope FROM ccq_consolidated_blocks "
+            "WHERE block_id = 'ccq_legacy'"
+        ).fetchone()
+    assert row == ("legacy consolidated memory", "personal")

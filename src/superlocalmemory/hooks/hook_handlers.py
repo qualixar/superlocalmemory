@@ -2,10 +2,10 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Claude Code hook handlers — zero-dependency, cross-platform.
+"""Claude Code hook handlers — minimal-dependency, cross-platform.
 
-All handlers use ONLY Python stdlib (sys, os, json, tempfile, subprocess, time).
-No SLM imports in the hot path. Called via:  slm hook <start|gate|init-done|checkpoint|stop>
+Handlers use Python stdlib plus the stdlib-only canonical data-root resolver.
+Called via: ``slm hook <start|gate|init-done|checkpoint|stop>``.
 
 The main() entry point in cli/main.py has a fast path that dispatches here
 BEFORE argparse or any heavy imports.
@@ -15,25 +15,60 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 # ---------------------------------------------------------------------------
 # Cross-platform temp paths
 # ---------------------------------------------------------------------------
 _TMP = tempfile.gettempdir()
-_MARKER = os.path.join(_TMP, "slm-session-initialized")
-_START_TIME = os.path.join(_TMP, "slm-session-start-time")
-_ACTIVITY_LOG = os.path.join(_TMP, "slm-session-activity")
-_LAST_CONSOLIDATION = os.path.join(
-    os.path.expanduser("~"), ".superlocalmemory", ".last-consolidation",
+
+
+def _root_namespace() -> str:
+    """Return the same bounded root identity used by installed gate hooks."""
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return hashlib.sha256(
+        str(canonical_data_root()).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+class _RootNamespacedTempPath(os.PathLike[str]):
+    """A path-like value that follows environment root switches at use time."""
+
+    def __init__(self, stem: str) -> None:
+        self._stem = stem
+
+    def __fspath__(self) -> str:
+        return os.path.join(_TMP, f"{self._stem}-{_root_namespace()}")
+
+    def __str__(self) -> str:
+        return self.__fspath__()
+
+
+_MARKER: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-initialized"
 )
+_START_TIME: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-start-time"
+)
+_ACTIVITY_LOG: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-activity"
+)
+_LAST_CONSOLIDATION = None  # test-only override; runtime resolution is dynamic
+
+
+def _last_consolidation_path() -> str:
+    from superlocalmemory.infra.data_root import state_path
+
+    return str(_LAST_CONSOLIDATION or state_path(".last-consolidation"))
 
 
 _DEFAULT_DAEMON_PORT = 8765
@@ -47,13 +82,14 @@ def _daemon_url() -> str:
     at startup. Reading it here keeps lifecycle hooks pointed at the
     caller's own daemon instead of a hard-coded ``8765`` that may belong to
     another user's instance. Falls back to the default port when the file is
-    absent or unreadable. Stdlib only — no SLM imports in the hot path.
+    absent or unreadable. The imported root resolver is stdlib-only and does
+    not initialize the engine.
     """
     port = _DEFAULT_DAEMON_PORT
     try:
-        port_file = os.path.join(
-            os.path.expanduser("~"), ".superlocalmemory", "daemon.port",
-        )
+        from superlocalmemory.infra.data_root import state_path
+
+        port_file = state_path("daemon.port")
         with open(port_file) as fh:
             port = int(fh.read().strip())
     except Exception:
@@ -353,7 +389,14 @@ def _hook_checkpoint() -> None:
 
             # v3.4.13: Route through daemon HTTP (not subprocess) to prevent
             # memory blast from concurrent embedding_worker spawns.
-            _daemon_post("/observe", {"content": f"File changed: {basename}"})
+            _daemon_post("/remember", {
+                "content": f"File changed: {basename}",
+                "tags": "hook-file-change",
+                "idempotency_key": (
+                    f"hook-file-change:{_safe_hash(file_path)}:"
+                    f"{now // max(_OBSERVE_COOLDOWN, 1)}"
+                ),
+            })
 
             # Log to session activity
             try:
@@ -457,14 +500,20 @@ def _hook_stop() -> None:
         parts.append(f"files: {modified}")
 
     summary = " | ".join(parts)
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
 
     # --- Save to SLM (v3.4.13: daemon HTTP, not subprocess) ---
-    if not _daemon_post("/observe", {"content": summary}, timeout=5.0):
-        # Fallback: try /remember if observe failed
-        _daemon_post("/remember", {"content": summary, "tags": "session-end"}, timeout=5.0)
+    _daemon_post("/remember", {
+        "content": summary,
+        "tags": "session-end",
+        "session_id": session_id,
+        "idempotency_key": (
+            f"hook-session-end:{session_id}"
+            if session_id else f"hook-session-end:{_safe_hash(summary)}"
+        ),
+    }, timeout=5.0)
 
     # --- Post-session skill evolution trigger (best-effort, via tool-event) ---
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
     if session_id:
         _daemon_post("/api/v3/tool-event", {
             "tool_name": "session_end",
@@ -564,8 +613,9 @@ def _maybe_consolidate() -> None:
     """Run cognitive consolidation if last run was >24h ago. Non-blocking."""
     try:
         last_ts = 0
-        if os.path.exists(_LAST_CONSOLIDATION):
-            with open(_LAST_CONSOLIDATION) as f:
+        last_consolidation = _last_consolidation_path()
+        if os.path.exists(last_consolidation):
+            with open(last_consolidation) as f:
                 last_ts = int(f.read().strip())
 
         now = int(time.time())
@@ -573,8 +623,8 @@ def _maybe_consolidate() -> None:
             return
 
         # Update timestamp FIRST to prevent concurrent runs
-        os.makedirs(os.path.dirname(_LAST_CONSOLIDATION), exist_ok=True)
-        with open(_LAST_CONSOLIDATION, "w") as f:
+        os.makedirs(os.path.dirname(last_consolidation), exist_ok=True)
+        with open(last_consolidation, "w") as f:
             f.write(str(now))
 
         # Run consolidation in background (don't block session end)

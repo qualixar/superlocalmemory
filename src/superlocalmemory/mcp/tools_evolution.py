@@ -22,11 +22,9 @@ from pathlib import Path
 from typing import Callable
 
 from mcp.types import ToolAnnotations
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger(__name__)
-
-MEMORY_DB = Path.home() / ".superlocalmemory" / "memory.db"
-
 
 def register_evolution_tools(server, get_engine: Callable) -> None:
     """Register evolution MCP tools for skill evolution intelligence."""
@@ -49,7 +47,7 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
         """
         try:
             # Check if evolution is enabled in config
-            config_path = Path.home() / ".superlocalmemory" / "config.json"
+            config_path = state_path("config.json")
             evo_cfg = {}
             if config_path.exists():
                 with open(config_path) as f:
@@ -82,7 +80,7 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
             class _Cfg:
                 evolution = _EvoCfg()
 
-            db_path = str(MEMORY_DB)
+            db_path = str(state_path("memory.db"))
             evolver = SkillEvolver(db_path, _Cfg())
 
             # Build candidate from manual trigger
@@ -145,7 +143,7 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             profile_id = engine.profile_id if engine else "default"
-            db_path = str(MEMORY_DB)
+            db_path = str(state_path("memory.db"))
 
             conn = sqlite3.connect(db_path, timeout=10)
             conn.row_factory = sqlite3.Row
@@ -273,7 +271,7 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
             skill_name: Specific skill name (empty = all skills)
         """
         try:
-            db_path = str(MEMORY_DB)
+            db_path = str(state_path("memory.db"))
             conn = sqlite3.connect(db_path, timeout=10)
             conn.row_factory = sqlite3.Row
 

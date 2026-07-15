@@ -129,6 +129,8 @@ class TestRememberTool:
         assert call_args[0][0] == "important fact"
         assert call_args[1]["tags"] == "python"
         assert call_args[1]["metadata"]["project"] == "slm"
+        assert call_args[1]["metadata"]["_slm_source_type"] == "mcp-offline"
+        assert call_args[1]["metadata"]["_slm_idempotency_key"].startswith("mcp:")
         assert result["success"] is True
         assert result["pending"] is True
         assert result["pending_id"] == 42

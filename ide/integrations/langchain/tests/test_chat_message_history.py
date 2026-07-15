@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
-"""SuperLocalMemory V2 - LangChain Chat Message History Tests
+"""SuperLocalMemory V3 - LangChain Chat Message History Tests
 
 Functional tests for SuperLocalMemoryChatMessageHistory.
 All tests use a temporary database -- the user's real memory is never touched.
 """
 import os
+import sqlite3
+import sys
 import tempfile
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
 from langchain_superlocalmemory import SuperLocalMemoryChatMessageHistory
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -176,6 +176,30 @@ def test_persistence_across_instances(tmp_db):
     msgs = h2.messages
     assert len(msgs) == 1
     assert msgs[0].content == "Persisted message"
+
+
+def test_explicit_database_uses_v3_canonical_ingestion_without_path_hacks(tmp_db):
+    """The installed adapter must write through V3 and never import from the data root."""
+    data_root = os.path.dirname(tmp_db)
+    before = list(sys.path)
+
+    h = SuperLocalMemoryChatMessageHistory(session_id="v3-contract", db_path=tmp_db)
+    h.add_messages([HumanMessage(content="Canonical V3 adapter message")])
+
+    assert sys.path == before
+    assert data_root not in sys.path
+    with sqlite3.connect(tmp_db) as conn:
+        operation = conn.execute(
+            "SELECT source_type, state FROM ingestion_operations"
+        ).fetchone()
+        memory = conn.execute(
+            "SELECT session_id FROM memories"
+        ).fetchone()
+    assert operation is not None
+    assert operation[0] == "python-api"
+    assert operation[1] in {"queryable", "complete", "failed"}
+    assert memory is not None
+    assert memory[0].startswith("langchain:")
 
 
 def test_unicode_content(tmp_db):

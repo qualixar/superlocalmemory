@@ -8,7 +8,7 @@ Classifies query type and returns per-type channel weights.
 V1 had this code (strategy_learner.py) but never wired it in.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

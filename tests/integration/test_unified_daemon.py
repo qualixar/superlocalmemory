@@ -161,19 +161,31 @@ class TestObserveBuffer:
     """Tests for debounce observation buffer."""
 
     def test_buffer_deduplicates(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
         from superlocalmemory.server.unified_daemon import ObserveBuffer
         buf = ObserveBuffer(debounce_sec=60)  # Long debounce so flush doesn't auto-fire
-        r1 = buf.enqueue("hello world")
-        r2 = buf.enqueue("hello world")  # Duplicate
-        assert r1["captured"] is True
+        buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
+        decision = SimpleNamespace(capture=False, category="none", confidence=0.0, reason="not matched")
+        with patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto:
+            auto.return_value.evaluate.return_value = decision
+            r1 = buf.enqueue("hello world")
+            r2 = buf.enqueue("hello world")  # Duplicate
+        assert r1["captured"] is False
+        assert r1["reason"] == "not matched"
         assert r2["captured"] is False
         assert r2["reason"] == "duplicate within debounce window"
 
     def test_buffer_accepts_different_content(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
         from superlocalmemory.server.unified_daemon import ObserveBuffer
         buf = ObserveBuffer(debounce_sec=60)
-        r1 = buf.enqueue("fact one")
-        r2 = buf.enqueue("fact two")
-        assert r1["captured"] is True
-        assert r2["captured"] is True
-        assert r2["buffer_size"] == 2
+        buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
+        decision = SimpleNamespace(capture=False, category="none", confidence=0.0, reason="not matched")
+        with patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto:
+            auto.return_value.evaluate.return_value = decision
+            r1 = buf.enqueue("fact one")
+            r2 = buf.enqueue("fact two")
+        assert r1["reason"] == "not matched"
+        assert r2["reason"] == "not matched"

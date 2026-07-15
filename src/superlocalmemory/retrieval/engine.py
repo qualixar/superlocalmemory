@@ -9,7 +9,7 @@ Channels: semantic, BM25, entity_graph, temporal, spreading_activation, hopfield
 Replaces V1's broken 10-channel triple-re-fusion pipeline.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 
@@ -24,7 +24,10 @@ from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.storage.models import (
-    AtomicFact, Mode, RecallResponse, RetrievalResult,
+    AtomicFact,
+    Mode,
+    RecallResponse,
+    RetrievalResult,
 )
 
 if TYPE_CHECKING:
@@ -50,7 +53,7 @@ class EmbeddingProvider(Protocol):
 
 
 class RetrievalEngine:
-    """6-channel retrieval: semantic + BM25 + entity_graph + temporal + spreading_activation + hopfield.
+    """Six-channel retrieval orchestrator.
 
     Usage::
         engine = RetrievalEngine(db, config, channels, embedder)
@@ -124,14 +127,14 @@ class RetrievalEngine:
         mode: Mode = Mode.A, limit: int = 20,
         *,
         extra_disabled_channels: set[str] | None = None,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
-        scopes participate in retrieval. Both default to True for backward
-        compatibility (existing data has scope='personal' — no effect).
+        scopes participate in retrieval. Both default to False so direct
+        retrieval-engine callers are private unless they explicitly opt in.
 
         V3.4.40 (2026-05-09): ``extra_disabled_channels`` allows callers to
         skip specific channels for a single recall (e.g. SpreadingActivation
@@ -218,10 +221,17 @@ class RetrievalEngine:
         fused_ids = {fr.fact_id for fr in fused}
         fused_scores = {fr.fact_id: fr.fused_score for fr in fused}
 
-        if self._bridge is not None and strat.query_type in ("multi_hop", "entity", "factual", "general"):
+        bridge_query_types = ("multi_hop", "entity", "factual", "general")
+        if self._bridge is not None and strat.query_type in bridge_query_types:
             try:
                 seed_ids = [fr.fact_id for fr in fused[:10]]
-                bridges = self._bridge.discover(seed_ids, profile_id, max_bridges=10)
+                bridges = self._bridge.discover(
+                    seed_ids,
+                    profile_id,
+                    max_bridges=10,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
                 for fid, score in bridges:
                     if fid not in fused_ids:
                         new_score = score * 0.8
@@ -268,7 +278,11 @@ class RetrievalEngine:
             try:
                 candidate_ids = [fr.fact_id for fr in fused[:100]]
                 eg_scores = self._entity.score_candidates(
-                    query, candidate_ids, profile_id,
+                    query,
+                    candidate_ids,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
                 )
                 if eg_scores:
                     boosted = []
@@ -314,16 +328,6 @@ class RetrievalEngine:
             top = self._apply_reranker(query, top, facts, alpha=ce_alpha)
         _em(f"rerank(ready={reranker_ready})")
 
-        # V3.4.11: Channel diversity — guarantee entity_graph results appear in
-        # the final output. Applied AFTER reranker so results can't be pushed out.
-        final_top = top[:effective_limit]
-        final_top = self._enforce_channel_diversity(
-            final_top, fused, ch_results, effective_limit,
-        )
-        # Reload facts for any newly injected results
-        if len(final_top) > len(top[:effective_limit]):
-            facts = self._load_facts(final_top, profile_id)
-
         # v3.6.6: Evidence floor — gate on per-channel scores (NOT fused/RRF score).
         # Nonsense queries fuse at 0.75-0.78 because RRF is rank-derived and
         # uncalibrated. The discriminator is EARNED CHANNEL EVIDENCE:
@@ -339,10 +343,29 @@ class RetrievalEngine:
         )
         if floor_enabled:
             min_sem = getattr(self._config, "min_semantic_evidence", 0.60)
-            final_top = self._apply_evidence_floor(final_top, facts, min_sem)
-            # Trim facts dict to match filtered final_top
-            filtered_ids = {fr.fact_id for fr in final_top}
-            facts = {fid: f for fid, f in facts.items() if fid in filtered_ids}
+            # Qualify the rerank pool BEFORE applying the caller's limit.  RRF
+            # can rank associative-only hits above an exact BM25 match; slicing
+            # first allowed those hits to occupy every output slot and then be
+            # removed by the floor, producing a false abstention even though a
+            # qualified candidate was immediately below the slice.
+            top = self._apply_evidence_floor(top, facts, min_sem)
+
+        # V3.4.11: Channel diversity — guarantee entity_graph results appear in
+        # the final output. Applied AFTER reranking and evidence qualification
+        # so an associative-only candidate cannot be reintroduced after the gate.
+        final_top = top[:effective_limit]
+        final_top = self._enforce_channel_diversity(
+            final_top, fused, ch_results, effective_limit,
+        )
+
+        # A channel-diversity promotion may come from outside the rerank pool.
+        # Load only when that happens; ordinary recalls reuse the existing map.
+        if any(fr.fact_id not in facts for fr in final_top):
+            facts.update(self._load_facts(final_top, profile_id))
+
+        # Trim facts to the selected, qualified result set.
+        selected_ids = {fr.fact_id for fr in final_top}
+        facts = {fid: f for fid, f in facts.items() if fid in selected_ids}
 
         # 6. Build response
         results = self._build_results(final_top, facts, strat)
@@ -648,7 +671,11 @@ class RetrievalEngine:
                     _safe_channel, "hopfield",
                     self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
                 )
-            if self._spreading_activation is not None and q_emb is not None and "spreading_activation" not in disabled:
+            if (
+                self._spreading_activation is not None
+                and q_emb is not None
+                and "spreading_activation" not in disabled
+            ):
                 futures["spreading_activation"] = executor.submit(
                     _safe_channel, "spreading_activation",
                     self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
@@ -688,8 +715,8 @@ class RetrievalEngine:
             return {}
         facts = self._db.get_facts_by_ids(
             needed, profile_id,
-            include_global=getattr(self, '_include_global', True),
-            include_shared=getattr(self, '_include_shared', True),
+            include_global=getattr(self, '_include_global', False),
+            include_shared=getattr(self, '_include_shared', False),
         )
         return {f.fact_id: f for f in facts}
 

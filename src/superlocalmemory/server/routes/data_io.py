@@ -8,6 +8,7 @@ Routes: /api/export, /api/import
 """
 import io
 import gzip
+import hashlib
 import json
 import logging
 from typing import Optional
@@ -16,7 +17,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
-from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH
+from .helpers import (
+    DB_PATH,
+    dict_factory,
+    get_active_profile,
+    get_db_connection,
+    require_engine,
+)
 
 logger = logging.getLogger("superlocalmemory.routes.data_io")
 
@@ -147,10 +154,23 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 status_code=400, detail="Invalid format: expected 'memories' array",
             )
 
-        engine = getattr(request.app.state, "engine", None)
+        engine = require_engine(request)
+        from superlocalmemory.core.engine_ingestion import (
+            build_engine_ingestion_command,
+            local_trusted_actor_id,
+        )
+        from superlocalmemory.core.ingestion_command import (
+            IngestionRequest,
+            IngestionState,
+        )
+
+        command = build_engine_ingestion_command(engine)
+        actor_id = local_trusted_actor_id("http-import")
+        file_digest = hashlib.sha256(content).hexdigest()
         imported = 0
         skipped = 0
         errors = []
+        operation_ids: list[str] = []
 
         for idx, memory in enumerate(memories):
             try:
@@ -159,29 +179,35 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                     errors.append(f"Memory {idx}: missing 'content' field")
                     continue
 
-                if engine:
-                    engine.store(
-                        content=memory_content,
-                        session_id=memory.get('session_id', ''),
-                        metadata={
-                            "project_name": memory.get('project_name'),
-                            "category": memory.get('category'),
-                            "tags": memory.get('tags', ''),
-                        },
+                metadata = {
+                    "project_name": memory.get('project_name'),
+                    "category": memory.get('category'),
+                    "tags": memory.get('tags', ''),
+                }
+                receipt, created = command.submit_with_status(IngestionRequest(
+                    content=memory_content,
+                    profile_id=engine._profile_id,
+                    source_type="http-import",
+                    idempotency_key=f"import:{file_digest}:{idx}",
+                    metadata=metadata,
+                    scope=memory.get("scope") or "personal",
+                    shared_with=tuple(memory.get("shared_with") or ()),
+                    trusted_actor_id=actor_id,
+                    session_id=memory.get('session_id', ''),
+                    session_date=memory.get('session_date') or "",
+                    speaker=memory.get('speaker') or "",
+                    role=memory.get('role') or "user",
+                ))
+                completed = command.materialize(receipt.operation_id)
+                if completed.state is not IngestionState.COMPLETE:
+                    raise RuntimeError(
+                        completed.last_error or "canonical import failed"
                     )
+                operation_ids.append(completed.operation_id)
+                if created:
+                    imported += 1
                 else:
-                    # Fallback: direct DB insert
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO atomic_facts (content, profile_id, session_id) "
-                        "VALUES (?, ?, ?)",
-                        (memory_content, get_active_profile(), memory.get('session_id', '')),
-                    )
-                    conn.commit()
-                    conn.close()
-
-                imported += 1
+                    skipped += 1
 
                 if ws_manager:
                     await ws_manager.broadcast({
@@ -198,7 +224,7 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
         return {
             "success": True, "imported_count": imported,
             "skipped_count": skipped, "total_processed": len(memories),
-            "errors": errors[:10],
+            "errors": errors[:10], "operation_ids": operation_ids,
         }
 
     except HTTPException:

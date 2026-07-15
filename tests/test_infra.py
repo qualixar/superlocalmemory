@@ -212,8 +212,9 @@ def test_webhook_dispatcher_close_is_idempotent():
 
 def test_backup_default_path():
     from superlocalmemory.infra.backup import BackupManager
+    from superlocalmemory.infra.data_root import canonical_data_root
     backup = BackupManager()
-    assert ".superlocalmemory" in str(backup.base_dir)
+    assert backup.base_dir == canonical_data_root()
 
 
 def test_backup_custom_paths(tmp_path):

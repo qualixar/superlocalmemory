@@ -12,7 +12,7 @@ HR-06: BLOB columns use Python bytes, not base64.
 HR-07: QJL is optional -- system works without it.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

@@ -258,7 +258,7 @@ See `ATTRIBUTION.md` and `NOTICE` for full attribution.
 
 ## Related Pages
 
-- [proxy-setup.md](proxy-setup.md) — Per-CLI proxy activation (Claude Code, Cursor, AGY, SDK, curl, 16+ clients)
+- [proxy-setup.md](proxy-setup.md) — Per-client proxy activation for documented CLI, SDK, and HTTP paths
 - [optimize-cli.md](optimize-cli.md) — Full CLI command reference
 - [optimize-config.md](optimize-config.md) — Configuration reference
 - [cli-reference.md](cli-reference.md) — Master CLI reference (all commands)

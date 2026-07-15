@@ -24,6 +24,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.infra.data_root import state_path
+
 logger = logging.getLogger(__name__)
 
 _REWARD_INTERVAL = float(
@@ -42,7 +44,7 @@ def _learning_db(config: Any) -> Path:
         cand = getattr(config, "learning_db_path", None)
         if cand is not None:
             return Path(cand)
-    return Path.home() / ".superlocalmemory" / "learning.db"
+    return state_path("learning.db")
 
 
 def _memory_db(config: Any) -> Path:
@@ -50,7 +52,7 @@ def _memory_db(config: Any) -> Path:
         cand = getattr(config, "db_path", None)
         if cand is not None:
             return Path(cand)
-    return Path.home() / ".superlocalmemory" / "memory.db"
+    return state_path("memory.db")
 
 
 def _profile_id(config: Any) -> str:

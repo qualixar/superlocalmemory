@@ -29,7 +29,7 @@ Your IDE config should look like:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `remember` | `content`, `tags?` | Store a new memory |
+| `remember` | `content`, `tags?`, `project?`, `importance?`, `session_id?`, `agent_id?`, `scope?`, `shared_with?`, `idempotency_key?` | Submit durable evidence and return an operation receipt |
 | `recall` | `query`, `limit?` | Retrieve relevant memories |
 | `search` | `query`, `limit?` | Search across all memories |
 | `forget` | `query` | Delete matching memories |
@@ -43,6 +43,11 @@ Your IDE config should look like:
 | `memory_used` | — | Storage usage statistics |
 | `backup_status` | — | Backup and database health |
 | `audit_trail` | `limit?` | Recent operations log |
+
+`remember` returns `operation_id`, `fact_ids`, `materialization_state`, and
+`pending`. The default daemon path returns after SQLite relational/FTS is
+`queryable`; enrichment continues on the same durable operation. Offline replay
+preserves the original source and idempotency identity.
 
 ## Active Memory Tools (V3.1)
 

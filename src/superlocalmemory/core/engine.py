@@ -170,18 +170,38 @@ class MemoryEngine:
         # Previously only the daemon lifespan ran apply_deferred, so an existing
         # pre-3.6.15 database used WITHOUT the daemon hit
         # "table memories has no column named scope" on the first scoped write.
-        # Idempotent (skips applied migrations) + non-fatal; mirrors the daemon.
+        # Idempotent (skips applied migrations). M018 is now a hard runtime
+        # prerequisite: allowing initialization to continue without it would
+        # make every advertised write path fail after startup.
         try:
+            import sqlite3
+
             from superlocalmemory.storage.migration_runner import (
                 apply_all, apply_deferred,
+            )
+            from superlocalmemory.storage.migrations import (
+                M018_ingestion_operations,
             )
             _base = self._config.base_dir
             _learning_db = _base / "learning.db"
             _memory_db = self._db.db_path
+            # Forward migrations extend the historical learning schema. A
+            # fresh explicit data root has no learning.db yet, so bootstrap
+            # those base tables before applying M001/M002/M009.
+            from superlocalmemory.learning.database import LearningDatabase
+            LearningDatabase(_learning_db)
             apply_all(_learning_db, _memory_db)
             apply_deferred(_learning_db, _memory_db)
+            with sqlite3.connect(str(_memory_db)) as migration_conn:
+                if not M018_ingestion_operations.verify(migration_conn):
+                    raise RuntimeError(
+                        "required M018 canonical-ingestion schema is unavailable"
+                    )
         except Exception as exc:
-            logger.warning("v3.6.15 deferred migration apply failed: %s", exc)
+            raise RuntimeError(
+                "MemoryEngine initialization stopped because the required "
+                f"ingestion migration failed: {exc}"
+            ) from exc
 
         # V3.4.7: Apply "Learning Brain" schema (tool_events, behavioral_assertions)
         try:
@@ -364,11 +384,30 @@ class MemoryEngine:
                         meta = {}
                 if not isinstance(meta, dict):
                     meta = {}
-                _scope = meta.get("scope") or "personal"
-                _shared = meta.get("shared_with")
-                self.store(
-                    item["content"], metadata=meta or None,
-                    scope=_scope, shared_with=_shared,
+                _scope = meta.pop("scope", None) or "personal"
+                _shared = meta.pop("shared_with", None)
+                _source_type = str(
+                    meta.pop("_slm_source_type", "legacy-pending")
+                )
+                _idempotency_key = str(
+                    meta.pop("_slm_idempotency_key", f"pending:{item['id']}")
+                )
+                if item.get("tags"):
+                    meta.setdefault("tags", item["tags"])
+                from superlocalmemory.core.engine_ingestion import (
+                    canonical_store,
+                    local_trusted_actor_id,
+                )
+                canonical_store(
+                    self,
+                    item["content"],
+                    source_type=_source_type,
+                    trusted_actor_id=local_trusted_actor_id("engine-startup"),
+                    metadata=meta or None,
+                    scope=_scope,
+                    shared_with=_shared,
+                    session_id=str(meta.get("session_id") or ""),
+                    idempotency_key=_idempotency_key,
                 )
                 mark_done(item["id"], base_dir)
             except Exception as exc:
@@ -397,54 +436,45 @@ class MemoryEngine:
         self._require_full("store")
         self._ensure_init()
 
-        from superlocalmemory.core.store_pipeline import run_store
-        return run_store(
-            content, self._profile_id,
-            session_id=session_id, session_date=session_date,
-            speaker=speaker, role=role, metadata=metadata,
-            scope=scope, shared_with=shared_with,
-            config=self._config, db=self._db,
-            embedder=self._embedder,
-            fact_extractor=self._fact_extractor,
-            entity_resolver=self._entity_resolver,
-            temporal_parser=self._temporal_parser,
-            type_router=self._type_router,
-            graph_builder=self._graph_builder,
-            consolidator=self._consolidator,
-            observation_builder=self._observation_builder,
-            scene_builder=self._scene_builder,
-            entropy_gate=self._entropy_gate,
-            ann_index=self._ann_index,
-            sheaf_checker=self._sheaf_checker,
-            retrieval_engine=self._retrieval_engine,
-            provenance=self._provenance,
-            hooks=self._hooks,
-            vector_store=self._vector_store,
-            context_generator=self._context_generator,
-            temporal_validator=self._temporal_validator,
-            auto_linker=self._auto_linker,
-            consolidation_engine=self._consolidation_engine,
+        from superlocalmemory.core.engine_ingestion import (
+            canonical_store,
+            local_trusted_actor_id,
+        )
+        return canonical_store(
+            self,
+            content,
+            source_type="python-api",
+            trusted_actor_id=local_trusted_actor_id("python-api"),
+            metadata=metadata,
+            scope=scope,
+            shared_with=shared_with,
+            session_id=session_id,
+            session_date=session_date,
+            speaker=speaker,
+            role=role,
+            require_complete=False,
         )
 
     def store_fact_direct(self, fact: AtomicFact) -> str:
-        """Store a pre-built fact with full enrichment."""
+        """Durably store a pre-built fact with full enrichment."""
         self._require_full("store_fact_direct")
         self._ensure_init()
 
-        from superlocalmemory.core.store_pipeline import run_store_fact_direct
-        return run_store_fact_direct(
-            fact, self._profile_id,
-            db=self._db, embedder=self._embedder,
-            entity_resolver=self._entity_resolver,
-            ann_index=self._ann_index,
-            graph_builder=self._graph_builder,
-            retrieval_engine=self._retrieval_engine,
-            vector_store=self._vector_store,
+        from superlocalmemory.core.engine_ingestion import (
+            canonical_store_fact,
+            local_trusted_actor_id,
+        )
+        return canonical_store_fact(
+            self,
+            fact,
+            trusted_actor_id=local_trusted_actor_id("python-api-prebuilt"),
         )
 
     def store_fast(
         self, content: str, metadata: dict[str, Any] | None = None,
         *, scope: str = "personal", shared_with: list[str] | None = None,
+        session_date: str | None = None, speaker: str = "", role: str = "user",
+        index_external: bool = True,
     ) -> list[str]:
         """v3.5.5 WRITE-THROUGH: synchronous verbatim insert for IMMEDIATE recall.
 
@@ -470,14 +500,9 @@ class MemoryEngine:
         from superlocalmemory.storage.models import (
             AtomicFact, FactType, MemoryRecord,
         )
-        if not content or not content.strip():
+        from superlocalmemory.core.engine_ingestion import content_passes_admission
+        if not content_passes_admission(content):
             return []
-        try:
-            from superlocalmemory.core.injection import is_low_quality
-            if is_low_quality(content):
-                return []
-        except Exception:
-            pass
         # v3.6.6 ingest gate: reject 1MB monsters + prompt-template pollution;
         # clamp the searchable FACT copy (head+tail) while the memories row keeps
         # the FULL original. Embedding/BM25 use the clamped copy so a 167KB paste
@@ -500,8 +525,10 @@ class MemoryEngine:
         now = datetime.now(timezone.utc).isoformat()
         record = MemoryRecord(
             profile_id=self._profile_id, content=content,
-            session_date=now[:10],
+            session_date=session_date or now[:10],
             session_id=(metadata or {}).get("session_id", ""),
+            speaker=speaker,
+            role=role,
             metadata=metadata or {},
             scope=scope, shared_with=shared_with,
         )
@@ -531,26 +558,29 @@ class MemoryEngine:
             fact_id=_uuid.uuid4().hex[:16], memory_id=record.memory_id,
             profile_id=self._profile_id, content=fact_text,
             fact_type=FactType.EPISODIC, entities=ents,
-            observation_date=now[:10], confidence=0.7, importance=0.5,
+            observation_date=session_date or now[:10],
+            confidence=0.7, importance=0.5,
             embedding=emb, fisher_mean=fmean, fisher_variance=fvar,
             created_at=now,
             scope=scope, shared_with=shared_with,
         )
         self._db.store_fact(fact)  # FTS5 trigger → immediately BM25-recallable
         # Upsert to vector store so the semantic channel finds it now.
-        try:
-            vs = getattr(self, "_vector_store", None)
-            if emb and vs and getattr(vs, "available", False):
-                vs.upsert(fact.fact_id, self._profile_id, emb)
-        except Exception:
-            pass
+        if index_external:
+            try:
+                vs = getattr(self, "_vector_store", None)
+                if emb and vs and getattr(vs, "available", False):
+                    vs.upsert(fact.fact_id, self._profile_id, emb)
+            except Exception:
+                pass
         # Persist BM25 tokens too (covers the in-memory rank_bm25 fallback path).
-        try:
-            bm25 = getattr(self._retrieval_engine, "_bm25", None)
-            if bm25:
-                bm25.add(fact.fact_id, fact_text, self._profile_id)
-        except Exception:
-            pass
+        if index_external:
+            try:
+                bm25 = getattr(self._retrieval_engine, "_bm25", None)
+                if bm25:
+                    bm25.add(fact.fact_id, fact_text, self._profile_id)
+            except Exception:
+                pass
         return [fact.fact_id]
 
     # -- Recall operations --------------------------------------------------

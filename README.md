@@ -4,10 +4,10 @@
 
 <h1 align="center">SuperLocalMemory V3.6.23</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
-<em>To the best of our knowledge, the only zero-cloud agent memory that beats Mem0's zero-LLM score on LoCoMo. Mode A: 74.8% vs Mem0 64.2% — no GPU, no API key, on CPU.</em></p>
+<em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
 <p align="center"><code>v3.6.23</code> — <strong>Plugin-native. Profile-aware. Distributed-ready.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
-<p align="center"><strong>3 published research papers</strong> (arXiv preprints + Zenodo-archived) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
+<p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
@@ -15,7 +15,7 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
-  <a href="#eu-ai-act-compliance"><img src="https://img.shields.io/badge/EU_AI_Act-Design_Compliant-brightgreen?style=for-the-badge" alt="EU AI Act Design Compliant"/></a>
+  <a href="#privacy-controls-and-operating-modes"><img src="https://img.shields.io/badge/Privacy-Deployment_Assessed-brightgreen?style=for-the-badge" alt="Privacy controls require deployment assessment"/></a>
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
@@ -26,52 +26,61 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
 
 ## Why SuperLocalMemory?
 
-Every hosted AI memory platform — Mem0 Cloud, Zep Cloud, Letta Cloud, EverMemOS Cloud — sends your data to cloud LLMs by default. Self-hosted variants exist but require Docker, a separate graph DB, or Ollama config, and most default to OpenAI until you flip env vars. After **August 2, 2026**, any of those cloud paths becomes a compliance question under the EU AI Act.
+Agent-memory systems make different storage, model-provider, and deployment trade-offs. SuperLocalMemory starts with a local runtime and makes provider-backed enrichment, cloud backup, connectors, and proxy use explicit choices.
 
-SuperLocalMemory V3 uses **mathematics instead of cloud compute** — differential geometry, algebraic topology, and stochastic analysis replace the work other systems need LLMs to do. Local-first out of the box. No Docker. No graph DB. No API keys. CPU-only.
+SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and Fisher-informed scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
-**Benchmark results** (evaluated on [LoCoMo](https://arxiv.org/abs/2402.09714), the standard long-conversation memory benchmark, published April 2026):
+### Historical research results
 
-| System | Score | Config | Cloud LLM required? | Open Source | Source |
-|:-------|:-----:|:-------|:-------------------:|:-----------:|:-------|
-| EverMemOS | 93.05% | Cloud (proprietary) | Yes | Core only | [evermind.ai](https://evermind.ai/) (Feb 2026) |
-| Hindsight (LoComo10) | 92.0% | Cloud | Yes | No | [benchmarks.hindsight.vectorize.io](https://benchmarks.hindsight.vectorize.io) (Apr 2026) |
-| Mem0 (token-efficient) | 91.6% | Hybrid (Cohere/OpenAI) | Yes | Partial | [mem0.ai blog](https://mem0.ai/blog/mem0-the-token-efficient-memory-algorithm) (Apr 16 2026) |
-| **SLM V3 Mode C** | **87.7%** | Local + optional LLM | Optional (Ollama OK) | **Yes (AGPL-3.0)** | In-house, [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) |
-| Zep v3 Cloud | 85.2% | Cloud | Yes | Community deprecated | [getzep.com](https://www.getzep.com/) |
-| **SLM V3 Mode A** | **74.8%** | **Local, CPU-only, zero-LLM** | **No** | **Yes (AGPL-3.0)** | In-house, [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) |
-| Mem0 (zero-retrieval-LLM) | 64.2% | Local baseline | No | Partial | Mem0 paper, zero-LLM row |
+The papers report versioned experiments; they are not measurements of the current V3.7 release candidate:
 
-> **How to read this table.** Scores from different papers use different LoCoMo splits, judge models, and prompt variants. We do NOT claim these numbers are apples-to-apples across rows. Rows marked "In-house" were run by us; cited rows link to the vendor's public source and date. The only apples-to-apples comparison is **Mode A 74.8% vs Mem0 zero-retrieval-LLM 64.2%** (+10.6pp) — both are zero-LLM configurations. Mem0's 91.6% and EverMemOS's 93.05% use cloud LLMs; Mode C uses a local LLM (Ollama).
+- Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction. It is not an end-to-end zero-LLM result.
+- Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components. It is not a full-dataset score.
 
-**What Mode A is:** CPU-only, SQLite-only, zero-LLM retrieval on published LoCoMo questions. To the best of our knowledge it is the only publicly-released local-first memory that clears Mem0's zero-LLM baseline on this benchmark. If another fully-local system hits similar numbers, please open an issue so we can update this table.
+See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588), the [official LoCoMo paper](https://arxiv.org/abs/2402.17753), and the [V3.7 audit](docs/audits/2026-07-14-v3-release-readiness/02-BENCHMARK-COMPETITOR-AUDIT.md) for protocols and limitations. The current V3.7 LoCoMo result is unknown; no historical score is a V3.7 release claim.
 
-Mathematical layers contribute **+12.7 percentage points** average across 6 conversations (n=832 questions), with up to **+19.9pp on the most challenging dialogues**.
+The preprints also contain ablation and mathematical analyses. Treat those as research evidence for the evaluated versions, not guarantees about every current runtime path.
 
 ---
 
 ## Quick Start
 
 ```bash
-# npm (recommended)
+# npm (recommended interactive CLI install; Node 18+)
+# Creates a package-owned virtual environment. It does not modify system Python.
 npm install -g superlocalmemory
 slm setup       # Choose mode (A/B/C)
 slm doctor      # Verify everything is working
 ```
 
 ```bash
-# pip
-pip install superlocalmemory
+# Python CLI (isolated application environment)
+pipx install superlocalmemory
+# Or: uv tool install superlocalmemory
 slm setup
 slm doctor
 ```
 
 ```bash
+# Python library/SDK (inside your project's Python virtual environment)
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
+```
+
+```bash
 # First use
-slm remember "Alice works at Google as a Staff Engineer"
+slm remember "Alice works at Google as a Staff Engineer" --json
 slm recall "What does Alice do?"
 slm status
 ```
+
+The default daemon write commits raw evidence plus a relational/FTS projection
+and returns a durable receipt in `queryable` state. Enrichment then advances the
+same operation through `enriching` to `complete`, or records a retryable
+`failed` state. Use `slm remember "..." --sync` when the caller must wait for
+all declared derivation and projector stages. JSON output includes the opaque
+`operation_id`, current `materialization_state`, and fact IDs.
 
 ```bash
 # Wrap your agent — starts proxy + sets environment + launches agent
@@ -80,7 +89,9 @@ slm wrap claude
 # See savings: slm optimize savings --since 1
 ```
 
-**Upgrading:** `pip install -U superlocalmemory && slm restart && slm doctor` — migration is automatic, no data loss.
+**Upgrading:** use the owner of the installation: `npm update -g superlocalmemory`,
+`pipx upgrade superlocalmemory`, or `uv tool upgrade superlocalmemory`. Then run
+`slm restart && slm doctor`. The installer never moves or deletes memory data.
 
 ---
 
@@ -90,11 +101,22 @@ slm wrap claude
 
 <a id="dual-interface-mcp--cli"></a>
 
-Five-channel hybrid retrieval: Semantic (Fisher-Rao geodesic distance) + BM25 + Entity Graph + Temporal + Hopfield (associative/partial-query completion). RRF fusion, cross-encoder reranking, adaptive LightGBM ranking. All data stays local — SQLite + optional LanceDB/CozoDB.
+Current recall has five candidate producers—dense semantic, BM25 lexical, profile, temporal, and associative—followed by fusion, optional reranking, and graph-based score enhancement. Core memory is SQLite-backed; LanceDB and CozoDB are optional experimental backends rather than the normal-path source of truth.
+
+Canonical ingestion is a durable state machine: `raw → queryable → enriching →
+complete`, with `failed` retaining raw evidence, error details, attempt count,
+and retry timing. SQLite relational facts and FTS are the queryable checkpoint;
+optional ANN/vector projectors are verified before `complete` is granted.
+
+Recalled text is treated as untrusted evidence. Hooks, MCP `session_init`, CLI
+session context, and chat use one bounded renderer that redacts recognized
+secrets, neutralizes forged boundary markers, and attaches provenance. Trusted
+IDE instruction files contain only the static SLM protocol; fresh memory is
+retrieved at runtime rather than copied into those files.
 
 Three mathematical contributions replace cloud LLM dependency:
 
-1. **Fisher-Rao Retrieval Metric** — similarity scoring from the Fisher information structure of diagonal Gaussian families. To the best of our knowledge, the first public application of information geometry to agent memory retrieval.
+1. **Fisher-informed scoring** — dense candidate generation uses cosine similarity; Fisher-derived terms can modify later scoring when their state is available.
 2. **Sheaf Cohomology for Consistency** — algebraic topology detects contradictions via coboundary norms on the knowledge graph.
 3. **Riemannian Langevin Lifecycle** — memory positions evolve on the Poincare ball; neglected memories self-archive, no hardcoded thresholds.
 
@@ -104,7 +126,7 @@ Auto-capture hooks (`slm hooks install`) fire only on real signals — topic piv
 
 <a id="multilingual-embedding-support"></a>
 
-**Multilingual:** plug in any OpenAI-compatible embedding endpoint — Ollama, vLLM, LiteLLM, `bge-m3`, `multilingual-e5`, `Qwen3-Embedding`. The math layer is language-agnostic; 30+ languages work at full retrieval quality. No cloud dependency, no code changes.
+**Multilingual models:** configure an OpenAI-compatible embedding endpoint such as Ollama, vLLM, LiteLLM, `bge-m3`, `multilingual-e5`, or `Qwen3-Embedding`. Language coverage and retrieval quality depend on the selected model and should be evaluated for the deployment corpus.
 
 ### Cache + Compress
 
@@ -128,7 +150,7 @@ One engine, three ways in — choose the surface that fits your setup:
 
 **Cache:** exact-match SQLite lookup (SHA-256, zero false hits) + vCache-gated semantic (opt-in). **100% cost saved on a hit** (input + output tokens).
 
-**Compress:** safe mode = lossless normalization (JSON/code/tool outputs, 60-95% fewer tokens); aggressive mode = LLMLingua-2 prose only (opt-in). CCR stores originals for byte-exact reversal. Anthropic 90% / OpenAI 50% prefix-cache discount alignment included. [CITATION-NEEDED-ONLINE: live provider prefix-cache discount rates]
+**Compress:** safe mode uses conservative normalization and preserves JSON and code; measured reduction varies by content and can be zero. Aggressive prose compression is opt-in and lossy. CCR can retain an original for later byte-exact retrieval when reversible storage is enabled.
 
 **Savings dashboard:** `slm optimize savings --since 7` — live USD/INR/tokens saved. Hot-reload config, fail-open.
 
@@ -136,7 +158,7 @@ One engine, three ways in — choose the surface that fits your setup:
 
 <a id="multi-machine-mesh-coordination"></a>
 
-Run SLM on multiple machines and have agents coordinate as one team — no external broker, no Docker. HTTP-based sync every 30s, mDNS discovery (`SLM_MESH_DISCOVERY=on`), graceful offline queue.
+Mesh provides authenticated coordination messages between configured peers, with an offline queue and optional mDNS discovery (`SLM_MESH_DISCOVERY=on`). It is not a replicated or conflict-resolving distributed-memory database.
 
 ```bash
 # Machine A (broker)
@@ -160,8 +182,11 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 
 | Path | Command | When |
 |:-----|:--------|:-----|
-| **npm** (recommended) | `npm install -g superlocalmemory` | Node 14+, installs Python deps automatically |
-| **pip** | `pip install superlocalmemory` | Python 3.11+, direct install |
+| **npm** (recommended interactive path) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified |
+| **Python CLI** | `pipx install superlocalmemory` or `uv tool install superlocalmemory` | Isolated tool environment; clean upgrade and uninstall |
+| **Python library** | Create a Python virtual environment, then `python -m pip install superlocalmemory` | Python 3.11+; import SLM from another Python application |
+| **Repository clone — macOS/Linux** | `./scripts/install.sh install` | Research/contributor path; delegates to an existing uv or pipx installation |
+| **Repository clone — Windows** | `.\scripts\install.ps1 -Action Install` | Research/contributor path; delegates to an existing uv or pipx installation |
 | **Claude Code Plugin** (WP-06) | `/plugin marketplace add qualixar/superlocalmemory` then `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core. Ships the skills/agents/hooks/commands |
 | **Portable / IDE connect** (WP-08) | `slm connect <ide> [--here]` | Wire any IDE without reinstalling; `slm connect claude-code` → plugin pointer |
 
@@ -246,15 +271,15 @@ To update later: `/plugin marketplace update qualixar` then `/plugin install sup
 
 ---
 
-## Modes + EU AI Act
+## Privacy controls and operating modes
 
-<a id="eu-ai-act-compliance"></a>
+<a id="privacy-controls-and-operating-modes"></a>
 
-| Mode | What | Cloud? | EU AI Act | Best For |
-|:----:|:-----|:------:|:---------:|:---------|
-| **A** | Local Guardian | **None** | **Compliant** | Privacy-first, air-gapped, enterprise |
-| **B** | Smart Local | Local only (Ollama) | Compliant | Better answers, data stays local |
-| **C** | Full Power | Cloud LLM | Partial | Maximum accuracy, research |
+| Mode | What | Core memory path | Optional network behavior |
+|:----:|:-----|:-----------------|:--------------------------|
+| **A** | Local Guardian | Local processing | Model/dependency downloads, connectors, backup, and other enabled integrations may use the network |
+| **B** | Smart Local | Local Ollama enrichment | Same optional integrations as Mode A |
+| **C** | Provider-assisted | Local storage with provider calls | Query or enrichment content is sent to the configured provider |
 
 ```bash
 slm mode a   # Zero-cloud (default)
@@ -262,20 +287,11 @@ slm mode b   # Local Ollama
 slm mode c   # Cloud LLM
 ```
 
-**Mode A** is, to the best of our knowledge, the only publicly-released agent memory that runs with zero cloud calls while clearing Mem0's published LoCoMo score. All data stays on your device. No API keys. No GPU. Runs on 2 vCPUs + 4GB RAM.
+Mode A can run core memory operations without sending memory content to a cloud model provider. This does not disable optional connectors, cloud backup, proxy providers, dependency acquisition, or model downloads; review configuration and network policy for the deployment.
 
-The EU AI Act (Regulation 2024/1689) takes full effect **August 2, 2026**.
+SuperLocalMemory provides local storage, export/erasure commands, provenance, policy, and audit features that can support a compliance program. The software is not a legal certification, and compliance depends on the use case, operator, configuration, and surrounding systems.
 
-| Requirement | Mode A | Mode B | Mode C |
-|:------------|:------:|:------:|:------:|
-| Data sovereignty (Art. 10) | **Pass** | **Pass** | Requires DPA |
-| Right to erasure (GDPR Art. 17) | **Pass** | **Pass** | **Pass** |
-| Transparency (Art. 13) | **Pass** | **Pass** | **Pass** |
-| No network calls during memory ops | **Yes** | **Yes** | No |
-
-To the best of our knowledge, no existing agent memory system addresses EU AI Act compliance by architectural design. Modes A and B pass all checks — no personal data leaves the device during any memory operation.
-
-Built-in compliance tools: GDPR Article 15/17 export + complete erasure, tamper-proof SHA-256 audit chain, data provenance tracking, ABAC policy enforcement. See [docs/compliance.md](docs/compliance.md).
+Available controls include local export and erasure commands, hash-chained audit records, provenance tracking, and ABAC policy enforcement. Verify their behavior and retention boundaries for your deployment; see [docs/compliance.md](docs/compliance.md).
 
 ---
 
@@ -317,7 +333,7 @@ slm dashboard    # Opens at http://localhost:8765
 | **v3.6.15** | Multi-scope | **Opt-in [shared memory](docs/shared-memory.md)** (personal/shared/global, off by default), default-deny scope at every read path, recall scope-race fix, contributor PRs #42/#43/#44, fixes #46–#49 |
 | **v3.6.14** | Plugin-native | Claude Code Plugin (WP-06), MCP profiles (WP-01), IDE connect (WP-08), asset consolidation, UI polish (WP-12) |
 | **v3.6.x** | Optimize Everywhere / Distributed-ready | Three surfaces (proxy/MCP/skill), `SLM_REMOTE=1` LAN mode, remote dashboard, custom LLM endpoints |
-| **v3.5.0** | Scale-Ready | CozoDB/LanceDB, 6-channel recall <1s, Core Memory Block, context injection v2, score normalization |
+| **v3.5.0** | Historical scale work | Optional experimental CozoDB/LanceDB paths, retrieval additions, Core Memory Block, context injection v2, score normalization |
 | **v3.4.x** | Scale-Ready (foundation) | Tiered storage, graph pruning, Hopfield channel, LightGBM ranking, mDNS mesh discovery |
 | **v3.3.x** | Foundation | BM25Plus, Fisher-Rao, sqlite-vec, RRF fusion, cross-encoder rerank. 3 published papers |
 
@@ -403,7 +419,7 @@ Qualixar is building the open-source infrastructure for AI agent reliability eng
 | **[AgentAssert](https://github.com/qualixar/agentassert-abc)** | Behavioral contracts + drift detection | `pip install agentassert-abc` |
 | **[SkillFortify](https://github.com/qualixar/skillfortify)** | Formal verification for agent skills | `pip install skillfortify` |
 
-**Zero cloud dependency. Local-first. EU AI Act compliant.**
+**Local-first architecture. Deployment-specific privacy and compliance controls.**
 
 Start here → **[qualixar.com](https://qualixar.com)** · [All papers on Qualixar HuggingFace](https://huggingface.co/Qualixar)
 

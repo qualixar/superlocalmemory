@@ -17,6 +17,10 @@ from superlocalmemory.core import slm_disabled as sd
 def tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "slm_home"
     home.mkdir()
+    # Exercise SLM_HOME as a legacy input shim by removing its two
+    # higher-precedence namespace selectors.
+    monkeypatch.delenv("SLM_DATA_DIR", raising=False)
+    monkeypatch.delenv("SL_MEMORY_PATH", raising=False)
     monkeypatch.setenv("SLM_HOME", str(home))
     monkeypatch.delenv("SLM_DISABLE", raising=False)
     return home

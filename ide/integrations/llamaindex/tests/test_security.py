@@ -1,28 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
-"""SuperLocalMemory V2 - LlamaIndex Chat Store Security Tests
+"""SuperLocalMemory V3 - LlamaIndex Chat Store Security Tests
 
 Security-focused tests: SQL injection, XSS, oversized payloads, null bytes,
 and other adversarial inputs that a production chat store must handle safely.
 """
 import os
-import sys
 import tempfile
 
 import pytest
-
-# Ensure the SLM source tree is importable for tests
-_SLM_SRC = os.path.join(
-    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "src"
-)
-_SLM_SRC = os.path.abspath(_SLM_SRC)
-if _SLM_SRC not in sys.path:
-    sys.path.insert(0, _SLM_SRC)
-
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.storage.chat_store.superlocalmemory import SuperLocalMemoryChatStore
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -128,12 +117,11 @@ class TestOversizedContent:
     """Verify that oversized payloads are handled without crashing."""
 
     def test_oversized_content_1mb(self, store):
-        """A 1MB message should be rejected by MemoryStoreV2's validation."""
+        """A 1MB message should be rejected by the V3 adapter boundary."""
         huge = "A" * 1_000_001  # Just over the 1MB limit
         msg = ChatMessage(role=MessageRole.USER, content=huge)
 
-        # MemoryStoreV2 raises ValueError for content > 1MB
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError, match="exceeds maximum size"):
             store.add_message("huge-key", msg)
 
     def test_large_but_valid_content(self, store):

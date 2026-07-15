@@ -40,6 +40,7 @@ class StubLLMServer:
         self._reply_text = reply_text
         self._requests: list[RecordedRequest] = []
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -117,18 +118,66 @@ class StubLLMServer:
                 self.end_headers()
                 self.wfile.write(body_bytes)
 
-        self._server = HTTPServer(("127.0.0.1", 0), _Handler)
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            daemon=True,
-            name="stub-llm-server",
-        )
-        self._thread.start()
+        with self._lifecycle_lock:
+            if self._server is not None or self._thread is not None:
+                raise RuntimeError("StubLLMServer is already running")
+
+            server = HTTPServer(("127.0.0.1", 0), _Handler)
+            try:
+                thread = threading.Thread(
+                    target=server.serve_forever,
+                    daemon=True,
+                    name="stub-llm-server",
+                )
+                self._server = server
+                self._thread = thread
+                thread.start()
+            except BaseException as start_error:
+                # Thread construction/start can fail after the listening socket
+                # has been bound. Detach state so a later _stop() remains safe.
+                self._server = None
+                self._thread = None
+                try:
+                    server.server_close()
+                except BaseException as close_error:  # pragma: no cover
+                    start_error.add_note(
+                        "server_close also failed during startup cleanup: "
+                        f"{type(close_error).__name__}: {close_error}"
+                    )
+                raise
 
     def _stop(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-            self._server = None
-        if self._thread is not None:
-            self._thread.join(timeout=3)
-            self._thread = None
+        # Claim ownership once. Concurrent or repeated stops become no-ops,
+        # while the owning caller completes every cleanup stage below.
+        with self._lifecycle_lock:
+            server, self._server = self._server, None
+            thread, self._thread = self._thread, None
+
+        first_error: BaseException | None = None
+
+        if server is not None and thread is not None and thread.is_alive():
+            try:
+                server.shutdown()
+            except BaseException as exc:
+                first_error = exc
+
+        if thread is not None:
+            try:
+                thread.join(timeout=3)
+                if thread.is_alive() and first_error is None:
+                    first_error = RuntimeError(
+                        "stub LLM server thread did not stop within 3 seconds"
+                    )
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+
+        if server is not None:
+            try:
+                server.server_close()
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+
+        if first_error is not None:
+            raise first_error

@@ -192,10 +192,14 @@ def main():
         sys.stdout.write("{}")
         return 0
 
+    data_root = (
+        os.environ.get("SLM_DATA_DIR")
+        or os.environ.get("SL_MEMORY_PATH")
+        or os.environ.get("SLM_HOME")
+        or os.path.join(os.path.expanduser("~"), ".superlocalmemory")
+    )
     db_path = os.environ.get("SLM_CACHE_DB") or os.path.join(
-        os.path.expanduser("~"),
-        ".superlocalmemory",
-        "active_brain_cache.db",
+        data_root, "active_brain_cache.db",
     )
     if not os.path.isfile(db_path):
         sys.stdout.write("{}")

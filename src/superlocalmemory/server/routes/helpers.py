@@ -11,7 +11,6 @@ shared lazy engine accessor used by every engine-dependent route.
 import logging
 import re
 import json
-import os
 import sqlite3
 import threading
 import time
@@ -21,6 +20,8 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
+
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 
 
 _engine_logger = logging.getLogger("superlocalmemory.engine")
@@ -85,72 +86,16 @@ def _resolve_slm_home() -> Path:
     e.g. tests, or a launcher that exports it late — still sees the
     right path.
     """
-    for var in ("SLM_DATA_DIR", "SL_MEMORY_PATH", "SLM_HOME"):
-        val = os.environ.get(var, "").strip()
-        if val:
-            return Path(val)
-    # Fall back to config.json's base_dir if present, else the hard default.
-    try:
-        _cfg = Path.home() / ".superlocalmemory" / "config.json"
-        if _cfg.exists():
-            with open(_cfg) as f:
-                _data = json.load(f)
-            _base = _data.get("base_dir")
-            if _base:
-                return Path(_base)
-    except (json.JSONDecodeError, OSError):
-        pass
-    return Path.home() / ".superlocalmemory"
+    return canonical_data_root()
 
 
 # V3 paths (migrated from ~/.claude-memory to ~/.superlocalmemory).
-# Exposed as module-level constants for backward compat with the many
-# route modules that do ``from .helpers import DB_PATH`` at import time,
-# but the *values* are resolved lazily so env overrides take effect.
-class _LazyPath:
-    """Path-like proxy that resolves the real path on first attribute access.
-
-    Importers bind to ``DB_PATH`` / ``MEMORY_DIR`` at import time; without
-    this proxy the value would be frozen before env vars are set. The
-    proxy defers resolution to ``_resolve_slm_home()`` and caches it.
-    """
-
-    __slots__ = ("_resolver", "_cached", "_suffix")
-
-    def __init__(self, resolver, suffix=""):
-        self._resolver = resolver
-        self._suffix = suffix
-        self._cached = None
-
-    def _resolve(self) -> Path:
-        if self._cached is None:
-            self._cached = self._resolver() / self._suffix if self._suffix else self._resolver()
-        return self._cached
-
-    def __fspath__(self) -> str:
-        return str(self._resolve())
-
-    def __truediv__(self, other) -> Path:
-        return self._resolve() / other
-
-    def __rtruediv__(self, other) -> Path:
-        return Path(other) / self._resolve()
-
-    def __str__(self) -> str:
-        return str(self._resolve())
-
-    def __repr__(self) -> str:
-        return f"_LazyPath({self._resolve()!r})"
-
-    # Forward common Path attributes used by callers (exists, mkdir, etc.).
-    def __getattr__(self, name):
-        return getattr(self._resolve(), name)
-
-
-MEMORY_DIR = _LazyPath(_resolve_slm_home)
-DB_PATH = _LazyPath(_resolve_slm_home, "memory.db")
+# Exposed as dynamic module-level path-like objects for backward compatibility
+# with route modules that import them. They never cache an earlier namespace.
+MEMORY_DIR = DynamicStatePath()
+DB_PATH = DynamicStatePath("memory.db")
 UI_DIR = Path(__file__).parent.parent / "ui"
-PROFILES_DIR = _LazyPath(_resolve_slm_home, "profiles")
+PROFILES_DIR = DynamicStatePath("profiles")
 
 
 # ---------------------------------------------------------------------------

@@ -15,35 +15,120 @@ memory across parallel test runs. Each worker consumes 0.5-1.5 GB.
 from __future__ import annotations
 
 import os
-import signal
+import secrets
 import sqlite3
-import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-import pytest
+# Capture and deny the real user namespace before replacing environment paths.
+_REAL_HOME = Path.home().resolve()
+_REAL_DATA_ROOT = Path(
+    os.environ.get("SLM_DATA_DIR")
+    or os.environ.get("SL_MEMORY_PATH")
+    or os.environ.get("SLM_HOME")
+    or (_REAL_HOME / ".superlocalmemory")
+).expanduser().resolve(strict=False)
+
+
+def _pytest_isolation_audit(event: str, args: tuple) -> None:
+    """Deny direct live-state opens and public-daemon socket connections."""
+    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        candidate = Path(args[0]).expanduser().resolve(strict=False)
+        if candidate == _REAL_DATA_ROOT or candidate.is_relative_to(_REAL_DATA_ROOT):
+            raise PermissionError(f"pytest denied live SLM state path: {candidate}")
+    if event == "socket.connect" and len(args) >= 2:
+        address = args[1]
+        if (
+            isinstance(address, tuple)
+            and len(address) >= 2
+            and str(address[0]).lower() in {"127.0.0.1", "localhost", "::1"}
+            and int(address[1]) in {8765, 8767}
+        ):
+            raise PermissionError(
+                f"pytest denied live SLM daemon port: {address[1]}"
+            )
+
+
+sys.addaudithook(_pytest_isolation_audit)
+
+# Establish a pytest-owned namespace before test modules are imported. Several
+# production modules resolve HOME and daemon paths at import time, so a normal
+# fixture is too late to protect the user's live installation.
+_TEST_ISOLATION_DIR = tempfile.TemporaryDirectory(prefix="slm-pytest-")
+_TEST_ROOT = Path(_TEST_ISOLATION_DIR.name).resolve()
+_TEST_HOME = _TEST_ROOT / "home"
+_TEST_DATA_DIR = _TEST_ROOT / "canonical-data"
+_TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+os.environ["SLM_TEST_ISOLATION"] = "1"
+os.environ["SLM_TEST_ROOT"] = str(_TEST_ROOT)
+os.environ["SLM_TEST_REAL_DATA_ROOT"] = str(_REAL_DATA_ROOT)
+os.environ["HOME"] = str(_TEST_HOME)
+os.environ["USERPROFILE"] = str(_TEST_HOME)
+os.environ["XDG_CONFIG_HOME"] = str(_TEST_HOME / ".config")
+os.environ["XDG_CACHE_HOME"] = str(_TEST_HOME / ".cache")
+os.environ["XDG_DATA_HOME"] = str(_TEST_HOME / ".local" / "share")
+os.environ["SLM_DATA_DIR"] = str(_TEST_DATA_DIR)
+os.environ["SL_MEMORY_PATH"] = str(_TEST_ROOT / "wrong-legacy-alias")
+os.environ["SLM_HOME"] = str(_TEST_ROOT / "wrong-hook-alias")
+os.environ["SLM_DAEMON_PORT"] = str(20_000 + secrets.randbelow(40_000))
+os.environ["SLM_TEST_INSTANCE_CAPABILITY"] = secrets.token_urlsafe(32)
+for _unsafe_env in (
+    "SLM_TEST_ALLOW_LIVE_HOME",
+    "SLM_HOOK_DAEMON_URL",
+    "SLM_MESH_PEER_URL",
+    "SLM_MESH_SHARED_SECRET",
+    "SLM_MESH_HOST",
+    "SLM_MESH_WS_PORT",
+    "SLM_MESH_DISCOVERY",
+    "SLM_DAEMON_HOST",
+    "SLM_HOST",
+):
+    os.environ.pop(_unsafe_env, None)
+
+import numpy as np  # noqa: E402  (isolation must be installed before imports)
+import pytest  # noqa: E402  (isolation must be installed before imports)
 
 
 @pytest.fixture(autouse=True, scope="function")
 def _block_live_slm_home_writes(tmp_path, monkeypatch):
-    """Global guard: refuse any test-time write to the user's live
-    ~/.superlocalmemory/ by default.
-
-    Point SLM_DATA_DIR at tmp_path for every test unless the test explicitly
-    opts out by setting SLM_TEST_ALLOW_LIVE_HOME=1 (tightly-scoped for
-    integration tests that must cover live-dir init).
-    """
-    if os.environ.get("SLM_TEST_ALLOW_LIVE_HOME") != "1":
-        monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    """Give each test an isolated data root with no live-home escape hatch."""
+    data_dir = tmp_path
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SLM_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SL_MEMORY_PATH", str(tmp_path / "wrong-legacy-alias"))
+    monkeypatch.setenv("SLM_HOME", str(tmp_path / "wrong-hook-alias"))
 
 
 # V3.3.14: Windows CI fix — KeyboardInterrupt during daemon thread teardown.
 # On Windows, when pytest exits, daemon threads (reranker warmup, maintenance
 # scheduler, parent watchdog) trigger KeyboardInterrupt that kills the process.
 # This hook runs BEFORE pytest's thread cleanup and terminates workers cleanly.
+def _cancel_test_timer_threads() -> None:
+    """Cancel and join timers created inside the pytest process.
+
+    Production owners remain responsible for their own lifecycle. This is the
+    final test-harness containment boundary for a failing test or fixture that
+    exits before calling its owner's close method.
+    """
+    import threading
+
+    timers = [
+        thread
+        for thread in threading.enumerate()
+        if isinstance(thread, threading.Timer)
+    ]
+    for thread in timers:
+        thread.cancel()
+    for thread in timers:
+        thread.join(timeout=0.2)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Clean up all SLM subprocess workers before pytest exits."""
+    _cancel_test_timer_threads()
     try:
         from superlocalmemory.core.embeddings import _cleanup_all_embedding_services
         _cleanup_all_embedding_services()
@@ -69,32 +154,13 @@ def pytest_sessionfinish(session, exitstatus):
 # ---------------------------------------------------------------------------
 
 def _kill_orphaned_slm_workers() -> None:
-    """Kill any orphaned SLM subprocess workers.
+    """Never kill workers by machine-wide process-name matching.
 
-    Targets: reranker_worker, embedding_worker, recall_worker.
-    These subprocesses each consume 0.5-1.5 GB and can orphan when
-    tests crash, get interrupted, or when parallel agents run tests.
-
-    Skipped on Windows where pkill is unavailable and signal handling
-    differs (KeyboardInterrupt propagation causes false CI failures).
+    Worker services created by this pytest process are closed through their
+    in-process registries. Process-group ownership is required before any real
+    daemon subprocess test may run.
     """
-    if os.name == "nt":
-        return  # Windows: atexit + __del__ handlers are sufficient
-
-    worker_patterns = [
-        "superlocalmemory.core.reranker_worker",
-        "superlocalmemory.core.embedding_worker",
-        "superlocalmemory.core.recall_worker",
-    ]
-    for pattern in worker_patterns:
-        try:
-            subprocess.run(
-                ["pkill", "-f", pattern],
-                capture_output=True,
-                timeout=5,
-            )
-        except Exception:
-            pass
+    return
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -107,7 +173,8 @@ def _prevent_heavy_model_loading():
 
     Tests that explicitly need real models should patch these back.
     """
-    from unittest.mock import MagicMock, patch as _patch
+    from unittest.mock import MagicMock
+    from unittest.mock import patch as _patch
 
     mock_reranker = MagicMock()
     mock_reranker.rerank.return_value = None
@@ -151,6 +218,7 @@ def cleanup_slm_workers_between_tests():
     real workers, this cleans them up. Lightweight when no workers exist.
     """
     yield
+    _cancel_test_timer_threads()
     try:
         from superlocalmemory.core.embeddings import _cleanup_all_embedding_services
         _cleanup_all_embedding_services()

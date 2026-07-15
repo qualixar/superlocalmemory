@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
-"""SuperLocalMemory V2 - LlamaIndex Chat Store Backend
+"""SuperLocalMemory V3 - LlamaIndex Chat Store Backend
 
-Implements LlamaIndex's BaseChatStore backed by SuperLocalMemory V2's
+Implements LlamaIndex's BaseChatStore backed by SuperLocalMemory V3's
 local SQLite storage. All data stays on-device — zero cloud, zero telemetry.
 
 Usage:
@@ -15,36 +15,28 @@ Usage:
 """
 import hashlib
 import json
-import sys
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.core.storage.chat_store.base import BaseChatStore
 
-# ---------------------------------------------------------------------------
-# Locate and import SuperLocalMemory V2's MemoryStoreV2
-# ---------------------------------------------------------------------------
-_SLM_PATH = Path.home() / ".superlocalmemory"
-if str(_SLM_PATH) not in sys.path:
-    sys.path.insert(0, str(_SLM_PATH))
-
-# Also support the source tree layout (for development / tests that pass db_path)
-_SLM_SRC_PATH = Path(__file__).resolve().parents[6] / "src"
-if _SLM_SRC_PATH.exists() and str(_SLM_SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(_SLM_SRC_PATH))
-
-try:
-    from superlocalmemory.core.engine import MemoryEngine
-except ImportError as exc:
-    raise ImportError(
-        "SuperLocalMemory V2 is not installed. "
-        "Run: curl -fsSL https://raw.githubusercontent.com/qualixar/superlocalmemory/main/install.sh | bash\n"
-        "Or visit: https://github.com/qualixar/superlocalmemory"
-    ) from exc
-
 
 # ---------------------------------------------------------------------------
+def _data_root() -> Path:
+    value = (
+        os.environ.get("SLM_DATA_DIR")
+        or os.environ.get("SL_MEMORY_PATH")
+        or os.environ.get("SLM_HOME")
+    )
+    return Path(value).expanduser() if value else Path.home() / ".superlocalmemory"
+
+
+# ``SLM_INSTALL_DIR`` is legacy installer metadata only. It is deliberately
+# never added to ``sys.path``. Install the V3 runtime with:
+# ``python -m pip install superlocalmemory``.
+
 # Constants
 # ---------------------------------------------------------------------------
 # Tag format: "li:chat:<hash>" where hash is a 24-char SHA-256 prefix of the key.
@@ -127,7 +119,7 @@ def _extract_key(content: str) -> Optional[str]:
 
 
 class SuperLocalMemoryChatStore(BaseChatStore):
-    """LlamaIndex chat store backed by SuperLocalMemory V2.
+    """LlamaIndex chat store backed by SuperLocalMemory V3.
 
     Stores chat messages in SuperLocalMemory's local SQLite database,
     keeping all data on-device with zero cloud calls.
@@ -145,7 +137,7 @@ class SuperLocalMemoryChatStore(BaseChatStore):
     # Pydantic fields ---------------------------------------------------
     # We store the db_path as a string so the model stays JSON-serializable.
     _db_path: Optional[str] = None
-    _store: Any = None  # MemoryStoreV2 — not serializable, set in __init__
+    _store: Any = None  # V3ChatStore — not serializable, set in __init__
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -157,11 +149,11 @@ class SuperLocalMemoryChatStore(BaseChatStore):
                      If None, uses the default ``~/.superlocalmemory/memory.db``.
         """
         super().__init__(**kwargs)
-        self._db_path = db_path
-        if db_path:
-            self._store = MemoryStoreV2(db_path=Path(db_path))
-        else:
-            self._store = MemoryStoreV2()
+        from llama_index.storage.chat_store.superlocalmemory._v3_store import V3ChatStore
+
+        resolved_db = Path(db_path) if db_path else _data_root() / "memory.db"
+        self._db_path = str(resolved_db)
+        self._store = V3ChatStore(resolved_db)
 
     @classmethod
     def class_name(cls) -> str:
@@ -178,23 +170,7 @@ class SuperLocalMemoryChatStore(BaseChatStore):
         Returns memories sorted by ``created_at`` ascending (oldest first)
         to preserve conversation order.
         """
-        tag = _make_tag(key)
-        all_memories = self._store.list_all(limit=_LIST_LIMIT)
-
-        matched: List[Dict[str, Any]] = []
-        for mem in all_memories:
-            mem_tags = mem.get("tags", [])
-            if isinstance(mem_tags, str):
-                try:
-                    mem_tags = json.loads(mem_tags)
-                except (json.JSONDecodeError, TypeError):
-                    mem_tags = [t.strip() for t in mem_tags.split(",") if t.strip()]
-            if tag in (mem_tags or []):
-                matched.append(mem)
-
-        # Sort by created_at ascending for correct conversation order
-        matched.sort(key=lambda m: m.get("created_at", ""))
-        return matched
+        return self._store.list_session(f"llamaindex:{_key_hash(key)}", limit=_LIST_LIMIT)
 
     def _memories_to_messages(
         self, memories: List[Dict[str, Any]]
@@ -226,11 +202,16 @@ class SuperLocalMemoryChatStore(BaseChatStore):
         """Add a single message for a key."""
         content = _serialize_message(key, message)
         tag = _make_tag(key)
-        self._store.add_memory(
-            content=content,
-            tags=[tag],
-            project_name=_PROJECT_NAME,
-            importance=_IMPORTANCE,
+        self._store.add(
+            content,
+            session_id=f"llamaindex:{_key_hash(key)}",
+            metadata={
+                "integration": "llamaindex",
+                "chat_key": key,
+                "tags": [tag],
+                "project_name": _PROJECT_NAME,
+                "importance": _IMPORTANCE,
+            },
         )
 
     def delete_messages(self, key: str) -> Optional[List[ChatMessage]]:
@@ -245,7 +226,7 @@ class SuperLocalMemoryChatStore(BaseChatStore):
         messages = self._memories_to_messages(memories)
 
         for mem in memories:
-            self._store.delete_memory(mem["id"])
+            self._store.delete(mem["id"])
 
         return messages
 
@@ -265,7 +246,7 @@ class SuperLocalMemoryChatStore(BaseChatStore):
 
         target = memories[idx]
         msg = _deserialize_message(target.get("content", ""))
-        self._store.delete_memory(target["id"])
+        self._store.delete(target["id"])
         return msg
 
     def delete_last_message(self, key: str) -> Optional[ChatMessage]:
@@ -280,7 +261,7 @@ class SuperLocalMemoryChatStore(BaseChatStore):
 
         last = memories[-1]
         msg = _deserialize_message(last.get("content", ""))
-        self._store.delete_memory(last["id"])
+        self._store.delete(last["id"])
         return msg
 
     def get_keys(self) -> List[str]:
@@ -290,25 +271,10 @@ class SuperLocalMemoryChatStore(BaseChatStore):
         field) rather than from tags, because tags contain only a hash of
         the key for length-safety.
         """
-        all_memories = self._store.list_all(limit=_LIST_LIMIT)
+        all_memories = self._store.list_prefix("llamaindex:", limit=_LIST_LIMIT)
         keys_seen: set[str] = set()
 
         for mem in all_memories:
-            # Only consider memories whose tags indicate they belong to us
-            mem_tags = mem.get("tags", [])
-            if isinstance(mem_tags, str):
-                try:
-                    mem_tags = json.loads(mem_tags)
-                except (json.JSONDecodeError, TypeError):
-                    mem_tags = [t.strip() for t in mem_tags.split(",") if t.strip()]
-
-            is_ours = any(
-                isinstance(t, str) and t.startswith(_TAG_PREFIX)
-                for t in (mem_tags or [])
-            )
-            if not is_ours:
-                continue
-
             key = _extract_key(mem.get("content", ""))
             if key is not None:
                 keys_seen.add(key)

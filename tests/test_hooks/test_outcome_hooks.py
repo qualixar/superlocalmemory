@@ -26,15 +26,12 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import sqlite3
-import statistics
 import sys
 import time
 from pathlib import Path
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures — memory.db bootstrap + env isolation
@@ -82,10 +79,12 @@ def _bootstrap_memory_db(path: Path) -> None:
 
 @pytest.fixture()
 def slm_home(tmp_path: Path, monkeypatch):
-    """Isolate ~/.superlocalmemory for each test via SLM_HOME env override."""
+    """Isolate hook state under the winning canonical data-root alias."""
     home = tmp_path / "slm_home"
     home.mkdir()
-    monkeypatch.setenv("SLM_HOME", str(home))
+    monkeypatch.setenv("SLM_DATA_DIR", str(home))
+    monkeypatch.setenv("SL_MEMORY_PATH", str(tmp_path / "wrong-legacy-root"))
+    monkeypatch.setenv("SLM_HOME", str(tmp_path / "wrong-hook-root"))
     return home
 
 
@@ -534,9 +533,10 @@ def test_all_hooks_exit_0_on_db_lock(
 ) -> None:
     """busy_timeout fast-fail: hooks still return 0 on SQLite OperationalError."""
     import sqlite3 as _sq
+
     from superlocalmemory.hooks import post_tool_outcome_hook as h_post
-    from superlocalmemory.hooks import user_prompt_rehash_hook as h_rehash
     from superlocalmemory.hooks import stop_outcome_hook as h_stop
+    from superlocalmemory.hooks import user_prompt_rehash_hook as h_rehash
 
     # Force every sqlite3.connect from these modules to raise OperationalError.
     class _Boom:

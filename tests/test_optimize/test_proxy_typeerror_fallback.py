@@ -5,6 +5,7 @@ shared (tenant-less) namespace, which would re-open cross-tenant disclosure.
 import asyncio
 
 from superlocalmemory.optimize.proxy._helpers import (
+    _HOOK_TENANT_SUPPORT,
     _safe_cache_check,
     _safe_cache_store,
     _accepts_tenant_id,
@@ -127,6 +128,8 @@ def test_store_internal_typeerror_does_not_retry_tenantless():
 
 
 def test_accepts_tenant_id_detection():
+    _HOOK_TENANT_SUPPORT.clear()
     assert _accepts_tenant_id(_TenantHookInternalTypeError().check) is True
     assert _accepts_tenant_id(_KwargsHookLeaks().check) is True   # **kwargs
     assert _accepts_tenant_id(_TrueLegacyHook().check) is False
+    assert all(not isinstance(key, int) for key in _HOOK_TENANT_SUPPORT)

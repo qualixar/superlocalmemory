@@ -52,6 +52,8 @@ from superlocalmemory.storage.migrations import (
     M014_v345_scale_ready as _M014,
     M015_add_pinned_column as _M015,
     M016_add_scope_support as _M016,
+    M017_ccq_scope_column as _M017,
+    M018_ingestion_operations as _M018,
 )
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
@@ -73,6 +75,8 @@ _MODULES = {
     _M014.NAME: _M014,
     _M015.NAME: _M015,
     _M016.NAME: _M016,
+    _M017.NAME: _M017,
+    _M018.NAME: _M018,
 }
 
 logger = logging.getLogger(__name__)
@@ -111,6 +115,8 @@ MIGRATIONS: list[Migration] = [
     Migration(name=_M004.NAME, db_target="memory", ddl=_M004.DDL),
     # M007 creates pending_outcomes (memory.db, LLD-00 §1.2).
     Migration(name=_M007.NAME, db_target="memory", ddl=_M007.DDL),
+    # M018 is additive and independent of runtime-bootstrapped tables.
+    Migration(name=_M018.NAME, db_target="memory", ddl=_M018.DDL),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 
@@ -139,6 +145,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M016 adds scope and shared_with columns to 5 core tables for
     # multi-scope memory support (personal/global/shared).
     Migration(name=_M016.NAME, db_target="memory", ddl=_M016.DDL),
+    # M017 adds scope to the engine-bootstrapped CCQ consolidation table.
+    Migration(name=_M017.NAME, db_target="memory", ddl=_M017.DDL),
 ]
 
 

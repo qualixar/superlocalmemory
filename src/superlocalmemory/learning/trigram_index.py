@@ -44,6 +44,7 @@ from typing import Optional
 # Import the RAM semaphore at module scope so tests can monkeypatch
 # ``trigram_index.ram_reservation`` to a no-op on CI boxes with tight RAM.
 from superlocalmemory.core.ram_lock import ram_reservation
+from superlocalmemory.infra.data_root import DynamicStatePath, state_path
 
 
 # --------------------------------------------------------------------------
@@ -205,7 +206,7 @@ class TrigramIndex:
     ``(entity_id, hits)`` candidates.
     """
 
-    CACHE_DB_PATH: Path = Path.home() / ".superlocalmemory" / "active_brain_cache.db"
+    CACHE_DB_PATH: Path = DynamicStatePath("active_brain_cache.db")
     MAX_TRIGRAMS: int = 1_000_000
     LOOKUP_LIMIT: int = 10
     LOOKUP_MIN_HITS: int = 2
@@ -537,7 +538,7 @@ def get_or_none() -> Optional[TrigramIndex]:
         return _SINGLETON
     if not TrigramIndex.CACHE_DB_PATH.exists():
         return None
-    default_source = Path.home() / ".superlocalmemory" / "memory.db"
+    default_source = state_path("memory.db")
     if not default_source.exists():
         return None
     _SINGLETON = TrigramIndex(source_db_path=default_source)

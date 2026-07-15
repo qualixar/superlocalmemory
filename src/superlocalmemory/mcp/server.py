@@ -27,11 +27,11 @@ _os.environ.setdefault('SLM_SKIP_DEP_CHECK', '1')
 import logging
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from superlocalmemory.mcp.http_transport import SLMFastMCP
 
 logger = logging.getLogger(__name__)
 
-server = FastMCP("SuperLocalMemory V3")
+server = SLMFastMCP("SuperLocalMemory V3")
 
 # Lazy engine singleton -------------------------------------------------------
 

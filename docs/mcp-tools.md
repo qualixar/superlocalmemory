@@ -36,7 +36,19 @@ Store a new memory.
 |-----------|------|:--------:|-------------|
 | `content` | string | Yes | The text to remember |
 | `tags` | string | No | Comma-separated tags |
-| `metadata` | object | No | Additional key-value metadata |
+| `project` | string | No | Project classification |
+| `importance` | integer | No | Importance hint (default: 5) |
+| `session_id` | string | No | Session attribution and stable retry input |
+| `agent_id` | string | No | Calling-agent attribution |
+| `scope` | string | No | `personal`, `shared`, or `global` |
+| `shared_with` | string | No | Comma-separated profile IDs for shared scope |
+| `idempotency_key` | string | No | Stable identity for safe retries |
+
+The result is a durable receipt containing `operation_id`, `fact_ids`,
+`materialization_state`, and `pending`. A daemon-backed default call normally
+returns after the SQLite relational/FTS projection is `queryable`; enrichment
+continues on the same operation. The offline compatibility spool preserves the
+same source and idempotency identity when it is replayed.
 
 ### `recall`
 

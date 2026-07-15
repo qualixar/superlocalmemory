@@ -164,6 +164,33 @@ class TestConsolidateNoop:
         action = consolidator.consolidate(new_fact, "default")
         assert action.action_type == ConsolidationActionType.NOOP
 
+    def test_operation_queryable_fact_can_be_excluded_from_candidates(
+        self, db: DatabaseManager,
+    ) -> None:
+        """A write-through projection must not suppress its own derivation."""
+        _store_fact(
+            db, "f_queryable", "Alice leads the reliability program",
+            canonical_entities=["ent_alice"],
+            embedding=[1.0, 0.0, 0.0],
+        )
+        consolidator = MemoryConsolidator(db=db)
+        db.store_memory(MemoryRecord(memory_id="m_derived", content="parent"))
+        derived = AtomicFact(
+            fact_id="f_derived", memory_id="m_derived",
+            content="Alice heads reliability engineering",
+            canonical_entities=["ent_alice"],
+            embedding=[1.0, 0.0, 0.0],
+        )
+
+        action = consolidator.consolidate(
+            derived,
+            "default",
+            exclude_fact_ids={"f_queryable"},
+        )
+
+        assert action.action_type == ConsolidationActionType.ADD
+        assert db.get_fact("f_derived") is not None
+
 
 # ---------------------------------------------------------------------------
 # Consolidation: UPDATE

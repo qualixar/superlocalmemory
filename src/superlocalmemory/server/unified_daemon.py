@@ -20,13 +20,14 @@ Port 8767: TCP redirect for backward compat (deprecated)
 24/7 by default. Opt-in auto-kill: --idle-timeout=1800
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -34,7 +35,9 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager, AsyncExitStack
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -51,13 +54,77 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.infra.daemon_identity import (
+    DaemonDescriptor,
+    build_descriptor,
+    clear_descriptor,
+    descriptor_path,
+    write_descriptor,
+)
+from superlocalmemory.infra.data_root import (
+    assert_no_durable_root_conflict,
+    canonical_data_root,
+    state_path,
+)
 
 logger = logging.getLogger("superlocalmemory.unified_daemon")
 
 _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767
-_PID_FILE = Path.home() / ".superlocalmemory" / "daemon.pid"
-_PORT_FILE = Path.home() / ".superlocalmemory" / "daemon.port"
+_ACTIVE_DAEMON_DESCRIPTOR: DaemonDescriptor | None = None
+
+
+def _process_descriptor(port: int, version: str, state: str) -> DaemonDescriptor:
+    """Return this process's stable namespace/instance identity."""
+    global _ACTIVE_DAEMON_DESCRIPTOR
+    if _ACTIVE_DAEMON_DESCRIPTOR is None:
+        descriptor = build_descriptor(
+            port=port,
+            version=version,
+            pid=os.getpid(),
+            instance_id=os.environ.get("SLM_DAEMON_INSTANCE_ID") or None,
+            capability=os.environ.get("SLM_DAEMON_CAPABILITY") or None,
+            state=state,
+        )
+        os.environ["SLM_DAEMON_INSTANCE_ID"] = descriptor.instance_id
+        os.environ["SLM_DAEMON_CAPABILITY"] = descriptor.capability
+        _ACTIVE_DAEMON_DESCRIPTOR = descriptor
+    elif _ACTIVE_DAEMON_DESCRIPTOR.state != state:
+        _ACTIVE_DAEMON_DESCRIPTOR = replace(
+            _ACTIVE_DAEMON_DESCRIPTOR,
+            state=state,
+            port=port,
+            version=version,
+        )
+    return _ACTIVE_DAEMON_DESCRIPTOR
+
+
+def _publish_process_descriptor(
+    port: int, version: str, state: str,
+) -> DaemonDescriptor:
+    """Atomically publish identity plus one-release PID/port mirrors."""
+    descriptor = _process_descriptor(port, version, state)
+    write_descriptor(descriptor)
+    pid_file = descriptor_path().with_name("daemon.pid")
+    port_file = descriptor_path().with_name("daemon.port")
+    pid_file.write_text(str(descriptor.pid))
+    port_file.write_text(str(descriptor.port))
+    return descriptor
+
+
+def _cleanup_process_descriptor(descriptor: DaemonDescriptor | None) -> None:
+    """Remove lifecycle state only when this process still owns the instance."""
+    if descriptor is None or not clear_descriptor(descriptor.instance_id):
+        return
+    for path, expected in (
+        (descriptor_path().with_name("daemon.pid"), str(descriptor.pid)),
+        (descriptor_path().with_name("daemon.port"), str(descriptor.port)),
+    ):
+        try:
+            if path.read_text().strip() == expected:
+                path.unlink()
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +135,8 @@ class RememberRequest(BaseModel):
     content: str
     tags: str = ""
     metadata: dict | None = None  # v3.4.26: pass-through from MCP pool_store
+    idempotency_key: str | None = None
+    session_id: str = ""
     # v3.6.15 multi-scope: visibility of the new memory. ``None`` scope means
     # "use the configured default_scope" (personal). shared_with is the list of
     # profile_ids for scope='shared'.
@@ -237,15 +306,15 @@ def _sanitize_json_text(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 class ObserveBuffer:
-    """Thread-safe debounce buffer for observation processing.
+    """Durable observation admission with a short duplicate window.
 
-    Buffers observations for a configurable window, deduplicates by content
-    hash, then processes as a batch via the singleton MemoryEngine.
+    An accepted observation is submitted to M018 before ``enqueue`` returns.
+    The timer clears only the in-memory duplicate set; it never owns evidence
+    or delays persistence.
     """
 
     def __init__(self, debounce_sec: float = 3.0):
         self._debounce_sec = debounce_sec
-        self._buffer: list[str] = []
         self._seen: set[str] = set()
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
@@ -255,16 +324,15 @@ class ObserveBuffer:
         self._engine = engine
 
     def enqueue(self, content: str) -> dict:
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         with self._lock:
             if content_hash in self._seen:
                 return {"captured": False, "reason": "duplicate within debounce window"}
             self._seen.add(content_hash)
-            self._buffer.append(content)
-            buf_size = len(self._buffer)
+            window_size = len(self._seen)
             if self._timer is not None:
                 self._timer.cancel()
-            self._timer = threading.Timer(self._debounce_sec, self._flush)
+            self._timer = threading.Timer(self._debounce_sec, self._clear_seen)
             self._timer.daemon = True
             self._timer.start()
         _emit_event(
@@ -272,74 +340,113 @@ class ObserveBuffer:
             payload={
                 "content_hash": content_hash,
                 "content_preview": content[:120],
-                "buffer_size": buf_size,
+                "buffer_size": window_size,
             },
         )
-        return {"captured": True, "queued": True, "buffer_size": buf_size}
-
-    def _flush(self) -> None:
-        with self._lock:
-            if not self._buffer:
-                return
-            batch = list(self._buffer)
-            self._buffer.clear()
-            self._seen.clear()
-            self._timer = None
-
         if self._engine is None:
-            return
+            with self._lock:
+                self._seen.discard(content_hash)
+            return {
+                "captured": False,
+                "durable": False,
+                "reason": "memory engine unavailable",
+            }
 
         try:
             from superlocalmemory.hooks.auto_capture import AutoCapture
-            auto = AutoCapture(engine=self._engine)
-            captured_count = 0
-            failed_count = 0
-            for content in batch:
-                try:
-                    decision = auto.evaluate(content)
-                    if decision.capture:
-                        auto.capture(content, category=decision.category)
-                        # Stage-9: count only what was actually WRITTEN to memory.
-                        # The prior 'processed N' counted skipped (capture=False)
-                        # items as successes — a false-positive write count.
-                        captured_count += 1
-                        _emit_event(
-                            "memory.captured",
-                            payload={
-                                "category": decision.category,
-                                "confidence": getattr(decision, "confidence", None),
-                                "content_preview": content[:120],
-                            },
-                        )
-                    else:
-                        _emit_event(
-                            "memory.dropped",
-                            payload={
-                                "reason": getattr(decision, "reason", "no patterns matched"),
-                                "content_preview": content[:120],
-                            },
-                        )
-                except Exception as exc:
-                    failed_count += 1
-                    logger.warning(
-                        "ObserveBuffer: auto.capture failed for content %.40r: %s",
-                        content,
-                        exc,
-                    )
-            logger.info(
-                "Observe debounce: evaluated=%d captured=%d failed=%d",
-                len(batch),
-                captured_count,
-                failed_count,
+            from superlocalmemory.core.engine_ingestion import (
+                build_engine_ingestion_command,
             )
+            from superlocalmemory.core.ingestion_command import IngestionRequest
+
+            decision = AutoCapture().evaluate(content)
+            if not decision.capture:
+                _emit_event(
+                    "memory.dropped",
+                    payload={
+                        "reason": decision.reason,
+                        "content_preview": content[:120],
+                    },
+                )
+                return {
+                    "captured": False,
+                    "durable": False,
+                    "reason": decision.reason,
+                    "category": decision.category,
+                    "confidence": round(decision.confidence, 3),
+                }
+
+            scope_config = getattr(self._engine._config, "scope", None)
+            scope = getattr(scope_config, "default_scope", "personal")
+            command = build_engine_ingestion_command(self._engine)
+            receipt = command.submit(IngestionRequest(
+                content=content,
+                profile_id=self._engine._profile_id,
+                source_type="http-observe",
+                idempotency_key=f"observe:v1:{content_hash}",
+                metadata={
+                    "source": "auto-capture",
+                    "category": decision.category,
+                    "confidence": decision.confidence,
+                },
+                scope=scope,
+                trusted_actor_id=_materializer_actor_id(),
+            ))
+            _emit_event(
+                "memory.captured",
+                payload={
+                    "operation_id": receipt.operation_id,
+                    "category": decision.category,
+                    "confidence": decision.confidence,
+                    "content_preview": content[:120],
+                },
+            )
+            return {
+                "captured": True,
+                "durable": True,
+                "queued": receipt.state.value != "complete",
+                "operation_id": receipt.operation_id,
+                "fact_ids": list(receipt.fact_ids),
+                "materialization_state": receipt.state.value,
+                "category": decision.category,
+                "confidence": round(decision.confidence, 3),
+            }
         except Exception as exc:
-            logger.error("ObserveBuffer: flush batch failed: %s", exc)
+            with self._lock:
+                self._seen.discard(content_hash)
+            logger.warning(
+                "ObserveBuffer: durable admission failed for content %.40r: %s",
+                content,
+                exc,
+            )
+            _emit_event(
+                "memory.dropped",
+                payload={
+                    "reason": "durable admission failed",
+                    "content_preview": content[:120],
+                },
+            )
+            return {
+                "captured": False,
+                "durable": False,
+                "reason": "durable admission failed",
+                "error": str(exc),
+            }
+
+    def _clear_seen(self) -> None:
+        with self._lock:
+            self._seen.clear()
+            self._timer = None
+
+    def _flush(self) -> None:
+        """Compatibility alias: no evidence is buffered in V3.7."""
+        self._clear_seen()
 
     def flush_sync(self) -> None:
-        """Force flush for shutdown."""
+        """Clear duplicate-window state for shutdown."""
         if self._timer is not None:
             self._timer.cancel()
-        self._flush()
+        self._clear_seen()
 
 
 _observe_buffer = ObserveBuffer(
@@ -445,13 +552,12 @@ async def lifespan(application: FastAPI):
     # (fresh install or upgrade), log a one-time banner with a link to the
     # CHANGELOG. Non-fatal; any filesystem error is swallowed.
     try:
-        from pathlib import Path as _VP
         try:
             from importlib.metadata import version as _pkg_version
             _slm_version = _pkg_version("superlocalmemory")
         except Exception:
             _slm_version = "unknown"
-        _version_marker = _VP.home() / ".superlocalmemory" / ".last_version"
+        _version_marker = state_path(".last_version")
         _prev = None
         if _version_marker.exists():
             try:
@@ -488,9 +594,8 @@ async def lifespan(application: FastAPI):
     # engine init so later queries see the expected columns/tables.
     # Non-fatal: any failure here is logged and the daemon still starts.
     try:
-        from pathlib import Path as _P
         from superlocalmemory.storage.migration_runner import apply_all
-        _home = _P.home() / ".superlocalmemory"
+        _home = canonical_data_root()
         _learning_db = _home / "learning.db"
         _memory_db = _home / "memory.db"
         _result = apply_all(_learning_db, _memory_db)
@@ -793,10 +898,9 @@ async def lifespan(application: FastAPI):
         # Previously routed through WorkerPool → recall_worker subprocess,
         # which loaded a duplicate MemoryEngine (~800 MB waste).
         try:
-            from pathlib import Path as _QP
             from superlocalmemory.core.queue_consumer import QueueConsumer
             from superlocalmemory.core.recall_queue import RecallQueue
-            _queue_db = _QP.home() / ".superlocalmemory" / "recall_queue.db"
+            _queue_db = state_path("recall_queue.db")
             _recall_queue = RecallQueue(_queue_db)
             _queue_consumer = QueueConsumer(
                 queue=_recall_queue,
@@ -854,7 +958,7 @@ async def lifespan(application: FastAPI):
         mesh_enabled = getattr(config, 'mesh_enabled', True) if config else True
         if mesh_enabled:
             from superlocalmemory.mesh.broker import MeshBroker
-            db_path = config.db_path if config else Path.home() / ".superlocalmemory" / "memory.db"
+            db_path = config.db_path if config else state_path("memory.db")
             mesh_broker = MeshBroker(str(db_path))
             mesh_broker.start_cleanup()
             application.state.mesh_broker = mesh_broker
@@ -874,7 +978,8 @@ async def lifespan(application: FastAPI):
     # Start legacy port redirect
     enable_legacy = os.environ.get("SLM_DISABLE_LEGACY_PORT", "").lower() not in ("1", "true")
     if enable_legacy:
-        asyncio.create_task(_start_legacy_redirect(_DEFAULT_PORT, _LEGACY_PORT))
+        identity = application.state.daemon_descriptor
+        asyncio.create_task(_start_legacy_redirect(identity.port, _LEGACY_PORT))
 
     # V3.4.22 LLD-02: signal-worker background drainer (S8-SK-01 fix).
     # Without this, ``signals.enqueue`` fills a bounded queue and drops
@@ -883,8 +988,7 @@ async def lifespan(application: FastAPI):
     if os.environ.get("SLM_SIGNALS_ENABLED", "1") != "0":
         try:
             from superlocalmemory.learning import signal_worker as _sw
-            from pathlib import Path as _P
-            _learning_db = _P.home() / ".superlocalmemory" / "learning.db"
+            _learning_db = state_path("learning.db")
             _sw.start(_learning_db)
             application.state.signal_worker_started = True
             logger.info("signal_worker started on %s", _learning_db)
@@ -1166,8 +1270,9 @@ async def lifespan(application: FastAPI):
             engine.close()
         except Exception:
             pass
-    _PID_FILE.unlink(missing_ok=True)
-    _PORT_FILE.unlink(missing_ok=True)
+    _cleanup_process_descriptor(
+        getattr(application.state, "daemon_descriptor", None),
+    )
     logger.info("Unified daemon shutdown complete")
 
 
@@ -1185,6 +1290,13 @@ def create_app() -> FastAPI:
         version=SLM_VERSION,
         lifespan=lifespan,
     )
+    try:
+        identity_port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
+    except ValueError:
+        identity_port = _DEFAULT_PORT
+    application.state.daemon_descriptor = _process_descriptor(
+        identity_port, SLM_VERSION, "ready",
+    )
 
     # -- Middleware --
     from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
@@ -1199,7 +1311,10 @@ def create_app() -> FastAPI:
         ],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-SLM-API-Key"],
+        allow_headers=[
+            "Content-Type", "Authorization", "X-SLM-API-Key",
+            "X-SLM-Daemon-Capability", "X-SLM-Target-Instance",
+        ],
     )
 
     # -- Register all dashboard routes (from existing api.py) --
@@ -1697,6 +1812,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             _recall_health = get_recall_health()
         except Exception:
             _recall_health = {"recall_healthy": None}
+        identity = getattr(application.state, "daemon_descriptor", None)
         return {
             "status": "ok",
             "pid": os.getpid(),
@@ -1708,6 +1824,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # v3.6.8: True iff the semantic channel actually fired on the last
             # health probe; includes self-heal counters.
             "recall_health": _recall_health,
+            **(identity.public_health_fields() if identity is not None else {}),
         }
 
     @application.get("/recall")
@@ -1810,10 +1927,11 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
     @application.post("/remember")
     async def remember(req: RememberRequest, wait: bool = False):
-        """v3.4.32: Async by default — writes to pending.db, returns pending_id
-        in <100ms. Materializer thread drains at low priority, yielding to
-        /search. Pass ``?wait=true`` for legacy synchronous behavior (blocks
-        on the embedder until facts are written).
+        """Persist through the durable canonical ingestion state machine.
+
+        The default path returns after the relational/FTS projection is
+        queryable.  ``wait=true`` materializes the same operation inline; the
+        background worker handles all other queryable operations.
         """
         _update_activity()
         engine = _get_engine_or_503()
@@ -1825,79 +1943,70 @@ def _register_daemon_routes(application: FastAPI) -> None:
         scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
         shared_with = req.shared_with
 
-        if wait:
-            try:
-                metadata = {"tags": req.tags} if req.tags else {}
-                extra = getattr(req, "metadata", None)
-                if isinstance(extra, dict):
-                    metadata.update(extra)
-                fact_ids = engine.store(
-                    req.content, metadata=metadata,
-                    scope=scope, shared_with=shared_with,
-                )
-                _emit_event(
-                    "memory.stored",
-                    payload={
-                        "fact_ids": list(fact_ids) if fact_ids else [],
-                        "count": len(fact_ids) if fact_ids else 0,
-                        "path": "remember_sync",
-                        "content_preview": req.content[:120],
-                    },
-                )
-                return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
-            except Exception as exc:
-                raise HTTPException(500, detail=str(exc))
-
         try:
-            from superlocalmemory.cli.pending_store import store_pending
+            from superlocalmemory.core.engine_ingestion import (
+                build_engine_ingestion_command,
+            )
+            from superlocalmemory.core.ingestion_command import (
+                IngestionRequest,
+                IngestionState,
+            )
+
             meta = {}
             if req.tags:
                 meta["tags"] = req.tags
             extra = getattr(req, "metadata", None)
             if isinstance(extra, dict):
                 meta.update(extra)
-            # v3.6.15 multi-scope: persist the resolved scope INSIDE the pending
-            # metadata so the materializer (_process_pending_memories) replays
-            # the write with the correct visibility instead of defaulting to
-            # personal. Non-personal only — keeps personal rows byte-identical
-            # to pre-3.6.15 so nothing downstream sees a new key by default.
-            if scope and scope != "personal":
-                meta["scope"] = scope
-                if shared_with:
-                    meta["shared_with"] = shared_with
-            # v3.5.5 WRITE-THROUGH: synchronous verbatim insert → the memory is
-            # keyword/BM25-recallable the instant this returns (~ms). Closes the
-            # recall window so a parallel/next agent finds memories saved seconds
-            # ago. Embedding/graph enrichment is deferred to the materializer.
-            fact_ids: list[str] = []
-            try:
-                fact_ids = engine.store_fast(
-                    req.content, metadata=meta,
-                    scope=scope, shared_with=shared_with,
-                )
-            except Exception as fexc:
-                logger.warning("store_fast failed, falling back to pending-only: %s", fexc)
-            # Enqueue for async enrichment (embedding + entities + graph). The
-            # materializer detects the already-inserted verbatim fact and enriches
-            # it in place rather than duplicating.
-            pending_id = store_pending(
-                req.content, tags=req.tags or "", metadata=meta,
+            identity = getattr(application.state, "daemon_descriptor", None)
+            if identity is None:
+                raise RuntimeError("daemon capability identity is unavailable")
+            trusted_actor_id = (
+                f"daemon-capability:{identity.capability_fingerprint}"
             )
+            command = build_engine_ingestion_command(engine)
+            receipt = command.submit(IngestionRequest(
+                content=req.content,
+                profile_id=engine._profile_id,
+                source_type="http",
+                idempotency_key=req.idempotency_key or uuid.uuid4().hex,
+                metadata=meta,
+                scope=scope,
+                shared_with=tuple(shared_with or ()),
+                trusted_actor_id=trusted_actor_id,
+                session_id=req.session_id,
+            ))
+
+            result = command.materialize(receipt.operation_id) if wait else receipt
+            if result.state is IngestionState.FAILED:
+                raise RuntimeError(result.last_error or "materialization failed")
+
+            fact_ids = list(result.fact_ids)
             _emit_event(
-                "memory.queued",
+                "memory.stored" if wait else "memory.queued",
                 payload={
-                    "pending_id": pending_id,
+                    "operation_id": result.operation_id,
+                    "fact_ids": fact_ids,
                     "tags": req.tags or "",
                     "content_preview": req.content[:120],
+                    "path": "remember_sync" if wait else "remember_queryable",
                 },
             )
             return {
                 "ok": True,
                 "fact_ids": fact_ids,
                 "count": len(fact_ids),
-                "pending_id": pending_id,
-                "status": "stored" if fact_ids else "queued",
-                "note": "write-through: recallable now; enriching async",
+                "operation_id": result.operation_id,
+                # One-release compatibility alias. The durable operation ID is
+                # opaque and replaces the integer pending.db row identifier.
+                "pending_id": result.operation_id,
+                "status": "stored" if wait else "queryable",
+                "materialization_state": result.state.value,
+                "note": (
+                    "canonical ingestion complete"
+                    if wait
+                    else "queryable now; canonical enrichment pending"
+                ),
             }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
@@ -1987,7 +2096,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "mode": mode,
             "fact_count": fact_count,
             "idle_s": round(time.monotonic() - _last_activity),
-            "port": _DEFAULT_PORT,
+            "port": application.state.daemon_descriptor.port,
             "legacy_port": _LEGACY_PORT,
         }
 
@@ -2011,8 +2120,17 @@ def _register_daemon_routes(application: FastAPI) -> None:
             raise HTTPException(500, detail=str(exc))
 
     @application.post("/stop")
-    async def stop():
-        """Graceful shutdown via uvicorn's mechanism."""
+    async def stop(request: Request):
+        """Gracefully stop only the capability-bound process instance."""
+        descriptor = getattr(application.state, "daemon_descriptor", None)
+        capability = request.headers.get("X-SLM-Daemon-Capability", "")
+        if descriptor is None or not hmac.compare_digest(
+            capability, descriptor.capability,
+        ):
+            raise HTTPException(403, detail="Invalid daemon capability")
+        target_instance = request.headers.get("X-SLM-Target-Instance", "")
+        if not hmac.compare_digest(target_instance, descriptor.instance_id):
+            raise HTTPException(409, detail="Daemon instance changed")
         logger.info("Stop requested via API")
         _observe_buffer.flush_sync()
         # Signal uvicorn to shut down gracefully
@@ -2137,15 +2255,101 @@ _materializer_stop = threading.Event()
 _materializer_thread: threading.Thread | None = None
 
 
-def _start_pending_materializer() -> None:
-    """Background thread: drains pending.db, yields to active /search calls.
+def _materializer_actor_id() -> str:
+    """Return the process-owned actor identity used by background writes."""
+    descriptor = _ACTIVE_DAEMON_DESCRIPTOR
+    if descriptor is None:
+        from superlocalmemory.server.routes.helpers import SLM_VERSION
 
-    Poll loop:
-    1. Fetch up to 5 pending rows.
-    2. For each row: if any /search is in flight, sleep 500ms (yield priority).
-    3. Call engine.store(), mark_done or mark_failed.
-    4. Sleep 2s between polls when idle (empty queue).
-    """
+        descriptor = _process_descriptor(_DEFAULT_PORT, SLM_VERSION, "ready")
+    return f"daemon-capability:{descriptor.capability_fingerprint}"
+
+
+def _materialize_ingestion_one_pass(engine, *, limit: int = 50) -> tuple[int, int]:
+    """Materialize durable M018 work once; return ``(complete, failed)``."""
+    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
+    from superlocalmemory.core.ingestion_command import IngestionState
+
+    command = build_engine_ingestion_command(engine)
+    completed = failed = 0
+    for operation in command.repository.list_materializable(limit=limit):
+        try:
+            result = command.materialize(operation.operation_id)
+        except Exception as exc:
+            failed += 1
+            logger.warning(
+                "Ingestion operation %s could not be materialized: %s",
+                operation.operation_id,
+                exc,
+            )
+            continue
+        if result.state is IngestionState.COMPLETE:
+            completed += 1
+            _emit_event(
+                "memory.stored",
+                payload={
+                    "operation_id": result.operation_id,
+                    "fact_ids": list(result.fact_ids),
+                    "path": "canonical_materializer",
+                    "content_preview": result.raw_content[:120],
+                },
+                source_agent="materializer",
+            )
+        else:
+            failed += 1
+            logger.warning(
+                "Ingestion operation %s failed: %s",
+                result.operation_id,
+                result.last_error,
+            )
+    return completed, failed
+
+
+def _materialize_legacy_pending_item(engine, item: dict) -> str:
+    """Backfill one pre-M018 pending.db row through canonical ingestion."""
+    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
+    from superlocalmemory.core.ingestion_command import (
+        IngestionRequest,
+        IngestionState,
+    )
+
+    metadata_value = item.get("metadata") or "{}"
+    try:
+        metadata = (
+            json.loads(metadata_value)
+            if isinstance(metadata_value, str)
+            else dict(metadata_value)
+        )
+    except (TypeError, ValueError):
+        metadata = {}
+    if item.get("tags"):
+        metadata.setdefault("tags", item["tags"])
+    scope = metadata.pop("scope", None) or "personal"
+    shared_with = tuple(metadata.pop("shared_with", None) or ())
+    source_type = str(metadata.pop("_slm_source_type", "legacy-pending"))
+    idempotency_key = str(
+        metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
+    )
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=item["content"],
+        profile_id=engine._profile_id,
+        source_type=source_type,
+        idempotency_key=idempotency_key,
+        metadata=metadata,
+        scope=scope,
+        shared_with=shared_with,
+        trusted_actor_id=_materializer_actor_id(),
+        session_id=str(metadata.get("session_id") or ""),
+    ))
+    result = command.materialize(receipt.operation_id)
+    if result.state is not IngestionState.COMPLETE:
+        raise RuntimeError(result.last_error or "legacy pending materialization failed")
+    return result.operation_id
+
+
+def _start_pending_materializer() -> None:
+    """Drain M018 operations and backfill the legacy pending.db queue."""
     global _materializer_thread
 
     def _loop():
@@ -2172,11 +2376,20 @@ def _start_pending_materializer() -> None:
                 if not _engine_logged:
                     logger.info("Materializer: engine acquired, starting drain loop")
                     _engine_logged = True
+
+                durable_complete, durable_failed = _materialize_ingestion_one_pass(
+                    engine,
+                    limit=50,
+                )
                 pending = get_pending(limit=50)
-                if not pending:
+                if not pending and not durable_complete and not durable_failed:
                     time.sleep(1.0)
                     continue
-                logger.info("Materializer: processing %d pending memories", len(pending))
+                if pending:
+                    logger.info(
+                        "Materializer: backfilling %d legacy pending memories",
+                        len(pending),
+                    )
                 for item in pending:
                     if _materializer_stop.is_set():
                         break
@@ -2185,92 +2398,15 @@ def _start_pending_materializer() -> None:
                         time.sleep(0.5)
                         waits += 1
                     try:
-                        import hashlib
-                        content = item["content"]
-                        content_hash = hashlib.md5(content.encode()).hexdigest()
-                        # v3.5.5: the write-through path already inserted a
-                        # verbatim fact (recallable via BM25). If it lacks an
-                        # embedding, ENRICH it in place (compute embedding +
-                        # upsert vector store) rather than skipping — otherwise
-                        # the fact would never be semantically searchable.
-                        # v3.6.15: scope the dedup to THIS profile. Without the
-                        # profile_id filter, a memory whose verbatim text matches
-                        # another profile's fact was treated as a duplicate and
-                        # silently dropped — cross-profile data loss + leakage.
-                        dup = engine._db.execute(
-                            "SELECT fact_id, embedding FROM atomic_facts "
-                            "WHERE content = ? AND profile_id = ? LIMIT 1",
-                            (content, engine._profile_id),
-                        )
-                        if dup:
-                            try:
-                                row = dict(dup[0])
-                                if not row.get("embedding") and engine._embedder:
-                                    emb = engine._embedder.embed(content)
-                                    if emb:
-                                        upd = {"embedding": emb}
-                                        try:
-                                            fm, fv = engine._embedder.compute_fisher_params(emb)
-                                            upd["fisher_mean"] = fm
-                                            upd["fisher_variance"] = fv
-                                        except Exception:
-                                            pass
-                                        engine._db.update_fact(row["fact_id"], upd)
-                                        vs = getattr(engine, "_vector_store", None)
-                                        if vs and getattr(vs, "available", False):
-                                            vs.upsert(row["fact_id"], engine._profile_id, emb)
-                            except Exception as eexc:
-                                logger.debug("enrichment of write-through fact failed: %s", eexc)
-                            mark_done(item["id"])
-                            continue
-                        import json as _json
-                        md_str = item.get("metadata") or "{}"
-                        try:
-                            md = _json.loads(md_str)
-                        except Exception:
-                            md = {}
-                        if item.get("tags"):
-                            md.setdefault("tags", item["tags"])
-                        # v3.6.15: replay the scope the async /remember path
-                        # stashed in metadata, so a queued non-personal write
-                        # materializes with the right visibility (not personal).
-                        _mscope = md.get("scope") or "personal"
-                        _mshared = md.get("shared_with")
-                        _shared_json = _json.dumps(_mshared) if _mshared else None
-                        # Create memory row (FK target for atomic_facts)
-                        from datetime import datetime, timezone
-                        from superlocalmemory.storage.models import (
-                            AtomicFact, FactType,
-                        )
-                        mem_id = content_hash[:16]
-                        engine._db.execute(
-                            "INSERT OR IGNORE INTO memories "
-                            "(memory_id, profile_id, content, "
-                            "session_id, speaker, role, created_at, "
-                            "metadata_json, scope, shared_with) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            (mem_id, engine._profile_id, content,
-                             "", "", "user",
-                             datetime.now(timezone.utc).isoformat(),
-                             _json.dumps(md), _mscope, _shared_json),
-                        )
-                        fact = AtomicFact(
-                            content=content,
-                            fact_type=FactType.EPISODIC,
-                            memory_id=mem_id,
-                            profile_id=engine._profile_id,
-                            scope=_mscope,
-                            shared_with=_mshared,
-                        )
-                        engine.store_fact_direct(fact)
+                        operation_id = _materialize_legacy_pending_item(engine, item)
                         mark_done(item["id"])
                         _emit_event(
                             "memory.stored",
                             payload={
                                 "pending_id": item["id"],
-                                "memory_id": mem_id,
-                                "path": "materializer_drain",
-                                "content_preview": content[:120],
+                                "operation_id": operation_id,
+                                "path": "legacy_pending_backfill",
+                                "content_preview": item["content"][:120],
                             },
                             source_agent="materializer",
                         )
@@ -2293,6 +2429,7 @@ def _start_pending_materializer() -> None:
 def start_server(port: int = _DEFAULT_PORT) -> None:
     """Start the unified daemon. Blocks until stopped."""
     global _start_time
+    assert_no_durable_root_conflict()
     import uvicorn
 
     # v3.4.23: rotate oversized logs before anything else so both the CLI
@@ -2302,17 +2439,16 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     except Exception:
         pass  # never block startup on log housekeeping
 
-    _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PID_FILE.write_text(str(os.getpid()))
-    _PORT_FILE.write_text(str(port))
+    from superlocalmemory.server.routes.helpers import SLM_VERSION
+
+    _publish_process_descriptor(port, SLM_VERSION, "starting")
     _start_time = time.monotonic()
 
     try:
         from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
             is_ready as _is_ready, migrate as _migrate,
         )
-        _data = Path(os.environ.get("SLM_DATA_DIR")
-                     or Path.home() / ".superlocalmemory")
+        _data = canonical_data_root()
         if not _is_ready(_data):
             _migrate(_data)
     except Exception as exc:
@@ -2327,7 +2463,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     # v3.4.32: Continuous pending-queue materializer with recall priority.
     _start_pending_materializer()
 
-    log_dir = Path.home() / ".superlocalmemory" / "logs"
+    log_dir = state_path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Bind address. `SLM_DAEMON_HOST` is the canonical name; `SLM_HOST` is
@@ -2349,11 +2485,12 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     )
     server = uvicorn.Server(config)
 
+    _publish_process_descriptor(port, SLM_VERSION, "ready")
+
     try:
         server.run()
     finally:
-        _PID_FILE.unlink(missing_ok=True)
-        _PORT_FILE.unlink(missing_ok=True)
+        _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
 
 
 # ---------------------------------------------------------------------------
@@ -2383,7 +2520,7 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
     Keeps one rotated copy (.1). Safe under concurrent start attempts:
     rename is atomic on POSIX, and truncation is idempotent.
     """
-    log_dir = log_dir or (Path.home() / ".superlocalmemory" / "logs")
+    log_dir = log_dir or state_path("logs")
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception:

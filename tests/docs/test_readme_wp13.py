@@ -233,23 +233,24 @@ def test_without_a_proxy_present():
 
 
 # ---------------------------------------------------------------------------
-# AC7: moat in hero (first 30 lines)
+# AC7: evidence-safe positioning near the hero
 # ---------------------------------------------------------------------------
 
 
-def test_moat_in_hero():
-    """AC7: First 30 lines must contain zero-cloud, Mem0, and 'best of our knowledge' signals."""
+def test_evidence_safe_positioning_near_hero():
+    """AC7: Opening copy must state the local contract without a competitor scoreboard."""
     lines = _readme_lines()
-    hero = "\n".join(lines[:30]).lower()
-    assert "zero" in hero or "zero-cloud" in hero or "zero-llm" in hero, (
-        "Hero (first 30 lines) must mention zero-cloud/zero-LLM moat (LLD AC7)."
+    opening = "\n".join(lines[:50]).lower()
+    assert "local runtime" in opening, (
+        "Opening copy must describe the local runtime contract (LLD AC7)."
     )
-    assert "mem0" in hero, (
-        "Hero (first 30 lines) must reference Mem0 comparison (LLD AC7)."
+    assert "explicit choices" in opening, (
+        "Opening copy must disclose optional provider/network choices (LLD AC7)."
     )
-    assert "best of our knowledge" in hero or "best-of-knowledge" in hero or "knowledge" in hero, (
-        "Hero (first 30 lines) must include a hedged 'best of our knowledge' claim (LLD AC7)."
+    assert "current v3.7 locomo result is unknown" in opening, (
+        "Opening copy must separate historical research from the V3.7 release (LLD AC7)."
     )
+    assert "mem0" not in opening, "Opening copy must not use an unverified competitor scoreboard."
 
 
 # ---------------------------------------------------------------------------

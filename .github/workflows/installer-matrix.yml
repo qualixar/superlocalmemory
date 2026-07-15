@@ -1,0 +1,141 @@
+name: Installer artifact matrix
+
+on:
+  pull_request:
+    paths:
+      - "bin/slm-npm"
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - "scripts/postinstall.js"
+      - "scripts/preuninstall.js"
+      - "src/superlocalmemory/cli/main.py"
+      - "package.json"
+      - "pyproject.toml"
+      - "tests/installers/**"
+      - "tests/postinstall/**"
+      - "tests/test_ci_guards/test_*installer*"
+      - ".github/workflows/installer-matrix.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bin/slm-npm"
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - "scripts/postinstall.js"
+      - "scripts/preuninstall.js"
+      - "src/superlocalmemory/cli/main.py"
+      - "package.json"
+      - "pyproject.toml"
+      - "tests/installers/**"
+      - "tests/postinstall/**"
+      - "tests/test_ci_guards/test_*installer*"
+      - ".github/workflows/installer-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clone-installers:
+    name: Clone installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+    env:
+      UV_TOOL_DIR: ${{ runner.temp }}/uv-tools
+      UV_TOOL_BIN_DIR: ${{ runner.temp }}/uv-bin
+      SLM_DATA_DIR: ${{ runner.temp }}/slm-data-must-not-exist
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
+      - name: Build candidate wheel
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python -m build
+      - name: Test installer contracts
+        run: |
+          python -m pip install --disable-pip-version-check pytest pyyaml tree-sitter-language-pack
+          python -m pytest -q tests/installers tests/test_ci_guards/test_windows_installer_contract.py tests/test_ci_guards/test_installation_surface_contract.py tests/test_cli/test_cli_metadata_read_only.py
+      - name: Install, invoke and uninstall candidate on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          ./scripts/install.sh install --manager uv --package "$wheel" --non-interactive
+          test ! -e "$SLM_DATA_DIR"
+          "$UV_TOOL_BIN_DIR/slm" --version
+          test ! -e "$SLM_DATA_DIR"
+          ./scripts/install.sh uninstall --manager uv
+          test ! -e "$UV_TOOL_BIN_DIR/slm"
+      - name: Install, invoke and uninstall candidate on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:UV_TOOL_BIN_DIR | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $wheel = (Get-ChildItem -Path dist -Filter *.whl | Select-Object -First 1).FullName
+          if (-not $wheel) { throw "Candidate wheel not found" }
+          .\scripts\install.ps1 -Action Install -ToolManager uv -Package $wheel -NonInteractive
+          if (Test-Path -LiteralPath $env:SLM_DATA_DIR) { throw "Installer created durable data" }
+          & (Join-Path $env:UV_TOOL_BIN_DIR "slm.exe") --version
+          if (Test-Path -LiteralPath $env:SLM_DATA_DIR) { throw "Version probe created durable data" }
+          .\scripts\install.ps1 -Action Uninstall -ToolManager Auto -NonInteractive
+          if (Test-Path -LiteralPath (Join-Path $env:UV_TOOL_BIN_DIR "slm.exe")) { throw "CLI remained after uninstall" }
+
+  npm-artifact:
+    name: npm private runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+    env:
+      SLM_DATA_DIR: ${{ runner.temp }}/npm-slm-data-must-not-exist
+      SLM_NPM_PREFIX: ${{ runner.temp }}/npm-prefix
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Build npm candidate
+        id: npm-pack
+        shell: bash
+        run: |
+          tarball="$(npm pack --ignore-scripts --json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d)[0].filename))")"
+          test -f "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Install, invoke and uninstall npm candidate on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm install --global --prefix "$SLM_NPM_PREFIX" "./${{ steps.npm-pack.outputs.tarball }}"
+          test ! -e "$SLM_DATA_DIR"
+          "$SLM_NPM_PREFIX/bin/slm" --version
+          test ! -e "$SLM_DATA_DIR"
+          npm uninstall --global --prefix "$SLM_NPM_PREFIX" superlocalmemory
+          test ! -e "$SLM_NPM_PREFIX/bin/slm"
+      - name: Install, invoke and uninstall npm candidate on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm install --global --prefix $env:SLM_NPM_PREFIX ".\${{ steps.npm-pack.outputs.tarball }}"
+          if (Test-Path -LiteralPath $env:SLM_DATA_DIR) { throw "npm installer created durable data" }
+          & (Join-Path $env:SLM_NPM_PREFIX "slm.cmd") --version
+          if (Test-Path -LiteralPath $env:SLM_DATA_DIR) { throw "Version probe created durable data" }
+          npm uninstall --global --prefix $env:SLM_NPM_PREFIX superlocalmemory
+          if (Test-Path -LiteralPath (Join-Path $env:SLM_NPM_PREFIX "slm.cmd")) { throw "npm CLI remained after uninstall" }

@@ -28,7 +28,8 @@ _MAX_MARKER_BYTES = 64  # a semver string is ≤ 32 chars; 64 is plenty
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("SLM_DATA_DIR") or Path.home() / ".superlocalmemory")
+    from superlocalmemory.infra.data_root import canonical_data_root
+    return canonical_data_root()
 
 
 def _marker_path() -> Path:

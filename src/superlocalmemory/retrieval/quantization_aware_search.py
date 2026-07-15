@@ -16,7 +16,7 @@ Applies precision-dependent score penalties:
   - polar:   config.polar_search_penalty (default 0.95x)
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

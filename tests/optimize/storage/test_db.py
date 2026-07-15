@@ -218,13 +218,15 @@ def test_machine_id_falls_back_on_windows_without_os_uname(
         "superlocalmemory.optimize.storage.db.platform.system",
         lambda: "Windows",
     )
+    canonical = tmp_path / "canonical"
+    monkeypatch.setenv("SLM_DATA_DIR", str(canonical))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delattr(_os, "uname", raising=False)
 
     db = CacheDB.__new__(CacheDB)
     mid = db._get_machine_id()
 
-    mid_file = tmp_path / ".superlocalmemory" / ".llmcache_key"
+    mid_file = canonical / ".llmcache_key"
     assert mid
     assert mid_file.exists()
     assert mid_file.read_text(encoding="utf-8").strip() == mid

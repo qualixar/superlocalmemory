@@ -1,18 +1,18 @@
 # SuperLocalMemory V3
 
-> **Five years of daily AI use. Your system won't feel it.**
-> *Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.*
+> **Local-first memory, cache, and compression controls for AI-agent workflows.**
+> *Documented clients include Claude Code, Cursor, Windsurf, Codex, and other named MCP configurations.*
 
-SuperLocalMemory gives AI assistants persistent memory across sessions. **v3.6.11 "Optimize Everywhere"** — cache, compress, and remember on any plan, no proxy required. No cloud. No APIs. No data leaves your machine.
+SuperLocalMemory gives AI assistants persistent memory across sessions. Optimize adds an opt-in exact cache, content-dependent compression, and proxy or agent-routed surfaces. Core memory state uses a local data root; optional providers, connectors, backup, and downloads have separate network behavior.
 
-### v3.6.12 "Distributed-ready" — Run SLM across your LAN
-Deploy SLM on a server and reach it from other machines. **`SLM_REMOTE=1`** (default off) lets the dashboard load from a remote browser, lets MCP gateways/hubs forward tool calls, and makes custom local LLM endpoints (llama.cpp / LM Studio / Azure) configurable from the dashboard — plus a batch of stability and security fixes. LAN access stays gated by `SLM_MCP_ALLOWED_HOSTS`. See the [Distributed Deployment guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/distributed-deployment.md).
+### v3.6.12 remote coordination controls
+**`SLM_REMOTE=1`** (default off) exposes selected HTTP surfaces to configured LAN clients. This is not replicated memory or automatic federation. Review authentication, host allowlists, transport security, and recovery behavior in the [Distributed Deployment guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/distributed-deployment.md).
 
 ### v3.6.11 "Optimize Everywhere" — Three Surfaces. No Proxy Required.
 **Cache. Compress. Remember.** SLM v3.6.11 delivers compression + caching across three surfaces: **proxy** (full-turn caching via `slm wrap claude`), **MCP tools** (5 new tools in `slm mcp`, full 1M window preserved), or **skill** (`~/.claude/skills/slm-optimize/`, zero-config auto-compress). Every setup covered — with or without a proxy. Install once with `pip install -U superlocalmemory`. [View details →](https://superlocalmemory.com/optimize-everywhere)
 
-### v3.4.5 "Scale-Ready" — 1 Million Memories. Zero Slowdown.
-**Tiered storage auto-classifies every memory as active, warm, cold, or archived.** Graph pruning removes redundant connections. Optional acceleration backends (CozoDB, LanceDB) for graph + vector operations. Tested on **1.18 million real graph edges** with under 2-second recall. Migration is automatic: `pip install -U superlocalmemory && slm restart`. [View details →](https://superlocalmemory.com/scale-ready)
+### v3.4.5 historical scale work
+This release introduced tiering, pruning, and optional experimental CozoDB/LanceDB paths. V3.7 does not yet publish a release-linked memory-count, quality-at-scale, or latency envelope; do not treat the historical scale page as current proof.
 
 ### V3.3.6: Zero-Friction Hooks — Install Once, Forget Forever
 One `npm install` and your AI memory is fully automatic:

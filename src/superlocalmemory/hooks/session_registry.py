@@ -54,8 +54,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-_REGISTRY_FILE = Path.home() / ".superlocalmemory" / ".active_sessions.json"
 _PRUNE_AFTER_SEC = 3600  # 1h — anything older is dead
+
+
+def _registry_file() -> Path:
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path(".active_sessions.json")
 
 
 def _now_ns() -> int:
@@ -64,23 +69,25 @@ def _now_ns() -> int:
 
 def _load() -> dict:
     try:
-        if not _REGISTRY_FILE.exists():
+        registry_file = _registry_file()
+        if not registry_file.exists():
             return {}
-        return json.loads(_REGISTRY_FILE.read_text(encoding="utf-8"))
+        return json.loads(registry_file.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
 
 def _save(data: dict) -> None:
     try:
-        _REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _REGISTRY_FILE.with_suffix(
+        registry_file = _registry_file()
+        registry_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = registry_file.with_suffix(
             f".{os.getpid()}.{time.time_ns()}.tmp",
         )
         tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, _REGISTRY_FILE)
+        os.replace(tmp, registry_file)
         try:
-            os.chmod(_REGISTRY_FILE, 0o600)
+            os.chmod(registry_file, 0o600)
         except OSError:
             pass
     except Exception as exc:  # pragma: no cover — defensive
@@ -185,6 +192,6 @@ def most_recent_active(
 def _reset_for_testing() -> None:
     """TEST-ONLY: wipe registry."""
     try:
-        _REGISTRY_FILE.unlink(missing_ok=True)
+        _registry_file().unlink(missing_ok=True)
     except Exception:
         pass

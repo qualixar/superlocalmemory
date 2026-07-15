@@ -9,7 +9,7 @@ Used by Phase 2 auto-invoke for recency scoring (H1 fix).
 All SQL parameterized (Rule 11). Silent errors (Rule 19).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

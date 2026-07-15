@@ -1,173 +1,93 @@
-"""Regression test for ObserveBuffer._flush silent-failure bug.
-
-Work package E: inner/outer bare except-pass swallows capture errors and reports
-false success.  This test pins the corrected behaviour:
-
-- When AutoCapture.capture() raises, a WARNING is logged (not silently dropped).
-- The summary log reports failed >= 1, not processed == len(batch) with no failures.
-"""
+"""Durability and observability regressions for HTTP observation admission."""
 
 from __future__ import annotations
 
 import logging
-import types
-import unittest.mock as mock
-
-import pytest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from superlocalmemory.server.unified_daemon import ObserveBuffer
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-class _FakeDecision:
-    """Minimal stand-in for AutoCapture's CaptureDecision."""
-    capture = True
-    category = "test"
+def _engine():
+    return SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default")
 
 
-class _BrokenAutoCapture:
-    """AutoCapture whose capture() always raises to simulate embedder/DB failure."""
-
-    def __init__(self, engine):  # noqa: ARG002
-        pass
-
-    def evaluate(self, content: str) -> _FakeDecision:  # noqa: ARG002
-        return _FakeDecision()
-
-    def capture(self, content: str, *, category: str) -> None:  # noqa: ARG002
-        raise RuntimeError("embedder down – simulated failure")
+def _decision():
+    return SimpleNamespace(
+        capture=True,
+        category="decision",
+        confidence=0.75,
+        reason="decision pattern detected",
+    )
 
 
-# ---------------------------------------------------------------------------
-# Test: inner capture() failure must emit WARNING, not be swallowed silently
-# ---------------------------------------------------------------------------
+def test_durable_admission_failure_is_logged_and_not_acknowledged(caplog):
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(_engine())
 
-def test_flush_logs_warning_on_capture_failure(caplog):
-    """_flush() must log WARNING when AutoCapture.capture() raises."""
-    buf = ObserveBuffer(debounce_sec=999)  # timer won't fire; we flush manually
-    buf.set_engine(object())  # any non-None sentinel
-
-    buf._buffer.append("test observation content")
-    buf._seen.add("any-hash")
-
-    # Patch the module-level import inside _flush so it returns _BrokenAutoCapture.
-    fake_module = types.ModuleType("superlocalmemory.hooks.auto_capture")
-    fake_module.AutoCapture = _BrokenAutoCapture
-
-    with mock.patch.dict(
-        "sys.modules",
-        {"superlocalmemory.hooks.auto_capture": fake_module},
+    with (
+        patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto,
+        patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+            side_effect=RuntimeError("database unavailable"),
+        ),
+        caplog.at_level(logging.WARNING, logger="superlocalmemory.unified_daemon"),
     ):
-        with caplog.at_level(logging.WARNING, logger="superlocalmemory.unified_daemon"):
-            buf._flush()
+        auto.return_value.evaluate.return_value = _decision()
+        result = buf.enqueue("we decided to use sqlite for durable memory")
 
-    # At least one WARNING must be present about the capture failure.
-    warning_records = [
-        r for r in caplog.records
-        if r.levelno == logging.WARNING and "ObserveBuffer" in r.getMessage()
-    ]
-    assert warning_records, (
-        "Expected at least one WARNING from ObserveBuffer when capture() raises, "
-        f"but caplog only contains: {[r.getMessage() for r in caplog.records]}"
-    )
+    assert result["captured"] is False
+    assert result["durable"] is False
+    assert any("durable admission failed" in record.getMessage() for record in caplog.records)
 
 
-# ---------------------------------------------------------------------------
-# Test: summary log must report failed >= 1, not silent success
-# ---------------------------------------------------------------------------
+def test_failed_admission_can_be_retried_immediately():
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(_engine())
+    content = "we decided to use sqlite for durable memory"
 
-def test_flush_summary_reports_failed_count(caplog):
-    """_flush() summary log must include failed>=1 when captures fail."""
-    buf = ObserveBuffer(debounce_sec=999)
-    buf.set_engine(object())
-
-    buf._buffer.append("another observation")
-    buf._seen.add("any-hash")
-
-    fake_module = types.ModuleType("superlocalmemory.hooks.auto_capture")
-    fake_module.AutoCapture = _BrokenAutoCapture
-
-    with mock.patch.dict(
-        "sys.modules",
-        {"superlocalmemory.hooks.auto_capture": fake_module},
+    with (
+        patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto,
+        patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+            side_effect=RuntimeError("database unavailable"),
+        ),
     ):
-        with caplog.at_level(logging.DEBUG, logger="superlocalmemory.unified_daemon"):
-            buf._flush()
+        auto.return_value.evaluate.return_value = _decision()
+        first = buf.enqueue(content)
+        second = buf.enqueue(content)
 
-    # The summary INFO line must mention "failed" with a non-zero count.
-    # Accept formats like "failed=1", "failed: 1", "1 failed", etc.
-    summary_records = [
-        r for r in caplog.records
-        if r.levelno == logging.INFO and "observe debounce" in r.getMessage().lower()
-    ]
-    assert summary_records, (
-        "Expected a summary INFO log with 'Observe debounce', "
-        f"caplog messages: {[r.getMessage() for r in caplog.records]}"
-    )
-    summary_text = summary_records[0].getMessage()
-    # Must NOT claim 1 processed with 0 failed when capture raised.
-    # The fixed code tracks successful vs failed separately.
-    assert "failed" in summary_text.lower(), (
-        f"Summary log does not mention 'failed': {summary_text!r}"
-    )
-    # The failed count must be >= 1.
-    import re
-    match = re.search(r"failed[=:\s]+(\d+)", summary_text, re.IGNORECASE)
-    assert match and int(match.group(1)) >= 1, (
-        f"Failed count not >= 1 in summary: {summary_text!r}"
+    assert first["reason"] == "durable admission failed"
+    assert second["reason"] == "durable admission failed"
+
+
+def test_success_returns_durable_operation_receipt():
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(_engine())
+    receipt = SimpleNamespace(
+        operation_id="op-observe",
+        fact_ids=("fact-queryable",),
+        state=SimpleNamespace(value="queryable"),
     )
 
-
-# ---------------------------------------------------------------------------
-# Test: successful captures still log correctly (no regression)
-# ---------------------------------------------------------------------------
-
-class _GoodAutoCapture:
-    """AutoCapture that always succeeds."""
-
-    def __init__(self, engine):  # noqa: ARG002
-        pass
-
-    def evaluate(self, content: str) -> _FakeDecision:  # noqa: ARG002
-        return _FakeDecision()
-
-    def capture(self, content: str, *, category: str) -> None:  # noqa: ARG002
-        pass  # success
-
-
-def test_flush_summary_reports_zero_failed_on_success(caplog):
-    """When all captures succeed, summary must report processed=N, failed=0."""
-    buf = ObserveBuffer(debounce_sec=999)
-    buf.set_engine(object())
-
-    buf._buffer.append("good observation")
-    buf._seen.add("any-hash")
-
-    fake_module = types.ModuleType("superlocalmemory.hooks.auto_capture")
-    fake_module.AutoCapture = _GoodAutoCapture
-
-    with mock.patch.dict(
-        "sys.modules",
-        {"superlocalmemory.hooks.auto_capture": fake_module},
+    with (
+        patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto,
+        patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+        ) as build,
     ):
-        with caplog.at_level(logging.DEBUG, logger="superlocalmemory.unified_daemon"):
-            buf._flush()
+        auto.return_value.evaluate.return_value = _decision()
+        build.return_value.submit.return_value = receipt
+        result = buf.enqueue("we decided to use sqlite for durable memory")
 
-    summary_records = [
-        r for r in caplog.records
-        if r.levelno == logging.INFO and "observe debounce" in r.getMessage().lower()
-    ]
-    assert summary_records, (
-        f"Expected summary INFO log. Got: {[r.getMessage() for r in caplog.records]}"
-    )
-    import re
-    summary_text = summary_records[0].getMessage()
-    match = re.search(r"failed[=:\s]+(\d+)", summary_text, re.IGNORECASE)
-    # If "failed" appears in the summary, its count must be 0.
-    if match:
-        assert int(match.group(1)) == 0, (
-            f"Expected failed=0 on clean run, got: {summary_text!r}"
-        )
+    assert result == {
+        "captured": True,
+        "durable": True,
+        "queued": True,
+        "operation_id": "op-observe",
+        "fact_ids": ["fact-queryable"],
+        "materialization_state": "queryable",
+        "category": "decision",
+        "confidence": 0.75,
+    }

@@ -10,9 +10,7 @@ V3.3.12: Extracted _emit_event to eliminate code duplication.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-_DB_PATH = Path.home() / ".superlocalmemory" / "memory.db"
+from superlocalmemory.infra.data_root import state_path
 
 
 def emit_event(event_type: str, payload: dict | None = None,
@@ -20,7 +18,7 @@ def emit_event(event_type: str, payload: dict | None = None,
     """Emit an event to the EventBus (best-effort, never raises)."""
     try:
         from superlocalmemory.infra.event_bus import EventBus
-        bus = EventBus.get_instance(_DB_PATH)
+        bus = EventBus.get_instance(state_path("memory.db"))
         bus.emit(event_type, payload=payload, source_agent=source_agent,
                  source_protocol="mcp")
     except Exception:

@@ -22,7 +22,7 @@ Key patterns implemented:
   - Narrative fact extraction in LLM modes (self-contained, context-rich)
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -38,10 +39,10 @@ from superlocalmemory.core.security_primitives import (
     redact_secrets,
     safe_resolve,
 )
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 
-
-CACHE_DB_DEFAULT: Path = Path.home() / ".superlocalmemory" / "active_brain_cache.db"
-INSTALL_TOKEN_DEFAULT: Path = Path.home() / ".superlocalmemory" / ".install_token"
+CACHE_DB_DEFAULT = DynamicStatePath("active_brain_cache.db")
+INSTALL_TOKEN_DEFAULT = DynamicStatePath(".install_token")
 
 TTL_SECONDS: int = 120
 CLEANUP_HORIZON_SECONDS: int = 600
@@ -90,6 +91,44 @@ def _read_install_token(home: Path) -> str | None:
     return token or None
 
 
+def _ensure_install_token_at(home: Path) -> str:
+    """Create/read the binding token for an explicit cache namespace.
+
+    The shared security primitive owns the canonical namespace. This bounded
+    variant preserves ``home_dir`` as a real override without mutating global
+    path state or routing an explicit cache through the canonical token.
+    """
+    if home.resolve(strict=False) == canonical_data_root():
+        return ensure_install_token()
+
+    token_path = home / ".install_token"
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        token = ""
+    if token:
+        return token
+
+    token = secrets.token_hex(32)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(str(token_path), flags, 0o600)
+        try:
+            os.write(fd, token.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        existing = token_path.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+        raise RuntimeError(f"install token is empty: {token_path}")
+    if os.name != "nt":
+        os.chmod(token_path, 0o600)
+    return token
+
+
 # ---------------------------------------------------------------------------
 # Writer (daemon-side)
 # ---------------------------------------------------------------------------
@@ -108,10 +147,14 @@ class ContextCache:
         db_path: Path | None = None,
         home_dir: Path | None = None,
     ) -> None:
-        self._home = home_dir or (Path.home() / ".superlocalmemory")
+        self._home = Path(home_dir) if home_dir is not None else canonical_data_root()
         self._home.mkdir(parents=True, exist_ok=True)
 
-        raw = db_path or (self._home / "active_brain_cache.db")
+        raw = db_path or (
+            Path(CACHE_DB_DEFAULT)
+            if home_dir is None
+            else self._home / "active_brain_cache.db"
+        )
         self._db_path = safe_resolve(self._home, Path(raw).name) \
             if Path(raw).parent == self._home else \
             safe_resolve(self._home, raw)
@@ -181,7 +224,7 @@ class ContextCache:
             );
             """
         )
-        token = ensure_install_token()
+        token = _ensure_install_token_at(self._home)
         now = int(time.time())
         self._write_conn.execute(
             "INSERT OR IGNORE INTO slm_meta (key, value, created_at) "
@@ -313,12 +356,17 @@ def read_entry_fast(
       - stdlib-only — no heavy imports, no daemon HTTP call.
     """
     try:
-        home = home_dir or (Path.home() / ".superlocalmemory")
+        home = Path(home_dir) if home_dir is not None else canonical_data_root()
         if not home.exists():
             return None
 
         requested = db_path or Path(
-            os.environ.get("SLM_CACHE_DB") or (home / "active_brain_cache.db"),
+            os.environ.get("SLM_CACHE_DB")
+            or (
+                Path(CACHE_DB_DEFAULT)
+                if home_dir is None
+                else home / "active_brain_cache.db"
+            ),
         )
         try:
             resolved = safe_resolve(home, Path(requested).resolve())

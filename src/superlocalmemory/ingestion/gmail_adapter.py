@@ -12,7 +12,7 @@ Tier 3: Gmail API with Pub/Sub push — full GCP (future)
 OPT-IN only. Enabled via: slm adapters enable gmail
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -23,8 +23,17 @@ import sys
 from pathlib import Path
 
 from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger("superlocalmemory.ingestion.gmail")
+
+
+def _adapters_config_path() -> Path:
+    return state_path("adapters.json")
+
+
+def _import_dir() -> Path:
+    return state_path("import")
 
 
 class GmailAdapter(BaseAdapter):
@@ -71,7 +80,7 @@ class GmailAdapter(BaseAdapter):
         if self._tier != "auto":
             return
 
-        adapters_path = Path.home() / ".superlocalmemory" / "adapters.json"
+        adapters_path = _adapters_config_path()
         cfg = {}
         if adapters_path.exists():
             cfg = json.loads(adapters_path.read_text()).get("gmail", {})
@@ -93,7 +102,7 @@ class GmailAdapter(BaseAdapter):
             return
 
         # Default: look for mbox file
-        mbox_dir = Path.home() / ".superlocalmemory" / "import"
+        mbox_dir = _import_dir()
         mbox_files = list(mbox_dir.glob("*.mbox")) if mbox_dir.exists() else []
         if mbox_files:
             self._tier = "mbox"
@@ -359,7 +368,7 @@ if __name__ == "__main__":
     import logging as _logging
     _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(message)s")
 
-    adapters_path = Path.home() / ".superlocalmemory" / "adapters.json"
+    adapters_path = _adapters_config_path()
     tier = "auto"
     if adapters_path.exists():
         cfg = json.loads(adapters_path.read_text()).get("gmail", {})

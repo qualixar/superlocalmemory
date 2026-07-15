@@ -24,12 +24,13 @@ import uvicorn
 
 from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
 from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.infra.data_root import DynamicStatePath
 
 logger = logging.getLogger("superlocalmemory.api_server")
 
 # V3 paths
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
+MEMORY_DIR = DynamicStatePath()
+DB_PATH = DynamicStatePath("memory.db")
 # V3.3.21: UI shipped inside the package for pip/npm installs.
 _PKG_UI = Path(__file__).resolve().parent.parent / "ui"
 _REPO_UI = Path(__file__).resolve().parent.parent.parent.parent / "ui"

@@ -12,8 +12,8 @@ SuperLocalMemory runs in one of three modes. You pick the trade-off between priv
 
 | Mode | What it does | Needs API key? | Data leaves your machine? |
 |------|-------------|:--------------:|:-------------------------:|
-| **A: Zero-Cloud** | Math-based retrieval. No LLM calls. | No | Never |
-| **B: Local LLM** | Mode A + a local LLM via Ollama. | No | Never |
+| **A: Local** | Retrieval without a model-provider call in the core path. | No | Optional integrations may transmit data |
+| **B: Local LLM** | Mode A + a local LLM via Ollama. | No | Depends on the Ollama endpoint and optional integrations |
 | **C: Cloud LLM** | Mode B + a cloud LLM for maximum recall quality. | Yes | Yes (queries only) |
 
 ### Check your current mode
@@ -34,9 +34,9 @@ Switching modes takes effect immediately. No data is lost.
 
 ### Mode A: Zero-Cloud (Default)
 
-All operations run locally. Retrieval uses four channels (semantic similarity, keyword search, entity graph, and temporal context) combined with mathematical scoring. No network calls.
+Core memory operations run against the local data root. Optional model and dependency downloads, connectors, backup, and other enabled integrations can use the network.
 
-Best for: privacy-sensitive work, air-gapped environments, EU AI Act compliance.
+Best for: deployments that want a local core path and can govern optional integrations explicitly. Regulatory compliance still requires deployment-specific assessment.
 
 ### Mode B: Local LLM
 

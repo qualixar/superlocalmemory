@@ -177,6 +177,27 @@ def _get_forgetting_scheduler(db: Any, config: Any) -> Any:
     return _forgetting_scheduler_cache[key]
 
 
+def _behavioral_entities(results: list[Any], limit: int = 20) -> list[str]:
+    """Read canonical entity IDs from the typed retrieval-result contract.
+
+    ``RetrievalResult`` is a dataclass whose entity evidence lives on
+    ``result.fact.canonical_entities``. Treating it as a SQLite mapping silently
+    discarded every entity and disabled behavioral entity learning.
+    """
+    entities: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        fact = getattr(result, "fact", None)
+        for entity_id in getattr(fact, "canonical_entities", ()) or ():
+            if not isinstance(entity_id, str) or not entity_id or entity_id in seen:
+                continue
+            seen.add(entity_id)
+            entities.append(entity_id)
+            if len(entities) >= limit:
+                return entities
+    return entities
+
+
 # ---------------------------------------------------------------------------
 # S8-ARC-04 (v3.4.22): unified ranking entry point.
 # ---------------------------------------------------------------------------
@@ -268,10 +289,10 @@ def apply_adaptive_ranking(
     Phase 2 (50+): heuristic boosts from recency, access count, trust.
     Phase 3 (200+): LightGBM ML-based reranking.
     """
+    from superlocalmemory.infra.data_root import state_path
     from superlocalmemory.learning.feedback import FeedbackCollector
-    from pathlib import Path
 
-    learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+    learning_db = state_path("learning.db")
     if not learning_db.exists():
         return response
 
@@ -284,7 +305,8 @@ def apply_adaptive_ranking(
     from superlocalmemory.learning.ranker import AdaptiveRanker
     ranker = AdaptiveRanker(signal_count=signal_count)
 
-    from datetime import UTC, datetime as _dt
+    from datetime import UTC
+    from datetime import datetime as _dt
     _now = _dt.now(UTC)
 
     result_dicts = []
@@ -354,17 +376,13 @@ def apply_v2_adaptive_ranking(
     try:
         from pathlib import Path as _P
 
+        from superlocalmemory.infra.data_root import state_path
         from superlocalmemory.learning.database import LearningDatabase
         from superlocalmemory.learning.model_cache import load_active
         from superlocalmemory.learning.ranker import AdaptiveRanker
-        from superlocalmemory.learning.signals import (
-            SignalBatch,
-            SignalCandidate,
-            enqueue,
-        )
 
         db_path = (_P(learning_db_path) if learning_db_path
-                   else _P.home() / ".superlocalmemory" / "learning.db")
+                   else state_path("learning.db"))
         if not db_path.exists():
             return response
 
@@ -378,7 +396,8 @@ def apply_v2_adaptive_ranking(
         )
 
         # Build result-dict shape expected by the ranker's rerank() path.
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
         _now_v2 = _dt.now(UTC)
 
         result_dicts: list[dict] = []
@@ -463,9 +482,9 @@ def apply_v2_bandit_ensemble(
         return response
 
     try:
-        from datetime import datetime as _dt
         from pathlib import Path as _P
 
+        from superlocalmemory.infra.data_root import state_path
         from superlocalmemory.learning.bandit import ContextualBandit
         from superlocalmemory.learning.ensemble import (
             choose_ensemble,
@@ -479,7 +498,7 @@ def apply_v2_bandit_ensemble(
         from superlocalmemory.retrieval.engine import apply_channel_weights
 
         db_path = (_P(learning_db_path) if learning_db_path
-                   else _P.home() / ".superlocalmemory" / "learning.db")
+                   else state_path("learning.db"))
         if not db_path.exists():
             return response
 
@@ -721,22 +740,11 @@ def run_recall(
     # singletons to avoid creating new objects per recall (was causing
     # object accumulation across 304 benchmark recalls).
     try:
-        # v3.4.7: Extract entities from results for behavioral tracking.
-        # Was passing wrong param (result_count instead of entities) → TypeError.
-        entities: list[str] = []
-        for r in response.results[:10]:
-            rd = r if isinstance(r, dict) else (dict(r) if hasattr(r, "keys") else {})
-            ents_json = rd.get("canonical_entities_json", "")
-            if ents_json:
-                try:
-                    import json as _json
-                    entities.extend(_json.loads(ents_json))
-                except (ValueError, TypeError):
-                    pass
+        entities = _behavioral_entities(response.results[:10])
         _get_behavioral_tracker(db).record_query(
             query=query,
             query_type=response.query_type,
-            entities=entities[:20],
+            entities=entities,
             profile_id=profile_id,
         )
     except Exception as exc:

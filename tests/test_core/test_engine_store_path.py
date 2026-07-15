@@ -62,9 +62,10 @@ def _add_action(fact_id: str = "f1") -> ConsolidationAction:
     )
 
 
-def _noop_action() -> ConsolidationAction:
+def _noop_action(existing_fact_id: str = "") -> ConsolidationAction:
     return ConsolidationAction(
         action_type=ConsolidationActionType.NOOP,
+        existing_fact_id=existing_fact_id,
     )
 
 
@@ -161,18 +162,26 @@ class TestStoreBasicFlow:
 class TestStoreConsolidation:
     """Verify noop / update / add consolidation outcomes."""
 
-    def test_store_noop_consolidation_skips_fact(
+    def test_store_noop_consolidation_returns_existing_canonical_fact(
         self, engine_with_mock_deps: MemoryEngine,
     ) -> None:
-        """When consolidator returns NOOP, the fact is not stored."""
+        """NOOP removes the projection and returns the existing fact ID."""
+        existing_ids = engine_with_mock_deps.store(
+            "The deployment review already approved the existing recovery plan",
+            session_id="s0",
+        )
+        assert existing_ids
+        existing_id = existing_ids[0]
         consolidator = engine_with_mock_deps._consolidator
         with patch.object(
-            consolidator, 'consolidate', return_value=_noop_action(),
+            consolidator,
+            'consolidate',
+            return_value=_noop_action(existing_id),
         ):
             ids = engine_with_mock_deps.store(
                 "Duplicate content here about something previously stored in the system", session_id="s1",
             )
-            assert ids == []
+            assert ids == [existing_id]
 
     def test_store_update_consolidation_returns_id(
         self, engine_with_mock_deps: MemoryEngine,
@@ -274,6 +283,38 @@ class TestStoreFactDirect:
             engine_with_mock_deps.store_fact_direct(fact)
             bm25_spy.assert_called_once()
             assert bm25_spy.call_args[0][0] == "bm25-f1"
+
+    def test_store_fact_direct_uses_complete_m018_operation(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        fact = _make_fact(
+            fact_id="durable-direct-f1",
+            content="The prebuilt durable fact preserves Alice and its identity",
+            entities=["Alice"],
+            fact_type=FactType.OPINION,
+        )
+        fact.memory_id = ""
+        fact.session_id = "prebuilt-session"
+
+        returned_id = engine_with_mock_deps.store_fact_direct(fact)
+
+        rows = engine_with_mock_deps._db.execute(
+            "SELECT state, final_fact_ids_json, source_type FROM ingestion_operations "
+            "WHERE idempotency_key=?",
+            ("prebuilt:durable-direct-f1",),
+        )
+        stored = engine_with_mock_deps._db.get_fact("durable-direct-f1")
+        assert returned_id == "durable-direct-f1"
+        assert len(rows) == 1
+        assert dict(rows[0]) == {
+            "state": "complete",
+            "final_fact_ids_json": '["durable-direct-f1"]',
+            "source_type": "python-api-prebuilt",
+        }
+        assert stored is not None
+        assert stored.fact_type is FactType.OPINION
+        assert stored.entities == ["Alice"]
+        assert stored.session_id == "prebuilt-session"
 
 
 # ---------------------------------------------------------------------------

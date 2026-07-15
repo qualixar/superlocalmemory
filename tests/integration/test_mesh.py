@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import sqlite3
+
 import pytest
-from pathlib import Path
 
 pytestmark = pytest.mark.slow
 
@@ -17,7 +17,7 @@ def mesh_db(tmp_path):
     """Create a temp DB with mesh tables (v3.4.3 base + v3.4.6 enhancements)."""
     db_path = tmp_path / "mesh_test.db"
     conn = sqlite3.connect(str(db_path))
-    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_DDL, _MESH_V346_ALTERS
+    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL
     conn.executescript(_MESH_DDL)
     for alter_sql in _MESH_V346_ALTERS:
         try:
@@ -106,7 +106,16 @@ class TestMeshMessages:
         msg_id = inbox[0]["id"]
         broker.mark_read(r2["peer_id"], [msg_id])
         inbox2 = broker.get_inbox(r2["peer_id"])
-        assert inbox2[0]["read"] == 1
+        # get_inbox is an unread queue: acknowledged messages disappear.
+        assert inbox2 == []
+        conn = broker._conn()
+        try:
+            row = conn.execute(
+                "SELECT read FROM mesh_messages WHERE id=?", (msg_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == 1
 
 
 class TestMeshState:

@@ -22,7 +22,7 @@ HR-03: Original float32 NEVER deleted unless keep_float32_backup=False
 HR-04: Quantization ONLY via EAP scheduler (not ad-hoc).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

@@ -63,7 +63,7 @@ session_init(
 ### What it does
 
 1. Derives a search query from `project_path` (or uses your explicit `query`).
-2. Runs a 2-tier recall: full 6-channel via daemon (primary) or FTS5 BM25
+2. Runs a 2-tier recall: full daemon retrieval (primary) or FTS5 BM25
    (emergency fallback if daemon is unreachable).
 3. Merges any pinned "core memory" facts with the recall results.
 4. Applies an age gate — memories older than `max_age_days` are suppressed

@@ -2,21 +2,25 @@
 /**
  * SuperLocalMemory V3 - Post-Recall Hook
  * Copyright (c) 2026 Varun Pratap Bhardwaj
- * Licensed under Elastic License 2.0
+ * Licensed under GNU Affero General Public License v3.0 or later
  *
  * Claude Code hook that tracks recall events for implicit signal collection.
  * This hook fires after the slm-recall skill completes, recording timing
  * data that the signal inference engine uses to detect satisfaction/dissatisfaction.
  *
  * Installation: Automatically registered via install-skills.sh
- * All data stays 100% local.
+ * The core hook reads local SLM state; the host client and optional integrations
+ * retain their own network behavior.
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const MEMORY_DIR = path.join(os.homedir(), '.superlocalmemory');
+const MEMORY_DIR = process.env.SLM_DATA_DIR
+    || process.env.SL_MEMORY_PATH
+    || process.env.SLM_HOME
+    || path.join(os.homedir(), '.superlocalmemory');
 const HOOK_LOG = path.join(MEMORY_DIR, 'recall-events.jsonl');
 
 // Parse input from Claude Code hook system

@@ -28,18 +28,16 @@ from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
 
 _HELP_EPILOG = """\
 operating modes:
-  Mode A  Local Guardian — Zero cloud, zero LLM. All processing stays on
-          your machine. Full EU AI Act compliance. Best for privacy-first
-          use, air-gapped systems, and regulated environments.
-          Retrieval score: 74.8% on LoCoMo benchmark.
+  Mode A  Local Guardian — No model-provider call in the core memory path.
+          Optional integrations, backup, and downloads have separate network
+          behavior; assess the complete deployment for privacy requirements.
 
   Mode B  Smart Local — Uses a local Ollama LLM for summarization and
-          enrichment. Data never leaves your network. EU AI Act compliant.
-          Requires: ollama running locally with a model pulled.
+          enrichment. The Ollama endpoint and enabled integrations determine
+          the data path. Requires: ollama running with a model pulled.
 
   Mode C  Full Power — Uses a cloud LLM (OpenAI, Anthropic, etc.) for
-          maximum accuracy. Best retrieval quality, agentic multi-hop.
-          Retrieval score: 87.7% on LoCoMo benchmark.
+          provider-assisted enrichment and retrieval behavior.
 
 quick start:
   slm setup                   Interactive first-time setup
@@ -70,6 +68,32 @@ documentation:
 """
 
 
+_NO_DAEMON_COMMANDS = {
+    "setup", "mode", "provider", "connect", "migrate", "mcp", "warmup",
+    "config", "evolve", "db",
+    # v3.4.22 escape hatches — never auto-start the daemon on these.
+    "disable", "enable", "clear-cache", "reconfigure", "benchmark",
+    "rotate-token",
+    # LLD-06 — agents launched through wrap start the daemon on demand.
+    "wrap",
+    # V3.6 Optimize commands that are config read/write only.
+    "optimize", "cache", "compress", "help-optimize",
+    # Lifecycle orchestration must run before any global auto-start hook.
+    "serve", "restart",
+}
+
+
+def _command_requires_daemon(args: argparse.Namespace) -> bool:
+    """Return whether global dispatch should ensure the daemon first.
+
+    All ``serve`` actions and ``restart`` own daemon inspection or mutation;
+    global dispatch must not race or duplicate those handlers.
+    """
+    if args.command in _NO_DAEMON_COMMANDS:
+        return False
+    return True
+
+
 def main() -> None:
     """Parse CLI arguments and dispatch to command handlers."""
     # Fast path: hook invocations bypass argparse entirely (stdlib only, ~30ms)
@@ -78,11 +102,20 @@ def main() -> None:
         handle_hook(sys.argv[2])
         return
 
+    # Metadata inspection is activation-free. Package managers, users, and CI
+    # must be able to inspect a newly installed executable without creating an
+    # SLM data root, config, version marker, daemon, hooks, or models.
+    _is_metadata_cmd = (
+        len(sys.argv) == 1
+        or any(arg in {"-h", "--help"} for arg in sys.argv[1:])
+        or (len(sys.argv) == 2 and sys.argv[1] in {"-v", "--version"})
+    )
+
     # WP-07: lazy first-run init — runs after hook/mcp fast-paths so stdout
     # is never polluted on those paths (CRIT-3, MCP JSON-RPC purity).
     # Guarded: any failure must not crash the CLI (AC4).
     _is_mcp_cmd = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
-    if not _is_mcp_cmd:
+    if not _is_mcp_cmd and not _is_metadata_cmd:
         try:
             from superlocalmemory.cli._lazy_init import _ensure_initialized
             _ensure_initialized()
@@ -102,7 +135,7 @@ def main() -> None:
 
     # One-time post-upgrade banner — silent for fresh installs and
     # same-version runs. Guarded against I/O errors internally.
-    if not _is_mcp_stdio:
+    if not _is_mcp_stdio and not _is_metadata_cmd:
         from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
         if check_and_emit_upgrade_banner(_ver):
             # First post-upgrade invocation: apply the data-dir migration if
@@ -110,7 +143,6 @@ def main() -> None:
             # we defer — the next daemon start picks it up.
             try:
                 import logging as _logging
-                from pathlib import Path as _P
                 from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
                     migrate_if_safe as _migrate_if_safe,
                 )
@@ -177,7 +209,7 @@ def main() -> None:
         "action", nargs="?", choices=["set"], help="Action",
     )
 
-    connect_p = sub.add_parser("connect", help="Auto-configure IDE integrations (17+ IDEs)")
+    connect_p = sub.add_parser("connect", help="Auto-configure a supported IDE integration")
     connect_p.add_argument("ide", nargs="?", help="Specific IDE to configure (e.g. cursor, codex, continue)")
     connect_p.add_argument(
         "--list", action="store_true", help="List all supported IDEs",
@@ -676,21 +708,7 @@ def main() -> None:
     # V3.4.4: Auto-start daemon for all commands that need it.
     # SLM is always-on — close laptop, reboot, crash: daemon auto-recovers.
     # Cross-platform: macOS + Windows + Linux.
-    _NO_DAEMON_COMMANDS = {
-        "setup", "mode", "provider", "connect", "migrate", "mcp", "warmup",
-        "config", "evolve", "db",
-        # v3.4.22 escape hatches — never auto-start the daemon on these.
-        "disable", "enable", "clear-cache", "reconfigure", "benchmark",
-        "rotate-token",
-        # LLD-06 — `slm wrap` may launch the agent binary directly without
-        # needing the daemon running (the agent will start the daemon on
-        # first LLM call, or the wrap command can be --dry-run).
-        "wrap",
-        # V3.6 Optimize commands that are config read/write only (no daemon needed)
-        "optimize", "cache", "compress", "help-optimize",
-        # NOTE: "proxy" NOT here — proxy needs daemon running
-    }
-    if args.command not in _NO_DAEMON_COMMANDS:
+    if _command_requires_daemon(args):
         try:
             from superlocalmemory.cli.daemon import ensure_daemon
             ensure_daemon()  # Starts daemon if not running; no-op if already up

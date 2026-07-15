@@ -42,7 +42,9 @@ def _daemon_url() -> str:
     """Get the daemon base URL."""
     port = 8765
     try:
-        port_file = os.path.join(os.path.expanduser("~"), ".superlocalmemory", "daemon.port")
+        from superlocalmemory.infra.data_root import state_path
+
+        port_file = state_path("daemon.port")
         if os.path.exists(port_file):
             port = int(open(port_file).read().strip())
     except Exception:

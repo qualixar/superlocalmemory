@@ -39,9 +39,9 @@ import platform
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
-
 
 # Hook modules to measure. Verified via ``ls src/superlocalmemory/hooks/``
 # on 2026-04-20 — the rehash entry point is ``user_prompt_rehash_hook``,
@@ -76,9 +76,15 @@ def _measure_cold_start(module_name: str) -> list[float]:
     """Return N wall-clock durations (ms) for ``from <module> import main``."""
     durations: list[float] = []
     cmd = [sys.executable, "-c", f"from {module_name} import main"]
+    repo_src = Path(__file__).resolve().parents[2] / "src"
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(repo_src), existing_pythonpath) if part
+    )
     for _ in range(_RUNS):
         t0 = time.perf_counter()
-        result = subprocess.run(cmd, capture_output=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, check=False, env=env)
         t1 = time.perf_counter()
         assert result.returncode == 0, (
             f"Import of {module_name} failed: "

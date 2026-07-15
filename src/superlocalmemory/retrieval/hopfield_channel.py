@@ -19,22 +19,20 @@ Key features:
   - Returns [] on any error (HR-06)
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from superlocalmemory.math.hopfield import HopfieldConfig, ModernHopfieldNetwork
-
-if TYPE_CHECKING:
-    from superlocalmemory.retrieval.vector_store import VectorStore
-    from superlocalmemory.storage.database import DatabaseManager
+from superlocalmemory.retrieval.scope_policy import filter_authorized_results
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +71,13 @@ class HopfieldChannel:
         self._vector_store = vector_store
         self._config = config or HopfieldConfig()
         self._hopfield = ModernHopfieldNetwork(self._config)
+        self._cache_lock = threading.RLock()
 
         # Memory matrix cache (per LLD Section 2.2, HR-09)
         self._cached_matrix: np.ndarray | None = None
         self._cached_fact_ids: list[str] = []
         self._cached_profile: str = ""
+        self._cached_scope_key: tuple[str, bool, bool] | None = None
         self._cached_count: int = 0
         self._cache_timestamp: float = 0.0
 
@@ -104,8 +104,17 @@ class HopfieldChannel:
         if not self._config.enabled:
             return []
 
+        include_global = bool(getattr(self, "include_global", False))
+        include_shared = bool(getattr(self, "include_shared", False))
         try:
-            return self._search_inner(query, profile_id, top_k)
+            with self._cache_lock:
+                return self._search_inner(
+                    query,
+                    profile_id,
+                    top_k,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
         except Exception as exc:
             # HR-06: Return [] on any error
             logger.warning("Hopfield channel error: %s", exc)
@@ -118,6 +127,9 @@ class HopfieldChannel:
         query: Any,
         profile_id: str,
         top_k: int,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[tuple[str, float]]:
         """Core search logic, separated for clean error handling."""
         # Step 2: Convert query to numpy
@@ -132,11 +144,18 @@ class HopfieldChannel:
             return []
 
         # Step 3b (AUDIT FIX G-MEDIUM-02): Check skip_threshold BEFORE loading matrix
-        total_count = (
-            self._vector_store.count(profile_id)
-            if self._vector_store and getattr(self._vector_store, "available", False)
-            else 0
-        )
+        try:
+            total_count = self._db.get_fact_count(
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+        except (AttributeError, TypeError):
+            total_count = (
+                self._vector_store.count(profile_id)
+                if self._vector_store and getattr(self._vector_store, "available", False)
+                else 0
+            )
         # Step 3c: Skip for very large stores
         if total_count > self._config.skip_threshold:
             logger.debug(
@@ -162,16 +181,41 @@ class HopfieldChannel:
         # VS exists. Routing on prefilter_candidates (not prefilter_threshold)
         # ensures the matrix is always bounded to ~prefilter_candidates rows.
         if vs_ok and total_count > self._config.prefilter_candidates:
-            return self._search_with_prefilter(q_vec, profile_id, [], top_k)
+            return self._search_with_prefilter(
+                q_vec,
+                profile_id,
+                [],
+                top_k,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
 
         # Tiny store (or no VS): build (cached) full matrix.
-        memory_matrix, fact_ids = self._get_memory_matrix(profile_id)
+        memory_matrix, fact_ids = self._get_memory_matrix(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         if memory_matrix is None or len(fact_ids) == 0:
             return []
         if vs_ok and len(fact_ids) > self._config.prefilter_candidates:
-            return self._search_with_prefilter(q_vec, profile_id, fact_ids, top_k)
-        return self._search_full_matrix(
+            return self._search_with_prefilter(
+                q_vec,
+                profile_id,
+                fact_ids,
+                top_k,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+        results = self._search_full_matrix(
             q_vec, memory_matrix, fact_ids, top_k,
+        )
+        return filter_authorized_results(
+            self._db,
+            results,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
         )
 
     def _search_full_matrix(
@@ -220,6 +264,9 @@ class HopfieldChannel:
         profile_id: str,
         all_fact_ids: list[str],
         top_k: int,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[tuple[str, float]]:
         """Two-stage retrieval for large stores (>prefilter_threshold facts).
 
@@ -243,15 +290,35 @@ class HopfieldChannel:
             top_k=self._config.prefilter_candidates,
             profile_id=profile_id,
         )
-        if not knn_results:
+        # The ANN index is owner-profile partitioned.  Supplement it with
+        # opted-in cross-profile facts, then authorize the combined candidates
+        # through the canonical DB predicate below.
+        external_facts = self._db.get_external_visible_facts(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        combined = {fact_id: score for fact_id, score in knn_results}
+        query_norm = float(np.linalg.norm(query))
+        for fact in external_facts:
+            embedding = getattr(fact, "embedding", None)
+            if embedding is None or len(embedding) != self._config.dimension:
+                continue
+            vector = np.array(embedding, dtype=np.float32)
+            denominator = query_norm * float(np.linalg.norm(vector))
+            if denominator <= 1e-8:
+                continue
+            score = (float(np.dot(query, vector) / denominator) + 1.0) / 2.0
+            combined[fact.fact_id] = max(combined.get(fact.fact_id, 0.0), score)
+        if not combined:
             return []
 
         # Stage 2: Load candidate facts
-        candidate_ids = [fid for fid, _ in knn_results]
+        candidate_ids = list(combined)
         candidates = self._db.get_facts_by_ids(
             candidate_ids, profile_id,
-            include_global=getattr(self, 'include_global', False),
-            include_shared=getattr(self, 'include_shared', False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
         if not candidates:
             return []
@@ -276,10 +343,21 @@ class HopfieldChannel:
         sub_matrix = sub_matrix / norms
 
         # Stage 4: Hopfield on subset
-        return self._search_full_matrix(query, sub_matrix, sub_ids, top_k)
+        results = self._search_full_matrix(query, sub_matrix, sub_ids, top_k)
+        return filter_authorized_results(
+            self._db,
+            results,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
 
     def _get_memory_matrix(
-        self, profile_id: str,
+        self,
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> tuple[np.ndarray | None, list[str]]:
         """Build or retrieve cached memory matrix X (n x d).
 
@@ -290,14 +368,22 @@ class HopfieldChannel:
             (memory_matrix, fact_ids) or (None, []) if no valid facts.
         """
         # Step 1: Check cache validity
-        current_count = (
-            self._vector_store.count(profile_id)
-            if self._vector_store and getattr(self._vector_store, "available", False)
-            else 0
-        )
+        scope_key = (profile_id, bool(include_global), bool(include_shared))
+        try:
+            current_count = self._db.get_fact_count(
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+        except (AttributeError, TypeError):
+            current_count = (
+                self._vector_store.count(profile_id)
+                if self._vector_store and getattr(self._vector_store, "available", False)
+                else 0
+            )
 
         if (
-            self._cached_profile == profile_id
+            self._cached_scope_key == scope_key
             and self._cached_count == current_count
             and self._cached_matrix is not None
             and (time.monotonic() - self._cache_timestamp)
@@ -310,8 +396,8 @@ class HopfieldChannel:
         # deserialize the whole table just to slice it.
         facts = self._db.get_all_facts(
             profile_id, limit=5000,
-            include_global=getattr(self, 'include_global', False),
-            include_shared=getattr(self, 'include_shared', False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
         if not facts:
             return (None, [])
@@ -341,6 +427,7 @@ class HopfieldChannel:
         self._cached_matrix = matrix
         self._cached_fact_ids = fact_ids
         self._cached_profile = profile_id
+        self._cached_scope_key = scope_key
         self._cached_count = current_count
         self._cache_timestamp = time.monotonic()
 
@@ -354,5 +441,6 @@ class HopfieldChannel:
         """
         self._cached_matrix = None
         self._cached_fact_ids = []
+        self._cached_scope_key = None
         self._cached_count = 0
         self._cache_timestamp = 0.0

@@ -178,7 +178,9 @@ class TestRotationMatrix:
 class TestRotationCopyOnDetect:
     """LLD Test 6: Copy polar_rotation if exists."""
 
-    def test_rotation_matrix_copy_on_detect(self, tmp_dir: Path) -> None:
+    def test_rotation_matrix_copy_on_detect(
+        self, monkeypatch, tmp_dir: Path,
+    ) -> None:
         """Test 6: Copies polar_rotation_{d}.npy if turbo doesn't exist."""
         import shutil
         import tempfile
@@ -186,6 +188,7 @@ class TestRotationCopyOnDetect:
         # Create a fake .superlocalmemory dir in tmp
         slm_dir = tmp_dir / ".superlocalmemory"
         slm_dir.mkdir()
+        monkeypatch.setenv("SLM_DATA_DIR", str(slm_dir))
         d = 32
 
         # Generate a polar rotation matrix
@@ -200,20 +203,13 @@ class TestRotationCopyOnDetect:
         turbo_path = slm_dir / f"turbo_rotation_{d}.npy"
         assert not turbo_path.exists()
 
-        # Patch Path.home() to use our tmp dir
-        import unittest.mock
-
-        with unittest.mock.patch(
-            "superlocalmemory.math.turbo_quant.Path.home",
-            return_value=tmp_dir,
-        ):
-            config = PolarQuantConfig(
-                dimension=d,
-                rotation_matrix_path="",  # use default path
-                seed=99,  # different seed -- but copy should still happen
-                codebook_method="turbo",
-            )
-            enc = TurboQuantEncoder(config)
+        config = PolarQuantConfig(
+            dimension=d,
+            rotation_matrix_path="",  # use default path
+            seed=99,  # different seed -- but copy should still happen
+            codebook_method="turbo",
+        )
+        enc = TurboQuantEncoder(config)
 
         # Turbo file should now exist (copied from polar)
         assert turbo_path.exists()

@@ -79,7 +79,16 @@ class LanceDBVectorBackend:
             return self._db.create_table("embeddings", schema=schema)
 
     def close(self) -> None:
-        """LanceDB is file-based — no explicit close needed."""
+        """Release this backend's native table and connection references."""
+        for resource in (self._table, self._db):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.debug("LanceDB resource close failed", exc_info=True)
+        self._table = None
+        self._db = None
 
     # ------------------------------------------------------------------
     # Write Path

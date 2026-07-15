@@ -515,8 +515,9 @@ class TestHookCheckpoint:
         # v3.4.13: Should POST to daemon instead of subprocess
         mock_daemon_post.assert_called()
         call_args = mock_daemon_post.call_args
-        assert call_args[0][0] == "/observe"
+        assert call_args[0][0] == "/remember"
         assert "main.py" in call_args[0][1]["content"]
+        assert call_args[0][1]["idempotency_key"].startswith("hook-file-change:")
 
         out = capsys.readouterr().out
         assert "[SLM-AUTO]" in out
@@ -751,9 +752,9 @@ class TestHookStop:
 
         # v3.4.13: Summary now POSTed to daemon via _daemon_post
         mock_daemon.assert_called()
-        observe_call = mock_daemon.call_args_list[0]
-        assert observe_call[0][0] == "/observe"
-        assert "test-project" in observe_call[0][1]["content"]
+        remember_call = mock_daemon.call_args_list[0]
+        assert remember_call[0][0] == "/remember"
+        assert "test-project" in remember_call[0][1]["content"]
 
     @patch("superlocalmemory.hooks.hook_handlers._maybe_consolidate")
     @patch("superlocalmemory.hooks.hook_handlers._daemon_post")
@@ -878,25 +879,23 @@ class TestHookStop:
     @patch("superlocalmemory.hooks.hook_handlers._maybe_consolidate")
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.run")
     @patch("superlocalmemory.hooks.hook_handlers._daemon_post")
-    def test_falls_back_to_remember_on_observe_failure(self, mock_daemon, mock_run, mock_consolidate, monkeypatch):
-        """v3.4.13: When /observe fails, falls back to /remember via daemon."""
+    def test_session_summary_uses_one_durable_remember_call(self, mock_daemon, mock_run, mock_consolidate, monkeypatch):
+        """Session summaries never acknowledge through the volatile observe buffer."""
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         call_paths = []
 
         def daemon_side_effect(path, body, timeout=3.0):
             call_paths.append(path)
-            if path == "/observe":
-                return False  # observe failed
-            return True  # remember succeeds
+            return True
 
         mock_daemon.side_effect = daemon_side_effect
 
         with pytest.raises(SystemExit):
             handle_hook("stop")
 
-        assert "/observe" in call_paths
-        assert "/remember" in call_paths
+        assert call_paths.count("/remember") == 1
+        assert "/observe" not in call_paths
 
 
 # ───────────────────────────────────────────────────────────────────

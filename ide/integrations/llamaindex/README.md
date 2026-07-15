@@ -1,15 +1,14 @@
-# LlamaIndex Chat Store — SuperLocalMemory V2
+# LlamaIndex Chat Store — SuperLocalMemory V3
 
-A LlamaIndex `BaseChatStore` implementation backed by [SuperLocalMemory V2](https://github.com/qualixar/superlocalmemory). All chat history stays **100% local** on your machine — zero cloud calls, zero telemetry, zero API keys.
+A LlamaIndex `BaseChatStore` integration for [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory).
 
 ## Prerequisites
 
-- Python 3.9+
-- SuperLocalMemory V2 installed (`~/.superlocalmemory/` must exist)
+- Python 3.11+
+- SuperLocalMemory installed in the same Python virtual environment
 
 ```bash
-# Install SuperLocalMemory V2 (one-time)
-curl -fsSL https://raw.githubusercontent.com/qualixar/superlocalmemory/main/install.sh | bash
+python -m pip install superlocalmemory
 ```
 
 ## Installation
@@ -51,19 +50,21 @@ chat_store.delete_messages("session-1")
 
 ## Features
 
-- **100% Local** — All data stored in SQLite at `~/.superlocalmemory/memory.db`
-- **Zero Cloud** — No API keys, no subscriptions, no data leaves your machine
-- **Shared Memory** — Chat history is accessible from Claude, Cursor, Windsurf, and 16+ other AI tools via SuperLocalMemory
-- **Session Isolation** — Each chat key is cleanly isolated using SLM tags
+- **Local data root** — Chat history is written to the configured SLM storage path
+- **Explicit network boundary** — The adapter invokes the installed SLM runtime; configured SLM providers retain their documented network behavior
+- **Shared runtime** — Documented SLM clients can access the same configured memory service when authorized
+- **Session Isolation** — Each chat key is isolated with a namespaced SHA-256 session identifier
 - **Persistent** — Survives process restarts (SQLite-backed, not in-memory)
 - **Full BaseChatStore API** — `set_messages`, `get_messages`, `add_message`, `delete_messages`, `delete_message`, `delete_last_message`, `get_keys`
 - **Async Support** — Async methods inherited from BaseChatStore (delegates to sync via `asyncio.to_thread`)
 
 ## How It Works
 
-Each chat message is stored as a separate memory entry in SuperLocalMemory V2:
+Each chat message is submitted through SuperLocalMemory V3's canonical ingestion
+contract. The exact serialized payload remains available for chat-store round trips:
 - **Content**: JSON-serialized `{role, content, additional_kwargs}`
-- **Tag**: `llamaindex:chat:<session_key>` for session isolation
+- **Session**: `llamaindex:<sha256(session_key)>` for bounded, injection-safe isolation
+- **Tag**: `li:chat:<hash>` in metadata for identification
 - **Project**: `llamaindex` for easy identification
 - **Importance**: 3 (low, since chat messages are transient)
 
@@ -76,6 +77,6 @@ chat_store = SuperLocalMemoryChatStore(db_path="/path/to/custom/memory.db")
 
 ## Links
 
-- [SuperLocalMemory V2](https://github.com/qualixar/superlocalmemory)
+- [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory)
 - [LlamaIndex Documentation](https://docs.llamaindex.ai/)
 - [LlamaIndex Chat Stores Guide](https://docs.llamaindex.ai/en/stable/module_guides/storing/chat_stores/)

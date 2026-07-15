@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Elastic-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
 // Lifecycle tab — state distribution, compaction, transitions (v2.8)
 // NOTE: All dynamic values pass through escapeHtml() or textContent for DOM insertion.

@@ -17,15 +17,13 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Callable
 
 from mcp.types import ToolAnnotations
 
 logger = logging.getLogger(__name__)
 
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
+from superlocalmemory.infra.data_root import state_path
 
 
 def _try_daemon_post(path: str, body: dict, timeout_s: float = 60.0) -> dict | None:
@@ -62,7 +60,7 @@ def _emit_event(event_type: str, payload: dict | None = None,
     """Emit an event to the EventBus (best-effort, never raises)."""
     try:
         from superlocalmemory.infra.event_bus import EventBus
-        bus = EventBus.get_instance(str(DB_PATH))
+        bus = EventBus.get_instance(str(state_path("memory.db")))
         bus.emit(event_type, payload=payload, source_agent=source_agent,
                  source_protocol="mcp")
     except Exception:

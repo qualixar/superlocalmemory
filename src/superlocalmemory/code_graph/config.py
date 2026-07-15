@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import state_path
+
 
 # Languages supported out of the box (tree-sitter grammar names)
 DEFAULT_LANGUAGES: frozenset[str] = frozenset({
@@ -85,4 +87,4 @@ class CodeGraphConfig:
             return self.db_path
         if slm_base_dir is not None:
             return slm_base_dir / "code_graph.db"
-        return Path.home() / ".superlocalmemory" / "code_graph.db"
+        return state_path("code_graph.db")

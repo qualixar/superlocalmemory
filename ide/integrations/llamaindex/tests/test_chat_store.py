@@ -1,28 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
-"""SuperLocalMemory V2 - LlamaIndex Chat Store Tests
+"""SuperLocalMemory V3 - LlamaIndex Chat Store Tests
 
 Comprehensive tests for the SuperLocalMemoryChatStore implementation.
 All tests use temporary databases — no production data is touched.
 """
 import os
-import sys
+import sqlite3
 import tempfile
 
 import pytest
-
-# Ensure the SLM source tree is importable for tests
-_SLM_SRC = os.path.join(
-    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "src"
-)
-_SLM_SRC = os.path.abspath(_SLM_SRC)
-if _SLM_SRC not in sys.path:
-    sys.path.insert(0, _SLM_SRC)
-
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.storage.chat_store.superlocalmemory import SuperLocalMemoryChatStore
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -229,6 +219,36 @@ class TestPersistence:
         msgs = store2.get_messages("persist-key")
         assert len(msgs) == 1
         assert msgs[0].content == "remember me"
+
+    def test_explicit_database_uses_v3_canonical_ingestion_without_path_hacks(
+        self, tmp_db
+    ):
+        """The installed adapter writes through V3 without importing from its data root."""
+        data_root = os.path.dirname(tmp_db)
+        import sys
+
+        before = list(sys.path)
+
+        store = SuperLocalMemoryChatStore(db_path=tmp_db)
+        store.add_message(
+            "v3-contract",
+            ChatMessage(role=MessageRole.USER, content="Canonical V3 adapter message"),
+        )
+
+        assert sys.path == before
+        assert data_root not in sys.path
+        with sqlite3.connect(tmp_db) as conn:
+            operation = conn.execute(
+                "SELECT source_type, state FROM ingestion_operations"
+            ).fetchone()
+            memory = conn.execute(
+                "SELECT session_id FROM memories"
+            ).fetchone()
+        assert operation is not None
+        assert operation[0] == "python-api"
+        assert operation[1] in {"queryable", "complete", "failed"}
+        assert memory is not None
+        assert memory[0].startswith("llamaindex:")
 
 
 class TestContentEdgeCases:

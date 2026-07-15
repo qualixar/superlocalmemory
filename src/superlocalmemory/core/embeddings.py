@@ -61,10 +61,20 @@ class DimensionMismatchError(RuntimeError):
 # This lock is the secondary safety net for when the daemon isn't available.
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_LOCK_FILE = Path.home() / ".superlocalmemory" / ".embedding.lock"
-_EMBEDDING_PID_FILE = Path.home() / ".superlocalmemory" / ".embedding-worker.pid"
 _MAX_CONCURRENT_WORKERS = int(os.environ.get("SLM_MAX_EMBEDDING_WORKERS", 1))
 _embedding_lock_fd: int | None = None
+
+
+def _embedding_lock_file() -> Path:
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path(".embedding.lock")
+
+
+def _embedding_pid_file() -> Path:
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path(".embedding-worker.pid")
 
 
 def _is_embedding_worker_alive() -> bool:
@@ -74,21 +84,23 @@ def _is_embedding_worker_alive() -> bool:
     check if one is already running. Prevents duplicate 1.6GB workers.
     """
     try:
-        if not _EMBEDDING_PID_FILE.exists():
+        pid_file = _embedding_pid_file()
+        if not pid_file.exists():
             return False
-        pid = int(_EMBEDDING_PID_FILE.read_text().strip())
+        pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)  # Signal 0 = check if alive
         return True
     except (ValueError, OSError, ProcessLookupError):
         # PID file invalid or process dead — clean up stale file
-        _EMBEDDING_PID_FILE.unlink(missing_ok=True)
+        _embedding_pid_file().unlink(missing_ok=True)
         return False
 
 
 def register_embedding_worker_pid(pid: int) -> None:
     """Write the embedding worker PID to the machine-wide PID file."""
-    _EMBEDDING_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _EMBEDDING_PID_FILE.write_text(str(pid))
+    pid_file = _embedding_pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(pid))
 
 
 def acquire_embedding_lock(timeout: float = 5.0) -> bool:
@@ -108,10 +120,11 @@ def acquire_embedding_lock(timeout: float = 5.0) -> bool:
         return True  # No file locking on Windows — PID check above is the guard
 
     import fcntl
-    _EMBEDDING_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = _embedding_lock_file()
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        _embedding_lock_fd = os.open(str(_EMBEDDING_LOCK_FILE), os.O_CREAT | os.O_RDWR)
+        _embedding_lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -505,22 +518,45 @@ class EmbeddingService:
             self._worker_proc = None
 
     def _kill_worker(self) -> None:
-        """Terminate worker subprocess."""
+        """Terminate the worker and close every owned pipe exactly once."""
         if self._idle_timer is not None:
             self._idle_timer.cancel()
             self._idle_timer = None
-        if self._worker_proc is not None:
-            try:
-                self._worker_proc.stdin.write('{"cmd":"quit"}\n')
-                self._worker_proc.stdin.flush()
-                self._worker_proc.wait(timeout=3)
-            except Exception:
-                try:
-                    self._worker_proc.kill()
-                except Exception:
-                    pass
+
+        proc = self._worker_proc
+        if proc is not None:
+            # Detach first so re-entrant/finalizer cleanup is idempotent.
             self._worker_proc = None
             self._worker_ready = False
+            try:
+                proc.stdin.write('{"cmd":"quit"}\n')
+                proc.stdin.flush()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    returncode = proc.poll()
+                except Exception:
+                    returncode = None
+                # MagicMock/unknown poll results are treated conservatively as
+                # live; a real exited child always reports an integer code.
+                if returncode is None or not isinstance(returncode, int):
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=3)
+                    except Exception:
+                        pass
+            finally:
+                # TextIOWrapper.close() can itself raise BrokenPipeError while
+                # flushing buffered stdin. Suppress it here, while the stream
+                # is still strongly referenced, so it cannot surface later as
+                # an unraisable finalizer warning.
+                for stream_name in ("stdin", "stdout", "stderr"):
+                    stream = getattr(proc, stream_name, None)
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except (BrokenPipeError, OSError, ValueError):
+                            pass
 
     def _reset_idle_timer(self) -> None:
         """Reset idle timer — kills worker after 2 min inactivity."""

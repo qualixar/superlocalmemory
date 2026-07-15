@@ -12,7 +12,7 @@ Edge types: ENTITY (shared entity, weight 1.0), TEMPORAL (exp-decay,
 weight 0.8). CONTRADICTION exposed for external Sheaf module (Wave 4).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

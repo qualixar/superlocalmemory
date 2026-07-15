@@ -97,7 +97,7 @@ class LayeredRateLimiter:
         for k in [p for p, e in self._per_pid.items() if e.last_used < cutoff]:
             del self._per_pid[k]
         for k in [a for a, e in self._per_agent.items() if e.last_used < cutoff]:
-            del self._per_agent[a]
+            del self._per_agent[k]
 
     def _get_pid(self, pid: int, now: float) -> TokenBucket:
         entry = self._per_pid.get(pid)

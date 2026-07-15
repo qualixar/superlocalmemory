@@ -10,7 +10,7 @@ Tier 2: Google Calendar API with OAuth polling — shares Gmail OAuth credential
 OPT-IN only. Enabled via: slm adapters enable calendar
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -22,8 +22,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger("superlocalmemory.ingestion.calendar")
+
+
+def _adapters_config_path() -> Path:
+    return state_path("adapters.json")
+
+
+def _import_dir() -> Path:
+    return state_path("import")
 
 
 class CalendarAdapter(BaseAdapter):
@@ -62,7 +71,7 @@ class CalendarAdapter(BaseAdapter):
         if self._tier != "auto":
             return
 
-        adapters_path = Path.home() / ".superlocalmemory" / "adapters.json"
+        adapters_path = _adapters_config_path()
         cfg = {}
         if adapters_path.exists():
             cfg = json.loads(adapters_path.read_text()).get("calendar", {})
@@ -79,7 +88,7 @@ class CalendarAdapter(BaseAdapter):
             return
 
         # Look for ICS files
-        import_dir = Path.home() / ".superlocalmemory" / "import"
+        import_dir = _import_dir()
         ics_files = list(import_dir.glob("*.ics")) if import_dir.exists() else []
         if ics_files:
             self._tier = "ics"
@@ -330,7 +339,7 @@ if __name__ == "__main__":
     import logging as _logging
     _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(message)s")
 
-    adapters_path = Path.home() / ".superlocalmemory" / "adapters.json"
+    adapters_path = _adapters_config_path()
     tier = "auto"
     if adapters_path.exists():
         cfg = json.loads(adapters_path.read_text()).get("calendar", {})

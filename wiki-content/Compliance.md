@@ -1,12 +1,12 @@
 # Compliance
 
-SuperLocalMemory is designed for regulatory compliance from the ground up. This page covers EU AI Act, GDPR, data retention, access control, and audit capabilities.
+SuperLocalMemory provides technical controls that may support regulatory programs. This page describes local storage, erasure, retention, access-policy, and audit capabilities; it is not legal advice or a certification of any deployment.
 
 ## EU AI Act (Regulation 2024/1689)
 
-The EU AI Act takes full effect **August 2, 2026**. To the best of our knowledge, no existing agent memory system addresses EU AI Act compliance.
+EU AI Act obligations depend on the deployed use case, operator role, risk classification, configuration, and surrounding systems.
 
-### Mode A & B: Full Compliance by Architecture
+### Mode A and B: local processing controls
 
 Mode A operates as a zero-LLM retrieval system. Mode B adds a local LLM via Ollama. In both modes, **all memory operations — storage, encoding, retrieval, and lifecycle management — execute locally without any cloud dependency.**
 
@@ -15,7 +15,7 @@ Mode A operates as a zero-LLM retrieval system. Mode B adds a local LLM via Olla
 | Data sovereignty (Art. 10) | **Pass** | **Pass** | Requires DPA |
 | Right to erasure (GDPR Art. 17) | **Pass** | **Pass** | **Pass** |
 | Transparency (Art. 13) | **Pass** | **Pass** | **Pass** |
-| No network calls during memory ops | **Yes** | **Yes** | No |
+| Core memory path without a cloud model provider | Available | Available with local Ollama | No |
 
 Key compliance points for Mode A/B:
 
@@ -33,7 +33,7 @@ Mode C sends data to a cloud LLM provider. This means:
 - The cloud provider's compliance status affects your overall compliance
 - Audit logs show which data was sent and when
 
-**Recommendation:** Use Mode A or B for EU AI Act-regulated environments. Use Mode C only where cloud AI is explicitly approved by your organization.
+**Recommendation:** prefer the smallest necessary data path, inventory optional providers and integrations, and obtain deployment-specific legal and security review.
 
 ## GDPR
 
@@ -63,11 +63,13 @@ slm dashboard    # Visual browser at http://localhost:8765
 
 ### Data Minimization (Article 5)
 
-The entropy gate automatically filters out low-information messages during auto-capture. Only structured, high-value facts are stored — not raw conversation dumps.
+Automatic observations are admitted by explicit capture rules. Once accepted,
+raw evidence and a queryable projection can be durable before enrichment runs;
+entropy and consolidation are not an unconditional pre-storage guarantee.
 
 ### Data Portability (Article 20)
 
-The SQLite database is a standard, portable format. It can be copied to any machine and used immediately.
+Core memory is SQLite-backed, but configuration, logs, queues, models, derived indexes, and optional backend state also live in the data root. Use the documented export or migration procedure rather than copying only one database file.
 
 ## Access Control
 
@@ -102,7 +104,7 @@ slm dashboard    # Compliance tab shows audit trail
 
 SuperLocalMemory does not process Protected Health Information (PHI) by default. If you store PHI:
 
-- Use Mode A only (zero cloud)
+- Inventory and restrict every provider, connector, backup, and download path
 - Use profile isolation for patient contexts
 - Review audit logs regularly via dashboard
 

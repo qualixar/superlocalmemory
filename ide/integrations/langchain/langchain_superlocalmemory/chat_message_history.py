@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
-"""SuperLocalMemory V2 - LangChain Chat Message History
+"""SuperLocalMemory V3 - LangChain Chat Message History
 
-Implements LangChain's BaseChatMessageHistory backed by SuperLocalMemory V2's
+Implements LangChain's BaseChatMessageHistory backed by SuperLocalMemory V3's
 local SQLite storage. All data stays on your machine -- zero cloud, zero telemetry.
 
 Usage:
@@ -13,8 +13,9 @@ Usage:
     history.add_messages([HumanMessage(content="Hello")])
     print(history.messages)
 """
+import hashlib
 import json
-import sys
+import os
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -30,40 +31,24 @@ from langchain_core.messages import (
     messages_from_dict,
 )
 
+
 # ---------------------------------------------------------------------------
-# MemoryStoreV2 import strategy
-# ---------------------------------------------------------------------------
-# SuperLocalMemory V2 installs to ~/.superlocalmemory/. We add that path so
-# the MemoryStoreV2 class can be imported. If SLM is not installed, we
-# raise a clear error at construction time (not import time) so the package
-# itself can still be imported for introspection.
-# ---------------------------------------------------------------------------
-
-_SLM_PATH = Path.home() / ".superlocalmemory"
-_MemoryStoreV2 = None
+def _data_root() -> Path:
+    value = (
+        os.environ.get("SLM_DATA_DIR")
+        or os.environ.get("SL_MEMORY_PATH")
+        or os.environ.get("SLM_HOME")
+    )
+    return Path(value).expanduser() if value else Path.home() / ".superlocalmemory"
 
 
-def _ensure_slm_imported():
-    """Lazily import MemoryStoreV2, raising a clear error if unavailable."""
-    global _MemoryStoreV2
-    if _MemoryStoreV2 is not None:
-        return _MemoryStoreV2
+# ``SLM_INSTALL_DIR`` is legacy installer metadata only. It is deliberately
+# never added to ``sys.path``; the separately installed superlocalmemory package
+# is the executable contract.
 
-    slm_path_str = str(_SLM_PATH)
-    if slm_path_str not in sys.path:
-        sys.path.insert(0, slm_path_str)
-
-    try:
-        from superlocalmemory.core.engine import MemoryEngine  # type: ignore[import-untyped]
-
-        _MemoryStoreV2 = MemoryStoreV2
-        return _MemoryStoreV2
-    except ImportError as exc:
-        raise ImportError(
-            "SuperLocalMemory V2 is not installed. "
-            "Run the installer from https://github.com/qualixar/superlocalmemory "
-            "or ensure ~/.superlocalmemory/is installed via npm/pip."
-        ) from exc
+def _session_storage_id(session_id: str) -> str:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return f"langchain:{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +88,7 @@ def _deserialize_messages(dicts: List[dict]) -> List[BaseMessage]:
 
 
 class SuperLocalMemoryChatMessageHistory(BaseChatMessageHistory):
-    """LangChain chat message history backed by SuperLocalMemory V2.
+    """LangChain chat message history backed by SuperLocalMemory V3.
 
     Each message is stored as an individual memory entry in the SLM SQLite
     database, tagged with the session ID for isolation.  This keeps the data
@@ -127,29 +112,18 @@ class SuperLocalMemoryChatMessageHistory(BaseChatMessageHistory):
         self.session_id = session_id
         self.db_path = db_path
 
-        MemoryStoreV2 = _ensure_slm_imported()
-        store_path = Path(db_path) if db_path else None
-        self._store = MemoryStoreV2(db_path=store_path)
+        from langchain_superlocalmemory._v3_store import V3ChatStore
+
+        store_path = Path(db_path) if db_path else _data_root() / "memory.db"
+        self._store = V3ChatStore(store_path)
+        self._storage_session_id = _session_storage_id(session_id)
 
     # -- property: messages ------------------------------------------------
 
     @property
     def messages(self) -> List[BaseMessage]:  # type: ignore[override]
         """Return all messages for this session, ordered chronologically."""
-        session_tag = f"{self._TAG_PREFIX}{self.session_id}"
-
-        # Retrieve a generous batch from SLM.  We filter by tag in Python
-        # because list_all does not accept a tag filter parameter.
-        all_memories = self._store.list_all(limit=10_000)
-
-        # Filter to memories belonging to this session.
-        session_memories = [
-            m for m in all_memories if session_tag in (m.get("tags") or [])
-        ]
-
-        # list_all returns newest-first (ORDER BY created_at DESC).
-        # We need chronological (oldest-first) order for chat history.
-        session_memories.sort(key=lambda m: m.get("created_at", ""))
+        session_memories = self._store.list_session(self._storage_session_id)
 
         # Deserialize each memory's content back to a BaseMessage.
         message_dicts: List[dict] = []
@@ -170,7 +144,7 @@ class SuperLocalMemoryChatMessageHistory(BaseChatMessageHistory):
     # -- add_messages ------------------------------------------------------
 
     def add_messages(self, messages: Sequence[BaseMessage]) -> None:
-        """Persist messages to SuperLocalMemory V2.
+        """Persist messages through SuperLocalMemory V3 canonical ingestion.
 
         Each message becomes a separate memory entry tagged with the session
         identifier.  Importance is set to 3 (lower than typical user
@@ -181,21 +155,21 @@ class SuperLocalMemoryChatMessageHistory(BaseChatMessageHistory):
 
         for message in messages:
             serialized = _serialize_message(message)
-            self._store.add_memory(
-                content=serialized,
-                tags=["langchain", session_tag],
-                importance=3,
-                project_name="langchain",
+            self._store.add(
+                serialized,
+                session_id=self._storage_session_id,
+                metadata={
+                    "integration": "langchain",
+                    "chat_session_id": self.session_id,
+                    "tags": ["langchain", session_tag],
+                    "importance": 3,
+                    "project_name": "langchain",
+                },
             )
 
     # -- clear -------------------------------------------------------------
 
     def clear(self) -> None:
         """Remove all messages for this session from the store."""
-        session_tag = f"{self._TAG_PREFIX}{self.session_id}"
-
-        all_memories = self._store.list_all(limit=10_000)
-
-        for mem in all_memories:
-            if session_tag in (mem.get("tags") or []):
-                self._store.delete_memory(mem["id"])
+        for mem in self._store.list_session(self._storage_session_id):
+            self._store.delete(mem["id"])

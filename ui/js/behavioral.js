@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Elastic-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
 // Behavioral Learning tab — outcomes, patterns, cross-project transfers (v2.8)
 // NOTE: All dynamic values use textContent or escapeHtml() from core.js before DOM insertion.

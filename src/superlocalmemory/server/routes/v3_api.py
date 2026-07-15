@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from superlocalmemory.server.routes.helpers import SLM_VERSION
@@ -713,7 +712,8 @@ def _record_learning_signals(query: str, results: list) -> None:
     """Record feedback + co-retrieval + confidence boost for any recall."""
     from superlocalmemory.core.config import SLMConfig
 
-    slm_dir = Path.home() / ".superlocalmemory"
+    from superlocalmemory.infra.data_root import canonical_data_root
+    slm_dir = canonical_data_root()
     config = SLMConfig.load()
     pid = config.active_profile
     fact_ids = [r.get("fact_id", "") for r in results[:10] if r.get("fact_id")]

@@ -25,30 +25,27 @@ If this test fails, real users are losing data.
 
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import time
 import urllib.request
-import urllib.error
-import json
+from pathlib import Path
+
 import pytest
 
-
-PENDING_DB = "/Users/v.pratap.bhardwaj/.superlocalmemory/pending.db"
-MEMORY_DB = "/Users/v.pratap.bhardwaj/.superlocalmemory/memory.db"
-DAEMON_URL = "http://127.0.0.1:8765"
+_DATA_ROOT = Path(os.environ["SLM_DATA_DIR"])
+PENDING_DB = _DATA_ROOT / "pending.db"
+MEMORY_DB = _DATA_ROOT / "memory.db"
+DAEMON_URL = os.environ.get("SLM_TEST_DAEMON_URL", "").rstrip("/")
 MATERIALIZER_TIMEOUT_S = 60  # how long we wait for materialization
 
 
-def _daemon_alive() -> bool:
-    try:
-        with urllib.request.urlopen(f"{DAEMON_URL}/health", timeout=2) as r:
-            return r.status == 200
-    except (urllib.error.URLError, OSError):
-        return False
-
-
 @pytest.mark.slow
-@pytest.mark.skipif(not _daemon_alive(), reason="SLM daemon not running")
+@pytest.mark.skipif(
+    not DAEMON_URL,
+    reason="requires a fixture-owned SLM_TEST_DAEMON_URL",
+)
 class TestAsyncRememberE2E:
     """Full pipeline tests — store via async API, verify in DB and recall.
 
@@ -118,7 +115,7 @@ class TestAsyncRememberE2E:
         ) as r:
             recall_resp = json.loads(r.read())
         assert recall_resp["result_count"] >= 1, (
-            f"Memory persisted but recall returned 0 results — index broken"
+            "Memory persisted but recall returned 0 results — index broken"
         )
         top_result = recall_resp["results"][0]
         assert marker in top_result["content"], (
@@ -131,7 +128,7 @@ class TestAsyncRememberE2E:
         Previously the daemon spammed `materializer loop error: name '_engine'
         is not defined` every 5 seconds, blocking all async materialization.
         """
-        log_path = "/Users/v.pratap.bhardwaj/.superlocalmemory/logs/daemon.log"
+        log_path = _DATA_ROOT / "logs" / "daemon.log"
         try:
             with open(log_path, "rb") as f:
                 # Read last 100 KB only — modern session

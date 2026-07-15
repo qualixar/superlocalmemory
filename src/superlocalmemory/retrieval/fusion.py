@@ -8,7 +8,7 @@ Single-pass RRF with k=15 for sharp rank discrimination on small candidate pools
 V1 had triple re-fusion which destroyed rankings — fixed in V2.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

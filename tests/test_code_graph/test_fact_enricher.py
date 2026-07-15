@@ -106,7 +106,7 @@ class TestEnrich:
         matched = _make_matched_node()
         result = enricher.enrich("fact-1", [matched], "Auth handler fixed")
 
-        assert "fact-1" is not None  # just verify no crash
+        assert result
         assert "authenticate_user" in result
         assert "1 callers" in result
         assert "calls 1" in result

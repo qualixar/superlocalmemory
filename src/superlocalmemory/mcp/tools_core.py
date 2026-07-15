@@ -13,25 +13,23 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from pathlib import Path
 from typing import Callable
 
 from mcp.types import ToolAnnotations
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.infra.data_root import canonical_data_root, state_path
 
 logger = logging.getLogger(__name__)
-
-_DB_PATH = str(Path.home() / ".superlocalmemory" / "memory.db")
-
 
 def _emit_event(event_type: str, payload: dict | None = None,
                 source_agent: str = "mcp_client") -> None:
     """Emit an event to the EventBus (best-effort, never raises)."""
     try:
         from superlocalmemory.infra.event_bus import EventBus
-        bus = EventBus.get_instance(_DB_PATH)
+        bus = EventBus.get_instance(str(state_path("memory.db")))
         bus.emit(event_type, payload=payload, source_agent=source_agent,
                  source_protocol="mcp")
     except Exception:
@@ -58,7 +56,6 @@ def _record_recall_hits(
     signal quality is never load-bearing on recall correctness.
     """
     try:
-        from pathlib import Path
         from superlocalmemory.learning.signals import (
             LearningSignals,
             enqueue_shown_flip,
@@ -66,7 +63,7 @@ def _record_recall_hits(
 
         engine = get_engine()
         pid = engine.profile_id
-        slm_dir = Path.home() / ".superlocalmemory"
+        slm_dir = canonical_data_root()
 
         shown_ids = [r.get("fact_id", "") for r in results[:10]
                      if r.get("fact_id")]
@@ -108,6 +105,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         agent_id: str = "mcp_client",
         scope: str | None = None,
         shared_with: str = "",
+        idempotency_key: str = "",
     ) -> dict:
         """Store content to memory with intelligent indexing.
 
@@ -128,6 +126,14 @@ def register_core_tools(server, get_engine: Callable) -> None:
             "agent_id": agent_id,
             "session_id": session_id,
         }
+        effective_idempotency_key = idempotency_key
+        if not effective_idempotency_key and session_id:
+            material = (
+                f"{agent_id}\0{session_id}\0{scope or ''}\0{shared_with}\0{content}"
+            )
+            effective_idempotency_key = "mcp:" + hashlib.sha256(
+                material.encode("utf-8")
+            ).hexdigest()
         # Parse shared_with from comma-separated string
         _shared_list = [s.strip() for s in shared_with.split(",") if s.strip()] if shared_with else None
         # v3.5.5 WRITE-THROUGH: route through the daemon's /remember, which does
@@ -145,15 +151,26 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
                     "content": content, "tags": tags, "metadata": meta,
                     "scope": scope, "shared_with": _shared_list,
+                    "session_id": session_id,
+                    "idempotency_key": effective_idempotency_key or None,
                 })
                 if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
                     fids = resp.get("fact_ids") or []
+                    materialization_state = resp.get("materialization_state")
+                    if materialization_state is None:
+                        materialization_state = (
+                            "complete" if resp.get("status") == "stored" else "queryable"
+                        )
+                    pending = materialization_state != "complete"
                     return {
                         "success": True,
                         "fact_ids": fids or [f"pending:{resp.get('pending_id','')}"],
                         "count": len(fids) if fids else 1,
-                        "pending": not fids,
-                        "message": "Stored (recallable now; enriching async).",
+                        "pending": pending,
+                        "pending_id": resp.get("pending_id"),
+                        "operation_id": resp.get("operation_id"),
+                        "materialization_state": materialization_state,
+                        "message": "Stored (queryable now; enriching async).",
                     }
         except Exception as dexc:
             logger.debug("MCP remember via daemon failed, pending fallback: %s", dexc)
@@ -163,8 +180,16 @@ def register_core_tools(server, get_engine: Callable) -> None:
             # v3.6.15: preserve a non-personal scope through the offline path so
             # the materializer replays the right visibility (else --scope global
             # would silently downgrade to personal when the daemon is offline).
+            meta = {
+                **meta,
+                "_slm_source_type": "mcp-offline",
+                "_slm_idempotency_key": (
+                    effective_idempotency_key
+                    or "mcp:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+                ),
+            }
             if scope and scope != "personal":
-                meta = {**meta, "scope": scope}
+                meta["scope"] = scope
                 if _shared_list:
                     meta["shared_with"] = _shared_list
             pending_id = store_pending(content, tags=tags, metadata=meta)
@@ -607,7 +632,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             "product": "SuperLocalMemory V3",
             "author": "Varun Pratap Bhardwaj",
             "organization": "Qualixar",
-            "license": "Elastic-2.0",
+            "license": "AGPL-3.0-or-later",
             "urls": {
                 "product": "https://superlocalmemory.com",
                 "author": "https://varunpratap.com",

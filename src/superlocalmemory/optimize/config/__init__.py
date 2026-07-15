@@ -6,7 +6,12 @@ module. They NEVER construct ConfigStore themselves or read optimize.json direct
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from superlocalmemory.optimize.config.schema import OptimizeConfig
+
+if TYPE_CHECKING:
+    from superlocalmemory.optimize.config.store import ConfigStore
 
 _store: "ConfigStore | None" = None
 

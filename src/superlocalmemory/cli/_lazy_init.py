@@ -42,11 +42,9 @@ def slm_home() -> Path:
 
     Pure: no mkdir, no side effects.
     """
-    for var in ("SLM_DATA_DIR", "SL_MEMORY_PATH", "SLM_HOME"):
-        val = os.environ.get(var, "").strip()
-        if val:
-            return Path(val)
-    return Path.home() / ".superlocalmemory"
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return canonical_data_root()
 
 
 # ---------------------------------------------------------------------------

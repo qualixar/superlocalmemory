@@ -30,9 +30,9 @@ slm warmup    # Pre-download embedding model (~500MB, optional)
 ```
 
 **Modes:**
-- **A** — Zero cloud. Data never leaves your machine. EU AI Act compliant. **(default)**
+- **A** — Core memory operations use the local data root without a cloud model provider. Optional integrations have separate network behavior. **(default)**
 - **B** — Local LLM via Ollama. Still fully private.
-- **C** — Cloud LLM for maximum accuracy (87.7% on LoCoMo).
+- **C** — Cloud LLM for provider-assisted enrichment; configured content is sent to that provider.
 
 Switch anytime: `slm mode a`, `slm mode b`, `slm mode c`.
 
@@ -41,8 +41,12 @@ Switch anytime: `slm mode a`, `slm mode b`, `slm mode c`.
 Store something:
 
 ```bash
-slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days."
+slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days." --json
 ```
+
+The default receipt reports an opaque `operation_id`, fact IDs, and
+`materialization_state: queryable`. Enrichment continues durably in the
+background. Add `--sync` when the next step requires `complete`.
 
 Recall it later:
 

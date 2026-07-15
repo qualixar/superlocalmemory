@@ -3,7 +3,7 @@ name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally with zero cloud dependency."
 version: "3.4.22"
 author: "Varun Pratap Bhardwaj"
-license: Elastic-2.0
+license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
 repository: https://github.com/qualixar/superlocalmemory
 triggers:

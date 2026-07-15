@@ -37,7 +37,6 @@ Design notes (LLD-04 §7 hard rules):
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -51,6 +50,7 @@ from superlocalmemory.core.security_primitives import (
 )
 from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.features import FEATURE_DIM
+from superlocalmemory.infra.data_root import canonical_data_root
 
 logger = logging.getLogger("superlocalmemory.routes.brain")
 
@@ -73,7 +73,13 @@ _VERSION: str = "3.4.23"
 
 # Memory directory (home-dir based). Always resolved at call time so that
 # tests can override via monkeypatch on ``_learning_db_path``.
-_MEMORY_DIR_DEFAULT = Path.home() / ".superlocalmemory"
+_MEMORY_DIR_DEFAULT = None  # test-only compatibility override
+
+
+def _memory_dir() -> Path:
+    if _MEMORY_DIR_DEFAULT is not None:
+        return Path(_MEMORY_DIR_DEFAULT)
+    return canonical_data_root()
 
 
 def _learning_db_path() -> Path:
@@ -83,11 +89,11 @@ def _learning_db_path() -> Path:
     monkeypatch without touching Path.home. See
     ``tests/test_api/test_brain_endpoint.py``.
     """
-    return _MEMORY_DIR_DEFAULT / "learning.db"
+    return _memory_dir() / "learning.db"
 
 
 def _memory_db_path() -> Path:
-    return _MEMORY_DIR_DEFAULT / "memory.db"
+    return _memory_dir() / "memory.db"
 
 
 # ---------------------------------------------------------------------------
@@ -565,9 +571,7 @@ def _adapter_last_sync_ago(adapter_name: str) -> int | None:
     try:
         import sqlite3 as _sqlite3
         from datetime import datetime as _dt, timezone as _tz
-        from pathlib import Path as _P
-
-        memory_db = _P.home() / ".superlocalmemory" / "memory.db"
+        memory_db = _memory_dir() / "memory.db"
         if not memory_db.exists():
             return None
         conn = _sqlite3.connect(
@@ -986,7 +990,6 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
     actually flowing: recall → enqueue → persist → finalize.
     """
     import sqlite3
-    from pathlib import Path
     try:
         from superlocalmemory.learning.outcome_queue import (
             get_counters, queue_size,
@@ -995,7 +998,7 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
         qsz = queue_size()
     except Exception:
         counters, qsz = {}, 0
-    home = Path.home() / ".superlocalmemory"
+    home = _memory_dir()
     db = home / "memory.db"
     pending_now = 0
     if db.exists():
@@ -1030,8 +1033,7 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
 def _compute_reward_preview(profile_id: str) -> dict:
     """Reward-tile aggregate — count + mean reward over the last 24h."""
     import sqlite3
-    from pathlib import Path
-    home = Path.home() / ".superlocalmemory"
+    home = _memory_dir()
     db = home / "memory.db"
     default = {
         "is_real": False, "rows_24h": 0, "mean_reward_24h": 0.0,

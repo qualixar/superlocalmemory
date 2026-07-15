@@ -58,8 +58,8 @@ def register_v28_tools(server, get_engine: Callable) -> None:
             # Previously, outcomes were stored but never created learning signals.
             try:
                 from superlocalmemory.learning.feedback import FeedbackCollector
-                from pathlib import Path as _Path
-                learning_db = _Path.home() / ".superlocalmemory" / "learning.db"
+                from superlocalmemory.infra.data_root import state_path
+                learning_db = state_path("learning.db")
                 collector = FeedbackCollector(learning_db)
                 signal_map = {"success": ("user_positive", 1.0),
                               "failure": ("user_negative", 0.0),

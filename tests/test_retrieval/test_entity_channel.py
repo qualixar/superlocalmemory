@@ -16,10 +16,7 @@ Covers:
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from superlocalmemory.retrieval.entity_channel import (
     EntityGraphChannel,
@@ -31,7 +28,6 @@ from superlocalmemory.storage.models import (
     EdgeType,
     GraphEdge,
 )
-
 
 # ---------------------------------------------------------------------------
 # extract_query_entities
@@ -106,6 +102,15 @@ def _mock_edge(source: str, target: str) -> GraphEdge:
     )
 
 
+def _authorize_all_mock_candidates(db: MagicMock) -> None:
+    """Model the canonical scope check for single-profile channel unit tests."""
+    db.get_facts_by_ids.side_effect = (
+        lambda fact_ids, _profile_id, **_kwargs: [
+            _mock_fact(fact_id) for fact_id in fact_ids
+        ]
+    )
+
+
 class TestEntityGraphChannelSearch:
     def test_no_entities_returns_empty(self) -> None:
         db = MagicMock()
@@ -122,6 +127,7 @@ class TestEntityGraphChannelSearch:
 
     def test_direct_entity_facts_returned(self) -> None:
         db = MagicMock()
+        _authorize_all_mock_candidates(db)
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
         db.get_facts_by_entity.return_value = [_mock_fact("f1", ["e_alice"])]
         db.get_edges_for_node.return_value = []
@@ -134,6 +140,7 @@ class TestEntityGraphChannelSearch:
 
     def test_spreading_activation_through_edges(self) -> None:
         db = MagicMock()
+        _authorize_all_mock_candidates(db)
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
         # Alice directly linked to f1
         db.get_facts_by_entity.return_value = [_mock_fact("f1")]
@@ -194,6 +201,7 @@ class TestEntityGraphChannelSearch:
 
     def test_entity_resolver_used_when_provided(self) -> None:
         db = MagicMock()
+        _authorize_all_mock_candidates(db)
         resolver = MagicMock()
         resolver.resolve.return_value = {"Alice": "e_alice"}
         db.get_facts_by_entity.return_value = [_mock_fact("f1")]
@@ -207,6 +215,7 @@ class TestEntityGraphChannelSearch:
 
     def test_discover_entities_from_facts(self) -> None:
         db = MagicMock()
+        _authorize_all_mock_candidates(db)
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
         db.get_facts_by_entity.side_effect = lambda eid, pid, **kwargs: (
             [_mock_fact("f1", ["e_alice"])] if eid == "e_alice"

@@ -11,7 +11,7 @@ at ~60 MB. Same isolation pattern as EmbeddingService.
 The worker subprocess auto-kills after 2 minutes idle.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -29,21 +29,27 @@ from typing import Any
 
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.storage.models import AtomicFact
 
-_RERANKER_PID_FILE = Path.home() / ".superlocalmemory" / ".reranker-worker.pid"
+_RERANKER_PID_FILE = None  # test-only override
+
+
+def _reranker_pid_file() -> Path:
+    return _RERANKER_PID_FILE or state_path(".reranker-worker.pid")
 
 
 def _is_reranker_worker_alive() -> bool:
     """Check if a reranker worker PID is already alive (machine-wide singleton)."""
     try:
-        if not _RERANKER_PID_FILE.exists():
+        pid_file = _reranker_pid_file()
+        if not pid_file.exists():
             return False
-        pid = int(_RERANKER_PID_FILE.read_text().strip())
+        pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)
         return True
     except (ValueError, OSError, ProcessLookupError):
-        _RERANKER_PID_FILE.unlink(missing_ok=True)
+        _reranker_pid_file().unlink(missing_ok=True)
         return False
 
 # Track all live reranker instances for atexit cleanup
@@ -215,8 +221,9 @@ class CrossEncoderReranker:
                 **popen_platform_kwargs(),
             )
             # v3.4.13: Register PID for machine-wide singleton
-            _RERANKER_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _RERANKER_PID_FILE.write_text(str(self._worker_proc.pid))
+            pid_file = _reranker_pid_file()
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(self._worker_proc.pid))
             logger.info(
                 "Reranker worker spawned (PID %d)", self._worker_proc.pid,
             )
@@ -321,22 +328,41 @@ class CrossEncoderReranker:
         return result_container[0] if result_container else ""
 
     def _kill_worker(self) -> None:
-        """Terminate worker subprocess."""
+        """Terminate the worker and close every owned pipe exactly once."""
         if self._idle_timer is not None:
             self._idle_timer.cancel()
             self._idle_timer = None
-        if self._worker_proc is not None:
-            try:
-                self._worker_proc.stdin.write('{"cmd":"quit"}\n')
-                self._worker_proc.stdin.flush()
-                self._worker_proc.wait(timeout=3)
-            except Exception:
-                try:
-                    self._worker_proc.kill()
-                except Exception:
-                    pass
+
+        proc = self._worker_proc
+        if proc is not None:
+            # Detach first so re-entrant/finalizer cleanup is idempotent.
             self._worker_proc = None
             self._worker_ready = False
+            try:
+                proc.stdin.write('{"cmd":"quit"}\n')
+                proc.stdin.flush()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    returncode = proc.poll()
+                except Exception:
+                    returncode = None
+                if returncode is None or not isinstance(returncode, int):
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=3)
+                    except Exception:
+                        pass
+            finally:
+                # Explicit close prevents TextIOWrapper from flushing a dead
+                # child's stdin later from an unraisable object finalizer.
+                for stream_name in ("stdin", "stdout", "stderr"):
+                    stream = getattr(proc, stream_name, None)
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except (BrokenPipeError, OSError, ValueError):
+                            pass
 
     def _reset_idle_timer(self) -> None:
         """Reset idle timer — kills worker after 2 min inactivity."""

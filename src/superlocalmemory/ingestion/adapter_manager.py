@@ -8,7 +8,7 @@ All adapters run as separate subprocesses managed via PID files.
 Config stored in ~/.superlocalmemory/adapters.json.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -20,10 +20,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import canonical_data_root, state_path
+
 logger = logging.getLogger("superlocalmemory.ingestion.manager")
 
-_SLM_HOME = Path.home() / ".superlocalmemory"
-_ADAPTERS_CONFIG = _SLM_HOME / "adapters.json"
+_SLM_HOME = None  # test-only compatibility override
+_ADAPTERS_CONFIG = None  # test-only compatibility override
 _VALID_ADAPTERS = ("gmail", "calendar", "transcript")
 
 # Module paths for each adapter
@@ -34,19 +36,35 @@ _ADAPTER_MODULES = {
 }
 
 
+def _slm_home() -> Path:
+    return Path(_SLM_HOME) if _SLM_HOME is not None else canonical_data_root()
+
+
+def _adapters_config_path() -> Path:
+    if _ADAPTERS_CONFIG is not None:
+        return Path(_ADAPTERS_CONFIG)
+    return state_path("adapters.json")
+
+
+def _adapter_log_dir() -> Path:
+    return _slm_home() / "logs"
+
+
 def _load_config() -> dict:
-    if _ADAPTERS_CONFIG.exists():
-        return json.loads(_ADAPTERS_CONFIG.read_text())
+    config_path = _adapters_config_path()
+    if config_path.exists():
+        return json.loads(config_path.read_text())
     return {name: {"enabled": False} for name in _VALID_ADAPTERS}
 
 
 def _save_config(config: dict) -> None:
-    _ADAPTERS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    _ADAPTERS_CONFIG.write_text(json.dumps(config, indent=2))
+    config_path = _adapters_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(config, indent=2))
 
 
 def _pid_file(name: str) -> Path:
-    return _SLM_HOME / f"adapter-{name}.pid"
+    return _slm_home() / f"adapter-{name}.pid"
 
 
 def _is_running(name: str) -> tuple[bool, int | None]:
@@ -128,7 +146,7 @@ def start_adapter(name: str) -> dict:
         return {"ok": False, "error": f"No module for {name}"}
 
     cmd = [sys.executable, "-m", module]
-    log_dir = _SLM_HOME / "logs"
+    log_dir = _adapter_log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"adapter-{name}.log"
 

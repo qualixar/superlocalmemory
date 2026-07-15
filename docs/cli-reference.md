@@ -58,13 +58,23 @@ Store a memory.
 ```bash
 slm remember "API rate limit is 100 req/min on staging"
 slm remember "Use camelCase for JS, snake_case for Python" --tags "style,convention"
-slm remember "Maria owns the auth service" --tags "team,ownership"
+slm remember "Maria owns the auth service" --scope shared --shared-with team-a
+slm remember "Wait for all enrichment" --sync --json
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--tags "a,b"` | Comma-separated tags for categorization |
-| `--profile name` | Store in a specific profile (overrides active profile) |
+| `--sync` | Wait until declared derivation and projector stages complete |
+| `--scope` | `personal`, `shared`, or `global` visibility |
+| `--shared-with` | Comma-separated profile IDs for shared scope |
+| `--json` | Emit the operation receipt and materialization state |
+
+Without `--sync`, the daemon returns after the memory is `queryable`; canonical
+enrichment continues in the background. If the daemon cannot start, the CLI
+stores raw evidence in the legacy offline spool. That spool is a compatibility
+input: replay submits the same source/idempotency identity through M018 before
+marking it done.
 
 ### `slm recall "query" [options]`
 

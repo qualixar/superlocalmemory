@@ -12,6 +12,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
+import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -181,6 +182,13 @@ def run_store(
     auto_linker: Any = None,
     context_generator: Any = None,
     consolidation_engine: Any = None,
+    existing_memory_id: str | None = None,
+    queryable_fact_ids: tuple[str, ...] = (),
+    trusted_actor_id: str = "",
+    pre_authorized: bool = False,
+    ingestion_source_type: str = "store",
+    ingestion_operation_id: str = "",
+    derivation_report: dict[str, bool] | None = None,
 ) -> list[str]:
     """Store content and extract structured facts. Returns fact_ids.
 
@@ -190,11 +198,15 @@ def run_store(
     # Pre-operation hooks (trust gate, ABAC, rate limiter)
     hook_ctx = {
         "operation": "store",
-        "agent_id": metadata.get("agent_id", "unknown") if metadata else "unknown",
+        "agent_id": (
+            trusted_actor_id
+            or (metadata.get("agent_id", "unknown") if metadata else "unknown")
+        ),
         "profile_id": profile_id,
         "content_preview": content[:100],
     }
-    hooks.run_pre("store", hook_ctx)
+    if not pre_authorized:
+        hooks.run_pre("store", hook_ctx)
 
     if entropy_gate and not entropy_gate.should_pass(content):
         return []
@@ -216,19 +228,65 @@ def run_store(
     parser = temporal_parser or TemporalParser()
     parsed_date = parser.parse_session_date(session_date) if session_date else None
 
-    record = MemoryRecord(
-        profile_id=profile_id, content=content,
-        session_id=session_id, speaker=speaker, role=role,
-        session_date=parsed_date, metadata=metadata or {},
-        scope=scope, shared_with=shared_with,
-    )
-    db.store_memory(record)
+    queryable_ids = frozenset(queryable_fact_ids)
+    queryable_facts: list[AtomicFact] = []
+    if existing_memory_id:
+        memory_rows = db.execute(
+            "SELECT * FROM memories WHERE memory_id=?",
+            (existing_memory_id,),
+        )
+        if not memory_rows:
+            raise ValueError("queryable ingestion memory does not exist")
+        memory = dict(memory_rows[0])
+        if memory["profile_id"] != profile_id:
+            raise ValueError("queryable ingestion memory profile mismatch")
+        if memory["content"] != content:
+            raise ValueError("queryable ingestion memory content mismatch")
+        stored_shared = json.loads(memory.get("shared_with") or "null")
+        if (memory.get("scope") or "personal") != scope:
+            raise ValueError("queryable ingestion memory scope mismatch")
+        if (stored_shared or None) != (shared_with or None):
+            raise ValueError("queryable ingestion shared scope mismatch")
+        queryable_facts = db.get_facts_by_ids(list(queryable_ids), profile_id)
+        if len(queryable_facts) != len(queryable_ids):
+            raise ValueError("queryable ingestion fact profile mismatch or missing fact")
+        if any(fact.memory_id != existing_memory_id for fact in queryable_facts):
+            raise ValueError("queryable ingestion fact belongs to another memory")
+        record = MemoryRecord(
+            memory_id=existing_memory_id,
+            profile_id=profile_id,
+            content=content,
+            session_id=memory.get("session_id") or session_id,
+            speaker=memory.get("speaker") or speaker,
+            role=memory.get("role") or role,
+            session_date=memory.get("session_date") or parsed_date,
+            created_at=memory["created_at"],
+            metadata=json.loads(memory.get("metadata_json") or "{}"),
+            scope=scope,
+            shared_with=shared_with,
+        )
+    else:
+        record = MemoryRecord(
+            profile_id=profile_id, content=content,
+            session_id=session_id, speaker=speaker, role=role,
+            session_date=parsed_date, metadata=metadata or {},
+            scope=scope, shared_with=shared_with,
+        )
+        db.store_memory(record)
+
+    extraction_complete = False
+    consolidation_complete = consolidator is not None
+    canonicalization_complete = entity_resolver is not None
+    graph_complete = graph_builder is not None
+    temporal_complete = True
+    provenance_complete = provenance is not None
 
     try:
         facts = fact_extractor.extract_facts(
             turns=[content], session_id=session_id,
             session_date=parsed_date, speaker_a=speaker,
         )
+        extraction_complete = facts is not None
     except Exception as _extract_exc:
         # P0-1 (remember-write-04): an extractor EXCEPTION (transient LLM/embed
         # backend error) must NOT orphan the already-committed memory. The None
@@ -256,7 +314,8 @@ def run_store(
     # V3.3.20: Stronger verbatim filter — skip greetings, filler, short phrases.
     # Verbatim facts with just "Hey! How are you?" dilute embeddings and add noise.
     _MIN_VERBATIM_WORDS = 8
-    if (content.strip()
+    if (not queryable_facts
+            and content.strip()
             and len(content.strip()) >= 40
             and len(content.strip().split()) >= _MIN_VERBATIM_WORDS):
         import uuid
@@ -284,6 +343,19 @@ def run_store(
         extracted_texts = {f.content.strip().lower() for f in facts}
         if verbatim.content.strip().lower() not in extracted_texts:
             facts.append(verbatim)
+
+    if queryable_facts:
+        # Replace any extractor-produced copy of the complete raw turn with the
+        # already-queryable projection, then promote that stable fact ID in
+        # place.  Large inputs may have a clamped queryable projection, so the
+        # projection itself is authoritative for the verbatim retrieval unit.
+        raw_text = content.strip().lower()
+        facts = [
+            fact for fact in facts
+            if fact.content.strip().lower() != raw_text
+            and fact.fact_id not in queryable_ids
+        ]
+        facts.extend(queryable_facts)
 
     # V3.3.21: If fact extraction produced nothing (short input like "this is test"),
     # store the raw content as a minimal fact. User explicitly called `slm remember` —
@@ -319,9 +391,39 @@ def run_store(
             temporal_parser=temporal_parser,
         )
 
+        is_queryable_promotion = fact.fact_id in queryable_ids
+        if is_queryable_promotion:
+            db.update_fact(fact.fact_id, {
+                "content": fact.content,
+                "fact_type": fact.fact_type,
+                "entities_json": fact.entities,
+                "canonical_entities_json": fact.canonical_entities,
+                "observation_date": fact.observation_date,
+                "referenced_date": fact.referenced_date,
+                "interval_start": fact.interval_start,
+                "interval_end": fact.interval_end,
+                "confidence": fact.confidence,
+                "importance": fact.importance,
+                "evidence_count": fact.evidence_count,
+                "access_count": fact.access_count,
+                "source_turn_ids_json": fact.source_turn_ids,
+                "session_id": fact.session_id,
+                "embedding": fact.embedding,
+                "fisher_mean": fact.fisher_mean,
+                "fisher_variance": fact.fisher_variance,
+                "lifecycle": fact.lifecycle,
+                "langevin_position": fact.langevin_position,
+                "emotional_valence": fact.emotional_valence,
+                "emotional_arousal": fact.emotional_arousal,
+                "signal_type": fact.signal_type,
+            })
         if consolidator:
             try:
-                action = consolidator.consolidate(fact, profile_id)
+                action = consolidator.consolidate(
+                    fact,
+                    profile_id,
+                    exclude_fact_ids=queryable_ids,
+                )
             except Exception as _consolidate_exc:
                 # P0-1 (remember-write-03): a consolidate failure (e.g. LLM
                 # timeout) must NOT orphan the already-committed memory. Fall
@@ -331,19 +433,31 @@ def run_store(
                     "consolidate() failed for fact %s — storing raw fact as "
                     "fallback: %s", fact.fact_id, _consolidate_exc,
                 )
+                consolidation_complete = False
                 action = None
 
             if action is not None:
                 if action.action_type.value == "noop":
-                    continue
+                    # A canonical ingestion projection already exists before
+                    # enrichment. Reconcile it against pre-existing facts and
+                    # remove it when consolidation proves it is a duplicate.
+                    target_id = action.existing_fact_id
+                    if is_queryable_promotion and target_id:
+                        db.delete_fact(fact.fact_id)
+                    existing_fact = db.get_fact(target_id) if target_id else None
+                    if existing_fact is None:
+                        continue
+                    fact = existing_fact
 
                 # Opinion confidence tracking: reinforce or decay
                 if fact.fact_type == FactType.OPINION and action.action_type.value == "update":
                     try:
-                        existing = db.get_fact(action.new_fact_id)
+                        existing = db.get_fact(
+                            action.existing_fact_id or action.new_fact_id
+                        )
                         if existing and existing.fact_type == FactType.OPINION:
                             new_conf = min(1.0, existing.confidence + 0.1)
-                            db.update_fact(action.new_fact_id, {"confidence": new_conf})
+                            db.update_fact(existing.fact_id, {"confidence": new_conf})
                     except Exception:
                         pass
                 elif fact.fact_type == FactType.OPINION and action.action_type.value == "supersede":
@@ -358,35 +472,37 @@ def run_store(
                         pass
 
                 if action.action_type.value in ("update", "supersede"):
-                    updated_fact = db.get_fact(action.new_fact_id)
-                    if updated_fact:
-                        # P1-2 (embeddings-vector-01): the merged/superseding
-                        # fact must reach the vector store (embed on-demand if
-                        # it has none) — otherwise it is invisible to the
-                        # semantic channel despite living in atomic_facts.
-                        _upsert_fact_vectors(
-                            updated_fact, profile_id, ann_index, vector_store, embedder,
+                    target_id = (
+                        (action.existing_fact_id or action.new_fact_id)
+                        if action.action_type.value == "update"
+                        else action.new_fact_id
+                    )
+                    if is_queryable_promotion and target_id != fact.fact_id:
+                        db.delete_fact(fact.fact_id)
+                    updated_fact = db.get_fact(target_id)
+                    if updated_fact is None:
+                        raise RuntimeError(
+                            f"consolidation {action.action_type.value} produced "
+                            f"missing fact {target_id}"
                         )
-                        if graph_builder:
-                            graph_builder.build_edges(updated_fact, profile_id)
-                        if observation_builder:
-                            for eid in updated_fact.canonical_entities:
-                                observation_builder.update_profile(
-                                    eid, updated_fact, profile_id,
-                                )
-                    stored_ids.append(action.new_fact_id)
-                    continue
+                    # Continue through the shared index/graph/temporal/
+                    # provenance stages.  The previous early continue made
+                    # UPDATE/SUPERSEDE facts look stored while skipping half of
+                    # canonical materialization.
+                    fact = updated_fact
                 # ADD case: consolidator already stored the fact (F8 fix)
                 # Fall through to post-processing below
             else:
                 # Consolidate failed → store the raw fact ourselves so the
                 # memory is never left without a retrievable fact, then fall
                 # through to post-processing (embeddings, graph, context).
-                db.store_fact(fact)
-        else:
+                if not is_queryable_promotion:
+                    db.store_fact(fact)
+        elif not is_queryable_promotion:
             db.store_fact(fact)
 
-        stored_ids.append(fact.fact_id)
+        if fact.fact_id not in stored_ids:
+            stored_ids.append(fact.fact_id)
 
         # Dual-write embedding to ANN index + vector store (embed on-demand if
         # a consolidated ADD fact arrived without one). See _upsert_fact_vectors.
@@ -461,6 +577,7 @@ def run_store(
                         len(invalidations), fact.fact_id,
                     )
             except Exception as exc:
+                temporal_complete = False
                 logger.debug(
                     "Temporal validation skipped for fact %s: %s",
                     fact.fact_id, exc,
@@ -488,6 +605,8 @@ def run_store(
                 event = TemporalEvent(
                     profile_id=profile_id, entity_id=eid,
                     fact_id=fact.fact_id,
+                    scope=fact.scope,
+                    shared_with=fact.shared_with,
                     observation_date=fact.observation_date,
                     referenced_date=fact.referenced_date,
                     interval_start=fact.interval_start,
@@ -506,6 +625,8 @@ def run_store(
                     profile_id=profile_id,
                     entity_id=sig.get("entity_id", ""),
                     fact_id=fact.fact_id,
+                    scope=fact.scope,
+                    shared_with=fact.shared_with,
                     interval_start=sig.get("start_time"),
                     interval_end=sig.get("end_time"),
                     description=sig.get("description", ""),
@@ -525,12 +646,12 @@ def run_store(
                 provenance.record(
                     fact_id=fact.fact_id,
                     profile_id=profile_id,
-                    source_type="store",
-                    source_id=session_id,
-                    created_by=speaker or "unknown",
+                    source_type=ingestion_source_type,
+                    source_id=ingestion_operation_id or session_id,
+                    created_by=trusted_actor_id or speaker or "unknown",
                 )
             except Exception:
-                pass
+                provenance_complete = False
 
     logger.info("Stored %d facts (session=%s)", len(stored_ids), session_id)
 
@@ -538,6 +659,16 @@ def run_store(
     hook_ctx["fact_ids"] = stored_ids
     hook_ctx["fact_count"] = len(stored_ids)
     hooks.run_post("store", hook_ctx)
+
+    if derivation_report is not None:
+        derivation_report.update({
+            "extraction": extraction_complete,
+            "canonicalization": canonicalization_complete,
+            "consolidation": consolidation_complete,
+            "graph": graph_complete,
+            "temporal": temporal_complete,
+            "provenance": provenance_complete,
+        })
 
     # Phase 5: Step-count trigger for lightweight consolidation (L7)
     if consolidation_engine is not None:

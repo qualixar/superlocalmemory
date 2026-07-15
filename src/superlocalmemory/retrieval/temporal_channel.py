@@ -8,7 +8,7 @@ Searches by referenced_date (NOT just created_at like V1).
 Returns empty when query has no temporal signal (no recency noise).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 
@@ -17,9 +17,10 @@ import math
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from dateutil.parser import parse as dateutil_parse, ParserError
+from dateutil.parser import ParserError, parse as dateutil_parse
 
 from superlocalmemory.encoding.temporal_parser import TemporalParser
+from superlocalmemory.storage.database import _scope_where
 
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
@@ -148,18 +149,23 @@ class TemporalChannel:
 
         results: list[tuple[str, float]] = []
         seen: set[str] = set()
+        where, params = _scope_where(
+            profile_id,
+            include_global=bool(getattr(self, "include_global", False)),
+            include_shared=bool(getattr(self, "include_shared", False)),
+            prefix="te",
+        )
 
         for name in names[:3]:  # Limit to first 3 entity mentions
-            # Look up entity ID
-            entity = self._db.get_entity_by_name(name, profile_id)
-            if entity is None:
-                continue
-
-            # Find all temporal events for this entity
+            # Resolve the entity and event in one scope-filtered query. Looking
+            # up the entity only in the requester's profile made global events
+            # owned by another profile undiscoverable before authorization was
+            # even evaluated.
             rows = self._db.execute(
-                "SELECT fact_id FROM temporal_events "
-                "WHERE profile_id = ? AND entity_id = ?",
-                (profile_id, entity.entity_id),
+                "SELECT te.fact_id FROM temporal_events AS te "
+                "JOIN canonical_entities AS ce ON ce.entity_id = te.entity_id "
+                f"WHERE {where} AND LOWER(ce.canonical_name) = LOWER(?)",
+                (*params, name),
             )
             for row in rows:
                 fid = dict(row)["fact_id"]
@@ -173,11 +179,16 @@ class TemporalChannel:
         return results
 
     def _load_events(self, profile_id: str) -> list[dict]:
+        where, params = _scope_where(
+            profile_id,
+            include_global=bool(getattr(self, "include_global", False)),
+            include_shared=bool(getattr(self, "include_shared", False)),
+        )
         rows = self._db.execute(
             "SELECT fact_id, observation_date, referenced_date, "
             "interval_start, interval_end "
-            "FROM temporal_events WHERE profile_id = ?",
-            (profile_id,),
+            f"FROM temporal_events WHERE {where}",
+            (*params,),
         )
         return [dict(r) for r in rows]
 

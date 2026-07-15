@@ -167,7 +167,9 @@ def test_doctor_no_crash_when_metrics_empty_and_db_absent(tmp_path: Path):
 # Test 4 — metrics_load raises → error contains "metrics read failed", no raise
 # ---------------------------------------------------------------------------
 
-def test_doctor_no_crash_when_metrics_load_raises(tmp_path: Path):
+def test_doctor_no_crash_when_metrics_load_raises(
+    tmp_path: Path, monkeypatch,
+):
     """If CacheDB.get_default().metrics_load raises, _gather_optimize_surface_b
     must catch it, set error containing 'metrics read failed', and NOT re-raise."""
     from superlocalmemory.cli.commands import _gather_optimize_surface_b
@@ -181,6 +183,7 @@ def test_doctor_no_crash_when_metrics_load_raises(tmp_path: Path):
     slm_dir = tmp_path / ".superlocalmemory"
     slm_dir.mkdir(parents=True, exist_ok=True)
     (slm_dir / "llmcache.db").touch()
+    monkeypatch.setenv("SLM_DATA_DIR", str(slm_dir))
 
     # Patch CacheDB at the module where it lives (local import inside the helper).
     with patch("pathlib.Path.home", return_value=tmp_path), patch(

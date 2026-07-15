@@ -14,7 +14,7 @@ Frequency: every 6-24h or after 100 stores.
 ~100 Langevin steps to stationarity.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

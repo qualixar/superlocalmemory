@@ -23,9 +23,7 @@ The fix:
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 class TestStartDaemonSubprocessHelper:
@@ -95,10 +93,13 @@ class TestEnsureDaemonStillWorks:
         with patch.object(_daemon, "is_daemon_running", return_value=True):
             assert _daemon.ensure_daemon() is True
 
-    def test_ensure_daemon_delegates_to_helper_after_lock(self, tmp_path) -> None:
+    def test_ensure_daemon_delegates_to_helper_after_lock(
+        self, tmp_path, monkeypatch,
+    ) -> None:
         """ensure_daemon now delegates the actual spawn to the helper."""
         from superlocalmemory.cli import daemon as _daemon
 
+        monkeypatch.setenv("SLM_TEST_ALLOW_DAEMON_SPAWN", "1")
         with patch.object(_daemon, "is_daemon_running", side_effect=[False, False]), \
              patch.object(_daemon, "_LOCK_FILE", tmp_path / "daemon.lock"), \
              patch.object(_daemon, "_start_daemon_subprocess", return_value=True) as helper:
@@ -113,7 +114,13 @@ class TestRestartStep3UsesHelperNotEnsureDaemon:
     def test_cmd_restart_imports_start_daemon_subprocess_not_ensure_daemon_in_step3(self) -> None:
         """The fix is observable in the source: Step 3 imports the helper, not ensure_daemon."""
         from pathlib import Path
-        commands_py = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "cli" / "commands.py"
+        commands_py = (
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "superlocalmemory"
+            / "cli"
+            / "commands.py"
+        )
         text = commands_py.read_text()
 
         # Find the cmd_restart function body
@@ -131,3 +138,15 @@ class TestRestartStep3UsesHelperNotEnsureDaemon:
             "cmd_restart must not import ensure_daemon — that re-introduces the "
             "v3.4.13→v3.4.41 self-deadlock bug."
         )
+
+
+def test_restart_never_scans_or_kills_machine_wide_processes() -> None:
+    """V3.7 restart is namespace-owned, never process-name-wide."""
+    import inspect
+
+    from superlocalmemory.cli.commands import cmd_restart
+
+    source = inspect.getsource(cmd_restart)
+    assert "process_iter" not in source
+    assert "pkill" not in source
+    assert "stop_daemon" in source

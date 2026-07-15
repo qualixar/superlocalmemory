@@ -23,13 +23,22 @@ All `slm` commands — V3 has 18 commands grouped by function. All data-returnin
 slm remember "Fixed the auth bug — JWT expiry was set to 1 hour instead of 24"
 slm remember "API rate limit is 100/min" --tags "api,config"
 slm remember "Important fact" --json    # Agent-native JSON output
+slm remember "Shared decision" --scope shared --shared-with team-a
+slm remember "Wait for enrichment" --sync --json
 ```
 
-Store a memory. The system automatically extracts entities, facts, emotional signals, temporal markers, and builds graph connections.
+Store a memory. The default daemon path commits raw evidence plus a queryable SQLite relational/FTS projection, then enriches the same durable operation in the background.
 
 Options:
 - `--tags "tag1,tag2"` — Add tags
 - `--json` — Output structured JSON (for agents, scripts, CI/CD)
+- `--sync` — Wait for all declared derivation and projector stages
+- `--scope personal|shared|global` — Set visibility
+- `--shared-with "profile-a,profile-b"` — Name readers for shared scope
+
+JSON output includes `operation_id`, `materialization_state`, and fact IDs. If
+the daemon cannot start, raw evidence enters the legacy offline spool; replay
+submits it through M018 before marking that spool row done.
 
 ### Recall
 
@@ -38,7 +47,7 @@ slm recall "JWT token configuration"
 slm recall "auth setup" --limit 5 --json
 ```
 
-Retrieve memories relevant to a query. Uses 4-channel retrieval (semantic, keyword, entity graph, temporal) with RRF fusion and cross-encoder reranking.
+Retrieve memories using the candidate producers healthy in the configured mode, followed by fusion, optional reranking, and graph-based score enhancement.
 
 Options:
 - `--limit N` — Number of results (default: 10)
@@ -227,7 +236,7 @@ SuperLocalMemory is the only AI memory system with both MCP and agent-native CLI
 
 | Need | Use | Example |
 |------|-----|---------|
-| IDE integration | MCP | Auto-configured for 17+ IDEs via `slm connect` |
+| IDE integration | MCP | Run `slm connect --list`, then configure a listed client |
 | Shell scripts | CLI + `--json` | `slm recall "auth" --json \| jq '.data.results'` |
 | CI/CD pipelines | CLI + `--json` | `slm remember "deployed v2.1" --json` |
 | Agent frameworks | CLI + `--json` | OpenClaw, Codex, Goose, nanobot |

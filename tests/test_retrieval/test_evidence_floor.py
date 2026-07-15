@@ -262,6 +262,46 @@ class TestEvidenceFloor:
         fact_ids = [r.fact.fact_id for r in response.results]
         assert "f1" in fact_ids, "Semantic >= 0.60 must pass floor"
 
+    def test_qualified_bm25_hit_backfills_after_associative_noise(self) -> None:
+        """Apply the evidence floor before the result limit.
+
+        Five candidates rank above the exact keyword hit through semantic scores
+        below the evidence threshold plus spreading activation.  They must not
+        consume the five output slots and cause a false abstention.
+        """
+        noise_facts = [
+            _make_fact(f"noise-{i}", f"Associative noise candidate number {i}")
+            for i in range(5)
+        ]
+        keyword_fact = _make_fact(
+            "keyword",
+            "The team decided to use microservices architecture.",
+        )
+        engine = _build_engine(
+            facts=[*noise_facts, keyword_fact],
+            semantic_results=[
+                *((fact.fact_id, 0.50 - i * 0.01)
+                  for i, fact in enumerate(noise_facts)),
+                (keyword_fact.fact_id, 0.20),
+            ],
+            bm25_results=[(keyword_fact.fact_id, 2.5)],
+        )
+        spreading = MagicMock()
+        spreading.search.return_value = [
+            (fact.fact_id, 0.90 - i * 0.01)
+            for i, fact in enumerate(noise_facts)
+        ]
+        engine._spreading_activation = spreading
+        engine._registry.register_channel(
+            "spreading_activation", spreading, needs_embedding=True,
+        )
+
+        response = engine.recall("microservices", "default", Mode.A, limit=5)
+
+        assert [result.fact.fact_id for result in response.results] == ["keyword"]
+        assert response.results[0].channel_scores["bm25"] == pytest.approx(2.5)
+        assert response.no_confident_match is False
+
 
 # ---------------------------------------------------------------------------
 # F-1-B: Kill switch SLM_RECALL_NO_FLOOR=1 disables floor

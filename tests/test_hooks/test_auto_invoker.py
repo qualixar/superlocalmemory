@@ -257,7 +257,9 @@ class TestFormatForInjection:
             "contextual_description": "",
         }]
         output = invoker.format_for_injection(results)
-        assert "# Relevant Memory Context" in output
+        assert "BEGIN UNTRUSTED SLM EVIDENCE v1" in output
+        assert "## Relevant Memories" in output
+        assert "fact_id=f1" in output
 
     def test_format_includes_fok_threshold(self):
         invoker = _make_invoker(fok_threshold=0.12)

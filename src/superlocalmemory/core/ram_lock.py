@@ -29,9 +29,19 @@ from typing import Iterator
 
 import psutil
 
-
-RAM_LOCK_PATH: Path = Path.home() / ".superlocalmemory" / "ram_lock.sem"
+# Public override retained for tests and embedders. ``None`` means resolve the
+# lock dynamically so a long-lived process can switch canonical namespaces
+# without retaining the first root it observed.
+RAM_LOCK_PATH: Path | None = None
 MIN_FREE_MB: int = 400
+
+
+def _ram_lock_path() -> Path:
+    if RAM_LOCK_PATH is not None:
+        return RAM_LOCK_PATH
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path("ram_lock.sem")
 
 
 @contextmanager
@@ -72,15 +82,16 @@ def ram_reservation(
             f"{floor_mb}MB"
         )
 
-    RAM_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _ram_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     # SEC-M6 — tighten the parent dir so the audit marker (``{pid}:{name}``)
     # is not readable by other UIDs on shared hosts. Idempotent; POSIX-only.
     try:
         if os.name == "posix":
-            os.chmod(RAM_LOCK_PATH.parent, 0o700)
+            os.chmod(lock_path.parent, 0o700)
     except OSError:  # pragma: no cover — perms race
         pass
-    fd = os.open(str(RAM_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         deadline = time.time() + timeout_s
         while True:

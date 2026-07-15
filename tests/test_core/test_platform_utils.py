@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -129,12 +130,20 @@ class TestStartParentWatchdog:
     """Parent watchdog thread."""
 
     def test_does_not_crash(self) -> None:
-        start_parent_watchdog()
+        stop = threading.Event()
+        thread = start_parent_watchdog(stop_event=stop)
+        assert thread is not None
+        stop.set()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
 
     def test_creates_daemon_thread(self) -> None:
         import threading
-        initial_count = threading.active_count()
-        start_parent_watchdog()
-        import time
-        time.sleep(0.1)
-        assert threading.active_count() >= initial_count
+        stop = threading.Event()
+        thread = start_parent_watchdog(stop_event=stop)
+        assert thread is not None
+        assert thread.daemon
+        assert thread.name == "parent-watchdog"
+        stop.set()
+        thread.join(timeout=1)
+        assert not thread.is_alive()

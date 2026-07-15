@@ -12,6 +12,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from superlocalmemory.infra.data_root import state_path
+
 from .helpers import DB_PATH
 
 logger = logging.getLogger("superlocalmemory.routes.agents")
@@ -33,6 +35,10 @@ except ImportError:
     pass
 
 
+def _registry_path():
+    return state_path("agents.json")
+
+
 @router.get("/api/agents")
 async def get_agents(
     request: Request,
@@ -43,9 +49,7 @@ async def get_agents(
     if not REGISTRY_AVAILABLE:
         return {"agents": [], "count": 0, "message": "Agent registry not available"}
     try:
-        from pathlib import Path
-        registry_path = Path.home() / ".superlocalmemory" / "agents.json"
-        registry = AgentRegistry(persist_path=registry_path)
+        registry = AgentRegistry(persist_path=_registry_path())
         agents = registry.list_agents()
         return {
             "agents": agents,
@@ -62,9 +66,7 @@ async def get_agent_stats(request: Request):
     if not REGISTRY_AVAILABLE:
         return {"total_agents": 0, "message": "Agent registry not available"}
     try:
-        from pathlib import Path
-        registry_path = Path.home() / ".superlocalmemory" / "agents.json"
-        registry = AgentRegistry(persist_path=registry_path)
+        registry = AgentRegistry(persist_path=_registry_path())
         agents = registry.list_agents()
         return {"total_agents": len(agents)}
     except Exception as e:

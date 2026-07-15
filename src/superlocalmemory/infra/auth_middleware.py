@@ -17,11 +17,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from superlocalmemory.infra.data_root import DynamicStatePath
+
 logger = logging.getLogger("superlocalmemory.auth")
 
 # V3 base directory
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-API_KEY_FILE = MEMORY_DIR / "api_key"
+MEMORY_DIR = DynamicStatePath()
+API_KEY_FILE = DynamicStatePath("api_key")
 
 
 def _load_api_key_hash(key_file: Optional[Path] = None) -> Optional[str]:
@@ -34,7 +36,7 @@ def _load_api_key_hash(key_file: Optional[Path] = None) -> Optional[str]:
         SHA-256 hex digest of the stored key, or ``None`` when auth is
         not configured.
     """
-    path = key_file or API_KEY_FILE
+    path = Path(key_file if key_file is not None else API_KEY_FILE)
     if not path.exists():
         return None
     try:

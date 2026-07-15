@@ -20,7 +20,7 @@ slm setup
 ```
 
 The wizard asks you to pick a mode:
-- **A (Local Guardian)** — Zero cloud. Your data never leaves your machine. Default.
+- **A (Local Guardian)** — Core memory operations use the local data root without a cloud model provider. Optional integrations have separate network behavior. Default.
 - **B (Smart Local)** — Local LLM via Ollama for answer synthesis.
 - **C (Full Power)** — Cloud LLM for maximum accuracy. Requires API key.
 
@@ -37,10 +37,12 @@ Downloads the nomic-embed-text-v1.5 model (~500MB). If you skip this, it downloa
 ### 4. Store your first memory
 
 ```bash
-slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days."
+slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days." --json
 ```
 
-Output: `Stored 1 facts.`
+Output includes `operation_id`, fact IDs, and `materialization_state:
+queryable`. This means the SQLite relational/FTS projection is recallable and
+enrichment is pending. Use `--sync` to wait for `complete`.
 
 ### 5. Recall it
 
@@ -164,7 +166,7 @@ slm recall "something you stored in V2"   # Verify old memories are accessible
 | Consistency | None | Sheaf cohomology (algebraic topology) |
 | Lifecycle | Hardcoded thresholds | Self-organizing Langevin dynamics |
 | Modes | Single mode | A (zero-cloud), B (local LLM), C (cloud LLM) |
-| EU AI Act | Not addressed | Mode A/B compliant by design |
+| Privacy and compliance controls | Not addressed | Deployment-specific controls and assessment |
 | Dashboard | 5 tabs | 17 tabs |
 | MCP Tools | 6 | 24 |
 | Tests | ~200 | 1400+ |

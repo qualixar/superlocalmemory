@@ -17,6 +17,10 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from superlocalmemory.optimize.storage.db import CacheDB
 
 logger = logging.getLogger("slm.optimize.compress.ccr")
 

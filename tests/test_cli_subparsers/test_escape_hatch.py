@@ -28,6 +28,10 @@ from superlocalmemory.cli import escape_hatch as eh
 def tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "slm_home"
     home.mkdir()
+    # SLM_DATA_DIR is the canonical, highest-precedence namespace.  Pin the
+    # fixture to that contract so a developer's ambient environment cannot
+    # redirect these destructive escape-hatch tests to another data root.
+    monkeypatch.setenv("SLM_DATA_DIR", str(home))
     monkeypatch.setenv("SLM_HOME", str(home))
     monkeypatch.delenv("SLM_DISABLE", raising=False)
     return home

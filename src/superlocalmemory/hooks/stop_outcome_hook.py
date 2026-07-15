@@ -49,15 +49,19 @@ def _inner_main() -> str:
         return "no_session"
 
     # Enumerate pending outcomes for this session.
+    conn = None
     try:
-        with open_memory_db() as conn:
-            rows = conn.execute(
-                "SELECT outcome_id FROM pending_outcomes "
-                "WHERE session_id = ? AND status = 'pending'",
-                (session_id,),
-            ).fetchall()
+        conn = open_memory_db()
+        rows = conn.execute(
+            "SELECT outcome_id FROM pending_outcomes "
+            "WHERE session_id = ? AND status = 'pending'",
+            (session_id,),
+        ).fetchall()
     except Exception:
         return "db_locked"
+    finally:
+        if conn is not None:
+            conn.close()
 
     if not rows:
         _cleanup_session_state(session_id)

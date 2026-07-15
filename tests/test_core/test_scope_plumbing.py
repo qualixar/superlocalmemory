@@ -23,6 +23,7 @@ import threading
 import pytest
 
 from superlocalmemory.cli import pending_store
+from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
 
 def _scope_of(engine, fact_id: str) -> str:
@@ -123,6 +124,52 @@ class TestRecallSharedOffByDefault:
         forced = {r.fact.fact_id for r in eng.recall(
             "octopus", include_global=True, include_shared=True).results}
         assert default == forced
+
+    def test_full_recall_returns_global_only_after_explicit_opt_in(
+        self, engine_with_mock_deps,
+    ):
+        eng = engine_with_mock_deps
+        eng._db.execute(
+            "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
+            "VALUES ('publisher', 'publisher', '')"
+        )
+        for fact_id, scope, shared_with in (
+            ("global-quasar", "global", None),
+            ("private-quasar", "personal", None),
+            ("project-quasar", "project", None),
+            ("shared-quasar", "shared", ["default"]),
+            ("denied-quasar", "shared", ["someone-else"]),
+        ):
+            memory = MemoryRecord(
+                memory_id=f"m-{fact_id}", profile_id="publisher",
+                scope=scope, shared_with=shared_with,
+                content=f"quasar-release-token {fact_id}",
+            )
+            eng._db.store_memory(memory)
+            eng._db.store_fact(AtomicFact(
+                fact_id=fact_id, memory_id=memory.memory_id,
+                profile_id="publisher", scope=scope, shared_with=shared_with,
+                content=f"quasar-release-token {fact_id}",
+                embedding=eng._embedder.embed(f"quasar-release-token {fact_id}"),
+            ))
+
+        default_ids = {
+            result.fact.fact_id
+            for result in eng.recall("quasar-release-token").results
+        }
+        opted_in_ids = {
+            result.fact.fact_id
+            for result in eng.recall(
+                "quasar-release-token", include_global=True, include_shared=True,
+            ).results
+        }
+
+        assert "global-quasar" not in default_ids
+        assert "global-quasar" in opted_in_ids
+        assert "shared-quasar" in opted_in_ids
+        assert "private-quasar" not in opted_in_ids
+        assert "project-quasar" not in opted_in_ids
+        assert "denied-quasar" not in opted_in_ids
 
 
 # ---------------------------------------------------------------------------

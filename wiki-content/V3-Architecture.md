@@ -1,6 +1,7 @@
 # V3 Architecture
 
-SuperLocalMemory V3 is a complete architectural reinvention — a mathematical retrieval engine built on information geometry, algebraic topology, and stochastic dynamics.
+SuperLocalMemory V3 combines local-first storage, multi-channel retrieval,
+optional mathematical scoring layers, lifecycle controls, and MCP clients.
 
 ---
 
@@ -13,34 +14,37 @@ SuperLocalMemory V3 is a complete architectural reinvention — a mathematical r
 │  ┌──────────────────┐  ┌────────────────────────────┐ │
 │  │  Product Shell     │  │  Mathematical Engine       │ │
 │  │                    │  │                            │ │
-│  │  CLI (15 commands) │  │  4-Channel Retrieval       │ │
-│  │  MCP Server (24)   │  │  Fisher-Rao Similarity     │ │
+│  │  CLI                │  │  Multi-channel Retrieval  │ │
+│  │  MCP Server         │  │  Fisher-informed Scoring  │ │
 │  │  Web Dashboard     │  │  Sheaf Consistency         │ │
-│  │  17+ IDE Configs   │  │  Langevin Lifecycle        │ │
+│  │  Named MCP Clients │  │  Langevin Lifecycle        │ │
 │  │  Learning (LightGBM│  │  11-Step Ingestion         │ │
 │  │  Trust (Bayesian)  │  │  Scene + Bridge Discovery  │ │
 │  │  Compliance (ABAC) │  │  Cross-Encoder Rerank      │ │
-│  │  Profiles (16+)    │  │  3 Operating Modes         │ │
+│  │  Profiles           │  │  3 Operating Modes         │ │
 │  └──────────────────┘  └────────────────────────────┘ │
 └──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4-Channel Hybrid Retrieval
+## Hybrid Retrieval
 
-V3 retrieves memories through four parallel channels, each capturing different aspects of relevance:
+Current recall uses five candidate producers where their dependencies are
+available, then applies fusion, optional reranking, and graph-based score
+enhancement:
 
 ```
 Query
   │
   ├─ Strategy Classification (single-hop / multi-hop / temporal / open-domain)
   │
-  ├─ 4 Parallel Channels:
-  │  ├─ Semantic Channel (Fisher-Rao weighted embedding similarity)
-  │  ├─ BM25 Channel (keyword matching, k1=1.2, b=0.75)
-  │  ├─ Entity Graph Channel (spreading activation, 3 hops, decay 0.7)
-  │  └─ Temporal Channel (3-date model: observation, referenced, interval)
+  ├─ Candidate Producers:
+  │  ├─ Dense semantic
+  │  ├─ BM25 lexical
+  │  ├─ Profile/entity context
+  │  ├─ Temporal
+  │  └─ Associative
   │
   ├─ Profile Lookup (direct SQL shortcut for entity queries)
   │
@@ -50,59 +54,64 @@ Query
   │
   ├─ Bridge Discovery (multi-hop only: Steiner tree + spreading activation)
   │
-  ├─ Cross-Encoder Rerank (energy-weighted: α·sigmoid(CE) + (1-α)·RRF)
+  ├─ Optional cross-encoder rerank when available
+  ├─ Graph-derived score enhancement (cannot introduce a candidate)
   │
   └─ Top-K Results with per-channel scores
 ```
 
-### Why Four Channels?
+### Why multiple producers?
 
 | Channel | What It Catches | What It Misses |
 |---------|----------------|----------------|
 | Semantic | Meaning similarity | Exact keywords, entity names |
 | BM25 | Exact terms, rare words | Paraphrases, synonyms |
-| Entity Graph | Relational connections | Unconnected memories |
+| Profile/entity context | Known entity and profile context | Unrelated facts |
 | Temporal | Time-relevant facts | Atemporal knowledge |
+| Associative | Linked decisions and related context | Isolated facts |
 
 No single channel handles all query types. The fusion combines their strengths.
+
+## Safe context injection
+
+Recalled memory is untrusted evidence, not a new instruction source. Hooks, MCP
+`session_init`, CLI session context, and chat use one renderer for provenance,
+budgets, recognized-secret redaction, canonical delimiters, and forged-marker
+neutralization. IDE rule files contain only static product protocol; dynamic
+memory is retrieved through MCP at runtime.
 
 ---
 
 ## Three Operating Modes
 
-| Mode | Description | LLM | EU AI Act |
-|:----:|:-----------|:---:|:---------:|
-| **A: Local Guardian** | Pure mathematical retrieval. Zero cloud calls. | None | Compliant |
-| **B: Smart Local** | Mode A + local LLM (Ollama) for extraction. | Local | Compliant |
-| **C: Full Power** | Mode B + cloud LLM + agentic retrieval. | Cloud | Partial |
+| Mode | Description | LLM | Compliance status |
+|:----:|:-----------|:---:|:------------------|
+| **A: Local Guardian** | Core memory operations use the local data root. Optional integrations have separate network behavior. | None | Deployment assessment required |
+| **B: Smart Local** | Mode A + operator-configured Ollama extraction. | Local | Deployment assessment required |
+| **C: Full Power** | Mode B + cloud-provider calls and agentic retrieval. | Cloud | Deployment and provider assessment required |
 
-**Mode A** is architecturally unique: no other memory system achieves meaningful accuracy without LLM calls. The 4-channel retrieval + cross-encoder reranking provides high-quality results without generative AI.
+Mode A runs the core memory path without a cloud model provider. Retrieval quality depends on the configured embedding model, corpus, and enabled indexes; this page makes no market-uniqueness claim.
 
 ---
 
-## 11-Step Ingestion Pipeline
+## Durable Ingestion Pipeline
 
-Every memory is processed through structured encoding before storage:
+Every accepted write owns an M018 operation and immutable replay identity.
 
-| Step | What Happens |
+| State | Contract |
 |:----:|:------------|
-| 1 | **Entropy gating** — information-theoretic filtering (low-entropy = skip) |
-| 2 | **Fact extraction** — atomic, typed facts (episodic/semantic/opinion/temporal) |
-| 3 | **Entity resolution** — canonical names with alias tracking |
-| 4 | **Temporal parsing** — 3-date model (observation, referenced, interval) |
-| 5 | **Type routing** — classify fact types for specialized handling |
-| 6 | **Emotional signal extraction** — valence and arousal tagging |
-| 7 | **Knowledge graph construction** — entities as nodes, relationships as edges |
-| 8 | **Consolidation** — merge/update/supersede existing facts |
-| 9 | **Scene clustering** — group facts by temporal-semantic coherence |
-| 10 | **Observation building** — structured entity profiles |
-| 11 | **Foresight generation** — anticipatory indexing for future queries |
+| `raw` | Raw content, metadata, scope, session context, and trusted actor are durable. |
+| `queryable` | Relational facts and SQLite FTS are committed before the receipt returns. |
+| `enriching` | A lease-owning worker runs the configured extraction, entity, consolidation, graph, temporal, provenance, and embedding stages. |
+| checkpoint | Final fact IDs and completed derivation stages commit before optional projectors. |
+| `complete` | Every declared derivation and configured projector succeeded. |
+| `failed` | Raw evidence, error, attempt count, and retry timing remain inspectable. |
 
 ---
 
 ## Database Schema
 
-V3 uses a **17-table** SQLite schema with FTS5 full-text search:
+V3 uses an additive SQLite schema with FTS5 full-text search. The exact table count changes with forward migrations and is not a compatibility contract.
 
 **Core:** `profiles`, `memories`, `atomic_facts`, `atomic_facts_fts` (FTS5)
 **Entities:** `canonical_entities`, `entity_aliases`, `entity_profiles`
@@ -110,9 +119,9 @@ V3 uses a **17-table** SQLite schema with FTS5 full-text search:
 **Quality:** `consolidation_log`, `trust_scores`, `provenance`
 **Learning:** `feedback_records`, `behavioral_patterns`, `action_outcomes`
 **Compliance:** `compliance_audit`
-**Infrastructure:** `bm25_tokens`, `config`, `schema_version`
+**Infrastructure:** `ingestion_operations`, `config`, `schema_version`, migration records
 
-All tables are partitioned by `profile_id` for multi-context isolation (16+ profiles).
+Core data tables are profile-scoped. M017 adds scope to CCQ blocks; M018 owns canonical ingestion operations. The legacy `pending.db` spool is an offline compatibility input whose replay submits through M018.
 
 ---
 
@@ -121,10 +130,10 @@ All tables are partitioned by `profile_id` for multi-context isolation (16+ prof
 ```
 superlocalmemory/src/superlocalmemory/
 ├── core/           Engine, config, modes, profiles, embeddings
-├── retrieval/      4-channel engine, semantic, BM25, entity, temporal, fusion, reranker
+├── retrieval/      Candidate producers, fusion, reranking, graph score enhancement
 ├── math/           Fisher-Rao metric, sheaf cohomology
 ├── dynamics/       Langevin lifecycle, Fisher-Langevin coupling
-├── encoding/       11-step pipeline (entity resolver, fact extractor, scene builder...)
+├── encoding/       Materialization stages (entity resolver, fact extractor, graph...)
 ├── storage/        Database, schema, migrations, V2 migrator
 ├── compliance/     EU AI Act, GDPR, ABAC
 ├── learning/       Adaptive learning, behavioral tracking, outcomes
@@ -162,11 +171,11 @@ slm dashboard    # Opens at http://localhost:8765
 
 Evaluated on the [LoCoMo benchmark](https://arxiv.org/abs/2402.09714) — 10 multi-session conversations, 1,986 total questions.
 
-| Configuration | Aggregate | Multi-Hop | Open Domain |
-|:-------|:--:|:--:|:--:|
-| **Mode A Retrieval (10 convs, 1,276 questions)** | **74.8%** | **70.3%** | **85.0%** |
-| **Mode A Raw (zero-LLM)** | **60.4%** | **43.0%** | **72.0%** |
-| **Mode C (conv-30, 81 questions)** | **87.7%** | **100.0%** | **86.0%** |
+These are historical paper experiments, not current V3.7 measurements:
+
+- Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction.
+- Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components.
+- The raw zero-LLM and category results remain documented in the versioned paper and must not be compared with other vendors without matching protocols.
 
 ### Ablation (conv-30, 81 questions)
 

@@ -29,6 +29,14 @@ from superlocalmemory.retrieval.temporal_channel import (
     _parse_iso,
     _proximity_score,
 )
+from superlocalmemory.storage import schema as real_schema
+from superlocalmemory.storage.database import DatabaseManager
+from superlocalmemory.storage.models import (
+    AtomicFact,
+    CanonicalEntity,
+    MemoryRecord,
+    TemporalEvent,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -266,3 +274,79 @@ class TestTemporalChannelSearch:
             results = ch.search("what happened on March 11?", "default")
 
         assert results == []
+
+
+class TestTemporalScopeContract:
+    @pytest.fixture()
+    def db(self, tmp_path: Path) -> DatabaseManager:
+        manager = DatabaseManager(tmp_path / "temporal-scope.db")
+        manager.initialize(real_schema)
+        for profile_id in ("requester", "publisher"):
+            manager.execute(
+                "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
+                "VALUES (?, ?, '')",
+                (profile_id, profile_id),
+            )
+        return manager
+
+    @staticmethod
+    def _seed_event(
+        db: DatabaseManager,
+        fact_id: str,
+        *,
+        scope: str,
+        shared_with: list[str] | None = None,
+    ) -> None:
+        memory = MemoryRecord(
+            memory_id=f"m-{fact_id}", profile_id="publisher",
+            scope=scope, shared_with=shared_with, content=fact_id,
+        )
+        db.store_memory(memory)
+        db.store_fact(AtomicFact(
+            fact_id=fact_id, memory_id=memory.memory_id,
+            profile_id="publisher", scope=scope, shared_with=shared_with,
+            content=f"Nova happened on 2026-03-11 ({fact_id})",
+        ))
+        entity = CanonicalEntity(
+            entity_id="e-nova", profile_id="publisher",
+            canonical_name="Nova", entity_type="person",
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO canonical_entities "
+            "(entity_id, profile_id, canonical_name, entity_type, first_seen, "
+            "last_seen, fact_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                entity.entity_id, entity.profile_id, entity.canonical_name,
+                entity.entity_type, entity.first_seen, entity.last_seen,
+                entity.fact_count,
+            ),
+        )
+        db.store_temporal_event(TemporalEvent(
+            event_id=f"t-{fact_id}", profile_id="publisher",
+            entity_id=entity.entity_id, fact_id=fact_id,
+            referenced_date="2026-03-11", description=fact_id,
+            scope=scope, shared_with=shared_with,
+        ))
+
+    def test_date_and_entity_search_include_only_visible_cross_profile_events(
+        self, db: DatabaseManager,
+    ) -> None:
+        self._seed_event(db, "global", scope="global")
+        self._seed_event(db, "private", scope="personal")
+        self._seed_event(db, "project", scope="project")
+        self._seed_event(
+            db, "shared_ok", scope="shared", shared_with=["requester"],
+        )
+        self._seed_event(
+            db, "shared_denied", scope="shared", shared_with=["someone-else"],
+        )
+        channel = TemporalChannel(db)
+        channel.include_global = True
+        channel.include_shared = True
+
+        visible = {
+            fid for fid, _ in channel.search(
+                "When did Nova act on 2026-03-11?", "requester",
+            )
+        }
+        assert visible == {"global", "shared_ok"}

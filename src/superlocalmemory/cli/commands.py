@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 from argparse import Namespace
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -319,29 +320,29 @@ def cmd_serve(args: Namespace) -> None:
         print("  slm serve status  — check daemon status")
         print("  slm serve stop    — stop daemon and free RAM")
     else:
-        print("Failed to start daemon. Check ~/.superlocalmemory/logs/daemon.log")
+        from superlocalmemory.infra.data_root import state_path
+        print(f"Failed to start daemon. Check {state_path('logs', 'daemon.log')}")
 
 
 # -- Ingestion Adapters (V3.4.3) ------------------------------------------
 
 
 def cmd_restart(args: Namespace) -> None:
-    """Nuclear restart: kill ALL orphans, clean state, start fresh, verify health.
+    """Restart the one daemon owned by the current SLM data namespace.
 
     5-step pipeline:
-      1. Kill ALL SLM processes (daemon + workers + orphans)
-      2. Clean stale PID/port/lock files
+      1. Capability-stop the owned daemon and its children
+      2. Acquire the namespace start lock
       3. Start fresh daemon
       4. Wait for engine warmup + verify health
       5. Optionally open dashboard
     """
-    import os
     import time
-    from pathlib import Path
+    from superlocalmemory.infra.daemon_identity import canonical_data_root
 
     use_json = getattr(args, "json", False)
     open_dashboard = getattr(args, "dashboard", False)
-    slm_dir = Path.home() / ".superlocalmemory"
+    slm_dir = canonical_data_root()
     steps: list[dict] = []
 
     def _log(step: int, name: str, status: str, detail: str = ""):
@@ -357,65 +358,45 @@ def cmd_restart(args: Namespace) -> None:
         print("  " + "=" * 40)
         print()
 
-    # Step 1: Kill ALL SLM processes
-    killed = 0
-    try:
-        import psutil
-        my_pid = os.getpid()
-        targets = [
-            "superlocalmemory.server.unified_daemon",
-            "superlocalmemory.core.embedding_worker",
-            "superlocalmemory.core.recall_worker",
-            "superlocalmemory.core.reranker_worker",
-            "superlocalmemory.cli.daemon",
-        ]
-        for proc in psutil.process_iter(["pid", "cmdline"]):
-            try:
-                if proc.pid == my_pid:
-                    continue
-                cmdline = " ".join(proc.info.get("cmdline") or [])
-                if any(t in cmdline for t in targets):
-                    for child in proc.children(recursive=True):
-                        try:
-                            child.kill()
-                            killed += 1
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-                    proc.kill()
-                    killed += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-    except ImportError:
-        # Fallback: pkill
-        import subprocess as _sp
-        for pattern in [
-            "superlocalmemory.server.unified_daemon",
-            "superlocalmemory.core.embedding_worker",
-            "superlocalmemory.core.recall_worker",
-            "superlocalmemory.core.reranker_worker",
-        ]:
-            try:
-                r = _sp.run(["pkill", "-9", "-f", pattern], capture_output=True, timeout=5)
-                if r.returncode == 0:
-                    killed += 1
-            except Exception:
-                pass
+    # Step 1: stop only the descriptor-owned daemon. Its graceful shutdown
+    # owns worker termination; process-name-wide scans are forbidden.
+    from superlocalmemory.cli.daemon import is_daemon_running, stop_daemon
 
-    _log(1, "Kill all SLM processes", "ok", f"{killed} processes killed")
-    time.sleep(3)
+    was_running = is_daemon_running()
+    stopped = stop_daemon() if was_running else True
+    if stopped and was_running:
+        for _ in range(40):
+            time.sleep(0.25)
+            if not is_daemon_running():
+                break
+        else:
+            stopped = False
+    killed = 1 if was_running and stopped else 0
+    _log(
+        1,
+        "Stop owned SLM daemon",
+        "ok" if stopped else "fail",
+        "owned daemon stopped" if killed else (
+            "already stopped" if stopped else "owned daemon did not stop"
+        ),
+    )
+    if not stopped:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "restart",
+                data={"steps": steps, "success": False},
+                next_actions=[{
+                    "command": "slm doctor",
+                    "description": "Diagnose the owned daemon",
+                }],
+            )
+        else:
+            print("\n  Restart FAILED at step 1. The owned daemon was not stopped.")
+        return
 
-    # Step 2: Clean stale files + HOLD the lock to prevent races
-    # v3.4.13: Do NOT delete daemon.lock — HOLD it instead.
-    # If we delete it, `slm mcp` (still running in Claude) will see no lock,
-    # acquire a NEW lock, and start a second daemon during our restart.
-    cleaned = []
-    for fname in ("daemon.pid", "daemon.port", ".embedding-worker.pid", ".reranker-worker.pid"):
-        fpath = slm_dir / fname
-        if fpath.exists():
-            fpath.unlink(missing_ok=True)
-            cleaned.append(fname)
-
-    # Hold the lock file to block other processes from starting a daemon
+    # Step 2: hold the namespace lock. Lifecycle files are removed only by the
+    # matching daemon instance during shutdown, never by an unrelated client.
     _LOCK_FILE = slm_dir / "daemon.lock"
     _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     restart_lock_fd = None
@@ -427,8 +408,7 @@ def cmd_restart(args: Namespace) -> None:
     except Exception:
         pass  # Best-effort — don't block restart if lock fails
 
-    _log(2, "Clean stale state files", "ok",
-         f"removed: {', '.join(cleaned)}" if cleaned else "already clean")
+    _log(2, "Acquire namespace start lock", "ok", str(_LOCK_FILE))
 
     # Step 3: Start fresh daemon (lock still held — no races)
     # v3.4.42: Call _start_daemon_subprocess() directly instead of
@@ -561,14 +541,15 @@ def cmd_config(args: Namespace) -> None:
       slm config get evolution.backend
     """
     import json
-    from pathlib import Path
+
+    from superlocalmemory.infra.data_root import state_path
 
     use_json = getattr(args, "json", False)
     action = getattr(args, "action", "get")
     key = getattr(args, "key", "")
     value = getattr(args, "value", None)
 
-    config_path = Path.home() / ".superlocalmemory" / "config.json"
+    config_path = state_path("config.json")
 
     # Read existing config
     cfg: dict = {}
@@ -682,7 +663,8 @@ def cmd_evolve(args: Namespace) -> None:
     If disabled, exits silently (zero output for fire-and-forget).
     """
     import json
-    from pathlib import Path
+
+    from superlocalmemory.infra.data_root import state_path
 
     session_id = getattr(args, "session", "") or ""
     profile = getattr(args, "profile", "default") or "default"
@@ -691,7 +673,7 @@ def cmd_evolve(args: Namespace) -> None:
         return  # Silent exit — nothing to do without a session
 
     # Check if evolution is enabled via config.json
-    config_path = Path.home() / ".superlocalmemory" / "config.json"
+    config_path = state_path("config.json")
     try:
         cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
     except (json.JSONDecodeError, OSError):
@@ -705,7 +687,7 @@ def cmd_evolve(args: Namespace) -> None:
     try:
         from superlocalmemory.evolution.skill_evolver import SkillEvolver
 
-        db_path = Path.home() / ".superlocalmemory" / "memory.db"
+        db_path = state_path("memory.db")
         if not db_path.exists():
             return
 
@@ -1069,7 +1051,12 @@ def cmd_remember(args: Namespace) -> None:
                         from superlocalmemory.cli.json_output import json_print
                         json_print("remember", data=result)
                     else:
-                        print(f"Stored \u2713 {result['count']} facts (via daemon).")
+                        state = result.get("materialization_state", "queryable")
+                        operation_id = result.get("operation_id", "unknown")
+                        print(
+                            f"{state.capitalize()} \u2713 {result['count']} facts "
+                            f"(operation={operation_id})."
+                        )
                     return
         except Exception:
             pass  # Fall through to pending store
@@ -1082,9 +1069,19 @@ def cmd_remember(args: Namespace) -> None:
         # pending row's metadata so the materializer replays the right
         # visibility. Unset / personal carries nothing — byte-identical to
         # pre-3.6.15 pending rows.
-        _pending_meta = None
+        import hashlib as _hashlib
+        _identity_material = (
+            f"{args.content}\0{args.tags or ''}\0{scope or ''}\0"
+            f"{','.join(shared_with or [])}"
+        )
+        _pending_meta = {
+            "_slm_source_type": "cli-offline",
+            "_slm_idempotency_key": "cli:" + _hashlib.sha256(
+                _identity_material.encode("utf-8")
+            ).hexdigest(),
+        }
         if scope and scope != "personal":
-            _pending_meta = {"scope": scope}
+            _pending_meta["scope"] = scope
             if shared_with:
                 _pending_meta["shared_with"] = shared_with
 
@@ -1111,10 +1108,21 @@ def cmd_remember(args: Namespace) -> None:
 
         # v3.6.15: resolve an unset scope to the configured default_scope.
         _scope = scope or getattr(getattr(config, "scope", None), "default_scope", "personal")
+        from superlocalmemory.core.engine_ingestion import (
+            canonical_store,
+            local_trusted_actor_id,
+        )
+
         metadata = {"tags": args.tags} if args.tags else {}
-        fact_ids = engine.store(
-            args.content, metadata=metadata,
-            scope=_scope, shared_with=shared_with,
+        operation = canonical_store(
+            engine,
+            args.content,
+            source_type="cli-sync",
+            trusted_actor_id=local_trusted_actor_id("cli"),
+            metadata=metadata,
+            scope=_scope,
+            shared_with=shared_with,
+            return_receipt=True,
         )
     except Exception as exc:
         if use_json:
@@ -1123,16 +1131,30 @@ def cmd_remember(args: Namespace) -> None:
             sys.exit(1)
         raise
 
+    fact_ids = list(operation.fact_ids) if hasattr(operation, "fact_ids") else list(operation)
+    operation_data = {
+        "fact_ids": fact_ids,
+        "count": len(fact_ids),
+        "materialization_state": getattr(
+            getattr(operation, "state", None), "value", "complete"
+        ),
+    }
+    if getattr(operation, "operation_id", None):
+        operation_data["operation_id"] = operation.operation_id
+
     if use_json:
         from superlocalmemory.cli.json_output import json_print
-        json_print("remember", data={"fact_ids": fact_ids, "count": len(fact_ids)},
+        json_print("remember", data=operation_data,
                    next_actions=[
                        {"command": "slm recall '<query>' --json", "description": "Search your memories"},
                        {"command": "slm list --json -n 5", "description": "See recent memories"},
                    ])
         return
 
-    print(f"Stored {len(fact_ids)} facts.")
+    print(
+        f"Complete \u2713 {len(fact_ids)} facts "
+        f"(operation={operation_data.get('operation_id', 'none')})."
+    )
 
 
 def cmd_recall(args: Namespace) -> None:
@@ -1264,9 +1286,15 @@ def cmd_recall(args: Namespace) -> None:
 def _cli_record_signals(config, query, results):
     """Record learning signals from CLI recall (no MCP dependency)."""
     from pathlib import Path
+
     from superlocalmemory.learning.feedback import FeedbackCollector
     from superlocalmemory.learning.signals import LearningSignals
-    slm_dir = Path.home() / ".superlocalmemory"
+    configured_root = getattr(config, "base_dir", None)
+    if configured_root is not None:
+        slm_dir = Path(configured_root)
+    else:
+        from superlocalmemory.infra.data_root import canonical_data_root
+        slm_dir = canonical_data_root()
     pid = config.active_profile
     fact_ids = [r.fact.fact_id for r in results[:10]]
     if not fact_ids:
@@ -1642,7 +1670,7 @@ def _gather_optimize_surface_b() -> dict:
         compress_runs, tokens_saved, cache_hits, cache_misses,
         db_present, error
     """
-    from pathlib import Path
+    from superlocalmemory.infra.data_root import state_path
     from superlocalmemory.optimize.storage.db import CacheDB
 
     result: dict = {
@@ -1672,7 +1700,7 @@ def _gather_optimize_surface_b() -> dict:
 
     # Step 2: read persisted metrics from llmcache.db (daemon-flushed, ≤60s stale).
     try:
-        db_path = Path.home() / ".superlocalmemory" / "llmcache.db"
+        db_path = state_path("llmcache.db")
         result["db_present"] = db_path.exists()
         if result["db_present"]:
             snap = CacheDB.get_default().metrics_load()
@@ -1778,7 +1806,7 @@ def cmd_doctor(args: Namespace) -> None:
             ver = getattr(m, "__version__", "?")
             core_ok.append(mod)
             core_versions.append(f"{mod} {ver}")
-        except ImportError:
+        except Exception:  # dependency import may fail after module discovery
             pass
     if len(core_ok) == len(core_modules):
         _check("Core deps", "PASS", ", ".join(core_versions[:4]) + "...")
@@ -1795,7 +1823,7 @@ def cmd_doctor(args: Namespace) -> None:
         try:
             __import__(mod)
             search_ok.append(mod)
-        except ImportError:
+        except Exception:  # dependency import may fail after module discovery
             pass
     if len(search_ok) == len(search_mods):
         _check("Search deps", "PASS", "sentence-transformers, torch, sklearn, geoopt")
@@ -1809,7 +1837,7 @@ def cmd_doctor(args: Namespace) -> None:
     for mod in ["fastapi", "uvicorn", "websockets"]:
         try:
             __import__(mod)
-        except ImportError:
+        except Exception:  # dependency import may fail after module discovery
             dash_ok = False
             break
     if dash_ok:
@@ -1822,7 +1850,7 @@ def cmd_doctor(args: Namespace) -> None:
     try:
         import lightgbm
         _check("Learning deps", "PASS", f"lightgbm {lightgbm.__version__}")
-    except ImportError:
+    except Exception:  # dependency import may fail after module discovery
         _check("Learning deps", "WARN", "lightgbm not installed",
                "pip install lightgbm")
     except OSError as exc:
@@ -1839,7 +1867,7 @@ def cmd_doctor(args: Namespace) -> None:
         try:
             __import__(mod)
             perf_ok.append(mod)
-        except ImportError:
+        except Exception:  # dependency import may fail after module discovery
             pass
     if perf_ok:
         _check("Performance deps", "PASS", "orjson")
@@ -1963,7 +1991,8 @@ def cmd_doctor(args: Namespace) -> None:
             pass  # Config load failed — already caught above
 
     # 9. Disk space
-    slm_home = Path.home() / ".superlocalmemory"
+    from superlocalmemory.infra.data_root import canonical_data_root
+    slm_home = canonical_data_root()
     try:
         usage = shutil.disk_usage(slm_home if slm_home.exists() else Path.home())
         free_gb = usage.free / (1024 ** 3)
@@ -2008,8 +2037,8 @@ def cmd_doctor(args: Namespace) -> None:
                     "WARN",
                     "System Python is externally managed (EXTERNALLY-MANAGED marker found). "
                     "pip install may fail with PEP 668 error.",
-                    "Use pipx for an isolated install: pipx install superlocalmemory  "
-                    "(last-resort only: pip install --break-system-packages superlocalmemory)",
+                    "Use an isolated install: pipx install superlocalmemory  "
+                    "or uv tool install superlocalmemory",
                 )
             else:
                 _check(
@@ -2031,7 +2060,7 @@ def cmd_doctor(args: Namespace) -> None:
             "disabled (optimize.json enabled=false) — caching/compression not active"
             + (f" [{_error}]" if _error else ""),
             fix="Enable via dashboard Optimize tab or set enabled=true"
-            " in ~/.superlocalmemory/optimize.json",
+            f" in {slm_home / 'optimize.json'}",
         )
     else:
         _surfaces = []
@@ -2414,7 +2443,6 @@ def _cmd_init_auto(
     from pathlib import Path
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.storage.models import Mode
-    from superlocalmemory.cli.setup_wizard import _mark_complete
 
     # Step 1: write mode-A config (create-if-absent or --force).
     # Pass slm_data_dir explicitly so env-overridden paths are respected even
@@ -2428,8 +2456,7 @@ def _cmd_init_auto(
             sys.exit(1)
 
     # Step 2: mark complete (write .setup-complete sentinel).
-    # Write the sentinel directly using slm_data_dir to avoid the module-level
-    # _SLM_HOME resolved at import time (tests set the env var after import).
+    # Write the sentinel directly using the already-selected namespace.
     try:
         import platform
         import time as _time
@@ -2461,7 +2488,6 @@ def _cmd_init_auto(
 
 def cmd_init(args: Namespace) -> None:
     """One-command setup: mode + hooks + IDE connect + warmup."""
-    from pathlib import Path
     from superlocalmemory.cli._lazy_init import slm_home
     from superlocalmemory.core.config import SLMConfig
 
@@ -2828,7 +2854,15 @@ def cmd_observe(args: Namespace) -> None:
             engine = MemoryEngine(config)
             engine.initialize()
 
-            auto = AutoCapture(engine=engine)
+            from superlocalmemory.core.engine_ingestion import (
+                canonical_store_fn,
+                local_trusted_actor_id,
+            )
+            auto = AutoCapture(store_fn=canonical_store_fn(
+                engine,
+                source_type="cli-observe",
+                trusted_actor_id=local_trusted_actor_id("cli"),
+            ))
             decision = auto.evaluate(content)
 
             if decision.capture:

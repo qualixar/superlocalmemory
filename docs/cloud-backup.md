@@ -26,7 +26,7 @@ That's it. SLM will:
 ### How It Works
 
 - Each backup creates a **GitHub Release** with your database files as assets
-- ALL databases are included: memory.db, learning.db, audit_chain.db, code_graph.db, pending.db
+- The configured database set is included. Canonical M018 ingestion operations and raw evidence live in `memory.db`; `pending.db` is a legacy offline compatibility spool where present.
 - Only the last **5 releases** are kept — older ones are automatically deleted to prevent storage bloat
 - Backups run in the background — the dashboard never freezes
 
@@ -138,11 +138,11 @@ Click the **download icon** in the sidebar to export a compressed `.gz` backup f
 
 | Database | Contents | Typical Size |
 |---|---|---|
-| `memory.db` | Facts, entities, graph edges, embeddings, sessions | 50 MB — 2 GB |
+| `memory.db` | Facts, M018 operations/raw evidence, entities, graph edges, embeddings, sessions | Deployment-specific |
 | `learning.db` | Learning signals, behavioral patterns, ranker data | 0.5 — 5 MB |
 | `audit_chain.db` | Audit trail, compliance provenance | 0.5 — 2 MB |
 | `code_graph.db` | Code knowledge graph (if used) | 0.1 — 10 MB |
-| `pending.db` | Pending operations queue | 0.1 — 1 MB |
+| `pending.db` | Legacy offline spool awaiting canonical M018 replay (when present) | Deployment-specific |
 
 All databases are backed up using SQLite's `sqlite3.backup()` API, which creates a consistent, atomic snapshot even while the daemon is running.
 

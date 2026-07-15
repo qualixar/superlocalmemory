@@ -49,9 +49,11 @@ def _make_embedding(seed: int, dim: int = DIM) -> list[float]:
 
 def _seed_fact(
     db: DatabaseManager, profile_id: str, content: str, seed: int,
+    *, scope: str = "personal", shared_with: list[str] | None = None,
 ) -> AtomicFact:
     record = MemoryRecord(
         profile_id=profile_id, content=content, session_id="s1",
+        scope=scope, shared_with=shared_with,
     )
     db.store_memory(record)
     fact = AtomicFact(
@@ -59,6 +61,8 @@ def _seed_fact(
         memory_id=record.memory_id,
         content=content,
         embedding=_make_embedding(seed),
+        scope=scope,
+        shared_with=shared_with,
     )
     db.store_fact(fact)
     return fact
@@ -108,6 +112,47 @@ class TestVectorStoreFastPath:
         mock_vs.search.assert_called_once()
         assert len(results) >= 1
 
+    def test_fast_path_merges_global_and_authorized_shared_candidates(
+        self, db: DatabaseManager,
+    ) -> None:
+        for profile_id in ("requester", "publisher"):
+            db.execute(
+                "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
+                "VALUES (?, ?, '')",
+                (profile_id, profile_id),
+            )
+        local = _seed_fact(db, "requester", "local", seed=2)
+        global_fact = _seed_fact(
+            db, "publisher", "global", seed=1, scope="global",
+        )
+        shared_fact = _seed_fact(
+            db, "publisher", "shared", seed=1, scope="shared",
+            shared_with=["requester"],
+        )
+        private_fact = _seed_fact(db, "publisher", "private", seed=1)
+        project_fact = _seed_fact(
+            db, "publisher", "project", seed=1, scope="project",
+        )
+        denied_fact = _seed_fact(
+            db, "publisher", "denied", seed=1, scope="shared",
+            shared_with=["someone-else"],
+        )
+
+        mock_vs = MagicMock()
+        mock_vs.available = True
+        mock_vs.search.return_value = [(local.fact_id, 0.5)]
+        channel = SemanticChannel(db, vector_store=mock_vs)
+        channel.include_global = True
+        channel.include_shared = True
+
+        result_ids = {
+            fid for fid, _ in channel.search(_make_embedding(1), "requester", top_k=10)
+        }
+        assert {local.fact_id, global_fact.fact_id, shared_fact.fact_id} <= result_ids
+        assert private_fact.fact_id not in result_ids
+        assert project_fact.fact_id not in result_ids
+        assert denied_fact.fact_id not in result_ids
+
 
 class TestFallbackOnEmptyVecStore:
     """SemanticChannel falls back to full scan if VectorStore is empty."""
@@ -150,3 +195,25 @@ class TestFallbackOnUnavailableVecStore:
         mock_vs.search.assert_not_called()
         # Full scan should still work
         assert len(results) >= 1
+
+    def test_full_scan_scope_contract_matches_fast_path_policy(
+        self, db: DatabaseManager,
+    ) -> None:
+        for profile_id in ("requester", "publisher"):
+            db.execute(
+                "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
+                "VALUES (?, ?, '')",
+                (profile_id, profile_id),
+            )
+        global_fact = _seed_fact(
+            db, "publisher", "global", seed=1, scope="global",
+        )
+        private_fact = _seed_fact(db, "publisher", "private", seed=1)
+
+        channel = SemanticChannel(db, vector_store=None)
+        channel.include_global = True
+        result_ids = {
+            fid for fid, _ in channel.search(_make_embedding(1), "requester", top_k=10)
+        }
+        assert global_fact.fact_id in result_ids
+        assert private_fact.fact_id not in result_ids

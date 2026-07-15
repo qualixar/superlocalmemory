@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -364,6 +365,40 @@ class TestTransaction:
             "SELECT * FROM memories WHERE memory_id = 'txn_fail'"
         )
         assert len(rows) == 0, "Transaction should have rolled back"
+
+    def test_other_thread_never_reuses_uncommitted_transaction_connection(
+        self, db: DatabaseManager,
+    ) -> None:
+        writer_ready = threading.Event()
+        release_writer = threading.Event()
+        writer_errors: list[Exception] = []
+
+        def writer() -> None:
+            try:
+                with db.transaction():
+                    db.execute(
+                        "INSERT INTO memories (memory_id, profile_id, content) "
+                        "VALUES ('thread_txn', 'default', 'uncommitted')"
+                    )
+                    writer_ready.set()
+                    assert release_writer.wait(timeout=5)
+            except Exception as exc:  # pragma: no cover - asserted below
+                writer_errors.append(exc)
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        assert writer_ready.wait(timeout=5)
+        try:
+            rows = db.execute(
+                "SELECT * FROM memories WHERE memory_id='thread_txn'"
+            )
+            assert rows == []
+        finally:
+            release_writer.set()
+            thread.join(timeout=5)
+
+        assert not thread.is_alive()
+        assert writer_errors == []
 
 
 # ---------------------------------------------------------------------------

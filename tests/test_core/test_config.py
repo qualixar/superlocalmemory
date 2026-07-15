@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from superlocalmemory.core.config import (
-    DEFAULT_BASE_DIR,
     DEFAULT_DB_NAME,
     ChannelWeights,
     EmbeddingConfig,
@@ -203,9 +202,11 @@ class TestDbPathComputation:
         assert cfg.db_path == custom
 
     def test_default_base_dir(self) -> None:
+        from superlocalmemory.infra.data_root import canonical_data_root
+
         cfg = SLMConfig()
-        assert cfg.base_dir == DEFAULT_BASE_DIR
-        assert cfg.db_path == DEFAULT_BASE_DIR / DEFAULT_DB_NAME
+        assert cfg.base_dir == canonical_data_root()
+        assert cfg.db_path == canonical_data_root() / DEFAULT_DB_NAME
 
     def test_for_mode_uses_custom_base_dir(self, tmp_path: Path) -> None:
         cfg = SLMConfig.for_mode(Mode.A, base_dir=tmp_path)

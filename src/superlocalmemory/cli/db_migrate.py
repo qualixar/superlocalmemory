@@ -18,11 +18,13 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import DynamicStatePath
+
 
 # Canonical paths — match LLD-01 / LLD-07 layout. Callers can override
 # via the ``learning_db_path`` / ``memory_db_path`` attributes on args
 # (tests rely on this to point at fixture DBs).
-DEFAULT_HOME = Path.home() / ".superlocalmemory"
+DEFAULT_HOME = DynamicStatePath()
 
 
 def _resolve_paths(args: Namespace) -> tuple[Path, Path]:
