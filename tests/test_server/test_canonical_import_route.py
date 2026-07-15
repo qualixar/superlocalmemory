@@ -21,6 +21,10 @@ def _client(engine) -> TestClient:
         M018_ingestion_operations.apply(conn)
     app = FastAPI()
     app.state.engine = engine
+    @app.middleware("http")
+    async def _authenticated_actor(request, call_next):
+        request.state.authenticated_actor = "authenticated:test-import"
+        return await call_next(request)
     app.include_router(router)
     return TestClient(app)
 
@@ -60,6 +64,7 @@ def test_replaying_same_import_file_reuses_canonical_operations(
     assert len(operations) == 1
     assert operations[0].source_type == "http-import"
     assert operations[0].session_id == "import-session"
+    assert operations[0].trusted_actor_id == "authenticated:test-import"
 
 
 def test_import_fails_closed_when_canonical_engine_is_unavailable(

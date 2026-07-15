@@ -20,6 +20,10 @@ def _client(engine) -> TestClient:
         M018_ingestion_operations.apply(conn)
     app = FastAPI()
     app.state.engine = engine
+    @app.middleware("http")
+    async def _authenticated_actor(request, call_next):
+        request.state.authenticated_actor = "authenticated:test-adapter"
+        return await call_next(request)
     app.include_router(router)
     return TestClient(app)
 
@@ -54,6 +58,7 @@ def test_ingest_preserves_adapter_source_and_deduplicates_by_operation(
     assert operations[0].source_type == "gmail"
     assert operations[0].idempotency_key == "message-1"
     assert operations[0].metadata == {"mailbox": "reliability"}
+    assert operations[0].trusted_actor_id == "authenticated:test-adapter"
 
 
 def test_concurrent_ingest_same_key_creates_one_operation_and_one_fact_set(
