@@ -261,6 +261,8 @@ class TestCrossEncoderIntegration:
         )
         response = engine.recall("q", "default")
         reranker.rerank.assert_called_once()
+        assert response.reranker_applied is True
+        assert response.reranker_status == "applied"
 
     def test_no_reranker_skips_rerank(self) -> None:
         facts = [_make_fact("f1")]
@@ -272,6 +274,8 @@ class TestCrossEncoderIntegration:
         )
         response = engine.recall("q", "default")
         assert len(response.results) == 1
+        assert response.reranker_applied is False
+        assert response.reranker_status == "not_configured"
 
     def test_reranker_failure_graceful(self) -> None:
         facts = [_make_fact("f1")]
@@ -287,6 +291,25 @@ class TestCrossEncoderIntegration:
         # Should not raise, fallback to un-reranked results
         response = engine.recall("q", "default")
         assert len(response.results) == 1
+        assert response.reranker_applied is False
+        assert response.reranker_status == "error"
+
+    def test_cold_reranker_fallback_is_explicit(self) -> None:
+        facts = [_make_fact("f1")]
+        db = _mock_db(facts)
+        reranker = MagicMock()
+        reranker._worker_ready = False
+        engine = _build_engine(
+            db=db,
+            semantic_results=[("f1", 0.9)],
+            reranker=reranker,
+        )
+
+        response = engine.recall("q", "default")
+
+        reranker.rerank.assert_not_called()
+        assert response.reranker_applied is False
+        assert response.reranker_status == "fallback_not_ready"
 
 
 # ---------------------------------------------------------------------------
