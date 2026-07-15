@@ -5,9 +5,14 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## V3.7 release candidate (unreleased)
+## [3.7.0+rc.1] - 2026-07-15 — Local release-witness candidate (not published)
 
-The V3.7 audit-hardening stream is not published yet. Current candidate work adds fail-closed release promotion, exact wheel/sdist testing, byte-level evidence and checksums, rendered-site claim scanning, canonical version/license guards, daemon identity and mutation authorization, migration-aware readiness, Zeroconf address decoding, and persisted int8 retrieval filtering. A V3.7 version entry will replace this section only when the final version is frozen and the release evidence bundle is green.
+This laptop-only candidate exists for real-user release witnessing. It is not a
+PyPI/npm publication, tag, or final V3.7 claim. It includes the V3.7
+audit-hardening stream: fail-closed release promotion, exact artifact testing,
+evidence and checksums, canonical version/license guards, daemon identity and
+mutation authorization, and retrieval/ingestion integrity fixes. Final `3.7.0`
+is frozen only after the release evidence bundle is green.
 
 ## [3.6.23] - 2026-07-12 — Cross-platform data-root and maintenance hardening
 
