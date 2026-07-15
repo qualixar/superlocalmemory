@@ -60,3 +60,21 @@ def test_missing_write_credential_fails_closed() -> None:
         require_write_actor(_Request({}), descriptor=None)
 
     assert exc_info.value.status_code == 403
+
+
+def test_configured_api_key_derives_authenticated_api_actor(monkeypatch) -> None:
+    from superlocalmemory.server.write_identity import require_write_actor
+
+    monkeypatch.setattr(
+        "superlocalmemory.infra.auth_middleware.verify_api_key",
+        lambda token: token == "external-api-key",
+    )
+
+    actor = require_write_actor(
+        _Request({"X-SLM-API-Key": "external-api-key"}),
+        descriptor=None,
+        actor_kind="http-api",
+    )
+
+    assert actor.startswith("api-key:http-api:")
+    assert "external-api-key" not in actor
