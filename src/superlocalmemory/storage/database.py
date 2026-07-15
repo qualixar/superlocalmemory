@@ -1442,6 +1442,36 @@ class DatabaseManager:
         Retries 3x on SQLITE_BUSY (handled by execute()).
         All SQL parameterized (HR-05).
         """
+        from superlocalmemory.core.lifecycle_state import atomic_lifecycle_for
+
+        with self.transaction():
+            self._upsert_retention_in_transaction(
+                fact_id=fact_id,
+                profile_id=profile_id,
+                retention_score=retention_score,
+                memory_strength=memory_strength,
+                access_count=access_count,
+                last_accessed_at=last_accessed_at,
+                lifecycle_zone=lifecycle_zone,
+            )
+            self.execute(
+                "UPDATE atomic_facts SET lifecycle = ? "
+                "WHERE fact_id = ? AND profile_id = ?",
+                (atomic_lifecycle_for(lifecycle_zone), fact_id, profile_id),
+            )
+
+    def _upsert_retention_in_transaction(
+        self,
+        *,
+        fact_id: str,
+        profile_id: str,
+        retention_score: float,
+        memory_strength: float,
+        access_count: int,
+        last_accessed_at: str,
+        lifecycle_zone: str,
+    ) -> None:
+        """Write one retention row using the caller's active transaction."""
         self.execute(
             "INSERT INTO fact_retention "
             "(fact_id, profile_id, retention_score, memory_strength, "
@@ -1468,9 +1498,11 @@ class DatabaseManager:
         Returns count of successfully upserted rows.
         """
         count = 0
+        from superlocalmemory.core.lifecycle_state import atomic_lifecycle_for
+
         with self.transaction():
             for f in facts:
-                self.upsert_retention(
+                self._upsert_retention_in_transaction(
                     fact_id=f["fact_id"],
                     profile_id=profile_id,
                     retention_score=f["retention"],
@@ -1478,6 +1510,11 @@ class DatabaseManager:
                     access_count=f["access_count"],
                     last_accessed_at=f["last_accessed_at"],
                     lifecycle_zone=f["zone"],
+                )
+                self.execute(
+                    "UPDATE atomic_facts SET lifecycle = ? "
+                    "WHERE fact_id = ? AND profile_id = ?",
+                    (atomic_lifecycle_for(f["zone"]), f["fact_id"], profile_id),
                 )
                 count += 1
         return count

@@ -29,6 +29,8 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
 
+from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
 
@@ -126,13 +128,12 @@ def promote_on_access_batch(db: DatabaseManager, fact_ids: list[str]) -> int:
     """
     if not fact_ids:
         return 0
-    placeholders = ",".join("?" * len(fact_ids))
-    db.execute(
-        f"UPDATE atomic_facts SET lifecycle = 'active' "
-        f"WHERE fact_id IN ({placeholders}) AND lifecycle IN ('warm', 'cold')",
-        tuple(fact_ids),
+    return set_fact_lifecycle_zone(
+        db,
+        fact_ids,
+        "active",
+        from_atomic=("warm", "cold"),
     )
-    return len(fact_ids)
 
 
 def promote_on_access(db: DatabaseManager, fact_id: str) -> None:
@@ -140,10 +141,11 @@ def promote_on_access(db: DatabaseManager, fact_id: str) -> None:
 
     Kept for backward compatibility. Prefer promote_on_access_batch.
     """
-    db.execute(
-        "UPDATE atomic_facts SET lifecycle = 'active' "
-        "WHERE fact_id = ? AND lifecycle IN ('warm', 'cold')",
-        (fact_id,),
+    set_fact_lifecycle_zone(
+        db,
+        [fact_id],
+        "active",
+        from_atomic=("warm", "cold"),
     )
 
 
@@ -164,10 +166,8 @@ def pin_fact(
             "(fact_id, profile_id, pinned_at, reason) VALUES (?, ?, ?, ?)",
             (fact_id, profile_id, now, reason),
         )
-        db.execute(
-            "UPDATE atomic_facts SET lifecycle = 'active' "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
+        set_fact_lifecycle_zone(
+            db, [fact_id], "active", profile_id=profile_id,
         )
         return True
     except Exception as exc:
@@ -315,11 +315,12 @@ def _demote_tier(
         # Batch UPDATE in chunks of 500
         for i in range(0, len(demoted_ids), 500):
             batch = demoted_ids[i:i + 500]
-            placeholders = ",".join("?" * len(batch))
-            db.execute(
-                f"UPDATE atomic_facts SET lifecycle = ? "
-                f"WHERE fact_id IN ({placeholders}) AND lifecycle = ?",
-                (to_tier, *batch, from_tier),
+            set_fact_lifecycle_zone(
+                db,
+                batch,
+                to_tier,
+                profile_id=profile_id,
+                from_atomic=(from_tier,),
             )
 
     return len(demoted_ids)
