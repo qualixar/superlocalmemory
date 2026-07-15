@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,12 @@ from fastapi.testclient import TestClient
 
 from superlocalmemory.mesh.broker import MeshBroker
 from superlocalmemory.server.routes import mesh as mesh_routes
+
+
+DAEMON_HEADERS = {
+    "X-SLM-Daemon-Capability": "mesh-capability",
+    "X-SLM-Target-Instance": "mesh-instance",
+}
 
 
 def _init_mesh_schema(db_path: str) -> None:
@@ -47,6 +54,11 @@ def _app_with_broker(secret: str | None = None) -> tuple[FastAPI, MeshBroker]:
     app = FastAPI()
     app.state.mesh_broker = broker
     app.state.config = None
+    app.state.daemon_descriptor = SimpleNamespace(
+        capability="mesh-capability",
+        instance_id="mesh-instance",
+        capability_fingerprint="mesh-fingerprint",
+    )
     app.include_router(mesh_routes.router)
     return app, broker
 
@@ -54,11 +66,15 @@ def _app_with_broker(secret: str | None = None) -> tuple[FastAPI, MeshBroker]:
 def test_register_and_peers_over_http() -> None:
     app, _ = _app_with_broker()
     c = TestClient(app)
-    r = c.post("/mesh/register", json={"session_id": "sess-1", "summary": "w"})
+    r = c.post(
+        "/mesh/register",
+        json={"session_id": "sess-1", "summary": "w"},
+        headers=DAEMON_HEADERS,
+    )
     assert r.status_code == 200
     body = r.json()
     assert body.get("peer_id")
-    r2 = c.get("/mesh/peers")
+    r2 = c.get("/mesh/peers", headers=DAEMON_HEADERS)
     assert r2.status_code == 200
     peers = r2.json().get("peers", [])
     assert any(p.get("session_id") == "sess-1" for p in peers)
@@ -81,11 +97,32 @@ def test_secret_accepts_correct_header() -> None:
     assert r.status_code == 200
 
 
-def test_no_secret_allows_all() -> None:
+def test_no_secret_still_requires_local_capability() -> None:
     app, _ = _app_with_broker(secret=None)
     c = TestClient(app)
     r = c.post("/mesh/register", json={"session_id": "s"})
-    assert r.status_code == 200
+    assert r.status_code == 403
+    accepted = c.post(
+        "/mesh/register", json={"session_id": "s"}, headers=DAEMON_HEADERS,
+    )
+    assert accepted.status_code == 200
+
+
+def test_mesh_state_rejects_secret_bearing_values() -> None:
+    app, _ = _app_with_broker(secret=None)
+    c = TestClient(app)
+
+    response = c.post(
+        "/mesh/state",
+        json={
+            "key": "provider_api_key",
+            "value": "sk-super-secret-value-1234567890",
+            "set_by": "peer",
+        },
+        headers=DAEMON_HEADERS,
+    )
+
+    assert response.status_code == 422
 
 
 # ── v3.6.20: Bearer token support (issue #60) ───────────────────────────────
