@@ -468,23 +468,24 @@ async def search_memories(request: Request, body: SearchRequest):
                 lambda: engine.recall(body.query, limit=body.limit, fast=False),
             )
             elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
-            results = []
-            for r in response.results[: body.limit]:
-                results.append({
-                    "fact_id": r.fact.fact_id,
-                    "memory_id": getattr(r.fact, "memory_id", ""),
-                    "content": r.fact.content[:300],
-                    "score": round(r.score, 4),
-                    "confidence": round(getattr(r, "confidence", 0.0), 4),
-                    "channel_scores": getattr(r, "channel_scores", {}),
-                    "created_at": getattr(r.fact, "created_at", ""),
-                })
+            from superlocalmemory.server.recall_serializer import (
+                recall_response_metadata,
+                serialize_recall_response,
+            )
+            results, no_confident_match = serialize_recall_response(
+                response,
+                limit=body.limit,
+                per_fact_max=300,
+                total_max=max(300, body.limit * 300),
+            )
             return {
                 "query": body.query,
                 "results": results,
                 "total": len(results),
                 "query_type": getattr(response, "query_type", "semantic"),
                 "retrieval_time_ms": elapsed_ms,
+                "no_confident_match": no_confident_match,
+                **recall_response_metadata(response),
             }
 
         # Fallback: direct DB text search (engine not yet initialised)
@@ -493,18 +494,35 @@ async def search_memories(request: Request, body: SearchRequest):
         cursor = conn.cursor()
         active_profile = get_active_profile()
         cursor.execute("""
-            SELECT fact_id as id, content, confidence as score,
+            SELECT fact_id, content, confidence as memory_confidence,
                    fact_type as category, created_at
             FROM atomic_facts
             WHERE profile_id = ? AND content LIKE ?
             ORDER BY confidence DESC LIMIT ?
         """, (active_profile, f'%{body.query}%', body.limit))
-        results = cursor.fetchall()
+        rows = cursor.fetchall()
         conn.close()
+
+        results = [{
+            **row,
+            "score": None,
+            "relevance_score": None,
+            "ranking_score": None,
+            "confidence": row.get("memory_confidence"),
+            "rank_position": position,
+        } for position, row in enumerate(rows, start=1)]
 
         return {
             "query": body.query, "results": results, "total": len(results),
             "query_type": "text_search", "retrieval_time_ms": 0,
+            "retrieval_mode": "degraded_lexical",
+            "score_contract_version": "2",
+            "calibration_status": "uncalibrated",
+            "calibration_id": None,
+            "answer_confidence": None,
+            "abstained": not bool(results),
+            "abstention_reason": None if results else "no_candidates",
+            "no_confident_match": False,
         }
 
     except Exception as e:

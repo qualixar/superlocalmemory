@@ -678,17 +678,16 @@ async def recall_trace(request: Request):
         )
         elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
 
-        results = []
-        for r in response.results[:limit]:
-            results.append({
-                "fact_id": r.fact.fact_id,
-                "memory_id": getattr(r.fact, "memory_id", ""),
-                "content": r.fact.content[:300],
-                "score": round(r.score, 4),
-                "confidence": round(getattr(r, "confidence", 0.0), 4),
-                "channel_scores": getattr(r, "channel_scores", {}),
-                "created_at": getattr(r.fact, "created_at", ""),
-            })
+        from superlocalmemory.server.recall_serializer import (
+            recall_response_metadata,
+            serialize_recall_response,
+        )
+        results, no_confident_match = serialize_recall_response(
+            response,
+            limit=limit,
+            per_fact_max=300,
+            total_max=max(300, limit * 300),
+        )
 
         # Record learning signals (non-blocking, non-critical)
         try:
@@ -704,6 +703,8 @@ async def recall_trace(request: Request):
             "retrieval_time_ms": elapsed_ms,
             "results": results,
             "synthesis": "",
+            "no_confident_match": no_confident_match,
+            **recall_response_metadata(response),
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

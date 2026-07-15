@@ -2124,6 +2124,7 @@ def cmd_trace(args: Namespace) -> None:
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
+        engine.initialize()
         limit = getattr(args, 'limit', 10)
         response = engine.recall(args.query, limit=limit)
     except Exception as exc:
@@ -2135,22 +2136,23 @@ def cmd_trace(args: Namespace) -> None:
 
     if use_json:
         from superlocalmemory.cli.json_output import json_print
-        items = []
-        for r in response.results:
-            item = {
-                "fact_id": r.fact.fact_id, "content": r.fact.content[:200],
-                "score": round(r.score, 3),
-            }
-            if hasattr(r, "channel_scores") and r.channel_scores:
-                item["channel_scores"] = {
-                    k: round(v, 3) for k, v in r.channel_scores.items()
-                }
-            items.append(item)
+        from superlocalmemory.server.recall_serializer import (
+            recall_response_metadata,
+            serialize_recall_response,
+        )
+        items, no_confident_match = serialize_recall_response(
+            response,
+            limit=limit,
+            per_fact_max=200,
+            total_max=max(200, limit * 200),
+        )
         json_print("trace", data={
             "query": args.query,
             "query_type": getattr(response, "query_type", "unknown"),
             "retrieval_time_ms": round(getattr(response, "retrieval_time_ms", 0), 1),
             "results": items, "count": len(items),
+            "no_confident_match": no_confident_match,
+            **recall_response_metadata(response),
         }, next_actions=[
             {"command": "slm recall '<query>' --json", "description": "Standard recall"},
         ])
@@ -2160,7 +2162,9 @@ def cmd_trace(args: Namespace) -> None:
     print(f"Type: {response.query_type} | Time: {response.retrieval_time_ms:.0f}ms")
     print(f"Results: {len(response.results)}")
     for i, r in enumerate(response.results, 1):
-        print(f"\n  {i}. [{r.score:.3f}] {r.fact.content[:100]}")
+        print(f"\n  {i}. [relevance {r.relevance_score:.3f}] {r.fact.content[:100]}")
+        if r.ranking_score is not None:
+            print(f"       ranking utility: {r.ranking_score:.6f}")
         if hasattr(r, "channel_scores") and r.channel_scores:
             for ch, sc in r.channel_scores.items():
                 print(f"       {ch}: {sc:.3f}")
