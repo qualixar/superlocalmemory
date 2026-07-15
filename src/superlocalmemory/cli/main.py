@@ -74,6 +74,7 @@ _NO_DAEMON_COMMANDS = {
     # v3.4.22 escape hatches — never auto-start the daemon on these.
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
     "rotate-token",
+    "evidence",
     # LLD-06 — agents launched through wrap start the daemon on demand.
     "wrap",
     # V3.6 Optimize commands that are config read/write only.
@@ -599,6 +600,40 @@ def main() -> None:
         "--json", action="store_true",
         help="Emit JSON result instead of human-readable summary",
     )
+
+    evidence_p = sub.add_parser(
+        "evidence",
+        help="Export, verify, import, or rebuild versioned memory evidence",
+    )
+    evidence_sub = evidence_p.add_subparsers(
+        dest="evidence_command", title="evidence subcommands",
+    )
+    evidence_export = evidence_sub.add_parser(
+        "export", help="Write a deterministic checksummed JSONL bundle",
+    )
+    evidence_export.add_argument("destination")
+    evidence_export.add_argument("--profile", default="default")
+    evidence_export.add_argument("--json", action="store_true")
+    evidence_verify = evidence_sub.add_parser(
+        "verify", help="Verify checksums and source reconciliation",
+    )
+    evidence_verify.add_argument("bundle")
+    evidence_verify.add_argument("--json", action="store_true")
+    evidence_import = evidence_sub.add_parser(
+        "import", help="Import relational truth (dry-run unless --execute)",
+    )
+    evidence_import.add_argument("bundle")
+    evidence_import.add_argument("--profile", default="default")
+    evidence_import.add_argument("--replace", action="store_true")
+    evidence_import.add_argument("--rollback-dir", default=None)
+    evidence_import.add_argument("--execute", action="store_true")
+    evidence_import.add_argument("--json", action="store_true")
+    evidence_rebuild = evidence_sub.add_parser(
+        "rebuild", help="Rebuild derived lexical state (dry-run unless --execute)",
+    )
+    evidence_rebuild.add_argument("--profile", default="default")
+    evidence_rebuild.add_argument("--execute", action="store_true")
+    evidence_rebuild.add_argument("--json", action="store_true")
 
     # S-M07: install-token rotation.
     sub.add_parser(

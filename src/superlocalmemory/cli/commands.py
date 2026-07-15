@@ -201,6 +201,7 @@ def dispatch(args: Namespace) -> None:
         "reconfigure": _cmd_escape_reconfigure,
         "benchmark": _cmd_escape_benchmark,
         "rotate-token": _cmd_escape_rotate_token,
+        "evidence": _cmd_evidence,
         # LLD-06 — `slm wrap <agent> [args...]` activates the Optimize proxy.
         "wrap": _cmd_wrap,
         # V3.6 Optimize subcommands (additive)
@@ -216,6 +217,13 @@ def dispatch(args: Namespace) -> None:
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
+
+
+def _cmd_evidence(args: Namespace) -> None:
+    """Lazy-load the evidence/rebuild command surface."""
+    from superlocalmemory.cli.evidence_cmd import cmd_evidence
+
+    cmd_evidence(args)
 
 
 def _cmd_wrap(args: Namespace) -> None:
