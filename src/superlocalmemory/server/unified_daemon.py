@@ -1905,8 +1905,14 @@ def _register_daemon_routes(application: FastAPI) -> None:
         readiness = {
             "engine": engine is not None,
             "migrations": migrations_ready,
+            "retrieval": bool(_embedding_warm),
             "migration_failures": migration_failures,
         }
+        base_ready = all((readiness["engine"], readiness["migrations"]))
+        fully_ready = base_ready and readiness["retrieval"]
+        runtime_state = (
+            "ready" if fully_ready else "warming" if base_ready else "not_ready"
+        )
         # v3.6.8: surface the recall-health verdict so a silently-degraded
         # recall path (warm-but-broken embedder) is VISIBLE, never silent.
         try:
@@ -1917,7 +1923,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         identity = getattr(application.state, "daemon_descriptor", None)
         return {
             "status": "ok",
-            "ready": all((readiness["engine"], readiness["migrations"])),
+            "ready": fully_ready,
             "readiness": readiness,
             "pid": os.getpid(),
             "engine": "initialized" if engine else "unavailable",
@@ -1929,6 +1935,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # health probe; includes self-heal counters.
             "recall_health": _recall_health,
             **(identity.public_health_fields() if identity is not None else {}),
+            # Runtime readiness is more precise than descriptor lifecycle.
+            # A process can be alive and identity-valid while retrieval warms.
+            "state": runtime_state,
         }
 
     @application.get("/recall")
