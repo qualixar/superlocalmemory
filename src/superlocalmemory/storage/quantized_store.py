@@ -150,13 +150,29 @@ class QuantizedEmbeddingStore:
         query_embedding: NDArray,
         profile_id: str,
         top_k: int = 50,
+        *,
+        bit_widths: tuple[int, ...] | None = None,
     ) -> list[tuple[str, float]]:
         """Search polar embeddings for a profile.
 
         Pre-filters by lifecycle_zone (excludes 'forgotten').
+        ``bit_widths`` selects a persisted precision tier; ``None`` preserves
+        the legacy all-quantized-row behavior.
         Returns [(fact_id, similarity)] sorted descending.
         """
+        if bit_widths is not None and not bit_widths:
+            return []
         try:
+            width_clause = ""
+            params: list[object] = [profile_id]
+            if bit_widths is not None:
+                widths = tuple(int(width) for width in bit_widths)
+                width_clause = (
+                    " AND pe.bit_width IN ("
+                    + ",".join("?" for _ in widths)
+                    + ")"
+                )
+                params.extend(widths)
             rows = self._db.execute(
                 "SELECT pe.fact_id, pe.radius, pe.angle_indices, "
                 "  pe.qjl_bits, pe.bit_width "
@@ -164,8 +180,9 @@ class QuantizedEmbeddingStore:
                 "JOIN fact_retention fr "
                 "  ON pe.fact_id = fr.fact_id AND fr.profile_id = pe.profile_id "
                 "WHERE pe.profile_id = ? "
-                "  AND fr.lifecycle_zone NOT IN ('forgotten')",
-                (profile_id,),
+                "  AND fr.lifecycle_zone NOT IN ('forgotten')"
+                + width_clause,
+                tuple(params),
             )
         except Exception as exc:
             logger.error("search query failed: %s", exc)

@@ -6,8 +6,8 @@
 
 Merges results from:
   Tier 1: float32 (VectorStore.search -- exact cosine)
-  Tier 2: int8    (VectorStore.search_int8 -- sqlite-vec native)
-  Tier 3: polar   (QuantizedEmbeddingStore.search -- PolarQuant)
+  Tier 2: int8    (QuantizedEmbeddingStore -- 8-bit PolarQuant rows)
+  Tier 3: polar   (QuantizedEmbeddingStore -- 2/4-bit PolarQuant rows)
 
 Deduplicates by keeping the highest score per fact_id.
 Applies precision-dependent score penalties:
@@ -110,16 +110,17 @@ class QuantizationAwareSearch:
     def _search_int8(
         self, query: NDArray, profile_id: str, top_k: int,
     ) -> list[tuple[str, float]]:
-        """Tier 2: int8 approximate via VectorStore.search_int8.
+        """Tier 2: persisted 8-bit quantized embeddings.
 
         Applies 0.98x penalty to account for int8 quantization error.
-        Gracefully returns [] if VectorStore lacks search_int8 method.
         """
-        fn = getattr(self._vector_store, "search_int8", None)
-        if fn is None:
-            return []
         try:
-            raw = fn(query, profile_id=profile_id, top_k=top_k)
+            raw = self._quantized_store.search(
+                query,
+                profile_id,
+                top_k,
+                bit_widths=(8,),
+            )
             return [(fid, score * _INT8_PENALTY) for fid, score in raw]
         except Exception as exc:
             logger.debug("int8 search failed: %s", exc)
@@ -133,7 +134,12 @@ class QuantizationAwareSearch:
         Applies polar_search_penalty from config.
         """
         try:
-            raw = self._quantized_store.search(query, profile_id, top_k)
+            raw = self._quantized_store.search(
+                query,
+                profile_id,
+                top_k,
+                bit_widths=(2, 4),
+            )
             penalty = self._config.polar_search_penalty
             return [(fid, score * penalty) for fid, score in raw]
         except Exception as exc:
