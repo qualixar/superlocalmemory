@@ -14,7 +14,6 @@ import math
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-
 INPUT_SCHEMA = "superlocalmemory.calibration-input/v1"
 REPORT_SCHEMA = "superlocalmemory.calibration-report/v1"
 MIN_HELD_OUT_EXAMPLES = 100
