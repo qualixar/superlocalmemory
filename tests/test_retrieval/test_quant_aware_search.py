@@ -36,19 +36,21 @@ def _random_vec(d: int, seed: int = 0) -> np.ndarray:
 
 @pytest.fixture
 def mock_vector_store() -> MagicMock:
-    """Mock VectorStore with search() and search_int8()."""
+    """Mock VectorStore with the shipped float32 search contract."""
     vs = MagicMock()
     vs.search.return_value = [("f1", 0.95), ("f2", 0.80)]
-    vs.search_int8.return_value = [("f3", 0.85)]
     vs.available = True
     return vs
 
 
 @pytest.fixture
 def mock_quantized_store() -> MagicMock:
-    """Mock QuantizedEmbeddingStore with search()."""
+    """Mock the persisted quantized tiers by their real bit widths."""
     qs = MagicMock()
-    qs.search.return_value = [("f4", 0.70), ("f5", 0.60)]
+    qs.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [("f3", 0.85)] if bit_widths == (8,) else
+        [("f4", 0.70), ("f5", 0.60)] if bit_widths == (2, 4) else []
+    )
     return qs
 
 
@@ -88,8 +90,9 @@ def test_mixed_precision_merges(
 
     # Verify all tier methods were called
     mock_vector_store.search.assert_called_once()
-    mock_vector_store.search_int8.assert_called_once()
-    mock_quantized_store.search.assert_called_once()
+    assert mock_quantized_store.search.call_count == 2
+    assert mock_quantized_store.search.call_args_list[0].kwargs["bit_widths"] == (8,)
+    assert mock_quantized_store.search.call_args_list[1].kwargs["bit_widths"] == (2, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +108,9 @@ def test_deduplication(
     """Duplicate fact_ids across tiers are deduped by max score."""
     # f1 appears in float32 (0.95) AND polar (0.90 * 0.95 penalty = 0.855)
     mock_vector_store.search.return_value = [("f1", 0.95)]
-    mock_vector_store.search_int8.return_value = []
-    mock_quantized_store.search.return_value = [("f1", 0.90)]
+    mock_quantized_store.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [] if bit_widths == (8,) else [("f1", 0.90)]
+    )
 
     searcher = QuantizationAwareSearch(mock_vector_store, mock_quantized_store, config)
     query = _random_vec(768, seed=2)
@@ -130,8 +134,9 @@ def test_polar_penalty_applied(
 ) -> None:
     """Polar results are penalized by config.polar_search_penalty."""
     mock_vector_store.search.return_value = []
-    mock_vector_store.search_int8.return_value = []
-    mock_quantized_store.search.return_value = [("f-polar", 1.0)]
+    mock_quantized_store.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [] if bit_widths == (8,) else [("f-polar", 1.0)]
+    )
 
     config = QuantizationConfig(polar_search_penalty=0.95)
     searcher = QuantizationAwareSearch(mock_vector_store, mock_quantized_store, config)
@@ -156,8 +161,9 @@ def test_int8_penalty_applied(
 ) -> None:
     """Int8 results are penalized by 0.98 factor."""
     mock_vector_store.search.return_value = []
-    mock_vector_store.search_int8.return_value = [("f-int8", 1.0)]
-    mock_quantized_store.search.return_value = []
+    mock_quantized_store.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [("f-int8", 1.0)] if bit_widths == (8,) else []
+    )
 
     searcher = QuantizationAwareSearch(mock_vector_store, mock_quantized_store, config)
     query = _random_vec(768, seed=4)
@@ -180,8 +186,9 @@ def test_float32_search_error_handled(
     """Float32 tier exception returns empty, other tiers still work."""
     vs = MagicMock()
     vs.search.side_effect = RuntimeError("float32 exploded")
-    vs.search_int8.return_value = [("f-ok", 0.7)]
-    mock_quantized_store.search.return_value = []
+    mock_quantized_store.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [("f-ok", 0.7)] if bit_widths == (8,) else []
+    )
 
     searcher = QuantizationAwareSearch(vs, mock_quantized_store, config)
     query = _random_vec(768, seed=5)
@@ -197,8 +204,10 @@ def test_int8_search_error_handled(
     config: QuantizationConfig,
 ) -> None:
     """Int8 tier exception returns empty, other tiers still work."""
-    mock_vector_store.search_int8.side_effect = RuntimeError("int8 broke")
-    mock_quantized_store.search.return_value = []
+    mock_quantized_store.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        (_ for _ in ()).throw(RuntimeError("int8 broke"))
+        if bit_widths == (8,) else []
+    )
 
     searcher = QuantizationAwareSearch(mock_vector_store, mock_quantized_store, config)
     query = _random_vec(768, seed=6)
@@ -214,7 +223,10 @@ def test_polar_search_error_handled(
 ) -> None:
     """Polar tier exception returns empty, other tiers still work."""
     qs = MagicMock()
-    qs.search.side_effect = RuntimeError("polar broke")
+    qs.search.side_effect = lambda _q, _p, _k, *, bit_widths=None: (
+        [("f-int8", 0.7)] if bit_widths == (8,)
+        else (_ for _ in ()).throw(RuntimeError("polar broke"))
+    )
 
     searcher = QuantizationAwareSearch(mock_vector_store, qs, config)
     query = _random_vec(768, seed=7)
