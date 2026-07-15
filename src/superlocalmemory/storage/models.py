@@ -436,3 +436,7 @@ class RecallResponse:
     answer_confidence: float | None = None
     abstained: bool = False
     abstention_reason: str | None = None
+    # Cross-encoder execution is observable; cold/busy/error fallback must not
+    # be mistaken for a reranked response.
+    reranker_applied: bool = False
+    reranker_status: str = "not_configured"

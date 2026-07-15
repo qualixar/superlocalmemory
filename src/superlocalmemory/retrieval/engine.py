@@ -322,9 +322,18 @@ class RetrievalEngine:
             self._reranker is not None
             and getattr(self._reranker, '_worker_ready', False)
         )
+        reranker_applied = False
+        reranker_status = (
+            "fallback_not_ready" if self._reranker is not None
+            else "not_configured"
+        )
         if reranker_ready and facts:
             ce_alpha = 0.5 if strat.query_type in ("multi_hop", "temporal") else 0.75
-            top = self._apply_reranker(query, top, facts, alpha=ce_alpha)
+            top, reranker_applied, reranker_status = self._apply_reranker(
+                query, top, facts, alpha=ce_alpha,
+            )
+        elif reranker_ready:
+            reranker_status = "no_candidates"
         _em(f"rerank(ready={reranker_ready})")
 
         # v3.6.6: Evidence floor — gate on per-channel scores (NOT fused/RRF score).
@@ -380,6 +389,8 @@ class RetrievalEngine:
             query_type=strat.query_type, channel_weights=strat.weights,
             total_candidates=total, retrieval_time_ms=ms,
             no_confident_match=no_match,
+            reranker_applied=reranker_applied,
+            reranker_status=reranker_status,
         )
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
@@ -741,7 +752,7 @@ class RetrievalEngine:
         self, query: str, fused: list[FusionResult],
         fact_map: dict[str, AtomicFact],
         alpha: float = 0.75,
-    ) -> list[FusionResult]:
+    ) -> tuple[list[FusionResult], bool, str]:
         """Rerank with blended CE + RRF scores (Bug 1 fix).
 
         Blended: alpha * sigmoid(CE_score) + (1 - alpha) * rrf_score.
@@ -753,7 +764,7 @@ class RetrievalEngine:
             for fr in fused if fr.fact_id in fact_map
         ]
         if not candidates:
-            return fused
+            return fused, False, "no_candidates"
 
         # V3.3.16: Strip speaker tags WITHOUT copying full AtomicFact objects.
         # Previously created full copies including 768-dim embeddings (~6KB each),
@@ -766,16 +777,32 @@ class RetrievalEngine:
             originals.append((fact, orig))
 
         try:
-            scored = self._reranker.rerank(  # type: ignore[union-attr]
-                query, candidates, top_k=len(candidates),
+            rerank_with_status = getattr(
+                self._reranker, "rerank_with_status", None,
             )
+            # MagicMock fabricates arbitrary attributes; only use the richer
+            # contract when it is defined by the reranker type itself.
+            if callable(rerank_with_status) and hasattr(
+                type(self._reranker), "rerank_with_status",
+            ):
+                scored, applied, status = rerank_with_status(
+                    query, candidates, top_k=len(candidates),
+                )
+            else:
+                scored = self._reranker.rerank(  # type: ignore[union-attr]
+                    query, candidates, top_k=len(candidates),
+                )
+                applied, status = True, "applied"
         except Exception as exc:
             logger.warning("Cross-encoder rerank failed: %s", exc)
-            return fused
+            return fused, False, "error"
         finally:
             # Restore original content (with speaker tags)
             for fact, orig_content in originals:
                 fact.content = orig_content
+
+        if not applied:
+            return fused, False, status
 
         score_map = {fact.fact_id: score for fact, score in scored}
 
@@ -804,7 +831,7 @@ class RetrievalEngine:
             for fr in fused
         ]
         updated.sort(key=lambda r: r.fused_score, reverse=True)
-        return updated
+        return updated, True, "applied"
 
     # -- Agentic adapter -----------------------------------
 

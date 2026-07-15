@@ -399,13 +399,23 @@ class CrossEncoderReranker:
         results (without reranking), and MCP gets reranked results
         (worker stays warm between calls).
         """
+        results, _, _ = self.rerank_with_status(query, candidates, top_k=top_k)
+        return results
+
+    def rerank_with_status(
+        self,
+        query: str,
+        candidates: list[tuple[AtomicFact, float]],
+        top_k: int = 10,
+    ) -> tuple[list[tuple[AtomicFact, float]], bool, str]:
+        """Return results plus whether cross-encoder inference actually ran."""
         if not candidates:
-            return []
+            return [], False, "no_candidates"
 
         # Non-blocking: if model isn't loaded yet, return fallback
         if not self._model_loaded:
             sorted_cands = sorted(candidates, key=lambda x: x[1], reverse=True)
-            return sorted_cands[:top_k]
+            return sorted_cands[:top_k], False, "fallback_not_ready"
 
         documents = [fact.content for fact, _ in candidates]
 
@@ -423,7 +433,7 @@ class CrossEncoderReranker:
         if resp is None or not resp.get("ok"):
             # Fallback: return by existing score
             sorted_cands = sorted(candidates, key=lambda x: x[1], reverse=True)
-            return sorted_cands[:top_k]
+            return sorted_cands[:top_k], False, "fallback_busy_or_unavailable"
 
         scores = resp["scores"]
         scored: list[tuple[AtomicFact, float]] = [
@@ -431,7 +441,7 @@ class CrossEncoderReranker:
             for (fact, _), score in zip(candidates, scores)
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:top_k]
+        return scored[:top_k], True, "applied"
 
     def score_pair(self, query: str, document: str) -> float:
         """Score a single (query, document) pair."""
