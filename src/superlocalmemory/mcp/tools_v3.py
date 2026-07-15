@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +66,14 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                     "success": False,
                     "error": f"Invalid mode '{mode}'. Use 'a', 'b', or 'c'.",
                 }
+            engine = get_engine()
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-set-mode",
+                profile_id=engine.profile_id,
+                content_preview=mode_lower,
+            )
             from superlocalmemory.core.config import SLMConfig
             from superlocalmemory.mcp.server import reset_engine
 
@@ -80,6 +90,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             )
 
             reset_engine()
+            authorization.complete()
 
             return {
                 "success": True,

@@ -24,6 +24,8 @@ from typing import Callable
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
 logger = logging.getLogger(__name__)
 
 _MAX_SUMMARY_LEN = 500  # Truncate input/output summaries
@@ -69,6 +71,13 @@ def register_learning_tools(server, get_engine: Callable) -> None:
         output_clean = _scrub(output_summary[:_MAX_SUMMARY_LEN])
 
         try:
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-log-tool-event",
+                profile_id=engine.profile_id,
+                content_preview=tool_name,
+            )
             engine._db.execute(
                 "INSERT INTO tool_events "
                 "(session_id, profile_id, project_path, tool_name, event_type, "
@@ -77,6 +86,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
                 (session_id, engine.profile_id, project_path, tool_name,
                  event_type, input_clean, output_clean, duration_ms, metadata, now),
             )
+            authorization.complete()
             return {"success": True, "tool": tool_name, "event": event_type}
         except Exception as exc:
             logger.debug("log_tool_event failed: %s", exc)
@@ -144,7 +154,22 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             assertion_id: The assertion ID to reinforce
         """
         engine = get_engine()
-        return _update_assertion_confidence(engine._db, assertion_id, reinforce=True)
+        try:
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-reinforce-assertion",
+                profile_id=engine.profile_id,
+                fact_id=assertion_id,
+            )
+            result = _update_assertion_confidence(
+                engine._db, assertion_id, reinforce=True,
+            )
+            if result.get("success"):
+                authorization.complete()
+            return result
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(idempotentHint=True))
     async def contradict_assertion(assertion_id: str) -> dict:
@@ -157,7 +182,22 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             assertion_id: The assertion ID to contradict
         """
         engine = get_engine()
-        return _update_assertion_confidence(engine._db, assertion_id, reinforce=False)
+        try:
+            authorization = authorize_mcp_mutation(
+                engine,
+                "delete",
+                mutation_source="mcp-contradict-assertion",
+                profile_id=engine.profile_id,
+                fact_id=assertion_id,
+            )
+            result = _update_assertion_confidence(
+                engine._db, assertion_id, reinforce=False,
+            )
+            if result.get("success"):
+                authorization.complete()
+            return result
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
 
 def _update_assertion_confidence(db, assertion_id: str, reinforce: bool) -> dict:

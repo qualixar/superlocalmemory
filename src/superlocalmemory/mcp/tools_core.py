@@ -21,6 +21,7 @@ from mcp.types import ToolAnnotations
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
 from superlocalmemory.infra.data_root import canonical_data_root, state_path
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
 
@@ -444,12 +445,19 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             pid = profile_id or engine.profile_id
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-build-memory-graph",
+                profile_id=pid,
+            )
             facts = engine._db.get_all_facts(pid)
             edge_count = 0
             for fact in facts:
                 if engine._graph_builder:
                     engine._graph_builder.build_edges(fact, pid)
                     edge_count += 1
+            authorization.complete()
             return {
                 "success": True,
                 "facts_processed": len(facts),
@@ -465,6 +473,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             old = engine.profile_id
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-switch-profile",
+                profile_id=profile_id,
+                content_preview=f"{old} -> {profile_id}",
+            )
             engine.profile_id = profile_id
 
             # Persist to both config stores so CLI and Dashboard stay in sync
@@ -487,6 +502,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             except Exception:
                 logger.debug("worker-pool recycle on profile switch skipped")
 
+            authorization.complete()
             return {
                 "success": True,
                 "previous_profile": old,
@@ -554,6 +570,14 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Correct or annotate a learned behavioral pattern to improve retrieval."""
         try:
             engine = get_engine()
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-correct-pattern",
+                profile_id=engine.profile_id,
+                fact_id=pattern_id,
+                content_preview=correction,
+            )
             from superlocalmemory.learning.behavioral import BehavioralPatternStore
             store = BehavioralPatternStore(engine._db.db_path)
             store.record(
@@ -562,6 +586,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 pattern_key=pattern_id,
                 metadata={"correction": correction},
             )
+            authorization.complete()
             return {"success": True, "pattern_id": pattern_id}
         except Exception as exc:
             logger.exception("correct_pattern failed")
