@@ -16,7 +16,42 @@ def _client(engine) -> TestClient:
         M018_ingestion_operations.apply(conn)
     app = create_app()
     app.state.engine = engine
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers["X-SLM-Daemon-Capability"] = (
+        app.state.daemon_descriptor.capability
+    )
+    return client
+
+
+def test_remember_rejects_missing_or_wrong_daemon_capability(
+    engine_with_mock_deps,
+) -> None:
+    """A caller cannot borrow the daemon's trusted actor identity."""
+    with engine_with_mock_deps._db.raw_connection() as conn:
+        M018_ingestion_operations.apply(conn)
+    app = create_app()
+    app.state.engine = engine_with_mock_deps
+    client = TestClient(app)
+    body = {
+        "content": (
+            "Mallory claims the daemon identity without presenting the "
+            "private local capability."
+        ),
+        "idempotency_key": "untrusted-caller-1",
+    }
+
+    missing = client.post("/remember", json=body)
+    wrong = client.post(
+        "/remember",
+        json=body,
+        headers={"X-SLM-Daemon-Capability": "caller-selected-admin"},
+    )
+
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+    assert engine_with_mock_deps._db.execute(
+        "SELECT * FROM ingestion_operations"
+    ) == []
 
 
 def test_async_remember_returns_durable_operation_and_is_idempotent(
