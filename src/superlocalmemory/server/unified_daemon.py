@@ -548,6 +548,12 @@ async def lifespan(application: FastAPI):
     engine = None
     config = None
 
+    # Register the SSE bridge inside the application lifespan.  FastAPI's
+    # legacy ``on_event`` hook is deprecated and, more importantly, made a
+    # second startup mechanism compete with the daemon's existing lifespan.
+    from superlocalmemory.server.routes.events import register_event_listener
+    register_event_listener()
+
     # H-21 (Stage 8) — first-boot-after-upgrade notice. Compare the cached
     # version marker against the current package version; if they differ
     # (fresh install or upgrade), log a one-time banner with a link to the
@@ -626,7 +632,7 @@ async def lifespan(application: FastAPI):
     except Exception as _exc:
         logger.warning("migration runner crashed (non-fatal): %s", _exc)
         application.state.migration_result = {
-            "applied": [], "skipped": [], "failed": [],
+            "applied": [], "skipped": [], "failed": ["_runner_crash"],
             "details": {"_crash": str(_exc)},
         }
 
@@ -1708,9 +1714,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     from superlocalmemory.server.routes.profiles import router as profiles_router
     from superlocalmemory.server.routes.backup import router as backup_router
     from superlocalmemory.server.routes.data_io import router as data_io_router
-    from superlocalmemory.server.routes.events import (
-        router as events_router, register_event_listener,
-    )
+    from superlocalmemory.server.routes.events import router as events_router
     from superlocalmemory.server.routes.agents import router as agents_router
     from superlocalmemory.server.routes.ws import router as ws_router, manager as ws_manager
     from superlocalmemory.server.routes.v3_api import router as v3_router
@@ -1831,12 +1835,6 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         html = index_path.read_text()
         return html.replace("__SLM_VERSION__", _SLM_VERSION)
 
-    # Startup event for event listener
-    @application.on_event("startup")
-    async def startup_event():
-        register_event_listener()
-
-
 def _register_daemon_routes(application: FastAPI) -> None:
     """Add daemon-specific routes for CLI integration."""
     global _last_activity
@@ -1886,6 +1884,19 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         # Non-blocking peek: report status without forcing a re-init.
         engine = getattr(application.state, "engine", None)
+        migration_result = getattr(application.state, "migration_result", None)
+        migration_failures = list(
+            (migration_result or {}).get("failed", []) or []
+        )
+        migration_details = (migration_result or {}).get("details", {}) or {}
+        migrations_ready = bool(migration_result) and not migration_failures
+        if migration_details.get("_crash"):
+            migrations_ready = False
+        readiness = {
+            "engine": engine is not None,
+            "migrations": migrations_ready,
+            "migration_failures": migration_failures,
+        }
         # v3.6.8: surface the recall-health verdict so a silently-degraded
         # recall path (warm-but-broken embedder) is VISIBLE, never silent.
         try:
@@ -1896,6 +1907,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         identity = getattr(application.state, "daemon_descriptor", None)
         return {
             "status": "ok",
+            "ready": all((readiness["engine"], readiness["migrations"])),
+            "readiness": readiness,
             "pid": os.getpid(),
             "engine": "initialized" if engine else "unavailable",
             "version": getattr(application, 'version', 'unknown'),
