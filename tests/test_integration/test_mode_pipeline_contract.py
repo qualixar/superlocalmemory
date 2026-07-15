@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -153,12 +154,32 @@ def test_every_mode_completes_canonical_ingestion_and_graph_aware_recall(
         assert any(fact.canonical_entities for fact in facts)
 
         retrieval = engine._retrieval_engine
+        channel_spies = {}
+        for name, channel in {
+            "semantic": retrieval._semantic,
+            "bm25": retrieval._bm25,
+            "temporal": retrieval._temporal,
+            "hopfield": retrieval._hopfield,
+            "spreading_activation": retrieval._spreading_activation,
+        }.items():
+            assert channel is not None, f"{name} was not wired in Mode {mode.value}"
+            spy = MagicMock(wraps=channel.search)
+            channel.search = spy
+            channel_spies[name] = spy
         graph_score = MagicMock(wraps=retrieval._entity.score_candidates)
         retrieval._entity.score_candidates = graph_score
+        started = time.perf_counter()
         response = engine.recall("What does Ada maintain in Atlas?", mode=mode)
+        wall_clock_ms = (time.perf_counter() - started) * 1000.0
 
         assert response.results
         assert any("Ada" in result.fact.content for result in response.results)
+        # The response metric is part of the public latency observability
+        # contract.  This test intentionally does not impose a machine- or
+        # corpus-independent one-second SLA on a mocked sandbox.
+        assert 0.0 <= response.retrieval_time_ms <= wall_clock_ms + 50.0
+        for name, spy in channel_spies.items():
+            assert spy.call_count >= 1, f"{name} did not participate"
         # Entity graph is intentionally a post-fusion enhancer: it scores the
         # candidates earned by semantic/BM25/temporal evidence rather than
         # injecting ungrounded graph-only candidates into the answer.
