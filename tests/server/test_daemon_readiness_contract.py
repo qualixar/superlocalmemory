@@ -46,6 +46,7 @@ def test_health_ready_requires_engine_and_clean_migrations(tmp_path, monkeypatch
     from superlocalmemory.server import unified_daemon
 
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(unified_daemon, "_embedding_warm", True)
     app = unified_daemon.create_app()
     app.state.engine = object()
     app.state.migration_result = {
@@ -58,8 +59,30 @@ def test_health_ready_requires_engine_and_clean_migrations(tmp_path, monkeypatch
     assert payload["readiness"] == {
         "engine": True,
         "migrations": True,
+        "retrieval": True,
         "migration_failures": [],
     }
+
+
+def test_health_is_live_but_warming_until_embedding_is_usable(
+    tmp_path, monkeypatch,
+) -> None:
+    from superlocalmemory.server import unified_daemon
+
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(unified_daemon, "_embedding_warm", False)
+    app = unified_daemon.create_app()
+    app.state.engine = object()
+    app.state.migration_result = {
+        "applied": ["M018"], "skipped": [], "failed": [], "details": {},
+    }
+
+    payload = asyncio.run(_health_route(app).endpoint())
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is False
+    assert payload["state"] == "warming"
+    assert payload["readiness"]["retrieval"] is False
 
 
 def test_configured_daemon_port_honours_the_isolated_port(monkeypatch) -> None:
