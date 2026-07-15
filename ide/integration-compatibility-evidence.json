@@ -1,0 +1,1237 @@
+{
+  "checks": [
+    {
+      "checker": "portable_config",
+      "client_id": "cursor",
+      "contract": "config_generation_parse",
+      "detail": "cursor/.cursor/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "cursor",
+      "contract": "start_command_shape",
+      "detail": "cursor/.cursor/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "cursor",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "cursor",
+      "contract": "reconnect",
+      "detail": "adapter-cursor/.cursor/rules/slm-active-brain.mdc",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "cursor",
+      "contract": "context_injection",
+      "detail": "adapter-cursor/.cursor/rules/slm-active-brain.mdc",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "cursor",
+      "contract": "uninstall_ownership",
+      "detail": "adapter-cursor/.cursor/rules/slm-active-brain.mdc",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "antigravity",
+      "contract": "config_generation_parse",
+      "detail": "antigravity/.antigravity/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "antigravity",
+      "contract": "start_command_shape",
+      "detail": "antigravity/.antigravity/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "antigravity",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "antigravity",
+      "contract": "reconnect",
+      "detail": "adapter-antigravity/.agent/skills/slm-memory-adapter/SKILL.md",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "antigravity",
+      "contract": "context_injection",
+      "detail": "adapter-antigravity/.agent/skills/slm-memory-adapter/SKILL.md",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "antigravity",
+      "contract": "uninstall_ownership",
+      "detail": "adapter-antigravity/.agent/skills/slm-memory-adapter/SKILL.md",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "windsurf",
+      "contract": "config_generation_parse",
+      "detail": "windsurf/.codeium/windsurf/mcp_config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "windsurf",
+      "contract": "start_command_shape",
+      "detail": "windsurf/.codeium/windsurf/mcp_config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "windsurf",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "gemini-cli",
+      "contract": "config_generation_parse",
+      "detail": "gemini-cli/.gemini/settings.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "gemini-cli",
+      "contract": "start_command_shape",
+      "detail": "gemini-cli/.gemini/settings.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "gemini-cli",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "vscode-copilot",
+      "contract": "config_generation_parse",
+      "detail": "vscode-copilot/.vscode/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "vscode-copilot",
+      "contract": "start_command_shape",
+      "detail": "vscode-copilot/.vscode/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "vscode-copilot",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "vscode-copilot",
+      "contract": "reconnect",
+      "detail": "adapter-vscode-copilot/.github/copilot-instructions.md",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "vscode-copilot",
+      "contract": "context_injection",
+      "detail": "adapter-vscode-copilot/.github/copilot-instructions.md",
+      "status": "passed"
+    },
+    {
+      "checker": "active_adapter",
+      "client_id": "vscode-copilot",
+      "contract": "uninstall_ownership",
+      "detail": "adapter-vscode-copilot/.github/copilot-instructions.md",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "zed",
+      "contract": "config_generation_parse",
+      "detail": "zed/.config/zed/settings.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "zed",
+      "contract": "start_command_shape",
+      "detail": "zed/.config/zed/settings.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "zed",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "jetbrains",
+      "contract": "config_generation_parse",
+      "detail": "jetbrains/.config/JetBrains/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "jetbrains",
+      "contract": "start_command_shape",
+      "detail": "jetbrains/.config/JetBrains/mcp.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "jetbrains",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "opencode",
+      "contract": "config_generation_parse",
+      "detail": "opencode/.config/opencode/config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "opencode",
+      "contract": "start_command_shape",
+      "detail": "opencode/.config/opencode/config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "opencode",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "claude-desktop",
+      "contract": "config_generation_parse",
+      "detail": "claude-desktop/Library/Application Support/Claude/claude_desktop_config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "claude-desktop",
+      "contract": "start_command_shape",
+      "detail": "claude-desktop/Library/Application Support/Claude/claude_desktop_config.json",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "claude-desktop",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "codex",
+      "contract": "config_generation_parse",
+      "detail": "codex/.codex/config.toml",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "codex",
+      "contract": "start_command_shape",
+      "detail": "codex/.codex/config.toml",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "codex",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "continue",
+      "contract": "config_generation_parse",
+      "detail": "continue/.continue/config.yaml",
+      "status": "passed"
+    },
+    {
+      "checker": "portable_config",
+      "client_id": "continue",
+      "contract": "start_command_shape",
+      "detail": "continue/.continue/config.yaml",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "continue",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    },
+    {
+      "checker": "plugin_package",
+      "client_id": "claude-code",
+      "contract": "config_generation_parse",
+      "detail": "plugin/scripts/slm-launch",
+      "status": "passed"
+    },
+    {
+      "checker": "plugin_package",
+      "client_id": "claude-code",
+      "contract": "start_command_shape",
+      "detail": "plugin/scripts/slm-launch",
+      "status": "passed"
+    },
+    {
+      "checker": "mcp_surface",
+      "client_id": "claude-code",
+      "contract": "memory_surface",
+      "detail": "forget,recall,remember,update_memory",
+      "status": "passed"
+    }
+  ],
+  "clients": [
+    {
+      "artifacts": [
+        "ide/configs/cursor-mcp.json"
+      ],
+      "category": "ide",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "checker": "active_adapter",
+          "evidence": [
+            "src/superlocalmemory/hooks/memory_protocol.py",
+            "tests/test_adapters/test_static_protocol_security.py"
+          ],
+          "status": "proven_local"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter.py"
+          ],
+          "status": "proven_local"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter_nondestructive.py"
+          ],
+          "status": "proven_local"
+        }
+      },
+      "display": "Cursor",
+      "external_host_runtime_proven": false,
+      "id": "cursor",
+      "test_level": "local_generated_config_and_adapter"
+    },
+    {
+      "artifacts": [
+        "ide/configs/antigravity-mcp.json"
+      ],
+      "category": "ide",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "checker": "active_adapter",
+          "evidence": [
+            "src/superlocalmemory/hooks/memory_protocol.py",
+            "tests/test_adapters/test_static_protocol_security.py"
+          ],
+          "status": "proven_local"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter.py"
+          ],
+          "status": "proven_local"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter_nondestructive.py"
+          ],
+          "status": "proven_local"
+        }
+      },
+      "display": "Antigravity",
+      "external_host_runtime_proven": false,
+      "id": "antigravity",
+      "test_level": "local_generated_config_and_adapter"
+    },
+    {
+      "artifacts": [
+        "ide/configs/windsurf-mcp.json"
+      ],
+      "category": "ide",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "src/superlocalmemory/hooks/portable_kit.py"
+          ],
+          "status": "static_only"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "Local config idempotency does not prove an external client reconnect."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Windsurf",
+      "external_host_runtime_proven": false,
+      "id": "windsurf",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/gemini-cli-mcp.json"
+      ],
+      "category": "agent_cli",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "src/superlocalmemory/hooks/portable_kit.py"
+          ],
+          "status": "static_only"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "Local config idempotency does not prove an external client reconnect."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Gemini CLI",
+      "external_host_runtime_proven": false,
+      "id": "gemini-cli",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/vscode-copilot-mcp.json"
+      ],
+      "category": "ide",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "checker": "active_adapter",
+          "evidence": [
+            "src/superlocalmemory/hooks/memory_protocol.py",
+            "tests/test_adapters/test_static_protocol_security.py"
+          ],
+          "status": "proven_local"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter.py"
+          ],
+          "status": "proven_local"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "checker": "active_adapter",
+          "evidence": [
+            "tests/test_adapters/test_cursor_adapter.py",
+            "tests/test_adapters/test_antigravity_adapter.py",
+            "tests/test_adapters/test_copilot_adapter_nondestructive.py"
+          ],
+          "status": "proven_local"
+        }
+      },
+      "display": "VS Code / GitHub Copilot",
+      "external_host_runtime_proven": false,
+      "id": "vscode-copilot",
+      "test_level": "local_generated_config_and_adapter"
+    },
+    {
+      "artifacts": [
+        "ide/configs/zed-mcp.json"
+      ],
+      "category": "ide",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "This integration only configures MCP; it has no owned instruction-file surface."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Zed",
+      "external_host_runtime_proven": false,
+      "id": "zed",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/jetbrains-mcp.json"
+      ],
+      "category": "ide_family",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "This integration only configures MCP; it has no owned instruction-file surface."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "JetBrains IDEs",
+      "external_host_runtime_proven": false,
+      "id": "jetbrains",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/opencode-mcp.json"
+      ],
+      "category": "agent_cli",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "This integration only configures MCP; it has no owned instruction-file surface."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "OpenCode",
+      "external_host_runtime_proven": false,
+      "id": "opencode",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/claude-desktop-mcp.json"
+      ],
+      "category": "desktop",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "This integration only configures MCP; it has no owned instruction-file surface."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Claude Desktop",
+      "external_host_runtime_proven": false,
+      "id": "claude-desktop",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/codex-mcp.toml"
+      ],
+      "category": "agent_cli",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "src/superlocalmemory/hooks/portable_kit.py"
+          ],
+          "status": "static_only"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "Local config idempotency does not prove an external client reconnect."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Codex CLI",
+      "external_host_runtime_proven": false,
+      "id": "codex",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "ide/configs/continue-mcp.yaml",
+        "ide/configs/continue-skills.yaml"
+      ],
+      "category": "ide_extension",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "This integration only configures MCP; it has no owned instruction-file surface."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "src/superlocalmemory/mcp/server.py",
+            "src/superlocalmemory/mcp/tools_core.py",
+            "src/superlocalmemory/mcp/tools_v33.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "checker": "portable_config",
+          "evidence": [
+            "tests/test_cli_subparsers/test_portable_kit.py"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Portable MCP config merge has no host-independent uninstall contract."
+          ],
+          "status": "not_proven"
+        }
+      },
+      "display": "Continue.dev",
+      "external_host_runtime_proven": false,
+      "id": "continue",
+      "test_level": "local_generated_config"
+    },
+    {
+      "artifacts": [
+        "plugin/.mcp.json",
+        "plugin/hooks/hooks.json",
+        "plugin/scripts/slm-launch"
+      ],
+      "category": "agent_cli_plugin",
+      "contracts": {
+        "config_generation_parse": {
+          "checker": "plugin_package",
+          "evidence": [
+            "scripts/__tests__/build-plugin.test.mjs",
+            "plugin/.mcp.json"
+          ],
+          "status": "proven_local"
+        },
+        "context_injection": {
+          "evidence": [
+            "plugin/hooks/hooks.json",
+            "tests/test_hook_handlers.py"
+          ],
+          "status": "static_only"
+        },
+        "memory_surface": {
+          "checker": "mcp_surface",
+          "evidence": [
+            "plugin/.mcp.json",
+            "src/superlocalmemory/mcp/server.py"
+          ],
+          "status": "proven_local"
+        },
+        "reconnect": {
+          "evidence": [
+            "plugin/hooks/hooks.json",
+            "External Claude Code reconnect was not executed by this gate."
+          ],
+          "status": "static_only"
+        },
+        "start_command_shape": {
+          "checker": "plugin_package",
+          "evidence": [
+            "plugin/.mcp.json",
+            "plugin/scripts/slm-launch"
+          ],
+          "status": "proven_local"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Uninstall is owned by the Claude plugin manager, not SLM's portable connector."
+          ],
+          "status": "manual_only"
+        }
+      },
+      "display": "Claude Code",
+      "external_host_runtime_proven": false,
+      "id": "claude-code",
+      "test_level": "local_packaged_contract"
+    },
+    {
+      "artifacts": [
+        "ide/configs/perplexity-mcp.json"
+      ],
+      "category": "desktop",
+      "contracts": {
+        "config_generation_parse": {
+          "evidence": [
+            "Config fixture syntax is validated; the host does not execute locally."
+          ],
+          "status": "static_only"
+        },
+        "context_injection": {
+          "evidence": [
+            "No owned context-injection surface is shipped for this client."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "evidence": [
+            "The shared MCP server exposes remember, recall, update_memory, and forget; host discovery was not executed."
+          ],
+          "status": "static_only"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "evidence": [
+            "The checked fixture names slm mcp, but the external host was not launched."
+          ],
+          "status": "static_only"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "The user owns removal of this manually copied config block."
+          ],
+          "status": "manual_only"
+        }
+      },
+      "display": "Perplexity Desktop",
+      "external_host_runtime_proven": false,
+      "id": "perplexity",
+      "test_level": "static_fixture_only"
+    },
+    {
+      "artifacts": [
+        "ide/configs/chatgpt-desktop-mcp.json"
+      ],
+      "category": "remote_connector_instructions",
+      "contracts": {
+        "config_generation_parse": {
+          "evidence": [
+            "Config fixture syntax is validated; the host does not execute locally."
+          ],
+          "status": "static_only"
+        },
+        "context_injection": {
+          "evidence": [
+            "No owned context-injection surface is shipped for this client."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "evidence": [
+            "The documented connector contract exposes search and fetch only, not remember/update/forget."
+          ],
+          "status": "not_proven"
+        },
+        "reconnect": {
+          "evidence": [
+            "No external client reconnect was executed locally."
+          ],
+          "status": "not_proven"
+        },
+        "start_command_shape": {
+          "evidence": [
+            "The file documents a user-started HTTP server and tunnel; no start command is installed into ChatGPT."
+          ],
+          "status": "manual_only"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "The user owns removal of this manually copied config block."
+          ],
+          "status": "manual_only"
+        }
+      },
+      "display": "ChatGPT Connector",
+      "external_host_runtime_proven": false,
+      "id": "chatgpt-desktop",
+      "test_level": "instructions_only"
+    },
+    {
+      "artifacts": [
+        "ide/configs/cody-commands.json"
+      ],
+      "category": "prompt_templates",
+      "contracts": {
+        "config_generation_parse": {
+          "evidence": [
+            "Config fixture syntax is validated; the host does not execute locally."
+          ],
+          "status": "static_only"
+        },
+        "context_injection": {
+          "evidence": [
+            "Prompt templates do not inject retrieved SLM context."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "evidence": [
+            "The prompts mention remember/recall intents but contain no executable SLM transport binding."
+          ],
+          "status": "manual_only"
+        },
+        "reconnect": {
+          "evidence": [
+            "Prompt templates own no connection."
+          ],
+          "status": "not_applicable"
+        },
+        "start_command_shape": {
+          "evidence": [
+            "The artifact contains prompt templates and starts no SLM process."
+          ],
+          "status": "not_applicable"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "The user owns removal of this manually copied config block."
+          ],
+          "status": "manual_only"
+        }
+      },
+      "display": "Sourcegraph Cody",
+      "external_host_runtime_proven": false,
+      "id": "cody",
+      "test_level": "prompt_template_only"
+    },
+    {
+      "artifacts": [
+        "ide/integrations/langchain/pyproject.toml",
+        "ide/integrations/langchain/tests/test_chat_message_history.py"
+      ],
+      "category": "framework_adapter",
+      "contracts": {
+        "config_generation_parse": {
+          "evidence": [
+            "This is a Python chat-store package, not an IDE config generator."
+          ],
+          "status": "not_applicable"
+        },
+        "context_injection": {
+          "evidence": [
+            "The adapter persists chat history; the framework owns prompt/context injection."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "evidence": [
+            "The chat-store API proves add/read/delete semantics, not the full remember/semantic-recall/update/forget surface."
+          ],
+          "status": "not_proven"
+        },
+        "reconnect": {
+          "evidence": [
+            "An isolated adapter test exists, but its dependencies are not part of the top-level release gate."
+          ],
+          "status": "static_only"
+        },
+        "start_command_shape": {
+          "evidence": [
+            "This package is imported by the framework and starts no MCP process."
+          ],
+          "status": "not_applicable"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Package uninstall is owned by the Python package manager."
+          ],
+          "status": "not_applicable"
+        }
+      },
+      "display": "LangChain",
+      "external_host_runtime_proven": false,
+      "id": "langchain",
+      "test_level": "isolated_adapter_tests_not_release_gated"
+    },
+    {
+      "artifacts": [
+        "ide/integrations/llamaindex/pyproject.toml",
+        "ide/integrations/llamaindex/tests/test_chat_store.py"
+      ],
+      "category": "framework_adapter",
+      "contracts": {
+        "config_generation_parse": {
+          "evidence": [
+            "This is a Python chat-store package, not an IDE config generator."
+          ],
+          "status": "not_applicable"
+        },
+        "context_injection": {
+          "evidence": [
+            "The adapter persists chat history; the framework owns prompt/context injection."
+          ],
+          "status": "not_applicable"
+        },
+        "memory_surface": {
+          "evidence": [
+            "The chat-store API proves add/read/delete semantics, not the full remember/semantic-recall/update/forget surface."
+          ],
+          "status": "not_proven"
+        },
+        "reconnect": {
+          "evidence": [
+            "An isolated adapter test exists, but its dependencies are not part of the top-level release gate."
+          ],
+          "status": "static_only"
+        },
+        "start_command_shape": {
+          "evidence": [
+            "This package is imported by the framework and starts no MCP process."
+          ],
+          "status": "not_applicable"
+        },
+        "uninstall_ownership": {
+          "evidence": [
+            "Package uninstall is owned by the Python package manager."
+          ],
+          "status": "not_applicable"
+        }
+      },
+      "display": "LlamaIndex",
+      "external_host_runtime_proven": false,
+      "id": "llamaindex",
+      "test_level": "isolated_adapter_tests_not_release_gated"
+    }
+  ],
+  "schema": "superlocalmemory.integration-compatibility/v1",
+  "summary": {
+    "checks_run": 45,
+    "external_host_runtime_proven": 0,
+    "locally_contract_tested": 12,
+    "named_clients": 17,
+    "static_or_manual_only": 5
+  }
+}
