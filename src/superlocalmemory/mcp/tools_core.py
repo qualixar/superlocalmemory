@@ -140,7 +140,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
         # a synchronous verbatim insert (memory is keyword/BM25-recallable the
         # instant this returns) and enqueues async enrichment. This closes the
         # recall window so a parallel/next agent finds memories saved seconds ago.
-        # Falls back to pending.db only if the daemon is unreachable.
+        # Falls back to the capability-owned worker only if the daemon is
+        # unreachable. Raw pending.db writes are legacy replay input only.
         try:
             import asyncio as _asyncio
             from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
@@ -176,30 +177,39 @@ def register_core_tools(server, get_engine: Callable) -> None:
             logger.debug("MCP remember via daemon failed, pending fallback: %s", dexc)
 
         try:
-            from superlocalmemory.cli.pending_store import store_pending
-            # v3.6.15: preserve a non-personal scope through the offline path so
-            # the materializer replays the right visibility (else --scope global
-            # would silently downgrade to personal when the daemon is offline).
-            meta = {
+            import asyncio as _asyncio
+            from superlocalmemory.mcp._daemon_proxy import choose_pool
+
+            worker_meta = {
                 **meta,
-                "_slm_source_type": "mcp-offline",
-                "_slm_idempotency_key": (
+                "tags": tags,
+                "scope": scope or "personal",
+                "shared_with": _shared_list or [],
+                "idempotency_key": (
                     effective_idempotency_key
                     or "mcp:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
                 ),
             }
-            if scope and scope != "personal":
-                meta["scope"] = scope
-                if _shared_list:
-                    meta["shared_with"] = _shared_list
-            pending_id = store_pending(content, tags=tags, metadata=meta)
+            stored = await _asyncio.to_thread(
+                choose_pool().store,
+                content,
+                worker_meta,
+            )
+            if not isinstance(stored, dict) or not stored.get("ok"):
+                raise RuntimeError(
+                    (stored or {}).get("error", "canonical worker store failed")
+                    if isinstance(stored, dict)
+                    else "canonical worker returned an invalid response"
+                )
+            fact_ids = list(stored.get("fact_ids") or [])
             return {
                 "success": True,
-                "fact_ids": [f"pending:{pending_id}"],
-                "count": 1,
-                "pending": True,
-                "pending_id": pending_id,
-                "message": "Stored — facts will appear shortly (daemon offline).",
+                "fact_ids": fact_ids,
+                "count": int(stored.get("count", len(fact_ids))),
+                "pending": False,
+                "pending_id": None,
+                "materialization_state": "complete",
+                "message": "Stored through canonical local ingestion.",
             }
         except Exception as exc:
             logger.exception("remember failed")

@@ -113,44 +113,61 @@ class TestRememberTool:
         assert result.get("pending") is True
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_remember_routes_to_pending_store(self, mock_emit):
-        """v3.4.32: remember writes to pending.db only — daemon materializer
-        drains the queue with recall priority. No redundant pool.store call."""
+    def test_remember_routes_to_canonical_worker(self, mock_emit):
+        """Daemon-offline remember uses the capability-owned worker."""
         remember = _get_remember_tool()
+        pool = MagicMock()
+        pool.store.return_value = {
+            "ok": True,
+            "fact_ids": ["fact-42"],
+            "count": 1,
+        }
 
-        with patch("superlocalmemory.cli.pending_store.store_pending",
-                   return_value=42) as mock_store:
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
+        ):
             result = asyncio.run(
                 remember("important fact", tags="python", project="slm")
             )
 
-        mock_store.assert_called_once()
-        call_args = mock_store.call_args
-        assert call_args[0][0] == "important fact"
-        assert call_args[1]["tags"] == "python"
-        assert call_args[1]["metadata"]["project"] == "slm"
-        assert call_args[1]["metadata"]["_slm_source_type"] == "mcp-offline"
-        assert call_args[1]["metadata"]["_slm_idempotency_key"].startswith("mcp:")
+        pool.store.assert_called_once()
+        call_args = pool.store.call_args
+        assert call_args.args[0] == "important fact"
+        assert call_args.args[1]["tags"] == "python"
+        assert call_args.args[1]["project"] == "slm"
+        assert call_args.args[1]["idempotency_key"].startswith("mcp:")
         assert result["success"] is True
-        assert result["pending"] is True
-        assert result["pending_id"] == 42
-        assert result["fact_ids"] == ["pending:42"]
+        assert result["pending"] is False
+        assert result["pending_id"] is None
+        assert result["fact_ids"] == ["fact-42"]
 
-    def test_remember_stores_to_pending_with_metadata(self):
-        """V3.3.27: Store-first pattern saves content and metadata to pending.db."""
+    def test_remember_sends_metadata_to_canonical_worker(self):
+        """Offline canonical ingestion preserves untrusted source metadata."""
         remember = _get_remember_tool()
+        pool = MagicMock()
+        pool.store.return_value = {
+            "ok": True,
+            "fact_ids": ["fact-meta"],
+            "count": 1,
+        }
 
-        result = asyncio.run(remember(
-            "meta test content for pending store",
-            tags="ai,ml", project="qclaw",
-            importance=9, agent_id="test-agent",
-        ))
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
+        ):
+            result = asyncio.run(remember(
+                "meta test content for canonical store",
+                tags="ai,ml", project="qclaw",
+                importance=9, agent_id="test-agent",
+            ))
 
         assert result["success"] is True
-        assert result.get("pending") is True
-        # Verify pending ID is returned
-        assert len(result["fact_ids"]) == 1
-        assert result["fact_ids"][0].startswith("pending:")
+        assert result.get("pending") is False
+        metadata = pool.store.call_args.args[1]
+        assert metadata["agent_id"] == "test-agent"
+        assert metadata["project"] == "qclaw"
+        assert metadata["importance"] == 9
 
 
 # ---------------------------------------------------------------------------
@@ -161,14 +178,19 @@ class TestRememberEdgeCases:
     """Edge case handling for the remember tool."""
 
     def test_remember_empty_content_handled(self):
-        """V3.3.27: Empty string content does not crash the store-first path."""
+        """Empty string rejection is returned without raw staging."""
         remember = _get_remember_tool()
-        result = asyncio.run(remember(""))
-        # Should not raise — store_pending accepts any content
+        pool = MagicMock()
+        pool.store.return_value = {"ok": True, "fact_ids": [], "count": 0}
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
+        ):
+            result = asyncio.run(remember(""))
         assert result["success"] is True
 
-    def test_remember_worker_pool_exception_still_stores_pending(self):
-        """V3.3.27: When WorkerPool crashes, data is still safe in pending.db."""
+    def test_remember_worker_pool_exception_fails_without_raw_persistence(self):
+        """Worker failure is explicit; it cannot bypass write authorization."""
         remember = _get_remember_tool()
 
         with patch(
@@ -177,15 +199,21 @@ class TestRememberEdgeCases:
         ):
             result = asyncio.run(remember("boom"))
 
-        assert result["success"] is True
-        assert result.get("pending") is True
+        assert result["success"] is False
+        assert "worker crashed" in result["error"]
 
-    def test_remember_agent_id_included_in_result(self):
-        """V3.3.27: agent_id is included in the store-first result."""
+    def test_remember_agent_id_is_untrusted_worker_metadata(self):
+        """Caller agent ID is audit metadata, not the trusted actor."""
         remember = _get_remember_tool()
-        result = asyncio.run(remember("agent test", agent_id="claude-opus"))
+        pool = MagicMock()
+        pool.store.return_value = {"ok": True, "fact_ids": ["fact-a"], "count": 1}
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
+        ):
+            result = asyncio.run(remember("agent test", agent_id="claude-opus"))
         assert result["success"] is True
-        assert result.get("pending") is True
+        assert pool.store.call_args.args[1]["agent_id"] == "claude-opus"
 
 
 class TestRememberWriteThrough:

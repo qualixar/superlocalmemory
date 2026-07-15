@@ -104,8 +104,26 @@ def _handle_recall(
 
 def _handle_store(content: str, metadata: dict) -> dict:
     engine = _get_engine()
-    session_id = metadata.pop("session_id", "")
-    fact_ids = engine.store(content, session_id=session_id, metadata=metadata)
+    values = dict(metadata or {})
+    session_id = str(values.pop("session_id", "") or "")
+    scope = str(values.pop("scope", "personal") or "personal")
+    shared_with = list(values.pop("shared_with", []) or [])
+    idempotency_key = str(values.pop("idempotency_key", "") or "")
+    from superlocalmemory.core.engine_ingestion import (
+        canonical_store,
+        local_trusted_actor_id,
+    )
+    fact_ids = canonical_store(
+        engine,
+        content,
+        source_type="mcp-offline-worker",
+        trusted_actor_id=local_trusted_actor_id("recall-worker"),
+        metadata=values,
+        scope=scope,
+        shared_with=shared_with,
+        session_id=session_id,
+        idempotency_key=idempotency_key,
+    )
 
     # Generate and persist summary immediately after store (Mode A heuristic, B/C LLM)
     if fact_ids:

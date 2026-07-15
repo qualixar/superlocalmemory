@@ -1034,7 +1034,8 @@ def cmd_remember(args: Namespace) -> None:
 
     # V3.3.21: Route through daemon for instant remember (no cold start).
     # If daemon is running, send request directly (~0.1s).
-    # If not, use store-first pattern (pending.db) as fallback.
+    # If not, fall through to the canonical local engine.  Public callers must
+    # never persist raw evidence ahead of actor derivation and the write hook.
     if not sync_mode:
         # Try daemon first
         try:
@@ -1059,45 +1060,7 @@ def cmd_remember(args: Namespace) -> None:
                         )
                     return
         except Exception:
-            pass  # Fall through to pending store
-
-        # v3.4.13: Store to pending DB (zero data loss) — daemon processes in background.
-        # NO subprocess spawn. Daemon's background loop picks up pending memories.
-        from superlocalmemory.cli.pending_store import store_pending
-
-        # v3.6.15 multi-scope: carry an explicit non-personal scope into the
-        # pending row's metadata so the materializer replays the right
-        # visibility. Unset / personal carries nothing — byte-identical to
-        # pre-3.6.15 pending rows.
-        import hashlib as _hashlib
-        _identity_material = (
-            f"{args.content}\0{args.tags or ''}\0{scope or ''}\0"
-            f"{','.join(shared_with or [])}"
-        )
-        _pending_meta = {
-            "_slm_source_type": "cli-offline",
-            "_slm_idempotency_key": "cli:" + _hashlib.sha256(
-                _identity_material.encode("utf-8")
-            ).hexdigest(),
-        }
-        if scope and scope != "personal":
-            _pending_meta["scope"] = scope
-            if shared_with:
-                _pending_meta["shared_with"] = shared_with
-
-        row_id = store_pending(
-            content=args.content,
-            tags=args.tags or "",
-            metadata=_pending_meta,
-        )
-
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("remember", data={"queued": True, "async": True,
-                                         "pending_id": row_id, "safe": True})
-        else:
-            print(f"Stored \u2713 (pending_id={row_id}) \u2014 processing in background.")
-        return
+            pass  # Fall through to authenticated canonical local ingestion.
 
     from superlocalmemory.core.engine import MemoryEngine
 
@@ -1117,7 +1080,7 @@ def cmd_remember(args: Namespace) -> None:
         operation = canonical_store(
             engine,
             args.content,
-            source_type="cli-sync",
+            source_type="cli-sync" if sync_mode else "cli-offline-canonical",
             trusted_actor_id=local_trusted_actor_id("cli"),
             metadata=metadata,
             scope=_scope,

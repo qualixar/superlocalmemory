@@ -79,3 +79,42 @@ def test_update_uses_capability_actor_and_runs_write_authorization(
         "fact-1",
         {"content": "new content"},
     )
+
+
+def test_store_uses_capability_actor_before_canonical_persistence(
+    monkeypatch,
+) -> None:
+    engine = _engine()
+    canonical_store = MagicMock(return_value=[])
+    monkeypatch.setattr(recall_worker, "_get_engine", lambda: engine)
+    monkeypatch.setattr(
+        "superlocalmemory.core.engine_ingestion.local_trusted_actor_id",
+        lambda kind: f"trusted:{kind}",
+    )
+    monkeypatch.setattr(
+        "superlocalmemory.core.engine_ingestion.canonical_store",
+        canonical_store,
+    )
+
+    result = recall_worker._handle_store(
+        "remember this",
+        {
+            "agent_id": "caller-selected-admin",
+            "scope": "shared",
+            "shared_with": ["research"],
+            "idempotency_key": "request-1",
+        },
+    )
+
+    assert result == {"ok": True, "fact_ids": [], "count": 0}
+    canonical_store.assert_called_once_with(
+        engine,
+        "remember this",
+        source_type="mcp-offline-worker",
+        trusted_actor_id="trusted:recall-worker",
+        metadata={"agent_id": "caller-selected-admin"},
+        scope="shared",
+        shared_with=["research"],
+        session_id="",
+        idempotency_key="request-1",
+    )
