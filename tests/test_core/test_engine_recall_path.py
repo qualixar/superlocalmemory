@@ -11,8 +11,7 @@ Covers:
   - recall() uses override profile_id when supplied
   - recall() uses override mode when supplied
   - recall() records retrieval_time_ms > 0
-  - Reconsolidation: trust_scorer.update_on_access called per result
-  - Reconsolidation: access_count incremented via _db.update_fact
+  - Recall exposure does not reinforce trust or ranking state
   - Adaptive ranking phase 1: no reranking when < 50 signals
   - Adaptive ranking: skips gracefully when learning DB missing
   - Pre-hooks invoked before recall
@@ -151,13 +150,13 @@ class TestRecallBasicFlow:
 # Reconsolidation (post-recall updates)
 # ---------------------------------------------------------------------------
 
-class TestRecallReconsolidation:
-    """Verify trust and access count updates after recall."""
+class TestRecallExposureIsolation:
+    """A model seeing a result is exposure, not positive feedback."""
 
-    def test_recall_updates_trust_on_access(
+    def test_recall_does_not_update_trust_from_exposure(
         self, engine_with_mock_deps: MemoryEngine,
     ) -> None:
-        """recall() calls trust_scorer.update_on_access for each result."""
+        """Trust changes require an authenticated outcome, not retrieval."""
         fact = _make_fact("trust-f1")
         mock_response = _make_recall_response(facts=[fact])
         re = engine_with_mock_deps._retrieval_engine
@@ -166,14 +165,12 @@ class TestRecallReconsolidation:
         with patch.object(re, 'recall', return_value=mock_response):
             with patch.object(ts, 'update_on_access') as trust_spy:
                 engine_with_mock_deps.recall("trust query")
-                trust_spy.assert_called_once_with(
-                    "fact", "trust-f1", engine_with_mock_deps._profile_id,
-                )
+                trust_spy.assert_not_called()
 
-    def test_recall_increments_access_count(
+    def test_recall_does_not_increment_ranking_access_count(
         self, engine_with_mock_deps: MemoryEngine,
     ) -> None:
-        """recall() calls _db.update_fact to increment access_count."""
+        """Exposure telemetry must not feed the next retrieval score."""
         fact = _make_fact("access-f1", access_count=3)
         mock_response = _make_recall_response(facts=[fact])
         re = engine_with_mock_deps._retrieval_engine
@@ -182,9 +179,7 @@ class TestRecallReconsolidation:
         with patch.object(re, 'recall', return_value=mock_response):
             with patch.object(db, 'update_fact') as db_spy:
                 engine_with_mock_deps.recall("access query")
-                db_spy.assert_called_once()
-                update_dict = db_spy.call_args[0][1]
-                assert update_dict["access_count"] == 4  # 3 + 1
+                db_spy.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
