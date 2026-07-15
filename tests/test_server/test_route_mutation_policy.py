@@ -84,6 +84,7 @@ def test_v3_memory_lifecycle_routes_cross_authenticated_policy_boundary() -> Non
         block = _function_block(source, function_name)
         assert "authorize_route_mutation" in block, function_name
         assert ".complete()" in block, function_name
+        assert "except HTTPException:" in block, function_name
 
 
 def test_fact_delete_and_edit_delegate_to_canonical_mutation_service() -> None:
