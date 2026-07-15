@@ -38,6 +38,21 @@ class _CursorConnection:
         self.closed = True
 
 
+def test_ingestion_schema_verifier_closes_its_sqlite_connection(monkeypatch) -> None:
+    """The migration verifier owns and explicitly closes its DB handle."""
+    from superlocalmemory.core import engine as engine_module
+
+    conn = _CursorConnection()
+    monkeypatch.setattr("sqlite3.connect", lambda *_args, **_kwargs: conn)
+    monkeypatch.setattr(
+        "superlocalmemory.storage.migrations.M018_ingestion_operations.verify",
+        lambda candidate: candidate is conn,
+    )
+
+    assert engine_module._verify_ingestion_schema(Path("memory.db")) is True
+    assert conn.closed is True
+
+
 def test_stop_hook_closes_owned_connection_on_cancellation(monkeypatch) -> None:
     from superlocalmemory.hooks import stop_outcome_hook as hook
 
