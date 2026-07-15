@@ -1281,6 +1281,24 @@ async def lifespan(application: FastAPI):
 # App factory
 # ---------------------------------------------------------------------------
 
+def _configure_mcp_transport_settings(fastmcp) -> bool:
+    """Apply the current transport mode without leaking singleton state.
+
+    ``superlocalmemory.mcp.server.server`` is process-global.  App factories
+    are invoked more than once by tests and embedded hosts, so both flags must
+    be assigned on every call; an earlier stateless app must not silently turn
+    a later default app stateless.  Keeping this small policy separate also
+    lets tests exercise the wiring without reloading FastMCP and rebuilding
+    hundreds of Pydantic models in a native-heavy Python process.
+    """
+    from superlocalmemory.core.remote_mode import mcp_stateless
+
+    stateless = bool(mcp_stateless())
+    fastmcp.settings.stateless_http = stateless
+    fastmcp.settings.json_response = stateless
+    return stateless
+
+
 def create_app() -> FastAPI:
     """Create the unified FastAPI application."""
     from superlocalmemory.server.routes.helpers import SLM_VERSION
@@ -1475,10 +1493,8 @@ def create_app() -> FastAPI:
         # clients keep full stateful sessions); enabled by SLM_REMOTE=1 or
         # SLM_MCP_STATELESS=1. Per-agent /mcp/{agent_id} routing is unaffected
         # (path-based, not session-based).
-        from superlocalmemory.core.remote_mode import mcp_stateless, is_remote_mode
-        if mcp_stateless():
-            _mcp_fastmcp.settings.stateless_http = True
-            _mcp_fastmcp.settings.json_response = True
+        from superlocalmemory.core.remote_mode import is_remote_mode
+        if _configure_mcp_transport_settings(_mcp_fastmcp):
             if is_remote_mode():
                 logger.warning(
                     "MCP transport: STATELESS mode ON (SLM_REMOTE) — LAN "
