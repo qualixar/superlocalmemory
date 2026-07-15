@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 logger = logging.getLogger(__name__)
 
@@ -970,6 +971,12 @@ async def run_consolidation(request: Request):
 
         config = SLMConfig.load()
         learning_db = DB_PATH.parent / "learning.db"
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-learning-consolidate",
+            profile_id=config.active_profile,
+        )
         result = await run_in_threadpool(
             run_consolidation_isolated,
             str(DB_PATH),
@@ -988,7 +995,10 @@ async def run_consolidation(request: Request):
             except Exception:
                 pass
         stats = result.get("stats") or {}
+        authorization.complete()
         return {"success": True, **stats}
+    except HTTPException:
+        raise
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -1383,6 +1393,12 @@ async def trigger_consolidation(request: Request):
 
         from superlocalmemory.server.routes.helpers import get_active_profile
         pid = profile or get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-consolidation-trigger",
+            profile_id=pid,
+        )
 
         # Use WorkerPool to run consolidation in the worker subprocess (Rule 18)
         try:
@@ -1394,6 +1410,7 @@ async def trigger_consolidation(request: Request):
                 "lightweight": lightweight,
             })
             if result and result.get("ok"):
+                authorization.complete()
                 return {"success": True, **result}
         except Exception:
             pass
@@ -1422,7 +1439,10 @@ async def trigger_consolidation(request: Request):
         except Exception as exc:
             logger.debug("Pattern mining after consolidation failed: %s", exc)
 
+        authorization.complete()
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1490,7 +1510,7 @@ async def update_core_memory_block(block_id: str, request: Request):
                 status_code=400,
             )
 
-        from superlocalmemory.server.routes.helpers import DB_PATH
+        from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
         import sqlite3
         from datetime import datetime, timezone
 
@@ -1500,14 +1520,24 @@ async def update_core_memory_block(block_id: str, request: Request):
                 status_code=404,
             )
 
+        pid = get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-core-memory-update",
+            profile_id=pid,
+            fact_id=block_id,
+            content_preview=str(content),
+        )
+
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
 
         # Verify block exists
         existing = conn.execute(
             "SELECT block_id, profile_id, block_type, version "
-            "FROM core_memory_blocks WHERE block_id = ?",
-            (block_id,),
+            "FROM core_memory_blocks WHERE block_id = ? AND profile_id = ?",
+            (block_id, pid),
         ).fetchone()
 
         if not existing:
@@ -1524,8 +1554,8 @@ async def update_core_memory_block(block_id: str, request: Request):
         conn.execute(
             "UPDATE core_memory_blocks SET content = ?, char_count = ?, "
             "version = ?, compiled_by = 'manual', updated_at = ? "
-            "WHERE block_id = ?",
-            (content, len(content), new_version, now, block_id),
+            "WHERE block_id = ? AND profile_id = ?",
+            (content, len(content), new_version, now, block_id, pid),
         )
         conn.commit()
 
@@ -1533,12 +1563,15 @@ async def update_core_memory_block(block_id: str, request: Request):
         updated = conn.execute(
             "SELECT block_id, block_type, content, char_count, version, "
             "compiled_by, updated_at FROM core_memory_blocks "
-            "WHERE block_id = ?",
-            (block_id,),
+            "WHERE block_id = ? AND profile_id = ?",
+            (block_id, pid),
         ).fetchone()
         conn.close()
 
+        authorization.complete()
         return dict(updated) if updated else {"block_id": block_id, "updated": True}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1664,6 +1697,12 @@ async def run_forgetting(request: Request):
         if not DB_PATH.exists():
             return {"success": False, "error": "Database not found"}
 
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-forgetting-run",
+            profile_id=pid,
+        )
         conn = _sqlite3.connect(str(DB_PATH))
         conn.row_factory = _sqlite3.Row
 
@@ -1713,7 +1752,10 @@ async def run_forgetting(request: Request):
             return {"success": False, "error": str(exc)}
 
         conn.close()
+        authorization.complete()
         return {"success": True, "facts_decayed": updated, "profile": pid}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -2083,12 +2125,21 @@ async def run_community_detection(request: Request):
         from superlocalmemory.core.graph_analyzer import GraphAnalyzer
 
         pid = get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-community-detection",
+            profile_id=pid,
+        )
         db = DatabaseManager(DB_PATH)
         db.initialize(_schema)
 
         analyzer = GraphAnalyzer(db)
         result = analyzer.compute_and_store(pid)
+        authorization.complete()
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

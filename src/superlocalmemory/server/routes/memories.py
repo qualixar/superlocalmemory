@@ -31,8 +31,9 @@ def _authorize_memory_mutation(
     fact_id: str,
     *,
     content_preview: str = "",
+    run_pre_hook: bool = True,
 ):
-    """Authenticate and run the engine trust boundary before direct SQL."""
+    """Authenticate a mutation, optionally gating route-owned direct SQL."""
     from superlocalmemory.server.write_identity import require_write_actor
 
     actor_id = require_write_actor(
@@ -53,11 +54,12 @@ def _authorize_memory_mutation(
     }
     if content_preview:
         context["content_preview"] = content_preview[:100]
-    try:
-        engine._hooks.run_pre(operation, context)
-    except Exception as exc:
-        logger.warning("Dashboard %s authorization rejected: %s", operation, exc)
-        raise HTTPException(403, detail="Write authorization rejected") from exc
+    if run_pre_hook:
+        try:
+            engine._hooks.run_pre(operation, context)
+        except Exception as exc:
+            logger.warning("Dashboard %s authorization rejected: %s", operation, exc)
+            raise HTTPException(403, detail="Write authorization rejected") from exc
     return engine, profile_id, context
 
 
@@ -775,25 +777,20 @@ async def get_fact_detail(request: Request, fact_id: str):
 @router.delete("/api/memories/{fact_id}")
 async def delete_memory(request: Request, fact_id: str):
     """Delete a specific memory (atomic fact) by ID."""
-    engine, active_profile, hook_context = _authorize_memory_mutation(
-        request, "delete", fact_id,
+    engine, _active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id, run_pre_hook=False,
     )
     try:
-        conn = get_db_connection()
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        # Verify it exists and belongs to this profile
-        cursor.execute(
-            "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, active_profile),
+        from superlocalmemory.core.mutations import delete_fact_authorized
+
+        result = delete_fact_authorized(
+            engine,
+            fact_id,
+            trusted_actor_id=hook_context["agent_id"],
+            source_agent_id="dashboard",
         )
-        if not cursor.fetchone():
-            conn.close()
+        if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
-        cursor.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
-        conn.commit()
-        conn.close()
-        engine._hooks.run_post("delete", hook_context)
         return {"success": True, "deleted": fact_id}
     except HTTPException:
         raise
@@ -939,29 +936,24 @@ async def edit_memory(request: Request, fact_id: str):
         new_content = (body.get("content") or "").strip()
         if not new_content:
             raise HTTPException(status_code=400, detail="content is required")
-        engine, active_profile, hook_context = _authorize_memory_mutation(
+        engine, _active_profile, hook_context = _authorize_memory_mutation(
             request,
             "update",
             fact_id,
             content_preview=new_content,
+            run_pre_hook=False,
         )
-        conn = get_db_connection()
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, active_profile),
+        from superlocalmemory.core.mutations import update_fact_authorized
+
+        result = update_fact_authorized(
+            engine,
+            fact_id,
+            new_content,
+            trusted_actor_id=hook_context["agent_id"],
+            source_agent_id="dashboard",
         )
-        if not cursor.fetchone():
-            conn.close()
+        if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
-        cursor.execute(
-            "UPDATE atomic_facts SET content = ? WHERE fact_id = ?",
-            (new_content, fact_id),
-        )
-        conn.commit()
-        conn.close()
-        engine._hooks.run_post("update", hook_context)
         return {"success": True, "fact_id": fact_id, "content": new_content}
     except HTTPException:
         raise
