@@ -35,6 +35,8 @@ def test_release_uses_only_immutable_action_revisions() -> None:
 
     assert action_uses
     assert all(re.search(r"@[0-9a-f]{40}$", action) for action in action_uses), action_uses
+    assert "uvx --from twine==6.2.0 twine check" in source
+    assert "uvx twine check" not in source
 
 
 def test_release_tests_and_records_exact_candidates_before_publication() -> None:
