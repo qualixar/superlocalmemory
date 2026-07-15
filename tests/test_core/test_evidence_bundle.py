@@ -8,8 +8,7 @@ from pathlib import Path
 
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
-from superlocalmemory.storage.migrations import M018_ingestion_operations
-from superlocalmemory.storage.migrations import M019_derivation_lineage
+from superlocalmemory.storage.migrations import M018_ingestion_operations, M019_derivation_lineage
 
 
 def _db(path: Path) -> DatabaseManager:
@@ -79,10 +78,16 @@ def test_export_is_deterministic_git_friendly_and_span_linked(tmp_path: Path) ->
 
     assert first["bundle_id"] == second["bundle_id"]
     assert first["files"] == second["files"]
-    facts = [json.loads(line) for line in (tmp_path / "first/facts.jsonl").read_text().splitlines()]
+    facts = [
+        json.loads(line)
+        for line in (tmp_path / "first/facts.jsonl").read_text().splitlines()
+    ]
     assert facts[0]["fact_id"] == "f1"
     assert "embedding" not in facts[0]
-    spans = [json.loads(line) for line in (tmp_path / "first/source_spans.jsonl").read_text().splitlines()]
+    spans = [
+        json.loads(line)
+        for line in (tmp_path / "first/source_spans.jsonl").read_text().splitlines()
+    ]
     assert spans == [{
         "end": len("Alpha uses SQLite"),
         "fact_id": "f1",
@@ -131,10 +136,15 @@ def test_round_trip_import_and_rebuild_derived_state(tmp_path: Path) -> None:
     export_evidence_bundle(source, "default", bundle)
 
     target = _db(tmp_path / "target.db")
-    result = import_evidence_bundle(target, bundle, replace=True, rollback_dir=tmp_path / "rollback")
+    result = import_evidence_bundle(
+        target, bundle, replace=True, rollback_dir=tmp_path / "rollback"
+    )
     assert result.valid is True
-    assert target.execute("SELECT content FROM atomic_facts WHERE fact_id='f1'")[0]["content"] == "Alpha uses SQLite"
-    assert target.execute("SELECT embedding FROM atomic_facts WHERE fact_id='f1'")[0]["embedding"] is None
+    fact = target.execute(
+        "SELECT content,embedding FROM atomic_facts WHERE fact_id='f1'"
+    )[0]
+    assert fact["content"] == "Alpha uses SQLite"
+    assert fact["embedding"] is None
 
     class Embedder:
         def embed(self, text: str) -> list[float]:

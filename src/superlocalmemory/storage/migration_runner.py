@@ -34,26 +34,60 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 from superlocalmemory.storage.migrations import (
     M001_add_signal_features_columns as _M001,
+)
+from superlocalmemory.storage.migrations import (
     M002_model_state_history as _M002,
+)
+from superlocalmemory.storage.migrations import (
     M003_migration_log as _M003,
+)
+from superlocalmemory.storage.migrations import (
     M004_cross_platform_sync_log as _M004,
+)
+from superlocalmemory.storage.migrations import (
     M005_bandit_tables as _M005,
+)
+from superlocalmemory.storage.migrations import (
     M006_action_outcomes_reward as _M006,
+)
+from superlocalmemory.storage.migrations import (
     M007_pending_outcomes as _M007,
+)
+from superlocalmemory.storage.migrations import (
     M009_model_lineage as _M009,
+)
+from superlocalmemory.storage.migrations import (
     M010_evolution_config as _M010,
+)
+from superlocalmemory.storage.migrations import (
     M011_archive_and_merge as _M011,
+)
+from superlocalmemory.storage.migrations import (
     M012_shadow_observations as _M012,
+)
+from superlocalmemory.storage.migrations import (
     M013_bi_temporal_columns as _M013,
+)
+from superlocalmemory.storage.migrations import (
     M014_v345_scale_ready as _M014,
+)
+from superlocalmemory.storage.migrations import (
     M015_add_pinned_column as _M015,
+)
+from superlocalmemory.storage.migrations import (
     M016_add_scope_support as _M016,
+)
+from superlocalmemory.storage.migrations import (
     M017_ccq_scope_column as _M017,
+)
+from superlocalmemory.storage.migrations import (
     M018_ingestion_operations as _M018,
+)
+from superlocalmemory.storage.migrations import (
+    M019_derivation_lineage as _M019,
 )
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
@@ -77,6 +111,7 @@ _MODULES = {
     _M016.NAME: _M016,
     _M017.NAME: _M017,
     _M018.NAME: _M018,
+    _M019.NAME: _M019,
 }
 
 logger = logging.getLogger(__name__)
@@ -117,6 +152,8 @@ MIGRATIONS: list[Migration] = [
     Migration(name=_M007.NAME, db_target="memory", ddl=_M007.DDL),
     # M018 is additive and independent of runtime-bootstrapped tables.
     Migration(name=_M018.NAME, db_target="memory", ddl=_M018.DDL),
+    Migration(name=_M019.NAME, db_target="memory", ddl=_M019.DDL,
+              dependencies=(_M018.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 

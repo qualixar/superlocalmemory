@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from superlocalmemory.core.evidence_bundle import export_evidence_bundle
 from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
     IngestionOperationRepository,
@@ -179,3 +180,11 @@ def test_checkpoint_versions_summaries_edges_scenes_and_lexical_index(
     assert index["source_status"] == "exact"
     assert index["source_start"] == 0
     assert {row["derivation_version"] for row in rows.values()} == {"test-derived-v2"}
+
+    manifest = export_evidence_bundle(db, "default", tmp_path / "bundle")
+    assert manifest["lineage_coverage"]["entity_summary"]["durable"] == 1
+    assert manifest["lineage_coverage"]["entity_summary"]["derived_from_facts"] == 1
+    assert manifest["lineage_coverage"]["memory_scene"]["durable"] == 1
+    assert manifest["lineage_coverage"]["graph_edge"]["durable"] == 1
+    assert manifest["lineage_coverage"]["index_bm25"]["durable"] == 1
+    assert manifest["lineage_coverage"]["profile"]["not_applicable"] == 1

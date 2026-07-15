@@ -32,10 +32,13 @@ _TABLES: tuple[tuple[str, str, str], ...] = (
     ("memories.jsonl", "memories", "memory_id"),
     ("facts.jsonl", "atomic_facts", "fact_id"),
     ("entities.jsonl", "canonical_entities", "entity_id"),
+    ("entity_profiles.jsonl", "entity_profiles", "profile_entry_id"),
+    ("memory_scenes.jsonl", "memory_scenes", "scene_id"),
     ("graph_edges.jsonl", "graph_edges", "edge_id"),
     ("temporal_events.jsonl", "temporal_events", "event_id"),
     ("provenance.jsonl", "provenance", "provenance_id"),
     ("ingestion_operations.jsonl", "ingestion_operations", "operation_id"),
+    ("derivation_lineage.jsonl", "derivation_lineage", "lineage_id"),
 )
 
 
@@ -96,12 +99,17 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 
 def _source_spans(
-    operations: list[dict], facts: list[dict],
+    operations: list[dict], facts: list[dict], lineage: list[dict],
 ) -> tuple[list[dict], dict[str, dict], list[str]]:
     facts_by_id = {str(row["fact_id"]): row for row in facts}
     spans: list[dict] = []
     by_fact: dict[str, dict] = {}
     unresolved: list[str] = []
+    durable = {
+        (str(row.get("object_id")), str(row.get("operation_id"))): row
+        for row in lineage
+        if row.get("object_type") == "fact"
+    }
     for operation in operations:
         raw = str(operation.get("raw_content") or "")
         ids: list[str] = []
@@ -113,10 +121,25 @@ def _source_spans(
         for fact_id in dict.fromkeys(ids):
             fact = facts_by_id.get(fact_id)
             if fact is None:
-                unresolved.append(f"operation {operation['operation_id']} references missing fact {fact_id}")
+                unresolved.append(
+                    f"operation {operation['operation_id']} references "
+                    f"missing fact {fact_id}"
+                )
                 continue
             content = str(fact.get("content") or "")
-            start = raw.find(content)
+            recorded = durable.get((fact_id, str(operation["operation_id"])))
+            if recorded is not None and recorded.get("source_status") == "unresolved":
+                unresolved.append(
+                    f"fact {fact_id} has no exact span in operation {operation['operation_id']}"
+                )
+                continue
+            start = (
+                int(recorded["source_start"])
+                if recorded is not None
+                and recorded.get("source_status") == "exact"
+                and recorded.get("source_start") is not None
+                else raw.find(content)
+            )
             if start < 0:
                 unresolved.append(
                     f"fact {fact_id} has no exact span in operation {operation['operation_id']}"
@@ -135,6 +158,64 @@ def _source_spans(
     return spans, by_fact, unresolved
 
 
+def _lineage_coverage(
+    rows_by_file: dict[str, list[dict]], span_map: dict[str, dict],
+) -> dict[str, dict[str, int]]:
+    lineage = rows_by_file.get("derivation_lineage.jsonl", [])
+    by_type: dict[str, dict[str, list[dict]]] = {}
+    for row in lineage:
+        by_type.setdefault(str(row.get("object_type")), {}).setdefault(
+            str(row.get("object_id")), []
+        ).append(row)
+
+    objects = {
+        "fact": [str(row["fact_id"]) for row in rows_by_file.get("facts.jsonl", [])],
+        "profile": [str(row["profile_id"]) for row in rows_by_file.get("profile.jsonl", [])],
+        "entity_summary": [
+            str(row["profile_entry_id"])
+            for row in rows_by_file.get("entity_profiles.jsonl", [])
+        ],
+        "graph_edge": [
+            str(row["edge_id"]) for row in rows_by_file.get("graph_edges.jsonl", [])
+        ],
+        "memory_scene": [
+            str(row["scene_id"])
+            for row in rows_by_file.get("memory_scenes.jsonl", [])
+        ],
+        "index_bm25": [
+            str(row["fact_id"]) for row in rows_by_file.get("facts.jsonl", [])
+        ],
+    }
+    coverage: dict[str, dict[str, int]] = {}
+    for object_type, object_ids in objects.items():
+        counts = {
+            "total": len(object_ids),
+            "durable": 0,
+            "derived_from_facts": 0,
+            "not_applicable": 0,
+            "legacy_exact_inference": 0,
+            "unresolved": 0,
+        }
+        for object_id in object_ids:
+            records = by_type.get(object_type, {}).get(object_id, [])
+            if records:
+                statuses = {str(row.get("source_status")) for row in records}
+                if statuses - {"unresolved"}:
+                    counts["durable"] += 1
+                    if "derived_from_facts" in statuses:
+                        counts["derived_from_facts"] += 1
+                    if "not_applicable" in statuses:
+                        counts["not_applicable"] += 1
+                else:
+                    counts["unresolved"] += 1
+            elif object_type == "fact" and object_id in span_map:
+                counts["legacy_exact_inference"] += 1
+            else:
+                counts["unresolved"] += 1
+        coverage[object_type] = counts
+    return coverage
+
+
 def export_evidence_bundle(
     db: Any, profile_id: str, destination: str | Path,
 ) -> dict:
@@ -149,7 +230,9 @@ def export_evidence_bundle(
         rows_by_file[filename] = _rows_for_profile(db, table, profile_id, order)
 
     spans, span_map, unresolved = _source_spans(
-        rows_by_file["ingestion_operations.jsonl"], rows_by_file["facts.jsonl"],
+        rows_by_file["ingestion_operations.jsonl"],
+        rows_by_file["facts.jsonl"],
+        rows_by_file["derivation_lineage.jsonl"],
     )
     rows_by_file["source_spans.jsonl"] = spans
 
@@ -175,6 +258,7 @@ def export_evidence_bundle(
         **identity,
         "bundle_id": bundle_id,
         "source_spans": span_map,
+        "lineage_coverage": _lineage_coverage(rows_by_file, span_map),
         "unresolved_source_links": unresolved,
     }
     (root / "manifest.json").write_text(
@@ -326,7 +410,9 @@ def import_evidence_bundle(
 _TOKEN_RE = re.compile(r"[\w'-]+", re.UNICODE)
 
 
-def rebuild_derived_state(db: Any, profile_id: str, *, embedder: Any | None = None) -> dict[str, int]:
+def rebuild_derived_state(
+    db: Any, profile_id: str, *, embedder: Any | None = None,
+) -> dict[str, int]:
     """Rebuild deterministic lexical state and optional content embeddings."""
     rows = db.execute(
         "SELECT fact_id, content FROM atomic_facts WHERE profile_id=? "
@@ -355,6 +441,79 @@ def rebuild_derived_state(db: Any, profile_id: str, *, embedder: Any | None = No
     return {"bm25_rows": bm25_rows, "embeddings": embeddings}
 
 
+def _normalized_bundle_rows(
+    bundle: Path, filename: str, profile_id: str,
+) -> list[dict]:
+    rows = _load_jsonl(bundle / filename)
+    for row in rows:
+        if "profile_id" in row:
+            row["profile_id"] = profile_id
+    return rows
+
+
+def verify_rebuild_equivalence(
+    db: Any, bundle: str | Path, *, profile_id: str,
+) -> dict[str, Any]:
+    """Compare deterministic local surfaces; leave model-dependent retrieval unverified."""
+    root = Path(bundle)
+    bundle_report = verify_evidence_bundle(root)
+    if not bundle_report.valid:
+        raise ValueError("invalid evidence bundle: " + "; ".join(bundle_report.errors))
+
+    mismatches: list[str] = []
+    relational = (
+        ("profile.jsonl", "profiles", "profile_id"),
+        ("memories.jsonl", "memories", "memory_id"),
+        ("facts.jsonl", "atomic_facts", "fact_id"),
+        ("entities.jsonl", "canonical_entities", "entity_id"),
+        ("entity_profiles.jsonl", "entity_profiles", "profile_entry_id"),
+        ("memory_scenes.jsonl", "memory_scenes", "scene_id"),
+        ("graph_edges.jsonl", "graph_edges", "edge_id"),
+    )
+    for filename, table, order in relational:
+        expected = _normalized_bundle_rows(root, filename, profile_id)
+        actual = _rows_for_profile(db, table, profile_id, order)
+        if expected != actual:
+            mismatches.append(table)
+
+    facts = _normalized_bundle_rows(root, "facts.jsonl", profile_id)
+    fact_ids = {str(row["fact_id"]) for row in facts}
+    fts_rows = db.execute(
+        "SELECT fact_id FROM atomic_facts_fts ORDER BY fact_id"
+    ) if _table_exists(db, "atomic_facts_fts") else []
+    fts_ids = {str(row["fact_id"]) for row in fts_rows}
+    if not fact_ids <= fts_ids:
+        mismatches.append("atomic_facts_fts")
+
+    expected_tokens = {
+        str(row["fact_id"]): [
+            token.lower() for token in _TOKEN_RE.findall(str(row.get("content") or ""))
+        ]
+        for row in facts
+    }
+    actual_tokens = {
+        str(row["fact_id"]): json.loads(row["tokens"] or "[]")
+        for row in db.execute(
+            "SELECT fact_id,tokens FROM bm25_tokens WHERE profile_id=? ORDER BY fact_id",
+            (profile_id,),
+        )
+    }
+    if expected_tokens != actual_tokens:
+        mismatches.append("bm25_tokens")
+
+    return {
+        "status": "partial" if not mismatches else "failed",
+        "equivalent_on_verified_surfaces": not mismatches,
+        "verified_surfaces": [
+            "relational_truth", "fts_membership", "bm25_tokens",
+        ],
+        "unverified_surfaces": [
+            "semantic_vector_retrieval", "ann_index", "reranker_behavior",
+        ],
+        "mismatches": mismatches,
+    }
+
+
 __all__ = [
     "BUNDLE_FORMAT",
     "BUNDLE_SCHEMA_VERSION",
@@ -363,4 +522,5 @@ __all__ = [
     "import_evidence_bundle",
     "rebuild_derived_state",
     "verify_evidence_bundle",
+    "verify_rebuild_equivalence",
 ]

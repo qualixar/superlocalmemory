@@ -23,7 +23,6 @@ from typing import Any, Callable
 
 from superlocalmemory.storage.database import DatabaseManager
 
-
 _MATERIALIZATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 
 
@@ -391,7 +390,18 @@ class IngestionOperationRepository:
         )
         if not rows:
             raise InvalidStateTransition("enriching checkpoint lost ownership")
-        return self._from_row(rows[0])
+        operation = self._from_row(rows[0])
+        from superlocalmemory.core.derivation_lineage import capture_operation_lineage
+
+        capture_operation_lineage(
+            self.db,
+            operation_id=operation.operation_id,
+            profile_id=operation.profile_id,
+            raw_content=operation.raw_content,
+            fact_ids=operation.final_fact_ids,
+            derivation_version=operation.derivation_version,
+        )
+        return operation
 
     def finish_enriching(
         self,
