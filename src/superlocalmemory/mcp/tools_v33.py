@@ -24,6 +24,7 @@ from mcp.types import ToolAnnotations
 logger = logging.getLogger(__name__)
 
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 
 def _try_daemon_post(path: str, body: dict, timeout_s: float = 60.0) -> dict | None:
@@ -119,14 +120,22 @@ def register_v33_tools(server, get_engine: Callable) -> None:
                     total += int(r["cnt"])
                 result = {"total": total, "transitions": 0, "dry_run_zones": zones}
             else:
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "delete",
+                    mutation_source="mcp-forgetting-cycle",
+                    profile_id=pid,
+                )
                 result = scheduler.run_decay_cycle(pid, force=True)
+                authorization.complete()
 
-            _emit_event("forgetting.cycle_complete", {
-                "profile_id": pid,
-                "dry_run": dry_run,
-                "total": result.get("total", 0),
-                "transitions": result.get("transitions", 0),
-            })
+            if not dry_run:
+                _emit_event("forgetting.cycle_complete", {
+                    "profile_id": pid,
+                    "dry_run": False,
+                    "total": result.get("total", 0),
+                    "transitions": result.get("transitions", 0),
+                })
 
             return {"success": True, "dry_run": dry_run, **result}
 
@@ -181,15 +190,23 @@ def register_v33_tools(server, get_engine: Callable) -> None:
                 facts = engine._db.get_all_facts(pid)
                 result = {"total": len(facts), "would_quantize": 0, "dry_run": True}
             else:
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-quantization-cycle",
+                    profile_id=pid,
+                )
                 result = scheduler.run_eap_cycle(pid)
+                authorization.complete()
 
-            _emit_event("eap.cycle_complete", {
-                "profile_id": pid,
-                "dry_run": dry_run,
-                "total": result.get("total", 0),
-                "downgrades": result.get("downgrades", 0),
-                "upgrades": result.get("upgrades", 0),
-            })
+            if not dry_run:
+                _emit_event("eap.cycle_complete", {
+                    "profile_id": pid,
+                    "dry_run": False,
+                    "total": result.get("total", 0),
+                    "downgrades": result.get("downgrades", 0),
+                    "upgrades": result.get("upgrades", 0),
+                })
 
             return {"success": True, "dry_run": dry_run, **result}
 
@@ -243,8 +260,15 @@ def register_v33_tools(server, get_engine: Callable) -> None:
                 CognitiveConsolidator,
             )
 
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-cognitive-consolidation",
+                profile_id=pid,
+            )
             consolidator = CognitiveConsolidator(db=engine._db)
             result = consolidator.run_pipeline(pid)
+            authorization.complete()
 
             _emit_event("ccq.consolidation_complete", {
                 "profile_id": pid,
@@ -336,6 +360,14 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             dry_run: If True, report orphans but don't kill them.
         """
         try:
+            engine = get_engine()
+            authorization = None
+            if not dry_run:
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "delete",
+                    mutation_source="mcp-process-reaper",
+                )
             from superlocalmemory.infra.process_reaper import (
                 cleanup_all_orphans,
                 ReaperConfig,
@@ -343,6 +375,8 @@ def register_v33_tools(server, get_engine: Callable) -> None:
 
             config = ReaperConfig()
             result = cleanup_all_orphans(config, dry_run=dry_run)
+            if authorization is not None:
+                authorization.complete()
 
             return {
                 "success": True,
@@ -444,6 +478,12 @@ def register_v33_tools(server, get_engine: Callable) -> None:
                 daemon_result["via"] = "daemon"
                 return daemon_result
 
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-maintenance-cycle",
+                profile_id=pid,
+            )
             results = {}
 
             # 1. Langevin dynamics step (lifecycle evolution)
@@ -474,6 +514,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             except Exception as exc:
                 results["behavioral"] = {"error": str(exc)}
 
+            authorization.complete()
             return {"success": True, "profile": pid, **results}
 
         except Exception as exc:

@@ -36,6 +36,36 @@ def _engine() -> MagicMock:
     return engine
 
 
+def test_mcp_policy_uses_capability_actor_and_caller_only_as_attribution(
+    monkeypatch,
+) -> None:
+    from superlocalmemory.mcp.agent_context import _current_agent_id
+    from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
+    engine = _engine()
+    token = _current_agent_id.set("caller-selected-label")
+    monkeypatch.setattr(
+        "superlocalmemory.core.engine_ingestion.local_trusted_actor_id",
+        lambda kind: f"trusted:{kind}",
+    )
+    try:
+        authorization = authorize_mcp_mutation(
+            engine,
+            "update",
+            mutation_source="test-surface",
+        )
+        authorization.complete()
+        authorization.complete()
+    finally:
+        _current_agent_id.reset(token)
+
+    context = engine._hooks.run_pre.call_args.args[1]
+    assert context["agent_id"] == "trusted:mcp"
+    assert context["source_agent_id"] == "caller-selected-label"
+    assert context["mutation_source"] == "test-surface"
+    engine._hooks.run_post.assert_called_once_with("update", context)
+
+
 def test_v28_retention_write_is_rejected_before_database_mutation() -> None:
     from superlocalmemory.mcp.tools_v28 import register_v28_tools
 
@@ -106,4 +136,3 @@ def test_session_agent_registration_is_rejected_before_registry_write() -> None:
 
     assert result["success"] is False
     registry.return_value.register_agent.assert_not_called()
-

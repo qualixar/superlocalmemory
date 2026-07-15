@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +44,11 @@ def register_v28_tools(server, get_engine: Callable) -> None:
         """
         try:
             engine = get_engine()
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-report-outcome",
+            )
             from superlocalmemory.learning.outcomes import OutcomeTracker
             tracker = OutcomeTracker(engine._db)
             ids = [mid.strip() for mid in memory_ids.split(",") if mid.strip()]
@@ -75,6 +82,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
             except Exception as exc2:
                 logger.debug("Outcome→signal bridge: %s", exc2)
 
+            authorization.complete()
             return {"success": True, "outcome_id": ao.outcome_id, "outcome": outcome}
         except Exception as exc:
             logger.exception("report_outcome failed")
@@ -134,8 +142,14 @@ def register_v28_tools(server, get_engine: Callable) -> None:
         """
         try:
             engine = get_engine()
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-retention-policy",
+            )
             engine._db.set_config("retention_cold_days", str(cold_after_days))
             engine._db.set_config("retention_archive_days", str(archive_after_days))
+            authorization.complete()
             return {
                 "success": True,
                 "cold_after_days": cold_after_days,
@@ -174,10 +188,17 @@ def register_v28_tools(server, get_engine: Callable) -> None:
                         "proposed": new_state.value,
                     })
             if not dry_run:
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-compact-memories",
+                    profile_id=pid,
+                )
                 for c in candidates:
                     engine._db.update_fact(
                         c["fact_id"], {"lifecycle": c["proposed"]},
                     )
+                authorization.complete()
             return {
                 "success": True,
                 "dry_run": dry_run,

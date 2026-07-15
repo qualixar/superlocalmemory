@@ -24,6 +24,7 @@ import uuid
 from typing import TYPE_CHECKING, Callable
 
 from superlocalmemory.infra.data_root import canonical_data_root, state_path
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 if TYPE_CHECKING:
     from superlocalmemory.mcp._pool_adapter import PoolRecallResponse
@@ -137,17 +138,19 @@ def _emit_event(event_type: str, payload: dict | None = None,
         logger.warning("event emit failed: type=%s err=%s", event_type, exc)
 
 
-def _register_agent(agent_id: str, profile_id: str) -> None:
+def _register_agent(agent_id: str, profile_id: str) -> bool:
     """Register an agent in the AgentRegistry (best-effort)."""
     try:
         from superlocalmemory.core.registry import AgentRegistry
         registry_path = canonical_data_root() / "agents.json"
         registry = AgentRegistry(persist_path=registry_path)
         registry.register_agent(agent_id, profile_id)
+        return True
     except Exception as exc:
         logger.warning(
             "agent registry write failed: agent=%s err=%s", agent_id, exc,
         )
+        return False
 
 
 def register_active_tools(server, get_engine: Callable) -> None:
@@ -402,7 +405,21 @@ def register_active_tools(server, get_engine: Callable) -> None:
 
             # Register agent + emit event (v3.4.39: SLM_AGENT_ID env support)
             agent_id = _get_agent_id()
-            _register_agent(agent_id, pid)
+            if hasattr(engine, "_hooks"):
+                registration_auth = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-agent-registration",
+                    profile_id=pid,
+                )
+                if _register_agent(agent_id, pid):
+                    registration_auth.complete()
+            else:
+                # A LIGHT client without the policy registry is read-capable,
+                # but must not fall back to an unauthorised registry write.
+                logger.info(
+                    "agent registration skipped: policy hooks unavailable"
+                )
             _emit_event("agent.connected", {
                 "agent_id": agent_id,
                 "project_path": project_path,
@@ -558,6 +575,14 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     ),
                 }
 
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-recall-feedback",
+                profile_id=pid,
+                fact_id=fact_id,
+                content_preview=feedback,
+            )
             record = engine._adaptive_learner.record_feedback(
                 query=query,
                 fact_id=fact_id,
@@ -566,6 +591,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
             )
 
             count = engine._adaptive_learner.get_feedback_count(pid)
+            authorization.complete()
 
             _emit_event("pattern.learned", {
                 "fact_id": fact_id,
@@ -622,7 +648,15 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     pass
             if not sid:
                 return {"success": False, "error": "No session_id provided or found"}
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-session-close",
+                profile_id=engine.profile_id,
+                content_preview=sid,
+            )
             count = engine.close_session(sid)
+            authorization.complete()
             return {
                 "success": True,
                 "session_id": sid,
@@ -656,13 +690,29 @@ def register_active_tools(server, get_engine: Callable) -> None:
             if action == "pin":
                 if not fact_id:
                     return {"success": False, "error": "fact_id required for pin"}
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-core-memory-pin",
+                    profile_id=pid,
+                    fact_id=fact_id,
+                )
                 db.set_pinned(fact_id, True)
+                authorization.complete()
                 return {"success": True, "action": "pin", "fact_id": fact_id}
 
             if action == "unpin":
                 if not fact_id:
                     return {"success": False, "error": "fact_id required for unpin"}
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-core-memory-unpin",
+                    profile_id=pid,
+                    fact_id=fact_id,
+                )
                 db.set_pinned(fact_id, False)
+                authorization.complete()
                 return {"success": True, "action": "unpin", "fact_id": fact_id}
 
             if action == "list":
