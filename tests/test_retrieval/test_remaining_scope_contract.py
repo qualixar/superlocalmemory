@@ -152,6 +152,20 @@ def test_entity_candidate_scoring_is_scope_safe_under_concurrency(scoped_db) -> 
             assert private.result() == {"local"}
 
 
+def test_entity_sql_fallback_discovers_entities_only_from_visible_facts(
+    scoped_db,
+) -> None:
+    channel = EntityGraphChannel(scoped_db, max_hops=2)
+
+    discovered = channel._discover_entities(
+        {"local", "personal"},
+        REQUESTER,
+        set(),
+    )
+
+    assert set(discovered) == {"entity_requester"}
+
+
 def test_authorization_boundary_fails_closed() -> None:
     db = MagicMock()
     db.get_facts_by_ids.side_effect = RuntimeError("authorization unavailable")

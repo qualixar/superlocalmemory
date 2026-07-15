@@ -219,6 +219,79 @@ class TestConcurrentRecallScopeIsolation:
         assert observations
         assert all(g == s for g, s in observations), observations
 
+    def test_final_fact_load_uses_call_local_scope_not_shared_state(
+        self, engine_with_mock_deps,
+    ):
+        eng = engine_with_mock_deps
+        eng.store_fast("otter final-load scope probe")
+        retrieval = eng._retrieval_engine
+        original_load = retrieval._load_facts
+        rendezvous = threading.Barrier(2, timeout=10)
+        observations: list[tuple[bool, bool, bool]] = []
+        obs_lock = threading.Lock()
+
+        def _spy_load(
+            fused,
+            profile_id,
+            *,
+            include_global=None,
+            include_shared=None,
+        ):
+            expected = threading.current_thread().name == "scope-opted-in"
+            rendezvous.wait()
+            if include_global is None:
+                # Legacy implementation reads mutable engine-wide flags here.
+                observed_global = bool(retrieval._include_global)
+                observed_shared = bool(retrieval._include_shared)
+                result = original_load(fused, profile_id)
+            else:
+                observed_global = bool(include_global)
+                observed_shared = bool(include_shared)
+                result = original_load(
+                    fused,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
+            with obs_lock:
+                observations.append(
+                    (expected, observed_global, observed_shared)
+                )
+            return result
+
+        retrieval._load_facts = _spy_load
+        try:
+            opted_in = threading.Thread(
+                target=lambda: eng.recall(
+                    "otter",
+                    include_global=True,
+                    include_shared=True,
+                ),
+                name="scope-opted-in",
+            )
+            private = threading.Thread(
+                target=lambda: eng.recall(
+                    "otter",
+                    include_global=False,
+                    include_shared=False,
+                ),
+                name="scope-private",
+            )
+            opted_in.start()
+            private.start()
+            opted_in.join(timeout=20)
+            private.join(timeout=20)
+        finally:
+            retrieval._load_facts = original_load
+
+        assert not opted_in.is_alive()
+        assert not private.is_alive()
+        assert len(observations) == 2
+        assert all(
+            expected == observed_global == observed_shared
+            for expected, observed_global, observed_shared in observations
+        ), observations
+
 
 # ---------------------------------------------------------------------------
 # W6 — the async pending materializer must REPLAY scope from metadata
