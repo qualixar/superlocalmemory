@@ -108,6 +108,9 @@ jobs:
           if forbidden:
               raise SystemExit(f"compiled cache files in npm artifact: {forbidden[:10]}")
           PY
+          python3 scripts/release_evidence.py verify-npm \
+            --tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --version "${{ steps.version.outputs.version }}"
 
       - name: Test exact candidate artifacts
         env:
@@ -120,12 +123,19 @@ jobs:
 
       - name: Generate immutable release evidence
         run: |
+          SBOM="dist/superlocalmemory-${{ steps.version.outputs.version }}.cdx.json"
+          python3 scripts/release_evidence.py sbom \
+            --version "${{ steps.version.outputs.version }}" \
+            --commit "$GITHUB_SHA" \
+            --uv-lock uv.lock \
+            --package-lock package-lock.json \
+            --output "$SBOM"
           python3 scripts/release_evidence.py create \
             --version "${{ steps.version.outputs.version }}" \
             --commit "$GITHUB_SHA" \
             --artifact-root dist \
             --workflow-run "$GITHUB_RUN_ID" \
-            dist/python/* "${{ steps.artifacts.outputs.npm_tarball }}"
+            dist/python/* "${{ steps.artifacts.outputs.npm_tarball }}" "$SBOM"
           python3 scripts/release_evidence.py verify \
             --manifest dist/release-evidence.json \
             --artifact-root dist
@@ -140,6 +150,7 @@ jobs:
             dist/npm/*
             dist/release-evidence.json
             dist/SHA256SUMS
+            dist/*.cdx.json
           if-no-files-found: error
           retention-days: 90
 
@@ -185,7 +196,8 @@ jobs:
               dist/python/* \
               "${{ steps.artifacts.outputs.npm_tarball }}" \
               dist/release-evidence.json \
-              dist/SHA256SUMS; do
+              dist/SHA256SUMS \
+              dist/*.cdx.json; do
               published="$EXISTING/$(basename "$candidate")"
               test -f "$published"
               cmp -- "$candidate" "$published"
@@ -196,6 +208,7 @@ jobs:
               "${{ steps.artifacts.outputs.npm_tarball }}" \
               dist/release-evidence.json \
               dist/SHA256SUMS \
+              dist/*.cdx.json \
               --verify-tag \
               --generate-notes \
               --title "SuperLocalMemory $GITHUB_REF_NAME"
