@@ -738,46 +738,17 @@ def run_recall(
         except Exception as exc:
             logger.debug("Access log batch store failed: %s", exc)
 
-    # V3.4.11: Promote recalled facts back to active tier (single batch UPDATE)
-    if response.results:
-        try:
-            from superlocalmemory.core.tier_manager import promote_on_access_batch
-            fact_ids = [r.fact.fact_id for r in response.results[:10]]
-            promote_on_access_batch(db, fact_ids)
-        except Exception:
-            pass  # tier_manager not available yet — graceful
-
-    # V3.3.16: Behavioral tracking + spaced repetition use module-level
-    # singletons to avoid creating new objects per recall (was causing
-    # object accumulation across 304 benchmark recalls).
+    # Query telemetry is permitted, but result-derived entities are not fed
+    # back as preferences.  Retrieval exposure is not positive feedback.
     try:
-        entities = _behavioral_entities(response.results[:10])
         _get_behavioral_tracker(db).record_query(
             query=query,
             query_type=response.query_type,
-            entities=entities,
+            entities=[],
             profile_id=profile_id,
         )
     except Exception as exc:
         logger.debug("Behavioral tracking: %s", exc)
-
-    if response.results:
-        try:
-            fsched = _get_forgetting_scheduler(db, config)
-            for r in response.results[:10]:
-                fsched.on_access_event(r.fact.fact_id, profile_id)
-        except Exception as exc:
-            logger.debug("Spaced repetition update: %s", exc)
-
-    # Phase 3: Hebbian strengthening for co-accessed facts
-    if auto_linker and response.results:
-        try:
-            recalled_ids = [
-                r.fact.fact_id for r in response.results[:10]
-            ]
-            auto_linker.strengthen_co_access(recalled_ids, profile_id)
-        except Exception as exc:
-            logger.debug("Hebbian strengthening: %s", exc)
 
     # S8-ARC-04 (v3.4.22): unified ranking entry point. Single env-var
     # (SLM_RANKING=off|v1|v2|v2-ensemble) controls the pipeline. Legacy
@@ -796,37 +767,9 @@ def run_recall(
         logger.debug("Ranking pipeline skipped: %s", exc)
 
     _mark("learning+ranking")
-    # Reconsolidation: access updates trust + count (neuroscience principle)
-    if trust_scorer:
-        for r in response.results:
-            trust_scorer.update_on_access("fact", r.fact.fact_id, profile_id)
-
-    # Fisher Bayesian update on recall — narrows variance on accessed facts
-    # so they score higher on subsequent recalls (critical for benchmark: +24pp).
-    # V3.3.16: Reuse query embedding from retrieval engine cache instead of
-    # calling embedder.embed() again (which was the memory leak source).
-    q_var_arr = None
-    if embedder and hasattr(retrieval_engine, '_query_embedding_cache'):
-        cached_emb = retrieval_engine._query_embedding_cache.get(query)
-        if cached_emb is not None:
-            import numpy as _np
-            _, q_var_list = embedder.compute_fisher_params(cached_emb)
-            q_var_arr = _np.array(q_var_list, dtype=_np.float64)
-
-    for r in response.results:
-        updates: dict[str, object] = {
-            "access_count": r.fact.access_count + 1,
-        }
-        if (q_var_arr is not None
-                and r.fact.fisher_variance
-                and len(r.fact.fisher_variance) == len(q_var_arr)
-                and r.fact.access_count >= 3):
-            import numpy as _np
-            f_var = _np.array(r.fact.fisher_variance, dtype=_np.float64)
-            new_var = 1.0 / (1.0 / _np.maximum(f_var, 0.05) + 1.0 / _np.maximum(q_var_arr, 0.05))
-            new_var = _np.clip(new_var, 0.05, 2.0)
-            updates["fisher_variance"] = new_var.tolist()
-        db.update_fact(r.fact.fact_id, updates)
+    # Deliberately no trust, Fisher, retention, lifecycle, popularity, or graph
+    # mutation here.  Those state transitions require a separately authenticated
+    # positive/negative outcome; merely returning a result is an exposure.
 
     # Post-operation hooks (audit, trust signal, learning)
     hook_ctx["result_count"] = len(response.results)
