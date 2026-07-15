@@ -60,7 +60,7 @@ class ForgettingScheduler:
         self._last_run_times: dict[str, float] = {}
 
     def run_decay_cycle(
-        self, profile_id: str, *, force: bool = False,
+        self, profile_id: str, *, force: bool = False, dry_run: bool = False,
     ) -> dict:
         """Run a full decay cycle for all facts in a profile.
 
@@ -70,6 +70,7 @@ class ForgettingScheduler:
         Args:
             profile_id: Profile to process.
             force: If True, bypass interval check.
+            dry_run: Compute transitions without persisting retention or lifecycle.
 
         Returns:
             Stats dict: {total, active, warm, cold, archive, forgotten,
@@ -87,7 +88,8 @@ class ForgettingScheduler:
         facts_data = self._fetch_facts_with_metadata(profile_id)
 
         if not facts_data:
-            self._last_run_times[profile_id] = now
+            if not dry_run:
+                self._last_run_times[profile_id] = now
             return {
                 "total": 0, "active": 0, "warm": 0, "cold": 0,
                 "archive": 0, "forgotten": 0, "transitions": 0,
@@ -100,7 +102,8 @@ class ForgettingScheduler:
         retention_results = self._ebbinghaus.batch_compute_retention(facts_data)
 
         # Step 4: Batch UPSERT into fact_retention
-        self._db.batch_upsert_retention(retention_results, profile_id)
+        if not dry_run:
+            self._db.batch_upsert_retention(retention_results, profile_id)
 
         # Step 5: Count zones and transitions
         zone_counts = {"active": 0, "warm": 0, "cold": 0, "archive": 0, "forgotten": 0}
@@ -121,11 +124,13 @@ class ForgettingScheduler:
                 forgotten_fact_ids.append(result["fact_id"])
 
         # Step 6: Soft-delete forgotten facts (HR-04)
-        for fact_id in forgotten_fact_ids:
-            self._soft_delete_with_audit(fact_id, profile_id)
+        if not dry_run:
+            for fact_id in forgotten_fact_ids:
+                self._soft_delete_with_audit(fact_id, profile_id)
 
         # Update last run time
-        self._last_run_times[profile_id] = now
+        if not dry_run:
+            self._last_run_times[profile_id] = now
 
         return {
             "total": len(retention_results),

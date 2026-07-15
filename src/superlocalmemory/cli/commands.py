@@ -2905,7 +2905,7 @@ def cmd_decay(args: Namespace) -> None:
         scheduler = ForgettingScheduler(
             engine._db, ebbinghaus, config.forgetting,
         )
-        result = scheduler.run_decay_cycle(pid, force=True)
+        result = scheduler.run_decay_cycle(pid, force=True, dry_run=dry_run)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -2970,7 +2970,7 @@ def cmd_quantize(args: Namespace) -> None:
         scheduler = EAPScheduler(
             engine._db, ebbinghaus, qstore, config.quantization,
         )
-        result = scheduler.run_eap_cycle(pid)
+        result = scheduler.run_eap_cycle(pid, dry_run=dry_run)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
