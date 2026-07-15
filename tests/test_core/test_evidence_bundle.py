@@ -9,6 +9,7 @@ from pathlib import Path
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.migrations import M018_ingestion_operations
+from superlocalmemory.storage.migrations import M019_derivation_lineage
 
 
 def _db(path: Path) -> DatabaseManager:
@@ -16,6 +17,7 @@ def _db(path: Path) -> DatabaseManager:
     db.initialize(schema)
     with db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
+        M019_derivation_lineage.apply(conn)
     return db
 
 
@@ -25,6 +27,27 @@ def _seed(db: DatabaseManager, *, content: str = "Alpha uses SQLite") -> None:
         "(memory_id, profile_id, content, session_id, speaker, role) "
         "VALUES ('m1','default',?,'s1','user','user')",
         (content,),
+    )
+    db.execute(
+        "INSERT INTO canonical_entities "
+        "(entity_id,profile_id,canonical_name,entity_type,fact_count) "
+        "VALUES ('e1','default','Alpha','person',1)",
+    )
+    db.execute(
+        "INSERT INTO entity_profiles "
+        "(profile_entry_id,entity_id,profile_id,knowledge_summary,fact_ids_json) "
+        "VALUES ('ep1','e1','default',?,'[\"f1\"]')",
+        (f"Entity summary: {content}",),
+    )
+    db.execute(
+        "INSERT INTO memory_scenes "
+        "(scene_id,profile_id,theme,fact_ids_json,entity_ids_json) "
+        "VALUES ('scene1','default','database','[\"f1\"]','[\"e1\"]')",
+    )
+    db.execute(
+        "INSERT INTO graph_edges "
+        "(edge_id,profile_id,source_id,target_id,edge_type,weight) "
+        "VALUES ('edge1','default','f1','e1','entity',1.0)",
     )
     db.execute(
         "INSERT INTO atomic_facts "
@@ -68,6 +91,10 @@ def test_export_is_deterministic_git_friendly_and_span_linked(tmp_path: Path) ->
         "text_sha256": first["source_spans"]["f1"]["text_sha256"],
     }]
     assert first["derivation_versions"] == ["v3.7-ingestion-1"]
+    assert first["files"]["entity_profiles.jsonl"]["count"] == 1
+    assert first["files"]["memory_scenes.jsonl"]["count"] == 1
+    assert first["lineage_coverage"]["fact"]["legacy_exact_inference"] == 1
+    assert first["lineage_coverage"]["profile"]["unresolved"] == 1
 
 
 def test_verify_rejects_tampering_and_reports_unresolved_links(tmp_path: Path) -> None:
@@ -95,6 +122,7 @@ def test_round_trip_import_and_rebuild_derived_state(tmp_path: Path) -> None:
         import_evidence_bundle,
         rebuild_derived_state,
         verify_evidence_bundle,
+        verify_rebuild_equivalence,
     )
 
     source = _db(tmp_path / "source.db")
@@ -118,6 +146,20 @@ def test_round_trip_import_and_rebuild_derived_state(tmp_path: Path) -> None:
     assert rebuilt["embeddings"] == 1
     assert target.execute("SELECT COUNT(*) AS c FROM bm25_tokens WHERE fact_id='f1'")[0]["c"] == 1
     assert verify_evidence_bundle(bundle).valid is True
+    equivalence = verify_rebuild_equivalence(target, bundle, profile_id="default")
+    assert equivalence["equivalent_on_verified_surfaces"] is True
+    assert equivalence["status"] == "partial"
+    assert equivalence["verified_surfaces"] == [
+        "relational_truth",
+        "fts_membership",
+        "bm25_tokens",
+    ]
+    assert "semantic_vector_retrieval" in equivalence["unverified_surfaces"]
+
+    target.execute("UPDATE atomic_facts SET content='tampered' WHERE fact_id='f1'")
+    broken = verify_rebuild_equivalence(target, bundle, profile_id="default")
+    assert broken["equivalent_on_verified_surfaces"] is False
+    assert "atomic_facts" in broken["mismatches"]
 
 
 def test_replace_requires_rollback_and_preserves_preimage(tmp_path: Path) -> None:
@@ -146,3 +188,39 @@ def test_replace_requires_rollback_and_preserves_preimage(tmp_path: Path) -> Non
     assert verify_evidence_bundle(rollback).valid is True
     old = [json.loads(line) for line in (rollback / "facts.jsonl").read_text().splitlines()]
     assert old[0]["content"] == "old value"
+
+    # Rollback is executable, not merely an exported file: restore the preimage.
+    import_evidence_bundle(
+        target,
+        rollback,
+        replace=True,
+        rollback_dir=tmp_path / "pre-rollback-new-state",
+    )
+    restored = target.execute(
+        "SELECT content FROM atomic_facts WHERE fact_id='f1'"
+    )
+    assert restored[0]["content"] == "old value"
+    restored_summary = target.execute(
+        "SELECT knowledge_summary FROM entity_profiles WHERE profile_entry_id='ep1'"
+    )
+    assert restored_summary[0]["knowledge_summary"] == "Entity summary: old value"
+
+
+def test_legacy_paraphrase_is_unresolved_not_given_a_fabricated_span(
+    tmp_path: Path,
+) -> None:
+    from superlocalmemory.core.evidence_bundle import export_evidence_bundle
+
+    db = _db(tmp_path / "legacy.db")
+    _seed(db, content="Paraphrased derived fact")
+    db.execute(
+        "UPDATE ingestion_operations SET raw_content='Original wording only' "
+        "WHERE operation_id='op1'"
+    )
+    manifest = export_evidence_bundle(db, "default", tmp_path / "legacy-bundle")
+
+    assert manifest["source_spans"] == {}
+    assert manifest["lineage_coverage"]["fact"]["unresolved"] == 1
+    assert manifest["unresolved_source_links"] == [
+        "fact f1 has no exact span in operation op1"
+    ]
