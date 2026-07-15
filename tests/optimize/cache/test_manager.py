@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from dataclasses import replace
 
 from superlocalmemory.optimize.cache.key_builder import CacheConfig
 from superlocalmemory.optimize.cache.manager import (
@@ -189,6 +190,53 @@ def test_noop_semantic_disabled() -> None:
     assert noop.is_enabled() is False
     assert noop.lookup(None, "t", None) is None
     noop.learn("eid", 0.9, True)  # must not raise
+
+
+def test_get_instance_wires_semantic_tier_when_enabled(
+    tmp_cache_db, monkeypatch,
+) -> None:
+    """The production singleton must not stay NoOp when semantic is enabled."""
+    from superlocalmemory.optimize.cache.semantic import VCacheSemantic
+    from superlocalmemory.optimize.config.defaults import DEFAULT_OPTIMIZE_CONFIG
+
+    monkeypatch.setattr(
+        "superlocalmemory.optimize.storage.db.CacheDB.get_default",
+        classmethod(lambda cls: tmp_cache_db),
+    )
+    config = replace(DEFAULT_OPTIMIZE_CONFIG, semantic_enabled=True)
+    embedder = lambda text: [0.0] * 768
+    CacheManager.reset_instance()
+    try:
+        manager = CacheManager.get_instance(
+            optimize_config=config,
+            semantic_embedder=embedder,
+        )
+        assert isinstance(manager._semantic, VCacheSemantic)
+        assert manager._semantic._embedder is embedder
+    finally:
+        CacheManager.reset_instance()
+
+
+def test_semantic_tier_embeds_requests_when_manager_passes_none(
+    tmp_cache_db,
+) -> None:
+    """Manager's legacy None embedding seam must produce a real vector."""
+    from unittest.mock import MagicMock
+
+    from superlocalmemory.optimize.cache.semantic import VCacheSemantic
+    from superlocalmemory.optimize.config.defaults import DEFAULT_OPTIMIZE_CONFIG
+
+    config = replace(DEFAULT_OPTIMIZE_CONFIG, semantic_enabled=True)
+    embedder = MagicMock(return_value=[0.25] * 768)
+    tier = VCacheSemantic(tmp_cache_db, config, embedder=embedder)
+    tier._lookup_inner = MagicMock(return_value=None)
+    request = {"messages": [{"role": "user", "content": "same meaning"}]}
+
+    tier.lookup(request, _tenant(1), None)
+
+    embedder.assert_called_once()
+    vector = tier._lookup_inner.call_args.args[2]
+    assert vector.shape == (768,)
 
 
 # ---- build_key with object (non-dict) path ----
