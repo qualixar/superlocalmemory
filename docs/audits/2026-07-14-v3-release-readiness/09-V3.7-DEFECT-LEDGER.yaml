@@ -261,6 +261,22 @@ defects:
       - "migration/m017_runner_registration_regression"
       - "migration/m017_fresh_upgrade_idempotency_report"
 
+  - id: SLM-P0-015
+    title: "Capability-bound remember rejects shipped proxy, hook, and dashboard writers"
+    severity: P0
+    evidence: runtime-proven
+    closure_mode: fix
+    workstream: WS2
+    dependencies: [SLM-P0-003, SLM-P0-010]
+    status: reproduced
+    acceptance:
+      - "Every Python-owned daemon writer uses one descriptor-validating client that supplies the private capability and exact target instance."
+      - "Browser writes authenticate through a server-issued same-origin session without exposing the daemon capability to JavaScript."
+      - "CLI, MCP remember, MCP auto-capture, hooks, and dashboard writes pass one write-surface identity and ingestion parity matrix."
+    proofs:
+      - "security/write_surface_identity_matrix"
+      - "contract/capability_bound_ingestion_parity"
+
   - id: SLM-P1-001
     title: "Retrieval channel contract and public composition disagree"
     severity: P1
