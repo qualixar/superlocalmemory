@@ -132,3 +132,26 @@ def test_unified_daemon_blocks_remote_mutation_before_route_execution(
     )
     assert response.status_code == 403
     assert response.json()["error"] == "Authenticated mutation capability required"
+
+
+def test_unified_daemon_blocks_remote_recall_telemetry_without_principal(
+    tmp_path, monkeypatch,
+) -> None:
+    from fastapi.testclient import TestClient
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from superlocalmemory.server.unified_daemon import create_app
+
+    class _RemotePeer(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            request.scope["client"] = ("192.0.2.45", 9124)
+            return await call_next(request)
+
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    app = create_app()
+    app.add_middleware(_RemotePeer)
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/recall",
+        params={"q": "keep this fact hot"},
+    )
+    assert response.status_code == 403
