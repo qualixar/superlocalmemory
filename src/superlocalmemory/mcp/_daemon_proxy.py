@@ -79,27 +79,26 @@ class DaemonPoolProxy:
     def store(
         self, content: str, metadata: dict | None = None,
     ) -> dict[str, Any]:
-        body = json.dumps({
+        body = {
             "content": content,
             "tags": (metadata or {}).get("tags", ""),
             "metadata": metadata or {},
             "session_id": (metadata or {}).get("session_id", ""),
             "idempotency_key": (metadata or {}).get("idempotency_key") or None,
-        }).encode()
-        req = urllib.request.Request(
-            self._url("/remember"),
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        }
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                data = json.loads(resp.read().decode() or "{}")
+            # One identity-aware daemon client owns descriptor validation,
+            # capability delivery, and exact-instance targeting.  A raw urllib
+            # POST here previously became unauthenticated when /remember was
+            # hardened and could also attach to a stale/foreign port.
+            from superlocalmemory.cli.daemon import daemon_request
+
+            data = daemon_request("POST", "/remember", body)
         except Exception as exc:
             logger.warning("daemon /remember failed: %s", exc)
             return {"ok": False, "error": str(exc)}
         if not isinstance(data, dict):
-            return {"ok": False, "error": "non-dict response"}
+            return {"ok": False, "error": "owned daemon unavailable"}
         data.setdefault("ok", True)
         return data
 

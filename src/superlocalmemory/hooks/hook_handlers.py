@@ -101,22 +101,20 @@ _DAEMON_URL = _daemon_url()
 
 
 def _daemon_post(path: str, body: dict, timeout: float = 3.0) -> bool:
-    """POST to SLM daemon via stdlib urllib. Returns True on success.
+    """POST through the owned-daemon identity client. Returns success.
 
     v3.4.13: Hooks route through daemon HTTP instead of spawning subprocesses.
     This eliminates the memory blast from concurrent worker spawns.
-    Uses ONLY stdlib — no httpx, no requests.
+    The client validates the descriptor and sends the private capability plus
+    exact instance ID; hook payload fields are never treated as identity.
     """
     try:
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            f"{_DAEMON_URL}{path}",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        from superlocalmemory.cli.daemon import daemon_request
+
+        response = daemon_request("POST", path, body)
+        return isinstance(response, dict) and bool(
+            response.get("ok", True)
         )
-        urllib.request.urlopen(req, timeout=timeout)
-        return True
     except Exception:
         return False
 

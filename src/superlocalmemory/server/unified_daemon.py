@@ -1801,13 +1801,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         return engine
 
     def _require_daemon_actor(request: Request) -> str:
-        """Authenticate this process instance and return its trusted actor.
-
-        Caller-provided agent labels are audit metadata only.  A mutating
-        control-plane request may borrow the daemon actor identity only after
-        proving possession of the private capability for this exact process
-        instance.
-        """
+        """Authenticate the private capability for this exact process."""
         descriptor = getattr(application.state, "daemon_descriptor", None)
         capability = request.headers.get("X-SLM-Daemon-Capability", "")
         if descriptor is None or not hmac.compare_digest(
@@ -1818,6 +1812,31 @@ def _register_daemon_routes(application: FastAPI) -> None:
         if not hmac.compare_digest(target_instance, descriptor.instance_id):
             raise HTTPException(409, detail="Daemon instance changed")
         return f"daemon-capability:{descriptor.capability_fingerprint}"
+
+    def _require_write_actor(request: Request) -> str:
+        """Authenticate a local write and return its trusted actor.
+
+        Caller-provided agent labels are audit metadata only.  A mutating
+        daemon client may borrow the process actor only after proving the
+        private capability for this exact instance.  Same-origin dashboard
+        writers instead present the install token, which is never the daemon
+        process capability.
+        """
+        capability = request.headers.get("X-SLM-Daemon-Capability", "")
+        if capability:
+            return _require_daemon_actor(request)
+
+        from superlocalmemory.core.security_primitives import verify_install_token
+
+        install_token = request.headers.get("X-Install-Token", "")
+        if verify_install_token(install_token):
+            from superlocalmemory.core.engine_ingestion import (
+                local_trusted_actor_id,
+            )
+
+            return local_trusted_actor_id("dashboard")
+
+        raise HTTPException(403, detail="Authenticated write capability required")
 
     @application.get("/health")
     async def health():
@@ -1956,7 +1975,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         queryable.  ``wait=true`` materializes the same operation inline; the
         background worker handles all other queryable operations.
         """
-        trusted_actor_id = _require_daemon_actor(request)
+        trusted_actor_id = _require_write_actor(request)
         _update_activity()
         engine = _get_engine_or_503()
 

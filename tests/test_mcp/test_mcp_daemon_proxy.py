@@ -92,21 +92,21 @@ class TestDaemonPoolProxy:
     def test_store_forwards_http_post(self, monkeypatch):
         captured = {}
 
-        def _fake_urlopen(req, timeout=30):
-            captured["url"] = req.full_url
-            captured["body"] = req.data
-            return _FakeResp(json.dumps({
-                "ok": True, "fact_ids": ["f1", "f2"], "count": 2,
-            }).encode())
+        def _owned_request(method, path, body=None):
+            captured.update(method=method, path=path, body=body)
+            return {"ok": True, "fact_ids": ["f1", "f2"], "count": 2}
 
-        import superlocalmemory.mcp._daemon_proxy as mod
-        monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen)
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            _owned_request,
+        )
 
         proxy = DaemonPoolProxy(port=9999)
         out = proxy.store("hello", metadata={"tags": "tag1"})
         assert out["fact_ids"] == ["f1", "f2"]
-        assert captured["url"].endswith("/remember")
-        body = json.loads(captured["body"].decode())
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/remember"
+        body = captured["body"]
         assert body["content"] == "hello"
         assert body["tags"] == "tag1"
 

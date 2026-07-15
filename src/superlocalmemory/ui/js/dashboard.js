@@ -72,14 +72,35 @@ document.addEventListener('click', function(e) {
     }
 });
 
+async function dashboardInstallToken() {
+    var key = 'slm_install_token';
+    var cached = sessionStorage.getItem(key);
+    if (cached) return cached;
+    var response = await fetch('/internal/token', {credentials: 'same-origin'});
+    if (!response.ok) return '';
+    var payload = await response.json();
+    var token = payload && payload.token ? payload.token : '';
+    if (token) sessionStorage.setItem(key, token);
+    return token;
+}
+
 // Quick store
-document.getElementById('quick-store-btn')?.addEventListener('click', function() {
+document.getElementById('quick-store-btn')?.addEventListener('click', async function() {
     var input = document.getElementById('quick-store-input');
     var content = input.value.trim();
     if (!content) return;
+    var token = await dashboardInstallToken();
+    if (!token) {
+        showToast('Store failed: local write credential unavailable', 'error');
+        return;
+    }
     fetch('/remember', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Install-Token': token
+        },
         body: JSON.stringify({content: content})
     }).then(function(r) {
         if (!r.ok) return r.json().catch(function() { return {}; }).then(function(d) {
