@@ -19,11 +19,13 @@ from superlocalmemory.math.hopfield import HopfieldConfig
 from superlocalmemory.retrieval.bridge_discovery import BridgeDiscovery
 from superlocalmemory.retrieval.entity_channel import EntityGraphChannel
 from superlocalmemory.retrieval.hopfield_channel import HopfieldChannel
+from superlocalmemory.retrieval.semantic_channel import SemanticChannel
 from superlocalmemory.retrieval.scope_policy import authorized_fact_ids
 from superlocalmemory.retrieval.spreading_activation import (
     SpreadingActivation,
     SpreadingActivationConfig,
 )
+from superlocalmemory.retrieval.temporal_channel import TemporalChannel
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 
@@ -202,6 +204,44 @@ def test_hopfield_prefilter_supplements_visible_external_candidates(scoped_db) -
     assert _ids(channel.search([1.0, 0.0, 0.0, 0.0], REQUESTER, top_k=20)) == VISIBLE
 
 
+def test_semantic_fast_path_never_returns_all_unauthorized_ann_ids(
+    scoped_db,
+) -> None:
+    vector_store = MagicMock(available=True)
+    vector_store.search.return_value = [("personal", 0.99)]
+    channel = SemanticChannel(scoped_db, vector_store=vector_store)
+
+    results = channel.search(
+        [1.0, 0.0, 0.0, 0.0],
+        REQUESTER,
+        top_k=20,
+    )
+
+    # An empty canonical authorization result must fall back to the scoped DB
+    # corpus; it must never return the raw, untrusted ANN candidate list.
+    assert _ids(results) == {"local"}
+
+
+def test_temporal_event_scope_cannot_override_private_fact_scope(scoped_db) -> None:
+    with scoped_db.raw_connection() as conn:
+        conn.execute(
+            "INSERT INTO temporal_events "
+            "(event_id, profile_id, scope, entity_id, fact_id, "
+            " observation_date, referenced_date, description) "
+            "VALUES ('forged_event', ?, 'global', 'entity_owner', "
+            " 'personal', '2026-01-01', '2026-01-01', 'forged')",
+            (OWNER,),
+        )
+    channel = TemporalChannel(scoped_db)
+    channel.include_global = True
+
+    date_results = channel.search("2026-01-01", REQUESTER, top_k=20)
+    entity_results = channel.search("When did Scope happen?", REQUESTER, top_k=20)
+
+    assert "personal" not in _ids(date_results)
+    assert "personal" not in _ids(entity_results)
+
+
 def test_spreading_activation_enforces_scope_and_scope_keyed_cache(scoped_db) -> None:
     vector_store = MagicMock(available=True)
     # The owner-partitioned ANN returns a maliciously broad candidate list;
@@ -320,3 +360,23 @@ def test_bridge_expansion_enforces_scope_for_seeds_and_candidates(scoped_db) -> 
     # The global seed itself is unauthorized without opt-in, so expansion
     # fails closed instead of reading it through unscoped get_fact().
     assert private == []
+
+
+def test_bridge_spreading_activation_rejects_unauthorized_seed(scoped_db) -> None:
+    with scoped_db.raw_connection() as conn:
+        conn.execute(
+            "INSERT INTO graph_edges "
+            "(edge_id, profile_id, scope, source_id, target_id, edge_type, "
+            " weight, created_at) VALUES "
+            "('forged_bridge', ?, 'global', 'personal', 'global', "
+            " 'semantic', 1.0, datetime('now'))",
+            (OWNER,),
+        )
+    bridge = BridgeDiscovery(scoped_db)
+
+    assert bridge.spreading_activation(
+        ["personal"],
+        REQUESTER,
+        max_depth=1,
+        include_global=True,
+    ) == []
