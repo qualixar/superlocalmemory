@@ -20,6 +20,9 @@ def _client(engine) -> TestClient:
     client.headers["X-SLM-Daemon-Capability"] = (
         app.state.daemon_descriptor.capability
     )
+    client.headers["X-SLM-Target-Instance"] = (
+        app.state.daemon_descriptor.instance_id
+    )
     return client
 
 

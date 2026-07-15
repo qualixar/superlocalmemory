@@ -1800,6 +1800,25 @@ def _register_daemon_routes(application: FastAPI) -> None:
             raise HTTPException(503, detail="Engine not initialized")
         return engine
 
+    def _require_daemon_actor(request: Request) -> str:
+        """Authenticate this process instance and return its trusted actor.
+
+        Caller-provided agent labels are audit metadata only.  A mutating
+        control-plane request may borrow the daemon actor identity only after
+        proving possession of the private capability for this exact process
+        instance.
+        """
+        descriptor = getattr(application.state, "daemon_descriptor", None)
+        capability = request.headers.get("X-SLM-Daemon-Capability", "")
+        if descriptor is None or not hmac.compare_digest(
+            capability, descriptor.capability,
+        ):
+            raise HTTPException(403, detail="Invalid daemon capability")
+        target_instance = request.headers.get("X-SLM-Target-Instance", "")
+        if not hmac.compare_digest(target_instance, descriptor.instance_id):
+            raise HTTPException(409, detail="Daemon instance changed")
+        return f"daemon-capability:{descriptor.capability_fingerprint}"
+
     @application.get("/health")
     async def health():
         _update_activity()
@@ -1926,13 +1945,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
             _end_recall()
 
     @application.post("/remember")
-    async def remember(req: RememberRequest, wait: bool = False):
+    async def remember(
+        req: RememberRequest,
+        request: Request,
+        wait: bool = False,
+    ):
         """Persist through the durable canonical ingestion state machine.
 
         The default path returns after the relational/FTS projection is
         queryable.  ``wait=true`` materializes the same operation inline; the
         background worker handles all other queryable operations.
         """
+        trusted_actor_id = _require_daemon_actor(request)
         _update_activity()
         engine = _get_engine_or_503()
 
@@ -1958,12 +1982,6 @@ def _register_daemon_routes(application: FastAPI) -> None:
             extra = getattr(req, "metadata", None)
             if isinstance(extra, dict):
                 meta.update(extra)
-            identity = getattr(application.state, "daemon_descriptor", None)
-            if identity is None:
-                raise RuntimeError("daemon capability identity is unavailable")
-            trusted_actor_id = (
-                f"daemon-capability:{identity.capability_fingerprint}"
-            )
             command = build_engine_ingestion_command(engine)
             receipt = command.submit(IngestionRequest(
                 content=req.content,
@@ -2122,15 +2140,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
     @application.post("/stop")
     async def stop(request: Request):
         """Gracefully stop only the capability-bound process instance."""
-        descriptor = getattr(application.state, "daemon_descriptor", None)
-        capability = request.headers.get("X-SLM-Daemon-Capability", "")
-        if descriptor is None or not hmac.compare_digest(
-            capability, descriptor.capability,
-        ):
-            raise HTTPException(403, detail="Invalid daemon capability")
-        target_instance = request.headers.get("X-SLM-Target-Instance", "")
-        if not hmac.compare_digest(target_instance, descriptor.instance_id):
-            raise HTTPException(409, detail="Daemon instance changed")
+        _require_daemon_actor(request)
         logger.info("Stop requested via API")
         _observe_buffer.flush_sync()
         # Signal uvicorn to shut down gracefully
