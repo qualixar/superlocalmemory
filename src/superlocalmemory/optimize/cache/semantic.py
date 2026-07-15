@@ -22,7 +22,7 @@ import logging
 import random
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
@@ -77,9 +77,12 @@ class VCacheSemantic(SemanticTier):
         self,
         db: "CacheDB",
         config: "OptimizeConfig",
+        *,
+        embedder: Callable[[str], list[float] | np.ndarray | None] | None = None,
     ) -> None:
         self._db = db
         self._config = config
+        self._embedder = embedder
         # TODO(v3.7): when entry_count > 10_000, promote to sqlite-vec. Config flag: semantic_use_vec.
 
         self._boundary_store = BoundaryStore(
@@ -134,7 +137,13 @@ class VCacheSemantic(SemanticTier):
             return None
         try:
             if embed is None:
-                return None
+                if self._embedder is None:
+                    return None
+                messages = _extract_messages(req)
+                system = _extract_system(req)
+                embed = self._embedder(self._build_query_text(messages, system))
+                if embed is None:
+                    return None
             vec = np.asarray(embed, dtype=np.float32)
             if vec.shape[0] != _EMBED_DIM:
                 logger.debug(
@@ -190,7 +199,13 @@ class VCacheSemantic(SemanticTier):
             return
         try:
             if embed is None:
-                return
+                if self._embedder is None:
+                    return
+                messages = _extract_messages(req)
+                system = _extract_system(req)
+                embed = self._embedder(self._build_query_text(messages, system))
+                if embed is None:
+                    return
             messages = _extract_messages(req)
             system = _extract_system(req)
             query_text = self._build_query_text(messages, system)
@@ -246,6 +261,11 @@ class VCacheSemantic(SemanticTier):
                 "VCacheSemantic.index_entry failed (fail-open): tenant=%s exc=%s",
                 tenant_id, exc, exc_info=True,
             )
+
+    def close(self) -> None:
+        close = getattr(self._embedder, "close", None)
+        if callable(close):
+            close()
 
     # ------------------------------------------------------------------
     # Internal lookup

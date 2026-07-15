@@ -178,7 +178,7 @@ def _load_hooks(config: OptimizeConfig) -> HookChain:
     if config.cache_enabled:
         try:
             from superlocalmemory.optimize.cache.manager import CacheManager
-            cache_hook = CacheManager.get_instance()
+            cache_hook = CacheManager.get_instance(optimize_config=config)
         except Exception as exc:
             logger.warning(
                 "cache hook load failed (proxy continues without cache): %s", exc
