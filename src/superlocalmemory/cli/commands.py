@@ -1053,35 +1053,67 @@ def cmd_remember(args: Namespace) -> None:
         if isinstance(_sw_raw, str) and _sw_raw.strip() else _sw_raw
     )
 
-    # V3.3.21: Route through daemon for instant remember (no cold start).
-    # If daemon is running, send request directly (~0.1s).
-    # If not, fall through to the canonical local engine.  Public callers must
-    # never persist raw evidence ahead of actor derivation and the write hook.
-    if not sync_mode:
-        # Try daemon first
-        try:
-            from superlocalmemory.cli.daemon import is_daemon_running, daemon_request, ensure_daemon
-            if is_daemon_running() or ensure_daemon():
-                result = daemon_request("POST", "/remember", {
+    # Both paths use the one owned daemon.  A second local engine for --sync
+    # duplicates heavyweight workers and can block for minutes on cold models.
+    daemon_owned = False
+    try:
+        from superlocalmemory.cli.daemon import (
+            daemon_request, ensure_daemon, is_daemon_running,
+        )
+        daemon_owned = is_daemon_running() or ensure_daemon()
+        if daemon_owned:
+            path = "/remember?wait=true" if sync_mode else "/remember"
+            result = daemon_request(
+                "POST", path, {
                     "content": args.content,
                     "tags": args.tags or "",
                     "scope": scope,
                     "shared_with": shared_with,
+                },
+                timeout_seconds=30,
+            )
+            if result and "fact_ids" in result:
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("remember", data=result)
+                else:
+                    state = result.get("materialization_state", "queryable")
+                    operation_id = result.get("operation_id", "unknown")
+                    print(
+                        f"{state.capitalize()} \u2713 {result['count']} facts "
+                        f"(operation={operation_id})."
+                    )
+                return
+            if sync_mode:
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("remember", error={
+                        "code": "SYNC_TIMEOUT",
+                        "message": (
+                            "Canonical ingestion did not complete within 30s; "
+                            "the durable operation remains available for retry."
+                        ),
+                    })
+                else:
+                    print(
+                        "Synchronous ingestion did not complete within 30s; "
+                        "the durable operation remains queued.",
+                        file=sys.stderr,
+                    )
+                sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception:
+        if sync_mode and daemon_owned:
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("remember", error={
+                    "code": "SYNC_TIMEOUT",
+                    "message": "Owned daemon request failed before completion.",
                 })
-                if result and "fact_ids" in result:
-                    if use_json:
-                        from superlocalmemory.cli.json_output import json_print
-                        json_print("remember", data=result)
-                    else:
-                        state = result.get("materialization_state", "queryable")
-                        operation_id = result.get("operation_id", "unknown")
-                        print(
-                            f"{state.capitalize()} \u2713 {result['count']} facts "
-                            f"(operation={operation_id})."
-                        )
-                    return
-        except Exception:
-            pass  # Fall through to authenticated canonical local ingestion.
+            sys.exit(1)
+        # Receipt-first writes may use the authenticated local fallback when
+        # no owned daemon exists.
 
     from superlocalmemory.core.engine import MemoryEngine
 

@@ -179,7 +179,13 @@ def _get_port() -> int:
     return _DEFAULT_PORT
 
 
-def daemon_request(method: str, path: str, body: dict | None = None) -> dict | None:
+def daemon_request(
+    method: str,
+    path: str,
+    body: dict | None = None,
+    *,
+    timeout_seconds: float = 30.0,
+) -> dict | None:
     """Send a request only after validating the owned daemon identity."""
     descriptor = read_descriptor()
     capability: str | None = None
@@ -209,7 +215,7 @@ def daemon_request(method: str, path: str, body: dict | None = None) -> dict | N
             headers["X-SLM-Daemon-Capability"] = capability
             headers["X-SLM-Target-Instance"] = descriptor.instance_id
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        resp = urllib.request.urlopen(req, timeout=30)
+        resp = urllib.request.urlopen(req, timeout=timeout_seconds)
         return json.loads(resp.read().decode())
     except Exception:
         return None
