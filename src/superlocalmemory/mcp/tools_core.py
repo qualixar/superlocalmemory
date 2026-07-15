@@ -573,7 +573,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
             result = pool._send({
                 "cmd": "delete_memory",
                 "fact_id": fact_id,
-                "agent_id": agent_id,
+                # Informational IDE/client label only.  The worker derives its
+                # authorization actor from the private local capability.
+                "source_agent_id": agent_id,
             })
             if result.get("ok"):
                 logger.info("Memory deleted: %s by agent: %s", fact_id[:16], agent_id)
@@ -614,7 +616,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "cmd": "update_memory",
                 "fact_id": fact_id,
                 "content": content.strip(),
-                "agent_id": agent_id,
+                "source_agent_id": agent_id,
             })
             if result.get("ok"):
                 logger.info("Memory updated: %s by agent: %s", fact_id[:16], agent_id)

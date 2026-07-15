@@ -154,10 +154,24 @@ def _handle_get_memory_facts(memory_id: str) -> dict:
     }
 
 
-def _handle_delete_memory(fact_id: str, agent_id: str = "system") -> dict:
-    """Delete a specific atomic fact by ID with audit logging."""
+def _handle_delete_memory(
+    fact_id: str,
+    source_agent_id: str = "system",
+) -> dict:
+    """Delete a fact after capability-derived authorization."""
     engine = _get_engine()
     pid = engine.profile_id
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+
+    trusted_actor_id = local_trusted_actor_id("recall-worker")
+    hook_context = {
+        "operation": "delete",
+        "agent_id": trusted_actor_id,
+        "source_agent_id": source_agent_id,
+        "profile_id": pid,
+        "fact_id": fact_id,
+    }
+    engine._hooks.run_pre("delete", hook_context)
     rows = engine._db.execute(
         "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ? LIMIT 1",
         (fact_id, pid),
@@ -169,15 +183,32 @@ def _handle_delete_memory(fact_id: str, agent_id: str = "system") -> dict:
     # Audit log
     import logging as _logging
     _logging.getLogger("superlocalmemory.audit").info(
-        "DELETE fact_id=%s by agent=%s content=%s", fact_id[:16], agent_id, content_preview,
+        "DELETE fact_id=%s actor=%s source_agent=%s content=%s",
+        fact_id[:16], trusted_actor_id, source_agent_id, content_preview,
     )
     return {"ok": True, "deleted": fact_id, "content_preview": content_preview}
 
 
-def _handle_update_memory(fact_id: str, content: str, agent_id: str = "system") -> dict:
-    """Update content of a specific atomic fact with audit logging."""
+def _handle_update_memory(
+    fact_id: str,
+    content: str,
+    source_agent_id: str = "system",
+) -> dict:
+    """Update a fact after capability-derived authorization."""
     engine = _get_engine()
     pid = engine.profile_id
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+
+    trusted_actor_id = local_trusted_actor_id("recall-worker")
+    hook_context = {
+        "operation": "update",
+        "agent_id": trusted_actor_id,
+        "source_agent_id": source_agent_id,
+        "profile_id": pid,
+        "fact_id": fact_id,
+        "content_preview": content[:100],
+    }
+    engine._hooks.run_pre("update", hook_context)
     rows = engine._db.execute(
         "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ? LIMIT 1",
         (fact_id, pid),
@@ -209,8 +240,8 @@ def _handle_update_memory(fact_id: str, content: str, agent_id: str = "system") 
                 pass
     import logging as _logging
     _logging.getLogger("superlocalmemory.audit").info(
-        "UPDATE fact_id=%s by agent=%s old=%s new=%s",
-        fact_id[:16], agent_id, old_content, content[:80],
+        "UPDATE fact_id=%s actor=%s source_agent=%s old=%s new=%s",
+        fact_id[:16], trusted_actor_id, source_agent_id, old_content, content[:80],
     )
     return {"ok": True, "fact_id": fact_id, "content": content}
 
@@ -299,14 +330,15 @@ def _worker_main() -> None:
                 _respond(result)
             elif cmd == "delete_memory":
                 result = _handle_delete_memory(
-                    req.get("fact_id", ""), req.get("agent_id", "system"),
+                    req.get("fact_id", ""),
+                    req.get("source_agent_id", req.get("agent_id", "system")),
                 )
                 _respond(result)
             elif cmd == "update_memory":
                 result = _handle_update_memory(
                     req.get("fact_id", ""),
                     req.get("content", ""),
-                    req.get("agent_id", "system"),
+                    req.get("source_agent_id", req.get("agent_id", "system")),
                 )
                 _respond(result)
             elif cmd == "get_memory_facts":

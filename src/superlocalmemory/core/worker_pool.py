@@ -101,12 +101,21 @@ class WorkerPool:
         })
 
     def delete_memory(self, fact_id: str, agent_id: str = "system") -> dict:
-        """Delete a specific memory by fact_id. Logged for audit."""
-        return self._send({"cmd": "delete_memory", "fact_id": fact_id, "agent_id": agent_id})
+        """Delete by fact ID; ``agent_id`` is untrusted audit metadata."""
+        return self._send({
+            "cmd": "delete_memory",
+            "fact_id": fact_id,
+            "source_agent_id": agent_id,
+        })
 
     def update_memory(self, fact_id: str, content: str, agent_id: str = "system") -> dict:
-        """Update content of a specific memory. Logged for audit."""
-        return self._send({"cmd": "update_memory", "fact_id": fact_id, "content": content, "agent_id": agent_id})
+        """Update content; ``agent_id`` is untrusted audit metadata."""
+        return self._send({
+            "cmd": "update_memory",
+            "fact_id": fact_id,
+            "content": content,
+            "source_agent_id": agent_id,
+        })
 
     def get_memory_facts(self, memory_id: str) -> dict:
         """Get original memory text + child atomic facts."""

@@ -613,6 +613,8 @@ def wire_hooks(
             ctx.get("agent_id", "unknown"), ctx.get("profile_id", profile_id)))
         hooks.register_pre("delete", lambda ctx: gate.check_delete(
             ctx.get("agent_id", "unknown"), ctx.get("profile_id", profile_id)))
+        hooks.register_pre("update", lambda ctx: gate.check_write(
+            ctx.get("agent_id", "unknown"), ctx.get("profile_id", profile_id)))
 
     # -- Post-store hooks (async, never block) --
     if trust_scorer:
