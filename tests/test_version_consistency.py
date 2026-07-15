@@ -194,3 +194,19 @@ def test_runtime_attribution_emits_current_license() -> None:
     attribution = QualixarSigner("release-gate-test-key").sign("candidate")
 
     assert attribution["license"] == "AGPL-3.0-or-later"
+
+
+def test_packaging_uses_pep639_license_metadata() -> None:
+    with (_REPO_ROOT / "pyproject.toml").open("rb") as stream:
+        metadata = tomllib.load(stream)
+
+    assert metadata["project"]["license"] == "AGPL-3.0-or-later"
+    assert metadata["project"]["license-files"] == ["LICENSE", "NOTICE"]
+    assert not any(
+        classifier.startswith("License ::")
+        for classifier in metadata["project"]["classifiers"]
+    )
+    assert any(
+        requirement.startswith("setuptools>=77.0.3")
+        for requirement in metadata["build-system"]["requires"]
+    )
