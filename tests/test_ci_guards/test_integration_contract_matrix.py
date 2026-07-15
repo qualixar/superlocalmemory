@@ -19,6 +19,7 @@ from superlocalmemory.hooks.portable_kit import IDE_MATRIX
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "ide" / "integration-contracts.json"
+EVIDENCE = ROOT / "ide" / "integration-compatibility-evidence.json"
 
 REQUIRED_CONTRACTS = {
     "config_generation_parse",
@@ -114,3 +115,10 @@ def test_evidence_counts_do_not_conflate_local_contracts_with_host_runtime(
     # Evidence must be deterministic and safe to check into release artifacts.
     assert evidence == build_evidence(ROOT, manifest, work_dir=tmp_path / "again")
     json.dumps(evidence, sort_keys=True)
+
+
+def test_checked_in_compatibility_evidence_matches_executable_matrix(
+    tmp_path: Path,
+) -> None:
+    expected = build_evidence(ROOT, load_manifest(MANIFEST), work_dir=tmp_path)
+    assert json.loads(EVIDENCE.read_text(encoding="utf-8")) == expected
