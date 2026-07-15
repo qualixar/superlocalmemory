@@ -76,7 +76,7 @@ class QualixarSigner:
     _PLATFORM: str = "Qualixar"
     _AUTHOR: str = "Varun Pratap Bhardwaj"
     _AUTHOR_URL: str = "https://varunpratap.com"
-    _LICENSE: str = "MIT"
+    _LICENSE: str = "AGPL-3.0-or-later"
 
     def __init__(self, secret_key: str | None = None) -> None:
         if secret_key is None:
@@ -100,7 +100,7 @@ class QualixarSigner:
 
             - ``platform``     – always ``"Qualixar"``
             - ``author``       – always ``"Varun Pratap Bhardwaj"``
-            - ``license``      – always ``"MIT"``
+            - ``license``      – always ``"AGPL-3.0-or-later"``
             - ``content_hash`` – SHA-256 hex digest of *content*
             - ``signature``    – HMAC-SHA256 hex digest (key-dependent)
             - ``timestamp``    – ISO 8601 UTC timestamp

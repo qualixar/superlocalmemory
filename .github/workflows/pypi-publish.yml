@@ -18,19 +18,19 @@ jobs:
       name: pypi
       url: https://pypi.org/project/superlocalmemory/
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.2.0
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
         with:
           node-version: "20"
           registry-url: https://registry.npmjs.org
@@ -64,6 +64,7 @@ jobs:
 
       - name: Install build and test dependencies
         run: |
+          uv lock --check
           npm ci --ignore-scripts
           uv sync --extra dev
 
@@ -108,6 +109,40 @@ jobs:
               raise SystemExit(f"compiled cache files in npm artifact: {forbidden[:10]}")
           PY
 
+      - name: Test exact candidate artifacts
+        env:
+          SLM_RELEASE_PYTHON_DIST: ${{ github.workspace }}/dist/python
+        run: |
+          uv run python -m pytest -q -o "addopts=" -m slow \
+            tests/release/test_artifact_contract.py \
+            tests/release/test_installed_artifacts.py \
+            tests/release/test_daemon_namespace_blackbox.py
+
+      - name: Generate immutable release evidence
+        run: |
+          python3 scripts/release_evidence.py create \
+            --version "${{ steps.version.outputs.version }}" \
+            --commit "$GITHUB_SHA" \
+            --artifact-root dist \
+            --workflow-run "$GITHUB_RUN_ID" \
+            dist/python/* "${{ steps.artifacts.outputs.npm_tarball }}"
+          python3 scripts/release_evidence.py verify \
+            --manifest dist/release-evidence.json \
+            --artifact-root dist
+          test -s dist/SHA256SUMS
+
+      - name: Retain candidate artifacts and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: superlocalmemory-${{ steps.version.outputs.version }}-candidates
+          path: |
+            dist/python/*
+            dist/npm/*
+            dist/release-evidence.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Check release registry state
         id: registry
         run: |
@@ -119,7 +154,7 @@ jobs:
 
       - name: Publish to PyPI
         if: steps.registry.outputs.pypi_exists != 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           packages-dir: dist/python/
 
@@ -136,3 +171,32 @@ jobs:
             --python-dist dist/python \
             --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
             --attempts 6 --interval 10
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            EXISTING="$RUNNER_TEMP/existing-release"
+            mkdir -p "$EXISTING"
+            gh release download "$GITHUB_REF_NAME" --dir "$EXISTING"
+            for candidate in \
+              dist/python/* \
+              "${{ steps.artifacts.outputs.npm_tarball }}" \
+              dist/release-evidence.json \
+              dist/SHA256SUMS; do
+              published="$EXISTING/$(basename "$candidate")"
+              test -f "$published"
+              cmp -- "$candidate" "$published"
+            done
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/python/* \
+              "${{ steps.artifacts.outputs.npm_tarball }}" \
+              dist/release-evidence.json \
+              dist/SHA256SUMS \
+              --verify-tag \
+              --generate-notes \
+              --title "SuperLocalMemory $GITHUB_REF_NAME"
+          fi

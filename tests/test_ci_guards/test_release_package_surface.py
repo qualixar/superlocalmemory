@@ -77,12 +77,14 @@ def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> Non
 
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert release["environment"]["name"] == "pypi"
-    assert release["permissions"] == {"contents": "read", "id-token": "write"}
+    assert release["permissions"] == {"contents": "write", "id-token": "write"}
     assert "npm publish" in source
-    assert "pypa/gh-action-pypi-publish@release/v1" in source
+    assert "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b" in source
     assert "check-release-registries" in source
     assert "verify-release-registries" in source
     assert "python -m pytest tests/ -q" in source
+    assert "SLM_RELEASE_PYTHON_DIST" in source
+    assert "scripts/release_evidence.py" in source
     assert "steps.registry.outputs.pypi_exists != 'true'" in source
     assert "steps.registry.outputs.npm_exists != 'true'" in source
     assert source.index("Build both release artifacts") < source.index("Publish to PyPI")

@@ -149,7 +149,10 @@ RULES = (
     ),
 )
 
-TEXT_SUFFIXES = {".md", ".mdx", ".astro", ".tsx", ".ts", ".js", ".mjs", ".py", ".toml", ".json", ".txt"}
+TEXT_SUFFIXES = {
+    ".astro", ".cff", ".html", ".js", ".json", ".md", ".mdx", ".mjs",
+    ".ps1", ".py", ".sh", ".toml", ".ts", ".tsx", ".txt",
+}
 SKIP_PARTS = {
     ".astro",
     ".backup",
@@ -166,6 +169,17 @@ SKIP_PARTS = {
     "superpowers",
 }
 HISTORICAL_FILES = {"CHANGELOG.md", "package-lock.json"}
+CURRENT_LICENSE_SURFACES = {
+    "CITATION.cff",
+    "scripts/test-npm-package.ps1",
+    "scripts/test-npm-package.sh",
+    "scripts/verify-install.ps1",
+    "scripts/verify-install.sh",
+    "scripts/verify-v27.ps1",
+    "scripts/verify-v27.sh",
+    "src/superlocalmemory/attribution/signer.py",
+}
+MIT_PATTERN = re.compile(r"\bMIT(?:\s+License)?\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -186,6 +200,8 @@ def _is_public_surface(path: Path, root: Path) -> bool:
         return False
 
     root_name = root.name.lower()
+    if root_name in {"dist", "build"}:
+        return path.suffix.lower() in {".html", ".json", ".txt", ".xml"}
     if "website" in root_name:
         return rel.parts[0] in {"src", "public"}
     if root_name.endswith(".wiki"):
@@ -274,7 +290,12 @@ def scan_paths(roots: Iterable[Path]) -> list[Finding]:
             except (OSError, UnicodeDecodeError):
                 continue
             for index, line in enumerate(lines):
-                if license_rule.pattern.search(line):
+                stale_license = license_rule.pattern.search(line)
+                current_mit = (
+                    rel.as_posix() in CURRENT_LICENSE_SURFACES
+                    and MIT_PATTERN.search(line)
+                )
+                if stale_license or current_mit:
                     findings.append(
                         Finding(path=path, line=index + 1, rule=license_rule, text=line.strip())
                     )

@@ -1,7 +1,7 @@
 # ============================================================================
 # SuperLocalMemory V2.7 — Quick Verification Script (PowerShell)
 # Copyright (c) 2026 Varun Pratap Bhardwaj
-# Licensed under MIT License
+# Licensed under AGPL-3.0-or-later - see LICENSE file
 # Repository: https://github.com/qualixar/superlocalmemory
 #
 # Run this after installation to verify everything works:

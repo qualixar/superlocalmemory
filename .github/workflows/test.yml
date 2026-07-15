@@ -7,7 +7,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-14, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -40,15 +40,7 @@ jobs:
             --ignore=tests/test_integration/test_e2e_v33.py \
             --ignore=tests/test_benchmarks/ \
             --ignore=tests/graph/test_cozo_backend.py \
-            --ignore=tests/vector/test_lancedb_backend.py \
-            || EXIT_CODE=$?
-          # Windows Python exits with code 1 due to KeyboardInterrupt during
-          # daemon thread cleanup (not a test failure). Tests themselves pass.
-          if [ "${EXIT_CODE:-0}" -eq 1 ] && [ "$RUNNER_OS" = "Windows" ]; then
-            echo "::warning::Windows KeyboardInterrupt during cleanup (non-fatal)"
-            exit 0
-          fi
-          exit ${EXIT_CODE:-0}
+            --ignore=tests/vector/test_lancedb_backend.py
 
   native-lancedb:
     name: Native LanceDB (${{ matrix.os }})

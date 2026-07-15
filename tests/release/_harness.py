@@ -162,6 +162,19 @@ def build_snapshot(snapshot: Path, output_dir: Path) -> BuiltArtifacts:
     return BuiltArtifacts(snapshot, output_dir, wheels[0], sdists[0])
 
 
+def candidate_artifacts_from_directory(
+    snapshot: Path,
+    output_dir: Path,
+) -> BuiltArtifacts:
+    """Select exactly one prebuilt wheel and sdist for byte-identical tests."""
+    resolved = output_dir.resolve()
+    wheels = sorted(resolved.glob("*.whl"))
+    sdists = sorted(resolved.glob("*.tar.gz"))
+    assert len(wheels) == 1, f"expected one candidate wheel, found: {wheels}"
+    assert len(sdists) == 1, f"expected one candidate sdist, found: {sdists}"
+    return BuiltArtifacts(snapshot.resolve(), resolved, wheels[0], sdists[0])
+
+
 def _venv_python(path: Path) -> Path:
     """Return the platform-specific interpreter path for ``path``."""
     if sys.platform == "win32":

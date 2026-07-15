@@ -5,6 +5,54 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## V3.7 release candidate (unreleased)
+
+The V3.7 audit-hardening stream is not published yet. Current candidate work adds fail-closed release promotion, exact wheel/sdist testing, byte-level evidence and checksums, rendered-site claim scanning, canonical version/license guards, daemon identity and mutation authorization, migration-aware readiness, Zeroconf address decoding, and persisted int8 retrieval filtering. A V3.7 version entry will replace this section only when the final version is frozen and the release evidence bundle is green.
+
+## [3.6.23] - 2026-07-12 — Cross-platform data-root and maintenance hardening
+
+### Fixed
+
+- Resolved the server data directory from the supported environment variables instead of a hard-coded path.
+- Made Langevin maintenance backfill tolerate timezone-naive `created_at` values.
+- Applied the coordinated cross-platform release patch and reconciled package metadata at 3.6.23.
+
+## [3.6.22] - 2026-06-30 — Provider response hardening
+
+### Fixed
+
+- Treated an empty HTTP 200 provider body as a controlled provider error instead of leaking a `JSONDecodeError`.
+- Completed the remaining dashboard audit fixes included in the 3.6.22 release tag.
+
+## [3.6.21] - 2026-06-30 — Dashboard audit and settings preservation
+
+### Fixed
+
+- Preserved unrelated user settings when dashboard and MCP configuration paths write updates.
+- Completed the dashboard UI audit and browser-side mesh authentication repair for issue #60.
+
+## [3.6.20] - 2026-06-26 — Remote mesh authentication repair
+
+### Fixed
+
+- Accepted the supported bearer-token authentication path in the mesh broker and removed the superseded validation path.
+
+## [3.6.19] - 2026-06-24 — Plugin hook source correction
+
+### Fixed
+
+- Moved the session mandate hook into `plugin-src`, the actual build source, so npm prepack no longer overwrites the shipped hook with stale content.
+
+## [3.6.18] - 2026-06-24 — Session mandate and atomic installer state
+
+### Added
+
+- Added the `session_init` mandate, plugin auto-install support, migration M017, and garbage-collection-safe tests.
+
+### Fixed
+
+- Made `settings.json` replacement atomic and hook installation idempotent across repeated installer runs.
+
 ## [3.6.17] - 2026-06-21 — Community PR round + dashboard-feedback fix + SQLite tuning
 
 Eight community pull requests merged after line-by-line review, plus fixes for the open issues. Every change was validated against the full test suite under the real 3.12 runtime; default single-machine behavior is unchanged.

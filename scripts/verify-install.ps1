@@ -1,7 +1,7 @@
 # ============================================================================
 # SuperLocalMemory - Installation Verification Script (PowerShell)
 # Copyright (c) 2026 Varun Pratap Bhardwaj
-# Licensed under MIT License
+# Licensed under AGPL-3.0-or-later - see LICENSE file
 # ============================================================================
 
 $ErrorActionPreference = "Continue"

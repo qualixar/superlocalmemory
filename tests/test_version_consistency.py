@@ -2,6 +2,7 @@
 
 import json
 import re
+import tomllib
 from pathlib import Path
 
 # Repo root is three levels up from this file:
@@ -72,6 +73,18 @@ def _read_citation_field(field: str) -> str:
     return match.group(1).strip()
 
 
+def _read_uv_lock_version() -> str:
+    with (_REPO_ROOT / "uv.lock").open("rb") as stream:
+        lock = tomllib.load(stream)
+    matches = [
+        package["version"]
+        for package in lock["package"]
+        if package.get("name") == "superlocalmemory"
+    ]
+    assert len(matches) == 1, f"Expected one superlocalmemory uv.lock entry: {matches}"
+    return matches[0]
+
+
 EXPECTED_VERSION = _read_pyproject_version()
 
 
@@ -134,6 +147,7 @@ def test_all_versions_consistent() -> None:
             "plugin/requirements.txt"
         ),
         "CITATION.cff": _read_citation_field("version"),
+        "uv.lock": _read_uv_lock_version(),
     }
     mismatches = {src: ver for src, ver in sources.items() if ver != EXPECTED_VERSION}
     assert not mismatches, (
@@ -172,3 +186,11 @@ def test_product_owned_verification_scripts_use_current_license() -> None:
         for relative in scripts
     }
     assert not any(stale.values()), stale
+
+
+def test_runtime_attribution_emits_current_license() -> None:
+    from superlocalmemory.attribution.signer import QualixarSigner
+
+    attribution = QualixarSigner("release-gate-test-key").sign("candidate")
+
+    assert attribution["license"] == "AGPL-3.0-or-later"
