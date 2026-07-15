@@ -18,6 +18,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--ingests", type=int, default=50)
+    parser.add_argument("--idempotent-ingests", type=int, default=100)
     parser.add_argument("--recalls", type=int, default=100)
     parser.add_argument("--sample-every", type=int, default=10)
     parser.add_argument(
@@ -29,6 +30,7 @@ def main() -> int:
     result = run_mode_a_local(
         warmup_iterations=args.warmup,
         ingest_iterations=args.ingests,
+        idempotent_ingest_iterations=args.idempotent_ingests,
         recall_iterations=args.recalls,
         sample_every=args.sample_every,
     )

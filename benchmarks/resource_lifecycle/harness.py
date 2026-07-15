@@ -166,6 +166,7 @@ def run_mode_a_local(
     *,
     warmup_iterations: int = 5,
     ingest_iterations: int = 50,
+    idempotent_ingest_iterations: int = 100,
     recall_iterations: int = 100,
     sample_every: int = 10,
     repo_root: Path | None = None,
@@ -174,6 +175,7 @@ def run_mode_a_local(
     for value, name in (
         (warmup_iterations, "warmup_iterations"),
         (ingest_iterations, "ingest_iterations"),
+        (idempotent_ingest_iterations, "idempotent_ingest_iterations"),
         (recall_iterations, "recall_iterations"),
         (sample_every, "sample_every"),
     ):
@@ -212,8 +214,10 @@ def run_mode_a_local(
         initialization_ms = (time.perf_counter_ns() - initialization_started) / 1_000_000
 
         ingest_latencies: list[float] = []
+        idempotent_ingest_latencies: list[float] = []
         recall_latencies: list[float] = []
         ingest_rss: list[float] = []
+        idempotent_ingest_rss: list[float] = []
         recall_rss: list[float] = []
         try:
             def ingest(index: int):
@@ -246,6 +250,40 @@ def run_mode_a_local(
                 if (offset + 1) % sample_every == 0 or offset + 1 == ingest_iterations:
                     ingest_rss.append(_rss_mb(process))
 
+            # Separate intended corpus/index growth from retry-path retention.
+            # A stable idempotency key exercises canonical ingestion repeatedly
+            # against fixed logical state, which is the leak-sensitive phase.
+            from superlocalmemory.core.engine_ingestion import canonical_store
+
+            retry_content = (
+                "Resource benchmark stable retry: Project Atlas owner Alice "
+                "approved the fixed recovery control and recorded the decision."
+            )
+
+            def idempotent_ingest():
+                return canonical_store(
+                    engine,
+                    retry_content,
+                    source_type="resource-benchmark",
+                    trusted_actor_id="local-capability:resource-benchmark",
+                    idempotency_key="resource-benchmark-stable-retry",
+                )
+
+            for _ in range(warmup_iterations):
+                if not idempotent_ingest():
+                    raise RuntimeError("idempotent warm-up produced no fact IDs")
+            idempotent_ingest_rss.append(_rss_mb(process))
+            for offset in range(idempotent_ingest_iterations):
+                fact_ids, elapsed_ms = _measure(idempotent_ingest)
+                if not fact_ids:
+                    raise RuntimeError("idempotent ingestion produced no fact IDs")
+                idempotent_ingest_latencies.append(elapsed_ms)
+                if (
+                    (offset + 1) % sample_every == 0
+                    or offset + 1 == idempotent_ingest_iterations
+                ):
+                    idempotent_ingest_rss.append(_rss_mb(process))
+
             fixed_query_index = warmup_iterations + ingest_iterations - 1
             for _ in range(warmup_iterations):
                 recall(fixed_query_index)
@@ -270,7 +308,7 @@ def run_mode_a_local(
     children_after = {child.pid for child in process.children(recursive=True)}
     virtual_memory = psutil.virtual_memory()
     recall_rss_result = rss_analysis(recall_rss, calls_per_sample=sample_every)
-    return {
+    result = {
         "schema_version": "1",
         "generated_at": datetime.now(UTC).isoformat(),
         "source_commit": _git_commit(root),
@@ -291,23 +329,25 @@ def run_mode_a_local(
             "network": "disabled by construction; no provider calls",
             "warmup_iterations": warmup_iterations,
             "ingest_iterations": ingest_iterations,
+            "idempotent_ingest_iterations": idempotent_ingest_iterations,
             "recall_iterations": recall_iterations,
             "rss_sample_every_calls": sample_every,
         },
         "initialization_ms": round(initialization_ms, 3),
         "latency": {
             "ingest": latency_summary(ingest_latencies),
+            "idempotent_ingest": latency_summary(idempotent_ingest_latencies),
             "recall": latency_summary(recall_latencies),
             "universal_budget_applied": False,
         },
         "rss": {
-            "ingest": rss_analysis(ingest_rss, calls_per_sample=sample_every),
-            "repeat_recall": recall_rss_result,
-            "bounded_window_conclusion": (
-                "no_unbounded_growth_detected"
-                if recall_rss_result["tail_plateau_observed"]
-                else "growth_signal_requires_investigation"
+            "corpus_build": rss_analysis(ingest_rss, calls_per_sample=sample_every),
+            "repeat_idempotent_ingest": rss_analysis(
+                idempotent_ingest_rss,
+                calls_per_sample=sample_every,
             ),
+            "repeat_recall": recall_rss_result,
+            "bounded_window_conclusion": None,
             "scope_warning": (
                 "Finite-run evidence only; this is not a proof for unlimited corpus size."
             ),
@@ -323,13 +363,30 @@ def run_mode_a_local(
             "quality": "resource harness does not claim retrieval accuracy",
         },
     }
+    return _finalize_conclusion(result)
+
+
+def _finalize_conclusion(result: dict) -> dict:
+    """Set the bounded conclusion only when both fixed-state tails plateau."""
+    stable_ingest = result["rss"]["repeat_idempotent_ingest"][
+        "tail_plateau_observed"
+    ]
+    stable_recall = result["rss"]["repeat_recall"]["tail_plateau_observed"]
+    result["rss"]["bounded_window_conclusion"] = (
+        "no_unbounded_growth_detected"
+        if stable_ingest and stable_recall
+        else "growth_signal_requires_investigation"
+    )
+    return result
 
 
 def render_markdown(result: dict) -> str:
     """Render one evidence result without turning it into a universal claim."""
     ingest = result["latency"]["ingest"]
+    idempotent_ingest = result["latency"]["idempotent_ingest"]
     recall = result["latency"]["recall"]
-    ingest_rss = result["rss"]["ingest"]
+    ingest_rss = result["rss"]["corpus_build"]
+    idempotent_ingest_rss = result["rss"]["repeat_idempotent_ingest"]
     recall_rss = result["rss"]["repeat_recall"]
     runtime = result["runtime"]
     protocol = result["protocol"]
@@ -345,6 +402,7 @@ def render_markdown(result: dict) -> str:
         f"- Mode A shipped local engine with `{protocol['embedding_boundary']}`.",
         f"- Warm-up: {protocol['warmup_iterations']} ingest+recall pairs.",
         f"- Measured: {protocol['ingest_iterations']} ingests and "
+        f"{protocol['idempotent_ingest_iterations']} fixed-state retry ingests and "
         f"{protocol['recall_iterations']} fixed-corpus recalls.",
         "- Temporary SQLite namespace; no provider call or network dependency.",
         "",
@@ -360,6 +418,9 @@ def render_markdown(result: dict) -> str:
         "|---|---:|---:|---:|---:|---:|",
         f"| canonical ingest | {ingest['samples']} | {ingest['p50_ms']} ms | "
         f"{ingest['p95_ms']} ms | {ingest['min_ms']} ms | {ingest['max_ms']} ms |",
+        f"| idempotent retry ingest | {idempotent_ingest['samples']} | "
+        f"{idempotent_ingest['p50_ms']} ms | {idempotent_ingest['p95_ms']} ms | "
+        f"{idempotent_ingest['min_ms']} ms | {idempotent_ingest['max_ms']} ms |",
         f"| repeat recall | {recall['samples']} | {recall['p50_ms']} ms | "
         f"{recall['p95_ms']} ms | {recall['min_ms']} ms | {recall['max_ms']} ms |",
         "",
@@ -370,10 +431,16 @@ def render_markdown(result: dict) -> str:
         "",
         "| phase | baseline | final | peak | growth | tail span | tail slope / 100 calls |",
         "|---|---:|---:|---:|---:|---:|---:|",
-        f"| repeat ingest | {ingest_rss['baseline_mb']} MiB | "
+        f"| corpus build (expected index growth) | {ingest_rss['baseline_mb']} MiB | "
         f"{ingest_rss['final_mb']} MiB | {ingest_rss['peak_mb']} MiB | "
         f"{ingest_rss['growth_mb']} MiB | {ingest_rss['tail_span_mb']} MiB | "
         f"{ingest_rss['tail_slope_mb_per_100_calls']} MiB |",
+        f"| fixed-state idempotent ingest | {idempotent_ingest_rss['baseline_mb']} MiB | "
+        f"{idempotent_ingest_rss['final_mb']} MiB | "
+        f"{idempotent_ingest_rss['peak_mb']} MiB | "
+        f"{idempotent_ingest_rss['growth_mb']} MiB | "
+        f"{idempotent_ingest_rss['tail_span_mb']} MiB | "
+        f"{idempotent_ingest_rss['tail_slope_mb_per_100_calls']} MiB |",
         f"| fixed-corpus repeat recall | {recall_rss['baseline_mb']} MiB | "
         f"{recall_rss['final_mb']} MiB | {recall_rss['peak_mb']} MiB | "
         f"{recall_rss['growth_mb']} MiB | {recall_rss['tail_span_mb']} MiB | "

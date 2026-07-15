@@ -14,8 +14,10 @@ Run from the repository root:
 
 The command writes `RESULTS.json` and `RESULTS.md` beside the harness. The raw
 result includes the source commit, package and Python versions, machine details,
-warm-up and sample counts, ingest/recall p50 and p95, every RSS sample, tail
-slope, and child-process ownership after close.
+warm-up and sample counts, unique-ingest/idempotent-retry/recall p50 and p95,
+every RSS sample, tail slope, and child-process ownership after close. Unique
+ingests intentionally grow the corpus and indexes; fixed-state idempotent retry
+and fixed-corpus recall are the leak-sensitive plateau phases.
 
 The conclusion is deliberately narrow. A finite local run can show that RSS
 plateaued in its fixed-corpus recall tail; it cannot prove unlimited-corpus

@@ -55,6 +55,7 @@ def test_mode_a_resource_harness_smoke(tmp_path: Path) -> None:
     result = run_mode_a_local(
         warmup_iterations=2,
         ingest_iterations=4,
+        idempotent_ingest_iterations=6,
         recall_iterations=6,
         sample_every=2,
     )
@@ -62,6 +63,7 @@ def test_mode_a_resource_harness_smoke(tmp_path: Path) -> None:
     assert result["protocol"]["mode"] == "A"
     assert result["latency"]["universal_budget_applied"] is False
     assert result["latency"]["ingest"]["samples"] == 4
+    assert result["latency"]["idempotent_ingest"]["samples"] == 6
     assert result["latency"]["recall"]["samples"] == 6
     assert result["process_ownership"]["new_child_pids_after_close"] == []
     assert "Mode B Ollama" in render_markdown(result)
