@@ -14,6 +14,12 @@ def _function_block(source: str, function_name: str) -> str:
     return source[start: next_route if next_route != -1 else None]
 
 
+def _application_function_block(source: str, function_name: str) -> str:
+    start = source.index(f"async def {function_name}")
+    next_route = source.find("\n    @application.", start + 1)
+    return source[start: next_route if next_route != -1 else None]
+
+
 def test_route_authorization_uses_middleware_actor_and_wraps_hooks() -> None:
     from superlocalmemory.server.route_mutations import authorize_route_mutation
 
@@ -99,3 +105,21 @@ def test_fact_delete_and_edit_delegate_to_canonical_mutation_service() -> None:
     edit_block = _function_block(source, "edit_memory")
     assert "update_fact_authorized" in edit_block
     assert "UPDATE atomic_facts SET content" not in edit_block
+
+
+def test_daemon_maintenance_and_session_writes_cross_policy_boundary() -> None:
+    source = Path(
+        "src/superlocalmemory/server/unified_daemon.py"
+    ).read_text(encoding="utf-8")
+    for function_name in (
+        "consolidate_cognitive_endpoint",
+        "run_maintenance_endpoint",
+        "session_close",
+    ):
+        block = _application_function_block(source, function_name)
+        assert "authorize_route_mutation" in block, function_name
+        assert ".complete()" in block, function_name
+
+    session_open = _application_function_block(source, "session_open")
+    assert "authenticated_request_actor" in session_open
+    assert "agent_id=" in session_open
