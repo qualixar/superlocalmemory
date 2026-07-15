@@ -89,6 +89,38 @@ def test_pytest_harness_cancels_test_owned_timer_threads() -> None:
     assert "thread.join(" in source
 
 
+def test_pytest_harness_explicitly_closes_its_collection_namespace() -> None:
+    """Repeated focused exits must not defer temp-root cleanup to ``__del__``."""
+    root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONDEVMODE"] = "1"
+    env["PYTHONWARNINGS"] = "always::ResourceWarning"
+
+    for _attempt in range(2):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "dev",
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "tests/test_resource_lifecycle.py",
+            ],
+            cwd=root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ResourceWarning" not in result.stderr, result.stderr
+        assert "PytestUnraisableExceptionWarning" not in result.stderr, result.stderr
+
+
 def test_optional_native_backend_runs_in_a_dedicated_process_lane() -> None:
     root = Path(__file__).resolve().parents[2]
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
