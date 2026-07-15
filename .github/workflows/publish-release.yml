@@ -1,0 +1,138 @@
+name: Publish coordinated release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: pypi
+      url: https://pypi.org/project/superlocalmemory/
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve and verify one release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::Release ref must be a v-prefixed tag, got $GITHUB_REF_NAME"
+            exit 1
+          fi
+          python3 - "$VERSION" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          expected = sys.argv[1]
+          package = json.loads(pathlib.Path("package.json").read_text())["version"]
+          pyproject = pathlib.Path("pyproject.toml").read_text()
+          match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+          actual = {"tag": expected, "package.json": package,
+                    "pyproject.toml": match.group(1) if match else None}
+          if len(set(actual.values())) != 1:
+              raise SystemExit(f"release version mismatch: {actual}")
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install build and test dependencies
+        run: |
+          npm ci --ignore-scripts
+          uv sync --extra dev
+
+      - name: Run release gates
+        run: |
+          uv run python -m pytest tests/ -q --tb=short -x \
+            --ignore=tests/test_integration/test_mode_b_ollama.py \
+            --ignore=tests/test_integration/test_e2e.py \
+            --ignore=tests/test_integration/test_e2e_v32.py \
+            --ignore=tests/test_integration/test_e2e_v33.py \
+            --ignore=tests/test_benchmarks/ \
+            --ignore=tests/graph/test_cozo_backend.py \
+            --ignore=tests/vector/test_lancedb_backend.py
+          npm test
+          npm run check:plugin
+
+      - name: Build both release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/python dist/npm
+          uv build --out-dir dist/python
+          npm pack --pack-destination dist/npm
+          NPM_TARBALL=$(find dist/npm -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          test -n "$NPM_TARBALL"
+          echo "npm_tarball=$NPM_TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect candidate artifacts
+        run: |
+          uvx twine check dist/python/*
+          npm pack --ignore-scripts --dry-run --json >/tmp/npm-pack.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          artifact = json.loads(Path("/tmp/npm-pack.json").read_text())[0]
+          paths = {item["path"] for item in artifact["files"]}
+          forbidden = sorted(path for path in paths if path.endswith((".pyc", ".pyo")))
+          forbidden += sorted(path for path in paths if "/__pycache__/" in f"/{path}")
+          if forbidden:
+              raise SystemExit(f"compiled cache files in npm artifact: {forbidden[:10]}")
+          PY
+
+      - name: Check release registry state
+        id: registry
+        run: |
+          python3 scripts/release_registry_guard.py check-release-registries \
+            "${{ steps.version.outputs.version }}" \
+            --python-dist dist/python \
+            --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish to PyPI
+        if: steps.registry.outputs.pypi_exists != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/python/
+
+      - name: Publish to npm
+        if: steps.registry.outputs.npm_exists != 'true'
+        run: npm publish "${{ steps.artifacts.outputs.npm_tarball }}" --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify registry parity
+        run: |
+          python3 scripts/release_registry_guard.py verify-release-registries \
+            "${{ steps.version.outputs.version }}" \
+            --python-dist dist/python \
+            --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --attempts 6 --interval 10

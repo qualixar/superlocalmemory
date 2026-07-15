@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts import release_registry_guard as registry_guard
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT / "package.json"
@@ -37,6 +39,8 @@ def test_npm_manifest_allowlists_only_runtime_install_scripts() -> None:
     assert "scripts/" not in files
     assert {
         "scripts/postinstall.js",
+        "scripts/postinstall-interactive.js",
+        "scripts/postinstall/validation.js",
         "scripts/preuninstall.js",
     } <= files
     assert "scripts/postinstall_binary.js" not in files
@@ -56,6 +60,14 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
     assert "scripts/postinstall_binary.js" not in paths
     assert "scripts/build-dmg.sh" not in paths
     assert "scripts/test-dmg.sh" not in paths
+    assert {path for path in paths if path.startswith("scripts/")} == {
+        "scripts/postinstall-interactive.js",
+        "scripts/postinstall.js",
+        "scripts/postinstall/validation.js",
+        "scripts/preuninstall.js",
+    }
+    assert artifact["entryCount"] <= 650
+    assert artifact["unpackedSize"] <= 10 * 1024 * 1024
 
 
 def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> None:
@@ -67,14 +79,101 @@ def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> Non
     release = workflow["jobs"]["release"]
 
     assert workflow["concurrency"]["cancel-in-progress"] is False
-    assert release["environment"]["name"] == "release"
+    assert release["environment"]["name"] == "pypi"
     assert release["permissions"] == {"contents": "read", "id-token": "write"}
     assert "npm publish" in source
     assert "pypa/gh-action-pypi-publish@release/v1" in source
     assert "check-release-registries" in source
     assert "verify-release-registries" in source
+    assert "python -m pytest tests/ -q" in source
     assert "steps.registry.outputs.pypi_exists != 'true'" in source
     assert "steps.registry.outputs.npm_exists != 'true'" in source
     assert source.index("Build both release artifacts") < source.index("Publish to PyPI")
     assert source.index("Build both release artifacts") < source.index("Publish to npm")
     assert source.index("Publish to npm") < source.index("Verify registry parity")
+
+
+def test_registry_guard_checks_both_immutable_package_versions(tmp_path: Path) -> None:
+    pypi_dist = tmp_path / "python"
+    pypi_dist.mkdir()
+    wheel = pypi_dist / "superlocalmemory-3.7.0-py3-none-any.whl"
+    wheel.write_bytes(b"wheel")
+    tarball = tmp_path / "superlocalmemory-3.7.0.tgz"
+    tarball.write_bytes(b"npm")
+    checked: list[str] = []
+
+    def fetcher(url: str) -> dict | None:
+        checked.append(url)
+        if "pypi.org" in url:
+            return {
+                "info": {"version": "3.7.0"},
+                "urls": [
+                    {
+                        "filename": wheel.name,
+                        "digests": {"sha256": registry_guard._sha256(wheel)},
+                    }
+                ],
+            }
+        return None
+
+    state = registry_guard.registry_state(
+        "3.7.0", pypi_dist=pypi_dist, npm_tarball=tarball, fetcher=fetcher
+    )
+
+    assert state == registry_guard.RegistryState(pypi_exists=True, npm_exists=False)
+    assert len(checked) == 2
+    assert any("pypi.org/pypi/superlocalmemory/3.7.0/json" in url for url in checked)
+    assert any("registry.npmjs.org/superlocalmemory/3.7.0" in url for url in checked)
+
+
+def test_registry_guard_writes_idempotent_recovery_outputs(tmp_path: Path) -> None:
+    output = tmp_path / "github-output"
+    registry_guard._write_github_output(
+        output,
+        registry_guard.RegistryState(pypi_exists=True, npm_exists=False),
+    )
+
+    assert output.read_text(encoding="utf-8") == (
+        "pypi_exists=true\nnpm_exists=false\n"
+    )
+
+
+def test_registry_parity_verification_retries_partial_publication(
+    monkeypatch, tmp_path: Path
+) -> None:
+    states = iter(
+        (
+            registry_guard.RegistryState(pypi_exists=True, npm_exists=False),
+            registry_guard.RegistryState(pypi_exists=True, npm_exists=True),
+        )
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(registry_guard, "registry_state", lambda _version, **_kwargs: next(states))
+    monkeypatch.setattr(registry_guard.time, "sleep", sleeps.append)
+
+    result = registry_guard._verify_with_retries(
+        "3.7.0",
+        attempts=2,
+        interval=0.25,
+        pypi_dist=tmp_path,
+        npm_tarball=tmp_path / "candidate.tgz",
+    )
+
+    assert result == registry_guard.RegistryState(True, True)
+    assert sleeps == [0.25]
+
+
+def test_registry_guard_rejects_same_version_with_different_artifact(tmp_path: Path) -> None:
+    tarball = tmp_path / "candidate.tgz"
+    tarball.write_bytes(b"candidate")
+
+    try:
+        registry_guard._assert_npm_identity(
+            {"version": "3.7.0", "dist": {"integrity": "sha512-wrong"}},
+            "3.7.0",
+            tarball,
+        )
+    except RuntimeError as exc:
+        assert "artifact identity mismatch" in str(exc)
+    else:
+        raise AssertionError("mismatched immutable npm artifact was accepted")
