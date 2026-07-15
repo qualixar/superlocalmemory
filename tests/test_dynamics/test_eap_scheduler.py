@@ -166,6 +166,33 @@ def test_retention_to_bitwidth_mapping() -> None:
     assert retention_to_bit_width(0.0) == 0
 
 
+def test_eap_dry_run_computes_without_precision_mutation(
+    scheduler: EAPScheduler,
+    test_db: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_db.execute(
+        "INSERT INTO fact_retention "
+        "(fact_id, profile_id, retention_score, lifecycle_zone) "
+        "VALUES (?, ?, ?, ?)",
+        ("dry-fact", "test_profile", 0.3, "cold"),
+    )
+    downgrade = MagicMock(return_value=True)
+    monkeypatch.setattr(scheduler, "_handle_downgrade", downgrade)
+
+    stats = scheduler.run_eap_cycle("test_profile", dry_run=True)
+
+    assert stats["total"] == 1
+    assert stats["downgrades"] == 1
+    downgrade.assert_not_called()
+    rows = test_db.execute(
+        "SELECT COUNT(*) AS n FROM embedding_quantization_metadata "
+        "WHERE fact_id = ?",
+        ("dry-fact",),
+    )
+    assert rows[0]["n"] == 0
+
+
 # ---------------------------------------------------------------------------
 # 19. EAP cycle compresses cold facts
 # ---------------------------------------------------------------------------

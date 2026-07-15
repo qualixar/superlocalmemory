@@ -129,6 +129,29 @@ def test_batch_retention_update(db_with_facts, ebbinghaus: EbbinghausCurve, conf
     ), "Zone counts must sum to total"
 
 
+def test_decay_dry_run_computes_without_durable_changes(
+    db_with_facts, ebbinghaus: EbbinghausCurve, config: ForgettingConfig,
+) -> None:
+    scheduler = ForgettingScheduler(db_with_facts, ebbinghaus, config)
+    before = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM fact_retention WHERE profile_id = ?",
+        ("test_profile",),
+    )[0]["n"]
+
+    stats = scheduler.run_decay_cycle("test_profile", force=True, dry_run=True)
+
+    after = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM fact_retention WHERE profile_id = ?",
+        ("test_profile",),
+    )[0]["n"]
+    archived = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM atomic_facts WHERE lifecycle != 'active'"
+    )[0]["n"]
+    assert stats["total"] == 10
+    assert before == after == 0
+    assert archived == 0
+
+
 # ---- Test 17: On-access strengthens ----
 
 def test_on_access_strengthens(db_with_facts, ebbinghaus: EbbinghausCurve, config: ForgettingConfig) -> None:
