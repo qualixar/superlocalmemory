@@ -76,6 +76,12 @@ async def lifespan(application: FastAPI):
         application.state.engine = None
         application.state.config = None
 
+    # Event fan-out belongs to the same application lifecycle as the engine.
+    # Registering it through FastAPI.on_event created a second, deprecated
+    # startup path and made TestClient initialization emit warnings.
+    from superlocalmemory.server.routes.events import register_event_listener
+
+    register_event_listener()
     yield
 
     # Cleanup
@@ -170,7 +176,7 @@ def create_app() -> FastAPI:
     from superlocalmemory.server.routes.profiles import router as profiles_router
     from superlocalmemory.server.routes.backup import router as backup_router
     from superlocalmemory.server.routes.data_io import router as data_io_router
-    from superlocalmemory.server.routes.events import router as events_router, register_event_listener
+    from superlocalmemory.server.routes.events import router as events_router
     from superlocalmemory.server.routes.agents import router as agents_router
     from superlocalmemory.server.routes.ws import router as ws_router, manager as ws_manager
     from superlocalmemory.server.routes.v3_api import router as v3_router
@@ -237,10 +243,6 @@ def create_app() -> FastAPI:
             "database": "connected" if DB_PATH.exists() else "missing",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-    @application.on_event("startup")
-    async def startup_event():
-        register_event_listener()
 
     return application
 
