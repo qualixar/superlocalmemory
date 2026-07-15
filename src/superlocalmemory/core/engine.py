@@ -548,20 +548,15 @@ class MemoryEngine:
                 r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b", fact_text)}
             | {m.group(1) for m in _re.finditer(r"\b([A-Z]{2,})\b", fact_text)}
         )
-        # v3.5.5: compute the embedding SYNCHRONOUSLY. A single warm embed is
-        # ~22ms (the 30-180s of full store() was LLM fact-extraction + graph,
-        # NOT embedding). With the embedding present, the semantic channel
-        # scores this fact correctly so it ranks properly IMMEDIATELY — not
-        # just keyword-findable but top-ranked. Graph/entity enrichment stays
-        # async. Embed failure → fact still inserted (keyword-recallable).
+        # Queryable admission must never acquire the embedding worker lock.
+        # On a warm daemon that looked cheap, but on a clean Mode A install the
+        # background model load owns that lock for up to 180s and turned the
+        # receipt-first path into a hidden synchronous wait.  The canonical
+        # materializer below runs the complete pipeline and promotes this same
+        # fact with its embedding, Fisher parameters, entities and graph edges.
+        # Until then it is deliberately BM25/entity/date recallable.
         emb = None
         fmean = fvar = None
-        try:
-            emb = self._embedder.embed(fact_text) if self._embedder else None
-            if emb:
-                fmean, fvar = self._embedder.compute_fisher_params(emb)
-        except Exception:
-            emb = None
         fact = AtomicFact(
             fact_id=_uuid.uuid4().hex[:16], memory_id=record.memory_id,
             profile_id=self._profile_id, content=fact_text,
