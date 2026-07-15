@@ -3,9 +3,11 @@
 
 """Destructive worker writes derive authority from the local capability."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from superlocalmemory.core import recall_worker
+from superlocalmemory.core.ingestion_command import IngestionState
 
 
 def _engine() -> MagicMock:
@@ -85,7 +87,11 @@ def test_store_uses_capability_actor_before_canonical_persistence(
     monkeypatch,
 ) -> None:
     engine = _engine()
-    canonical_store = MagicMock(return_value=[])
+    canonical_store = MagicMock(return_value=SimpleNamespace(
+        fact_ids=("fact-1",),
+        operation_id="operation-1",
+        state=IngestionState.COMPLETE,
+    ))
     monkeypatch.setattr(recall_worker, "_get_engine", lambda: engine)
     monkeypatch.setattr(
         "superlocalmemory.core.engine_ingestion.local_trusted_actor_id",
@@ -106,7 +112,14 @@ def test_store_uses_capability_actor_before_canonical_persistence(
         },
     )
 
-    assert result == {"ok": True, "fact_ids": [], "count": 0}
+    assert result == {
+        "ok": True,
+        "fact_ids": ["fact-1"],
+        "count": 1,
+        "operation_id": "operation-1",
+        "pending_id": None,
+        "materialization_state": "complete",
+    }
     canonical_store.assert_called_once_with(
         engine,
         "remember this",
@@ -117,4 +130,5 @@ def test_store_uses_capability_actor_before_canonical_persistence(
         shared_with=["research"],
         session_id="",
         idempotency_key="request-1",
+        return_receipt=True,
     )
