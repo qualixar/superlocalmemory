@@ -143,12 +143,6 @@ class RetrievalEngine:
         t0 = time.monotonic()
         self._extra_disabled = set(extra_disabled_channels or ())
 
-        # Multi-scope: scope flags are set on the (shared) channel instances +
-        # the channels executed atomically under self._scope_lock — see the
-        # `# 3. Run channels` block below. (profile_channel does not read scope.)
-        self._include_global = include_global
-        self._include_shared = include_shared
-
         # v3.5.0 diagnostic: stage timing inside retrieval (SLM_RECALL_TIMING=1).
         import os as _os_e
         import time as _time_e
@@ -307,7 +301,12 @@ class RetrievalEngine:
         # 4. Load facts for rerank pool
         pool = min(len(fused), max(effective_limit * 3, 30))
         top = fused[:pool]
-        facts = self._load_facts(top, profile_id)
+        facts = self._load_facts(
+            top,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         _em("load_facts")
 
         # V3.3.21: Session diversity for aggregation queries.
@@ -361,7 +360,12 @@ class RetrievalEngine:
         # A channel-diversity promotion may come from outside the rerank pool.
         # Load only when that happens; ordinary recalls reuse the existing map.
         if any(fr.fact_id not in facts for fr in final_top):
-            facts.update(self._load_facts(final_top, profile_id))
+            facts.update(self._load_facts(
+                final_top,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            ))
 
         # Trim facts to the selected, qualified result set.
         selected_ids = {fr.fact_id for fr in final_top}
@@ -703,7 +707,12 @@ class RetrievalEngine:
     # -- Fact loading -------------------------------------------------------
 
     def _load_facts(
-        self, fused: list[FusionResult], profile_id: str,
+        self,
+        fused: list[FusionResult],
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> dict[str, AtomicFact]:
         """Load facts by ID — targeted query, not full-table scan.
 
@@ -715,8 +724,8 @@ class RetrievalEngine:
             return {}
         facts = self._db.get_facts_by_ids(
             needed, profile_id,
-            include_global=getattr(self, '_include_global', False),
-            include_shared=getattr(self, '_include_shared', False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
         return {f.fact_id: f for f in facts}
 

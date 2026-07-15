@@ -764,7 +764,14 @@ class EntityGraphChannel:
         """Find new canonical entity IDs referenced by a set of facts."""
         new: list[str] = []
         seen = set(visited)
-        for fid in fact_ids:
+        allowed_fact_ids = authorized_fact_ids(
+            self._db,
+            fact_ids,
+            profile_id,
+            include_global=bool(getattr(self, "include_global", False)),
+            include_shared=bool(getattr(self, "include_shared", False)),
+        )
+        for fid in allowed_fact_ids:
             rows = self._db.execute(
                 "SELECT canonical_entities_json FROM atomic_facts WHERE fact_id = ?", (fid,),
             )
