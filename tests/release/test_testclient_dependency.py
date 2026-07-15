@@ -25,9 +25,7 @@ def test_starlette_testclient_import_has_no_deprecation_warning() -> None:
         [
             sys.executable,
             "-W",
-            "error::DeprecationWarning",
-            "-W",
-            "error::starlette.testclient.StarletteDeprecationWarning",
+            "error",
             "-c",
             (
                 "from starlette.applications import Starlette; "

@@ -125,6 +125,9 @@ dev = [
     "pytest-cov>=4.1",
     "pytest-asyncio>=0.21",
     "sqlite-vec>=0.1.6",
+    # Starlette TestClient's maintained synchronous backend. Test-only: the
+    # product runtime continues to use the separately pinned httpx client.
+    "httpx2==2.5.0",
 ]
 
 [project.urls]
@@ -196,6 +199,7 @@ select = ["E", "F", "I", "W"]
 [dependency-groups]
 dev = [
     "build>=1.4.0",
+    "httpx2==2.5.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.21",
     "twine>=6.2.0",
