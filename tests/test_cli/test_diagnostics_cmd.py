@@ -9,6 +9,8 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from superlocalmemory.cli.main import _command_requires_daemon
 from superlocalmemory.infra.local_diagnostics import LocalDiagnostics
 
@@ -18,6 +20,38 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_diagnostics_export_is_explicit_and_does_not_require_daemon() -> None:
     assert _command_requires_daemon(Namespace(command="diagnostics")) is False
+
+
+def test_successful_ide_connection_records_only_aggregate_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from superlocalmemory.cli.commands import cmd_connect
+    from superlocalmemory.hooks import portable_kit
+    from superlocalmemory.infra import local_diagnostics
+
+    monkeypatch.setattr(
+        portable_kit,
+        "connect_ide",
+        lambda *_args, **_kwargs: {
+            "error": None,
+            "mcp_config": "wrote",
+            "mcp_path": "/private/config.json",
+            "agents_md": "unchanged",
+        },
+    )
+    recorded: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        local_diagnostics,
+        "record_operation",
+        lambda operation, **kwargs: recorded.append((operation, kwargs.get("client"))),
+    )
+
+    cmd_connect(Namespace(
+        ide="cursor", here=False, profile=None, json=False,
+        cross_platform=False, disable=None, dry_run=False,
+    ))
+
+    assert recorded == [("activation", "cursor")]
 
 
 def test_cli_exports_existing_local_aggregates_without_network(
