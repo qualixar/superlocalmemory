@@ -10,8 +10,9 @@ from fastapi import HTTPException
 
 
 class _Request:
-    def __init__(self, headers: dict[str, str]):
+    def __init__(self, headers: dict[str, str], client_host: str = "127.0.0.1"):
         self.headers = headers
+        self.client = SimpleNamespace(host=client_host)
 
 
 def test_exact_daemon_capability_derives_process_actor() -> None:
@@ -78,3 +79,32 @@ def test_configured_api_key_derives_authenticated_api_actor(monkeypatch) -> None
 
     assert actor.startswith("api-key:http-api:")
     assert "external-api-key" not in actor
+
+
+def test_local_http_mutation_gets_capability_derived_process_actor(
+    monkeypatch,
+) -> None:
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
+
+    monkeypatch.setattr(
+        "superlocalmemory.core.engine_ingestion.local_trusted_actor_id",
+        lambda kind: f"trusted:{kind}",
+    )
+    actor = require_http_mutation_actor(
+        _Request({}, client_host="127.0.0.1"),
+        descriptor=None,
+        actor_kind="http-route",
+    )
+    assert actor == "trusted:http-route"
+
+
+def test_remote_http_mutation_without_credential_fails_closed() -> None:
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_http_mutation_actor(
+            _Request({}, client_host="192.0.2.44"),
+            descriptor=None,
+            actor_kind="http-route",
+        )
+    assert exc_info.value.status_code == 403

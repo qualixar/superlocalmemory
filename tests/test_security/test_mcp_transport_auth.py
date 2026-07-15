@@ -70,3 +70,4 @@ def test_unified_daemon_does_not_exempt_mcp_from_authentication() -> None:
     assert '_AUTH_EXEMPT_PREFIXES = ("/v1/", "/v1beta/")' in source
     assert 'startswith(("/v1/", "/v1beta/", "/mcp"))' not in source
     assert "authorize_http_mcp_request" in source
+    assert "require_http_mutation_actor" in source
