@@ -95,7 +95,7 @@ jobs:
 
       - name: Inspect candidate artifacts
         run: |
-          uvx twine check dist/python/*
+          uvx --from twine==6.2.0 twine check dist/python/*
           npm pack --ignore-scripts --dry-run --json >/tmp/npm-pack.json
           python3 - <<'PY'
           import json
