@@ -100,7 +100,7 @@ class TestRememberTool:
     @pytest.mark.slow
     @patch("superlocalmemory.mcp.tools_core._emit_event")
     def test_remember_returns_pending_id(self, mock_emit):
-        """V3.3.27: Store-first pattern returns pending ID for background processing.
+        """Offline canonical ingestion returns a truthful durable receipt.
 
         Marked ``slow`` (Stage 7 delivery-lead review): spawns a real
         worker subprocess and blocks ~100s on its ready-signal, which
@@ -110,7 +110,38 @@ class TestRememberTool:
         remember = _get_remember_tool()
         result = asyncio.run(remember("Test content for pending store"))
         assert result["success"] is True
-        assert result.get("pending") is True
+        assert result["materialization_state"] == "complete"
+        assert result["pending"] is False
+        assert result["pending_id"] is None
+        assert result["operation_id"]
+        assert result["fact_ids"]
+        assert all(not fact_id.startswith("pending:") for fact_id in result["fact_ids"])
+
+    def test_remember_preserves_worker_materialization_receipt(self):
+        """The MCP surface must not relabel a queryable operation complete."""
+        remember = _get_remember_tool()
+        pool = MagicMock()
+        pool.store.return_value = {
+            "ok": True,
+            "fact_ids": ["queryable-fact"],
+            "count": 1,
+            "operation_id": "operation-42",
+            "pending_id": "operation-42",
+            "materialization_state": "queryable",
+        }
+
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
+        ):
+            result = asyncio.run(remember("queryable canonical fact"))
+
+        assert result["success"] is True
+        assert result["materialization_state"] == "queryable"
+        assert result["operation_id"] == "operation-42"
+        assert result["pending"] is True
+        assert result["pending_id"] == "operation-42"
+        assert result["fact_ids"] == ["queryable-fact"]
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")
     def test_remember_routes_to_canonical_worker(self, mock_emit):
