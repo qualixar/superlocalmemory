@@ -6,8 +6,8 @@ latency buckets, coarse error classes, and aggregate cross-client transitions.
 Memory content, queries, fact identifiers, filesystem locations, exception
 messages, and identity values are not stored in this diagnostics database.
 
-There is **no network reporting endpoint**. The aggregate file is never
-exported automatically. To create a local support artifact, the operator must
+No network reporting endpoint exists. The aggregate file is never exported automatically.
+To create a local support artifact, the operator must
 explicitly run:
 
 ```bash

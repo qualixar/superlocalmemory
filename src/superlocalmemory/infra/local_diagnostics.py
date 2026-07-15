@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sqlite3
 import tempfile
 from collections.abc import Callable, Iterable
@@ -59,9 +60,9 @@ _ERROR_CLASSES = frozenset(
 
 def normalize_client(value: str | None) -> str:
     """Collapse an arbitrary actor label to a fixed non-identifying family."""
-    candidate = str(value or "").strip().lower()
+    tokens = frozenset(re.findall(r"[a-z0-9]+", str(value or "").lower()))
     for family in _CLIENT_FAMILIES:
-        if family in candidate:
+        if family in tokens:
             return family
     return "other"
 

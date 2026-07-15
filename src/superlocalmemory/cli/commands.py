@@ -880,6 +880,11 @@ def cmd_connect(args: Namespace) -> None:
                 agents_md_source=_agents_md_source_factory(),
             )
 
+            if not result.get("error"):
+                from superlocalmemory.infra.local_diagnostics import record_operation
+
+                record_operation("activation", client=ide_arg)
+
             if getattr(args, "json", False):
                 from superlocalmemory.cli.json_output import json_print
                 json_print("connect", data=result)
