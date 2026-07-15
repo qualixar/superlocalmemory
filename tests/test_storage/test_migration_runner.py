@@ -152,6 +152,24 @@ def test_apply_all_on_fresh_db_applies_all(fresh_dbs: tuple[Path, Path]) -> None
     assert "M007_pending_outcomes" in names_memory
 
 
+def test_apply_all_bootstraps_a_blank_learning_database(tmp_path: Path) -> None:
+    """A first daemon boot must not record false migration failures.
+
+    The daemon invokes ``apply_all`` before the engine exists, so the runner
+    itself owns creation of the learning tables that M001/M002/M009 extend.
+    """
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+
+    stats = mr.apply_all(learning_db, memory_db)
+
+    assert stats["failed"] == []
+    assert {"M001_add_signal_features_columns", "M002_model_state_history",
+            "M009_model_lineage"} <= set(stats["applied"])
+    assert "query_id" in _table_cols(learning_db, "learning_signals")
+    assert "is_candidate" in _table_cols(learning_db, "learning_model_state")
+
+
 def test_apply_all_creates_all_new_columns(fresh_dbs: tuple[Path, Path]) -> None:
     learning_db, memory_db = fresh_dbs
     mr.apply_all(learning_db, memory_db)

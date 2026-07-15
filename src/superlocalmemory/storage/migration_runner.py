@@ -440,6 +440,25 @@ def _bootstrap_both_migration_logs(
     return failed, details
 
 
+def _bootstrap_learning_schema(learning_db: Path, *, dry_run: bool) -> str | None:
+    """Create the base learning tables before forward migrations extend them.
+
+    ``apply_all`` is called by the daemon before ``MemoryEngine`` exists.  A
+    blank first-install therefore has no ``learning_signals`` or
+    ``learning_model_state`` tables for M001/M002/M009 to alter.  The runner
+    owns this prerequisite so every caller has the same first-boot contract.
+    """
+    if dry_run:
+        return None
+    try:
+        from superlocalmemory.learning.database import LearningDatabase
+
+        LearningDatabase(learning_db)
+    except Exception as exc:  # noqa: BLE001 - retain runner's non-fatal API
+        return f"learning schema bootstrap failed: {type(exc).__name__}: {exc}"
+    return None
+
+
 def apply_all(
     learning_db: Path,
     memory_db: Path,
@@ -455,6 +474,17 @@ def apply_all(
     skipped: list[str] = []
     failed: list[str] = []
     details: dict[str, str] = {}
+
+    schema_error = _bootstrap_learning_schema(learning_db, dry_run=dry_run)
+    if schema_error is not None:
+        failed.append("learning_schema_bootstrap")
+        details["learning_schema_bootstrap"] = schema_error
+        return {
+            "applied": applied,
+            "skipped": skipped,
+            "failed": failed,
+            "details": details,
+        }
 
     # S9-W1 C3: unify the migration_log bootstrap across both DBs up-front.
     bs_failed, bs_details = _bootstrap_both_migration_logs(
