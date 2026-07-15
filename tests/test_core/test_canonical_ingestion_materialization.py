@@ -101,6 +101,38 @@ def test_materialization_promotes_queryable_fact_without_duplicate_memory(
     )
 
 
+def test_queryable_admission_never_waits_for_embedding_warmup(
+    engine_with_mock_deps,
+) -> None:
+    """Receipt-first admission must not acquire the enrichment worker lock."""
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+
+    with patch.object(
+        engine._embedder,
+        "embed",
+        side_effect=AssertionError("embedding belongs to materialization"),
+    ) as embed:
+        receipt = command.submit(IngestionRequest(
+            content=(
+                "Nia owns the Atlas retrieval service and records the release "
+                "checkpoint on July 16, 2026."
+            ),
+            profile_id=engine._profile_id,
+            source_type="http",
+            idempotency_key="receipt-before-embedding",
+            trusted_actor_id="daemon-capability:owned-instance",
+        ))
+
+    embed.assert_not_called()
+
+    assert receipt.state is IngestionState.QUERYABLE
+    fact = engine._db.get_fact(receipt.queryable_fact_ids[0])
+    assert fact is not None
+    assert fact.embedding is None
+
+
 def test_materializer_rejects_queryable_facts_from_another_profile(
     engine_with_mock_deps,
 ) -> None:
