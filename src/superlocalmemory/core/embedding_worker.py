@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import signal
 import sys
 
@@ -52,6 +53,18 @@ def _start_parent_watchdog() -> None:
     start_parent_watchdog()
 
 
+def _embedding_backend_order() -> tuple[str, str]:
+    """Return the stable local backend preference for this platform.
+
+    ONNX model export/loading can stall indefinitely on Apple Silicon while
+    the same cached model loads through PyTorch CPU in a few seconds.  Keep
+    ONNX first elsewhere and retain it as a fallback on macOS.
+    """
+    if sys.platform == "darwin" and platform.machine().lower() == "arm64":
+        return ("pytorch", "onnx")
+    return ("onnx", "pytorch")
+
+
 def _load_embedding_model(name: str) -> tuple:
     """Load embedding model. ONNX CPU-only first, PyTorch fallback.
 
@@ -59,26 +72,25 @@ def _load_embedding_model(name: str) -> tuple:
     """
     from sentence_transformers import SentenceTransformer
 
-    # ONNX with explicit CPU provider — avoids CoreML EP memory overhead.
-    try:
-        m = SentenceTransformer(
-            name,
-            backend="onnx",
-            trust_remote_code=True,
-            model_kwargs={"provider": "CPUExecutionProvider"},
-        )
-        return m, "onnx"
-    except Exception:
-        pass
-
-    # PyTorch CPU fallback.
-    try:
-        import torch
-        with torch.inference_mode():
-            m = SentenceTransformer(name, trust_remote_code=True, device="cpu")
-        return m, "pytorch"
-    except Exception:
-        return None, ""
+    for backend in _embedding_backend_order():
+        try:
+            if backend == "onnx":
+                m = SentenceTransformer(
+                    name,
+                    backend="onnx",
+                    trust_remote_code=True,
+                    model_kwargs={"provider": "CPUExecutionProvider"},
+                )
+            else:
+                import torch
+                with torch.inference_mode():
+                    m = SentenceTransformer(
+                        name, trust_remote_code=True, device="cpu",
+                    )
+            return m, backend
+        except Exception:
+            continue
+    return None, ""
 
 
 def _worker_main() -> None:
