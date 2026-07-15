@@ -573,11 +573,13 @@ describe('Integration: real repo build', () => {
     assert.equal(result.status, 0, `--check exited ${result.status}: ${result.stdout}${result.stderr}`);
   });
 
-  test('plugin/.claude-plugin/plugin.json exists with version=3.6.14', () => {
+  test('plugin/.claude-plugin/plugin.json matches the source manifest version', () => {
     const p = path.join(REPO_ROOT, 'plugin', '.claude-plugin', 'plugin.json');
+    const manifestPath = path.join(REPO_ROOT, 'plugin-src', 'manifest.json');
     assert.ok(fs.existsSync(p), 'plugin/.claude-plugin/plugin.json must exist');
     const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    assert.equal(parsed.version, '3.6.14');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    assert.equal(parsed.version, manifest.version);
     assert.equal(parsed.author.name, 'Qualixar');
     assert.ok(parsed.author.url, 'author.url must be present');
   });
