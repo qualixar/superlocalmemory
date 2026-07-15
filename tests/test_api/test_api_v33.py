@@ -349,6 +349,17 @@ class TestForgettingRun:
             assert "facts_decayed" in data
             assert data["profile"] == "default"
 
+        conn = sqlite3.connect(str(db_path))
+        mismatches = conn.execute(
+            "SELECT COUNT(*) FROM atomic_facts af "
+            "JOIN fact_retention fr ON fr.fact_id = af.fact_id "
+            "WHERE af.profile_id = 'default' AND af.lifecycle != "
+            "CASE WHEN fr.lifecycle_zone IN ('archive', 'forgotten') "
+            "THEN 'archived' ELSE fr.lifecycle_zone END"
+        ).fetchone()[0]
+        conn.close()
+        assert mismatches == 0
+
     def test_run_forgetting_no_db(self, tmp_path):
         """POST /forgetting/run with no DB returns error gracefully."""
         fake_db = tmp_path / "nonexistent.db"
