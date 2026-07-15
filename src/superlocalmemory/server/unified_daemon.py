@@ -322,7 +322,7 @@ class ObserveBuffer:
     def set_engine(self, engine) -> None:
         self._engine = engine
 
-    def enqueue(self, content: str) -> dict:
+    def enqueue(self, content: str, *, trusted_actor_id: str = "") -> dict:
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         with self._lock:
             if content_hash in self._seen:
@@ -389,7 +389,7 @@ class ObserveBuffer:
                     "confidence": decision.confidence,
                 },
                 scope=scope,
-                trusted_actor_id=_materializer_actor_id(),
+                trusted_actor_id=trusted_actor_id or _materializer_actor_id(),
             ))
             _emit_event(
                 "memory.captured",
@@ -2085,9 +2085,20 @@ def _register_daemon_routes(application: FastAPI) -> None:
             raise HTTPException(500, detail=str(exc))
 
     @application.post("/observe")
-    async def observe(req: ObserveRequest):
+    async def observe(req: ObserveRequest, request: Request):
         _update_activity()
-        result = _observe_buffer.enqueue(req.content)
+        from superlocalmemory.server.write_identity import (
+            authenticated_request_actor,
+        )
+        actor_id = authenticated_request_actor(
+            request,
+            getattr(application.state, "daemon_descriptor", None),
+            actor_kind="http-observe",
+        )
+        result = _observe_buffer.enqueue(
+            req.content,
+            trusted_actor_id=actor_id,
+        )
         return result
 
     # v3.4.26: CCQ consolidation via daemon so MCP clients don't need to
