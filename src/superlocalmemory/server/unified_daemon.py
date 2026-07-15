@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -1802,16 +1801,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
     def _require_daemon_actor(request: Request) -> str:
         """Authenticate the private capability for this exact process."""
-        descriptor = getattr(application.state, "daemon_descriptor", None)
-        capability = request.headers.get("X-SLM-Daemon-Capability", "")
-        if descriptor is None or not hmac.compare_digest(
-            capability, descriptor.capability,
-        ):
-            raise HTTPException(403, detail="Invalid daemon capability")
-        target_instance = request.headers.get("X-SLM-Target-Instance", "")
-        if not hmac.compare_digest(target_instance, descriptor.instance_id):
-            raise HTTPException(409, detail="Daemon instance changed")
-        return f"daemon-capability:{descriptor.capability_fingerprint}"
+        from superlocalmemory.server.write_identity import require_daemon_actor
+
+        return require_daemon_actor(
+            request,
+            getattr(application.state, "daemon_descriptor", None),
+        )
 
     def _require_write_actor(request: Request) -> str:
         """Authenticate a local write and return its trusted actor.
@@ -1822,21 +1817,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
         writers instead present the install token, which is never the daemon
         process capability.
         """
-        capability = request.headers.get("X-SLM-Daemon-Capability", "")
-        if capability:
-            return _require_daemon_actor(request)
+        from superlocalmemory.server.write_identity import require_write_actor
 
-        from superlocalmemory.core.security_primitives import verify_install_token
-
-        install_token = request.headers.get("X-Install-Token", "")
-        if verify_install_token(install_token):
-            from superlocalmemory.core.engine_ingestion import (
-                local_trusted_actor_id,
-            )
-
-            return local_trusted_actor_id("dashboard")
-
-        raise HTTPException(403, detail="Authenticated write capability required")
+        return require_write_actor(
+            request,
+            getattr(application.state, "daemon_descriptor", None),
+            actor_kind="dashboard",
+        )
 
     @application.get("/health")
     async def health():

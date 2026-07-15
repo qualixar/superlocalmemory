@@ -42,4 +42,6 @@ def test_memory_mutation_routes_require_authenticated_actor() -> None:
         start = source.index(f"async def {function_name}")
         next_route = source.find("\n@router.", start + 1)
         block = source[start: next_route if next_route != -1 else None]
-        assert "require_write_actor" in block, function_name
+        assert "_authorize_memory_mutation" in block, function_name
+
+    assert "require_write_actor" in source

@@ -25,6 +25,42 @@ def _get_engine(request: Request):
     return get_engine_lazy(request.app.state)
 
 
+def _authorize_memory_mutation(
+    request: Request,
+    operation: str,
+    fact_id: str,
+    *,
+    content_preview: str = "",
+):
+    """Authenticate and run the engine trust boundary before direct SQL."""
+    from superlocalmemory.server.write_identity import require_write_actor
+
+    actor_id = require_write_actor(
+        request,
+        getattr(request.app.state, "daemon_descriptor", None),
+        actor_kind="dashboard",
+    )
+    engine = _get_engine(request)
+    if engine is None:
+        raise HTTPException(503, detail="Engine not initialized")
+    profile_id = engine.profile_id
+    context = {
+        "operation": operation,
+        "agent_id": actor_id,
+        "source_agent_id": "dashboard",
+        "profile_id": profile_id,
+        "fact_id": fact_id,
+    }
+    if content_preview:
+        context["content_preview"] = content_preview[:100]
+    try:
+        engine._hooks.run_pre(operation, context)
+    except Exception as exc:
+        logger.warning("Dashboard %s authorization rejected: %s", operation, exc)
+        raise HTTPException(403, detail="Write authorization rejected") from exc
+    return engine, profile_id, context
+
+
 def _preview(content: str | None) -> str:
     """Truncate content for preview display."""
     if not content:
@@ -739,11 +775,13 @@ async def get_fact_detail(request: Request, fact_id: str):
 @router.delete("/api/memories/{fact_id}")
 async def delete_memory(request: Request, fact_id: str):
     """Delete a specific memory (atomic fact) by ID."""
+    engine, active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id,
+    )
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         # Verify it exists and belongs to this profile
         cursor.execute(
             "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
@@ -755,6 +793,7 @@ async def delete_memory(request: Request, fact_id: str):
         cursor.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
         conn.commit()
         conn.close()
+        engine._hooks.run_post("delete", hook_context)
         return {"success": True, "deleted": fact_id}
     except HTTPException:
         raise
@@ -772,11 +811,13 @@ async def forget_memory(request: Request, fact_id: str):
     future ``slm restore`` can bring it back.
     """
     import json as _json
+    engine, active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id,
+    )
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         cursor.execute(
             "SELECT fact_id, content, importance, confidence, "
             "       canonical_entities_json, embedding, created_at "
@@ -813,6 +854,7 @@ async def forget_memory(request: Request, fact_id: str):
         )
         conn.commit()
         conn.close()
+        engine._hooks.run_post("delete", hook_context)
         return {"success": True, "fact_id": fact_id, "archived_at": archived_at}
     except HTTPException:
         raise
@@ -830,6 +872,9 @@ async def merge_memory(request: Request, fact_id: str):
     the loser's ``merged_into`` column. The loser is archived so it
     no longer appears in default recall. The winner is untouched.
     """
+    engine, active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id,
+    )
     try:
         body = await request.json()
         kept = str((body or {}).get("into", "")).strip()
@@ -843,7 +888,6 @@ async def merge_memory(request: Request, fact_id: str):
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         # Both must belong to the active profile.
         cursor.execute(
             "SELECT fact_id FROM atomic_facts "
@@ -874,6 +918,7 @@ async def merge_memory(request: Request, fact_id: str):
         )
         conn.commit()
         conn.close()
+        engine._hooks.run_post("delete", hook_context)
         return {
             "success": True,
             "merged": fact_id,
@@ -894,10 +939,15 @@ async def edit_memory(request: Request, fact_id: str):
         new_content = (body.get("content") or "").strip()
         if not new_content:
             raise HTTPException(status_code=400, detail="content is required")
+        engine, active_profile, hook_context = _authorize_memory_mutation(
+            request,
+            "update",
+            fact_id,
+            content_preview=new_content,
+        )
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         cursor.execute(
             "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
             (fact_id, active_profile),
@@ -911,6 +961,7 @@ async def edit_memory(request: Request, fact_id: str):
         )
         conn.commit()
         conn.close()
+        engine._hooks.run_post("update", hook_context)
         return {"success": True, "fact_id": fact_id, "content": new_content}
     except HTTPException:
         raise
