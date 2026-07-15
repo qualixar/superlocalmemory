@@ -1,0 +1,129 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-07-15T06:13:09.501856+00:00",
+  "source_commit": "b5c96e4484db7e4c57e28800dad54e4c9ec618da",
+  "product_version": "3.6.23",
+  "runtime": {
+    "python": "3.12.13",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "logical_cpus": 15,
+    "system_memory_mb": 24576.0
+  },
+  "protocol": {
+    "mode": "A",
+    "engine": "shipped MemoryEngine FULL + canonical ingestion + recall",
+    "database": "isolated temporary SQLite",
+    "embedding_boundary": "deterministic-sha256-numpy-768",
+    "network": "disabled by construction; no provider calls",
+    "warmup_iterations": 5,
+    "ingest_iterations": 50,
+    "idempotent_ingest_iterations": 100,
+    "recall_iterations": 100,
+    "rss_sample_every_calls": 10
+  },
+  "initialization_ms": 94.828,
+  "latency": {
+    "ingest": {
+      "samples": 50,
+      "min_ms": 35.626,
+      "p50_ms": 96.028,
+      "p95_ms": 140.961,
+      "max_ms": 196.818,
+      "mean_ms": 97.295
+    },
+    "idempotent_ingest": {
+      "samples": 100,
+      "min_ms": 1.156,
+      "p50_ms": 1.666,
+      "p95_ms": 5.568,
+      "max_ms": 8.058,
+      "mean_ms": 2.012
+    },
+    "recall": {
+      "samples": 100,
+      "min_ms": 82.932,
+      "p50_ms": 86.05,
+      "p95_ms": 88.949,
+      "max_ms": 99.588,
+      "mean_ms": 86.219
+    },
+    "universal_budget_applied": false
+  },
+  "rss": {
+    "corpus_build": {
+      "samples_mb": [
+        82.094,
+        84.047,
+        89.016,
+        90.203,
+        94.0,
+        114.844
+      ],
+      "baseline_mb": 82.094,
+      "final_mb": 114.844,
+      "peak_mb": 114.844,
+      "growth_mb": 32.75,
+      "tail_span_mb": 24.641,
+      "tail_slope_mb_per_100_calls": 123.203,
+      "tail_plateau_observed": false
+    },
+    "repeat_idempotent_ingest": {
+      "samples_mb": [
+        114.922,
+        114.922,
+        114.812,
+        114.812,
+        114.812,
+        114.812,
+        114.812,
+        114.812,
+        114.812,
+        114.812,
+        114.812
+      ],
+      "baseline_mb": 114.922,
+      "final_mb": 114.812,
+      "peak_mb": 114.922,
+      "growth_mb": -0.109,
+      "tail_span_mb": 0.0,
+      "tail_slope_mb_per_100_calls": 0.0,
+      "tail_plateau_observed": true
+    },
+    "repeat_recall": {
+      "samples_mb": [
+        121.094,
+        121.547,
+        124.812,
+        128.594,
+        128.594,
+        128.703,
+        128.766,
+        128.781,
+        128.781,
+        128.781,
+        128.891
+      ],
+      "baseline_mb": 121.094,
+      "final_mb": 128.891,
+      "peak_mb": 128.891,
+      "growth_mb": 7.797,
+      "tail_span_mb": 0.188,
+      "tail_slope_mb_per_100_calls": 0.281,
+      "tail_plateau_observed": true
+    },
+    "bounded_window_conclusion": "no_unbounded_growth_detected",
+    "scope_warning": "Finite-run evidence only; this is not a proof for unlimited corpus size."
+  },
+  "process_ownership": {
+    "child_pids_before": [],
+    "child_pids_after": [],
+    "new_child_pids_after_close": []
+  },
+  "excluded": {
+    "mode_b_ollama_e2e": "external model/host dependency; measure separately",
+    "mode_c_provider_e2e": "external provider/network dependency; measure separately",
+    "quality": "resource harness does not claim retrieval accuracy"
+  }
+}

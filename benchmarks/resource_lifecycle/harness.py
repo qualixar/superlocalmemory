@@ -393,8 +393,8 @@ def render_markdown(result: dict) -> str:
     return "\n".join([
         "# Local resource-lifecycle evidence",
         "",
-        f"Generated: `{result['generated_at']}`  ",
-        f"Source: `{result['source_commit']}`  ",
+        f"Generated: `{result['generated_at']}`",
+        f"Source: `{result['source_commit']}`",
         f"Package: `{result['product_version']}`",
         "",
         "## Protocol",
