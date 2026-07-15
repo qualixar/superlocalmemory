@@ -50,6 +50,7 @@ def _make_embedding(seed: int, dim: int = DIM) -> list[float]:
 def _seed_fact(
     db: DatabaseManager, profile_id: str, content: str, seed: int,
     *, scope: str = "personal", shared_with: list[str] | None = None,
+    access_count: int = 0, fisher_variance: list[float] | None = None,
 ) -> AtomicFact:
     record = MemoryRecord(
         profile_id=profile_id, content=content, session_id="s1",
@@ -63,6 +64,8 @@ def _seed_fact(
         embedding=_make_embedding(seed),
         scope=scope,
         shared_with=shared_with,
+        access_count=access_count,
+        fisher_variance=fisher_variance,
     )
     db.store_fact(fact)
     return fact
@@ -111,6 +114,45 @@ class TestVectorStoreFastPath:
         # Should have called VectorStore.search
         mock_vs.search.assert_called_once()
         assert len(results) >= 1
+
+    def test_fast_and_fallback_fisher_scores_are_equivalent(
+        self, db: DatabaseManager,
+    ) -> None:
+        """Candidate-source choice must not change Fisher contribution."""
+        facts = [
+            _seed_fact(
+                db, "default", "fresh fact", seed=1,
+                access_count=0, fisher_variance=[0.2] * DIM,
+            ),
+            _seed_fact(
+                db, "default", "used fact", seed=2,
+                access_count=8, fisher_variance=[0.4] * DIM,
+            ),
+        ]
+        query = np.asarray(_make_embedding(3), dtype=np.float32)
+        knn = []
+        for fact in facts:
+            vector = np.asarray(fact.embedding, dtype=np.float32)
+            cosine = float(np.dot(query, vector) / (
+                np.linalg.norm(query) * np.linalg.norm(vector)
+            ))
+            knn.append((fact.fact_id, (cosine + 1.0) / 2.0))
+
+        mock_vs = MagicMock(available=True)
+        mock_vs.search.return_value = sorted(
+            knn, key=lambda item: item[1], reverse=True,
+        )
+        fast = SemanticChannel(db, vector_store=mock_vs).search(
+            query.tolist(), "default", top_k=10,
+        )
+        fallback = SemanticChannel(db, vector_store=None).search(
+            query.tolist(), "default", top_k=10,
+        )
+
+        assert [fact_id for fact_id, _ in fast] == [
+            fact_id for fact_id, _ in fallback
+        ]
+        assert dict(fast) == pytest.approx(dict(fallback), abs=1e-6)
 
     def test_fast_path_merges_global_and_authorized_shared_candidates(
         self, db: DatabaseManager,
