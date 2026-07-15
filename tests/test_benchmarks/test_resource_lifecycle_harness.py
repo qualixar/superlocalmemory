@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -12,6 +14,24 @@ from benchmarks.resource_lifecycle.harness import (
     rss_analysis,
     run_mode_a_local,
 )
+
+
+def test_direct_benchmark_entrypoint_resolves_repository_package() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "benchmarks/resource_lifecycle/run_benchmark.py",
+            "--help",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--ingests" in result.stdout
 
 
 def test_metric_contract_reports_distribution_without_universal_budget() -> None:
