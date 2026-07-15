@@ -166,13 +166,17 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     pending = materialization_state != "complete"
                     return {
                         "success": True,
-                        "fact_ids": fids or [f"pending:{resp.get('pending_id','')}"],
-                        "count": len(fids) if fids else 1,
+                        "fact_ids": fids,
+                        "count": int(resp.get("count", len(fids))),
                         "pending": pending,
-                        "pending_id": resp.get("pending_id"),
+                        "pending_id": resp.get("pending_id") if pending else None,
                         "operation_id": resp.get("operation_id"),
                         "materialization_state": materialization_state,
-                        "message": "Stored (queryable now; enriching async).",
+                        "message": (
+                            "Stored through canonical daemon ingestion."
+                            if not pending
+                            else "Queryable now; canonical enrichment is still running."
+                        ),
                     }
         except Exception as dexc:
             logger.debug("MCP remember via daemon failed, pending fallback: %s", dexc)
@@ -203,14 +207,33 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     else "canonical worker returned an invalid response"
                 )
             fact_ids = list(stored.get("fact_ids") or [])
+            materialization_state = str(
+                stored.get("materialization_state") or "complete"
+            )
+            allowed_states = {"queryable", "enriching", "complete"}
+            if materialization_state not in allowed_states:
+                raise RuntimeError(
+                    "canonical worker returned invalid materialization state: "
+                    f"{materialization_state}"
+                )
+            pending = materialization_state != "complete"
+            operation_id = stored.get("operation_id")
+            pending_id = stored.get("pending_id")
+            if pending and pending_id is None:
+                pending_id = operation_id
             return {
                 "success": True,
                 "fact_ids": fact_ids,
                 "count": int(stored.get("count", len(fact_ids))),
-                "pending": False,
-                "pending_id": None,
-                "materialization_state": "complete",
-                "message": "Stored through canonical local ingestion.",
+                "pending": pending,
+                "pending_id": pending_id if pending else None,
+                "operation_id": operation_id,
+                "materialization_state": materialization_state,
+                "message": (
+                    "Stored through canonical local ingestion."
+                    if not pending
+                    else "Queryable now; canonical enrichment is still running."
+                ),
             }
         except Exception as exc:
             logger.exception("remember failed")

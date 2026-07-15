@@ -192,7 +192,14 @@ def _prevent_heavy_model_loading():
     mock_reranker._kill_worker = MagicMock()
 
     mock_pool = MagicMock()
-    mock_pool.store.return_value = {"ok": True, "fact_ids": ["pending:mock"], "count": 1}
+    mock_pool.store.return_value = {
+        "ok": True,
+        "fact_ids": ["fact-mock"],
+        "count": 1,
+        "operation_id": "operation-mock",
+        "pending_id": None,
+        "materialization_state": "complete",
+    }
     mock_pool.recall.return_value = {"ok": True, "results": [], "count": 0}
     mock_pool.kill.return_value = None
 

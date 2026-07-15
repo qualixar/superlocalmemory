@@ -117,7 +117,7 @@ def _handle_store(content: str, metadata: dict) -> dict:
         canonical_store,
         local_trusted_actor_id,
     )
-    fact_ids = canonical_store(
+    operation = canonical_store(
         engine,
         content,
         source_type="mcp-offline-worker",
@@ -127,7 +127,18 @@ def _handle_store(content: str, metadata: dict) -> dict:
         shared_with=shared_with,
         session_id=session_id,
         idempotency_key=idempotency_key,
+        return_receipt=True,
     )
+    if hasattr(operation, "fact_ids"):
+        fact_ids = list(operation.fact_ids)
+        operation_id = getattr(operation, "operation_id", None)
+        materialization_state = getattr(
+            getattr(operation, "state", None), "value", "complete"
+        )
+    else:
+        fact_ids = list(operation)
+        operation_id = None
+        materialization_state = "complete"
 
     # Generate and persist summary immediately after store (Mode A heuristic, B/C LLM)
     if fact_ids:
@@ -147,7 +158,15 @@ def _handle_store(content: str, metadata: dict) -> dict:
         except Exception:
             pass  # Summary is non-critical
 
-    return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
+    pending = materialization_state != "complete"
+    return {
+        "ok": True,
+        "fact_ids": fact_ids,
+        "count": len(fact_ids),
+        "operation_id": operation_id,
+        "pending_id": operation_id if pending else None,
+        "materialization_state": materialization_state,
+    }
 
 
 def _handle_get_memory_facts(memory_id: str) -> dict:
