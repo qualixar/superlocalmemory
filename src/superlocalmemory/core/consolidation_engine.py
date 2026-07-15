@@ -482,10 +482,13 @@ class ConsolidationEngine:
                 continue
 
             # Promote: active -> warm (lifecycle transition)
-            self._db.execute(
-                "UPDATE atomic_facts SET lifecycle = 'warm' "
-                "WHERE fact_id = ? AND lifecycle = 'active'",
-                (fact_id,),
+            from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+            set_fact_lifecycle_zone(
+                self._db,
+                [fact_id],
+                "warm",
+                profile_id=profile_id,
+                from_atomic=("active",),
             )
             promoted += 1
 

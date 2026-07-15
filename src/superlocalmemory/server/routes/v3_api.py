@@ -1747,6 +1747,9 @@ async def run_forgetting(request: Request):
                 (pid,),
             )
 
+            from superlocalmemory.core.lifecycle_state import reconcile_profile_lifecycle
+            reconcile_profile_lifecycle(conn, pid)
+
             conn.commit()
         except Exception as exc:
             conn.close()

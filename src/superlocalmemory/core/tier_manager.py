@@ -29,7 +29,10 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
 
-from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+from superlocalmemory.core.lifecycle_state import (
+    reconcile_profile_lifecycle,
+    set_fact_lifecycle_zone,
+)
 
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
@@ -78,6 +81,10 @@ def evaluate_tiers(
         "pinned_protected": 0,
         "total_evaluated": 0,
     }
+
+    # Repair any rows written by pre-V3.7 split lifecycle paths before making
+    # new transition decisions.
+    reconcile_profile_lifecycle(db, profile_id)
 
     now = datetime.now(UTC)
     pinned_ids = _get_pinned_fact_ids(db, profile_id)

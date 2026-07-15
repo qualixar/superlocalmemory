@@ -174,10 +174,9 @@ async def pin_fact_route(
                 "VALUES (?, ?, ?, ?)",
                 (body.fact_id, profile_id, now, body.reason),
             )
-            conn.execute(
-                "UPDATE atomic_facts SET lifecycle = 'active' "
-                "WHERE fact_id = ? AND profile_id = ?",
-                (body.fact_id, profile_id),
+            from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+            set_fact_lifecycle_zone(
+                conn, [body.fact_id], "active", profile_id=profile_id,
             )
             conn.commit()
             authorization.complete()

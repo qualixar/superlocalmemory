@@ -1560,20 +1560,17 @@ class DatabaseManager:
             )
             return
 
-        # Update fact_retention
-        self.execute(
-            "UPDATE fact_retention SET lifecycle_zone = 'forgotten', "
-            "  retention_score = 0.0 "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
-        )
+        from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
 
-        # Mark in atomic_facts as archived (valid enum value per A-CRIT-01)
-        self.execute(
-            "UPDATE atomic_facts SET lifecycle = 'archived' "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
-        )
+        with self.transaction():
+            set_fact_lifecycle_zone(
+                self, [fact_id], "forgotten", profile_id=profile_id,
+            )
+            self.execute(
+                "UPDATE fact_retention SET retention_score = 0.0 "
+                "WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
 
     # ------------------------------------------------------------------
     # Phase E: CCQ Consolidated Blocks & Audit CRUD

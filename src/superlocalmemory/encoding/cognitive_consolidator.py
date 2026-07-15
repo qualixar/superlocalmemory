@@ -741,13 +741,13 @@ class CognitiveConsolidator:
             cluster_id=cluster.cluster_id,
         )
 
-        # Archive source facts (HR-04: soft-archive, never delete)
+        # Archive source facts (HR-04: soft-archive, never delete) through the
+        # lifecycle invariant writer.
+        from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+        set_fact_lifecycle_zone(
+            self._db, cluster.fact_ids, "archive", profile_id=profile_id,
+        )
         for fact_id in cluster.fact_ids:
-            self._db.execute(
-                "UPDATE atomic_facts SET lifecycle = 'archived' "
-                "WHERE fact_id = ? AND profile_id = ?",
-                (fact_id, profile_id),
-            )
             # Log access event
             self._db.execute(
                 "INSERT INTO fact_access_log "
@@ -756,15 +756,6 @@ class CognitiveConsolidator:
                 "VALUES (?, ?, ?, datetime('now'), 'consolidation', 'ccq')",
                 (_new_id(), fact_id, profile_id),
             )
-            # Update fact_retention zone
-            self._db.execute(
-                "UPDATE fact_retention "
-                "SET lifecycle_zone = 'archive', "
-                "    last_computed_at = datetime('now') "
-                "WHERE fact_id = ? AND profile_id = ?",
-                (fact_id, profile_id),
-            )
-
         return block_id
 
     # ------------------------------------------------------------------

@@ -17,6 +17,13 @@ from typing import Any, Iterable
 _RETENTION_ZONES = frozenset({"active", "warm", "cold", "archive", "forgotten"})
 
 
+def _materialize_rows(result: Any) -> list[Any]:
+    """Normalize DatabaseManager lists and raw sqlite3 cursors."""
+    if hasattr(result, "fetchall"):
+        return list(result.fetchall())
+    return list(result)
+
+
 def normalize_retention_zone(zone: str) -> str:
     """Return the canonical retention spelling or reject an invalid state."""
     canonical = "archive" if zone == "archived" else zone
@@ -66,12 +73,18 @@ def set_fact_lifecycle_zone(
     where = " AND ".join(filters)
 
     transaction = getattr(db, "transaction", None)
-    context = transaction() if callable(transaction) else nullcontext()
+    txn_state = getattr(db, "_txn_state", None)
+    already_in_transaction = getattr(txn_state, "conn", None) is not None
+    context = (
+        transaction()
+        if callable(transaction) and not already_in_transaction
+        else nullcontext()
+    )
     with context:
-        candidates = db.execute(
+        candidates = _materialize_rows(db.execute(
             f"SELECT fact_id FROM atomic_facts WHERE {where}",
             tuple(filter_params),
-        )
+        ))
         selected = tuple(row["fact_id"] for row in candidates)
         if not selected:
             return 0
@@ -92,3 +105,49 @@ def set_fact_lifecycle_zone(
             (atomic, *selected),
         )
     return len(selected)
+
+
+def reconcile_profile_lifecycle(db: Any, profile_id: str) -> int:
+    """Repair historical mirror drift using retention state as authority.
+
+    Legacy archived atomic facts without a retention row are first imported as
+    ``archive`` so they remain excluded from ordinary recall.  Existing
+    retention rows then overwrite the compatibility mirror in one transaction.
+    """
+    transaction = getattr(db, "transaction", None)
+    txn_state = getattr(db, "_txn_state", None)
+    already_in_transaction = getattr(txn_state, "conn", None) is not None
+    context = (
+        transaction()
+        if callable(transaction) and not already_in_transaction
+        else nullcontext()
+    )
+    with context:
+        db.execute(
+            "INSERT INTO fact_retention (fact_id, profile_id, lifecycle_zone) "
+            "SELECT fact_id, profile_id, "
+            "CASE WHEN lifecycle = 'archived' THEN 'archive' ELSE lifecycle END "
+            "FROM atomic_facts af WHERE profile_id = ? AND lifecycle != 'active' "
+            "AND NOT EXISTS (SELECT 1 FROM fact_retention fr "
+            "WHERE fr.fact_id = af.fact_id)",
+            (profile_id,),
+        )
+        rows = _materialize_rows(db.execute(
+            "SELECT COUNT(*) AS count FROM atomic_facts af "
+            "JOIN fact_retention fr ON fr.fact_id = af.fact_id "
+            "WHERE af.profile_id = ? AND af.lifecycle != "
+            "CASE WHEN fr.lifecycle_zone IN ('archive', 'forgotten') "
+            "THEN 'archived' ELSE fr.lifecycle_zone END",
+            (profile_id,),
+        ))
+        changed = int(rows[0]["count"]) if rows else 0
+        db.execute(
+            "UPDATE atomic_facts SET lifecycle = ("
+            "SELECT CASE WHEN fr.lifecycle_zone IN ('archive', 'forgotten') "
+            "THEN 'archived' ELSE fr.lifecycle_zone END "
+            "FROM fact_retention fr WHERE fr.fact_id = atomic_facts.fact_id) "
+            "WHERE profile_id = ? AND EXISTS ("
+            "SELECT 1 FROM fact_retention fr WHERE fr.fact_id = atomic_facts.fact_id)",
+            (profile_id,),
+        )
+    return changed
