@@ -1585,6 +1585,8 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             if request.url.path.startswith(_AUTH_EXEMPT_PREFIXES):
                 return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+            records_recall_telemetry = request.url.path.startswith("/recall")
+            requires_mutation_actor = is_write or records_recall_telemetry
             headers = dict(request.headers)
             client_host = request.client.host if request.client else ""
             if request.url.path.startswith("/mcp") and not authorize_http_mcp_request(
@@ -1603,7 +1605,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             # loopback origins (the local dashboard) always pass, and LAN origins
             # pass only when explicitly allowlisted in SLM_REMOTE mode. Non-browser
             # clients (CLI/MCP/curl) send no Origin and are unaffected.
-            if is_write:
+            if requires_mutation_actor:
                 _origin = headers.get("origin", "") or headers.get("Origin", "")
                 if _origin:
                     _ok_origin = any(_origin.startswith(p) for p in (
@@ -1914,6 +1916,16 @@ def _register_daemon_routes(application: FastAPI) -> None:
         if not effective_sid:
             import time as _t
             effective_sid = f"http:{int(_t.time() * 1000)}"
+        recall_actor = getattr(request.state, "authenticated_actor", "")
+        if not recall_actor:
+            from superlocalmemory.server.write_identity import (
+                require_http_mutation_actor,
+            )
+            recall_actor = require_http_mutation_actor(
+                request,
+                getattr(application.state, "daemon_descriptor", None),
+                actor_kind="http-recall",
+            )
         # v3.4.32: mark recall in-flight so the pending materializer pauses
         # v3.4.52: run engine.recall() in a thread-pool executor so the
         # FastAPI event loop stays responsive for /health, /remember, and
@@ -1932,6 +1944,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             response = await asyncio.to_thread(
                 engine.recall,
                 search_query, limit=limit, session_id=effective_sid,
+                agent_id=recall_actor,
                 fast=fast,
                 include_global=include_global,
                 include_shared=include_shared,
