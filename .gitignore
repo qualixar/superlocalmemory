@@ -105,7 +105,6 @@ venv/
 .venv/
 env/
 ENV/
-uv.lock
 
 # ==== SECRETS & TOKENS (Never commit) ====
 .mcpregistry_github_token
