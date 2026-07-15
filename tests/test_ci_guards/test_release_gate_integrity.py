@@ -64,6 +64,18 @@ def test_release_tests_and_records_exact_candidates_before_publication() -> None
     assert build < artifact_tests < evidence < publish_pypi < parity < github_release
 
 
+def test_release_python_lock_is_part_of_the_source_checkout() -> None:
+    lockfile = ROOT / "uv.lock"
+    ignored = {
+        line.strip()
+        for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert lockfile.is_file(), "release CI requires a checked-in uv.lock"
+    assert "uv.lock" not in ignored, "uv.lock cannot be ignored when release CI consumes it"
+
+
 def test_changelog_starts_with_the_current_package_version() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     expected = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
