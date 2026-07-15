@@ -11,6 +11,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -104,7 +105,36 @@ def _get_broker(request: Request):
             )
             if not presented or not hmac.compare_digest(presented, secret):
                 raise HTTPException(401, detail="invalid or missing credential")
+            return broker
+
+    # Loopback is a transport property, not an identity.  Every mesh read and
+    # write must prove the install/API/process capability because peer inboxes,
+    # coordination state, and project paths can be sensitive.
+    from superlocalmemory.server.write_identity import require_write_actor
+
+    require_write_actor(
+        request,
+        getattr(request.app.state, "daemon_descriptor", None),
+        actor_kind="mesh-route",
+    )
     return broker
+
+
+_SECRET_KEY = re.compile(
+    r"(?:^|[_\-.])(api[_\-.]?key|secret|token|password|credential)(?:$|[_\-.])",
+    re.IGNORECASE,
+)
+
+
+def _reject_secret_state(key: str, value: str) -> None:
+    """Refuse secret material in the plaintext coordination store."""
+    from superlocalmemory.core.security_primitives import redact_secrets
+
+    if _SECRET_KEY.search(key) or redact_secrets(value) != value:
+        raise HTTPException(
+            422,
+            detail="Mesh state is coordination metadata; secret values are prohibited",
+        )
 
 
 # -- Routes --
@@ -197,6 +227,7 @@ async def state_set(req: StateSetRequest, request: Request):
     broker = _get_broker(request)
     if not req.key:
         raise HTTPException(400, detail="key required")
+    _reject_secret_state(req.key, req.value)
     return broker.set_state(req.key, req.value, req.set_by)
 
 
