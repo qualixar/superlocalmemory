@@ -132,6 +132,7 @@ def init_encoding(
     db: DatabaseManager,
     embedder: Any,
     llm: Any,
+    trust_scorer: Any = None,
 ) -> dict[str, Any]:
     """Create all encoding components. Returns dict of components."""
     from superlocalmemory.encoding.fact_extractor import FactExtractor
@@ -157,7 +158,7 @@ def init_encoding(
     )
     graph_builder = GraphBuilder(db, ann_index)
     consolidator = MemoryConsolidator(
-        db, embedder, llm, config.encoding,
+        db, embedder, llm, config.encoding, trust_scorer=trust_scorer,
     )
     observation_builder = ObservationBuilder(db)
     scene_builder = SceneBuilder(db, embedder)

@@ -190,6 +190,12 @@ CREATE TABLE IF NOT EXISTS atomic_facts (
 
     created_at         TEXT NOT NULL DEFAULT (datetime('now')),
 
+    -- Trust-gated merge (M018) — belief-update framework alignment
+    source_agent_id            TEXT NOT NULL DEFAULT '',
+    pending_corroboration      INTEGER NOT NULL DEFAULT 0,
+    corroboration_agents_json  TEXT NOT NULL DEFAULT '[]',
+    intent_flagged             INTEGER NOT NULL DEFAULT 0,
+
     FOREIGN KEY (memory_id) REFERENCES memories (memory_id)
         ON DELETE CASCADE,
     FOREIGN KEY (profile_id) REFERENCES profiles (profile_id)
@@ -211,7 +217,9 @@ CREATE INDEX IF NOT EXISTS idx_facts_referenced_date
     WHERE referenced_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_facts_interval
     ON atomic_facts (profile_id, interval_start, interval_end)
-    WHERE interval_start IS NOT NULL;"""
+    WHERE interval_start IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_facts_pending_corroboration
+    ON atomic_facts (profile_id, pending_corroboration);"""
 
 
 # ---------------------------------------------------------------------------

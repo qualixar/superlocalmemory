@@ -604,6 +604,7 @@ class EngagementRewardModel:
                 # lock-scope — SQLite rows are tied to the connection.
                 _pid = pending["profile_id"]
                 _qid = pending["recall_query_id"]
+                _fact_ids_json = pending["fact_ids_json"]
         except sqlite3.Error as exc:
             logger.debug("finalize_outcome SQLite error: %s", exc)
             return _FALLBACK_REWARD
@@ -633,7 +634,57 @@ class EngagementRewardModel:
             except Exception as exc:  # noqa: BLE001 — defence in depth
                 logger.debug("feed_recall_settled failed (non-fatal): %s", exc)
 
+        # Belief-update framework feedback loop: "feedback updates tau(s)
+        # for next input" — feed the settled outcome back into the trust
+        # of the agent(s) who asserted the recalled facts. Fail-soft, same
+        # pattern as the shadow-router feed above.
+        self._propagate_trust_signal(_fact_ids_json, _pid, reward)
+
         return reward
+
+    def _propagate_trust_signal(
+        self, fact_ids_json: str, profile_id: str, reward: float,
+    ) -> None:
+        """Feed a settled recall outcome back into per-source trust tau(s).
+
+        Closes the loop the reference framework describes: using a
+        retrieved fact and having that use succeed/fail updates the trust
+        of the agent that asserted it, which then affects both future
+        merge gating (encoding/consolidator.py) and future retrieval
+        ranking (retrieval/engine.py). Best-effort/non-fatal — a trust-DB
+        hiccup must never affect finalize_outcome's return contract.
+        """
+        if reward > 0.55:
+            signal = "recall_hit"
+        elif reward < 0.45:
+            signal = "contradiction"
+        else:
+            return  # neutral outcome — no clear positive/negative signal
+        try:
+            fact_ids = json.loads(fact_ids_json or "[]")
+        except json.JSONDecodeError:  # pragma: no cover — defensive
+            return
+        if not fact_ids:
+            return
+        try:
+            from superlocalmemory.storage.database import DatabaseManager
+            from superlocalmemory.trust.scorer import TrustScorer
+
+            db = DatabaseManager(self._db)
+            placeholders = ",".join("?" * len(fact_ids))
+            rows = db.execute(
+                "SELECT DISTINCT source_agent_id FROM atomic_facts "
+                f"WHERE fact_id IN ({placeholders}) AND source_agent_id != ''",
+                tuple(fact_ids),
+            )
+            agent_ids = [dict(r)["source_agent_id"] for r in rows]
+            if not agent_ids:
+                return
+            scorer = TrustScorer(db)
+            for agent_id in agent_ids:
+                scorer.record_signal(agent_id, profile_id, signal)
+        except Exception as exc:  # noqa: BLE001 — defence in depth
+            logger.debug("trust signal propagation failed (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------
     # Daemon-start reaper
@@ -644,6 +695,13 @@ class EngagementRewardModel:
 
         Called by the consolidation worker and by the daemon lifespan
         before any hot-path traffic resumes. Returns the count finalized.
+
+        Deliberately does NOT call ``_propagate_trust_signal`` (unlike
+        ``finalize_outcome``) — this batch path can process 10k+ stale
+        rows and per-row trust DB writes would reintroduce exactly the
+        lock-contention regression the chunking below exists to avoid.
+        Trust still gets fed for every outcome finalized on the normal
+        real-time path; only crash-recovered stale rows skip it.
 
         # S-M01: previous impl iterated ``finalize_outcome`` per row —
         # 3 statements × N rows under the RLock. After a long crash the

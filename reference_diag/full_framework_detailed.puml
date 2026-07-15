@@ -1,0 +1,114 @@
+@startuml
+skinparam backgroundColor white
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ActivityBorderThickness 1.2
+skinparam ActivityDiamondBorderThickness 1.2
+skinparam ArrowColor #444444
+skinparam ArrowFontSize 11
+skinparam ActivityRoundCorner 10
+
+skinparam partition {
+  BorderColor #666666
+  FontColor #222222
+  FontStyle bold
+  BorderStyle dashed
+}
+
+skinparam activity {
+  BackgroundColor #EAF1FC
+  BorderColor #4A7EBB
+  FontColor #1A1A1A
+  DiamondBackgroundColor #FFF6DC
+  DiamondBorderColor #C99A2E
+}
+
+start
+
+partition "0. Ingestion" #F5F5F5 {
+  :Observation o_(t+1);
+  note right
+    Tool-derived content is assumed already
+    schema-validated upstream by AgentSys —
+    out of scope for this diagram.
+  end note
+  :Intent classifier —
+  assertion vs. query / directive;
+  note right
+    Unsolved component: errors here propagate
+    to every downstream guarantee. Adversarial
+    content is built to blur this exact line.
+  end note
+}
+
+fork
+  partition "2. Belief-Aware Retrieval  (always runs)" #EAF1FC {
+    :Retrieval score;
+    :alpha_t(c) = sim(o_t,c) . lambda^tau_t(c);
+    :Select top-K by alpha_t(c);
+    :Read — return distribution r_t;
+    note right
+      Runs on every observation, independent
+      of whether it also writes. Fixes the
+      "query has no path to memory" bug.
+    end note
+  }
+fork again
+  partition "1. Trust-Gated Belief Update  (assertions only)" #EAF1FC {
+    if (assertion?) then (yes)
+      :Extract candidate (c, h);
+      if (attribute c already\nin M_t?) then (Merge)
+        :Simulate what-if merge\nagainst current p_t^(c)(h);
+        if (tau(s) x delta\nabove threshold?) then (yes)
+          #DCEEDC:Commit — noisy-OR merge;
+          :p_(t+1)^(c)(h) =\nmin(1-(1-p_t^(c)(h))(1-delta), 0.99);
+        else (no)
+          #FBE1E1:Quarantine / reject;
+          note right: untrusted source,\nno corroboration
+          kill
+        endif
+      else (Add)
+        if (multi-source\ndeployment?) then (yes)
+          if (independent\ncorroboration received?) then (yes)
+            #DCEEDC:Commit — bootstrap\np in [0.7, 0.9];
+          else (no)
+            #FBE1E1:Quarantine — awaiting\ncorroboration;
+            kill
+          endif
+        else (single source)
+          #FCEBC1:Commit — bootstrap p in [0.7, 0.9]\n(no quorum check possible);
+          note right
+            Known gap: trust math is dormant
+            on first mention when only one
+            source exists — flag explicitly,
+            don't silently assume multi-source.
+          end note
+        endif
+      endif
+    else (no — query\nor directive)
+      :No write candidate generated;
+      kill
+    endif
+  }
+end fork
+
+partition "3. Action / Pattern Learning" #EAF1FC {
+  :Policy (+ agent registry);
+  :a_t ~ pi( . | o_t, r_t);
+  :Execute a_t;
+  note right
+    AgentSys tool-call isolation
+    lives here — a separate boundary
+    from Tier 0 / ingestion above.
+  end note
+  :Pattern learning —
+  score outcome +ve / -ve
+  for supplying source s;
+}
+
+:feedback: updates tau(s)\nfor next input;
+note right: dashed — loops back\nto the Merge decision above
+stop
+
+@enduml

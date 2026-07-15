@@ -230,6 +230,21 @@ class EncodingConfig:
     # Entropy gate
     entropy_threshold: float = 0.95
 
+    # Trust-gated merge (M018) — belief-update framework alignment.
+    # Commit threshold for tau(s) * delta at merge time (Update path); below
+    # this, the merge is quarantined (pending_corroboration) instead of
+    # applied. delta is the new fact's confidence; tau(s) is the asserting
+    # agent's Bayesian trust score.
+    merge_trust_threshold: float = 0.15
+    # "single_source": brand-new facts bootstrap-commit immediately (today's
+    # real-world default — one user, one set of tools; trust math is
+    # dormant on first mention, logged explicitly rather than silent).
+    # "multi_source": brand-new facts are quarantined awaiting independent
+    # corroboration from a second agent before committing.
+    deployment_mode: str = "single_source"
+    # Bootstrap confidence range for newly-committed first-mention facts.
+    bootstrap_confidence_range: tuple[float, float] = (0.7, 0.9)
+
 
 # ---------------------------------------------------------------------------
 # Retrieval Config
@@ -270,10 +285,20 @@ class RetrievalConfig:
     hopfield_top_k: int = 50
 
     # Trust weighting — apply Bayesian trust scores to retrieval ranking.
-    # When enabled, each fact's score is multiplied by a trust weight in [0.5, 1.5].
+    # weight = trust_lambda ** (tau - 0.5): an exponential curve re-centered
+    # so the neutral prior (tau=0.5, no trust data) still yields weight=1.0.
     # Low-trust facts are demoted; high-trust facts are promoted.
-    # Default trust = 1.0 (no effect when no trust data exists).
     use_trust_weighting: bool = True
+    trust_lambda: float = 2.25
+
+    # Hard trust floor — facts with fact-trust below this are excluded
+    # entirely from recall() results, not just demoted by trust_lambda.
+    # Distinct from EncodingConfig.merge_trust_threshold, which gates the
+    # write-time quarantine/merge decision; this gates read-time retrieval,
+    # closing the gap where a quarantined/untrusted fact still surfaced in
+    # results (only soft-demoted) as long as it matched the query well.
+    # Only enforced when use_trust_weighting is True.
+    trust_floor: float = 0.15
 
     # Ablation channel control for experiments.
     # List of channel names to SKIP during retrieval (e.g., ["bm25", "entity_graph"]).

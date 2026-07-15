@@ -195,6 +195,21 @@ def run_store(
         "content_preview": content[:100],
     }
     hooks.run_pre("store", hook_ctx)
+    agent_id = hook_ctx["agent_id"]
+
+    # Stage 0 (belief-update framework): classify assertion vs. query/directive.
+    # Never silently drops content (see the v3.3.21 invariant below) — a
+    # non-assertion is still stored, but flagged so the trust-gated merge
+    # pipeline (encoding/consolidator.py) forces it through quarantine
+    # regardless of source trust.
+    from superlocalmemory.core.intent_classifier import classify_intent
+    _intent_result = classify_intent(content)
+    intent_flagged = _intent_result.intent != "assertion" and _intent_result.confidence >= 0.5
+    if intent_flagged:
+        logger.debug(
+            "store: content classified as %s (confidence=%.2f) — flagging for quarantine",
+            _intent_result.intent, _intent_result.confidence,
+        )
 
     if entropy_gate and not entropy_gate.should_pass(content):
         return []
@@ -318,10 +333,12 @@ def run_store(
             entity_resolver=entity_resolver,
             temporal_parser=temporal_parser,
         )
+        fact.source_agent_id = agent_id
+        fact.intent_flagged = intent_flagged
 
         if consolidator:
             try:
-                action = consolidator.consolidate(fact, profile_id)
+                action = consolidator.consolidate(fact, profile_id, agent_id)
             except Exception as _consolidate_exc:
                 # P0-1 (remember-write-03): a consolidate failure (e.g. LLM
                 # timeout) must NOT orphan the already-committed memory. Fall

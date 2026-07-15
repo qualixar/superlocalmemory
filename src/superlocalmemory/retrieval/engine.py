@@ -789,11 +789,14 @@ class RetrievalEngine:
     def _get_trust_weight(self, fact: AtomicFact, profile_id: str) -> tuple[float, float]:
         """Look up Bayesian trust score and convert to a multiplicative weight.
 
-        Returns (trust_weight, raw_trust_score).
-        trust_weight is clamped to [0.5, 1.5]:
-          - trust=0.0 -> weight=0.5  (demote untrusted facts)
-          - trust=0.5 -> weight=1.0  (neutral, default prior)
-          - trust=1.0 -> weight=1.5  (promote highly trusted facts)
+        Belief-aware retrieval (Stage 2): alpha_t(c) = sim(o_t,c) . lambda^tau_t(c).
+        Implemented as ``trust_lambda ** (tau - 0.5)`` — re-centered on the
+        neutral prior (tau=0.5) so it still yields weight=1.0 there, matching
+        today's baseline scoring behavior, while still being a genuine
+        exponential trust decay/boost curve (not the prior linear map):
+          - trust=0.0 -> weight=1/sqrt(trust_lambda)  (demote untrusted facts)
+          - trust=0.5 -> weight=1.0                    (neutral, default prior)
+          - trust=1.0 -> weight=sqrt(trust_lambda)     (promote highly trusted facts)
         If trust scoring is disabled or unavailable, returns (1.0, 0.5).
         """
         if not self._config.use_trust_weighting or self._trust_scorer is None:
@@ -804,8 +807,7 @@ class RetrievalEngine:
         except Exception:
             return 1.0, 0.5
 
-        # Linear map: trust 0.0->0.5, 0.5->1.0, 1.0->1.5
-        weight = 0.5 + raw  # raw in [0, 1] -> weight in [0.5, 1.5]
+        weight = self._config.trust_lambda ** (raw - 0.5)
         return weight, raw
 
     # -- Response building --------------------------------------------------
@@ -865,6 +867,12 @@ class RetrievalEngine:
 
             # Trust weighting: Bayesian trust modulates final ranking
             trust_weight, raw_trust = self._get_trust_weight(fact, profile_id)
+
+            # Hard trust floor: below this, exclude entirely rather than
+            # merely demote (soft trust_weight alone doesn't stop a
+            # well-matched but untrusted/quarantined fact from surfacing).
+            if self._config.use_trust_weighting and raw_trust < self._config.trust_floor:
+                continue
 
             boosted_score = fr.fused_score * recency_boost * quality * trust_weight
             # v3.5.0 (M2): soft-normalize to [0,1]. RRF weights + scene/entity

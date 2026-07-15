@@ -76,6 +76,24 @@ def _mock_channel(results: list[tuple[str, float]]) -> MagicMock:
     return ch
 
 
+def _build_trust_engine(
+    facts: list[AtomicFact],
+    trust_map: dict[str, float],
+    use_trust: bool = True,
+) -> RetrievalEngine:
+    """Helper: engine with a mock trust scorer returning preset trust values."""
+    db = _mock_db(facts)
+    config = RetrievalConfig(use_trust_weighting=use_trust)
+    scorer = MagicMock()
+    scorer.get_fact_trust.side_effect = lambda fid, pid: trust_map.get(fid, 0.5)
+    return _build_engine(
+        db=db,
+        semantic_results=[(f.fact_id, 0.9) for f in facts],
+        config=config,
+        trust_scorer=scorer,
+    )
+
+
 def _build_engine(
     db: MagicMock | None = None,
     semantic_results: list[tuple[str, float]] | None = None,
@@ -253,60 +271,146 @@ class TestChannelDisabling:
 # ---------------------------------------------------------------------------
 
 class TestTrustWeighting:
-    """Verify Bayesian trust weight modulates final ranking."""
+    """Verify Bayesian trust weight modulates final ranking.
 
-    def _build_trust_engine(
-        self,
-        facts: list[AtomicFact],
-        trust_map: dict[str, float],
-        use_trust: bool = True,
-    ) -> RetrievalEngine:
-        """Helper: engine with a mock trust scorer returning preset trust values."""
-        db = _mock_db(facts)
-        config = RetrievalConfig(use_trust_weighting=use_trust)
-        scorer = MagicMock()
-        scorer.get_fact_trust.side_effect = lambda fid, pid: trust_map.get(fid, 0.5)
-        return _build_engine(
-            db=db,
-            semantic_results=[(f.fact_id, 0.9) for f in facts],
-            config=config,
-            trust_scorer=scorer,
-        )
+    Trust values here stay >= RetrievalConfig.trust_floor (0.15) so they
+    exercise the soft trust_lambda demotion in isolation. Hard exclusion
+    below the floor is covered separately in TestTrustFloor.
+    """
 
     def test_trust_weight_boosts_high_trust_facts(self) -> None:
         """trust=1.0 maps to weight=1.5, boosting the fact's score."""
         f_high = _make_fact("f_high", "High-trust fact with comprehensive verified evidence")
         f_low = _make_fact("f_low", "Low-trust fact with minimal unverified source information")
-        engine = self._build_trust_engine(
+        engine = _build_trust_engine(
             [f_high, f_low],
-            trust_map={"f_high": 1.0, "f_low": 0.0},
+            trust_map={"f_high": 1.0, "f_low": 0.2},
         )
         response = engine.recall("q", "default")
         scores = {r.fact.fact_id: r.score for r in response.results}
         assert scores["f_high"] > scores["f_low"]
 
     def test_trust_weight_demotes_low_trust_facts(self) -> None:
-        """trust=0.0 maps to weight=0.5, demoting the fact's score."""
+        """trust=0.2 (above the 0.15 floor) still maps to weight < 1.0, demoting
+        the fact's score without excluding it outright."""
         f_untrusted = _make_fact("f_untrusted", "Untrusted fact about dubious claim with no evidence")
-        engine = self._build_trust_engine(
+        engine = _build_trust_engine(
             [f_untrusted],
-            trust_map={"f_untrusted": 0.0},
+            trust_map={"f_untrusted": 0.2},
         )
         response = engine.recall("q", "default")
         # The trust_score field should reflect low trust
-        assert response.results[0].trust_score == pytest.approx(0.0, abs=0.1)
+        assert response.results[0].trust_score == pytest.approx(0.2, abs=0.05)
 
     def test_trust_disabled_returns_neutral(self) -> None:
-        """When use_trust_weighting=False, trust_score defaults to 0.5 (neutral)."""
+        """When use_trust_weighting=False, trust_score defaults to 0.5 (neutral)
+        and the trust floor is not enforced."""
         f1 = _make_fact("f1", "Fact that should not have trust applied to its retrieval score")
-        engine = self._build_trust_engine(
+        engine = _build_trust_engine(
             [f1],
-            trust_map={"f1": 0.0},  # Would demote if enabled
+            trust_map={"f1": 0.0},  # Would demote/exclude if enabled
             use_trust=False,
         )
         response = engine.recall("q", "default")
         # Default trust when disabled is 0.5 (neutral)
         assert response.results[0].trust_score == pytest.approx(0.5, abs=0.1)
+
+    def test_trust_weight_neutral_prior_anchors_to_one(self) -> None:
+        """weight = trust_lambda ** (tau - 0.5); tau=0.5 (no data) => weight=1.0.
+
+        Re-centered so the exponential curve (belief-update framework's
+        alpha_t(c) = sim . lambda^tau) preserves today's baseline scoring
+        at the default/neutral prior instead of always boosting by lambda^0.5.
+        """
+        f = _make_fact("f_neutral", "Neutral trust fact with no strong signal")
+        engine = _build_trust_engine([f], trust_map={"f_neutral": 0.5})
+        weight, raw = engine._get_trust_weight(f, "default")
+        assert raw == pytest.approx(0.5)
+        assert weight == pytest.approx(1.0)
+
+    def test_trust_weight_matches_exponential_formula(self) -> None:
+        f = _make_fact("f_hi", "High trust fact with verified evidence")
+        engine = _build_trust_engine([f], trust_map={"f_hi": 1.0})
+        weight, raw = engine._get_trust_weight(f, "default")
+        expected = engine._config.trust_lambda ** (raw - 0.5)
+        assert weight == pytest.approx(expected)
+        assert weight == pytest.approx(engine._config.trust_lambda ** 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Trust floor — hard exclusion (added alongside RetrievalConfig.trust_floor)
+# ---------------------------------------------------------------------------
+
+class TestTrustFloor:
+    """Verify facts below trust_floor are excluded from results outright,
+    not just demoted. This is what actually closes the poisoning gap
+    documented in TestPoisonGating below."""
+
+    def test_below_floor_excluded_entirely(self) -> None:
+        f_poison = _make_fact("f_poison", "Fully untrusted single-source claim with no corroboration")
+        engine = _build_trust_engine([f_poison], trust_map={"f_poison": 0.05})
+        response = engine.recall("q", "default")
+        assert response.results == []
+
+    def test_at_floor_boundary_is_retained(self) -> None:
+        """trust == trust_floor exactly is NOT excluded (strict '<' comparison)."""
+        f = _make_fact("f_boundary", "Fact sitting exactly at the trust floor boundary value")
+        engine = _build_trust_engine([f], trust_map={"f_boundary": 0.15})
+        response = engine.recall("q", "default")
+        assert len(response.results) == 1
+
+    def test_above_floor_is_retained_but_demoted(self) -> None:
+        f = _make_fact("f_above", "Fact just above the trust floor boundary value threshold")
+        engine = _build_trust_engine([f], trust_map={"f_above": 0.2})
+        response = engine.recall("q", "default")
+        assert len(response.results) == 1
+
+    def test_floor_not_enforced_when_trust_weighting_disabled(self) -> None:
+        f = _make_fact("f_untracked", "Fact scored while trust weighting is fully disabled")
+        engine = _build_trust_engine(
+            [f], trust_map={"f_untracked": 0.0}, use_trust=False,
+        )
+        response = engine.recall("q", "default")
+        assert len(response.results) == 1
+
+
+# ---------------------------------------------------------------------------
+# Poison gating — end-to-end: quarantine (write-time) + trust floor (read-time)
+# ---------------------------------------------------------------------------
+
+class TestPoisonGating:
+    """Verifies the poisoning gap is closed: a quarantined, fully-untrusted
+    fact (trust=0.0, well below RetrievalConfig.trust_floor=0.15) is excluded
+    from recall() results entirely by the hard trust floor in
+    RetrievalEngine._build_results, even when it's the best semantic match
+    for the query.
+
+    Before the trust floor was added, this fact was only soft-demoted
+    (weight = trust_lambda ** (tau - 0.5) ~= 0.667x at trust=0.0) and still
+    came back in results — see git history for the prior characterization
+    of that gap.
+    """
+
+    def test_quarantined_untrusted_fact_is_excluded(self) -> None:
+        poison = AtomicFact(
+            fact_id="f_poison", memory_id="m0",
+            content="A false claim injected by an untrusted single source with zero corroboration",
+            confidence=0.9, pending_corroboration=True,
+        )
+        db = _mock_db([poison])
+        config = RetrievalConfig(use_trust_weighting=True)
+        scorer = MagicMock()
+        scorer.get_fact_trust.side_effect = lambda fid, pid: 0.0
+        engine = _build_engine(
+            db=db,
+            semantic_results=[("f_poison", 0.9)],
+            config=config,
+            trust_scorer=scorer,
+        )
+
+        response = engine.recall("q", "default")
+
+        assert response.results == []
 
 
 # ---------------------------------------------------------------------------

@@ -336,8 +336,10 @@ class DatabaseManager:
                 embedding, fisher_mean, fisher_variance,
                 lifecycle, langevin_position,
                 emotional_valence, emotional_arousal, signal_type, created_at,
-                scope, shared_with)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                scope, shared_with,
+                source_agent_id, pending_corroboration,
+                corroboration_agents_json, intent_flagged)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (fact.fact_id, fact.memory_id, fact.profile_id, fact.content,
              fact.fact_type.value,
              json.dumps(fact.entities), json.dumps(fact.canonical_entities),
@@ -348,7 +350,9 @@ class DatabaseManager:
              _jd(fact.embedding), _jd(fact.fisher_mean), _jd(fact.fisher_variance),
              fact.lifecycle.value, _jd(fact.langevin_position),
              fact.emotional_valence, fact.emotional_arousal,
-             fact.signal_type.value, fact.created_at, _scope, _shared),
+             fact.signal_type.value, fact.created_at, _scope, _shared,
+             fact.source_agent_id, 1 if fact.pending_corroboration else 0,
+             json.dumps(fact.corroboration_agents), 1 if fact.intent_flagged else 0),
         )
         return fact.fact_id
 
@@ -380,6 +384,10 @@ class DatabaseManager:
             pinned=bool(d.get("pinned", 0)),
             scope=d.get("scope", "personal"),
             shared_with=_jl(d.get("shared_with"), None),
+            source_agent_id=d.get("source_agent_id", "") or "",
+            pending_corroboration=bool(d.get("pending_corroboration", 0)),
+            corroboration_agents=_jl(d.get("corroboration_agents_json")),
+            intent_flagged=bool(d.get("intent_flagged", 0)),
             created_at=d["created_at"],
         )
 
@@ -490,6 +498,8 @@ class DatabaseManager:
         "source_turn_ids_json", "session_id", "embedding",
         "fisher_mean", "fisher_variance", "lifecycle", "langevin_position",
         "emotional_valence", "emotional_arousal", "signal_type",
+        "source_agent_id", "pending_corroboration",
+        "corroboration_agents_json", "intent_flagged",
     })
 
     def update_fact(self, fact_id: str, updates: dict[str, Any]) -> None:

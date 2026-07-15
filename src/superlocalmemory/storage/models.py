@@ -185,6 +185,15 @@ class AtomicFact:
     # v3.4.65: Core Memory Block explicit pin (M015)
     pinned: bool = False
 
+    # Trust-gated merge (M018): which agent asserted this fact, whether it's
+    # quarantined awaiting corroboration/trust, which agents have corroborated
+    # it, and whether its content was classified as query/directive rather
+    # than assertion (still stored, but forced through quarantine).
+    source_agent_id: str = ""
+    pending_corroboration: bool = False
+    corroboration_agents: list[str] = field(default_factory=list)
+    intent_flagged: bool = False
+
     created_at: str = field(default_factory=_now)
 
 

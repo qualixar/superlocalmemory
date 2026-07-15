@@ -254,6 +254,7 @@ class MemoryEngine:
 
         enc = init_encoding(
             self._config, self._db, self._embedder, self._llm,
+            trust_scorer=self._trust_scorer,
         )
         self._ann_index = enc["ann_index"]
         self._fact_extractor = enc["fact_extractor"]

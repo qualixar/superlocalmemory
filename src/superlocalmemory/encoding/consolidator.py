@@ -23,6 +23,7 @@ import math
 from typing import Any, Protocol
 
 from superlocalmemory.core.config import EncodingConfig
+from superlocalmemory.encoding.policy import MergeAction, MergePolicy
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import (
     AtomicFact,
@@ -51,6 +52,12 @@ class LLM(Protocol):
     def generate(self, prompt: str, system: str = "") -> str: ...
 
     def is_available(self) -> bool: ...
+
+
+class TrustScorerProtocol(Protocol):
+    """Anything that can look up an agent's Bayesian trust score tau(s)."""
+
+    def get_agent_trust(self, agent_id: str, profile_id: str) -> float: ...
 
 
 # ---------------------------------------------------------------------------
@@ -91,56 +98,66 @@ class MemoryConsolidator:
         embedder: Embedder | None = None,
         llm: LLM | None = None,
         config: EncodingConfig | None = None,
+        trust_scorer: TrustScorerProtocol | None = None,
     ) -> None:
         self._db = db
         self._embedder = embedder
         self._llm = llm
         self._cfg = config or EncodingConfig()
+        self._trust_scorer = trust_scorer
+        self._policy = MergePolicy(self._is_contradicting, self._cfg)
 
     # -- Public API ---------------------------------------------------------
 
     def consolidate(
-        self, new_fact: AtomicFact, profile_id: str,
+        self, new_fact: AtomicFact, profile_id: str, agent_id: str = "unknown",
     ) -> ConsolidationAction:
         """Consolidate *new_fact* against existing knowledge.
 
+        Formalizes ``pi(a_t | o_t, r_t)`` (Stage 3 of the belief-update
+        framework): *new_fact* is the observation ``o_t``, the candidates
+        found below are ``r_t`` (belief-aware retrieval doubling as the
+        write path's candidate lookup — a pending/quarantined fact can
+        itself surface here, which is how independent corroboration on
+        first mention is detected). ``MergePolicy`` selects the action;
+        this method executes it via the ``_execute_*`` primitives.
+
         Returns a ``ConsolidationAction`` describing what was done.
         """
+        new_fact.source_agent_id = new_fact.source_agent_id or agent_id
         candidates = self._find_candidates(new_fact, profile_id)
+        tau = (
+            self._trust_scorer.get_agent_trust(agent_id, profile_id)
+            if self._trust_scorer is not None else 0.5
+        )
+        decision = self._policy.select(new_fact, candidates, tau)
 
-        if not candidates:
-            return self._execute_add(new_fact, profile_id, reason="no matching facts")
-
-        best_fact, best_score = candidates[0]
-
-        if best_score > _NOOP_THRESHOLD:
-            # Even near-duplicates might be contradictions (e.g. negation).
-            # Check contradiction BEFORE declaring NOOP.
-            if self._is_contradicting(new_fact, best_fact):
-                return self._execute_supersede(
-                    new_fact, best_fact, profile_id,
-                    reason=f"contradiction detected (score={best_score:.3f})",
-                )
-            return self._execute_noop(
-                new_fact, best_fact, profile_id,
-                reason=f"near-duplicate (score={best_score:.3f})",
+        if decision.action == MergeAction.ADD:
+            return self._execute_add(new_fact, profile_id, reason=decision.reason)
+        if decision.action == MergeAction.ADD_QUARANTINE:
+            return self._execute_add_quarantine(new_fact, profile_id, reason=decision.reason)
+        if decision.action == MergeAction.UPDATE:
+            return self._execute_update(
+                new_fact, decision.best_fact, profile_id, reason=decision.reason,
             )
-
-        if best_score > _MATCH_THRESHOLD:
-            if self._is_contradicting(new_fact, best_fact):
-                return self._execute_supersede(
-                    new_fact, best_fact, profile_id,
-                    reason=f"contradiction detected (score={best_score:.3f})",
-                )
-            if new_fact.fact_type == best_fact.fact_type:
-                return self._execute_update(
-                    new_fact, best_fact, profile_id,
-                    reason=f"refines existing (score={best_score:.3f})",
-                )
-
-        return self._execute_add(
-            new_fact, profile_id,
-            reason=f"new information (best_score={best_score:.3f})",
+        if decision.action == MergeAction.UPDATE_QUARANTINE:
+            return self._execute_quarantine_merge(
+                new_fact, decision.best_fact, profile_id, reason=decision.reason,
+            )
+        if decision.action == MergeAction.CORROBORATE:
+            return self._execute_corroborate(
+                new_fact, decision.best_fact, profile_id, reason=decision.reason,
+            )
+        if decision.action == MergeAction.STILL_PENDING:
+            return self._execute_still_pending(
+                new_fact, decision.best_fact, profile_id, reason=decision.reason,
+            )
+        if decision.action == MergeAction.SUPERSEDE:
+            return self._execute_supersede(
+                new_fact, decision.best_fact, profile_id, reason=decision.reason,
+            )
+        return self._execute_noop(
+            new_fact, decision.best_fact, profile_id, reason=decision.reason,
         )
 
     def get_consolidation_history(
@@ -276,13 +293,38 @@ class MemoryConsolidator:
     def _execute_add(
         self, new_fact: AtomicFact, profile_id: str, *, reason: str,
     ) -> ConsolidationAction:
-        """Store the new fact and link to related facts via semantic edges."""
+        """Commit a brand-new fact as a trusted belief (single-source bootstrap).
+
+        Confidence is clamped into ``bootstrap_confidence_range`` — the
+        diagram's "Commit — bootstrap p in [0.7, 0.9]" — rather than
+        overwritten outright, so extraction-quality signal already on the
+        fact is preserved where it already falls in range.
+        """
+        lo, hi = self._cfg.bootstrap_confidence_range
+        new_fact.confidence = min(max(new_fact.confidence, lo), hi)
+        new_fact.pending_corroboration = False
         self._db.store_fact(new_fact)
         self._create_semantic_edges(new_fact, profile_id)
         action = self._log_action(
             ConsolidationActionType.ADD, new_fact.fact_id, "", profile_id, reason,
         )
-        logger.debug("ADD fact %s: %s", new_fact.fact_id, reason)
+        logger.debug("ADD fact %s (confidence=%.3f): %s", new_fact.fact_id, new_fact.confidence, reason)
+        return action
+
+    def _execute_add_quarantine(
+        self, new_fact: AtomicFact, profile_id: str, *, reason: str,
+    ) -> ConsolidationAction:
+        """Store a brand-new fact quarantined, awaiting independent corroboration."""
+        new_fact.pending_corroboration = True
+        new_fact.corroboration_agents = (
+            [new_fact.source_agent_id] if new_fact.source_agent_id else []
+        )
+        self._db.store_fact(new_fact)
+        self._create_semantic_edges(new_fact, profile_id)
+        action = self._log_action(
+            ConsolidationActionType.NOOP, new_fact.fact_id, "", profile_id, reason,
+        )
+        logger.debug("ADD_QUARANTINE fact %s: %s", new_fact.fact_id, reason)
         return action
 
     def _execute_update(
@@ -293,12 +335,22 @@ class MemoryConsolidator:
         *,
         reason: str,
     ) -> ConsolidationAction:
-        """Update existing fact: bump evidence, optionally merge content."""
+        """Trust-gated noisy-OR merge: commit new evidence into the existing belief.
+
+        Only reached once ``MergePolicy`` has already confirmed
+        ``tau(s) * delta`` clears ``merge_trust_threshold`` — this method
+        performs the commit unconditionally.
+        """
+        delta = new_fact.confidence
         new_evidence = existing.evidence_count + 1
-        new_confidence = min(1.0, existing.confidence + 0.05)
+        new_confidence = min(1 - (1 - existing.confidence) * (1 - delta), 0.99)
+        agents = list(existing.corroboration_agents)
+        if new_fact.source_agent_id and new_fact.source_agent_id not in agents:
+            agents.append(new_fact.source_agent_id)
         updates: dict[str, Any] = {
             "evidence_count": new_evidence,
             "confidence": new_confidence,
+            "corroboration_agents_json": agents,
         }
 
         # If LLM available, merge content for a richer fact
@@ -314,9 +366,76 @@ class MemoryConsolidator:
             profile_id, reason,
         )
         logger.debug(
-            "UPDATE fact %s (evidence=%d): %s",
-            existing.fact_id, new_evidence, reason,
+            "UPDATE fact %s (evidence=%d, confidence=%.3f <- noisy-OR delta=%.3f): %s",
+            existing.fact_id, new_evidence, new_confidence, delta, reason,
         )
+        return action
+
+    def _execute_quarantine_merge(
+        self,
+        new_fact: AtomicFact,
+        existing: AtomicFact,
+        profile_id: str,
+        *,
+        reason: str,
+    ) -> ConsolidationAction:
+        """Reject an untrusted/uncorroborated merge — quarantine, leave the belief untouched."""
+        self._db.update_fact(existing.fact_id, {"pending_corroboration": 1})
+        action = self._log_action(
+            ConsolidationActionType.NOOP,
+            new_fact.fact_id, existing.fact_id,
+            profile_id, reason,
+        )
+        logger.debug("UPDATE_QUARANTINE %s (merge rejected): %s", existing.fact_id, reason)
+        return action
+
+    def _execute_corroborate(
+        self,
+        new_fact: AtomicFact,
+        existing: AtomicFact,
+        profile_id: str,
+        *,
+        reason: str,
+    ) -> ConsolidationAction:
+        """Independent corroboration received — commit the pending fact."""
+        lo, hi = self._cfg.bootstrap_confidence_range
+        commit_confidence = (lo + hi) / 2.0
+        agents = list(existing.corroboration_agents)
+        if new_fact.source_agent_id and new_fact.source_agent_id not in agents:
+            agents.append(new_fact.source_agent_id)
+        self._db.update_fact(existing.fact_id, {
+            "pending_corroboration": 0,
+            "confidence": commit_confidence,
+            "evidence_count": existing.evidence_count + 1,
+            "corroboration_agents_json": agents,
+        })
+        action = self._log_action(
+            ConsolidationActionType.UPDATE,
+            new_fact.fact_id, existing.fact_id,
+            profile_id, reason,
+        )
+        logger.debug(
+            "CORROBORATE %s -> confidence=%.3f: %s",
+            existing.fact_id, commit_confidence, reason,
+        )
+        return action
+
+    def _execute_still_pending(
+        self,
+        new_fact: AtomicFact,
+        existing: AtomicFact,
+        profile_id: str,
+        *,
+        reason: str,
+    ) -> ConsolidationAction:
+        """Same source repeats an uncorroborated claim — no state change, stays quarantined."""
+        self._db.update_fact(existing.fact_id, {"access_count": existing.access_count + 1})
+        action = self._log_action(
+            ConsolidationActionType.NOOP,
+            new_fact.fact_id, existing.fact_id,
+            profile_id, reason,
+        )
+        logger.debug("STILL_PENDING %s: %s", existing.fact_id, reason)
         return action
 
     def _execute_supersede(
