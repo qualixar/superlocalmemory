@@ -73,6 +73,14 @@ _LEGACY_PORT = 8767
 _ACTIVE_DAEMON_DESCRIPTOR: DaemonDescriptor | None = None
 
 
+def _configured_daemon_port() -> int:
+    """Return the configured bind port, falling back safely to the default."""
+    try:
+        return int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
+    except ValueError:
+        return _DEFAULT_PORT
+
+
 def _process_descriptor(port: int, version: str, state: str) -> DaemonDescriptor:
     """Return this process's stable namespace/instance identity."""
     global _ACTIVE_DAEMON_DESCRIPTOR
@@ -1031,11 +1039,12 @@ async def lifespan(application: FastAPI):
     # Python's logging module then wrote the full stack to stderr. Because the
     # call runs inside FastAPI's stacked merged_lifespan, each dump was ~30 KB
     # and the error log grew to tens of MB within a day.
+    _display_port = _configured_daemon_port()
     if idle_timeout <= 0:
-        _ready_msg = f"Unified daemon ready on port {_DEFAULT_PORT} (24/7 mode)"
+        _ready_msg = f"Unified daemon ready on port {_display_port} (24/7 mode)"
     else:
         _ready_msg = (
-            f"Unified daemon ready on port {_DEFAULT_PORT} "
+            f"Unified daemon ready on port {_display_port} "
             f"(idle timeout: {idle_timeout}s)"
         )
     logger.info(_ready_msg)
@@ -1315,10 +1324,7 @@ def create_app() -> FastAPI:
         version=SLM_VERSION,
         lifespan=lifespan,
     )
-    try:
-        identity_port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
-    except ValueError:
-        identity_port = _DEFAULT_PORT
+    identity_port = _configured_daemon_port()
     application.state.daemon_descriptor = _process_descriptor(
         identity_port, SLM_VERSION, "ready",
     )
@@ -1525,7 +1531,11 @@ def create_app() -> FastAPI:
         from superlocalmemory.mcp.agent_context import AgentIDExtractorASGI
 
         application.mount("/mcp", AgentIDExtractorASGI(_mcp_app))
-        logger.info("MCP HTTP transport mounted at /mcp (Streamable HTTP, port 8765; per-agent routing enabled)")
+        logger.info(
+            "MCP HTTP transport mounted at /mcp (Streamable HTTP, port %d; "
+            "per-agent routing enabled)",
+            _configured_daemon_port(),
+        )
     except Exception as _mcp_exc:  # pragma: no cover — defensive
         logger.warning("MCP HTTP mount failed (non-fatal, stdio still works): %s", _mcp_exc)
 

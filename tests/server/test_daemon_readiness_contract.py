@@ -60,3 +60,12 @@ def test_health_ready_requires_engine_and_clean_migrations(tmp_path, monkeypatch
         "migrations": True,
         "migration_failures": [],
     }
+
+
+def test_configured_daemon_port_honours_the_isolated_port(monkeypatch) -> None:
+    """Operator-facing readiness text must name the port the process binds."""
+    from superlocalmemory.server import unified_daemon
+
+    monkeypatch.setenv("SLM_DAEMON_PORT", "18765")
+
+    assert unified_daemon._configured_daemon_port() == 18765
