@@ -780,12 +780,12 @@ async def lifespan(application: FastAPI):
         # uses the daemon's engine directly via EngineRecallAdapter.
         # WorkerPool is still available as fallback for dashboard/chat routes.
 
-        # Force reranker warmup
+        # The reranker constructor has already started its background warmup.
+        # Never block daemon publication here: a first-time model download or
+        # ONNX compilation previously held every CLI/MCP request for 120s.
+        # Until it is ready, retrieval uses its deterministic fallback scorer;
+        # the worker upgrades subsequent recalls without changing their API.
         retrieval_eng = getattr(engine, '_retrieval_engine', None)
-        if retrieval_eng:
-            reranker = getattr(retrieval_eng, '_reranker', None)
-            if reranker and hasattr(reranker, 'warmup_sync'):
-                reranker.warmup_sync(timeout=120)
 
         # V3.4.11: Pre-warm embedding worker (load ONNX model on startup)
         # Without this, first recall takes 60-90s for model load.

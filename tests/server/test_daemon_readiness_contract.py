@@ -69,3 +69,13 @@ def test_configured_daemon_port_honours_the_isolated_port(monkeypatch) -> None:
     monkeypatch.setenv("SLM_DAEMON_PORT", "18765")
 
     assert unified_daemon._configured_daemon_port() == 18765
+
+
+def test_daemon_lifespan_does_not_block_on_reranker_warmup() -> None:
+    """A usable daemon must publish routes while local models warm in background."""
+    import inspect
+
+    from superlocalmemory.server import unified_daemon
+
+    source = inspect.getsource(unified_daemon.lifespan)
+    assert "reranker.warmup_sync(timeout=120)" not in source
