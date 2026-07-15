@@ -244,18 +244,26 @@ Control tool surface via `SLM_MCP_PROFILE`:
 
 | Profile | Tools | Use case |
 |:--------|:-----:|:---------|
-| `core14` (default) | 14 | Memory core — `remember`, `recall`, `forget`, `session_init`, + mesh |
-| `mesh8` | 8 | Mesh-only — multi-machine coordination |
-| `full38` | 38 | Core + optimize + evolution + trust |
-| `power50` | 50 | Full38 + admin + ingestion + compliance |
-| `whole81` | 81 | Every tool (`SLM_MCP_ALL_TOOLS=1`) |
+| `core` | 14 | Memory, session, and optimize core |
+| `code` | 20 | Core + code-graph tools |
+| `mesh` | 8 | Mesh-only — multi-machine coordination |
+| `full` | 38 | Memory + optimize + evolution + mesh |
+| `power` | 50 | Full + administration, lifecycle, and diagnostics |
+| `whole` | all registered | Every registered MCP tool |
 
 **Precedence:** `ALL` > `TOOLS` > `PROFILE` > `default`
 
 ```bash
-export SLM_MCP_PROFILE=full38   # or core14 / mesh8 / power50 / whole81
+export SLM_MCP_PROFILE=full   # or core / code / mesh / power / whole
 slm mcp
 ```
+
+For a predictable small surface, set `core` explicitly. Leaving the variable
+unset retains the compatibility default, whose mesh tools follow the local
+mesh setting. The former count-suffixed names (`core14`, `code20`, `mesh8`,
+`full38`, `power50`, `whole81`) remain temporary aliases and emit a migration
+warning. Unknown names stop startup instead of silently selecting another tool
+set.
 
 Per-IDE configs available for Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Gemini CLI, JetBrains, Zed, and more (15 configs in `ide/configs/`). See [docs/ide-setup.md](docs/ide-setup.md).
 
