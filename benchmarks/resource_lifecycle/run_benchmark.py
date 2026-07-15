@@ -6,11 +6,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from benchmarks.resource_lifecycle.harness import (
-    render_markdown,
-    run_mode_a_local,
-    write_results,
-)
+if __package__:
+    from .harness import render_markdown, run_mode_a_local, write_results
+else:
+    # Direct execution places this directory, not the repository root, on
+    # sys.path. Keep the documented script command independent of PYTHONPATH.
+    from harness import render_markdown, run_mode_a_local, write_results
 
 
 def main() -> int:
