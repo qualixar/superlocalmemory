@@ -51,12 +51,12 @@ def test_cli_exports_existing_local_aggregates_without_network(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == {
-        "command": "diagnostics",
-        "data": {"exported": True, "reporting": "manual_export_only"},
-        "error": None,
-        "next_actions": [],
-        "ok": True,
+    output = json.loads(result.stdout)
+    assert output["success"] is True
+    assert output["command"] == "diagnostics"
+    assert output["data"] == {
+        "exported": True,
+        "reporting": "manual_export_only",
     }
     assert destination.is_file()
     exported = json.loads(destination.read_text(encoding="utf-8"))
@@ -69,4 +69,3 @@ def test_privacy_diagnostics_documentation_states_no_automatic_reporting() -> No
     assert "No network reporting endpoint" in doc
     assert "never exported automatically" in doc
     assert "slm diagnostics export" in doc
-

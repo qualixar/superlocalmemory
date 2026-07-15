@@ -123,40 +123,68 @@ def canonical_store(
     return_receipt: bool = False,
 ) -> list[str] | IngestionOperation:
     """Synchronously submit and completely materialize one canonical write."""
+    import time
+
     from superlocalmemory.core.ingestion_command import IngestionRequest, IngestionState
+    from superlocalmemory.infra.local_diagnostics import record_operation
+
+    started = time.monotonic()
 
     # Preserve the long-standing Python/API contract for rejected content:
     # low-information input is a no-op and never becomes an M018 operation.
     if not content_passes_admission(content):
+        record_operation(
+            "remember",
+            client=trusted_actor_id,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error=ValueError("content rejected by local admission policy"),
+        )
         return []
-
-    command = build_engine_ingestion_command(engine)
-    receipt = command.submit(IngestionRequest(
-        content=content,
-        profile_id=engine._profile_id,
-        source_type=source_type,
-        idempotency_key=idempotency_key or uuid.uuid4().hex,
-        metadata=dict(metadata or {}),
-        scope=scope,
-        shared_with=tuple(shared_with or ()),
-        trusted_actor_id=trusted_actor_id,
-        session_id=session_id,
-        session_date=session_date or "",
-        speaker=speaker,
-        role=role,
-    ))
-    result = command.materialize(receipt.operation_id)
-    if result.state is not IngestionState.COMPLETE:
-        if not require_complete and receipt.fact_ids:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Canonical operation %s remains %s and will retry: %s",
-                result.operation_id,
-                result.state.value,
-                result.last_error,
-            )
-            return list(receipt.fact_ids)
-        raise RuntimeError(result.last_error or "canonical materialization failed")
+    try:
+        command = build_engine_ingestion_command(engine)
+        receipt = command.submit(IngestionRequest(
+            content=content,
+            profile_id=engine._profile_id,
+            source_type=source_type,
+            idempotency_key=idempotency_key or uuid.uuid4().hex,
+            metadata=dict(metadata or {}),
+            scope=scope,
+            shared_with=tuple(shared_with or ()),
+            trusted_actor_id=trusted_actor_id,
+            session_id=session_id,
+            session_date=session_date or "",
+            speaker=speaker,
+            role=role,
+        ))
+        result = command.materialize(receipt.operation_id)
+        if result.state is not IngestionState.COMPLETE:
+            if not require_complete and receipt.fact_ids:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Canonical operation %s remains %s and will retry: %s",
+                    result.operation_id,
+                    result.state.value,
+                    result.last_error,
+                )
+                record_operation(
+                    "remember", client=trusted_actor_id,
+                    duration_ms=(time.monotonic() - started) * 1000.0,
+                )
+                return list(receipt.fact_ids)
+            raise RuntimeError(result.last_error or "canonical materialization failed")
+    except Exception as exc:
+        record_operation(
+            "remember",
+            client=trusted_actor_id,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error=exc,
+        )
+        raise
+    record_operation(
+        "remember",
+        client=trusted_actor_id,
+        duration_ms=(time.monotonic() - started) * 1000.0,
+    )
     return result if return_receipt else list(result.fact_ids)
 
 

@@ -722,7 +722,9 @@ def check_first_use(command: str) -> None:
     mutations require explicit consent inside ``slm setup``.
     """
     # Commands that work without setup
-    _SKIP_COMMANDS = {"setup", "init", "hook", "hooks", "reap", "mcp"}
+    _SKIP_COMMANDS = {
+        "setup", "init", "hook", "hooks", "reap", "mcp", "diagnostics",
+    }
     if command in _SKIP_COMMANDS:
         return
 

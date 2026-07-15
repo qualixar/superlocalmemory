@@ -75,6 +75,7 @@ _NO_DAEMON_COMMANDS = {
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
     "rotate-token",
     "evidence",
+    "diagnostics",
     # LLD-06 — agents launched through wrap start the daemon on demand.
     "wrap",
     # V3.6 Optimize commands that are config read/write only.
@@ -634,6 +635,21 @@ def main() -> None:
     evidence_rebuild.add_argument("--profile", default="default")
     evidence_rebuild.add_argument("--execute", action="store_true")
     evidence_rebuild.add_argument("--json", action="store_true")
+
+    diagnostics_p = sub.add_parser(
+        "diagnostics",
+        help="Export bounded local operational aggregates (manual only)",
+    )
+    diagnostics_sub = diagnostics_p.add_subparsers(
+        dest="diagnostics_command", title="diagnostics subcommands",
+    )
+    diagnostics_export = diagnostics_sub.add_parser(
+        "export", help="Write a deterministic content-free JSON report",
+    )
+    diagnostics_export.add_argument("destination")
+    diagnostics_export.add_argument(
+        "--json", action="store_true", help="Output structured JSON",
+    )
 
     # S-M07: install-token rotation.
     sub.add_parser(

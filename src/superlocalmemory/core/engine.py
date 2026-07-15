@@ -648,20 +648,30 @@ class MemoryEngine:
         pid = profile_id or self._profile_id
 
         from superlocalmemory.core.recall_pipeline import run_recall
-        response = run_recall(
-            query, pid, mode=mode, limit=limit, agent_id=agent_id,
-            config=self._config,
-            retrieval_engine=self._retrieval_engine,
-            trust_scorer=self._trust_scorer,
-            embedder=self._embedder,
-            db=self._db, llm=self._llm,
-            hooks=self._hooks,
-            access_log=self._access_log,
-            auto_linker=self._auto_linker,
-            fast=fast,
-            include_global=include_global,
-            include_shared=include_shared,
-        )
+        try:
+            response = run_recall(
+                query, pid, mode=mode, limit=limit, agent_id=agent_id,
+                config=self._config,
+                retrieval_engine=self._retrieval_engine,
+                trust_scorer=self._trust_scorer,
+                embedder=self._embedder,
+                db=self._db, llm=self._llm,
+                hooks=self._hooks,
+                access_log=self._access_log,
+                auto_linker=self._auto_linker,
+                fast=fast,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+        except Exception as exc:
+            from superlocalmemory.infra.local_diagnostics import record_operation
+
+            record_operation("recall", client=agent_id, error=exc)
+            raise
+
+        from superlocalmemory.infra.local_diagnostics import record_recall
+
+        record_recall(self._db, response, client=agent_id)
 
         # S9-DASH-02: enqueue for pending_outcomes. Non-blocking; errors
         # swallowed because signal capture is never load-bearing on

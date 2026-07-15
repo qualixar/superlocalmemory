@@ -202,6 +202,7 @@ def dispatch(args: Namespace) -> None:
         "benchmark": _cmd_escape_benchmark,
         "rotate-token": _cmd_escape_rotate_token,
         "evidence": _cmd_evidence,
+        "diagnostics": _cmd_diagnostics,
         # LLD-06 — `slm wrap <agent> [args...]` activates the Optimize proxy.
         "wrap": _cmd_wrap,
         # V3.6 Optimize subcommands (additive)
@@ -224,6 +225,13 @@ def _cmd_evidence(args: Namespace) -> None:
     from superlocalmemory.cli.evidence_cmd import cmd_evidence
 
     cmd_evidence(args)
+
+
+def _cmd_diagnostics(args: Namespace) -> None:
+    """Lazy-load the local aggregate diagnostics export surface."""
+    from superlocalmemory.cli.diagnostics_cmd import cmd_diagnostics
+
+    cmd_diagnostics(args)
 
 
 def _cmd_wrap(args: Namespace) -> None:
