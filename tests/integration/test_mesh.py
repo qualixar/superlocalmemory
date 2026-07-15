@@ -232,6 +232,17 @@ class TestMeshBroadcast:
         inbox2 = broker.get_inbox(r2["peer_id"])
         assert inbox2[0]["read"] == 1  # Now marked read via mesh_reads
 
+    def test_broadcast_marked_read_is_not_redelivered(self, broker):
+        """Inbox is an unread delivery queue, not a permanent event feed."""
+        sender = broker.register_peer("sender")
+        recipient = broker.register_peer("recipient")
+        broker.send_message(sender["peer_id"], "broadcast", "deliver once")
+
+        first_inbox = broker.get_inbox(recipient["peer_id"])
+        broker.mark_read(recipient["peer_id"], [first_inbox[0]["id"]])
+
+        assert broker.get_inbox(recipient["peer_id"]) == []
+
 
 class TestMeshProjectMessages:
     """Tests for project-based messaging (v3.4.6)."""
@@ -256,6 +267,17 @@ class TestMeshProjectMessages:
         broker.send_message(r1["peer_id"], "project:/projects/qos", "qos only")
         inbox = broker.get_inbox(r2["peer_id"], project_path="/projects/slm")
         assert len(inbox) == 0  # Different project, no message
+
+    def test_project_message_marked_read_is_not_redelivered(self, broker):
+        """Project fan-out records one read receipt per recipient."""
+        sender = broker.register_peer("sender", project_path="/projects/slm")
+        recipient = broker.register_peer("recipient", project_path="/projects/slm")
+        broker.send_message(sender["peer_id"], "project:/projects/slm", "deliver once")
+
+        first_inbox = broker.get_inbox(recipient["peer_id"], project_path="/projects/slm")
+        broker.mark_read(recipient["peer_id"], [first_inbox[0]["id"]])
+
+        assert broker.get_inbox(recipient["peer_id"], project_path="/projects/slm") == []
 
 
 class TestMeshOfflineQueue:
