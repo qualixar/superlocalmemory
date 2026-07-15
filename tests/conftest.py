@@ -149,6 +149,16 @@ def pytest_sessionfinish(session, exitstatus):
                 pass
 
 
+def pytest_unconfigure(config) -> None:
+    """Release the collection-time namespace before interpreter teardown.
+
+    ``TemporaryDirectory`` otherwise waits for its weakref finalizer, which
+    emits a ``ResourceWarning`` under ``-X dev`` and hides real fixture leaks
+    in the same shutdown window.
+    """
+    _TEST_ISOLATION_DIR.cleanup()
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped worker cleanup (prevents orphaned subprocess leak)
 # ---------------------------------------------------------------------------
