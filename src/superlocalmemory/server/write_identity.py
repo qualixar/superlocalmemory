@@ -10,6 +10,7 @@ local install token used by the same-origin dashboard.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from typing import Any
 
@@ -61,6 +62,15 @@ def require_write_actor(
         from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
 
         return local_trusted_actor_id(actor_kind)
+
+    from superlocalmemory.infra.auth_middleware import verify_api_key
+
+    api_key = _header(request, "X-SLM-API-Key")
+    if verify_api_key(api_key):
+        fingerprint = hashlib.sha256(
+            b"superlocalmemory-api-actor-v1\0" + api_key.encode("utf-8")
+        ).hexdigest()
+        return f"api-key:{actor_kind}:{fingerprint}"
 
     raise HTTPException(403, detail="Authenticated write capability required")
 

@@ -13,6 +13,7 @@ V3 change: base directory moved from ``~/.claude-memory/`` to
 """
 
 import hashlib
+import hmac
 import logging
 from pathlib import Path
 from typing import Optional
@@ -78,7 +79,18 @@ def check_api_key(
 
     # Writes require a matching key
     provided = request_headers.get("x-slm-api-key", "")
-    if not provided:
-        return False
+    return verify_api_key(provided, key_file=key_file)
 
-    return hashlib.sha256(provided.encode()).hexdigest() == key_hash
+
+def verify_api_key(
+    presented: str,
+    key_file: Optional[Path] = None,
+) -> bool:
+    """Verify a configured API key; unconfigured auth is never identity."""
+    if not isinstance(presented, str) or not presented:
+        return False
+    expected = _load_api_key_hash(key_file)
+    if expected is None:
+        return False
+    actual = hashlib.sha256(presented.encode()).hexdigest()
+    return hmac.compare_digest(actual, expected)
