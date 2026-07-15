@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
@@ -537,24 +538,44 @@ class TestMathLayers:
             "Fisher variance is nearly uniform — content-derived variance not working"
         )
 
-    def test_fisher_ramp_activates_after_accesses(
+    def test_recall_exposure_is_logged_without_fisher_reinforcement(
         self, loaded_engine: MemoryEngine,
     ) -> None:
-        """After 5+ recalls, Fisher ramp should activate (access_count >= 3
-        triggers Bayesian variance narrowing in engine.recall)."""
-        # Recall the same query 6 times to trigger access updates
+        """Recall records exposure without feeding it back into ranking state."""
+        baseline = {
+            str(row["fact_id"]): (int(row["access_count"]), row["fisher_variance"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,access_count,fisher_variance FROM atomic_facts "
+                "WHERE profile_id='default'"
+            )
+        }
+        expected_exposures: Counter[str] = Counter()
         for _ in range(6):
-            loaded_engine.recall("What is Alice's job?")
+            response = loaded_engine.recall("What is Alice's job?")
+            expected_exposures.update(result.fact.fact_id for result in response.results)
 
-        # Check that at least one fact's access_count >= 3
-        rows = loaded_engine._db.execute(
-            "SELECT access_count FROM atomic_facts "
-            "WHERE profile_id = 'default' AND access_count >= 3 "
-            "LIMIT 1"
+        logged = {
+            str(row["fact_id"]): int(row["count"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,COUNT(*) AS count FROM fact_access_log "
+                "WHERE profile_id='default' AND access_type='recall' "
+                "GROUP BY fact_id"
+            )
+        }
+        assert expected_exposures
+        assert all(
+            logged.get(fact_id, 0) >= count
+            for fact_id, count in expected_exposures.items()
         )
-        assert len(rows) > 0, (
-            "Fisher ramp not active: no facts reached access_count >= 3 after 6 recalls"
-        )
+
+        after = {
+            str(row["fact_id"]): (int(row["access_count"]), row["fisher_variance"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,access_count,fisher_variance FROM atomic_facts "
+                "WHERE profile_id='default'"
+            )
+        }
+        assert after == baseline
 
     def test_sheaf_checker_was_initialized(
         self, loaded_engine: MemoryEngine,
