@@ -551,6 +551,10 @@ describe('REGRESSION: prune scoped to plugin/ only', () => {
 // TEST 16 — Full build on real REPO_ROOT succeeds + --check exits 0
 // ---------------------------------------------------------------------------
 describe('Integration: real repo build', () => {
+  test('plugin builder declares its ESM format by extension', () => {
+    assert.equal(path.extname(SCRIPT_PATH), '.mjs');
+  });
+
   test('node build-plugin.js succeeds on real repo', () => {
     const result = spawnSync(
       process.execPath,
