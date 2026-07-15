@@ -2108,9 +2108,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
     # v3.4.26: CCQ consolidation via daemon so MCP clients don't need to
     # import CognitiveConsolidator (which pulls sentence-transformers).
     @application.post("/consolidate/cognitive")
-    async def consolidate_cognitive_endpoint(body: dict):
+    async def consolidate_cognitive_endpoint(body: dict, request: Request):
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.server.route_mutations import (
+            authorize_route_mutation,
+        )
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-cognitive-consolidation",
+            profile_id=body.get("profile_id") or engine.profile_id,
+        )
         try:
             pid = body.get("profile_id") or engine.profile_id
             from superlocalmemory.encoding.cognitive_consolidator import (
@@ -2118,21 +2127,33 @@ def _register_daemon_routes(application: FastAPI) -> None:
             )
             consolidator = CognitiveConsolidator(db=engine._db)
             result = consolidator.run_pipeline(pid)
+            authorization.complete()
             return {
                 "ok": True,
                 "profile_id": pid,
                 "clusters_processed": result.clusters_processed,
                 "blocks_created": result.blocks_created,
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
 
     # v3.4.26: run_maintenance via daemon so MCP doesn't import
     # EbbinghausCurve, ForgettingScheduler, or ConsolidationWorker.
     @application.post("/maintenance/run")
-    async def run_maintenance_endpoint(body: dict):
+    async def run_maintenance_endpoint(body: dict, request: Request):
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.server.route_mutations import (
+            authorize_route_mutation,
+        )
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-maintenance",
+            profile_id=body.get("profile_id") or engine.profile_id,
+        )
         try:
             pid = body.get("profile_id") or engine.profile_id
             results: dict = {}
@@ -2166,7 +2187,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 results["behavioral"] = {"patterns_mined": count}
             except Exception as exc:
                 results["behavioral"] = {"error": str(exc)}
+            authorization.complete()
             return {"ok": True, "profile": pid, **results}
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
 
@@ -2218,7 +2242,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         return {"status": "stopping"}
 
     @application.post("/session/open")
-    async def session_open(req: SessionOpenRequest):
+    async def session_open(req: SessionOpenRequest, request: Request):
         """#49: Open a session locally — warm recall context with no model
         roundtrip, so a shell/session-start hook can call it directly
         (`slm session open`) instead of going through the MCP tool.
@@ -2232,25 +2256,48 @@ def _register_daemon_routes(application: FastAPI) -> None:
         else:
             query = "recent important decisions"
         try:
-            resp = engine.recall(query, limit=req.max_results)
+            from superlocalmemory.server.write_identity import (
+                authenticated_request_actor,
+            )
+            actor_id = authenticated_request_actor(
+                request,
+                getattr(application.state, "daemon_descriptor", None),
+                actor_kind="http-session-open",
+            )
+            resp = engine.recall(
+                query,
+                limit=req.max_results,
+                agent_id=actor_id,
+            )
             results = (
                 getattr(resp, "results", None)
                 or getattr(resp, "memories", None)
                 or []
             )
             return {"ok": True, "query": query, "warmed": len(results)}
+        except HTTPException:
+            raise
         except Exception as exc:
             # Warming is best-effort — never fail the session-open hook.
             return {"ok": True, "query": query, "warmed": 0, "warning": str(exc)}
 
     @application.post("/session/close")
-    async def session_close(req: SessionCloseRequest):
+    async def session_close(req: SessionCloseRequest, request: Request):
         """#49: Close a session locally (e.g. a Claude /quit hook calling
         `slm session close`). Creates per-entity temporal summary events.
         An empty session_id closes the most recent real session.
         """
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.server.route_mutations import (
+            authorize_route_mutation,
+        )
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-session-close",
+            profile_id=engine.profile_id,
+        )
         sid = req.session_id
         if not sid:
             # Fall back to the most recent session that has memories.
@@ -2271,8 +2318,11 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     "message": "no session to close"}
         try:
             created = engine.close_session(sid)
+            authorization.complete()
             return {"ok": True, "session_id": sid,
                     "summary_events_created": int(created)}
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
 
