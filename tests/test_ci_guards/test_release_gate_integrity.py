@@ -47,6 +47,8 @@ def test_release_tests_and_records_exact_candidates_before_publication() -> None
     assert "-m slow" in source
     assert "scripts/release_evidence.py" in source
     assert "SHA256SUMS" in source
+    assert "verify-npm" in source
+    assert ".cdx.json" in source
     assert "actions/upload-artifact@" in source
     assert "gh release create" in source
 
