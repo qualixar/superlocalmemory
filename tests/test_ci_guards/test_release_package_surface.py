@@ -13,11 +13,8 @@ from scripts import release_registry_guard as registry_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT / "package.json"
-RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "publish-release.yml"
-LEGACY_WORKFLOWS = (
-    ROOT / ".github" / "workflows" / "npm-publish.yml",
-    ROOT / ".github" / "workflows" / "pypi-publish.yml",
-)
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "pypi-publish.yml"
+LEGACY_WORKFLOWS = (ROOT / ".github" / "workflows" / "npm-publish.yml",)
 
 
 def _npm_dry_run() -> dict:
