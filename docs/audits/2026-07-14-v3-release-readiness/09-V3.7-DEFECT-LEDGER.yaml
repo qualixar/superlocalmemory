@@ -545,18 +545,16 @@ defects:
     title: "Legacy macOS DMG builder packages an obsolete and unsafe V2 installer contract"
     severity: P1
     evidence: code-proven
-    closure_mode: narrow
+    closure_mode: remove
     workstream: WS9
     dependencies: [SLM-P0-008, SLM-P0-009, SLM-P1-014]
-    status: fix_in_review
+    status: verified
     acceptance:
-      - "V3.7 either omits the DMG from every supported release surface or builds it only from the frozen candidate artifacts."
-      - "Any supported DMG has release-consistent version, AGPL license, install behavior, checksums, signing, notarization, and uninstall semantics."
-      - "The packaged installer preserves user data and passes clean install, upgrade, uninstall, integrity, mount, and Gatekeeper verification on supported macOS versions."
+      - "No DMG builder, validator, release test, installer document, CI reference, package entry, or supported public claim remains."
+      - "Supported installation paths are npm, isolated Python/pip, repository-clone install.sh, and repository-clone install.ps1."
     proofs:
-      - "package/dmg_release_artifact_matrix"
-      - "security/macos_signing_notarization_report"
-      - "claims/no_legacy_dmg_contract_scan"
+      - "tests/test_ci_guards/test_release_package_surface.py::test_dmg_distribution_contract_is_absent_from_supported_surfaces"
+      - "claims/no_dmg_distribution_contract_scan"
 
   - id: SLM-P1-020
     title: "Read-only CLI metadata commands create durable application state"

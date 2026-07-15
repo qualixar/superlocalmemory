@@ -22,7 +22,8 @@ published, tagged, signed, notarized, or deployed.
   separation, mesh-state authentication, mDNS parsing, MCP profile fail-closed
   behavior, persisted int8 tiering, and resource cleanup have committed fixes.
 - Exact Python/npm release-artifact gates, CycloneDX generation, release evidence,
-  coordinated registry guards, package-license truth, and frozen DMG construction
+  coordinated registry guards, package-license truth, and the now-removed DMG
+  contract
   are committed. The root `uv.lock` is now source-controlled because release CI
   consumes it.
 - The 17-client integration manifest is executable and honest: 12 clients have
@@ -84,12 +85,12 @@ absent. The release contract must state that limitation.
    unresolved legacy provenance.
 3. Run the complete default suite, slow lane, strict-warning/resource lane,
    benchmark-safe local lanes, build/wheel/sdist/npm exact-artifact lanes,
-   SBOM/evidence verification, DMG unsigned verification, claim scans, and
+   SBOM/evidence verification, installer claim scans, and
    website/wiki checks.
 4. Reconcile all 48 YAML ledger rows and the verification matrix only from
    executed proof. Do not mark external/platform evidence `verified`.
 5. Commit the final release-candidate report. Do not bump/tag/publish stable
-   `3.7.0` while Windows/Linux matrices, signed/notarized DMG proof, registry/tag
+   `3.7.0` while Windows/Linux matrices, registry/tag
    parity, external-host integration execution, and other required external
    evidence are absent.
 
@@ -98,9 +99,8 @@ absent. The release contract must state that limitation.
 - Current V3.7 LoCoMo performance is unknown; historical paper results must stay
   historical. LoCoMo is not a release gate, and no current score may be claimed.
 - Windows/Linux and multi-version host matrices have not been executed here.
-- The DMG is locally built and unsigned; signing, notarization, stapling, and
-  Gatekeeper evidence require credentials and an authorized release workflow.
+- The DMG distribution channel is removed by owner decision. npm, pip,
+  `install.sh`, and `install.ps1` are the supported installer contract.
 - PyPI/npm/GitHub tag and registry parity require the frozen release commit and
   explicit publication authority.
 - External IDE/client runtimes are not proven by the local integration matrix.
-

@@ -206,7 +206,6 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 | **Python library** | Create a Python virtual environment, then `python -m pip install superlocalmemory` | Python 3.11+; import SLM from another Python application |
 | **Repository clone — macOS/Linux** | `./scripts/install.sh install` | Research/contributor path; delegates to an existing uv or pipx installation |
 | **Repository clone — Windows** | `.\scripts\install.ps1 -Action Install` | Research/contributor path; delegates to an existing uv or pipx installation |
-| **macOS DMG** | Frozen release artifact only | Optional wrapper around one version-matched wheel; a distributable image must pass Developer ID, notarization, stapling, mount, manifest, and Gatekeeper gates |
 | **Claude Code Plugin** (WP-06) | `/plugin marketplace add qualixar/superlocalmemory` then `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core. Ships the skills/agents/hooks/commands |
 | **Portable / IDE connect** (WP-08) | `slm connect <ide> [--here]` | Wire any IDE without reinstalling; `slm connect claude-code` → plugin pointer |
 
@@ -341,7 +340,6 @@ Available controls include local export and erasure commands, hash-chained audit
 | V2 migration | [docs/migration-from-v2.md](docs/migration-from-v2.md) |
 | Configuration | [docs/configuration.md](docs/configuration.md) |
 | Retrieval score contract | [docs/retrieval-score-contract.md](docs/retrieval-score-contract.md) |
-| macOS DMG release contract | [docs/install-macos-dmg.md](docs/install-macos-dmg.md) |
 | Wiki | [github.com/qualixar/superlocalmemory/wiki](https://github.com/qualixar/superlocalmemory/wiki) |
 
 **Web dashboard:**
