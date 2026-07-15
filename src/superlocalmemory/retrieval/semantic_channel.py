@@ -205,7 +205,12 @@ class SemanticChannel:
         )
 
         if not facts:
-            return [(fid, score) for fid, score in knn_results[:top_k]]
+            # The vector/QAS indexes are candidate sources, never an
+            # authorization source.  Returning their raw IDs here leaked an
+            # owner-private fact precisely when canonical scope filtering
+            # rejected the entire candidate set.  Empty means "no authorized
+            # fast-path hits" so the caller may use the scoped full scan.
+            return []
 
         # Step 3: Fisher-Rao re-scoring on the subset
         q_mean: np.ndarray | None = None

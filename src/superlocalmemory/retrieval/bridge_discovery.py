@@ -179,6 +179,16 @@ class BridgeDiscovery:
         Returns:
             List of (fact_id, activation_score) for activated facts.
         """
+        allowed_seeds = authorized_fact_ids(
+            self._db,
+            seed_ids,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        if any(seed_id not in allowed_seeds for seed_id in seed_ids):
+            return []
+
         activations: dict[str, float] = {fid: 1.0 for fid in seed_ids}
         frontier = list(seed_ids)
 

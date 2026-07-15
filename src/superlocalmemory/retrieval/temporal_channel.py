@@ -153,7 +153,7 @@ class TemporalChannel:
             profile_id,
             include_global=bool(getattr(self, "include_global", False)),
             include_shared=bool(getattr(self, "include_shared", False)),
-            prefix="te",
+            prefix="af",
         )
 
         for name in names[:3]:  # Limit to first 3 entity mentions
@@ -164,6 +164,7 @@ class TemporalChannel:
             rows = self._db.execute(
                 "SELECT te.fact_id FROM temporal_events AS te "
                 "JOIN canonical_entities AS ce ON ce.entity_id = te.entity_id "
+                "JOIN atomic_facts AS af ON af.fact_id = te.fact_id "
                 f"WHERE {where} AND LOWER(ce.canonical_name) = LOWER(?)",
                 (*params, name),
             )
@@ -183,11 +184,14 @@ class TemporalChannel:
             profile_id,
             include_global=bool(getattr(self, "include_global", False)),
             include_shared=bool(getattr(self, "include_shared", False)),
+            prefix="af",
         )
         rows = self._db.execute(
-            "SELECT fact_id, observation_date, referenced_date, "
-            "interval_start, interval_end "
-            f"FROM temporal_events WHERE {where}",
+            "SELECT te.fact_id, te.observation_date, te.referenced_date, "
+            "te.interval_start, te.interval_end "
+            "FROM temporal_events AS te "
+            "JOIN atomic_facts AS af ON af.fact_id = te.fact_id "
+            f"WHERE {where}",
             (*params,),
         )
         return [dict(r) for r in rows]
