@@ -66,7 +66,8 @@ def test_phase2_with_signals_no_model(tmp_path):
 def test_phase3_requires_active_and_verified_model(tmp_path):
     db = make_db_with_migrations(tmp_path)
     _seed_signals(db, n_queries=40, per_query=10)  # 400 signals
-    assert _retrain_ranker_impl(db._db_path, "p1")
+    with pytest.warns(DeprecationWarning, match="ranker_retrain_legacy is deprecated"):
+        assert _retrain_ranker_impl(db._db_path, "p1")
     phase = _compute_ranker_phase(
         "p1", learning_db_path=Path(db._db_path),
     )
