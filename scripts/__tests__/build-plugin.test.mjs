@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process';
 // Module path (relative to this file location: scripts/__tests__/)
 // ---------------------------------------------------------------------------
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
-const SCRIPT_PATH = path.resolve(import.meta.dirname, '../build-plugin.js');
+const SCRIPT_PATH = path.resolve(import.meta.dirname, '../build-plugin.mjs');
 
 // Lazy-import the module (it exports pure functions)
 let mod;
@@ -555,7 +555,7 @@ describe('Integration: real repo build', () => {
     assert.equal(path.extname(SCRIPT_PATH), '.mjs');
   });
 
-  test('node build-plugin.js succeeds on real repo', () => {
+  test('node build-plugin.mjs succeeds on real repo', () => {
     const result = spawnSync(
       process.execPath,
       [SCRIPT_PATH, '--quiet'],

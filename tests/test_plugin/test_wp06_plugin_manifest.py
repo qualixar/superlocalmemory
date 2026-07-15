@@ -70,7 +70,7 @@ def _load_json(path: Path) -> dict:
 def _ensure_plugin_generated() -> None:
     """Regenerate ignored plugin outputs before checking the plugin layout."""
     subprocess.run(
-        ["node", "scripts/build-plugin.js", "--quiet"],
+        ["node", "scripts/build-plugin.mjs", "--quiet"],
         cwd=REPO,
         check=True,
     )
