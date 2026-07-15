@@ -161,15 +161,15 @@ slm recall "something you stored in V2"   # Verify old memories are accessible
 
 | Feature | V2 | V3 |
 |:--------|:---|:---|
-| Retrieval | Cosine similarity only | 4-channel (Semantic + BM25 + Entity Graph + Temporal) |
-| Similarity | Cosine distance | Fisher-Rao geodesic distance |
+| Retrieval | Cosine similarity only | Five candidate producers plus fusion and optional score enhancements |
+| Similarity | Cosine distance | Dense cosine relevance with optional Fisher-informed later scoring |
 | Consistency | None | Sheaf cohomology (algebraic topology) |
 | Lifecycle | Hardcoded thresholds | Self-organizing Langevin dynamics |
 | Modes | Single mode | A (zero-cloud), B (local LLM), C (cloud LLM) |
 | Privacy and compliance controls | Not addressed | Deployment-specific controls and assessment |
 | Dashboard | 5 tabs | 17 tabs |
-| MCP Tools | 6 | 24 |
-| Tests | ~200 | 1400+ |
+| MCP Tools | 6 | Profile-selected V3 tool surfaces |
+| Tests | Historical V2 suite | V3 unit, contract, artifact, and integration suites |
 
 ### Rollback if needed
 
@@ -206,7 +206,7 @@ Full reference: [CLI Reference](CLI-Reference)
 ## Next Steps
 
 - [Modes Explained](Modes-Explained) — Understand A vs B vs C
-- [MCP Tools](MCP-Tools) — All 24 tools available in your IDE
+- [MCP Tools](MCP-Tools) — Profile-selected tool and resource contracts
 - [IDE Setup](IDE-Setup) — Per-IDE configuration guides
 - [Auto-Memory](Auto-Memory) — How auto-capture and auto-recall work
 - [Architecture Overview](V3-Architecture) — How the system works under the hood

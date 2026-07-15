@@ -2,7 +2,8 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-Get your AI's memory system running in under 5 minutes. **V3.1: Now with Active Memory — your memory learns from your usage and gets smarter over time, at zero token cost.**
+Install the CLI, activate the product explicitly, and verify one store/recall
+round trip.
 
 <!-- MKT-M4: orient new Claude users who already have Anthropic's free
      built-in memory (shipped March 2026) on why SLM still earns a
@@ -12,28 +13,26 @@ Get your AI's memory system running in under 5 minutes. **V3.1: Now with Active 
      client (LangChain-MCP, LlamaIndex MCP, CrewAI-via-MCP, etc.) is
      covered, not just the 5 named IDEs. -->
 
-### Why not just use Claude's built-in memory?
+### Product boundary
 
-Anthropic's free Claude Memory (March 2026) and Claude Code's Auto-Memory
-are fine defaults. SLM earns the daemon in three places:
+SLM is useful when you need a user-operated memory service across configured
+tools:
 
 - **Local core path by default.** Core memory state uses the configured local
   data root. Optional providers, connectors, backup, model downloads, and
   skill evolution have separate network behavior and must be enabled or configured.
-- **Shared across tools, not just one chat.** One memory, consumed by
-  Claude Code + Cursor + Antigravity + VS Code + Claude Desktop —
-  anything that speaks MCP.
-- **Learns from your outcomes.** Implicit reward signals (dwell,
-  re-query, edit, cite) retrain the ranker against how you actually
-  work, not just summarised chat transcripts.
+- **Named client configurations.** MCP and CLI surfaces can point multiple
+  configured tools at one approved data root. Treat a client as verified only
+  when it passes the release integration matrix.
+- **Outcome-aware ranking components.** Explicit feedback and qualified
+  outcomes can inform local ranking. Exposure alone is not a positive signal.
 
 SuperLocalMemory is built for **one developer, one laptop, many tools.**
 Team / multi-user memory is a different product (SLM-Mesh).
 
-**Integration surface: MCP-native.** The five IDEs listed below are
-explicit wirings, but any MCP-compatible client (LangChain-MCP adapters,
-LlamaIndex MCP, CrewAI-via-MCP, etc.) can use SLM without a custom
-adapter.
+**Integration surface:** SLM exposes MCP and CLI contracts. Protocol
+compatibility does not by itself prove install, lifecycle, identity, and
+cross-client behavior for every product that implements MCP.
 
 ---
 
@@ -103,8 +102,12 @@ Output:
 
 ```
 [1] The project uses PostgreSQL 16 on port 5433, not the default 5432
-    Score: 0.94 | Stored: 2 minutes ago | Profile: default
+    Relevance: 0.94 | Stored: 2 minutes ago | Profile: default
 ```
+
+The value is query-relative relevance, not answer confidence. V3.7 declares
+`calibration_status: "uncalibrated"` and `answer_confidence: null`; see the
+[retrieval score contract](retrieval-score-contract.md).
 
 ## Check System Status
 
@@ -122,10 +125,13 @@ This shows:
 
 ## How It Works With Your IDE
 
-Once connected, SuperLocalMemory works automatically:
+Automation depends on the client plus the hooks/instructions you explicitly
+enable:
 
-- **Auto-recall** — When your AI assistant responds, relevant memories are injected as context. No manual queries needed.
-- **Auto-capture** — Decisions, bug fixes, architecture choices, and preferences are stored as you work. No manual tagging needed.
+- **Auto-recall** — Supported session hooks can request bounded, untrusted
+  evidence context.
+- **Auto-capture** — Supported observe hooks can submit content to configured
+  admission rules.
 
 You can still use `slm remember` and `slm recall` from the terminal whenever you want explicit control.
 

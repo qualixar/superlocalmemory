@@ -46,7 +46,7 @@ The preprints also contain ablation and mathematical analyses. Treat those as re
 ## Quick Start
 
 ```bash
-# npm (recommended interactive CLI install; Node 18+)
+# npm (recommended CLI install; Node 18+)
 # Creates a package-owned virtual environment. It does not modify system Python.
 npm install -g superlocalmemory
 slm setup       # Choose mode (A/B/C)
@@ -101,7 +101,12 @@ slm wrap claude
 
 <a id="dual-interface-mcp--cli"></a>
 
-Current recall has five candidate producers—dense semantic, BM25 lexical, profile, temporal, and associative—followed by fusion, optional reranking, and graph-based score enhancement. Core memory is SQLite-backed; LanceDB and CozoDB are optional experimental backends rather than the normal-path source of truth.
+Current recall has five candidate producers—dense semantic, BM25 lexical,
+temporal, Hopfield associative, and spreading activation—followed by fusion,
+optional reranking, and entity-graph score enhancement. The entity graph does
+not create an independent candidate in the current implementation. Core memory
+is SQLite-backed; LanceDB and CozoDB are optional experimental backends rather
+than the normal-path source of truth.
 
 Canonical ingestion is a durable state machine: `raw → queryable → enriching →
 complete`, with `failed` retaining raw evidence, error details, attempt count,
@@ -114,13 +119,24 @@ secrets, neutralizes forged boundary markers, and attaches provenance. Trusted
 IDE instruction files contain only the static SLM protocol; fresh memory is
 retrieved at runtime rather than copied into those files.
 
-Three mathematical contributions replace cloud LLM dependency:
+**Score Contract v2:** `relevance_score` is query-relative relevance;
+`ranking_score` is internal ranking utility; `memory_confidence` belongs to the
+stored assertion; and `trust_score` is an evidence-policy signal. Legacy
+`score` and `confidence` remain aliases for one compatibility release. V3.7 is
+explicitly uncalibrated: `calibration_status` is `uncalibrated` and
+`answer_confidence` is `null`. See
+[the retrieval score contract](docs/retrieval-score-contract.md).
+
+The retrieval/lifecycle implementation includes three mathematical layers that
+can run without a cloud LLM:
 
 1. **Fisher-informed scoring** — dense candidate generation uses cosine similarity; Fisher-derived terms can modify later scoring when their state is available.
 2. **Sheaf Cohomology for Consistency** — algebraic topology detects contradictions via coboundary norms on the knowledge graph.
 3. **Riemannian Langevin Lifecycle** — memory positions evolve on the Poincare ball; neglected memories self-archive, no hardcoded thresholds.
 
-Auto-capture hooks (`slm hooks install`) fire only on real signals — topic pivot, web call, file edit — never on a timer. Fail-open, <10ms p99 hot path.
+Auto-capture hooks are installed explicitly with `slm hooks install`. Hook
+latency and capture quality must be evaluated for the target client and
+workload; V3.7 publishes no universal p99 claim.
 
 **Multi-scope memory (v3.6.15, opt-in):** keep memories `personal` (default), `shared` with named profiles, or `global` across the machine. Off by default — recall only ever returns your own facts until you turn sharing on, per call or in config. See **[docs/shared-memory.md](docs/shared-memory.md)**.
 
@@ -148,7 +164,10 @@ One engine, three ways in — choose the surface that fits your setup:
 - Zero configuration → **Skill (C)**: install once, auto-compresses CLAUDE.md and large outputs
 - Agent-controlled caching of repeated file reads → **MCP tools (B)**
 
-**Cache:** exact-match SQLite lookup (SHA-256, zero false hits) + vCache-gated semantic (opt-in). **100% cost saved on a hit** (input + output tokens).
+**Cache:** exact-match SQLite lookup is the stable cache path. Semantic cache
+controls are experimental until release-linked precision, invalidation, and
+tenant-isolation evidence exists. A cache hit can avoid a provider request, but
+actual cost and latency savings depend on the intercepted surface and provider.
 
 **Compress:** safe mode uses conservative normalization and preserves JSON and code; measured reduction varies by content and can be zero. Aggressive prose compression is opt-in and lossy. CCR can retain an original for later byte-exact retrieval when reversible storage is enabled.
 
@@ -182,11 +201,12 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 
 | Path | Command | When |
 |:-----|:--------|:-----|
-| **npm** (recommended interactive path) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified |
+| **npm** (recommended CLI path) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified; run `slm setup` explicitly afterward |
 | **Python CLI** | `pipx install superlocalmemory` or `uv tool install superlocalmemory` | Isolated tool environment; clean upgrade and uninstall |
 | **Python library** | Create a Python virtual environment, then `python -m pip install superlocalmemory` | Python 3.11+; import SLM from another Python application |
 | **Repository clone — macOS/Linux** | `./scripts/install.sh install` | Research/contributor path; delegates to an existing uv or pipx installation |
 | **Repository clone — Windows** | `.\scripts\install.ps1 -Action Install` | Research/contributor path; delegates to an existing uv or pipx installation |
+| **macOS DMG** | Frozen release artifact only | Optional wrapper around one version-matched wheel; a distributable image must pass Developer ID, notarization, stapling, mount, manifest, and Gatekeeper gates |
 | **Claude Code Plugin** (WP-06) | `/plugin marketplace add qualixar/superlocalmemory` then `/plugin install superlocalmemory@qualixar` | Self-bootstraps venv, isolated SLM_DATA_DIR, additive — 14-tool core. Ships the skills/agents/hooks/commands |
 | **Portable / IDE connect** (WP-08) | `slm connect <ide> [--here]` | Wire any IDE without reinstalling; `slm connect claude-code` → plugin pointer |
 
@@ -312,6 +332,8 @@ Available controls include local export and erasure commands, hash-chained audit
 | Skill evolution | [docs/skill-evolution.md](docs/skill-evolution.md) |
 | V2 migration | [docs/migration-from-v2.md](docs/migration-from-v2.md) |
 | Configuration | [docs/configuration.md](docs/configuration.md) |
+| Retrieval score contract | [docs/retrieval-score-contract.md](docs/retrieval-score-contract.md) |
+| macOS DMG release contract | [docs/install-macos-dmg.md](docs/install-macos-dmg.md) |
 | Wiki | [github.com/qualixar/superlocalmemory/wiki](https://github.com/qualixar/superlocalmemory/wiki) |
 
 **Web dashboard:**

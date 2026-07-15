@@ -1,15 +1,21 @@
 # Installation
 
-SuperLocalMemory V3 installs via **npm**, **pip**, or **git clone**. All three methods give you the same product — choose whichever fits your workflow.
+SuperLocalMemory V3 provides an npm CLI path, isolated Python CLI paths, a
+Python-library path inside a project virtual environment, repository-clone
+installers, and an optional frozen-wheel macOS DMG. The channels share release
+identity but have different ownership and verification contracts.
 
-> **No desktop app (DMG/EXE) for V3.** V3 is a CLI + MCP server, not a GUI application. The V2 desktop installers are deprecated. Use `slm dashboard` for the web UI.
+> **DMG status:** V3.7 has a rebuilt candidate-only DMG contract. A DMG is not
+> distributable until the frozen V3.7 wheel passes Developer ID signing,
+> notarization, stapling, manifest, mount, and Gatekeeper verification. V2 DMG
+> behavior is not a supported V3 contract.
 
 ## Prerequisites
 
 | Requirement | Version | Check |
 |:-----------|:--------|:------|
 | **Python** | 3.11+ | `python3 --version` |
-| **Node.js** (for npm install) | 14+ | `node --version` |
+| **Node.js** (for npm install) | 18+ | `node --version` |
 
 Python 3.11+ is required for the V3 engine. Node.js is only needed if you install via npm.
 
@@ -17,31 +23,23 @@ Python 3.11+ is required for the V3 engine. Node.js is only needed if you instal
 
 ## Method 1: npm (Recommended)
 
-One command installs everything — CLI, Python dependencies, and MCP server.
+This installs the CLI and MCP runtime into a package-owned Python environment.
 
 ```bash
 npm install -g superlocalmemory
 ```
 
-This automatically:
-- Installs the V3 engine and CLI (`slm` command)
-- Auto-installs Python dependencies (numpy, scipy, networkx, sentence-transformers, torch)
-- Creates data directory at `~/.superlocalmemory/`
-- **Auto-installs Claude Code hooks** (v3.3.6+) — memory lifecycle is fully automatic
-- Detects V2 installations and guides migration
-
-**That's it.** Open Claude Code and memory just works. No `slm setup` or `slm init` needed for auto-memory.
-
-For optional configuration:
+The npm lifecycle does not mutate protected system Python, install hooks, edit
+IDE configuration, start a daemon, download a model, or create the memory data
+root. Activation is explicit:
 
 ```bash
-slm setup     # Interactive wizard — choose Mode A/B/C, configure provider
+slm setup     # Choose mode and integrations
 slm warmup    # Pre-download embedding model (~500MB, one-time)
+slm doctor    # Verify the installed runtime and configuration
 ```
 
-> **`slm warmup` is optional.** If you skip it, the model downloads automatically on your first `slm remember` or `slm recall`.
-
-> **Don't want auto-hooks?** Run `slm hooks remove` to opt out. Re-enable anytime with `slm hooks install`.
+Hooks remain opt-in through `slm setup` or `slm hooks install`.
 
 ### Verify
 
@@ -60,10 +58,12 @@ SuperLocalMemory V3
 
 ---
 
-## Method 2: pip
+## Method 2: isolated Python CLI
 
 ```bash
-pip install superlocalmemory
+pipx install superlocalmemory
+# or
+uv tool install superlocalmemory
 ```
 
 Then run:
@@ -76,12 +76,21 @@ slm status    # Verify
 
 ---
 
-## Method 3: Git Clone (for development or air-gapped environments)
+## Method 3: Python library in a project environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
+```
+
+## Method 4: repository clone (research and development)
 
 ```bash
 git clone https://github.com/qualixar/superlocalmemory.git
 cd superlocalmemory
-pip install -e .
+./scripts/install.sh install   # macOS/Linux; requires existing uv or pipx
+# Windows PowerShell: .\scripts\install.ps1 -Action Install
 ```
 
 Then:
@@ -94,7 +103,11 @@ slm status
 
 ---
 
-## What Gets Installed
+## Resource expectations
+
+Dependency and model footprints vary by Python platform, resolver, selected
+backend, and configured embedding model. The values below are orientation from
+the historical default stack, not a V3.7 release envelope:
 
 | Component | Size | When |
 |:----------|:-----|:-----|
@@ -102,11 +115,17 @@ slm status
 | Search engine (sentence-transformers, einops, torch) | ~200MB | During install |
 | Embedding model (nomic-ai/nomic-embed-text-v1.5, 768d) | ~500MB | First use or `slm warmup` |
 
-**Total disk footprint:** ~750MB after first use (mostly PyTorch + embedding model).
+**Historical orientation:** ~750MB after first use (mostly PyTorch + an
+embedding model). Measure the frozen artifact on each supported platform before
+using this value for capacity planning.
 
-**RAM usage:** ~500-800MB peak during embedding model load, ~20-50MB steady state. CPU-only — no GPU required.
+**Historical orientation:** ~500-800MB peak during default embedding-model
+load and ~20-50MB steady state. Backend and model selection can change this
+materially.
 
-> **If any dependency fails during install**, the installer prints the exact `pip install` command to fix it. BM25 keyword search works even without embeddings — you're never fully blocked.
+If an optional retrieval dependency is unavailable, inspect `slm doctor`,
+health, and trace output. Do not assume degraded retrieval is equivalent to the
+declared full topology.
 
 ---
 
@@ -119,7 +138,8 @@ npm install -g superlocalmemory
 slm setup
 ```
 
-Works out of the box. Python 3.11+ is included with Homebrew (`brew install python@3.12`) or available from python.org.
+Use an existing supported Python 3.11–3.14 runtime. The npm installer does not
+bootstrap Homebrew, uv, pipx, or Python.
 
 ### Linux (Ubuntu/Debian/Fedora)
 
@@ -137,7 +157,8 @@ npm install -g superlocalmemory
 slm setup
 ```
 
-Requires Python 3.11+ from [python.org](https://www.python.org/downloads/). Add Python to PATH during installation.
+Requires an installed supported Python runtime. Hosted Windows artifact proof
+must pass for the frozen V3.7 release before the channel is marked verified.
 
 ---
 
@@ -207,7 +228,7 @@ See [Migration from V2](Migration-from-V2) for the full guide.
 
 - [Quick Start Tutorial](Quick-Start-Tutorial) — Your first memory in 2 minutes
 - [Modes Explained](Modes-Explained) — Choose between A (zero-cloud), B (local Ollama), C (full power)
-- [CLI Reference](CLI-Reference) — All 14 commands with examples
+- [CLI Reference](CLI-Reference) — Current command guidance and installed-help contract
 
 ---
 *Part of [Qualixar](https://qualixar.com) | Created by [Varun Pratap Bhardwaj](https://varunpratap.com)*

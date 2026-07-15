@@ -6,11 +6,13 @@ SuperLocalMemory V3 offers three operating modes. Choose based on your privacy r
 
 **Local core processing with explicit optional integrations.**
 
-- All memory operations run locally on your machine
+- Core memory state uses the configured local data root
 - No model-provider call is required for core memory operations; connectors, backup, downloads, and other enabled integrations have separate network behavior
-- Retrieval uses 4-channel hybrid search: semantic similarity, keyword matching, entity graph traversal, and temporal relevance
-- Cross-encoder reranking for precise result ordering
-- Mathematical foundations (Fisher-Rao, Sheaf, Langevin) enhance accuracy without any LLM
+- Retrieval can use dense semantic, BM25 lexical, temporal, Hopfield
+  associative, and spreading-activation candidate producers
+- Optional reranking and entity-graph score enhancement depend on runtime health
+- Fisher, sheaf, and Langevin components can operate without a cloud LLM; this
+  page makes no universal accuracy claim
 - Local storage, erasure, provenance, policy, and audit controls are available for deployment-specific assessment
 
 **Who it's for:** Privacy-conscious developers, enterprise environments with strict data policies, EU-regulated industries, air-gapped systems.
@@ -21,7 +23,7 @@ SuperLocalMemory V3 offers three operating modes. Choose based on your privacy r
 
 ## Mode B: Smart Local
 
-**Local LLM for answer synthesis. Still fully private.**
+**Local LLM through an operator-managed endpoint.**
 
 - Everything in Mode A, plus a local LLM via Ollama
 - The LLM synthesizes retrieved memories into coherent answers

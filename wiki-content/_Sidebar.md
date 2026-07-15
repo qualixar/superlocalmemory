@@ -13,6 +13,7 @@
 **Reference**
 * [CLI Commands](CLI-Reference)
 * [MCP Tools](MCP-Tools)
+* [Retrieval Score Contract](Retrieval-Score-Contract)
 * [Auto-Memory](Auto-Memory)
 * [Active Memory (V3.1)](Active-Memory)
 

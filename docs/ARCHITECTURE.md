@@ -8,10 +8,10 @@ A high-level overview of how SuperLocalMemory V3 stores, organizes, and retrieve
 
 ## Design Principles
 
-1. **Local-first.** Your data stays on your machine by default. Cloud is opt-in.
-2. **Zero-configuration.** Install and forget. Memory capture and recall happen automatically.
-3. **Multi-channel retrieval.** No single search method is best for every query. V3 combines four channels and picks the best results.
-4. **Mathematically grounded.** Retrieval quality, consistency, and lifecycle management are backed by information geometry rather than heuristics.
+1. **Local-first.** Core memory state uses a local data root; optional integrations have separate network behavior.
+2. **Explicit activation.** Installation does not implicitly add hooks, edit IDE configuration, start a daemon, or download a model.
+3. **Multi-channel retrieval.** The engine can combine five candidate producers when their dependencies are healthy.
+4. **Inspectable scoring.** Mathematical and heuristic signals remain distinct from calibrated answer confidence.
 
 ## System Overview
 
@@ -21,7 +21,7 @@ Your IDE (Claude, Cursor, VS Code, ...)
        | MCP Protocol
        v
 +------------------+
-| MCP Server       |  24 tools, 6 resources
+| MCP Server       |  Profile-selected tools and resources
 +------------------+
        |
        v
@@ -64,11 +64,11 @@ then fusion, optional reranking, and graph-based score enhancement.
 
 | Channel | How it works | Best for |
 |---------|-------------|----------|
-| **Semantic** | Vector similarity using sentence embeddings, enhanced by Fisher-Rao geometry | "Queries that mean the same thing but use different words" |
+| **Semantic** | Dense vector similarity; Fisher-derived terms can affect later scoring where available | "Queries that mean the same thing but use different words" |
 | **BM25** | Classic keyword matching with term frequency scoring | "Queries with specific names, codes, or exact terms" |
-| **Profile** | Retrieves profile-scoped facts and accumulated entity context | "What does this profile know about Maria?" |
 | **Temporal** | Matches based on time references and event ordering | "What did we decide last Friday?" or "Changes since the sprint started" |
-| **Associative** | Uses stored associations to extend candidate evidence | Related decisions and linked technical context |
+| **Hopfield** | Associative retrieval over stored representations | Related decisions and linked technical context |
+| **Spreading activation** | Traverses linked graph neighborhoods | Multi-hop related evidence |
 
 ### Fusion and Ranking
 
@@ -102,7 +102,7 @@ for the decision and its limits.
 |------|-----------|-----------|---------------|
 | **A: Local** | Candidate retrieval + math-informed scoring | None for core memory operations | Local data root; optional integrations may use the network |
 | **B: Local LLM** | Candidate retrieval + local LLM enrichment | Ollama (local) | Local data root; optional integrations may use the network |
-| **C: Cloud LLM** | 4-channel + cross-encoder + agentic retrieval | Cloud provider | Queries sent to cloud |
+| **C: Cloud LLM** | Candidate retrieval plus configured provider-backed enrichment | Cloud provider | Configured content is sent to the provider |
 
 Mode A is the default. Core memory operations can run without a cloud model provider, but model and dependency downloads, connectors, cloud backup, and explicitly enabled integrations may use the network.
 

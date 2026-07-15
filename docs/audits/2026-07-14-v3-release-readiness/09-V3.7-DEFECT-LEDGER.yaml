@@ -281,13 +281,13 @@ defects:
     title: "Retrieval channel contract and public composition disagree"
     severity: P1
     evidence: code-proven
-    closure_mode: fix
+    closure_mode: narrow
     workstream: WS4
     dependencies: [SLM-P0-002]
-    status: open
+    status: fix_in_review
     acceptance:
-      - "Dense, lexical, graph, temporal, and associative families independently contribute candidates before fusion."
-      - "README, MCP, CLI, website, traces, and package metadata are generated from the canonical registry."
+      - "Public surfaces state the implemented candidate topology: dense semantic, BM25 lexical, temporal, Hopfield associative, and spreading activation; entity-graph enhancement is post-fusion."
+      - "README, MCP, CLI, website, traces, and package metadata are generated from or checked against the canonical registry."
     proofs:
       - "contract/independent_candidate_generators"
       - "claims/channel_registry_parity"
@@ -299,7 +299,7 @@ defects:
     closure_mode: fix
     workstream: WS4
     dependencies: [SLM-P1-001]
-    status: open
+    status: proof_pending
     acceptance:
       - "Relevance, memory trust, and answer confidence are separate documented values."
       - "Held-out calibration supports meaningful abstention without score saturation."
@@ -342,7 +342,7 @@ defects:
     closure_mode: narrow
     workstream: WS7
     dependencies: [SLM-P0-010, SLM-P1-013]
-    status: open
+    status: fix_in_review
     acceptance:
       - "Semantic cache is absent from stable surfaces unless real embeddings, calibration, invalidation, and tenant isolation pass."
       - "No stub benchmark is presented as production capability."
@@ -357,7 +357,7 @@ defects:
     closure_mode: prove
     workstream: WS7
     dependencies: [SLM-P0-006]
-    status: open
+    status: fix_in_review
     acceptance:
       - "Safe, aggressive, proxy, and MCP results are reported separately by content class."
       - "Stable structured-data invariants and CCR recovery pass; no generic percentage headline remains."
@@ -387,7 +387,7 @@ defects:
     closure_mode: narrow
     workstream: WS8
     dependencies: [SLM-P1-009]
-    status: open
+    status: fix_in_review
     acceptance:
       - "V3.7 defines mesh as authenticated coordination and verified cross-client continuity."
       - "No memory-replication, federation, conflict-resolution, or multi-peer claim remains."
@@ -548,7 +548,7 @@ defects:
     closure_mode: narrow
     workstream: WS9
     dependencies: [SLM-P0-008, SLM-P0-009, SLM-P1-014]
-    status: reproduced
+    status: fix_in_review
     acceptance:
       - "V3.7 either omits the DMG from every supported release surface or builds it only from the frozen candidate artifacts."
       - "Any supported DMG has release-consistent version, AGPL license, install behavior, checksums, signing, notarization, and uninstall semantics."

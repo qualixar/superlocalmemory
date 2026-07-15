@@ -2,7 +2,10 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-Profiles let you maintain completely isolated memory contexts. Work memories never mix with personal memories. Client A never sees Client B's data.
+Profiles organize memory contexts inside one installation. Personal facts are
+profile-scoped by default; shared and global recall are opt-in and subject to
+the configured scope policy. Profiles are not an operating-system or tenant
+security boundary.
 
 ---
 
@@ -16,7 +19,9 @@ A profile is an isolated memory namespace. Each profile has its own:
 - Retention policies
 - Audit trail
 
-There is zero data leakage between profiles. Searching in one profile never returns results from another.
+The supported contract excludes another profile's personal facts. Release
+verification must also prove authorized shared/global inclusion and
+unauthorized, deleted, and archived exclusion across every retrieval surface.
 
 ## Default Profile
 

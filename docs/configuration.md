@@ -14,7 +14,7 @@ SuperLocalMemory runs in one of three modes. You pick the trade-off between priv
 |------|-------------|:--------------:|:-------------------------:|
 | **A: Local** | Retrieval without a model-provider call in the core path. | No | Optional integrations may transmit data |
 | **B: Local LLM** | Mode A + a local LLM via Ollama. | No | Depends on the Ollama endpoint and optional integrations |
-| **C: Cloud LLM** | Mode B + a cloud LLM for maximum recall quality. | Yes | Yes (queries only) |
+| **C: Cloud LLM** | Mode B + configured cloud-provider enrichment and/or answer construction. | Yes | Configured query, ingestion, or enrichment content may be sent |
 
 ### Check your current mode
 
@@ -56,7 +56,8 @@ ollama pull llama3.2
 slm mode b
 ```
 
-Best for: developers who want better recall without sending data to the cloud.
+Best for: developers who can operate the selected local model and separately
+govern optional networked integrations.
 
 ### Mode C: Cloud LLM
 
@@ -71,7 +72,7 @@ slm provider set openai
 
 You will be prompted for your API key (stored locally in your config file, never transmitted except to the provider you choose).
 
-Best for: maximum recall quality when privacy constraints allow cloud calls.
+Best for: deployments that have approved the configured provider data path.
 
 ## Provider Configuration
 

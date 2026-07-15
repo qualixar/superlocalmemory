@@ -2,15 +2,17 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SLM v3.6.11 **"Optimize Everywhere"** delivers compression + caching across **three surfaces** — proxy, MCP tools, or skill — so every Claude user gets savings regardless of subscription or proxy preference.
+SLM exposes optimization controls through a proxy plus content explicitly
+routed through MCP tools or a skill. Savings depend on workload, provider,
+cacheability, and compression mode.
 
 ## Three Surfaces
 
 | Surface | Entry point | Proxy required? | Context window | Cache scope |
 |---------|------------|:---------------:|:--------------:|-------------|
 | **A — Proxy** | `slm wrap claude` / `ANTHROPIC_BASE_URL` | Yes | Shrinks (intercepts full context) | Full Claude turn |
-| **B — MCP tools** | 5 tools in `slm mcp` | **No** | **Full 1M preserved** | Results you route through SLM |
-| **C — Skill** | `~/.claude/skills/slm-optimize/` | **No** | **Full 1M preserved** | Auto-applied by agent per skill rules |
+| **B — MCP tools** | 5 tools in applicable MCP profiles | **No** | Does not intercept the primary window | Results you route through SLM |
+| **C — Skill** | `~/.claude/skills/slm-optimize/` | **No** | Depends on agent/tool behavior | Applied only when the agent follows the skill rules |
 
 **Hard constraint:** The primary Claude conversation turn cannot be cached without a proxy. Surfaces B and C cache results you explicitly route through SLM — not the Claude turn itself.
 
@@ -26,7 +28,9 @@ Five new MCP tools, included in `slm mcp` from v3.6.11+:
 | `slm_cache_get` | Retrieve cached result by key. Returns `hit:True/False`. |
 | `slm_optimize_stats` | Session compression + cache statistics. |
 
-All five are **fail-open**: any internal error returns `ok:False` with the original unchanged — never raises to the agent.
+The tools are designed to return `ok:False` and preserve the original on
+handled optimization failure. Verify this contract against the frozen artifact
+before relying on it as a fault-containment boundary.
 
 ### Surface C: slm-optimize Skill (v3.6.11)
 
@@ -37,7 +41,9 @@ mkdir -p ~/.claude/skills/slm-optimize
 cp skills/slm-optimize/SKILL.md ~/.claude/skills/slm-optimize/SKILL.md
 ```
 
-The skill instructs the agent to: compress CLAUDE.md at session start, compress large tool outputs, cache repeated file reads and bash results, and recover originals via `slm_retrieve`. Fail-open always — optimization never blocks the primary task.
+The skill instructs the agent to compress selected context, cache repeated
+results, and recover originals via `slm_retrieve`. Actual behavior depends on
+the agent following the skill and the selected compression mode.
 
 ---
 
@@ -45,7 +51,7 @@ SLM v3.6 **Optimize** is a local-first cost-reduction layer. Surface A sits betw
 
 | Lever | Mechanism | Saving | Off by default? |
 |-------|-----------|--------|:---------------:|
-| **Cache** | Skip the call entirely on repeats — exact-match → vCache-gated semantic | **100% on a hit** | Cache ON, Semantic OFF |
+| **Cache** | Skip an intercepted provider call on an exact match; semantic controls remain experimental | Provider-dependent | Cache ON, Semantic OFF |
 | **Compress** | Shrink the prompt before sending — **safe = lossless** normalization; **aggressive = LLMLingua-2 prose only** (opt-in) | Safe: small + lossless · Aggressive: large on prose | Safe mode ON, Aggressive OFF |
 | **Align** | Stabilize the prompt prefix to maximize native provider prefix-cache discounts | Lossless extra | ON when compression is ON |
 
@@ -60,13 +66,13 @@ SLM v3.6 **Optimize** is a local-first cost-reduction layer. Surface A sits betw
 | Feature | What It Does | User Benefit |
 |---------|-------------|--------------|
 | **Exact Cache** | Byte-identical repeat calls served from local SQLite — zero provider tokens consumed | Save 100% on repeated prompts |
-| **Semantic Cache** (opt-in) | vCache-powered learned thresholds with SAFE-CACHE centroid defense — near-duplicate queries return cached results within error bound | Save 100% on near-repeats with verified accuracy |
+| **Semantic Cache** (experimental) | Controls exist, but stable enablement requires release-linked precision, invalidation, and tenant-isolation evidence | No stable savings or accuracy claim |
 | **Lossless safe compression** | Whitespace + compact-JSON normalization only — never removes content; code untouched | Small, zero-risk token reduction; provider prefix-cache stays stable |
 | **LLMLingua-2 Prose** (opt-in, aggressive) | Token-classification prose compression (`microsoft/llmlingua-2-xlm-roberta-large-meetingbank`) — prose ONLY, never code/numbers/structured/current-turn | Large savings on prose-heavy workloads |
 | **CCR (Compressed Context Retrieval)** | Pre-compression originals stored, retrievable byte-exact via UUID (best-effort) | Safety net for aggressive prose compression |
 | **Independent runtime toggles** (v3.6.10) | Cache and Compress flip on/off live from the dashboard — no restart | Run cache-only, compress-only, both, or neither, per your workload |
-| **Per-agent MCP identity** (v3.6.10) | `http://127.0.0.1:8765/mcp/{agent_id}` attributes memory per AI client | Many agents share one daemon with separate identities |
-| **CacheAligner** | Detects volatile tokens (UUIDs, timestamps) in system prompts — logs stability score | Maximizes native provider prefix-cache discounts (Anthropic 90%, OpenAI 50%) |
+| **Per-agent MCP attribution** (v3.6.10) | `http://127.0.0.1:8765/mcp/{agent_id}` labels audit attribution; authenticated credentials derive mutation authority | Many clients can use one daemon without treating a path label as identity |
+| **CacheAligner** | Detects volatile tokens in system prompts and reports a stability signal | Provider-specific effect requires measurement |
 | **Interception Proxy** | HTTP proxy on port 8765 serving Anthropic, OpenAI, and Gemini surfaces | Zero-code integration — just set `base_url` |
 | **SDK Wrappers** | `withSLM(OpenAI())` — in-process interception, no network hop | Drop-in for existing SDK code |
 | **Agent Wrapping** | `slm wrap claude` — one command configures base_url and launches the agent | Fastest path to savings |
@@ -105,7 +111,9 @@ SLM v3.6 **Optimize** is a local-first cost-reduction layer. Surface A sits betw
 4. **Cache store** — the provider response is cached for future hits
 5. **Savings tracked** — every hit, miss, compression, and alignment event is counted and displayed in the dashboard
 
-All errors are **fail-open** — any cache/compress/proxy error passes through to the provider. Your calls never break.
+Handled optimization errors are designed to pass through to the provider. The
+frozen release must prove failure behavior for each supported proxy/provider
+surface; this is not a guarantee against transport or provider failure.
 
 ---
 
@@ -114,7 +122,7 @@ All errors are **fail-open** — any cache/compress/proxy error passes through t
 ### Step 1: Install
 
 ```bash
-pip install -U superlocalmemory    # always latest 3.6.x
+pipx install superlocalmemory      # or: uv tool install superlocalmemory
 # or: npm i -g superlocalmemory
 ```
 
@@ -159,10 +167,10 @@ Or open the dashboard: `slm serve` → http://localhost:8700 → **Optimize** ta
 
 ## Key Properties
 
-| Property | Guarantee |
+| Property | Intended contract and required proof |
 |----------|-----------|
 | **Data isolation** | Separate `llmcache.db` — never touches `memory.db` / `atomic_facts` |
-| **Fail-open** | Any cache/compress/proxy error → passthrough to provider. Calls never break |
+| **Fail-open** | Handled optimization failures should pass through; provider/transport failures remain possible |
 | **Safe defaults** | Optimize ON, Cache ON, Semantic OFF, Compress safe mode, Aggressive OFF, CCR OFF. No behavior change without explicit enable |
 | **Encryption at rest** | AES-256-GCM on all cache values — random per-install salt, `chmod 600` on DB files |
 | **No pickle** | JSON-only serialization (CWE-502 safe) |

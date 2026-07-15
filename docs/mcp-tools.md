@@ -2,9 +2,14 @@
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-SuperLocalMemory exposes 38 tools and 7 resources via the Model Context Protocol (MCP). Any MCP-compatible AI assistant can use these automatically.
+SuperLocalMemory exposes profile-selected tools and resources through the Model
+Context Protocol (MCP). The installed profile registry is the source of truth
+for names and counts; a client still decides when to call a tool.
 
-> **v3.6.11:** Five new **Optimize tools** — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`. Proxy-free compression + routed-result caching. Full 1M context window preserved. [See Three Surfaces →](optimize-overview.md)
+> **Optimize tools:** `slm_compress`, `slm_retrieve`, `slm_cache_set`,
+> `slm_cache_get`, and `slm_optimize_stats` provide explicit compression and
+> routed-result caching. They do not intercept or cache the primary
+> conversation turn without a proxy. [See Three Surfaces →](optimize-overview.md)
 
 ## Connecting
 
@@ -58,6 +63,12 @@ Search memories by natural language query.
 |-----------|------|:--------:|-------------|
 | `query` | string | Yes | Natural language search query |
 | `limit` | number | No | Max results (default: 10) |
+
+Recall results follow [Score Contract v2](retrieval-score-contract.md):
+`relevance_score` is query relevance, `ranking_score` is diagnostic ranking
+utility, and `memory_confidence` belongs to the stored assertion. Canonical
+responses declare `calibration_status: "uncalibrated"` and
+`answer_confidence: null`; retrieval scores are not answer probabilities.
 
 ### `search`
 

@@ -8,21 +8,26 @@ EU AI Act obligations depend on the deployed use case, operator role, risk class
 
 ### Mode A and B: local processing controls
 
-Mode A operates as a zero-LLM retrieval system. Mode B adds a local LLM via Ollama. In both modes, **all memory operations — storage, encoding, retrieval, and lifecycle management — execute locally without any cloud dependency.**
+Mode A can run the core memory path without a cloud model provider. Mode B can
+add an operator-configured local Ollama model. Optional connectors, cloud
+backup, proxy providers, remote embedding endpoints, dependency/model
+downloads, and other integrations have separate network behavior.
 
 | Requirement | Mode A | Mode B | Mode C |
 |:------------|:------:|:------:|:------:|
-| Data sovereignty (Art. 10) | **Pass** | **Pass** | Requires DPA |
-| Right to erasure (GDPR Art. 17) | **Pass** | **Pass** | **Pass** |
-| Transparency (Art. 13) | **Pass** | **Pass** | **Pass** |
+| Data-location control | Deployment assessment required | Deployment assessment required | Provider and deployment assessment required |
+| Right-to-erasure support | Local commands and propagation tests required | Local commands and propagation tests required | Local plus provider/connector procedures required |
+| Transparency support | Trace, provenance, and audit controls available | Same, plus local-model assessment | Same, plus provider assessment |
 | Core memory path without a cloud model provider | Available | Available with local Ollama | No |
 
 Key compliance points for Mode A/B:
 
-- **Data sovereignty:** No personal data leaves the device during any memory operation (Article 10 data governance)
-- **Transparency:** All retrieval decisions are auditable — vector similarity, keyword matching, graph traversal. No black-box LLM decisions.
-- **Risk classification:** Local retrieval is minimal risk. No AI system makes autonomous decisions.
-- **Right to explanation:** You can trace exactly why a memory was recalled using `slm trace "query"`
+- **Data location:** Core state is local, but operators must inventory every
+  enabled provider, connector, backup, download, and remote endpoint.
+- **Transparency:** `slm trace` exposes recorded channel contributions and
+  score fields. It is diagnostic evidence, not a legal explanation guarantee.
+- **Risk classification:** Classification depends on the deployed use case and
+  actor role; local storage alone does not determine it.
 
 ### Mode C: Partial Compliance
 
@@ -45,13 +50,15 @@ Delete memories matching a query:
 slm forget "query matching memories to delete"
 ```
 
-This permanently removes all matching memories, graph connections, and metadata. Because data is stored locally, there are no cloud logs to purge — deletion is immediate and complete.
+The command initiates deletion through the supported mutation path. A release
+claim of complete erasure requires the lifecycle propagation matrix to cover
+relational state, graph/index projections, cache, export, backup, optional
+backends, and enabled external systems.
 
-To delete everything, remove the database:
-
-```bash
-rm ~/.superlocalmemory/memory.db
-```
+Do not remove only `memory.db` as a complete-erasure procedure. Configuration,
+logs, queues, models, derived indexes, credentials, optional backend state, and
+backups can live elsewhere in the data root. Use the documented export,
+erasure, and uninstall procedures for the installed release.
 
 ### Right to Access (Article 15)
 
@@ -75,14 +82,16 @@ Core memory is SQLite-backed, but configuration, logs, queues, models, derived i
 
 ### Profile Isolation
 
-Profiles provide complete data isolation:
+Profiles provide default personal-memory separation inside one installation:
 
 ```bash
 slm profile create client-a
 slm profile switch client-a
 ```
 
-Memories in `client-a` are invisible to other profiles. There is no cross-profile data leakage.
+Shared and global scopes are opt-in. Profiles are not an operating-system,
+process, or tenant-security boundary; deployment isolation and the V3.7 scope
+matrix remain required for sensitive workloads.
 
 ### Trust Scoring
 
@@ -92,9 +101,11 @@ Every agent that interacts with SuperLocalMemory has a Bayesian trust score (0.0
 - Trust is updated based on outcome reports
 - View trust scores via the dashboard (Trust tab)
 
-### Tamper-Proof Audit Trail
+### Hash-chained audit trail
 
-All operations (store, recall, delete) are logged in a SHA-256 hash-chain audit trail. Each entry references the previous entry's hash — any tampering breaks the chain.
+Audit records can be hash-chained so later modification is detectable during
+verification. This is tamper-evidence, not tamper-proof storage, and coverage
+must be checked for the deployed operation set.
 
 ```bash
 slm dashboard    # Compliance tab shows audit trail

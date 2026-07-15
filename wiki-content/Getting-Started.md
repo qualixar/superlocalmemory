@@ -5,7 +5,7 @@ Get SuperLocalMemory running in under 5 minutes.
 ## Prerequisites
 
 - **Python** 3.11+ (`python3 --version`)
-- **Node.js** 14+ (only if installing via npm)
+- **Node.js** 18+ (only if installing via npm)
 - Any supported IDE (Claude Code, Cursor, VS Code, Windsurf, etc.)
 
 ## Install

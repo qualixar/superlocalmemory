@@ -25,6 +25,7 @@ This evidence pack separates shipped truth, benchmark truth, public claims, reme
 12. [V3.7 implementation Wave 1](11-V3.7-IMPLEMENTATION-WAVE-1.md) — daemon ownership and test-isolation changes, executable evidence, and remaining blockers.
 13. [V3.7 implementation Wave 2](12-V3.7-IMPLEMENTATION-WAVE-2.md) — canonical data-root migration, two-HOME installed-artifact proof, discovered defects, and the installer approval gate.
 14. [V3.7 implementation Wave 2B](13-V3.7-IMPLEMENTATION-WAVE-2B-INSTALLERS.md) — rebuilt npm, Unix/macOS, and Windows installer contracts; artifact lifecycle proof; consent boundary; discovered P0/P1 defects; and the unresolved DMG release decision.
+15. [V3.7 implementation Wave 3](14-V3.7-IMPLEMENTATION-WAVE-3-INTEGRITY.md) — canonical integrity changes, Score Contract v2, authenticated mutation boundary, rebuilt package/DMG truth, documentation corrections, and remaining release gates.
 
 ## Evidence vocabulary
 

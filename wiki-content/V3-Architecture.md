@@ -42,9 +42,9 @@ Query
   ├─ Candidate Producers:
   │  ├─ Dense semantic
   │  ├─ BM25 lexical
-  │  ├─ Profile/entity context
   │  ├─ Temporal
-  │  └─ Associative
+  │  ├─ Hopfield associative
+  │  └─ Spreading activation
   │
   ├─ Profile Lookup (direct SQL shortcut for entity queries)
   │
@@ -66,9 +66,9 @@ Query
 |---------|----------------|----------------|
 | Semantic | Meaning similarity | Exact keywords, entity names |
 | BM25 | Exact terms, rare words | Paraphrases, synonyms |
-| Profile/entity context | Known entity and profile context | Unrelated facts |
+| Hopfield associative | Distributed associative similarity | Exact-term-only relationships |
 | Temporal | Time-relevant facts | Atemporal knowledge |
-| Associative | Linked decisions and related context | Isolated facts |
+| Spreading activation | Linked graph neighborhoods | Isolated facts |
 
 No single channel handles all query types. The fusion combines their strengths.
 
@@ -139,10 +139,10 @@ superlocalmemory/src/superlocalmemory/
 ├── learning/       Adaptive learning, behavioral tracking, outcomes
 ├── trust/          Trust scoring, provenance tracking, gates
 ├── llm/            LLM backbone (Ollama / Azure / OpenAI)
-├── mcp/            MCP server (24 tools, 6 resources)
-├── cli/            CLI with setup wizard (15 commands)
+├── mcp/            MCP server with profile-selected tools and resources
+├── cli/            CLI, setup wizard, diagnostics, and maintenance commands
 ├── server/         Dashboard API + UI server
-└── tests/          1400+ tests
+└── tests/          Unit, contract, artifact, and integration tests
 ```
 
 ---
