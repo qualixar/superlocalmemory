@@ -46,6 +46,39 @@ def test_hook_handlers_defaults_on_garbage_port_file(home: Path) -> None:
     assert hook_handlers._daemon_url() == "http://127.0.0.1:8765"
 
 
+def test_hook_daemon_post_uses_owned_identity_client(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def _owned_request(method, path, body=None):
+        captured.update(method=method, path=path, body=body)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "superlocalmemory.cli.daemon.daemon_request",
+        _owned_request,
+    )
+    monkeypatch.setattr(
+        hook_handlers.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hook bypassed owned daemon identity")
+        ),
+    )
+
+    assert hook_handlers._daemon_post(
+        "/remember",
+        {"content": "checkpoint"},
+    ) is True
+    assert captured == {
+        "method": "POST",
+        "path": "/remember",
+        "body": {"content": "checkpoint"},
+    }
+
+
 # ---------------------------------------------------------------------------
 # post_tool_async_hook._port_file_url and fallback path
 # ---------------------------------------------------------------------------

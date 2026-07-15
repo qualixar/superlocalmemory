@@ -110,6 +110,44 @@ class TestDaemonPoolProxy:
         assert body["content"] == "hello"
         assert body["tags"] == "tag1"
 
+    def test_store_delegates_to_owned_daemon_client(self, monkeypatch):
+        captured = {}
+
+        def _owned_request(method, path, body=None):
+            captured.update(method=method, path=path, body=body)
+            return {"ok": True, "fact_ids": ["owned-fact"], "count": 1}
+
+        import superlocalmemory.mcp._daemon_proxy as mod
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            _owned_request,
+        )
+        monkeypatch.setattr(
+            mod.urllib.request,
+            "urlopen",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("raw daemon write bypassed identity client")
+            ),
+        )
+
+        out = DaemonPoolProxy(port=9999).store(
+            "identity-bound content",
+            metadata={"tags": "audit", "agent_id": "caller-label"},
+        )
+
+        assert out["fact_ids"] == ["owned-fact"]
+        assert captured == {
+            "method": "POST",
+            "path": "/remember",
+            "body": {
+                "content": "identity-bound content",
+                "tags": "audit",
+                "metadata": {"tags": "audit", "agent_id": "caller-label"},
+                "session_id": "",
+                "idempotency_key": None,
+            },
+        }
+
     def test_recall_returns_ok_false_on_http_error(self, monkeypatch):
         def _fake_urlopen(req, timeout=30):
             raise ConnectionRefusedError("daemon closed")

@@ -57,6 +57,38 @@ def test_remember_rejects_missing_or_wrong_daemon_capability(
     ) == []
 
 
+def test_dashboard_remember_accepts_verified_install_token(
+    engine_with_mock_deps,
+) -> None:
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    with engine_with_mock_deps._db.raw_connection() as conn:
+        M018_ingestion_operations.apply(conn)
+    app = create_app()
+    app.state.engine = engine_with_mock_deps
+    client = TestClient(app)
+
+    response = client.post(
+        "/remember?wait=true",
+        json={
+            "content": (
+                "The dashboard records an authenticated local reliability "
+                "decision through the canonical ingestion command."
+            ),
+            "idempotency_key": "dashboard-install-token-1",
+        },
+        headers={"X-Install-Token": ensure_install_token()},
+    )
+
+    assert response.status_code == 200, response.text
+    operation = dict(engine_with_mock_deps._db.execute(
+        "SELECT trusted_actor_id FROM ingestion_operations"
+    )[0])
+    assert operation["trusted_actor_id"].startswith(
+        "local-capability:dashboard:"
+    )
+
+
 def test_async_remember_returns_durable_operation_and_is_idempotent(
     engine_with_mock_deps,
 ) -> None:
