@@ -67,6 +67,28 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
     assert artifact["unpackedSize"] <= 10 * 1024 * 1024
 
 
+def test_dmg_distribution_contract_is_absent_from_supported_surfaces() -> None:
+    removed_paths = (
+        ROOT / "scripts" / "build-dmg.sh",
+        ROOT / "scripts" / "dmg_release.py",
+        ROOT / "scripts" / "test-dmg.sh",
+        ROOT / "docs" / "install-macos-dmg.md",
+        ROOT / "tests" / "installers" / "test_dmg_release_contract.py",
+    )
+    assert not any(path.exists() for path in removed_paths)
+
+    supported_text = [
+        (ROOT / "README.md").read_text(encoding="utf-8"),
+        *(path.read_text(encoding="utf-8") for path in (ROOT / ".github" / "workflows").glob("*.yml")),
+        *(
+            path.read_text(encoding="utf-8")
+            for path in (ROOT / "docs").rglob("*.md")
+            if "audits" not in path.parts and "v2-archive" not in path.parts
+        ),
+    ]
+    assert not any("dmg" in content.lower() for content in supported_text)
+
+
 def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> None:
     assert RELEASE_WORKFLOW.is_file()
     assert not any(path.exists() for path in LEGACY_WORKFLOWS)
