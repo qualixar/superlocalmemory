@@ -224,12 +224,7 @@ class SemanticChannel:
         for fact in facts:
             cos_sim = knn_scores.get(fact.fact_id, 0.0)
 
-            # V3.3.21: Fisher-Rao ramp with minimum floor.
-            # Bug fix: access_count=0 for fresh facts → Fisher weight=0 → metric DEAD.
-            # Paper 2's +12pp on multi-hop came from Fisher-Rao. A 0.3 floor ensures
-            # fresh facts still benefit from variance-weighted similarity, while
-            # frequently accessed facts get progressively stronger Fisher influence.
-            fisher_weight = max(0.15, min(1.2, (fact.access_count or 0) / 10.0 * 1.2))
+            fisher_weight = self._fisher_weight(fact.access_count)
 
             if (fisher_weight > 0.01
                     and fact.fisher_variance is not None
@@ -240,8 +235,7 @@ class SemanticChannel:
                 f_sim = self._compute_fisher_sim(
                     q_vec, f_vec, var_vec, fact, q_mean, q_var,
                 )
-                capped_w = min(1.0, fisher_weight)
-                sim = capped_w * f_sim + (1.0 - capped_w) * cos_sim
+                sim = fisher_weight * f_sim + (1.0 - fisher_weight) * cos_sim
             else:
                 sim = cos_sim
 
@@ -287,8 +281,8 @@ class SemanticChannel:
             # Cosine baseline (always computed)
             cos_sim = (_cosine_similarity(q_vec, f_vec) + 1.0) / 2.0
 
-            # Graduated Fisher-Rao ramp (F37, F108)
-            fisher_weight = min(1.2, (fact.access_count or 0) / 10.0 * 1.2)
+            # The weighting contract is identical to the sqlite-vec path.
+            fisher_weight = self._fisher_weight(fact.access_count)
 
             if (fisher_weight > 0.01
                     and fact.fisher_variance is not None
@@ -297,8 +291,7 @@ class SemanticChannel:
                 f_sim = self._compute_fisher_sim(
                     q_vec, f_vec, var_vec, fact, q_mean, q_var,
                 )
-                capped_w = min(1.0, fisher_weight)
-                sim = capped_w * f_sim + (1.0 - capped_w) * cos_sim
+                sim = fisher_weight * f_sim + (1.0 - fisher_weight) * cos_sim
             else:
                 sim = cos_sim
 
@@ -307,6 +300,14 @@ class SemanticChannel:
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
+
+    @staticmethod
+    def _fisher_weight(access_count: int | None) -> float:
+        """Canonical Fisher blend shared by every semantic candidate path."""
+        graduated = (access_count or 0) / 10.0 * 1.2
+        # A small floor keeps Fisher variance active for new facts.  The cap
+        # prevents the blend from extrapolating beyond its two score inputs.
+        return min(1.0, max(0.15, graduated))
 
     # ------------------------------------------------------------------
     # Fisher similarity dispatch
