@@ -13,6 +13,7 @@ License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import math
 import re
@@ -94,6 +95,17 @@ class RetrievalEngine:
         # recall A's mid-flight on the shared channels. Uncontended for a single
         # recall (~0 cost); only the channel phase of concurrent recalls serialises.
         self._scope_lock = threading.Lock()
+        # One executor belongs to one retrieval engine. Creating/destroying six
+        # worker threads on every recall caused allocator/thread-stack RSS churn
+        # under sustained sessions. The scope lock already serializes channel
+        # execution, so one six-worker pool preserves the existing concurrency
+        # semantics while making ownership and shutdown deterministic.
+        self._channel_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=6,
+            thread_name_prefix="slm-recall-channel",
+        )
+        self._close_lock = threading.Lock()
+        self._closed = False
 
         # V3.3.4: LRU cache for query embeddings (avoids redundant Ollama API calls)
         # V3.4.40 (2026-05-09): bumped 64 -> 512. Each cached embedding is ~3KB
@@ -620,7 +632,6 @@ class RetrievalEngine:
         down to max(semantic,bm25,entity,temporal,hopfield,sa) — roughly a
         3-5x speedup for the channel phase.
         """
-        import concurrent.futures
         import os as _os_e
         import time as _time_e
         _et = bool(_os_e.environ.get("SLM_RECALL_TIMING"))
@@ -665,45 +676,45 @@ class RetrievalEngine:
                 logger.warning("%s channel: %s", name, exc)
                 return (name, None)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
-                futures["semantic"] = executor.submit(
-                    _safe_channel, "semantic",
-                    self._semantic.search, q_emb, profile_id, self._config.semantic_top_k,
-                )
-            if self._bm25 is not None and "bm25" not in disabled:
-                futures["bm25"] = executor.submit(
-                    _safe_channel, "bm25",
-                    self._bm25.search, query, profile_id, self._config.bm25_top_k,
-                )
-            if self._temporal is not None and "temporal" not in disabled:
-                futures["temporal"] = executor.submit(
-                    _safe_channel, "temporal",
-                    self._temporal.search, query, profile_id, self._config.bm25_top_k,
-                )
-            if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
-                futures["hopfield"] = executor.submit(
-                    _safe_channel, "hopfield",
-                    self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
-                )
-            if (
-                self._spreading_activation is not None
-                and q_emb is not None
-                and "spreading_activation" not in disabled
-            ):
-                futures["spreading_activation"] = executor.submit(
-                    _safe_channel, "spreading_activation",
-                    self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
-                )
+        executor = self._channel_executor
+        if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
+            futures["semantic"] = executor.submit(
+                _safe_channel, "semantic",
+                self._semantic.search, q_emb, profile_id, self._config.semantic_top_k,
+            )
+        if self._bm25 is not None and "bm25" not in disabled:
+            futures["bm25"] = executor.submit(
+                _safe_channel, "bm25",
+                self._bm25.search, query, profile_id, self._config.bm25_top_k,
+            )
+        if self._temporal is not None and "temporal" not in disabled:
+            futures["temporal"] = executor.submit(
+                _safe_channel, "temporal",
+                self._temporal.search, query, profile_id, self._config.bm25_top_k,
+            )
+        if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
+            futures["hopfield"] = executor.submit(
+                _safe_channel, "hopfield",
+                self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
+            )
+        if (
+            self._spreading_activation is not None
+            and q_emb is not None
+            and "spreading_activation" not in disabled
+        ):
+            futures["spreading_activation"] = executor.submit(
+                _safe_channel, "spreading_activation",
+                self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
+            )
 
-            # Collect results as channels complete
-            for name, fut in futures.items():
-                try:
-                    ch_name, result = fut.result(timeout=30)
-                    if result:
-                        out[ch_name] = result
-                except Exception as exc:
-                    logger.warning("Channel %s timed out or failed: %s", name, exc)
+        # Collect results as channels complete.
+        for name, fut in futures.items():
+            try:
+                ch_name, result = fut.result(timeout=30)
+                if result:
+                    out[ch_name] = result
+            except Exception as exc:
+                logger.warning("Channel %s timed out or failed: %s", name, exc)
 
         # Apply registered post-retrieval filters (forgetting filter, etc.)
         if hasattr(self, '_registry') and self._registry._filters:
@@ -714,6 +725,14 @@ class RetrievalEngine:
                     logger.warning("Post-retrieval filter failed: %s", exc)
 
         return out
+
+    def close(self) -> None:
+        """Release the channel workers owned by this retrieval engine."""
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._channel_executor.shutdown(wait=True, cancel_futures=True)
 
     # -- Fact loading -------------------------------------------------------
 

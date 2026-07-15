@@ -177,6 +177,13 @@ def _get_forgetting_scheduler(db: Any, config: Any) -> Any:
     return _forgetting_scheduler_cache[key]
 
 
+def release_recall_resources(db: Any) -> None:
+    """Release process-level recall singletons owned by a closing database."""
+    key = id(db)
+    _behavioral_tracker_cache.pop(key, None)
+    _forgetting_scheduler_cache.pop(key, None)
+
+
 def _behavioral_entities(results: list[Any], limit: int = 20) -> list[str]:
     """Read canonical entity IDs from the typed retrieval-result contract.
 

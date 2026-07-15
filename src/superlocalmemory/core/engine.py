@@ -733,7 +733,19 @@ class MemoryEngine:
     def close(self) -> None:
         if self._maintenance_scheduler is not None:
             self._maintenance_scheduler.stop()
+        if self._retrieval_engine is not None:
+            try:
+                self._retrieval_engine.close()
+            except Exception:
+                pass
         if self._db is not None:
+            try:
+                from superlocalmemory.core.recall_pipeline import (
+                    release_recall_resources,
+                )
+                release_recall_resources(self._db)
+            except Exception:
+                pass
             try:
                 self._db.close()
             except Exception:
