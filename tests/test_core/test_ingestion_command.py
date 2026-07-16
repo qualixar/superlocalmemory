@@ -447,3 +447,29 @@ def test_materializable_queue_respects_failed_retry_backoff(
         queryable.operation_id,
         failed.operation_id,
     ]
+
+
+def test_materializable_queue_can_defer_fresh_queryable_receipts(
+    db, ingestion_request,
+) -> None:
+    command = IngestionCommand(
+        IngestionOperationRepository(db),
+        write_queryable=lambda *_: ["fact-fast-1"],
+        materialize=lambda *_: ["fact-final-1"],
+    )
+    queryable = command.submit(ingestion_request)
+
+    assert command.repository.list_materializable(
+        limit=10, min_queryable_age_seconds=1.0,
+    ) == []
+
+    db.execute(
+        "UPDATE ingestion_operations SET "
+        "created_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 seconds') "
+        "WHERE operation_id=?",
+        (queryable.operation_id,),
+    )
+    due = command.repository.list_materializable(
+        limit=10, min_queryable_age_seconds=1.0,
+    )
+    assert [item.operation_id for item in due] == [queryable.operation_id]
