@@ -263,8 +263,19 @@ class MeshBroker:
             return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
                     "Mesh messages are notifications — reference a file path instead."}
 
-        conn = self._conn()
-        try:
+        # Remote delivery is an external side effect, so do it outside the
+        # retry envelope. Local writes below are retried as a whole short
+        # transaction when another daemon-owned operation has SQLite's writer.
+        if to_peer in self._remote_peers and self._sync_client:
+            return self._sync_client.send_to_remote(to_peer, {
+                "from_peer": from_peer,
+                "to": to_peer,
+                "content": content,
+                "type": msg_type,
+            })
+
+        def _send(conn: sqlite3.Connection) -> dict:
+            nonlocal to_peer, project_path
             now = datetime.now(timezone.utc).isoformat()
             expires_at = self._compute_expires(now)
 
@@ -277,14 +288,6 @@ class MeshBroker:
                 to_peer = "project"
             else:
                 target_type = "peer"
-                # Check if this is a remote peer — proxy to remote SLM
-                if to_peer in self._remote_peers and self._sync_client:
-                    return self._sync_client.send_to_remote(to_peer, {
-                        "from_peer": from_peer,
-                        "to": to_peer,
-                        "content": content,
-                        "type": msg_type,
-                    })
                 # Verify recipient exists for direct messages
                 if not conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (to_peer,)).fetchone():
                     return {"ok": False, "error": "recipient peer not found"}
@@ -316,8 +319,8 @@ class MeshBroker:
             conn.commit()
             return {"ok": True, "id": cursor.lastrowid, "target_type": target_type,
                     "expires_at": expires_at}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_send)
 
     def get_inbox(self, peer_id: str, project_path: str = "") -> list[dict]:
         """Get all messages for this peer: direct + broadcast + project."""
@@ -438,8 +441,23 @@ class MeshBroker:
     # -- Locks --
 
     def lock_action(self, file_path: str, locked_by: str, action: str) -> dict:
-        conn = self._conn()
-        try:
+        if action == "query":
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT locked_by, locked_at FROM mesh_locks WHERE file_path=?",
+                    (file_path,),
+                ).fetchone()
+                if row:
+                    return {"locked": True, "by": row["locked_by"], "since": row["locked_at"]}
+                return {"locked": False}
+            finally:
+                conn.close()
+
+        if action not in {"acquire", "release"}:
+            return {"ok": False, "error": f"unknown action: {action}"}
+
+        def _lock_action(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
 
             if action == "acquire":
@@ -471,18 +489,9 @@ class MeshBroker:
                 return {"ok": False, "action": "not_released",
                         "error": "no lock held by this peer for that file"}
 
-            elif action == "query":
-                row = conn.execute(
-                    "SELECT locked_by, locked_at FROM mesh_locks WHERE file_path=?",
-                    (file_path,),
-                ).fetchone()
-                if row:
-                    return {"locked": True, "by": row["locked_by"], "since": row["locked_at"]}
-                return {"locked": False}
+            raise AssertionError("validated action was not handled")
 
-            return {"ok": False, "error": f"unknown action: {action}"}
-        finally:
-            conn.close()
+        return self._write_with_retry(_lock_action)
 
     # -- Helpers (v3.4.6) --
 
@@ -569,8 +578,7 @@ class MeshBroker:
                 logger.debug("Mesh cleanup error: %s", exc)
 
     def _run_cleanup(self) -> None:
-        conn = self._conn()
-        try:
+        def _cleanup(conn: sqlite3.Connection) -> None:
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
             # Mark stale peers (no heartbeat for 5 min)
@@ -614,5 +622,5 @@ class MeshBroker:
                 (now_iso,),
             )
             conn.commit()
-        finally:
-            conn.close()
+
+        self._write_with_retry(_cleanup)
