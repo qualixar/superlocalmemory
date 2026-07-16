@@ -41,6 +41,12 @@ memory, retrieve bounded evidence for an agent, and expose cache, compression,
 and peer-coordination controls through a CLI, MCP, dashboard, and supported
 IDE integrations.
 
+![SuperLocalMemory V3.7 capability architecture: modes, seven operating layers, Scale Engine, Mesh, delivery surfaces, and opt-in adapters](docs/assets/slm-v37-capability-architecture.png)
+
+*Architecture boundary: SQLite + sqlite-vec remain canonical; CozoDB and
+LanceDB are parity-gated projections; Mesh coordinates trusted peers rather
+than replicating a distributed memory database; connectors are opt-in.*
+
 ```text
  IDEs, agents, scripts, connectors, and humans
              │  CLI · MCP (HTTP/stdio) · hooks · dashboard
@@ -93,6 +99,12 @@ health surfaces expose the stages actually completed by the installed runtime.
 Dashboard visibility is not a substitute for runtime proof: use `slm doctor`,
 `slm health`, `slm trace`, and the relevant CLI/MCP operation to validate a
 deployment.
+
+### Watch the product walkthrough
+
+[![Watch the SuperLocalMemory demo](https://img.youtube.com/vi/PMWW_ypsL60/hqdefault.jpg)](https://www.youtube.com/watch?v=PMWW_ypsL60)
+
+**[Watch the SuperLocalMemory demo on YouTube](https://www.youtube.com/watch?v=PMWW_ypsL60)** — a five-minute walkthrough of installation, setup, recall, cache, and compression. The video shows a product walkthrough; use the commands and release notes in this README as the current release contract.
 
 ### Historical research results
 
