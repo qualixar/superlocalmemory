@@ -44,12 +44,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-14, windows-latest]
-    env:
-      UV_TOOL_DIR: ${{ runner.temp }}/uv-tools
-      UV_TOOL_BIN_DIR: ${{ runner.temp }}/uv-bin
-      SLM_DATA_DIR: ${{ runner.temp }}/slm-data-must-not-exist
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Prepare isolated runtime paths
+        shell: bash
+        run: |
+          echo "UV_TOOL_DIR=${RUNNER_TEMP}/uv-tools" >> "$GITHUB_ENV"
+          echo "UV_TOOL_BIN_DIR=${RUNNER_TEMP}/uv-bin" >> "$GITHUB_ENV"
+          echo "SLM_DATA_DIR=${RUNNER_TEMP}/slm-data-must-not-exist" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
@@ -100,11 +102,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-14, windows-latest]
-    env:
-      SLM_DATA_DIR: ${{ runner.temp }}/npm-slm-data-must-not-exist
-      SLM_NPM_PREFIX: ${{ runner.temp }}/npm-prefix
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Prepare isolated runtime paths
+        shell: bash
+        run: |
+          echo "SLM_DATA_DIR=${RUNNER_TEMP}/npm-slm-data-must-not-exist" >> "$GITHUB_ENV"
+          echo "SLM_NPM_PREFIX=${RUNNER_TEMP}/npm-prefix" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
