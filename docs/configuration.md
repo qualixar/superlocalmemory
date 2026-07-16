@@ -8,6 +8,10 @@ Control how SuperLocalMemory stores, retrieves, and processes your memories.
 
 ## Three Operating Modes
 
+For the published LoCoMo result scopes behind Modes A and C, see
+[Benchmark Evidence](benchmarks.md). Mode B has no separately published LoCoMo
+run.
+
 SuperLocalMemory runs in one of three modes. You pick the trade-off between privacy and power.
 
 | Mode | What it does | Needs API key? | Data leaves your machine? |

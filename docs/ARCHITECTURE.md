@@ -4,6 +4,10 @@
 
 A high-level overview of how SuperLocalMemory V3 stores, organizes, and retrieves your memories.
 
+Published V3 LoCoMo evidence carried into V3.7 is maintained in
+[Benchmark Evidence](benchmarks.md), including the original model, judge, and
+sample disclosures required to interpret each result.
+
 ---
 
 ## Design Principles

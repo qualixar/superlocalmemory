@@ -13,7 +13,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
@@ -1059,11 +1059,10 @@ class SLMConfig:
                 "api_key": self.embedding.api_key,
                 "deployment_name": self.embedding.deployment_name,
             },
-            "retrieval": {
-                "use_cross_encoder": self.retrieval.use_cross_encoder,
-                "cross_encoder_model": self.retrieval.cross_encoder_model,
-                "cross_encoder_backend": self.retrieval.cross_encoder_backend,
-            },
+            # Persist the complete retrieval contract.  Saving only the
+            # cross-encoder subset silently reset channel limits, evidence
+            # floors, and agentic settings on the next mode/provider change.
+            "retrieval": asdict(self.retrieval),
         }
 
         # V3.4.11: Persist evolution config (C-CONFIGSAVE fix)
@@ -1261,13 +1260,23 @@ class SLMConfig:
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
             )
-        else:
+        elif embedding_endpoint:
             _c_emb = EmbeddingConfig(
-                model_name="text-embedding-3-large",
-                dimension=3072,
+                model_name=embedding_model_name or "text-embedding-3-large",
+                dimension=embedding_dimension or 3072,
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
                 deployment_name=embedding_deployment,
+            )
+        else:
+            # Mode C upgrades LLM capability; it must not silently require a
+            # second paid embedding provider.  A 3072-dim cloud embedding
+            # contract without an endpoint/key was auto-routed to the local
+            # 768-dim Ollama embedder, which made ingestion fail at vector
+            # materialization. Cloud embeddings remain an explicit opt-in.
+            _c_emb = EmbeddingConfig(
+                model_name="nomic-ai/nomic-embed-text-v1.5",
+                dimension=768,
             )
         return cls(
             mode=mode,

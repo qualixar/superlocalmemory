@@ -2,6 +2,21 @@
 
 SuperLocalMemory V3 introduces three mathematical pillars — each a **world first** in agent memory systems. These are described in our paper ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
 
+## Published LoCoMo Evidence Carried into V3.7
+
+The published V3 architecture results remain the evidence base for V3.7. They
+retain their original protocols and are not a newly rerun V3.7 package result:
+
+| Configuration | Result | Published scope |
+|---|---:|---|
+| **Mode A Raw** | **60.4%** | 10 conversations / 1,276 questions; local embeddings, local retrieval, zero-LLM answer construction |
+| **Mode A Retrieval** | **74.8%** | 10 conversations / 1,276 questions; local retrieval with GPT-4.1-mini answer synthesis |
+| **Mode C** | **87.7%** | Conv-30 / 81 questions; cloud embeddings with GPT-4.1-mini answer generation and judge |
+
+The six-conversation mathematics ablation below is a separate protocol. It
+reports **71.7%** with information-geometric layers versus **58.9%** without
+them (**+12.7pp**) and must not be substituted for the aggregate rows above.
+
 ---
 
 ## 1. Fisher-Rao Information Geometry

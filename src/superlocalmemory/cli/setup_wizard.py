@@ -863,28 +863,38 @@ def _install_autostart_service() -> bool:
 # Mode C provider config (preserved from original)
 # ---------------------------------------------------------------------------
 
-def configure_provider(config: object) -> None:
-    """Configure LLM provider for Mode C."""
+def configure_provider(config: object, provider_name: str | None = None) -> None:
+    """Configure an LLM provider for Mode C.
+
+    When ``provider_name`` is supplied by ``slm provider set <provider>``,
+    configuration is non-interactive and resolves its credential from the
+    provider's documented environment variable. Omitting it preserves the
+    existing interactive picker.
+    """
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.storage.models import Mode
 
     presets = SLMConfig.provider_presets()
 
-    print()
-    print("  Choose your LLM provider:")
-    print()
     providers = list(presets.keys())
-    for i, name in enumerate(providers, 1):
-        preset = presets[name]
-        print(f"    [{i}] {name.capitalize()} — {preset['model']}")
-    print()
+    interactive_selection = provider_name is None
+    if interactive_selection:
+        print()
+        print("  Choose your LLM provider:")
+        print()
+        for i, name in enumerate(providers, 1):
+            preset = presets[name]
+            print(f"    [{i}] {name.capitalize()} — {preset['model']}")
+        print()
 
-    idx = _prompt(f"  Select provider [1-{len(providers)}]: ", "1")
-    try:
-        provider_name = providers[int(idx) - 1]
-    except (ValueError, IndexError):
-        print("  Invalid choice. Using OpenAI.")
-        provider_name = "openai"
+        idx = _prompt(f"  Select provider [1-{len(providers)}]: ", "1")
+        try:
+            provider_name = providers[int(idx) - 1]
+        except (ValueError, IndexError):
+            print("  Invalid choice. Using OpenAI.")
+            provider_name = "openai"
+    elif provider_name not in presets:
+        raise ValueError(f"Unsupported provider: {provider_name}")
 
     preset = presets[provider_name]
 
@@ -896,18 +906,27 @@ def configure_provider(config: object) -> None:
         if existing:
             print(f"  Found {env_key} in environment.")
             api_key = existing
-        elif is_interactive():
+        elif interactive_selection and is_interactive():
             api_key = _prompt(
                 f"  Enter your {provider_name.capitalize()} API key: ",
             )
 
-    updated = SLMConfig.for_mode(
-        Mode.C,
-        llm_provider=provider_name,
-        llm_model=preset["model"],
-        llm_api_key=api_key,
-        llm_api_base=preset["base_url"],
+    # Provider selection is an additive configuration operation.  Rebuilding
+    # via ``for_mode`` used to reset retrieval, scale-engine, evolution, and
+    # user-tuned embedding settings — surprising and unsafe after a user had
+    # configured a local or promoted Cozo/Lance deployment.  Keep every
+    # unrelated setting intact and change only the mode/provider contract.
+    from superlocalmemory.core.config import LLMConfig
+
+    updated = config if isinstance(config, SLMConfig) else SLMConfig.load()
+    updated.mode = Mode.C
+    updated.llm = LLMConfig(
+        provider=provider_name,
+        model=preset["model"],
+        api_key=api_key,
+        api_base=preset["base_url"],
     )
     updated.save(mode_change=True)
+    SLMConfig.write_current_mode(Mode.C, updated.base_dir)
     print(f"  Provider: {provider_name}")
     print(f"  Model: {preset['model']}")

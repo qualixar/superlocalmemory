@@ -35,6 +35,29 @@ in the V3 paper remains the foundation of this release. The figures below keep
 their original LoCoMo protocol, answer-construction, model, and sample scope;
 they are not a claim of a newly rerun 3.7 package benchmark.
 
+### How SLM fits beside other memory systems
+
+Different products solve different boundaries. SLM is for developers who want
+one local-first operating control plane—not only an SDK, managed context API,
+or agent runtime. It combines dated evidence, graph-aware retrieval, cache and
+compression controls, trusted-peer Mesh, and MCP/CLI/hooks/dashboard/IDE
+surfaces in one install.
+
+| If your primary need is… | Product boundary to evaluate |
+|---|---|
+| Local-first agent memory plus operations, optimization, and IDE-agent surfaces | **SuperLocalMemory** — Mode A local core; Modes B/C by explicit choice. |
+| A memory SDK, self-hosted server, or managed platform | [Mem0](https://github.com/mem0ai/mem0) |
+| A temporal context-graph service or graph engine | [Zep / Graphiti](https://github.com/getzep/graphiti) |
+| A stateful agent runtime with memory blocks and archival memory | [Letta](https://docs.letta.com/guides/core-concepts/memory/context-hierarchy) |
+| LangGraph-native memory primitives and managers | [LangMem](https://github.com/langchain-ai/langmem) |
+| A context API/app with profiles, connectors, and RAG | [Supermemory](https://github.com/supermemoryai/supermemory) |
+| User profiles and event-timeline memory | [Memobase](https://github.com/memodb-io/memobase) |
+
+See the [source-linked market comparison](https://superlocalmemory.com/comparison)
+for current primary sources and protocol-scoped benchmark evidence. A LoCoMo
+percentage is comparable only when the dataset scope, answer model, judge,
+retrieval stack, and release artifact match.
+
 ### The V3.7 capability architecture
 
 SuperLocalMemory is one local control plane for persistent agent context. It is
@@ -451,6 +474,7 @@ Available controls include local export and erasure commands, hash-chained audit
 | Multi-machine mesh | [docs/multi-machine.md](docs/multi-machine.md) |
 | Auto-memory hooks | [docs/auto-memory.md](docs/auto-memory.md) |
 | Architecture + math | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Published benchmark evidence | [docs/benchmarks.md](docs/benchmarks.md) |
 | CLI reference | [docs/cli-reference.md](docs/cli-reference.md) |
 | MCP tools reference | [docs/mcp-tools.md](docs/mcp-tools.md) |
 | Getting started | [docs/getting-started.md](docs/getting-started.md) |

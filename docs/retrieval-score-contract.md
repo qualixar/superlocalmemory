@@ -1,5 +1,9 @@
 # Retrieval Score Contract v2
 
+This contract describes runtime result fields, not benchmark accuracy. For the
+published V3 LoCoMo figures carried into V3.7 and their protocol disclosures,
+see [Benchmark Evidence](benchmarks.md).
+
 SuperLocalMemory V3.7 keeps retrieval ordering separate from confidence. A
 retrieval score answers “how relevant is this stored fact to this query?” It
 does not answer “how likely is a generated answer to be correct?”

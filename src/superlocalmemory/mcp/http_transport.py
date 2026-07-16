@@ -38,7 +38,15 @@ def install_streamable_http_resource_guard() -> None:
 
 
 class SLMFastMCP(FastMCP):
-    """FastMCP with deterministic per-request SSE resource cleanup."""
+    """FastMCP with SLM release identity and deterministic SSE cleanup."""
+
+    def __init__(self, *args, product_version: str = "3.7.0", **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # FastMCP delegates the initialize response to the low-level MCP
+        # server. Without an explicit value it reports the installed ``mcp``
+        # library version, which makes an SLM 3.7 server identify itself as
+        # (for example) 1.27.1 to every IDE client.
+        self._mcp_server.version = product_version
 
     def streamable_http_app(self):
         install_streamable_http_resource_guard()

@@ -189,6 +189,12 @@ class TestSLMConfigForMode:
         )
         assert cfg.llm.provider == "anthropic"
 
+    def test_mode_c_without_explicit_embedding_endpoint_uses_local_dimension(self) -> None:
+        cfg = SLMConfig.for_mode(Mode.C)
+        assert cfg.embedding.is_cloud is False
+        assert cfg.embedding.dimension == 768
+        assert cfg.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
+
 
 # ---------------------------------------------------------------------------
 # db_path auto-computed

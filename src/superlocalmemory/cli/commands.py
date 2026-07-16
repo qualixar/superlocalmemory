@@ -821,7 +821,7 @@ def cmd_provider(args: Namespace) -> None:
     if args.action == "set":
         from superlocalmemory.cli.setup_wizard import configure_provider
 
-        configure_provider(config)
+        configure_provider(config, provider_name=getattr(args, "provider", None))
     else:
         print(f"Provider: {config.llm.provider or 'none (Mode A)'}")
         if config.llm.model:
@@ -2209,15 +2209,85 @@ def cmd_doctor(args: Namespace) -> None:
 
 def cmd_trace(args: Namespace) -> None:
     """Recall with per-channel score breakdown."""
+    use_json = getattr(args, 'json', False)
+    limit = getattr(args, 'limit', 10)
+
+    # Trace must use the same daemon-owned engine as recall. A direct CLI
+    # engine cannot attach to the machine-wide embedding worker already owned
+    # by the daemon; it then silently loses semantic, Hopfield, and spreading
+    # activation channels. The daemon trace route keeps the loaded model,
+    # graph, and retrieval state intact while returning the same score detail.
+    try:
+        from superlocalmemory.cli.daemon import (
+            daemon_request, ensure_daemon, is_daemon_running,
+        )
+        if is_daemon_running() or ensure_daemon():
+            result = daemon_request(
+                "POST", "/api/v3/recall/trace",
+                {"query": args.query, "limit": limit},
+            )
+            if result and "results" in result:
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("trace", data={
+                        "query": result.get("query", args.query),
+                        "query_type": result.get("query_type", "unknown"),
+                        "retrieval_time_ms": round(
+                            float(result.get("retrieval_time_ms", 0)), 1,
+                        ),
+                        "results": result["results"],
+                        "count": len(result["results"]),
+                        "no_confident_match": bool(
+                            result.get("no_confident_match", False),
+                        ),
+                        "score_contract_version": result.get(
+                            "score_contract_version", "2",
+                        ),
+                        "calibration_status": result.get(
+                            "calibration_status", "uncalibrated",
+                        ),
+                        "calibration_id": result.get("calibration_id"),
+                        "answer_confidence": result.get("answer_confidence"),
+                        "abstained": bool(result.get("abstained", False)),
+                        "abstention_reason": result.get("abstention_reason"),
+                    }, next_actions=[
+                        {
+                            "command": "slm recall '<query>' --json",
+                            "description": "Standard recall",
+                        },
+                    ])
+                    return
+                print(f"Query: {result.get('query', args.query)}")
+                print(
+                    f"Type: {result.get('query_type', 'unknown')} | Time: "
+                    f"{float(result.get('retrieval_time_ms', 0)):.0f}ms"
+                )
+                print(f"Results: {len(result['results'])}")
+                for i, item in enumerate(result["results"], 1):
+                    print(
+                        f"\n  {i}. [relevance "
+                        f"{float(item.get('relevance_score', item.get('score', 0))):.3f}] "
+                        f"{str(item.get('content', ''))[:100]}"
+                    )
+                    if item.get("ranking_score") is not None:
+                        print(
+                            "       ranking utility: "
+                            f"{float(item['ranking_score']):.6f}"
+                        )
+                    for channel, score in (item.get("channel_scores") or {}).items():
+                        print(f"       {channel}: {float(score):.3f}")
+                return
+    except Exception:
+        # The direct path remains the offline escape hatch when a daemon is
+        # unavailable or a local transport error occurs.
+        pass
+
     from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.core.config import SLMConfig
-
-    use_json = getattr(args, 'json', False)
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
         engine.initialize()
-        limit = getattr(args, 'limit', 10)
         response = engine.recall(args.query, limit=limit)
     except Exception as exc:
         if use_json:

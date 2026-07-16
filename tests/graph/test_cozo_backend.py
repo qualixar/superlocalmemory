@@ -125,6 +125,27 @@ class TestCanonicalEntityProjection:
         assert health["edges"] == 1
         assert [fact_id for fact_id, _ in backend.recall_facts(["entity-ada"])] == ["fact-1", "fact-2"]
 
+    def test_bulk_projection_preserves_parallel_typed_fact_edges(self, backend):
+        """Projection parity must not collapse distinct canonical edge types."""
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO graph_edges VALUES
+                ('fact-1', 'fact-2', 'related', 1.0, 'default'),
+                ('fact-1', 'fact-2', 'temporal', 0.8, 'default');
+        """)
+        backend.bulk_import_from_sqlite(conn)
+        assert backend.health_check()["edges"] == 2
+
     def test_remove_fact_is_parameter_safe_and_removes_derived_records(self, backend):
         unsafe_id = "fact-'quoted'"
         backend.add_entity("entity-ada", "Ada", "person")

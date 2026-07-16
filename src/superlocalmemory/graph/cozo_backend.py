@@ -160,8 +160,8 @@ class CozoDBGraphBackend:
         try:
             self._db.run("""
                 :create edge {
-                    from_id: String, to_id: String =>
-                    edge_type: String, weight: Float default 1.0,
+                    from_id: String, to_id: String, edge_type: String =>
+                    weight: Float default 1.0,
                     metadata: String default '{}',
                     profile_id: String default 'default',
                     created_at: String
@@ -284,7 +284,7 @@ class CozoDBGraphBackend:
             ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
                 *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
                 (from_id = $fact_id or to_id = $fact_id)
-            :rm edge {from_id, to_id => edge_type, weight, metadata, profile_id, created_at}
+            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
         """, {"fact_id": fact_id})
 
     # ------------------------------------------------------------------

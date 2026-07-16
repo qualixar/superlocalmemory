@@ -210,6 +210,11 @@ def main() -> None:
     provider_p.add_argument(
         "action", nargs="?", choices=["set"], help="Action",
     )
+    provider_p.add_argument(
+        "provider", nargs="?",
+        choices=["openai", "anthropic", "azure", "ollama", "openrouter"],
+        help="Provider to configure; omit to use the interactive selector",
+    )
 
     connect_p = sub.add_parser("connect", help="Auto-configure a supported IDE integration")
     connect_p.add_argument("ide", nargs="?", help="Specific IDE to configure (e.g. cursor, codex, continue)")

@@ -20,6 +20,7 @@
 **Architecture**
 * [Architecture Overview](V3-Architecture)
 * [Capabilities and Operations](Capabilities-and-Operations)
+* [Published Benchmarks](V3-Architecture#benchmarks)
 * [Mathematical Foundations](V3-Mathematical-Foundations)
 
 **Enterprise**
