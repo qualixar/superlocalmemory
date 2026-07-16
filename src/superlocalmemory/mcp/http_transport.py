@@ -40,7 +40,7 @@ def install_streamable_http_resource_guard() -> None:
 class SLMFastMCP(FastMCP):
     """FastMCP with SLM release identity and deterministic SSE cleanup."""
 
-    def __init__(self, *args, product_version: str = "3.7.0", **kwargs) -> None:
+    def __init__(self, *args, product_version: str = "3.7.1", **kwargs) -> None:
         super().__init__(*args, **kwargs)
         # FastMCP delegates the initialize response to the low-level MCP
         # server. Without an explicit value it reports the installed ``mcp``

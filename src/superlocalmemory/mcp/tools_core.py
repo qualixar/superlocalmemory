@@ -111,7 +111,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Store content to memory with intelligent indexing.
 
         Extracts atomic facts, resolves entities, builds graph edges,
-        and indexes for 4-channel retrieval.
+        and indexes for hybrid retrieval with graph-aware enhancement.
 
         Multi-scope: ``scope`` sets visibility (personal/shared/global).
         ``shared_with`` is a comma-separated list of profile_ids for
@@ -246,7 +246,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         include_global: bool | None = None,
         include_shared: bool | None = None,
     ) -> dict:
-        """Search memories by semantic query with 4-channel retrieval, RRF fusion, and reranking.
+        """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
         S9-DASH-02: optional ``session_id`` threads through to the
         engine's outcome-queue so PostToolUse / Stop hooks can attach

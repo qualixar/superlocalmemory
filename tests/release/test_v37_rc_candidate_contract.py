@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_FINAL_RELEASE = "3.7.0"
+_FINAL_RELEASE = "3.7.1"
 
 
 def test_v37_release_source_has_final_package_version() -> None:

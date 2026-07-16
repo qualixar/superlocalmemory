@@ -5,6 +5,15 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-07-16 — Installer-parity hotfix
+
+### Fixed
+
+- Included the full `plugin-src/` build inputs in the npm artifact so the npm-owned Python runtime can build with the same Codex skill data files as the PyPI artifact.
+- Added a release gate that fails when any Python `data-files` build source is absent from `npm pack` output.
+- Corrected first-run configuration metadata to use the installed runtime version instead of a stale historical version.
+- Kept background reranker warmup informational on first run; fallback retrieval remains explicit and `slm doctor` remains the diagnostic path.
+
 ## [3.7.0] - 2026-07-16 — Release package
 
 V3.7 packages the audit-hardening stream: fail-closed release promotion,

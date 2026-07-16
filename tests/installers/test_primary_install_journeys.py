@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,12 @@ def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
     artifact = json.loads(result.stdout)[0]
     paths = {entry["path"] for entry in artifact["files"]}
     assert {"bin/slm-npm", "scripts/postinstall.js", "pyproject.toml"} <= paths
+    with (ROOT / "pyproject.toml").open("rb") as stream:
+        data_files = tomllib.load(stream)["tool"]["setuptools"]["data-files"]
+    required_build_sources = {
+        source for sources in data_files.values() for source in sources
+    }
+    assert required_build_sources <= paths
     assert "scripts/install.sh" not in paths
     assert "scripts/install.ps1" not in paths
     assert "install.sh" not in paths

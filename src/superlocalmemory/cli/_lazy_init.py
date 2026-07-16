@@ -4,7 +4,7 @@
 
 """WP-07 — Lazy first-run initialisation (pip cross-install).
 
-stdlib-only — zero heavy imports, STDOUT-SILENT.
+Lightweight import only — zero heavy imports, STDOUT-SILENT.
 
 Public API
 ----------
@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
+from superlocalmemory import __version__ as _RUNTIME_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +57,7 @@ def slm_home() -> Path:
 # Only mode + base_dir; everything else uses SLMConfig defaults.
 _MINIMAL_CONFIG: dict = {
     "mode": "a",
-    "version": "3.6.14",
+    "version": _RUNTIME_VERSION,
 }
 
 

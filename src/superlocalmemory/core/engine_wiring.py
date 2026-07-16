@@ -22,6 +22,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _log_reranker_warmup_status(reranker: Any) -> None:
+    """Record non-blocking reranker warmup state without alarming first-run users."""
+    ready = reranker.warmup_sync(timeout=180)
+    if ready:
+        logger.info("Cross-encoder reranker warm and ready")
+        return
+    try:
+        from superlocalmemory.retrieval.reranker import _is_reranker_worker_alive
+
+        if _is_reranker_worker_alive():
+            logger.info(
+                "Cross-encoder reranker worker held by another process "
+                "(machine-wide singleton — usually the unified daemon); "
+                "this process will route reranking through that worker"
+            )
+            return
+    except Exception:
+        pass
+    logger.info(
+        "Cross-encoder reranker did not become ready during background warmup; "
+        "recalls use fallback scoring. Run 'slm doctor' for diagnostics."
+    )
+
+
 # ---------------------------------------------------------------------------
 # init_embedder  (was MemoryEngine._init_embedder + helpers)
 # ---------------------------------------------------------------------------
@@ -552,29 +576,12 @@ def init_retrieval(
     # trust in slm health / slm doctor output.
     if reranker is not None:
         import threading
-        def _log_warmup_status() -> None:
-            ready = reranker.warmup_sync(timeout=180)
-            if ready:
-                logger.info("Cross-encoder reranker warm and ready")
-                return
-            # warmup_sync returned False. Could be (a) singleton held by
-            # another process (benign), or (b) actual model load failure.
-            # Disambiguate by probing the singleton PID file.
-            try:
-                from superlocalmemory.retrieval.reranker import _is_reranker_worker_alive
-                if _is_reranker_worker_alive():
-                    logger.info(
-                        "Cross-encoder reranker worker held by another process "
-                        "(machine-wide singleton — usually the unified daemon); "
-                        "this process will route reranking through that worker"
-                    )
-                    return
-            except Exception:
-                pass
-            logger.warning(
-                "Cross-encoder reranker warmup failed — recalls will use fallback scoring"
-            )
-        t = threading.Thread(target=_log_warmup_status, daemon=True, name="ce-init-warmup")
+        t = threading.Thread(
+            target=_log_reranker_warmup_status,
+            args=(reranker,),
+            daemon=True,
+            name="ce-init-warmup",
+        )
         t.start()
 
     # Phase A: Register forgetting filter into the channel registry

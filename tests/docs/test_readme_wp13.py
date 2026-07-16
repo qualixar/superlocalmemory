@@ -247,10 +247,18 @@ def test_evidence_safe_positioning_near_hero():
     assert "explicit choices" in opening, (
         "Opening copy must disclose optional provider/network choices (LLD AC7)."
     )
-    assert "current v3.7 locomo result is unknown" in opening, (
-        "Opening copy must separate historical research from the V3.7 release (LLD AC7)."
+    assert "published benchmark evidence carried into v3.7" in opening, (
+        "Opening copy must identify the evidence as the published V3 research "
+        "carried into the release (LLD AC7)."
     )
-    assert "mem0" not in opening, "Opening copy must not use an unverified competitor scoreboard."
+    assert "not a claim of a newly rerun 3.7 package benchmark" in opening, (
+        "Opening copy must preserve the protocol boundary of the published evidence "
+        "(LLD AC7)."
+    )
+    assert "different products solve different boundaries" in opening, (
+        "Opening copy must frame the comparison by product boundary, not an "
+        "unsupported performance scoreboard."
+    )
 
 
 # ---------------------------------------------------------------------------

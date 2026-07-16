@@ -40,7 +40,7 @@ _DEFAULT_DISABLED_FILE = _DEFAULT_VERSION_DIR / ".hooks-disabled"
 VERSION_DIR = _DEFAULT_VERSION_DIR
 VERSION_FILE = _DEFAULT_VERSION_FILE
 DISABLED_FILE = _DEFAULT_DISABLED_FILE
-HOOKS_VERSION = "3.7.0"
+HOOKS_VERSION = "3.7.1"
 
 # Cross-platform temp dir and backwards-compatible marker overrides. Runtime
 # defaults are root-namespaced and resolved when hook definitions are built.

@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "description": "Local-first agent memory with MCP and an agent-native CLI. Documented clients include Claude Code, Cursor, and Windsurf.",
   "keywords": [
     "ai-memory",
@@ -77,7 +77,7 @@
     "scripts/preuninstall.js",
     ".claude-plugin/",
     "plugin/",
-    "plugin-src/rules/AGENTS.md",
+    "plugin-src/",
     "docs/pi-dev-integration.md",
     "pyproject.toml",
     "README.md",

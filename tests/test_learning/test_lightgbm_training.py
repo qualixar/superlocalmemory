@@ -43,6 +43,7 @@ from tests.test_learning._signal_fixtures import (
     make_batch,
     open_conn,
 )
+from tests.fixtures.lgb_mock import MockDataset, mock_lgb_train
 
 
 # ---------------------------------------------------------------------------
@@ -178,12 +179,13 @@ def test_phase3_requires_active_and_verified_model(tmp_path):
 
 
 def _make_fake_active(feature_names: tuple[str, ...]) -> ActiveModel:
-    # Train a trivial booster on synthetic data so drift_mode can be tested
-    # without touching the DB.
+    # Drift-mode tests need only a serializable Booster contract.  Calling the
+    # native trainer here can race another OpenMP runtime in a full macOS run;
+    # use the same deterministic unit-test double as the directory fixture.
     X = np.random.rand(40, len(FEATURE_NAMES)).astype(np.float32)
     y = np.random.randint(0, 5, size=40).astype(np.int32)
     group = [10, 10, 10, 10]
-    ds = lgb.Dataset(X, label=y, group=group,
+    ds = MockDataset(X, label=y, group=group,
                      feature_name=list(FEATURE_NAMES), free_raw_data=False)
     params = {
         "objective": "lambdarank", "metric": "ndcg",
@@ -192,7 +194,7 @@ def _make_fake_active(feature_names: tuple[str, ...]) -> ActiveModel:
         "num_threads": 2,  # v3.4.58: prevent OpenMP multi-runtime SIGSEGV on macOS ARM
     }
 
-    booster = lgb.train(params, ds, num_boost_round=3)
+    booster = mock_lgb_train(params, ds, num_boost_round=3)
     return ActiveModel(
         profile_id="fake",
         booster=booster,

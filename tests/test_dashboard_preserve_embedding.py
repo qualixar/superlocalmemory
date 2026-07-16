@@ -343,10 +343,10 @@ class TestSetProvider:
 # ── for_mode baseline (unchanged contract) ───────────────────────────────────
 
 class TestForModeContract:
-    """for_mode() behaviour is unchanged — this is the baseline the fix builds on."""
+    """Mode defaults preserve an explicit boundary for paid cloud embeddings."""
 
-    def test_for_mode_c_empty_embedding_uses_hardcoded_defaults(self):
-        """for_mode() with empty embedding fields yields Mode C hardcoded defaults."""
+    def test_for_mode_c_empty_embedding_keeps_local_fallback(self):
+        """Mode C requires an explicit endpoint before selecting cloud embeddings."""
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.storage.models import Mode
 
@@ -363,5 +363,5 @@ class TestForModeContract:
             embedding_dimension=0,
         )
 
-        assert config.embedding.model_name == "text-embedding-3-large"
-        assert config.embedding.dimension == 3072
+        assert config.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
+        assert config.embedding.dimension == 768
