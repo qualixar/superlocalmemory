@@ -257,3 +257,41 @@ class TestEmbeddingServiceTimeout:
         stream.readline.side_effect = OSError("broken pipe")
         with pytest.raises(OSError, match="broken pipe"):
             EmbeddingService._readline_with_timeout(stream, timeout_seconds=5.0)
+
+    def test_worker_dependency_import_failure_is_reported_not_crashed(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A broken local ML stack must emit a protocol error, not exit silently."""
+        import builtins
+        from superlocalmemory.core import embedding_worker
+
+        real_import = builtins.__import__
+
+        def _blocked_import(name, *args, **kwargs):
+            if name == "sentence_transformers":
+                raise ValueError("incompatible local numpy installation")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _blocked_import)
+        assert embedding_worker._load_embedding_model("local-model") == (None, "")
+
+    def test_terminal_worker_error_disables_repeated_respawns(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A reported dependency failure must not churn workers on each recall."""
+        import io
+
+        service = EmbeddingService(EmbeddingConfig())
+        worker = MagicMock()
+        worker.stdin = io.StringIO()
+        worker.stdout = io.StringIO(
+            '{"ok": false, "error": "sentence-transformers unavailable"}\n',
+        )
+        service._worker_proc = worker
+        monkeypatch.setattr(service, "_ensure_worker", lambda: None)
+        killed = MagicMock()
+        monkeypatch.setattr(service, "_kill_worker", killed)
+
+        assert service._subprocess_embed(["dependency failure witness"]) is None
+        assert service.is_available is False
+        killed.assert_called_once()
