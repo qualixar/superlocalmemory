@@ -85,7 +85,8 @@ def test_repository_clone_has_only_scoped_lifecycle_installers() -> None:
 
 
 def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
-    if shutil.which("npm") is None:
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    if npm is None:
         pytest.skip("npm artifact is executed by the dedicated installer matrix")
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert package["bin"] == {
@@ -97,7 +98,7 @@ def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
     assert "scripts/install.ps1" not in package["files"]
 
     result = subprocess.run(
-        ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"],
+        [npm, "pack", "--dry-run", "--json", "--ignore-scripts"],
         cwd=ROOT,
         text=True,
         capture_output=True,

@@ -83,7 +83,10 @@ def _portable_config(repo: Path, client_id: str, work: Path) -> str:
     block = _extract_slm_block(data, descriptor)
     if block.get("command") != "slm" or block.get("args") != ["mcp"]:
         raise AssertionError(f"unsafe start command for {client_id}: {block!r}")
-    return path.relative_to(work).as_posix()
+    # The generated path is host-dependent for clients such as Claude Desktop
+    # (macOS Application Support vs Linux .config). Release evidence records
+    # the portable contract that was executed, not a host-specific temp path.
+    return f"{client_id}:portable-config"
 
 
 def _declared_profile_tools(repo: Path) -> set[str]:
