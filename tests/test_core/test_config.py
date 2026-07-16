@@ -145,6 +145,7 @@ class TestSLMConfigForMode:
         assert cfg.llm.provider == ""
         assert cfg.embedding.is_cloud is False
         assert cfg.embedding.dimension == 768
+        assert cfg.temporal_validator.mode == "a"
 
     def test_mode_b_ollama_llm(self) -> None:
         cfg = SLMConfig.for_mode(Mode.B)
@@ -153,6 +154,7 @@ class TestSLMConfigForMode:
         assert cfg.llm.provider == "ollama"
         assert cfg.llm.model == "llama3.2"
         assert cfg.embedding.is_cloud is False
+        assert cfg.temporal_validator.mode == "b"
 
     def test_mode_c_cloud_everything(self) -> None:
         cfg = SLMConfig.for_mode(
@@ -172,6 +174,7 @@ class TestSLMConfigForMode:
         # Mode C has boosted channel weights
         assert cfg.channel_weights.semantic == 1.5
         assert cfg.retrieval.semantic_top_k == 80
+        assert cfg.temporal_validator.mode == "c"
 
     def test_mode_b_custom_provider(self) -> None:
         cfg = SLMConfig.for_mode(
