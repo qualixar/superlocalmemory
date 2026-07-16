@@ -20,7 +20,6 @@ Author: Varun Pratap Bhardwaj / Qualixar
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 import sqlite3
@@ -35,8 +34,44 @@ from superlocalmemory.core.security_primitives import safe_resolve_identifier
 
 logger = logging.getLogger(__name__)
 
+try:  # POSIX advisory locks (macOS/Linux)
+    import fcntl as _fcntl
+except ImportError:  # Windows has no fcntl; use its stdlib byte-range lock.
+    _fcntl = None
 
-# M-P-07: path-component hints for filesystems where ``fcntl.flock`` is
+
+def _acquire_profile_lock(fd: int) -> None:
+    """Acquire a non-blocking cross-process lock on every supported OS."""
+    if _fcntl is not None:
+        _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        return
+
+    import msvcrt
+
+    # ``msvcrt.locking`` cannot lock an empty file. Reserve one marker byte;
+    # the file content is diagnostic only and never a correctness signal.
+    if os.fstat(fd).st_size == 0:
+        os.write(fd, b"\0")
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except OSError as exc:
+        raise BlockingIOError("evolution profile lock is held") from exc
+
+
+def _release_profile_lock(fd: int) -> None:
+    """Release the lock acquired by :func:`_acquire_profile_lock`."""
+    if _fcntl is not None:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        return
+
+    import msvcrt
+
+    os.lseek(fd, 0, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+# M-P-07: path-component hints for filesystems where advisory locking is
 # known to degrade to a no-op. We do NOT abort — some users accept the
 # risk — but we emit a one-shot warning so a double-cycle is at least
 # attributable to a known root cause. If/when we ship a threading-only
@@ -127,7 +162,7 @@ class EvolutionBudget:
         )
         self._lock_path = safe_stem.with_suffix(".lock")
         # M-P-07: warn once per lock-path when we detect the lock sits on
-        # a known sync-backed filesystem. ``fcntl.flock`` silently
+        # a known sync-backed filesystem. Advisory locking silently
         # degrades on iCloud/OneDrive/Dropbox — two concurrent cycles
         # would each acquire and burn LLM budget. Documentation-only for
         # now; a future release may refuse to run until the lock_dir is
@@ -141,7 +176,7 @@ class EvolutionBudget:
             if key not in _WARNED_SYNC_PATHS:
                 _WARNED_SYNC_PATHS.add(key)
                 logger.warning(
-                    "evolution lock at %s lives under %r — fcntl.flock "
+                    "evolution lock at %s lives under %r — advisory locking "
                     "may silently no-op on sync-backed filesystems. "
                     "Concurrent cycles could double-bill LLM cost. Move "
                     "the lock_dir off the sync root to make single-flight "
@@ -258,12 +293,12 @@ class EvolutionBudget:
                 f"cap={MAX_CYCLES_PER_DAY}",
             )
 
-        # Single-flight lock (non-blocking flock). A second concurrent
+        # Single-flight lock (non-blocking advisory lock). A second concurrent
         # acquire raises BlockingIOError — surface as BudgetExhausted.
         fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR, 0o600)
         try:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _acquire_profile_lock(fd)
             except BlockingIOError as e:
                 os.close(fd)
                 raise BudgetExhausted(
@@ -296,7 +331,7 @@ class EvolutionBudget:
             # Release lock before propagating — a failed cycle-record should
             # not leave the lock dangling.
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                _release_profile_lock(fd)
             finally:
                 os.close(fd)
                 self._lock_fd = None
@@ -312,7 +347,7 @@ class EvolutionBudget:
         finally:
             self._cycle_start_mono = None
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                _release_profile_lock(fd)
             finally:
                 try:
                     os.close(fd)
