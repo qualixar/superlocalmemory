@@ -2,10 +2,10 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.7.1</h1>
+<h1 align="center">SuperLocalMemory V3.7.2</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.7.1</code> — <strong>Installer-parity hotfix; release witnesses required before outreach.</strong><br/>
+<p align="center"><code>v3.7.2</code> — <strong>Reliability release: durable local writes, cross-platform installation, and bounded enrichment recovery.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 

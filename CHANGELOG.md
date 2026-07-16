@@ -5,6 +5,16 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.2] - 2026-07-16 — Reliability release
+
+### Fixed
+
+- Strengthened daemon-owned local write coordination across Mesh and MCP paths.
+- Kept durable facts queryable when optional enrichment needs a controlled retry.
+- Preserved graph-aware retrieval through the canonical fallback when sqlite-vec is unavailable.
+- Bounded local embedding-worker dependency failures to prevent repeated worker respawns.
+- Hardened Windows RAM reservations and cross-platform installer validation.
+
 ## [3.7.1] - 2026-07-16 — Installer-parity hotfix
 
 ### Fixed
