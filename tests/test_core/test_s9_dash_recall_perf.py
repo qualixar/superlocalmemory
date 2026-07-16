@@ -125,6 +125,26 @@ def test_recall_with_session_id_does_not_regress(monkeypatch) -> None:
         f"to the outcome-queue enqueue path."
     )
 
+
+def test_fast_recall_is_forwarded_to_the_retrieval_pipeline(monkeypatch) -> None:
+    """The public fast flag must not be silently rewritten to full recall."""
+    engine_stub, stub_response = _make_engine(monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _capture_fast(*args, **kwargs):
+        captured.update(kwargs)
+        return stub_response
+
+    monkeypatch.setattr(
+        "superlocalmemory.core.recall_pipeline.run_recall",
+        _capture_fast,
+    )
+
+    from superlocalmemory.core.engine import MemoryEngine
+    MemoryEngine.recall(engine_stub, "fast witness", fast=True)
+
+    assert captured["fast"] is True
+
     # And at least one enqueue landed (the producer is actually wired).
     counters = outcome_queue.get_counters()
     assert counters["recall_enqueued"] >= 1, \
