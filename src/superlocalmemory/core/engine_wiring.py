@@ -388,11 +388,6 @@ def _init_spreading_activation(
     vector_store: Any,
 ) -> Any | None:
     """Create SpreadingActivation for Phase 3 5th retrieval channel."""
-    # V3.3.21: Guard against None vector_store. Without embeddings, SA's
-    # search() crashes with "'NoneType' has no attribute 'search'".
-    if vector_store is None:
-        logger.debug("SpreadingActivation skipped: no vector_store")
-        return None
     try:
         from superlocalmemory.retrieval.spreading_activation import (
             SpreadingActivation,

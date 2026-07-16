@@ -93,7 +93,7 @@ class SpreadingActivation:
     def __init__(
         self,
         db: Any,
-        vector_store: Any,
+        vector_store: Any | None,
         config: SpreadingActivationConfig | None = None,
     ) -> None:
         self._db = db
@@ -122,8 +122,11 @@ class SpreadingActivation:
         include_shared = bool(getattr(self, "include_shared", False))
         try:
             # Step 0: Get seed nodes from VectorStore KNN
-            seed_results = self._vector_store.search(
-                query, top_k=self._config.top_m, profile_id=profile_id,
+            seed_results = self._seed_search(
+                query,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
             )
             # Owner-partitioned vector indexes cannot discover opted-in peers.
             # Add visible external embeddings with the same cosine seed signal.
@@ -215,6 +218,53 @@ class SpreadingActivation:
                 profile_id, exc,
             )
             return []
+
+    def _seed_search(
+        self,
+        query: Any,
+        profile_id: str,
+        *,
+        include_global: bool,
+        include_shared: bool,
+    ) -> list[tuple[str, float]]:
+        """Return bounded semantic graph seeds from vec0 or canonical SQLite.
+
+        sqlite-vec is an acceleration projection, not a prerequisite for the
+        graph retrieval layer.  When it is unavailable on a platform, use the
+        canonical stored embeddings and the same cosine signal as the
+        cross-profile supplement below.  This keeps spreading activation
+        present and truthful rather than silently removing a retrieval layer.
+        """
+        if self._vector_store is not None and getattr(
+            self._vector_store, "available", False,
+        ):
+            return self._vector_store.search(
+                query, top_k=self._config.top_m, profile_id=profile_id,
+            )
+
+        q_vec = np.array(query, dtype=np.float32)
+        q_norm = float(np.linalg.norm(q_vec))
+        if q_norm <= 1e-8:
+            return []
+        facts = self._db.get_all_facts(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        scored: list[tuple[str, float]] = []
+        for fact in facts:
+            embedding = getattr(fact, "embedding", None)
+            if embedding is None:
+                continue
+            fact_vec = np.array(embedding, dtype=np.float32)
+            if fact_vec.shape != q_vec.shape:
+                continue
+            denominator = q_norm * float(np.linalg.norm(fact_vec))
+            if denominator <= 1e-8:
+                continue
+            score = (float(np.dot(q_vec, fact_vec) / denominator) + 1.0) / 2.0
+            scored.append((fact.fact_id, score))
+        return sorted(scored, key=lambda item: item[1], reverse=True)[:self._config.top_m]
 
     def _propagate(
         self,
