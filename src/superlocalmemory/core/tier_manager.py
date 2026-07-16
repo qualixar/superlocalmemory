@@ -452,6 +452,10 @@ def _sync_tiers_to_backends(
 
     if _lancedb_backend and hasattr(_lancedb_backend, "bulk_update_tiers_from_sqlite"):
         try:
-            _lancedb_backend.bulk_update_tiers_from_sqlite(db.conn)
+            # DatabaseManager intentionally has no public `.conn`; use its
+            # transaction boundary so tier synchronization cannot silently
+            # fail after a scale projection has been promoted.
+            with db.raw_connection() as conn:
+                _lancedb_backend.bulk_update_tiers_from_sqlite(conn)
         except Exception as exc:
             logger.warning("LanceDB tier sync failed: %s", exc)

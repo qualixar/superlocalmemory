@@ -108,6 +108,13 @@ class TestWrite:
         )
         assert count == 1
 
+    def test_replayed_vector_write_replaces_instead_of_duplicates(self, backend):
+        backend.add_vectors(["a1"], [_make_vec(0.1)], ["active"])
+        backend.add_vectors(["a1"], [_make_vec(0.2)], ["warm"])
+        assert backend.health_check()["vectors"] == 1
+        result = backend.similarity_search(_make_vec(0.2), top_k=1, tier_filter=["warm"])
+        assert result and result[0][0] == "a1"
+
     def test_update_tier(self, populated):
         populated.update_tier("f0", "cold")
         results = populated.similarity_search(

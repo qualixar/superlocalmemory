@@ -101,14 +101,22 @@ class LanceDBVectorBackend:
         tiers: list[str],
         profile_id: str = "default",
     ) -> int:
-        """Batch insert vectors."""
+        """Idempotently insert or replace vectors by canonical fact ID."""
         if not fact_ids:
             return 0
         data = [
             {"fact_id": fid, "vector": emb, "tier": tier, "profile_id": profile_id}
             for fid, emb, tier in zip(fact_ids, embeddings, tiers)
         ]
-        self._table.add(data)
+        # `add()` permits duplicate fact IDs on retries.  Store/retry paths are
+        # at-least-once by design, so use LanceDB's merge operation to keep the
+        # projection one-row-per-fact and safe to replay after a restart.
+        (
+            self._table.merge_insert("fact_id")
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute(data)
+        )
         return len(data)
 
     # ------------------------------------------------------------------
@@ -209,7 +217,11 @@ class LanceDBVectorBackend:
             })
 
         if data:
-            self._table.add(data)
+            self.add_vectors(
+                [item["fact_id"] for item in data],
+                [item["vector"] for item in data],
+                [item["tier"] for item in data],
+            )
 
         logger.info("LanceDB: imported %d vectors from sqlite-vec", len(data))
         return len(data)
