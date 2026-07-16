@@ -37,7 +37,7 @@ The papers report versioned experiments; they are not measurements of the curren
 - Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction. It is not an end-to-end zero-LLM result.
 - Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components. It is not a full-dataset score.
 
-See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588), the [official LoCoMo paper](https://arxiv.org/abs/2402.17753), and the [V3.7 audit](docs/audits/2026-07-14-v3-release-readiness/02-BENCHMARK-COMPETITOR-AUDIT.md) for protocols and limitations. The current V3.7 LoCoMo result is unknown; no historical score is a V3.7 release claim.
+See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) and the [official LoCoMo paper](https://arxiv.org/abs/2402.17753) for protocols and limitations. The current V3.7 LoCoMo result is unknown; no historical score is a V3.7 release claim.
 
 The preprints also contain ablation and mathematical analyses. Treat those as research evidence for the evaluated versions, not guarantees about every current runtime path.
 
@@ -131,9 +131,10 @@ can run without a cloud LLM:
 2. **Sheaf Cohomology for Consistency** — algebraic topology detects contradictions via coboundary norms on the knowledge graph.
 3. **Riemannian Langevin Lifecycle** — memory positions evolve on the Poincare ball; neglected memories self-archive, no hardcoded thresholds.
 
-Auto-capture hooks are installed explicitly with `slm hooks install`. Hook
-latency and capture quality must be evaluated for the target client and
-workload; V3.7 publishes no universal p99 claim.
+Auto-capture hooks are installed explicitly with `slm hooks install` (Claude
+Code) or `slm hooks install --agent codex` (Codex). Hook latency and capture
+quality must be evaluated for the target client and workload; V3.7 publishes
+no universal p99 claim.
 
 **Multi-scope memory (v3.6.15, opt-in):** keep memories `personal` (default), `shared` with named profiles, or `global` across the machine. Off by default — recall only ever returns your own facts until you turn sharing on, per call or in config. See **[docs/shared-memory.md](docs/shared-memory.md)**.
 
@@ -292,6 +293,31 @@ then install:
 > pip/npm for the CLI or other IDEs.
 
 To update later: `/plugin marketplace update qualixar` then `/plugin install superlocalmemory@qualixar`.
+
+## Codex add-on
+
+For Codex, install the SLM-owned skills, two focused subagents, and four
+lifecycle hooks explicitly:
+
+```bash
+slm codex install
+```
+
+This adds only SLM-owned files under `~/.agents/skills`, `~/.codex/agents`, and
+`~/.codex/hooks.json`; it does not replace another agent's hooks or rewrite
+`~/.codex/config.toml`. Codex requires review and trust for new command hooks:
+open `/hooks` after installation. MCP wiring remains a separate explicit step:
+
+```bash
+slm connect codex
+```
+
+`slm connect codex` semantically merges the `superlocalmemory` MCP server into
+`~/.codex/config.toml`, preserving unrelated configuration keys and writing
+atomically. TOML serializers can normalize whitespace and comments, so it is
+not a byte-preserving operation; use it only when you want the MCP server
+configured. Check the result with `slm codex status`; undo SLM-owned add-ons
+with `slm codex remove`.
 
 ---
 

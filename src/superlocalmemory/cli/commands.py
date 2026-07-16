@@ -140,7 +140,7 @@ def cmd_session(args: Namespace) -> None:
 def dispatch(args: Namespace) -> None:
     """Route CLI command to the appropriate handler."""
     # Auto-install/upgrade hooks on version change (single file read, ~0.1ms)
-    if args.command not in ("hooks", "init", "mcp"):
+    if args.command not in ("hooks", "codex", "init", "mcp"):
         try:
             from superlocalmemory.hooks.claude_code_hooks import auto_install_if_needed
             auto_install_if_needed()
@@ -170,6 +170,7 @@ def dispatch(args: Namespace) -> None:
         "dashboard": cmd_dashboard,
         "profile": cmd_profile,
         "hooks": cmd_hooks,
+        "codex": cmd_codex,
         "session-context": cmd_session_context,
         "session": cmd_session,  # #49: local session open/close for hooks
         "observe": cmd_observe,
@@ -2637,12 +2638,49 @@ def cmd_init(args: Namespace) -> None:
 
 
 def cmd_hooks(args: Namespace) -> None:
-    """Manage Claude Code hooks for invisible memory injection."""
+    """Manage additive Claude Code or Codex memory lifecycle hooks."""
     from superlocalmemory.hooks.claude_code_hooks import (
         install_hooks, remove_hooks, check_status,
     )
 
     action = getattr(args, "action", "status")
+    agent = getattr(args, "agent", "claude")
+    dry_run = getattr(args, "dry_run", False)
+    if agent == "codex":
+        from superlocalmemory.hooks.codex_hooks import (
+            install_hooks as install_codex_hooks,
+            remove_hooks as remove_codex_hooks,
+            check_status as check_codex_hooks,
+        )
+        if action == "install":
+            result = install_codex_hooks(dry_run=dry_run)
+            if result["success"]:
+                prefix = "would be installed" if dry_run else "installed"
+                print(f"SLM hooks {prefix} in Codex: {result['path']}")
+                if result.get("hooks_added"):
+                    print(f"  Hook types: {', '.join(result['hooks_added'])}")
+                print("  Review and trust the new hooks in Codex with /hooks.")
+            else:
+                print(f"Installation failed: {result['errors']}")
+            return
+        if action == "remove":
+            result = remove_codex_hooks(dry_run=dry_run)
+            if result["success"]:
+                prefix = "would be removed" if dry_run else "removed"
+                print(f"SLM hooks {prefix} from Codex: {result['path']}")
+            else:
+                print(f"Removal failed: {result['errors']}")
+            return
+        result = check_codex_hooks()
+        if result["installed"] is None:
+            print(f"SLM Codex hooks: INDETERMINATE ({result['error']})")
+        elif result["installed"]:
+            print("SLM Codex hooks: INSTALLED")
+            print(f"  Hook types: {', '.join(result['hook_types'])}")
+        else:
+            print("SLM Codex hooks: NOT INSTALLED")
+            print("  Run: slm hooks install --agent codex")
+        return
     # Gate is OFF by default. --gate opts in (for brave users).
     include_gate = getattr(args, "gate", False)
 
@@ -2676,6 +2714,34 @@ def cmd_hooks(args: Namespace) -> None:
             print("SLM hooks: NOT INSTALLED")
             print("  Run: slm hooks install")
             print("  Or:  slm init  (full setup)")
+
+
+def cmd_codex(args: Namespace) -> None:
+    """Manage explicit, SLM-owned Codex skills, agents, and lifecycle hooks."""
+    from superlocalmemory.hooks.codex_assets import install_assets, remove_assets, status_assets
+    from superlocalmemory.hooks.codex_hooks import install_hooks, remove_hooks, check_status
+
+    action, dry_run = getattr(args, "action", "status"), getattr(args, "dry_run", False)
+    if action == "install":
+        assets, hooks = install_assets(dry_run=dry_run), install_hooks(dry_run=dry_run)
+        if assets.get("success") and hooks.get("success"):
+            print(f"SLM Codex add-ons {'would be installed' if dry_run else 'installed'}: 7 skills, 2 subagents, 4 lifecycle hooks.")
+            print("MCP wiring remains explicit: run `slm connect codex` if it is not already configured.")
+            print("Review and trust newly installed hooks in Codex with /hooks.")
+        else:
+            print(f"Codex integration failed: {assets.get('errors', []) + hooks.get('errors', [])}")
+        return
+    if action == "remove":
+        assets, hooks = remove_assets(dry_run=dry_run), remove_hooks(dry_run=dry_run)
+        if assets.get("success") and hooks.get("success"):
+            print("SLM-owned Codex add-ons removed; your MCP and non-SLM settings were left intact.")
+        else:
+            print(f"Codex removal failed: {assets.get('errors', []) + hooks.get('errors', [])}")
+        return
+    assets, hooks = status_assets(), check_status()
+    print(f"SLM Codex add-ons: {'INSTALLED' if assets['installed'] and hooks['installed'] else 'NOT INSTALLED'}")
+    print(f"  Skills: {len(assets['skills'])}/7; subagents: {len(assets['agents'])}/2")
+    print(f"  Hooks: {', '.join(hooks.get('hook_types', [])) or 'none'}")
 
 
 def cmd_session_context(args: Namespace) -> None:

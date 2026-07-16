@@ -24,6 +24,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Cross-platform temp paths
@@ -152,6 +153,15 @@ def handle_hook(action: str) -> None:
     if action == "before_web":
         from superlocalmemory.hooks.before_web_hook import main as _main
         sys.exit(_main())
+    if action == "codex-start":
+        _hook_codex_start()
+        return
+    if action == "codex-prompt":
+        _hook_codex_prompt()
+        return
+    if action == "codex-stop":
+        _hook_codex_stop()
+        return
 
     handlers = {
         "mandate": _hook_mandate,
@@ -166,6 +176,135 @@ def handle_hook(action: str) -> None:
         print(f"Unknown hook action: {action}", file=sys.stderr)
         sys.exit(1)
     handler()
+
+
+def _codex_payload() -> dict:
+    """Read Codex's documented JSON hook payload without failing closed."""
+    try:
+        value = json.load(sys.stdin)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _apply_codex_session(payload: dict) -> str:
+    """Map Codex lifecycle fields onto the shared SLM session primitives."""
+    project_dir = payload.get("cwd")
+    if not isinstance(project_dir, str) or not project_dir:
+        project_dir = os.getcwd()
+    os.environ["CLAUDE_PROJECT_DIR"] = project_dir
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        # Shared handlers use this neutral lifecycle identity despite its
+        # historical environment-variable name.  It is never sent to a host.
+        os.environ["CLAUDE_SESSION_ID"] = session_id
+    return project_dir
+
+
+def _codex_mcp_session_init(project_dir: str, payload: dict) -> dict:
+    """Open SLM lifecycle attribution through packaged ``slm mcp``.
+
+    This mirrors MCP clients instead of embedding a personal executable path.
+    Hook failure is intentionally fail-open: Codex sessions remain usable if
+    the local daemon or MCP server is unavailable.
+    """
+    query = payload.get("prompt") or payload.get("user_prompt") or Path(project_dir).name
+    if not isinstance(query, str):
+        query = Path(project_dir).name
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            ["slm", "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": "superlocalmemory-codex-hook", "version": "3.7"}},
+        }) + "\n")
+        proc.stdin.flush()
+        proc.stdout.readline()
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n")
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "session_init", "arguments": {
+                "project_path": project_dir, "query": query[:500],
+                "max_results": 10, "max_age_days": 30,
+            }},
+        }) + "\n")
+        proc.stdin.flush()
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            response = json.loads(line)
+            if response.get("id") == 2:
+                content = response.get("result", {}).get("content", [])
+                if content and isinstance(content[0], dict):
+                    return json.loads(content[0].get("text") or "{}")
+                return response.get("result", {})
+    except Exception:
+        return {}
+    finally:
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=1)
+            except Exception:
+                pass
+    return {}
+
+
+def _hook_codex_start() -> None:
+    """Codex SessionStart: create lifecycle session and inject fast context."""
+    payload = _codex_payload()
+    project_dir = _apply_codex_session(payload)
+    session = _codex_mcp_session_init(project_dir, payload)
+    context = ""
+    try:
+        result = subprocess.run(
+            ["slm", "session-context", Path(project_dir).name or "general"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            context = result.stdout.strip()
+    except Exception:
+        pass
+    session_msg = "SLM session_init unavailable"
+    if session.get("session_id"):
+        session_msg = (
+            f"SLM session_init OK: {session['session_id']} "
+            f"({session.get('memory_count', 0)} memories, "
+            f"{session.get('retrieval_mode', 'unknown')})"
+        )
+    print(json.dumps({
+        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
+            f"{session_msg}\n\n" + (context or "(SLM context unavailable.)")
+        )},
+        "systemMessage": session_msg,
+    }))
+
+
+def _hook_codex_prompt() -> None:
+    """Codex prompt event: retain existing topic and rehash signals."""
+    payload = _codex_payload()
+    _apply_codex_session(payload)
+    for action in ("user_prompt_rehash", "topic_shift"):
+        try:
+            proc = subprocess.run(["slm", "hook", action], input=json.dumps(payload),
+                                  text=True, capture_output=True, timeout=4)
+            if proc.stdout.strip():
+                print(proc.stdout.strip())
+        except Exception:
+            continue
+
+
+def _hook_codex_stop() -> None:
+    """Codex Stop: reuse the daemon-backed session checkpoint handler."""
+    _apply_codex_session(_codex_payload())
+    _hook_stop()
 
 
 # ---------------------------------------------------------------------------

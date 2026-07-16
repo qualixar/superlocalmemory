@@ -69,7 +69,7 @@ documentation:
 
 
 _NO_DAEMON_COMMANDS = {
-    "setup", "mode", "provider", "connect", "migrate", "mcp", "warmup",
+    "setup", "mode", "provider", "connect", "migrate", "mcp", "warmup", "hooks", "codex",
     "config", "evolve", "db",
     # v3.4.22 escape hatches — never auto-start the daemon on these.
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
@@ -420,7 +420,7 @@ def main() -> None:
     profile_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
     # -- Active Memory (V3.1) ------------------------------------------
-    hooks_p = sub.add_parser("hooks", help="Manage Claude Code hooks for auto memory injection")
+    hooks_p = sub.add_parser("hooks", help="Manage additive Claude Code or Codex hooks")
     hooks_p.add_argument(
         "action", nargs="?", default="status",
         choices=["install", "remove", "status"], help="Action (default: status)",
@@ -429,6 +429,18 @@ def main() -> None:
         "--gate", action="store_true",
         help="Enable PreToolUse gate (experimental — blocks tools until session_init)",
     )
+    hooks_p.add_argument(
+        "--agent", choices=["claude", "codex"], default="claude",
+        help="Target agent (default: claude)",
+    )
+    hooks_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Show whether the additive change is valid without writing files",
+    )
+
+    codex_p = sub.add_parser("codex", help="Install or inspect explicit Codex SLM add-ons")
+    codex_p.add_argument("action", nargs="?", default="status", choices=["install", "remove", "status"])
+    codex_p.add_argument("--dry-run", action="store_true", help="Validate without writing user files")
 
     ctx_p = sub.add_parser("session-context", help="Print session context (for hooks)")
     ctx_p.add_argument("query", nargs="?", default="", help="Optional context query")
