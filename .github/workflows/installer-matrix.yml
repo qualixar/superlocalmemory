@@ -69,7 +69,12 @@ jobs:
           # Keep this a pre-install contract: the repository-wide conftest
           # imports product dependencies such as NumPy, while these tests
           # verify installers before any candidate has been installed.
-          python -m pytest -q --noconftest tests/installers tests/test_ci_guards/test_windows_installer_contract.py tests/test_ci_guards/test_installation_surface_contract.py tests/test_cli/test_cli_metadata_read_only.py
+          python -m pytest -q --noconftest tests/test_ci_guards/test_windows_installer_contract.py tests/test_ci_guards/test_installation_surface_contract.py tests/test_cli/test_cli_metadata_read_only.py
+      - name: Test Unix shell-installer contracts
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python -m pytest -q --noconftest tests/installers/test_unix_installer_contract.py
       - name: Install, invoke and uninstall candidate on Unix
         if: runner.os != 'Windows'
         shell: bash
