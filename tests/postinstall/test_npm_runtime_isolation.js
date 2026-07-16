@@ -20,6 +20,7 @@ const POSTINSTALL = path.join(REPO_ROOT, 'scripts', 'postinstall.js');
 const PREUNINSTALL = path.join(REPO_ROOT, 'scripts', 'preuninstall.js');
 const INTERACTIVE_CONFIG = path.join(REPO_ROOT, 'scripts', 'postinstall-interactive.js');
 const WRAPPER = path.join(REPO_ROOT, 'bin', 'slm-npm');
+const PACKAGE_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function clearModule(modulePath) {
   delete require.cache[require.resolve(modulePath)];
@@ -38,7 +39,7 @@ function capturePostinstall() {
       return { status: 0, stdout: Buffer.from('Python 3.12.8\n'), stderr: Buffer.from('') };
     }
     if (args.includes('-c')) {
-      return { status: 0, stdout: Buffer.from('3.6.23\n'), stderr: Buffer.from('') };
+      return { status: 0, stdout: Buffer.from(PACKAGE_VERSION + '\n'), stderr: Buffer.from('') };
     }
     return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
   };
