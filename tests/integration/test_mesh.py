@@ -134,6 +134,39 @@ class TestMeshMessages:
         result = broker.send_message(r1["peer_id"], "fake", "hello")
         assert result["ok"] is False
 
+    def test_send_retries_a_transient_writer_lock(self, broker, mesh_db, monkeypatch):
+        """Peer messaging shares the same bounded writer contract as heartbeat."""
+        sender = broker.register_peer("sender")
+        recipient = broker.register_peer("recipient")
+
+        def _zero_wait_connection():
+            conn = sqlite3.connect(str(mesh_db), timeout=0)
+            conn.execute("PRAGMA busy_timeout=0")
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(broker, "_conn", _zero_wait_connection)
+        lock_holder = sqlite3.connect(
+            str(mesh_db), timeout=0, check_same_thread=False,
+        )
+        lock_holder.execute("BEGIN IMMEDIATE")
+
+        def _release_lock():
+            time.sleep(0.05)
+            lock_holder.rollback()
+            lock_holder.close()
+
+        releaser = threading.Thread(target=_release_lock)
+        releaser.start()
+        try:
+            result = broker.send_message(
+                sender["peer_id"], recipient["peer_id"], "retry this message",
+            )
+        finally:
+            releaser.join(timeout=1)
+
+        assert result["ok"] is True
+
     def test_mark_read(self, broker):
         r1 = broker.register_peer("s1")
         r2 = broker.register_peer("s2")
