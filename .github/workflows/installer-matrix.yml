@@ -66,7 +66,10 @@ jobs:
       - name: Test installer contracts
         run: |
           python -m pip install --disable-pip-version-check pytest pyyaml tree-sitter-language-pack
-          python -m pytest -q tests/installers tests/test_ci_guards/test_windows_installer_contract.py tests/test_ci_guards/test_installation_surface_contract.py tests/test_cli/test_cli_metadata_read_only.py
+          # Keep this a pre-install contract: the repository-wide conftest
+          # imports product dependencies such as NumPy, while these tests
+          # verify installers before any candidate has been installed.
+          python -m pytest -q --noconftest tests/installers tests/test_ci_guards/test_windows_installer_contract.py tests/test_ci_guards/test_installation_surface_contract.py tests/test_cli/test_cli_metadata_read_only.py
       - name: Install, invoke and uninstall candidate on Unix
         if: runner.os != 'Windows'
         shell: bash
