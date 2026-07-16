@@ -202,3 +202,46 @@ def test_every_mode_completes_canonical_ingestion_and_graph_aware_recall(
             _assert_sqlite_integrity(database)
     finally:
         engine.close()
+
+
+def test_spreading_activation_remains_wired_without_sqlite_vec(
+    tmp_path: Path,
+) -> None:
+    """The graph layer needs a SQLite seed fallback when vec0 is unavailable."""
+    config = SLMConfig.for_mode(Mode.A, base_dir=tmp_path)
+    config.retrieval.use_cross_encoder = False
+    embedder = _DeterministicEmbedder(config.embedding.dimension)
+    engine = MemoryEngine(config)
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "superlocalmemory.core.engine_wiring.init_embedder",
+            return_value=embedder,
+        ))
+        stack.enter_context(patch(
+            "superlocalmemory.core.engine_wiring._init_vector_store",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "superlocalmemory.llm.backbone.LLMBackbone", _LocalLLM,
+        ))
+        engine.initialize()
+    try:
+        engine.store(
+            "Ada maintains the Atlas graph recovery procedure on July 15, 2026.",
+            session_id="sqlite-fallback-session",
+            session_date="2026-07-15",
+        )
+        retrieval = engine._retrieval_engine
+        assert retrieval._spreading_activation is not None
+        spreading_search = MagicMock(
+            wraps=retrieval._spreading_activation.search,
+        )
+        retrieval._spreading_activation.search = spreading_search
+
+        response = engine.recall("What does Ada maintain in Atlas?", mode=Mode.A)
+
+        assert response.results
+        assert spreading_search.call_count >= 1
+        assert "spreading_activation" in response.channel_weights
+    finally:
+        engine.close()
