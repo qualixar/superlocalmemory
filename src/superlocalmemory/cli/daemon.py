@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import sys
 import time
 from dataclasses import replace
@@ -83,6 +84,47 @@ def _descriptor_process_is_alive(descriptor) -> bool:
     except Exception:
         return False
     return abs(actual - float(descriptor.process_create_time)) <= 1.0
+
+
+def _is_port_available(port: int) -> bool:
+    """Return whether the daemon port can be exclusively bound right now."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+            candidate.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+
+
+def _has_tcp_listener(port: int) -> bool:
+    """Return whether a process is actively accepting on the daemon port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+            candidate.settimeout(0.5)
+            return candidate.connect_ex(("127.0.0.1", port)) == 0
+    except OSError:
+        return False
+
+
+def wait_for_owned_daemon_shutdown(descriptor, timeout: float = 25.0) -> bool:
+    """Wait for the stopped instance *and* its TCP listener to be gone.
+
+    Restart must never spawn a replacement just because the descriptor was
+    removed: a graceful shutdown can remove it before Uvicorn releases the
+    port.  The 25-second budget covers Uvicorn's 10-second graceful drain plus
+    SLM worker cleanup. A descriptor carries process creation time, so PID
+    reuse cannot make this wait target an unrelated process.
+    """
+    port = descriptor.port if descriptor is not None else _DEFAULT_PORT
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        process_alive = (
+            descriptor is not None and _descriptor_process_is_alive(descriptor)
+        )
+        if not process_alive and _is_port_available(port):
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def is_daemon_running() -> bool:
@@ -257,6 +299,12 @@ def _start_daemon_subprocess() -> bool:
     """
     if is_daemon_running():
         return True
+    # Never create a descriptor for a child that cannot own the listener.
+    # A closed connection in TIME_WAIT is not a listener and is safe: the
+    # server reserves its socket with SO_REUSEADDR during bootstrap.
+    if _has_tcp_listener(_DEFAULT_PORT):
+        logger.warning("daemon port %d is already owned; refusing a second start", _DEFAULT_PORT)
+        return False
     assert_no_durable_root_conflict()
 
     import subprocess

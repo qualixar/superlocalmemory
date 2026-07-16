@@ -102,3 +102,15 @@ def test_daemon_lifespan_does_not_block_on_reranker_warmup() -> None:
 
     source = inspect.getsource(unified_daemon.lifespan)
     assert "reranker.warmup_sync(timeout=120)" not in source
+
+
+def test_daemon_reserves_listener_before_engine_or_migration_work() -> None:
+    """A duplicate daemon must fail before touching the shared data root."""
+    import inspect
+
+    from superlocalmemory.server import unified_daemon
+
+    source = inspect.getsource(unified_daemon.start_server)
+    assert source.index("listener.bind") < source.index("_publish_process_descriptor")
+    assert source.index("listener.bind") < source.index("_start_memory_watchdog")
+    assert "server.run(sockets=[listener])" in source

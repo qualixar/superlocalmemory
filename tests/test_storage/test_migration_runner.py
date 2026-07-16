@@ -184,6 +184,40 @@ def test_apply_all_creates_all_new_columns(fresh_dbs: tuple[Path, Path]) -> None
             "metrics_json", "feature_names", "trained_on_count"} <= model_cols
 
 
+def test_historical_m002_hash_upgrades_without_drift_and_backfills_integrity(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A V3.4.21 M002 record must remain valid after the forward repair."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+
+    with sqlite3.connect(learning_db) as conn:
+        # This is the DDL fingerprint written by the original M002 release.
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ?, status = 'complete' "
+            "WHERE name = 'M002_model_state_history'",
+            ("fab7082925462d44407f9496551ec488d95b7411f6480f067ec192338e077eba",),
+        )
+        conn.execute(
+            "INSERT INTO learning_model_state "
+            "(profile_id, state_bytes, bytes_sha256, trained_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("upgrade", b"preserve-model-bytes", "", "2026-01-01", "2026-01-01"),
+        )
+        conn.execute("DELETE FROM migration_log WHERE name = 'M020_model_state_integrity'")
+
+    upgraded = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" not in upgraded["failed"]
+    assert "M020_model_state_integrity" in upgraded["applied"]
+    with sqlite3.connect(learning_db) as conn:
+        state_bytes, digest = conn.execute(
+            "SELECT state_bytes, bytes_sha256 FROM learning_model_state "
+            "WHERE profile_id = 'upgrade'"
+        ).fetchone()
+    assert state_bytes == b"preserve-model-bytes"
+    assert digest == hashlib.sha256(state_bytes).hexdigest()
+
+
 def test_apply_all_creates_bandit_tables(fresh_dbs: tuple[Path, Path]) -> None:
     learning_db, memory_db = fresh_dbs
     mr.apply_all(learning_db, memory_db)

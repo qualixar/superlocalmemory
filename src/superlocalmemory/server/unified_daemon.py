@@ -1114,6 +1114,13 @@ async def lifespan(application: FastAPI):
                     _mcp_lifespan_exc,
                 )
 
+        # Uvicorn enters this lifespan only after it has bound the listener.
+        # Publishing ``ready`` here prevents a failed competing process from
+        # overwriting the live daemon descriptor before it owns the port.
+        from superlocalmemory.server.routes.helpers import SLM_VERSION
+        application.state.daemon_descriptor = _publish_process_descriptor(
+            _configured_daemon_port(), SLM_VERSION, "ready",
+        )
         yield
 
     # Cancel optimize metrics flush loop + run final flush before shutdown
@@ -1326,7 +1333,7 @@ def create_app() -> FastAPI:
     )
     identity_port = _configured_daemon_port()
     application.state.daemon_descriptor = _process_descriptor(
-        identity_port, SLM_VERSION, "ready",
+        identity_port, SLM_VERSION, "starting",
     )
 
     # -- Middleware --
@@ -2623,7 +2630,40 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     """Start the unified daemon. Blocks until stopped."""
     global _start_time
     assert_no_durable_root_conflict()
+    import socket
     import uvicorn
+
+    # Bind before any migration or engine work.  A process which cannot own
+    # the listener must not open the user's databases or publish lifecycle
+    # state: otherwise a stale service and a manual restart can briefly run
+    # two engines against one SQLite root.
+    bind_host = (
+        os.environ.get("SLM_DAEMON_HOST")
+        or os.environ.get("SLM_HOST")
+        or "127.0.0.1"
+    )
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # This handles a just-closed connection in TIME_WAIT.  It is safe only
+    # with the active-listener probe immediately below; without that guard,
+    # macOS can permit a second SO_REUSEADDR listener on the same port.
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.5)
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                raise OSError("an active daemon listener already owns the port")
+        listener.bind((bind_host, port))
+        listener.listen(socket.SOMAXCONN)
+    except OSError as exc:
+        listener.close()
+        logger.error(
+            "SLM daemon will not start: %s:%d is already unavailable (%s)",
+            bind_host, port, exc,
+        )
+        return
+    # The lifespan uses the configured port for its identity and health
+    # payload, so a CLI --port must be reflected there as well.
+    os.environ["SLM_DAEMON_PORT"] = str(port)
 
     # v3.4.23: rotate oversized logs before anything else so both the CLI
     # path (`slm serve`) and the LaunchAgent path (__main__) are covered.
@@ -2659,15 +2699,6 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     log_dir = state_path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Bind address. `SLM_DAEMON_HOST` is the canonical name; `SLM_HOST` is
-    # accepted as a shorter alias (issue #23). Set either to 0.0.0.0 to serve
-    # a shared instance over a trusted private network (e.g. WireGuard mesh).
-    bind_host = (
-        os.environ.get("SLM_DAEMON_HOST")
-        or os.environ.get("SLM_HOST")
-        or "127.0.0.1"
-    )
-
     config = uvicorn.Config(
         app="superlocalmemory.server.unified_daemon:create_app",
         factory=True,
@@ -2678,11 +2709,10 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     )
     server = uvicorn.Server(config)
 
-    _publish_process_descriptor(port, SLM_VERSION, "ready")
-
     try:
-        server.run()
+        server.run(sockets=[listener])
     finally:
+        listener.close()
         _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
 
 

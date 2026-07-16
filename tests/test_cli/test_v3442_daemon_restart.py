@@ -23,6 +23,7 @@ The fix:
 
 from __future__ import annotations
 
+from itertools import chain, repeat
 from unittest.mock import MagicMock, patch
 
 
@@ -82,6 +83,16 @@ class TestStartDaemonSubprocessHelper:
 
         assert result is False
 
+    def test_refuses_to_spawn_when_a_listener_already_owns_the_port(self) -> None:
+        from superlocalmemory.cli import daemon as _daemon
+
+        with patch.object(_daemon, "is_daemon_running", return_value=False), patch.object(
+            _daemon, "_has_tcp_listener", return_value=True,
+        ), patch("subprocess.Popen") as popen:
+            assert not _daemon._start_daemon_subprocess()
+
+        popen.assert_not_called()
+
 
 class TestEnsureDaemonStillWorks:
     """ensure_daemon() must keep its existing semantics for non-restart callers."""
@@ -106,6 +117,37 @@ class TestEnsureDaemonStillWorks:
             assert _daemon.ensure_daemon() is True
 
         helper.assert_called_once()
+
+
+class TestOwnedDaemonShutdownWait:
+    """Restart must wait for port release, not merely descriptor removal."""
+
+    def test_wait_requires_process_exit_and_port_release(self) -> None:
+        from types import SimpleNamespace
+        from superlocalmemory.cli import daemon as _daemon
+
+        descriptor = SimpleNamespace(port=18765)
+        with patch.object(
+            _daemon, "_descriptor_process_is_alive",
+            side_effect=chain([True, False], repeat(False)),
+        ), patch.object(
+            _daemon, "_is_port_available", side_effect=[False, True],
+        ), patch.object(_daemon.time, "sleep"):
+            assert _daemon.wait_for_owned_daemon_shutdown(descriptor, timeout=1)
+
+    def test_wait_refuses_restart_when_port_remains_owned(self) -> None:
+        from types import SimpleNamespace
+        from superlocalmemory.cli import daemon as _daemon
+
+        descriptor = SimpleNamespace(port=18765)
+        with patch.object(
+            _daemon, "_descriptor_process_is_alive", return_value=False,
+        ), patch.object(
+            _daemon, "_is_port_available", return_value=False,
+        ), patch.object(_daemon.time, "monotonic", side_effect=[0, 0, 2]), patch.object(
+            _daemon.time, "sleep",
+        ):
+            assert not _daemon.wait_for_owned_daemon_shutdown(descriptor, timeout=1)
 
 
 class TestRestartStep3UsesHelperNotEnsureDaemon:

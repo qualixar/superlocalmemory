@@ -375,19 +375,34 @@ def cmd_restart(args: Namespace) -> None:
         print("  " + "=" * 40)
         print()
 
+    # Acquire the namespace lock before requesting shutdown.  Otherwise an
+    # auto-starting hook can observe the brief offline window and start a
+    # second daemon while this command is still waiting for the old process.
+    _LOCK_FILE = slm_dir / "daemon.lock"
+    _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    restart_lock_fd = None
+    try:
+        restart_lock_fd = open(_LOCK_FILE, "w")
+        if sys.platform != "win32":
+            import fcntl
+            fcntl.flock(restart_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception:
+        pass  # Best-effort — don't block restart if lock fails
+
     # Step 1: stop only the descriptor-owned daemon. Its graceful shutdown
     # owns worker termination; process-name-wide scans are forbidden.
-    from superlocalmemory.cli.daemon import is_daemon_running, stop_daemon
+    from superlocalmemory.cli.daemon import (
+        is_daemon_running,
+        read_descriptor,
+        stop_daemon,
+        wait_for_owned_daemon_shutdown,
+    )
 
     was_running = is_daemon_running()
+    owned_descriptor = read_descriptor() if was_running else None
     stopped = stop_daemon() if was_running else True
     if stopped and was_running:
-        for _ in range(40):
-            time.sleep(0.25)
-            if not is_daemon_running():
-                break
-        else:
-            stopped = False
+        stopped = wait_for_owned_daemon_shutdown(owned_descriptor)
     killed = 1 if was_running and stopped else 0
     _log(
         1,
@@ -398,6 +413,8 @@ def cmd_restart(args: Namespace) -> None:
         ),
     )
     if not stopped:
+        if restart_lock_fd:
+            restart_lock_fd.close()
         if use_json:
             from superlocalmemory.cli.json_output import json_print
             json_print(
@@ -412,19 +429,8 @@ def cmd_restart(args: Namespace) -> None:
             print("\n  Restart FAILED at step 1. The owned daemon was not stopped.")
         return
 
-    # Step 2: hold the namespace lock. Lifecycle files are removed only by the
-    # matching daemon instance during shutdown, never by an unrelated client.
-    _LOCK_FILE = slm_dir / "daemon.lock"
-    _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    restart_lock_fd = None
-    try:
-        restart_lock_fd = open(_LOCK_FILE, "w")
-        if sys.platform != "win32":
-            import fcntl
-            fcntl.flock(restart_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except Exception:
-        pass  # Best-effort — don't block restart if lock fails
-
+    # Step 2: the namespace lock was acquired before shutdown so hooks cannot
+    # auto-start another daemon inside the offline transition.
     _log(2, "Acquire namespace start lock", "ok", str(_LOCK_FILE))
 
     # Step 3: Start fresh daemon (lock still held — no races)
@@ -435,7 +441,6 @@ def cmd_restart(args: Namespace) -> None:
     # fall into its lock-fail branch and time out after 60s while the
     # actual daemon never gets started. Calling the helper directly
     # bypasses that self-deadlock and starts the daemon as intended.
-    time.sleep(1)
     from superlocalmemory.cli.daemon import _start_daemon_subprocess
     started = _start_daemon_subprocess()
 

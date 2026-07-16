@@ -89,6 +89,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M019_derivation_lineage as _M019,
 )
+from superlocalmemory.storage.migrations import (
+    M020_model_state_integrity as _M020,
+)
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
 # that lets the runner detect "already applied" state when an idempotent
@@ -112,6 +115,7 @@ _MODULES = {
     _M017.NAME: _M017,
     _M018.NAME: _M018,
     _M019.NAME: _M019,
+    _M020.NAME: _M020,
 }
 
 logger = logging.getLogger(__name__)
@@ -139,6 +143,10 @@ MIGRATIONS: list[Migration] = [
               dependencies=(_M003.NAME,)),
     # M009 extends learning_model_state (created by M002).
     Migration(name=_M009.NAME, db_target="learning", ddl=_M009.DDL,
+              dependencies=(_M002.NAME,)),
+    # M020 owns post-release integrity repair. M002 remains byte-for-byte
+    # compatible with databases that recorded its historical DDL hash.
+    Migration(name=_M020.NAME, db_target="learning", ddl=_M020.DDL,
               dependencies=(_M002.NAME,)),
     # M010 creates evolution_config + evolution_llm_cost_log (learning.db).
     Migration(name=_M010.NAME, db_target="learning", ddl=_M010.DDL,
