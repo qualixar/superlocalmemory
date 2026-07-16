@@ -72,6 +72,12 @@ IDE integrations.
 LanceDB are parity-gated projections; Mesh coordinates trusted peers rather
 than replicating a distributed memory database; connectors are opt-in.*
 
+**Memory boundaries:** profiles isolate workspaces by default. Every memory is
+`personal`, `shared` with named profile readers, or `global`; cross-profile
+recall is default-deny and must be explicitly enabled. This scoped sharing is
+local authorization, not SLM Mesh synchronization. See
+[shared-memory.md](docs/shared-memory.md).
+
 ```text
  IDEs, agents, scripts, connectors, and humans
              │  CLI · MCP (HTTP/stdio) · hooks · dashboard
@@ -97,6 +103,7 @@ health surfaces expose the stages actually completed by the installed runtime.
 | Capability | What ships today | Operator boundary |
 |---|---|---|
 | **Memory types and lifecycle** | Atomic facts, episodic scenes, temporal events, canonical entities, profiles/scopes, consolidation, forgetting and retention controls | Lifecycle policies and retention decisions remain operator-configured. |
+| **Memory boundaries** | Profile-isolated workspaces plus `personal`, `shared`, and `global` memory scopes | Personal is the default; shared/global recall requires explicit scope policy or per-call opt-in. |
 | **Ingestion** | Durable raw-to-complete operation state, fact extraction, entity resolution, graph/temporal/provenance derivations, and replay-safe identity | `--sync` waits for declared stages; dependencies and mode determine which enrichers are available. |
 | **Retrieval and recall** | Semantic, lexical, temporal, Hopfield and spreading-activation candidate channels; RRF fusion, optional reranking and graph score enhancement | Healthy channels participate; response provenance states the evidence used. |
 | **Brain and learning** | Behavioral patterns, feedback/outcome records, rewards, consolidation, LightGBM-related ranking components, soft prompts, and guarded skill-evolution workflows | Learning is evidence-driven; it does not claim autonomous correctness or guaranteed improvement. |

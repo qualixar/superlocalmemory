@@ -8,6 +8,15 @@ Published V3 LoCoMo evidence carried into V3.7 is maintained in
 [Benchmark Evidence](benchmarks.md), including the original model, judge, and
 sample disclosures required to interpret each result.
 
+## Memory boundaries: profiles and scopes
+
+Profiles partition the active workspace. Within a profile, a memory is
+`personal` (default), `shared` with explicitly named profile readers, or
+`global`. Read visibility across profiles is default-deny: recall includes
+shared/global facts only when an operator enables the relevant policy or a
+caller supplies the explicit scope option. This is local authorization and is
+separate from trusted-peer SLM Mesh coordination.
+
 ---
 
 ## Design Principles

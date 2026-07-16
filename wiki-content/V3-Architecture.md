@@ -5,6 +5,13 @@ retrieval, lifecycle and learning controls, Optimize, Mesh, and MCP/CLI/IDE
 surfaces. It is an operator-controlled memory runtime rather than a single
 vector index.
 
+## Memory boundaries
+
+Profiles are isolated workspaces. Each memory is `personal` (default),
+`shared` with named profile readers, or `global`; shared/global recall is
+default-deny until scope visibility is explicitly enabled. Scope sharing is a
+local authorization contract, not a synonym for SLM Mesh peer coordination.
+
 ---
 
 ## Overview
