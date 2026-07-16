@@ -332,6 +332,23 @@ def test_background_one_pass_isolates_poison_operation_and_continues() -> None:
     assert (completed, failed) == (1, 1)
 
 
+def test_background_one_pass_yields_before_claiming_during_recall() -> None:
+    """Durable M018 work must obey the same recall-priority gate as legacy work."""
+    from superlocalmemory.core.recall_gate import begin_recall, end_recall
+
+    begin_recall()
+    try:
+        with patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+        ) as build_command:
+            completed, failed = _materialize_ingestion_one_pass(object())
+    finally:
+        end_recall()
+
+    assert (completed, failed) == (0, 0)
+    build_command.assert_not_called()
+
+
 def test_legacy_pending_row_backfills_through_canonical_operation(
     engine_with_mock_deps,
 ) -> None:
