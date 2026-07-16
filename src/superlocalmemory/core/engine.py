@@ -607,11 +607,10 @@ class MemoryEngine:
         ``put_nowait`` and the actual ``pending_outcomes`` INSERT runs
         on a background worker.
 
-        V3.4.40 (2026-05-09): ``fast=True`` skips the SpreadingActivation
-        channel. Deprecated in v3.6.9 — SA now completes in ~36ms after the
-        neighbor-cache fix; fast=True is slower than fast=False and reduces
-        recall quality. The parameter is accepted for backward compatibility
-        but is silently treated as False.
+        ``fast=True`` is the latency-bounded path: it skips spreading
+        activation and remote agentic verification while retaining semantic,
+        lexical, graph, temporal, and Hopfield retrieval. Use full recall when
+        maximum multi-round quality matters more than response time.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
         scopes participate in retrieval. ``None`` (the default) means "use the
@@ -631,14 +630,6 @@ class MemoryEngine:
             include_global = bool(getattr(_scope_cfg, "recall_include_global", False))
         if include_shared is None:
             include_shared = bool(getattr(_scope_cfg, "recall_include_shared", False))
-
-        if fast:
-            logger.warning(
-                "fast=True is deprecated (v3.6.9): SpreadingActivation now "
-                "completes in ~36ms; fast mode is slower and reduces quality. "
-                "Pass fast=False (the default) to silence this warning."
-            )
-            fast = False
 
         pid = profile_id or self._profile_id
 

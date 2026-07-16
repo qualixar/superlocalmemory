@@ -631,9 +631,8 @@ def run_recall(
 
     Pipeline: retrieval -> agentic sufficiency (if configured) -> post-recall updates.
 
-    V3.4.40: ``fast=True`` adds spreading_activation to the per-recall
-    extra_disabled_channels set, skipping the 5th channel for sub-second
-    response.
+    ``fast=True`` skips spreading activation and remote agentic verification,
+    retaining the bounded single-pass retrieval channels.
     """
     # Pre-operation hooks
     hook_ctx = {
@@ -673,7 +672,7 @@ def run_recall(
     # Single-hop/factual/temporal queries get WORSE with decomposition —
     # sub-query noise dilutes precision. Mode C (LLM) can trigger broadly.
     agentic_rounds = config.retrieval.agentic_max_rounds
-    if agentic_rounds > 0 and response.results:
+    if not fast and agentic_rounds > 0 and response.results:
         max_score = max((r.score for r in response.results), default=0.0)
         has_llm = llm is not None and getattr(llm, "is_available", False)
         should_trigger = (

@@ -281,7 +281,7 @@ def main() -> None:
 
     # v3.6.12 (parity-3): `search` is an alias of `recall` so the CLI has the
     # same search verb the MCP exposes (handlers dict maps both to cmd_recall).
-    recall_p = sub.add_parser("recall", aliases=["search"], help="Semantic search with 4-channel retrieval")
+    recall_p = sub.add_parser("recall", aliases=["search"], help="Multi-channel memory retrieval")
     recall_p.add_argument("query", help="Search query")
     recall_p.add_argument(
         "--limit", type=int, default=CANONICAL_RECALL_LIMIT,
@@ -290,8 +290,8 @@ def main() -> None:
     recall_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
     recall_p.add_argument(
         "--fast", action="store_true",
-        help="Skip SpreadingActivation 5th channel for sub-second response. "
-             "Other 4 channels (semantic, lexical, temporal, structural) still run. "
+        help="Skip spreading activation and remote agentic verification for a "
+             "latency-bounded response. Other configured retrieval channels still run. "
              "Use when you need recall before a tool call (e.g. before WebSearch).",
     )
     # v3.6.15: shared memory is opt-in. Unset (None) → resolve the configured

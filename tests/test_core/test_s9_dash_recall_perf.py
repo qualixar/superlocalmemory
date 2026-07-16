@@ -125,6 +125,12 @@ def test_recall_with_session_id_does_not_regress(monkeypatch) -> None:
         f"to the outcome-queue enqueue path."
     )
 
+    # And at least one enqueue landed (the producer is actually wired).
+    counters = outcome_queue.get_counters()
+    assert counters["recall_enqueued"] >= 1, \
+        "engine.recall did not call enqueue_recall — producer is unwired"
+    outcome_queue._reset_for_testing()
+
 
 def test_fast_recall_is_forwarded_to_the_retrieval_pipeline(monkeypatch) -> None:
     """The public fast flag must not be silently rewritten to full recall."""
@@ -144,9 +150,3 @@ def test_fast_recall_is_forwarded_to_the_retrieval_pipeline(monkeypatch) -> None
     MemoryEngine.recall(engine_stub, "fast witness", fast=True)
 
     assert captured["fast"] is True
-
-    # And at least one enqueue landed (the producer is actually wired).
-    counters = outcome_queue.get_counters()
-    assert counters["recall_enqueued"] >= 1, \
-        "engine.recall did not call enqueue_recall — producer is unwired"
-    outcome_queue._reset_for_testing()

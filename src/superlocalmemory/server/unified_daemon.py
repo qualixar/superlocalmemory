@@ -1987,7 +1987,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # prevent resource oversaturation. Ollama serialises concurrent
         # embedding calls and the reranker subprocess has a single lock —
         # queuing more than ~3 concurrent full recalls just adds latency.
-        # Fast recalls (SQLite/BM25 only) skip the semaphore.
+        # Fast recalls retain the bounded retrieval channels but skip remote
+        # agentic verification, so they do not need the full-recall semaphore.
         if not fast:
             await _recall_semaphore.acquire()
         try:
