@@ -556,6 +556,21 @@ async def lifespan(application: FastAPI):
     engine = None
     config = None
 
+    # The local dashboard obtains its short-lived browser credential from
+    # ``/internal/token`` before its first write or token-gated read.  A
+    # completely fresh Mode A install may not ingest or recall anything during
+    # startup, so neither of those paths has created the install token yet.
+    # Create it as part of the daemon's durable identity bootstrap instead.
+    # This keeps the token endpoint read-only (and therefore fail-closed when a
+    # token is unexpectedly missing after startup) while making every normal
+    # daemon-backed dashboard usable from its first page load.
+    try:
+        from superlocalmemory.core.security_primitives import ensure_install_token
+
+        ensure_install_token()
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("install-token bootstrap failed: %s", exc)
+
     # Register the SSE bridge inside the application lifespan.  FastAPI's
     # legacy ``on_event`` hook is deprecated and, more importantly, made a
     # second startup mechanism compete with the daemon's existing lifespan.
