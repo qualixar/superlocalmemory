@@ -485,3 +485,19 @@ class TestGeneratorRoundTrip:
         assert src.read_text(encoding="utf-8") == out.read_text(encoding="utf-8"), (
             "plugin/requirements.txt must match plugin-src/requirements.txt byte-for-byte"
         )
+
+
+class TestPluginDaemonOwnership:
+    """Every plugin MCP process must join its namespace daemon first."""
+
+    def test_posix_launcher_starts_daemon_before_mcp(self) -> None:
+        launcher = PLUGIN_SRC / "scripts" / "slm-launch"
+        source = launcher.read_text(encoding="utf-8")
+        assert "serve start" in source
+        assert source.index("serve start") < source.rindex(" mcp")
+
+    def test_windows_launcher_starts_daemon_before_mcp(self) -> None:
+        launcher = PLUGIN_SRC / "scripts" / "slm-launch.bat"
+        source = launcher.read_text(encoding="utf-8")
+        assert "serve start" in source
+        assert source.index("serve start") < source.rindex(" mcp")
