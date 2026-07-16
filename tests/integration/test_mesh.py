@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -67,6 +69,40 @@ class TestMeshPeers:
     def test_heartbeat_nonexistent(self, broker):
         result = broker.heartbeat("fake-id")
         assert result["ok"] is False
+
+    def test_heartbeat_retries_a_transient_writer_lock(self, broker, mesh_db, monkeypatch):
+        """A busy peer write must not make an otherwise healthy heartbeat fail.
+
+        WAL allows readers alongside a writer, but SQLite still admits only one
+        writer at a time.  The broker owns a short retry budget so concurrent
+        agent heartbeats are retried rather than surfaced as ``database is
+        locked`` to the caller.
+        """
+        peer = broker.register_peer("locked-session")
+
+        def _zero_wait_connection():
+            conn = sqlite3.connect(str(mesh_db), timeout=0)
+            conn.execute("PRAGMA busy_timeout=0")
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(broker, "_conn", _zero_wait_connection)
+        lock_holder = sqlite3.connect(
+            str(mesh_db), timeout=0, check_same_thread=False,
+        )
+        lock_holder.execute("BEGIN IMMEDIATE")
+
+        def _release_lock():
+            time.sleep(0.05)
+            lock_holder.rollback()
+            lock_holder.close()
+
+        releaser = threading.Thread(target=_release_lock)
+        releaser.start()
+        try:
+            assert broker.heartbeat(peer["peer_id"]) == {"ok": True}
+        finally:
+            releaser.join(timeout=1)
 
     def test_update_summary(self, broker):
         r = broker.register_peer("session-1", summary="old")
