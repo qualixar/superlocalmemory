@@ -2443,7 +2443,12 @@ def _materializer_actor_id() -> str:
     return f"daemon-capability:{descriptor.capability_fingerprint}"
 
 
-def _materialize_ingestion_one_pass(engine, *, limit: int = 50) -> tuple[int, int]:
+def _materialize_ingestion_one_pass(
+    engine,
+    *,
+    limit: int = 50,
+    min_queryable_age_seconds: float = 1.0,
+) -> tuple[int, int]:
     """Materialize durable M018 work once; return ``(complete, failed)``."""
     # The durable queue shares the embedder/LLM with foreground recall just
     # like the legacy pending queue.  Yield before even constructing/claiming
@@ -2456,7 +2461,10 @@ def _materialize_ingestion_one_pass(engine, *, limit: int = 50) -> tuple[int, in
 
     command = build_engine_ingestion_command(engine)
     completed = failed = 0
-    for operation in command.repository.list_materializable(limit=limit):
+    for operation in command.repository.list_materializable(
+        limit=limit,
+        min_queryable_age_seconds=min_queryable_age_seconds,
+    ):
         try:
             result = command.materialize(operation.operation_id)
         except Exception as exc:

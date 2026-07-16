@@ -266,18 +266,30 @@ class IngestionOperationRepository:
             )
         ]
 
-    def list_materializable(self, *, limit: int = 50) -> list[IngestionOperation]:
-        """Return durable work in FIFO order for the background materializer."""
+    def list_materializable(
+        self,
+        *,
+        limit: int = 50,
+        min_queryable_age_seconds: float = 0.0,
+    ) -> list[IngestionOperation]:
+        """Return durable work in FIFO order for the background materializer.
+
+        A short age gate can protect a freshly admitted receipt from racing
+        the user's immediate recall on single-queue local model runtimes such
+        as Ollama.  Failed retries and expired leases remain immediately due.
+        """
         now = time.time()
+        grace_modifier = f"-{max(0.0, float(min_queryable_age_seconds))} seconds"
         return [
             self._from_row(row)
             for row in self.db.execute(
                 "SELECT * FROM ingestion_operations "
-                "WHERE state='queryable' "
+                "WHERE (state='queryable' AND created_at <= "
+                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) "
                 "OR (state='failed' AND next_retry_at <= ?) "
                 "OR (state='enriching' AND lease_expires_at <= ?) "
                 "ORDER BY created_at, rowid LIMIT ?",
-                (now, now, max(1, int(limit))),
+                (grace_modifier, now, now, max(1, int(limit))),
             )
         ]
 

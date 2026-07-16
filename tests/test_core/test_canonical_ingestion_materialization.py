@@ -264,7 +264,9 @@ def test_background_one_pass_completes_queryable_operation(
         trusted_actor_id="daemon-capability:owned-instance",
     ))
 
-    completed, failed = _materialize_ingestion_one_pass(engine)
+    completed, failed = _materialize_ingestion_one_pass(
+        engine, min_queryable_age_seconds=0,
+    )
 
     assert (completed, failed) == (1, 0)
     assert command.repository.get(receipt.operation_id).state is IngestionState.COMPLETE
@@ -305,8 +307,9 @@ def test_background_one_pass_isolates_poison_operation_and_continues() -> None:
     ]
 
     class FakeRepository:
-        def list_materializable(self, *, limit):
+        def list_materializable(self, *, limit, min_queryable_age_seconds):
             assert limit == 50
+            assert min_queryable_age_seconds == 1.0
             return operations
 
     class FakeCommand:
