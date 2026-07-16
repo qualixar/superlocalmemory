@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -82,6 +85,8 @@ def test_repository_clone_has_only_scoped_lifecycle_installers() -> None:
 
 
 def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
+    if shutil.which("npm") is None:
+        pytest.skip("npm artifact is executed by the dedicated installer matrix")
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert package["bin"] == {
         "slm": "./bin/slm-npm",

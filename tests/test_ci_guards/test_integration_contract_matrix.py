@@ -7,6 +7,7 @@ configuration is not the same claim as launching that external client.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from scripts.integration_compatibility import (
@@ -115,6 +116,19 @@ def test_evidence_counts_do_not_conflate_local_contracts_with_host_runtime(
     # Evidence must be deterministic and safe to check into release artifacts.
     assert evidence == build_evidence(ROOT, manifest, work_dir=tmp_path / "again")
     json.dumps(evidence, sort_keys=True)
+
+
+def test_evidence_is_canonical_when_manifest_client_order_changes(
+    tmp_path: Path,
+) -> None:
+    """Checked-in release evidence must not vary with input iteration order."""
+    manifest = load_manifest(MANIFEST)
+    reordered = deepcopy(manifest)
+    reordered["clients"].reverse()
+
+    assert build_evidence(manifest=manifest, repo=ROOT, work_dir=tmp_path) == (
+        build_evidence(repo=ROOT, manifest=reordered, work_dir=tmp_path / "reordered")
+    )
 
 
 def test_checked_in_compatibility_evidence_matches_executable_matrix(

@@ -273,7 +273,19 @@ def build_evidence(
     validation = validate_local_contracts(repo, manifest, work_dir=work_dir)
     if validation["failures"]:
         raise RuntimeError(f"integration contract failures: {validation['failures']!r}")
-    clients = manifest["clients"]
+    # Evidence is a release artifact. Canonicalize list order so equivalent
+    # manifests produce byte-stable JSON across Python versions and test
+    # collection orders, rather than making CI depend on insertion order.
+    clients = sorted(manifest["clients"], key=lambda client: client["id"])
+    checks = sorted(
+        validation["checks"],
+        key=lambda check: (
+            check["client_id"],
+            check["contract"],
+            check["checker"],
+            check["detail"],
+        ),
+    )
     return {
         "schema": SCHEMA,
         "summary": {
@@ -292,7 +304,7 @@ def build_evidence(
             "checks_run": validation["checks_run"],
         },
         "clients": clients,
-        "checks": validation["checks"],
+        "checks": checks,
     }
 
 
