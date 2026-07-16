@@ -149,35 +149,52 @@ def register_core_tools(server, get_engine: Callable) -> None:
             # is_daemon_running() and daemon_request() both use blocking urllib
             # against the same uvicorn server — run in threads so the MCP
             # event loop stays unblocked (#34 class bug).
-            if await _asyncio.to_thread(is_daemon_running):
-                resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
-                    "content": content, "tags": tags, "metadata": meta,
-                    "scope": scope, "shared_with": _shared_list,
-                    "session_id": session_id,
-                    "idempotency_key": effective_idempotency_key or None,
-                })
-                if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
-                    fids = resp.get("fact_ids") or []
-                    materialization_state = resp.get("materialization_state")
-                    if materialization_state is None:
-                        materialization_state = (
-                            "complete" if resp.get("status") == "stored" else "queryable"
-                        )
-                    pending = materialization_state != "complete"
-                    return {
-                        "success": True,
-                        "fact_ids": fids,
-                        "count": int(resp.get("count", len(fids))),
-                        "pending": pending,
-                        "pending_id": resp.get("pending_id") if pending else None,
-                        "operation_id": resp.get("operation_id"),
-                        "materialization_state": materialization_state,
-                        "message": (
-                            "Stored through canonical daemon ingestion."
-                            if not pending
-                            else "Queryable now; canonical enrichment is still running."
-                        ),
-                    }
+            daemon_owned = await _asyncio.to_thread(is_daemon_running)
+            if daemon_owned:
+                # A positively identified daemon owns this database. Never
+                # spawn a WorkerPool writer after a transient daemon failure:
+                # that creates the competing writers which SQLite WAL cannot
+                # support. Retry the canonical path, then return an explicit
+                # retryable result to the MCP client.
+                for attempt in range(3):
+                    resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
+                        "content": content, "tags": tags, "metadata": meta,
+                        "scope": scope, "shared_with": _shared_list,
+                        "session_id": session_id,
+                        "idempotency_key": effective_idempotency_key or None,
+                    })
+                    if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
+                        fids = resp.get("fact_ids") or []
+                        materialization_state = resp.get("materialization_state")
+                        if materialization_state is None:
+                            materialization_state = (
+                                "complete" if resp.get("status") == "stored" else "queryable"
+                            )
+                        pending = materialization_state != "complete"
+                        return {
+                            "success": True,
+                            "fact_ids": fids,
+                            "count": int(resp.get("count", len(fids))),
+                            "pending": pending,
+                            "pending_id": resp.get("pending_id") if pending else None,
+                            "operation_id": resp.get("operation_id"),
+                            "materialization_state": materialization_state,
+                            "message": (
+                                "Stored through canonical daemon ingestion."
+                                if not pending
+                                else "Queryable now; canonical enrichment is still running."
+                            ),
+                        }
+                    if attempt < 2:
+                        await _asyncio.sleep(0.05 * (attempt + 1))
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "error": (
+                        "Canonical daemon is temporarily unavailable; retry the "
+                        "same remember operation without starting a second writer."
+                    ),
+                }
         except Exception as dexc:
             logger.debug("MCP remember via daemon failed, pending fallback: %s", dexc)
 

@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger("superlocalmemory.mesh")
 import os as _os
@@ -37,6 +37,11 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data dumps
 MESSAGE_TTL_HOURS = 48   # Offline messages expire after 48h
 MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+
+_T = TypeVar("_T")
+_WRITE_RETRY_ATTEMPTS = 6
+_WRITE_RETRY_BASE_SECONDS = 0.025
+_WRITE_BUSY_TIMEOUT_MS = 250
 
 
 class MeshBroker:
@@ -109,11 +114,55 @@ class MeshBroker:
     # -- Connection helper --
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
+        # WAL is configured during database initialization and persists with the
+        # database. Reissuing journal_mode=WAL for every short-lived mesh
+        # connection is itself a schema-level write that can contend with the
+        # daemon. Mesh writes below use bounded whole-transaction retries.
+        conn = sqlite3.connect(
+            self._db_path,
+            timeout=_WRITE_BUSY_TIMEOUT_MS / 1000,
+        )
+        conn.execute(f"PRAGMA busy_timeout={_WRITE_BUSY_TIMEOUT_MS}")
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _is_transient_lock(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database is busy" in message
+
+    def _write_with_retry(
+        self,
+        operation: Callable[[sqlite3.Connection], _T],
+    ) -> _T:
+        """Run one idempotent mesh mutation with a bounded SQLite retry budget.
+
+        SQLite WAL lets reads continue while a write is in progress, but it
+        still permits a single writer. Retrying the entire short transaction on
+        a fresh connection avoids leaking a transient writer collision to an
+        agent heartbeat or mesh command.
+        """
+        last_error: sqlite3.OperationalError | None = None
+        for attempt in range(_WRITE_RETRY_ATTEMPTS):
+            conn = self._conn()
+            try:
+                return operation(conn)
+            except sqlite3.OperationalError as exc:
+                if not self._is_transient_lock(exc):
+                    raise
+                last_error = exc
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+            finally:
+                conn.close()
+
+            if attempt < _WRITE_RETRY_ATTEMPTS - 1:
+                time.sleep(_WRITE_RETRY_BASE_SECONDS * (2 ** attempt))
+
+        assert last_error is not None
+        raise last_error
 
     # -- Peers --
 
@@ -170,8 +219,7 @@ class MeshBroker:
             conn.close()
 
     def heartbeat(self, peer_id: str) -> dict:
-        conn = self._conn()
-        try:
+        def _heartbeat(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             cursor = conn.execute(
                 "UPDATE mesh_peers SET last_heartbeat=?, status='active' WHERE peer_id=?",
@@ -181,8 +229,8 @@ class MeshBroker:
                 return {"ok": False, "error": "peer not found"}
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_heartbeat)
 
     def update_summary(self, peer_id: str, summary: str) -> dict:
         conn = self._conn()
