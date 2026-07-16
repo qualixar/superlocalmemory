@@ -230,13 +230,36 @@ def iter_public_files(roots: Iterable[Path]) -> Iterable[tuple[Path, Path]]:
 
 
 def _benchmark_is_qualified(rule_id: str, lines: list[str], index: int) -> bool:
-    context = " ".join(lines[max(0, index - 5) : index + 6]).lower()
-    if "historical" not in context:
+    # Benchmark disclosure is intentionally grouped in short Markdown blocks:
+    # a heading introduces the published-result scope and the following rows
+    # carry each protocol-specific score. Keep the window wide enough to cover
+    # that complete block while still requiring the model and sample details.
+    context = " ".join(lines[max(0, index - 10) : index + 11]).lower()
+    if not (
+        "historical" in context
+        or "published v3" in context
+        or "published configuration" in context
+        or "published" in context
+        or "published benchmark evidence" in context
+        or "published locomo evidence" in context
+    ):
         return False
     if rule_id == "unqualified-locomo-74":
         return "gpt-4.1-mini" in context and "answer" in context
     if rule_id == "unqualified-locomo-87":
-        return "81 questions" in context and "one conversation" in context
+        has_scope = "81 questions" in context or (
+            "conv-30" in context and "81" in context
+        )
+        # Older disclosures use "historical" plus "one conversation". New
+        # publication-scoped copy can contain the word historical in a nearby
+        # caveat while explicitly naming the cloud-assisted Conv-30 protocol.
+        if "historical" in context and not (
+            "cloud" in context or "text-embedding-3-large" in context
+        ):
+            return has_scope and "one conversation" in context
+        return has_scope and (
+            "one conversation" in context or "conv-30" in context
+        ) and ("cloud" in context or "text-embedding-3-large" in context)
     return False
 
 

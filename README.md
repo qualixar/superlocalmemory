@@ -2,10 +2,10 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.7.0+rc.1</h1>
+<h1 align="center">SuperLocalMemory V3.7</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.7.0+rc.1</code> — <strong>Local release-witness candidate; not published.</strong><br/>
+<p align="center"><code>v3.7.0</code> — <strong>Release package; registry publication gate pending.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -30,8 +30,10 @@ Agent-memory systems make different storage, model-provider, and deployment trad
 
 SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and Fisher-informed scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
-**Evidence boundary:** current V3.7 LoCoMo result is unknown. The historical
-paper experiments below are versioned research results, not a release score.
+**Published benchmark evidence carried into V3.7:** the architecture evaluated
+in the V3 paper remains the foundation of this release. The figures below keep
+their original LoCoMo protocol, answer-construction, model, and sample scope;
+they are not a claim of a newly rerun 3.7 package benchmark.
 
 ### The V3.7 capability architecture
 
@@ -106,16 +108,31 @@ deployment.
 
 **[Watch the SuperLocalMemory demo on YouTube](https://www.youtube.com/watch?v=PMWW_ypsL60)** — a five-minute walkthrough of installation, setup, recall, cache, and compression. The video shows a product walkthrough; use the commands and release notes in this README as the current release contract.
 
-### Historical research results
+### Published LoCoMo evidence carried into V3.7
 
-The papers report versioned experiments; they are not measurements of the current V3.7 release candidate:
+The V3 paper evaluates the architecture carried into V3.7. Every figure below
+is protocol-scoped, so a reader can distinguish local retrieval, answer
+construction, and cloud-assisted evaluation rather than treating unlike runs as
+one score.
 
-- Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction. It is not an end-to-end zero-LLM result.
-- Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components. It is not a full-dataset score.
+| Published configuration | LoCoMo aggregate | Protocol scope | What the result establishes |
+|---|---:|---|---|
+| **Mode A Raw** | **60.4%** | 10 conversations; 1,276 scored questions; local embeddings, local retrieval, and zero-LLM answer construction | End-to-end local answer construction under the published V3 protocol. |
+| **Mode A Retrieval** | **74.8%** | 10 conversations; 1,276 scored questions; local retrieval, then GPT-4.1-mini answer synthesis | Retrieval evidence: local retrieval contributes the evidence, while the disclosed external model constructs the final answer. |
+| **Mode C** | **87.7%** | Conv-30 only; 81 scored questions; text-embedding-3-large plus GPT-4.1-mini answer generation and judge | Cloud-assisted configuration on one fully disclosed conversation; not a full-dataset result. |
 
-See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) and the [official LoCoMo paper](https://arxiv.org/abs/2402.17753) for protocols and limitations. The current V3.7 LoCoMo result is unknown; no historical score is a V3.7 release claim.
+Published category results: Mode A Retrieval scored **72.0%** single-hop,
+**70.3%** multi-hop, **80.0%** temporal, and **85.0%** open-domain. Mode C
+scored **64.0%** single-hop, **100.0%** multi-hop, and **86.0%** open-domain
+on its 81-question Conv-30 scope (no temporal category was reported for that
+run). Across six LoCoMo conversations, the paper reports **71.7%** with the
+information-geometric layers versus **58.9%** without them: **+12.7pp**.
 
-The preprints also contain ablation and mathematical analyses. Treat those as research evidence for the evaluated versions, not guarantees about every current runtime path.
+See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) and the [official
+LoCoMo paper](https://arxiv.org/abs/2402.17753) for the full protocol,
+ablation table, and limitations. These are published V3 architecture results
+carried into V3.7—not a substitute for a newly rerun release-artifact
+benchmark.
 
 ---
 

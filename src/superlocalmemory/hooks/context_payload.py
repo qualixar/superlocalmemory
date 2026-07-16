@@ -22,7 +22,7 @@ from typing import Callable, Iterable
 from superlocalmemory.core.security_primitives import redact_secrets
 
 
-VERSION = "3.4.23"
+VERSION = "3.7.0"
 DEFAULT_TOP_K = 10
 DEFAULT_DECISIONS_K = 5
 DEFAULT_MEMORIES_K = 10

@@ -1,1 +1,1 @@
-superlocalmemory==3.7.0+rc.1
+superlocalmemory==3.7.0

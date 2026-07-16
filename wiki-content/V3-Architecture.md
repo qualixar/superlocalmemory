@@ -212,13 +212,14 @@ verification.
 
 Evaluated on the [LoCoMo benchmark](https://arxiv.org/abs/2402.09714) — 10 multi-session conversations, 1,986 total questions.
 
-These are historical paper experiments, not current V3.7 measurements:
+These are published V3 architecture experiments carried into V3.7 messaging:
 
-- Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction.
-- Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components.
-- The raw zero-LLM and category results remain documented in the versioned paper and must not be compared with other vendors without matching protocols.
+- **60.4%** Mode A Raw across 10 conversations / 1,276 questions with zero-LLM answer construction.
+- **74.8%** Mode A Retrieval across the same scope with local retrieval and GPT-4.1-mini answer synthesis.
+- **87.7%** Mode C on Conv-30 / 81 questions with cloud embeddings and GPT-4.1-mini answer generation and judge.
+- The raw zero-LLM and category results remain documented in the paper and must not be compared with other vendors without matching protocols.
 
-See the versioned papers for their evaluated protocol, ablations, and results.
+These scores retain their evaluated protocol scope; they are not a newly rerun 3.7 package benchmark. See the paper for ablations and full results.
 Those historical experiments are not performance claims for the current V3.7
 runtime or a cross-vendor comparison.
 

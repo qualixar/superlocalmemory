@@ -17,7 +17,7 @@ from superlocalmemory.optimize.proxy.lifecycle import HookChain
 
 logger = logging.getLogger("slm.optimize.proxy")
 
-_PROXY_VERSION = "3.6.3"
+_PROXY_VERSION = "3.7.0"
 _REQUEST_TIMEOUT_S = 300.0
 _CONNECT_TIMEOUT_S = 10.0
 _MAX_CONNECTIONS = 100

@@ -64,7 +64,7 @@ router = APIRouter(prefix="/api/v3", tags=["brain"])
 # LLD-03 v2 stratum space = 4 query types × 3 entity bins × 4 time buckets.
 _STRATA_TOTAL: int = 48
 
-_VERSION: str = "3.4.23"
+_VERSION: str = "3.7.0"
 
 # Banned metric names (LLD-04 U4). Kept as a tuple for grep visibility;
 # the source-level test asserts we don't accidentally reintroduce them.

@@ -114,11 +114,13 @@ Yes: `slm mode a`, `slm mode b`, or `slm mode c`. Your memories are shared acros
 
 ### What are the accuracy differences?
 
-The papers contain versioned LoCoMo experiments, not current-release guarantees:
-- Historical V3 research result: **74.8%** used local retrieval with GPT-4.1-mini answer construction.
-- Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components.
+The V3 paper provides published LoCoMo evidence carried into V3.7 architecture:
 
-The current V3.7 result is unknown. See the linked preprints for their original protocols and limitations.
+- **60.4%** Mode A Raw across 10 conversations / 1,276 questions with zero-LLM answer construction.
+- **74.8%** Mode A Retrieval across the same scope with local retrieval and GPT-4.1-mini answer synthesis.
+- **87.7%** Mode C on Conv-30 / 81 questions with cloud embeddings and GPT-4.1-mini answer generation and judge.
+
+The figures retain their original protocol scope; they are not a newly rerun 3.7 package benchmark. See the linked preprint for category results, ablations, and limitations.
 
 ## Privacy and Security
 

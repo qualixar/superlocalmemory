@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "3.7.0+rc.1",
+  "version": "3.7.0",
   "description": "Local-first agent memory with MCP and an agent-native CLI. Documented clients include Claude Code, Cursor, and Windsurf.",
   "keywords": [
     "ai-memory",
