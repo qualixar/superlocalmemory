@@ -569,4 +569,6 @@ Start here → **[qualixar.com](https://qualixar.com)** · [All papers on Qualix
 
 If this project solves a real problem for you, **please star the repo** — it helps other developers discover Qualixar and signals that the AI agent reliability community is growing.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=qualixar/superlocalmemory&type=Date)](https://star-history.com/#qualixar/superlocalmemory&Date)
+[![Star SuperLocalMemory on GitHub](https://img.shields.io/github/stars/qualixar/superlocalmemory?style=for-the-badge&logo=github&label=Star%20on%20GitHub)](https://github.com/qualixar/superlocalmemory)
+
+The live Star History chart is intentionally not embedded: its upstream service timed out during release validation. The link above is the stable, direct way to star and follow the repository.
