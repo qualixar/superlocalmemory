@@ -26,6 +26,7 @@ This evidence pack separates shipped truth, benchmark truth, public claims, reme
 13. [V3.7 implementation Wave 2](12-V3.7-IMPLEMENTATION-WAVE-2.md) — canonical data-root migration, two-HOME installed-artifact proof, discovered defects, and the installer approval gate.
 14. [V3.7 implementation Wave 2B](13-V3.7-IMPLEMENTATION-WAVE-2B-INSTALLERS.md) — rebuilt npm, Unix/macOS, and Windows installer contracts; artifact lifecycle proof; consent boundary; discovered P0/P1 defects; and the now-superseded DMG decision.
 15. [V3.7 implementation Wave 3](14-V3.7-IMPLEMENTATION-WAVE-3-INTEGRITY.md) — canonical integrity changes, Score Contract v2, authenticated mutation boundary, package truth, documentation corrections, and remaining release gates.
+16. [V3.7 runtime witness Wave 4](16-V3.7-RUNTIME-WITNESS-WAVE-4.md) — real-user Mode A/B/C, Ollama and OpenRouter evidence, latency contracts, defects closed during the witness, and remaining stable-release gates.
 
 ## Evidence vocabulary
 
