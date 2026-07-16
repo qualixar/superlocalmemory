@@ -1,7 +1,9 @@
-# V3 Architecture
+# V3.7 Architecture
 
-SuperLocalMemory V3 combines local-first storage, multi-channel retrieval,
-optional mathematical scoring layers, lifecycle controls, and MCP clients.
+SuperLocalMemory combines a local canonical memory store, multi-channel
+retrieval, lifecycle and learning controls, Optimize, Mesh, and MCP/CLI/IDE
+surfaces. It is an operator-controlled memory runtime rather than a single
+vector index.
 
 ---
 
@@ -14,14 +16,14 @@ optional mathematical scoring layers, lifecycle controls, and MCP clients.
 │  ┌──────────────────┐  ┌────────────────────────────┐ │
 │  │  Product Shell     │  │  Mathematical Engine       │ │
 │  │                    │  │                            │ │
-│  │  CLI                │  │  Multi-channel Retrieval  │ │
+│  │  CLI + Python SDK   │  │  Multi-channel Retrieval  │ │
 │  │  MCP Server         │  │  Fisher-informed Scoring  │ │
 │  │  Web Dashboard     │  │  Sheaf Consistency         │ │
 │  │  Named MCP Clients │  │  Langevin Lifecycle        │ │
-│  │  Learning (LightGBM│  │  11-Step Ingestion         │ │
+│  │  Learning (LightGBM│  │  Durable Ingestion         │ │
 │  │  Trust (Bayesian)  │  │  Scene + Bridge Discovery  │ │
 │  │  Compliance (ABAC) │  │  Cross-Encoder Rerank      │ │
-│  │  Profiles           │  │  3 Operating Modes         │ │
+│  │  Profiles + Mesh    │  │  3 Operating Modes         │ │
 │  └──────────────────┘  └────────────────────────────┘ │
 └──────────────────────────────────────────────────────┘
 ```
@@ -94,6 +96,22 @@ Mode A runs the core memory path without a cloud model provider. Retrieval quali
 
 ---
 
+## Seven-stage execution model
+
+SLM uses seven logical stages to make the product inspectable from a write to
+an agent-facing recall. They are not seven services and they do not imply that
+every optional backend is active for every request.
+
+| Stage | Responsibility | Inspect with |
+|---|---|---|
+| 1. Admission | Actor, profile/scope, source identity, idempotency, raw evidence | `remember --json`, MCP write receipt |
+| 2. Queryable core | Transactional SQLite fact + FTS checkpoint | receipt `materialization_state` |
+| 3. Enrichment | Fact/entity/scene/graph/temporal/provenance/embedding derivations | operation status and daemon logs |
+| 4. Brain and lifecycle | Consolidation, feedback/outcomes, patterns, rewards, forgetting and retention | Brain, Health and Operations workspaces |
+| 5. Retrieval | Candidate producers, fusion, optional rerank and graph scoring | `slm trace` |
+| 6. Context safety | Scope/policy, secret redaction, provenance, budgeted untrusted renderer | session/MCP context output |
+| 7. Operations | Backups, audit, daemon, Scale Engine, cache/compression and Mesh | `slm doctor`, dashboard, diagnostics |
+
 ## Durable Ingestion Pipeline
 
 Every accepted write owns an M018 operation and immutable replay identity.
@@ -123,6 +141,25 @@ V3 uses an additive SQLite schema with FTS5 full-text search. The exact table co
 
 Core data tables are profile-scoped. M017 adds scope to CCQ blocks; M018 owns canonical ingestion operations. The legacy `pending.db` spool is an offline compatibility input whose replay submits through M018.
 
+### Canonical store and Scale Engine
+
+SQLite and sqlite-vec are the canonical store. CozoDB (graph) and LanceDB
+(vector) are derived Scale Engine projections; they do not replace the
+canonical database on installation. The supported activation sequence is:
+
+```bash
+slm db scale prepare
+slm db scale verify <stage-id>
+slm db scale promote <stage-id>
+# If needed:
+slm db scale rollback <backup-id>
+```
+
+Prepare builds private projections, verify compares them against the active
+SQLite source, promote takes an explicit rollback point, and rollback restores
+that named point. This is a correctness control, not a published throughput or
+memory-count guarantee.
+
 ---
 
 ## Code Structure
@@ -147,7 +184,7 @@ superlocalmemory/src/superlocalmemory/
 
 ---
 
-## Dashboard
+## Dashboard and operational workspaces
 
 ```bash
 slm dashboard    # Opens at http://localhost:8765
@@ -165,7 +202,11 @@ slm dashboard    # Opens at http://localhost:8765
 
 </details>
 
-17 tabs: Dashboard, Recall Lab, Knowledge Graph, Memories, Trust, Math Health, Compliance, Learning, IDE Connections, Settings, and more.
+The dashboard exposes Dashboard, Brain, Knowledge Graph, Memories, Health,
+Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and
+Optimize workspaces. Some data is mode- or configuration-dependent. A visible
+panel means the API surface is available; use CLI/MCP traces for deployment
+verification.
 
 ## Benchmarks
 
@@ -177,20 +218,9 @@ These are historical paper experiments, not current V3.7 measurements:
 - Historical Mode C result: **87.7%** on **81 questions from one conversation** with cloud-assisted components.
 - The raw zero-LLM and category results remain documented in the versioned paper and must not be compared with other vendors without matching protocols.
 
-### Ablation (conv-30, 81 questions)
-
-| Removed | Impact |
-|:--------|:------:|
-| Cross-encoder reranking | **-30.7pp** |
-| Fisher-Rao metric | **-10.8pp** |
-| All math layers | **-7.6pp** |
-| BM25 channel | **-6.5pp** |
-| Sheaf consistency | -1.7pp |
-| Entity graph | -1.0pp |
-
-Mathematical layers contribute **+12.7pp average** across 6 conversations (n=832), with up to **+19.9pp** on the most challenging dialogues.
-
-Full methodology and results in the [V3 paper](https://arxiv.org/abs/2603.14588) ([Zenodo](https://zenodo.org/records/19038659)).
+See the versioned papers for their evaluated protocol, ablations, and results.
+Those historical experiments are not performance claims for the current V3.7
+runtime or a cross-vendor comparison.
 
 ---
 

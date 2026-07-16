@@ -30,6 +30,70 @@ Agent-memory systems make different storage, model-provider, and deployment trad
 
 SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and Fisher-informed scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
+**Evidence boundary:** current V3.7 LoCoMo result is unknown. The historical
+paper experiments below are versioned research results, not a release score.
+
+### The V3.7 capability architecture
+
+SuperLocalMemory is one local control plane for persistent agent context. It is
+not just a vector store: the same runtime can accept evidence, build and govern
+memory, retrieve bounded evidence for an agent, and expose cache, compression,
+and peer-coordination controls through a CLI, MCP, dashboard, and supported
+IDE integrations.
+
+```text
+ IDEs, agents, scripts, connectors, and humans
+             │  CLI · MCP (HTTP/stdio) · hooks · dashboard
+             ▼
+ ┌────────────────────────── SLM CONTROL PLANE ──────────────────────────┐
+ │  1. Admission       identity, scope, idempotency, raw evidence         │
+ │  2. Queryable core  SQLite facts + FTS durable receipt                  │
+ │  3. Enrichment      facts, entities, scenes, time, provenance, graph   │
+ │  4. Memory brain    feedback, patterns, rewards, consolidation          │
+ │  5. Retrieval       semantic · BM25 · temporal · Hopfield · activation │
+ │  6. Context safety  policy, trust, provenance, redaction, budgets      │
+ │  7. Operations      lifecycle, audit, cache/compress, mesh, backups    │
+ └───────────────────────────────────────────────────────────────────────┘
+             │
+             ▼
+ SQLite + sqlite-vec canonical store  ──► optional graph/vector projections
+```
+
+The seven stages are an execution model, not a promise that every optional
+enricher or retrieval channel runs for every request. The receipt, trace, and
+health surfaces expose the stages actually completed by the installed runtime.
+
+| Capability | What ships today | Operator boundary |
+|---|---|---|
+| **Memory types and lifecycle** | Atomic facts, episodic scenes, temporal events, canonical entities, profiles/scopes, consolidation, forgetting and retention controls | Lifecycle policies and retention decisions remain operator-configured. |
+| **Ingestion** | Durable raw-to-complete operation state, fact extraction, entity resolution, graph/temporal/provenance derivations, and replay-safe identity | `--sync` waits for declared stages; dependencies and mode determine which enrichers are available. |
+| **Retrieval and recall** | Semantic, lexical, temporal, Hopfield and spreading-activation candidate channels; RRF fusion, optional reranking and graph score enhancement | Healthy channels participate; response provenance states the evidence used. |
+| **Brain and learning** | Behavioral patterns, feedback/outcome records, rewards, consolidation, LightGBM-related ranking components, soft prompts, and guarded skill-evolution workflows | Learning is evidence-driven; it does not claim autonomous correctness or guaranteed improvement. |
+| **Knowledge graph and entities** | Canonical entities, aliases, entity profiles, graph edges, scenes, timelines, explorer and graph APIs | Stored/derived graph data is evidence, not an instruction authority. |
+| **Scale Engine** | SQLite + sqlite-vec are canonical. CozoDB graph and LanceDB vector projections are packaged and managed with prepare → verify → promote → rollback | Promotion is explicit and parity-gated; do not advertise an unverified projection as the source of truth. |
+| **Optimize** | Exact cache, tagged invalidation, safe compression, opt-in aggressive prose compression, CCR originals, proxy/MCP/skill surfaces | Only proxy intercepts a primary provider turn. MCP/skill cache results explicitly routed through SLM. |
+| **Mesh** | Authenticated peer messages, inbox/outbox, locks, offline queue, optional discovery and mesh MCP tools | Mesh is coordination, not automatic replicated memory or conflict resolution. |
+| **Governance and operations** | Provenance, audit/retention/policy surfaces, export/erasure controls, diagnostics, health, backups and daemon lifecycle | These are engineering controls, not a legal certification. |
+| **Integrations** | CLI, Python SDK, MCP HTTP/stdio, Claude plugin, Codex add-on, supported IDE configurations, Gmail/Calendar/transcript adapters | Hooks, IDE edits, connectors, and networked adapters require explicit operator activation. |
+
+### What the dashboard exposes
+
+`slm dashboard` opens a local operational view of the same control plane:
+
+| Workspace | Use it to inspect or control |
+|---|---|
+| Dashboard and Health | daemon identity, storage/runtime health, diagnostics and recent activity |
+| Brain | consolidation, behavioral patterns, outcomes/rewards, learning state and soft prompts |
+| Knowledge Graph and Memories | graph neighborhoods, entities, scenes, temporal evidence, memory inspection and mutation |
+| Operations | ingestion-operation state, traces, maintenance and lifecycle work |
+| Entity Explorer and Skill Evolution | compiled entity summaries/timelines; opt-in skill lineage, budgets and verification outcomes |
+| Mesh Peers | configured peers, inbox/outbox, pending coordination and locks |
+| Settings and Optimize | mode/provider/configuration; cache, compression and savings telemetry |
+
+Dashboard visibility is not a substitute for runtime proof: use `slm doctor`,
+`slm health`, `slm trace`, and the relevant CLI/MCP operation to validate a
+deployment.
+
 ### Historical research results
 
 The papers report versioned experiments; they are not measurements of the current V3.7 release candidate:
@@ -104,7 +168,7 @@ optional reranking, and entity-graph score enhancement. The entity graph does
 not create an independent candidate in the current implementation. Core memory
 is SQLite-backed. SQLite and sqlite-vec remain the canonical source of truth.
 The packaged Scale Engine can maintain CozoDB graph and LanceDB vector
-projections, but it is deliberately inactive until
+projections, and it remains outside active retrieval paths until
 `slm db scale prepare`, `verify`, and `promote` prove parity against the
 canonical store. This makes the capability available on a fresh installation
 without silently migrating an existing user's data.
@@ -373,7 +437,10 @@ Available controls include local export and erasure commands, hash-chained audit
 ```bash
 slm dashboard    # Opens at http://localhost:8765
 ```
-17-tab sidebar with Knowledge Graph (Sigma.js WebGL, community detection), Health Monitor, Entity Explorer, Mesh Peers, Ingestion Status, Privacy blur mode. Cross-platform: macOS + Windows + Linux.
+The dashboard includes Dashboard, Brain, Knowledge Graph, Memories, Health,
+Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and
+Optimize workspaces. Features are populated only when their corresponding
+runtime capability is enabled and healthy.
 
 **Release history:**
 

@@ -19,6 +19,7 @@
 
 **Architecture**
 * [Architecture Overview](V3-Architecture)
+* [Capabilities and Operations](Capabilities-and-Operations)
 * [Mathematical Foundations](V3-Mathematical-Foundations)
 
 **Enterprise**

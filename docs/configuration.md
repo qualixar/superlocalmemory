@@ -45,9 +45,9 @@ Everything from Mode A, plus a local LLM (via Ollama) that improves recall by un
 **Setup:**
 
 ```bash
-# Install Ollama (if not already installed)
-brew install ollama          # macOS
-curl -fsSL https://ollama.com/install.sh | sh  # Linux
+# Install Ollama using its reviewed package/instructions for your platform.
+# macOS example:
+brew install ollama
 
 # Pull a model
 ollama pull llama3.2

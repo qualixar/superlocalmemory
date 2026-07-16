@@ -1,32 +1,72 @@
-# SuperLocalMemory V3
+# SuperLocalMemory V3.7
 
-> **Local-first memory, cache, and compression controls for AI-agent workflows.**
-> *Documented clients include Claude Code, Cursor, Windsurf, Codex, and other named MCP configurations.*
+> **Local-first agent memory, retrieval, cache, compression, and trusted-peer coordination in one operator-controlled runtime.**
 
-SuperLocalMemory gives AI assistants persistent memory across sessions. Optimize adds an opt-in exact cache, content-dependent compression, and proxy or agent-routed surfaces. Core memory state uses a local data root; optional providers, connectors, backup, and downloads have separate network behavior.
+SuperLocalMemory turns conversations, observations, and connected-source
+evidence into durable memory that can be recalled through a CLI, MCP, hooks,
+dashboard, or documented IDE integrations. SQLite + sqlite-vec are the
+canonical local store. The product also includes an explicit Scale Engine for
+CozoDB graph and LanceDB vector projections, a cache/compression module, and
+SLM Mesh coordination controls.
 
-### v3.6.12 remote coordination controls
-**`SLM_REMOTE=1`** (default off) exposes selected HTTP surfaces to configured LAN clients. This is not replicated memory or automatic federation. Review authentication, host allowlists, transport security, and recovery behavior in the [Distributed Deployment guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/distributed-deployment.md).
+## The product in one view
 
-### v3.6.11 Optimize surfaces
-SLM exposes a proxy for intercepted provider calls plus MCP tools and skills for
-content explicitly routed through SLM. MCP/skill use does not cache the primary
-conversation turn without a proxy. Compression reduction is content- and
-mode-dependent; safe mode can return the original unchanged.
+```text
+Sources and clients
+CLI · MCP HTTP/stdio · hooks · dashboard · IDEs · adapters
+                              │
+                              ▼
+  admission → queryable core → enrichment → brain/lifecycle
+                              │
+                              ▼
+ semantic · BM25 · temporal · Hopfield · spreading activation
+                              │
+                              ▼
+ safe bounded context with policy, provenance and trace evidence
+                              │
+                              ▼
+ SQLite + sqlite-vec canonical ─► parity-gated graph/vector projections
+```
 
-### v3.4.5 historical scale work
-This release introduced tiering, pruning, and optional experimental CozoDB/LanceDB paths. V3.7 does not yet publish a release-linked memory-count, quality-at-scale, or latency envelope; do not treat the historical scale page as current proof.
+The architecture has seven logical stages: admission, queryable durability,
+enrichment, learning/lifecycle, retrieval, safe context delivery, and
+operations. A specific write or recall only reports stages that actually ran;
+optional enrichers and retrieval channels are dependency- and mode-aware.
 
-### V3.3.6 hook lineage
-Hooks can provide session recall, observation, and close-time checkpoints after
-the operator explicitly installs them. Current installers do not add hooks or
-edit IDE configuration implicitly; run `slm setup` or `slm hooks install` at
-the activation boundary.
+## Capability map
 
-### V3.1 active-memory lineage
-SLM includes local feedback, outcome, and adaptive-ranking components. Exposure
-to a result is not proof that it was helpful, and V3.7 does not make a market
-uniqueness or guaranteed-improvement claim. [Read the limitations →](Active-Memory)
+| Area | Available capability | Important boundary |
+|---|---|---|
+| Memory | Facts, scenes, temporal events, entities, profiles/scopes, memory lifecycle | Recalled content is untrusted evidence, never a new instruction. |
+| Ingestion | Replay-safe operation receipts; extraction, entity, graph, temporal, provenance and embedding derivations | Use `--sync` when a caller needs all declared stages, not only the immediate queryable receipt. |
+| Recall | Semantic, BM25, temporal, Hopfield and spreading-activation candidates; fusion, optional rerank and graph score enhancement | Runtime health determines the channels that participate. |
+| Brain | Behavioral patterns, feedback/outcomes, reward signals, consolidation, soft prompts and guarded skill evolution | Learning is not a guarantee that an outcome was correct or beneficial. |
+| Graph | Canonical entities, aliases, profiles, edges, scenes, timelines and an Entity Explorer | Graph evidence is inspectable and provenance-bearing. |
+| Scale Engine | CozoDB graph + LanceDB vectors with prepare → verify → promote → rollback | SQLite remains canonical; promotion is explicit and parity-gated. |
+| Optimize | Exact cache, tag invalidation, safe compression, opt-in lossy prose compression and CCR originals | Only the proxy can intercept a primary provider turn. |
+| Mesh | Authenticated peer messages, locks, inbox/outbox, queues and optional discovery | Mesh coordinates peers; it is not a replicated distributed-memory database. |
+| Governance | Provenance, audit, retention, policy, export/erasure, health and diagnostics | Deployment configuration determines compliance posture. |
+| Integrations | CLI, Python SDK, MCP, Claude plugin, Codex add-on, documented IDE configs, Gmail/Calendar/transcript adapters | Connectors and hooks are opt-in and have their own data paths. |
+
+## Operating modes
+
+| Mode | Core behavior | Model path |
+|---|---|---|
+| **A — Local Guardian** | Local core memory and math-informed retrieval | No cloud model provider is required for core operations. |
+| **B — Smart Local** | Mode A plus an operator-managed Ollama endpoint | Local LLM endpoint. |
+| **C — Provider-assisted** | Local storage with configured provider-backed enrichment/retrieval behavior | Content sent to the configured provider follows that provider path. |
+
+Mode A does not disable model downloads, adapters, backup, proxy providers, or
+other integrations that an operator explicitly enables. Review the complete
+deployment before making a privacy or compliance determination.
+
+## Dashboard workspaces
+
+The local dashboard includes Dashboard, Brain, Knowledge Graph, Memories,
+Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings,
+and Optimize workspaces. Use it with `slm health`, `slm doctor`, and `slm
+trace` for operational verification rather than treating a visual status as a
+guarantee.
 
 ## Quick Start
 
