@@ -79,11 +79,11 @@ class BackendOrchestrator:
         # 1. Apply schema (if not already applied)
         self._apply_schema_v345()
 
-        # 2. Initialize TierManager (always)
+        # 2. Initialize TierManager (always). Backends are refreshed after
+        # optional projections have been opened below.
         try:
-            from superlocalmemory.core.tier_manager import evaluate_tiers, set_backends
+            from superlocalmemory.core.tier_manager import evaluate_tiers
             self._tiers = evaluate_tiers
-            set_backends(cozo=self._cozo, lancedb=self._lancedb)
             logger.info("BackendOrchestrator: TierManager initialized")
         except Exception as exc:
             logger.warning("TierManager init failed (non-fatal): %s", exc)
@@ -97,6 +97,16 @@ class BackendOrchestrator:
         except Exception as exc:
             logger.warning("Initial rebalance failed (non-fatal): %s", exc)
 
+        # Backends may be installed with the product, but installing a wheel
+        # is not authorization to mutate an existing data root.  Only a
+        # verified, explicit promotion may initialize and migrate projections.
+        if getattr(self._config, "scale_engine_state", "local_core") != "promoted":
+            logger.info(
+                "Scale Engine remains on Local Core (state=%s)",
+                getattr(self._config, "scale_engine_state", "local_core"),
+            )
+            return
+
         # 4. Initialize CozoDB if available
         cozo_available = self._detect_cozo()
         if cozo_available:
@@ -107,20 +117,18 @@ class BackendOrchestrator:
         if lancedb_available:
             self._init_lancedb()
 
-        # 6. Auto-migrate
+        # A promoted stage is already parity-verified.  Never rebuild it at
+        # startup: automatic migration would bypass the staged lifecycle and
+        # could make the active projection diverge from canonical SQLite.
         if self._cozo:
-            status = self._cozo_status()
-            if status in ("not_initialized", "migrating"):
-                if status == "migrating":
-                    logger.warning("CozoDB migration interrupted — rebuilding")
-                self._migrate_cozo()
-
+            self._update_status("cozo", "active", self._cozo.health_check().get("edges", 0))
         if self._lancedb:
-            status = self._lancedb_status()
-            if status in ("not_initialized", "migrating"):
-                if status == "migrating":
-                    logger.warning("LanceDB migration interrupted — rebuilding")
-                self._migrate_lancedb()
+            self._update_status("lancedb", "active", self._lancedb.health_check().get("vectors", 0))
+        try:
+            from superlocalmemory.core.tier_manager import set_backends
+            set_backends(cozo=self._cozo, lancedb=self._lancedb)
+        except Exception as exc:
+            logger.warning("TierManager backend registration failed (non-fatal): %s", exc)
 
         logger.info("BackendOrchestrator: daemon ready (cozo=%s, lancedb=%s)",
                      "active" if self._cozo and self._cozo_status() == "active" else "off",

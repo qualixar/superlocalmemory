@@ -84,50 +84,26 @@
     }, REFRESH_INTERVAL);
   };
 
-  // Try BOTH brokers: daemon (port 8765 /mesh/*) AND standalone slm-mesh (port 7899 /*)
-  var STANDALONE_PORT = null;
-
-  function fetchStandaloneBroker(path) {
-    var ports = [7899];
-    return fetch('http://127.0.0.1:' + ports[0] + path, { signal: AbortSignal.timeout(2000) })
-      .then(function(r) {
-        if (r.ok) { STANDALONE_PORT = ports[0]; return r.json(); }
-        STANDALONE_PORT = null;
-        return null;
-      })
-      .catch(function() { STANDALONE_PORT = null; return null; });
-  }
-
   function fetchMeshStatus() {
-    Promise.all([
-      meshFetch('/mesh/status').then(function(r) {
-        if (!r.ok) return r.status === 401 ? { _auth_error: true } : null;
-        return r.json();
-      }).catch(function() { return null; }),
-      fetchStandaloneBroker('/health')
-    ]).then(function(results) {
-      var daemon = results[0];
+    meshFetch('/mesh/status').then(function(r) {
+      if (!r.ok) return r.status === 401 ? { _auth_error: true } : null;
+      return r.json();
+    }).catch(function() { return null; }).then(function(daemon) {
       if (daemon && daemon._auth_error) { renderMeshStatusAuthError(); return; }
-      renderMeshStatus(daemon, results[1]);
+      renderMeshStatus(daemon, null);
     });
   }
 
   function fetchMeshPeers() {
-    Promise.all([
-      meshFetch('/mesh/peers').then(function(r) {
-        if (!r.ok) return r.status === 401 ? { _auth_error: true } : { peers: [] };
-        return r.json();
-      }).catch(function() { return { peers: [] }; }),
-      fetchStandaloneBroker('/peers')
-    ]).then(function(results) {
-      var daemonResult = results[0];
+    meshFetch('/mesh/peers').then(function(r) {
+      if (!r.ok) return r.status === 401 ? { _auth_error: true } : { peers: [] };
+      return r.json();
+    }).catch(function() { return { peers: [] }; }).then(function(daemonResult) {
       if (daemonResult && daemonResult._auth_error) { renderMeshPeersAuthError(); return; }
       var daemonPeers = (daemonResult && daemonResult.peers) || [];
-      var standalonePeers = (results[1] && (results[1].peers || results[1])) || [];
-      if (!Array.isArray(standalonePeers)) standalonePeers = [];
       var seen = {};
       var allPeers = [];
-      daemonPeers.concat(standalonePeers).forEach(function(p) {
+      daemonPeers.forEach(function(p) {
         var id = p.peer_id || p.id || JSON.stringify(p);
         if (!seen[id]) { seen[id] = true; allPeers.push(p); }
       });
@@ -200,28 +176,18 @@
     // Standalone broker (TypeScript, slm-mesh npm)
     var standaloneUp = standaloneData && standaloneData.status === 'ok';
     var standaloneUptime = standaloneData ? (standaloneData.uptime || 0) : 0;
-    var standaloneVersion = standaloneData ? (standaloneData.version || '') : '';
-
-    var anyUp = daemonUp || standaloneUp;
-    var statusText = anyUp ? 'Active' : 'Offline';
-    var statusKey = anyUp ? 'active' : 'dead';
-    var bestUptime = Math.max(daemonUptime, standaloneUptime);
-
-    // Combined info
-    var brokerInfo = [];
-    if (daemonUp) brokerInfo.push('Daemon (Python)');
-    if (standaloneUp) brokerInfo.push('slm-mesh ' + standaloneVersion);
+    var statusText = daemonUp ? 'Active' : 'Offline';
+    var statusKey = daemonUp ? 'active' : 'dead';
 
     el.innerHTML =
       '<div class="row g-3">' +
         statusCard('Broker', statusDot(statusKey) + ' ' + statusText, 'bi-wifi') +
         statusCard('Peers', daemonPeers, 'bi-people') +
-        statusCard('Uptime', formatUptime(bestUptime), 'bi-clock') +
-        statusCard('Brokers', brokerInfo.length, 'bi-hdd-stack') +
+        statusCard('Uptime', formatUptime(daemonUptime), 'bi-clock') +
+        statusCard('Broker', daemonUp ? 1 : 0, 'bi-hdd-stack') +
       '</div>' +
       '<div style="font-size:0.75rem;color:var(--ng-text-quaternary);margin-top:8px;text-align:center">' +
-        (brokerInfo.length > 0 ? 'Running: ' + brokerInfo.join(' + ') : 'No brokers detected') +
-        (standaloneUp ? ' (port 7899)' : '') +
+        (daemonUp ? 'Running: integrated SLM daemon' : 'No broker detected') +
         ' · Peers register via <code>mesh_summary</code> MCP tool and expire after 60s without heartbeat' +
       '</div>';
   }

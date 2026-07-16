@@ -30,7 +30,13 @@ def _cmd_db_dispatch(args: Namespace) -> None:
         if rc:
             sys.exit(rc)
         return
-    print("Usage: slm db migrate [--status] [--dry-run]")
+    if sub == "scale":
+        from superlocalmemory.cli.scale_engine_cmd import cmd_db_scale
+        rc = cmd_db_scale(args)
+        if rc:
+            sys.exit(rc)
+        return
+    print("Usage: slm db migrate [--status] [--dry-run] | slm db scale <action>")
     sys.exit(2)
 
 
@@ -605,6 +611,7 @@ def cmd_config(args: Namespace) -> None:
         _ALLOWED_CONFIG_KEYS = {
             "evolution.enabled", "evolution.backend", "evolution.max_evolutions_per_cycle",
             "mesh_enabled", "daemon_idle_timeout", "entity_compilation_enabled",
+            "graph_backend", "vector_backend", "scale_engine_state",
         }
         if key not in _ALLOWED_CONFIG_KEYS:
             if use_json:
@@ -1671,17 +1678,43 @@ def cmd_status(args: Namespace) -> None:
 
 def cmd_health(args: Namespace) -> None:
     """Show math layer health status."""
-    from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.core.config import SLMConfig
 
     use_json = getattr(args, 'json', False)
     try:
         config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-        facts = engine._db.get_all_facts(engine.profile_id)
-        fisher_count = sum(1 for f in facts if f.fisher_mean is not None)
-        langevin_count = sum(1 for f in facts if f.langevin_position is not None)
+        from superlocalmemory.cli.daemon import is_daemon_running
+        if is_daemon_running():
+            # A running daemon owns the writable SQLite connections. Opening a
+            # second MemoryEngine re-runs schema initialization and can lock
+            # the user's database. Health only needs aggregate counts, so use
+            # a read-only snapshot connection instead.
+            import sqlite3
+            db_path = config.db_path
+            conn = sqlite3.connect(
+                f"file:{db_path}?mode=ro", uri=True, timeout=5,
+            )
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*), "
+                    "SUM(CASE WHEN fisher_mean IS NOT NULL THEN 1 ELSE 0 END), "
+                    "SUM(CASE WHEN langevin_position IS NOT NULL THEN 1 ELSE 0 END) "
+                    "FROM atomic_facts WHERE profile_id = ?",
+                    (config.active_profile,),
+                ).fetchone()
+                total_facts, fisher_count, langevin_count = row or (0, 0, 0)
+            finally:
+                conn.close()
+            facts = [None] * int(total_facts or 0)
+            fisher_count = int(fisher_count or 0)
+            langevin_count = int(langevin_count or 0)
+        else:
+            from superlocalmemory.core.engine import MemoryEngine
+            engine = MemoryEngine(config)
+            engine.initialize()
+            facts = engine._db.get_all_facts(engine.profile_id)
+            fisher_count = sum(1 for f in facts if f.fisher_mean is not None)
+            langevin_count = sum(1 for f in facts if f.langevin_position is not None)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print

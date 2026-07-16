@@ -272,12 +272,14 @@ function _updateSidebarWidget(destinations) {
 
     if (primary.destination_type === 'google_drive') {
         var email = config.email || 'Google Drive';
-        avatar.innerHTML = '<img src="https://www.google.com/s2/favicons?domain=google.com&sz=32" style="width:28px;height:28px;border-radius:50%;" onerror="this.outerHTML=\'<i class=\\\'bi bi-google\\\' style=\\\'font-size:14px;color:#4285f4;\\\'></i>\'">';
+        // Keep the dashboard fully local. CSP deliberately forbids remote
+        // avatar requests, and a provider icon conveys the same state.
+        avatar.innerHTML = '<i class="bi bi-google" style="font-size:14px;color:#4285f4;"></i>';
         name.textContent = email.split('@')[0];
         name.title = email;
     } else if (primary.destination_type === 'github') {
         var username = config.username || 'GitHub';
-        avatar.innerHTML = '<img src="https://github.com/' + username + '.png?size=56" style="width:28px;height:28px;border-radius:50%;" onerror="this.outerHTML=\'<i class=\\\'bi bi-github\\\' style=\\\'font-size:14px;\\\'></i>\'">';
+        avatar.innerHTML = '<i class="bi bi-github" style="font-size:14px;"></i>';
         name.textContent = username;
     }
 

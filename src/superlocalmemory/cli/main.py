@@ -259,6 +259,17 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Report what would change without applying",
     )
+    db_scale_p = db_sub.add_parser(
+        "scale",
+        help="Safely stage and promote optional CozoDB/LanceDB projections",
+    )
+    db_scale_p.add_argument(
+        "scale_action",
+        choices=("status", "prepare", "verify", "promote", "rollback"),
+        help="Lifecycle action. Prepare and verify never mutate active projection paths.",
+    )
+    db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
+    db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")
 
     # -- Memory Operations ---------------------------------------------
     remember_p = sub.add_parser("remember", help="Store a memory (extracts facts, builds graph)")

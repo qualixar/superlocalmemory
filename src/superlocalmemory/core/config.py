@@ -807,6 +807,9 @@ class SLMConfig:
     # v3.5.0: scaling backends — "sqlite" / "cozo" / "auto" / "lancedb" / "sqlite-vec" / "auto".
     graph_backend: str = "auto"       # "auto" = cozo if pycozo installed, else sqlite
     vector_backend: str = "auto"      # "auto" = lancedb if installed, else sqlite-vec
+    # Scale Engine is installed separately from activation.  Existing roots
+    # stay on SQLite until a staged parity check promotes these projections.
+    scale_engine_state: str = "local_core"  # local_core | prepared | verified | promoted
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     health: HealthConfig = field(default_factory=HealthConfig)
 
@@ -885,6 +888,13 @@ class SLMConfig:
             base_dir=raw_base_dir,
         )
         config.active_profile = data.get("active_profile", "default")
+        config.graph_backend = data.get("graph_backend", "auto")
+        config.vector_backend = data.get("vector_backend", "auto")
+        state = data.get("scale_engine_state", "local_core")
+        config.scale_engine_state = (
+            state if state in {"local_core", "prepared", "verified", "promoted"}
+            else "local_core"
+        )
 
         # V3.3 config fields (additive — defaults work if missing from JSON)
         fg = data.get("forgetting", {})
@@ -1031,6 +1041,9 @@ class SLMConfig:
         data = {
             "mode": effective_mode,
             "active_profile": self.active_profile,
+            "graph_backend": self.graph_backend,
+            "vector_backend": self.vector_backend,
+            "scale_engine_state": self.scale_engine_state,
             "base_dir": str(self.base_dir),  # V3.5.9: persist so load() can restore custom paths
             "llm": {
                 "provider": self.llm.provider,

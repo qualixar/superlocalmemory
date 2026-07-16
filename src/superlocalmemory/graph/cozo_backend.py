@@ -51,6 +51,62 @@ class CozoDBQueryError(CozoDBError):
     """Datalog query execution failed."""
 
 
+class _CozoRows:
+    """Small pandas-values compatible view for PyCozo's dict results."""
+
+    def __init__(self, rows: list[list[Any]]) -> None:
+        self._rows = rows
+
+    def tolist(self) -> list[list[Any]]:
+        return self._rows
+
+
+class _CozoResult:
+    """Normalize old PyCozo dict responses to the dataframe surface we use."""
+
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self.values = _CozoRows(list(result.get("rows", []))) if isinstance(result, dict) else result.values
+
+    def __len__(self) -> int:
+        return len(self.values.tolist())
+
+
+class _CozoClientAdapter:
+    """Bridge PyCozo 0.3 embedded bindings and later client conveniences.
+
+    PyCozo 0.3 is the last client compatible with the published macOS native
+    binding. It returns dictionaries and exposes ``import_relations`` rather
+    than ``put``; later clients return dataframe-like values and add ``put``.
+    SLM only needs relation upserts and row results, so normalize those here.
+    """
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def run(self, script: str, params: dict[str, Any] | None = None) -> Any:
+        result = self._client.run(script, params)
+        return _CozoResult(result) if isinstance(result, dict) else result
+
+    def put(self, relation: str, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        put = getattr(self._client, "put", None)
+        if callable(put):
+            put(relation, rows)
+            return
+        headers = list(rows[0])
+        self._client.import_relations({
+            relation: {
+                "headers": headers,
+                "rows": [[row.get(header) for header in headers] for row in rows],
+            },
+        })
+
+    def close(self) -> None:
+        self._client.close()
+
+
 # ---------------------------------------------------------------------------
 # CozoDBGraphBackend
 # ---------------------------------------------------------------------------
@@ -70,7 +126,8 @@ class CozoDBGraphBackend:
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
-        self._db = _CozoClient("rocksdb", self._db_path)  # type: ignore[misc]
+        client = _CozoClient("rocksdb", self._db_path, dataframe=False)  # type: ignore[misc]
+        self._db = _CozoClientAdapter(client)
         self._ensure_schema()
 
     def close(self) -> None:

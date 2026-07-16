@@ -102,8 +102,12 @@ Current recall has five candidate producers—dense semantic, BM25 lexical,
 temporal, Hopfield associative, and spreading activation—followed by fusion,
 optional reranking, and entity-graph score enhancement. The entity graph does
 not create an independent candidate in the current implementation. Core memory
-is SQLite-backed; LanceDB and CozoDB are optional experimental backends rather
-than the normal-path source of truth.
+is SQLite-backed. SQLite and sqlite-vec remain the canonical source of truth.
+The packaged Scale Engine can maintain CozoDB graph and LanceDB vector
+projections, but it is deliberately inactive until
+`slm db scale prepare`, `verify`, and `promote` prove parity against the
+canonical store. This makes the capability available on a fresh installation
+without silently migrating an existing user's data.
 
 Canonical ingestion is a durable state machine: `raw → queryable → enriching →
 complete`, with `failed` retaining raw evidence, error details, attempt count,
@@ -384,7 +388,7 @@ slm dashboard    # Opens at http://localhost:8765
 | **v3.6.15** | Multi-scope | **Opt-in [shared memory](docs/shared-memory.md)** (personal/shared/global, off by default), default-deny scope at every read path, recall scope-race fix, contributor PRs #42/#43/#44, fixes #46–#49 |
 | **v3.6.14** | Plugin-native | Claude Code Plugin (WP-06), MCP profiles (WP-01), IDE connect (WP-08), asset consolidation, UI polish (WP-12) |
 | **v3.6.x** | Optimize Everywhere / Distributed-ready | Three surfaces (proxy/MCP/skill), `SLM_REMOTE=1` LAN mode, remote dashboard, custom LLM endpoints |
-| **v3.5.0** | Historical scale work | Optional experimental CozoDB/LanceDB paths, retrieval additions, Core Memory Block, context injection v2, score normalization |
+| **v3.5.0** | Historical scale work | Early CozoDB/LanceDB projection paths, retrieval additions, Core Memory Block, context injection v2, score normalization |
 | **v3.4.x** | Scale-Ready (foundation) | Tiered storage, graph pruning, Hopfield channel, LightGBM ranking, mDNS mesh discovery |
 | **v3.3.x** | Foundation | BM25Plus, Fisher-Rao, sqlite-vec, RRF fusion, cross-encoder rerank. 3 published papers |
 

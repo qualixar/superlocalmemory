@@ -382,6 +382,17 @@ toml = [
 ]
 
 [[package]]
+name = "cozo-embedded"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/be/d6cdf495fc73ce2506c66a4078c35f28f9f340ca57e460d0af74832f7c08/cozo_embedded-0.3.0-cp37-abi3-macosx_10_14_x86_64.whl", hash = "sha256:5e8f5904ba37220daf59fec42f53880ceefb89d152c1d096229b946d0573068e", size = 5883455, upload-time = "2022-12-20T04:50:37.701Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/23/575b6fb7ed14910231668b6893d7b20ad02d4c35949332d01a52e818ea3f/cozo_embedded-0.3.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:d8a294ce0a15f89c75120ad22df9433769272a5b3bc8fb0b07254fa568bf082c", size = 5297662, upload-time = "2022-12-20T04:50:40.561Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/21/885e077de1ddcb28743594dd15e77d8c63f83bfee365140fddef115a0ad5/cozo_embedded-0.3.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:bed5802ee316d78da5f520a28d52048c5376e3de91d04e4e2dd77ba5054dea95", size = 6804152, upload-time = "2022-12-20T04:50:43.092Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/e8/82ab8677e1fb8811fcfa2dafb50f9a0e6c44a4f558365c9587694289e61b/cozo_embedded-0.3.0-cp37-abi3-win_amd64.whl", hash = "sha256:53860bfbe73897b92ecfb1a9c520b6b3a784b5bbeed0d8de29e027fd186498d6", size = 5567718, upload-time = "2022-12-20T04:50:45.799Z" },
+]
+
+[[package]]
 name = "cryptography"
 version = "45.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1994,6 +2005,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pycozo"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/5e/9e9b8b490fd69b75f969c7cfdebca172af9a82a4cd83e4b32d9e6750683f/pycozo-0.3.0.tar.gz", hash = "sha256:be5c2696c0c18e98452c06f21979ac2ca0c94c4ef313634bbd49936c77d87abb", size = 12521, upload-time = "2022-12-20T04:53:46.796Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/83/d873d1b4f6a8224b4efaccfa5fbc207abaa6db03458b3bb5f46b12859f95/pycozo-0.3.0-py3-none-any.whl", hash = "sha256:f256de2f49684621c8dc1f93239d566c2045fd51b2dd74dca6c6a21b937d297d", size = 12250, upload-time = "2022-12-20T04:53:44.629Z" },
+]
+
+[package.optional-dependencies]
+embedded = [
+    { name = "cozo-embedded" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3065,6 +3090,7 @@ dependencies = [
     { name = "fastapi", extra = ["all"] },
     { name = "httpx" },
     { name = "huggingface-hub" },
+    { name = "lancedb" },
     { name = "lightgbm" },
     { name = "llmlingua" },
     { name = "mcp" },
@@ -3075,6 +3101,7 @@ dependencies = [
     { name = "orjson" },
     { name = "portalocker" },
     { name = "psutil" },
+    { name = "pycozo", extra = ["embedded"] },
     { name = "python-dateutil" },
     { name = "rank-bm25" },
     { name = "rustworkx" },
@@ -3096,6 +3123,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cozo = [
+    { name = "pycozo", extra = ["embedded"] },
+]
 dev = [
     { name = "httpx2" },
     { name = "pytest" },
@@ -3111,10 +3141,12 @@ full = [
     { name = "google-auth-oauthlib" },
     { name = "icalendar" },
     { name = "keyring" },
+    { name = "lancedb" },
     { name = "lightgbm" },
     { name = "onnxruntime" },
     { name = "optimum" },
     { name = "orjson" },
+    { name = "pycozo", extra = ["embedded"] },
     { name = "python-multipart" },
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
@@ -3139,6 +3171,10 @@ learning = [
 ]
 performance = [
     { name = "orjson" },
+]
+scale = [
+    { name = "lancedb" },
+    { name = "pycozo", extra = ["embedded"] },
 ]
 search = [
     { name = "einops" },
@@ -3179,7 +3215,9 @@ requires-dist = [
     { name = "huggingface-hub", specifier = "==0.36.2" },
     { name = "icalendar", marker = "extra == 'ingestion'", specifier = ">=6.0.0" },
     { name = "keyring", marker = "extra == 'ingestion'", specifier = ">=25.0.0" },
+    { name = "lancedb", specifier = "==0.30.2" },
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = "==0.30.2" },
+    { name = "lancedb", marker = "extra == 'scale'", specifier = "==0.30.2" },
     { name = "lightgbm", specifier = "==4.6.0" },
     { name = "lightgbm", marker = "extra == 'learning'", specifier = ">=4.0.0" },
     { name = "llmlingua", specifier = "==0.2.2" },
@@ -3194,6 +3232,9 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.9.0" },
     { name = "portalocker", specifier = "==3.2.0" },
     { name = "psutil", specifier = "==7.2.2" },
+    { name = "pycozo", extras = ["embedded"], specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "extra == 'cozo'", specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "extra == 'scale'", specifier = "==0.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
@@ -3209,7 +3250,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = "==0.1.9" },
     { name = "sqlite-vec", marker = "extra == 'dev'", specifier = ">=0.1.6" },
     { name = "structlog", specifier = "==25.5.0" },
-    { name = "superlocalmemory", extras = ["search", "ui", "learning", "performance", "ingestion", "injection"], marker = "extra == 'full'" },
+    { name = "superlocalmemory", extras = ["search", "ui", "learning", "performance", "ingestion", "injection", "scale"], marker = "extra == 'full'" },
     { name = "tiktoken", marker = "extra == 'injection'", specifier = ">=0.8.0" },
     { name = "tomli-w", specifier = "==1.2.0" },
     { name = "torch", specifier = "==2.11.0" },
@@ -3224,7 +3265,7 @@ requires-dist = [
     { name = "websockets", specifier = "==16.0" },
     { name = "zeroconf", specifier = ">=0.140" },
 ]
-provides-extras = ["search", "ui", "injection", "learning", "performance", "lancedb", "ingestion", "full", "dev"]
+provides-extras = ["search", "ui", "injection", "learning", "performance", "lancedb", "cozo", "scale", "ingestion", "full", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

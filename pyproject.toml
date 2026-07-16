@@ -73,6 +73,12 @@ dependencies = [
     "scikit-learn==1.8.0",
     # Vector KNN extension for the semantic channel.
     "sqlite-vec==0.1.9",
+    # Scale Engine projections.  These ship with the base install so every
+    # fresh Python user can prepare them on day one.  They remain inactive
+    # until `slm db scale prepare -> verify -> promote` proves parity with
+    # canonical SQLite; dependency installation never migrates user data.
+    "lancedb==0.30.2",
+    "pycozo[embedded]==0.3.0",
     # v3.6.10: LLMLingua-2 prose compression (aggressive mode, opt-in at runtime).
     # Hard dependency so `pip install superlocalmemory` ships compression-ready;
     # the ~560MB model downloads on first setup/warmup (fail-open). Verified the
@@ -111,6 +117,15 @@ performance = [
 lancedb = [
     "lancedb==0.30.2",
 ]
+cozo = [
+    "pycozo[embedded]==0.3.0",
+]
+# Backwards-compatible explicit install target for automation and docs.  The
+# packages are also base dependencies from v3.7 onward.
+scale = [
+    "lancedb==0.30.2",
+    "pycozo[embedded]==0.3.0",
+]
 ingestion = [
     "keyring>=25.0.0",
     "google-auth-oauthlib>=1.2.0",
@@ -118,7 +133,7 @@ ingestion = [
     "icalendar>=6.0.0",
 ]
 full = [
-    "superlocalmemory[search,ui,learning,performance,ingestion,injection]",
+    "superlocalmemory[search,ui,learning,performance,ingestion,injection,scale]",
 ]
 dev = [
     "pytest>=8.0",
