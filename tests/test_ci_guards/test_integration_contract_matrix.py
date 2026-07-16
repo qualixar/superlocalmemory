@@ -135,4 +135,18 @@ def test_checked_in_compatibility_evidence_matches_executable_matrix(
     tmp_path: Path,
 ) -> None:
     expected = build_evidence(ROOT, load_manifest(MANIFEST), work_dir=tmp_path)
-    assert json.loads(EVIDENCE.read_text(encoding="utf-8")) == expected
+    checked_in = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    assert checked_in["schema"] == expected["schema"]
+    assert checked_in["summary"] == expected["summary"]
+    assert checked_in["clients"] == expected["clients"]
+
+    # Check execution can arrive in a different order across supported Python
+    # and filesystem combinations. Contract identity, status, checker, and
+    # detail are the evidence; list order is not.
+    def _checks_by_contract(evidence: dict) -> dict[tuple[str, str], dict]:
+        return {
+            (check["client_id"], check["contract"]): check
+            for check in evidence["checks"]
+        }
+
+    assert _checks_by_contract(checked_in) == _checks_by_contract(expected)
