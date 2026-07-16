@@ -169,11 +169,9 @@ class MeshBroker:
     def register_peer(self, session_id: str, summary: str = "",
                       host: str = "", port: int = 0,
                       project_path: str = "", agent_type: str = "unknown") -> dict:
-        conn = self._conn()
-        try:
+        def _register(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
-            if not host:
-                host = self._host
+            effective_host = host or self._host
             # Idempotent: update if same session_id exists
             existing = conn.execute(
                 "SELECT peer_id FROM mesh_peers WHERE session_id = ?",
@@ -184,7 +182,7 @@ class MeshBroker:
                 conn.execute(
                     "UPDATE mesh_peers SET summary=?, host=?, port=?, last_heartbeat=?, "
                     "status='active', project_path=?, agent_type=? WHERE peer_id=?",
-                    (summary, host, port, now, project_path, agent_type, peer_id),
+                    (summary, effective_host, port, now, project_path, agent_type, peer_id),
                 )
             else:
                 peer_id = str(uuid.uuid4())[:12]
@@ -192,7 +190,7 @@ class MeshBroker:
                     "INSERT INTO mesh_peers (peer_id, session_id, summary, status, host, port, "
                     "registered_at, last_heartbeat, project_path, agent_type) "
                     "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)",
-                    (peer_id, session_id, summary, host, port, now, now, project_path, agent_type),
+                    (peer_id, session_id, summary, effective_host, port, now, now, project_path, agent_type),
                 )
             self._log_event(conn, "peer_registered", peer_id, {
                 "session_id": session_id, "project_path": project_path,
@@ -202,12 +200,11 @@ class MeshBroker:
             # v3.4.6: Deliver pending broadcast/project messages on registration
             pending = self._get_pending_for_peer(conn, peer_id, project_path)
             return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending)}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_register)
 
     def deregister_peer(self, peer_id: str) -> dict:
-        conn = self._conn()
-        try:
+        def _deregister(conn: sqlite3.Connection) -> dict:
             row = conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (peer_id,)).fetchone()
             if not row:
                 return {"ok": False, "error": "peer not found"}
@@ -215,8 +212,8 @@ class MeshBroker:
             self._log_event(conn, "peer_deregistered", peer_id)
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_deregister)
 
     def heartbeat(self, peer_id: str) -> dict:
         def _heartbeat(conn: sqlite3.Connection) -> dict:
@@ -233,8 +230,7 @@ class MeshBroker:
         return self._write_with_retry(_heartbeat)
 
     def update_summary(self, peer_id: str, summary: str) -> dict:
-        conn = self._conn()
-        try:
+        def _update_summary(conn: sqlite3.Connection) -> dict:
             cursor = conn.execute(
                 "UPDATE mesh_peers SET summary=? WHERE peer_id=?",
                 (summary, peer_id),
@@ -243,8 +239,8 @@ class MeshBroker:
                 return {"ok": False, "error": "peer not found"}
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_update_summary)
 
     def list_peers(self) -> list[dict]:
         conn = self._conn()
@@ -379,8 +375,7 @@ class MeshBroker:
             conn.close()
 
     def mark_read(self, peer_id: str, message_ids: list[int]) -> dict:
-        conn = self._conn()
-        try:
+        def _mark_read(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             for msg_id in message_ids:
                 # Check if this is a direct message or broadcast/project
@@ -404,8 +399,8 @@ class MeshBroker:
                     )
             conn.commit()
             return {"ok": True, "marked": len(message_ids)}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_mark_read)
 
     # -- State --
 
@@ -418,8 +413,7 @@ class MeshBroker:
             conn.close()
 
     def set_state(self, key: str, value: str, set_by: str) -> dict:
-        conn = self._conn()
-        try:
+        def _set_state(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 "INSERT INTO mesh_state (key, value, set_by, updated_at) VALUES (?, ?, ?, ?) "
@@ -428,8 +422,8 @@ class MeshBroker:
             )
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_set_state)
 
     def get_state_key(self, key: str) -> dict | None:
         conn = self._conn()
