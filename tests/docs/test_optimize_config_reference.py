@@ -42,4 +42,4 @@ def test_optimize_config_reference_explains_actual_activation_boundaries() -> No
     assert "daemon startup" in text
     assert "config file changes do not mount proxy routes" in text
     assert "does not trigger hot-reload" in text
-    assert '"safe" (lossless whitespace normalization)' in text
+    assert '`"safe"` (lossless whitespace normalization)' in text

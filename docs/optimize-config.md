@@ -8,13 +8,17 @@ Reference for all SLM v3.6 Optimize configuration options.
 
 ## Config File
 
-All settings are stored in a single JSON file that the daemon hot-reloads on change:
+Optimize settings are stored in a single JSON file:
 
 ```bash
 ~/.superlocalmemory/optimize.json
 ```
 
-**Hot-reload:** config changes are picked up within 2 seconds via a background watchdog thread. No daemon restart required.
+**Runtime behavior:** When proxy routes were mounted at daemon startup, cache and
+compression changes saved through the daemon API reload immediately; direct file
+edits and standalone CLI writes are detected by the watchdog within 2 seconds.
+Changing `proxy_enabled` is different: it is evaluated during daemon startup, so
+config file changes do not mount proxy routes in an already-running daemon.
 
 **Write via:**
 - **UI** — Dashboard → Optimize tab (runtime toggles, TTL sliders, per-provider settings)
@@ -28,9 +32,9 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Master Optimize ON/OFF |
-| `proxy_enabled` | bool | `false` | Proxy server auto-start |
-| `config_version` | int | `1` | Incremented on each save — triggers hot-reload |
+| `enabled` | bool | `false` | SDK adapter enablement; it does not gate proxy route mounting |
+| `proxy_enabled` | bool | `false` | Mount proxy routes at daemon startup; changing it requires a daemon restart |
+| `config_version` | int | `1` | Revision written by `ConfigStore.save()`; it does not trigger hot-reload |
 
 ---
 
@@ -94,7 +98,7 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `compress_enabled` | bool | `false` | Enable compression |
-| `compress_mode` | str | `"safe"` | `"safe"` (lossless extractive) or `"aggressive"` (lossy prose allowed) |
+| `compress_mode` | str | `"safe"` | `"safe"` (lossless whitespace normalization) or `"aggressive"` (lossy prose allowed) |
 | `compress_prose` | bool | `false` | Prose compression (LLMLingua-2, opt-in) |
 | `compress_protect_recent` | int | `4` | Number of most recent messages to skip compression |
 
