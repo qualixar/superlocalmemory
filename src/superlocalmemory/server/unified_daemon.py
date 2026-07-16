@@ -2138,18 +2138,33 @@ def _register_daemon_routes(application: FastAPI) -> None:
             ))
 
             result = command.materialize(receipt.operation_id) if wait else receipt
-            if result.state is IngestionState.FAILED:
-                raise RuntimeError(result.last_error or "materialization failed")
-
             fact_ids = list(result.fact_ids)
+            # The queryable write is a separate durable transaction.  A cold
+            # optional enrichment dependency (most often the local embedding
+            # worker) may need its bounded retry window, but must not turn an
+            # already-admitted fact into an HTTP 500.  Keep the operation's
+            # failed state truthful so the daemon materializer retries it; the
+            # response communicates that the fact is queryable, not complete.
+            enrichment_deferred = (
+                result.state is IngestionState.FAILED and bool(fact_ids)
+            )
+            if result.state is IngestionState.FAILED and not enrichment_deferred:
+                raise RuntimeError(result.last_error or "materialization failed")
+            completed = result.state is IngestionState.COMPLETE
             _emit_event(
-                "memory.stored" if wait else "memory.queued",
+                "memory.stored" if completed else "memory.queued",
                 payload={
                     "operation_id": result.operation_id,
                     "fact_ids": fact_ids,
                     "tags": req.tags or "",
                     "content_preview": req.content[:120],
-                    "path": "remember_sync" if wait else "remember_queryable",
+                    "path": (
+                        "remember_sync"
+                        if completed
+                        else "remember_sync_deferred"
+                        if enrichment_deferred
+                        else "remember_queryable"
+                    ),
                 },
             )
             return {
@@ -2160,11 +2175,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 # One-release compatibility alias. The durable operation ID is
                 # opaque and replaces the integer pending.db row identifier.
                 "pending_id": result.operation_id,
-                "status": "stored" if wait else "queryable",
+                "status": "stored" if completed else "queryable",
                 "materialization_state": result.state.value,
                 "note": (
                     "canonical ingestion complete"
-                    if wait
+                    if completed
+                    else "queryable now; canonical enrichment will retry"
+                    if enrichment_deferred
                     else "queryable now; canonical enrichment pending"
                 ),
             }
