@@ -1185,6 +1185,7 @@ class SLMConfig:
                 base_dir=_base,
                 embedding=_a_emb,
                 llm=LLMConfig(),  # No LLM
+                temporal_validator=TemporalValidatorConfig(mode="a"),
                 retrieval=RetrievalConfig(
                     # V3.3.2: ONNX cross-encoder enabled for all modes (~200MB)
                     use_cross_encoder=True,
@@ -1226,6 +1227,7 @@ class SLMConfig:
                     api_base=llm_api_base or "http://localhost:11434",
                     api_key=llm_api_key or "",
                 ),
+                temporal_validator=TemporalValidatorConfig(mode="b"),
                 retrieval=RetrievalConfig(
                     # V3.3.2: ONNX cross-encoder enabled for all modes (~200MB)
                     use_cross_encoder=True,
@@ -1264,6 +1266,7 @@ class SLMConfig:
                 api_key=llm_api_key,
                 api_base=llm_api_base,
             ),
+            temporal_validator=TemporalValidatorConfig(mode="c"),
             channel_weights=ChannelWeights(
                 semantic=1.5,
                 bm25=1.2,
