@@ -295,6 +295,8 @@ class EmbeddingService:
         never hangs indefinitely on cold model loads or network issues.
         """
         with self._lock:
+            if not self._available:
+                return None
             # Worker recycling: restart after N requests to prevent
             # C++ allocator fragmentation over long-running sessions.
             if self._request_count >= _WORKER_RECYCLE_AFTER and self._worker_proc is not None:
@@ -339,6 +341,12 @@ class EmbeddingService:
                 resp = json.loads(resp_line)
                 if not resp.get("ok"):
                     logger.warning("Worker error: %s", resp.get("error"))
+                    # A well-formed worker error is a terminal local
+                    # dependency/model failure, not a transient pipe race.
+                    # Disable this service and terminate the child so every
+                    # recall does not respawn a heavyweight failing process.
+                    self._available = False
+                    self._kill_worker()
                     return None
                 self._reset_idle_timer()
                 self._request_count += 1

@@ -70,7 +70,13 @@ def _load_embedding_model(name: str) -> tuple:
 
     Returns (model, backend_name) or (None, "").
     """
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception:
+        # Dependency/version errors must stay inside the JSON-lines protocol.
+        # Letting this import escape kills the worker before it can explain the
+        # failure, which the parent previously mislabeled as a long timeout.
+        return None, ""
 
     for backend in _embedding_backend_order():
         try:
