@@ -27,6 +27,12 @@ _SNAPSHOT_FILES = (
     "ATTRIBUTION.md",
 )
 
+# These are PEP 517 package inputs referenced from ``pyproject.toml`` via
+# ``tool.setuptools.data-files``.  Omitting them creates a test snapshot that
+# cannot build although the checkout can, which makes the installed-artifact
+# release witness meaningless.
+_SNAPSHOT_TREES = ("plugin-src",)
+
 
 def _ignore_snapshot_paths(_directory: str, names: list[str]) -> set[str]:
     """Exclude generated/local state while retaining every package source."""
@@ -59,6 +65,15 @@ def copy_release_snapshot(destination: Path) -> Path:
         source = REPO_ROOT / relative
         if source.exists():
             shutil.copy2(source, destination / relative)
+    for relative in _SNAPSHOT_TREES:
+        source = REPO_ROOT / relative
+        if source.exists():
+            shutil.copytree(
+                source,
+                destination / relative,
+                symlinks=True,
+                ignore=_ignore_snapshot_paths,
+            )
     shutil.copytree(
         REPO_ROOT / "src",
         destination / "src",

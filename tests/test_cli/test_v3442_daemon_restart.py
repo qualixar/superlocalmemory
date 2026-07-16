@@ -149,6 +149,20 @@ class TestOwnedDaemonShutdownWait:
         ):
             assert not _daemon.wait_for_owned_daemon_shutdown(descriptor, timeout=1)
 
+    def test_zombie_descriptor_process_is_not_treated_as_alive(self) -> None:
+        from types import SimpleNamespace
+        import psutil
+        from superlocalmemory.cli import daemon as _daemon
+
+        process = MagicMock()
+        process.is_running.return_value = True
+        process.status.return_value = psutil.STATUS_ZOMBIE
+        descriptor = SimpleNamespace(pid=99991, process_create_time=1.0)
+        with patch.object(_daemon, "_is_pid_alive", return_value=True), patch(
+            "psutil.Process", return_value=process,
+        ):
+            assert _daemon._descriptor_process_is_alive(descriptor) is False
+
 
 class TestRestartStep3UsesHelperNotEnsureDaemon:
     """B1 regression guard: Step 3 must NOT call ensure_daemon (would self-deadlock)."""

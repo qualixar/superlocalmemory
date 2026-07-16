@@ -93,6 +93,22 @@ def test_wheel_contains_root_and_optimize_legal_notices(
     assert "superlocalmemory/optimize/NOTICE" in names
 
 
+def test_wheel_contains_packaged_codex_skill_assets(
+    built_artifacts: BuiltArtifacts,
+) -> None:
+    """Every pyproject data-file reference must survive the release snapshot."""
+    names = wheel_names(built_artifacts.wheel)
+    expected_suffixes = {
+        "data/share/superlocalmemory/codex/skills/"
+        f"{skill}/SKILL.md"
+        for skill in (
+            "slm-cache", "slm-compress", "slm-graph", "slm-recall",
+            "slm-remember", "slm-session", "slm-status",
+        )
+    }
+    assert all(any(name.endswith(suffix) for name in names) for suffix in expected_suffixes)
+
+
 def test_sdist_contains_root_and_optimize_legal_notices(
     built_artifacts: BuiltArtifacts,
 ) -> None:

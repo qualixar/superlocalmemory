@@ -78,7 +78,13 @@ def _descriptor_process_is_alive(descriptor) -> bool:
     try:
         import psutil
 
-        actual = float(psutil.Process(descriptor.pid).create_time())
+        process = psutil.Process(descriptor.pid)
+        # A terminated daemon can remain in the process table briefly as a
+        # zombie while its parent reaps it.  PID existence is therefore not
+        # liveness and must not block a namespace-owned restart.
+        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+            return False
+        actual = float(process.create_time())
     except ImportError:
         return True
     except Exception:
@@ -90,6 +96,11 @@ def _is_port_available(port: int) -> bool:
     """Return whether the daemon port can be exclusively bound right now."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+            # The server binds with address reuse. Mirror that contract here:
+            # a recently closed listener may leave TCP connections in
+            # TIME_WAIT, which must not be mistaken for an active owner and
+            # block a safe restart for the full TCP timeout.
+            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             candidate.bind(("127.0.0.1", port))
         return True
     except OSError:
