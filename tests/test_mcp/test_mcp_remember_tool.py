@@ -265,6 +265,31 @@ class TestRememberWriteThrough:
         assert result["fact_ids"] == ["abc123"]
         assert result["pending"] is False
 
+    def test_remember_never_spawns_a_second_writer_when_daemon_is_unavailable(
+        self, monkeypatch,
+    ) -> None:
+        """A known daemon may be retrying a writer lock; do not bypass it.
+
+        Falling back to a local WorkerPool after the daemon was positively
+        identified creates a second database writer, which turns a transient
+        collision into repeated lock failures under parallel MCP clients.
+        """
+        import superlocalmemory.cli.daemon as _d
+
+        monkeypatch.setattr(_d, "is_daemon_running", lambda *a, **k: True)
+        monkeypatch.setattr(_d, "daemon_request", lambda *a, **k: None)
+
+        remember = _get_remember_tool()
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            side_effect=AssertionError("a live daemon must retain write ownership"),
+        ):
+            result = asyncio.run(remember("do not fork a writer"))
+
+        assert result["success"] is False
+        assert result["retryable"] is True
+        assert "daemon" in result["error"].lower()
+
     def test_complete_empty_write_never_fabricates_pending_fact_id(
         self, monkeypatch,
     ) -> None:
