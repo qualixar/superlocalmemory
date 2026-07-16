@@ -2445,6 +2445,12 @@ def _materializer_actor_id() -> str:
 
 def _materialize_ingestion_one_pass(engine, *, limit: int = 50) -> tuple[int, int]:
     """Materialize durable M018 work once; return ``(complete, failed)``."""
+    # The durable queue shares the embedder/LLM with foreground recall just
+    # like the legacy pending queue.  Yield before even constructing/claiming
+    # work so an active user recall cannot suffer priority inversion.
+    if _recalls_in_flight() > 0:
+        return 0, 0
+
     from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
     from superlocalmemory.core.ingestion_command import IngestionState
 
