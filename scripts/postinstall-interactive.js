@@ -514,6 +514,14 @@ function printFirstRunChecklist(config) {
   console.log('  slm doctor                 — run health checks (DB, models, ports)');
   console.log('  slm health --watch         — live health ladder readout');
   console.log('  slm dashboard              — open the dashboard in your browser');
+  console.log('');
+  console.log('Available capability map (nothing external is enabled silently):');
+  console.log('  Memory + graph: dated episodic facts, entity graph, and local SQLite retrieval are ready.');
+  console.log('  Scale Engine: stage and verify CozoDB graph + LanceDB vector projections with `slm db scale prepare`.');
+  console.log('  Cache + compression: use the MCP optimize tools or `slm optimize on`; aggressive prose is opt-in.');
+  console.log('  Mesh: local coordination is available; configure a shared secret before exposing it to a LAN.');
+  console.log('  Adapters: Gmail, Calendar, and Transcript are OFF until `slm adapters enable <name>`.');
+  console.log('  IDE add-ons: install only SLM-owned integration with `slm hooks install --agent codex` or `--agent claude`.');
   if (config.skill_evolution_enabled) {
     // UX-L3: make the failure mode explicit to users who opted into
     // evolution. If three LLM calls fail, the circuit breaker trips — and

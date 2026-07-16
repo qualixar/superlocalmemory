@@ -2279,11 +2279,16 @@ def cmd_mcp(_args: Namespace) -> None:
         from superlocalmemory.infra.process_reaper import (
             ReaperConfig,
             find_orphans,
+            is_mcp_server_process,
             kill_orphan,
         )
         _reaper_cfg = ReaperConfig(orphan_age_threshold_hours=0.0)
         for _orphan in find_orphans(_reaper_cfg):
-            kill_orphan(_orphan.pid, graceful_timeout_seconds=1.0)
+            # A unified daemon is expected to be detached from the launching
+            # shell and can therefore have PPID 1.  The MCP reaper must never
+            # treat that healthy shared daemon as an orphaned stdio server.
+            if is_mcp_server_process(_orphan):
+                kill_orphan(_orphan.pid, graceful_timeout_seconds=1.0)
     except Exception:
         pass  # Never block MCP startup on cleanup failure
 

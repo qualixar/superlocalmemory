@@ -248,6 +248,10 @@ async def test_kv_set_get_hit_miss_and_tenant_isolation(tools, monkeypatch):
     set_r = await tools["slm_cache_set"](key="my_key", value="agent_a_value")
     assert set_r["ok"] is True
     assert set_r["stored"] is True
+    # The direct MCP KV path must populate the normalized tag index as well
+    # as the entry's descriptive tag_json, otherwise CLI invalidation is a
+    # misleading no-op for MCP-created cache entries.
+    mock_db.tag_register.assert_called_once()
 
     get_hit = await tools["slm_cache_get"](key="my_key")
     assert get_hit["ok"] is True
