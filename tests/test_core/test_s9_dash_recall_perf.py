@@ -17,6 +17,7 @@ and isolates the code we added in this commit.
 from __future__ import annotations
 
 import time
+from statistics import median
 from types import SimpleNamespace
 
 import pytest
@@ -96,17 +97,34 @@ def test_recall_with_session_id_does_not_regress(monkeypatch) -> None:
         recall_method(engine_stub, "q")
         recall_method(engine_stub, "q", session_id="s")
 
-    iterations = 200
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        recall_method(engine_stub, "q")
-    baseline_ms = (time.perf_counter() - t0) * 1000.0
+    # Pair short equal batches and alternate their order. A sequential 200 +
+    # 200 measurement picks up macOS runner scheduling/CPU-frequency drift as
+    # a false session-id regression; interleaving preserves the same product
+    # signal while comparing like-for-like execution windows.
+    rounds = 10
+    per_round = 20
+    baseline_samples: list[float] = []
+    with_sid_samples: list[float] = []
 
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        recall_method(engine_stub, "q", session_id="sess-perf")
-    with_sid_ms = (time.perf_counter() - t0) * 1000.0
+    def _measure(with_session: bool) -> float:
+        t0 = time.perf_counter()
+        for _ in range(per_round):
+            recall_method(
+                engine_stub, "q", session_id="sess-perf" if with_session else None,
+            )
+        return (time.perf_counter() - t0) * 1000.0
 
+    for round_index in range(rounds):
+        if round_index % 2:
+            with_sid_samples.append(_measure(True))
+            baseline_samples.append(_measure(False))
+        else:
+            baseline_samples.append(_measure(False))
+            with_sid_samples.append(_measure(True))
+
+    iterations = rounds * per_round
+    baseline_ms = median(baseline_samples) * rounds
+    with_sid_ms = median(with_sid_samples) * rounds
     delta_ms = with_sid_ms - baseline_ms
     per_call_delta_us = delta_ms * 1000.0 / iterations
 

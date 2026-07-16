@@ -24,6 +24,7 @@ from typing import Any
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT, SLMConfig
 from superlocalmemory.core.engine_capabilities import Capabilities, CapabilityError
 from superlocalmemory.core.modes import get_capabilities
+from superlocalmemory.learning.outcome_queue import RecallEvent, enqueue_recall
 from superlocalmemory.storage.models import (
     AtomicFact, MemoryRecord, Mode, RecallResponse,
 )
@@ -664,9 +665,6 @@ class MemoryEngine:
         # recall correctness (LLD-02 §4.9, LLD-08 §4.1).
         if session_id:
             try:
-                from superlocalmemory.learning.outcome_queue import (
-                    RecallEvent, enqueue_recall,
-                )
                 fact_ids = tuple(
                     getattr(r.fact, "fact_id", "") or ""
                     for r in getattr(response, "results", [])
