@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
+from superlocalmemory.core.ingestion_command import IngestionState
 from superlocalmemory.server.unified_daemon import create_app
 from superlocalmemory.storage.migrations import M018_ingestion_operations
 
@@ -153,3 +157,44 @@ def test_wait_remember_completes_same_canonical_operation(
         "state": "complete",
         "session_id": "session-sync",
     }
+
+
+def test_wait_remember_keeps_durable_fact_queryable_when_enrichment_retries(
+    engine_with_mock_deps,
+) -> None:
+    """A cold optional embedding path must not turn an admitted fact into 500."""
+    client = _client(engine_with_mock_deps)
+    receipt = SimpleNamespace(
+        operation_id="cold-embedding-op",
+        state=IngestionState.QUERYABLE,
+        fact_ids=("fact-queryable",),
+    )
+    deferred = SimpleNamespace(
+        operation_id="cold-embedding-op",
+        state=IngestionState.FAILED,
+        fact_ids=("fact-queryable",),
+        last_error="incomplete derivation stages: embeddings",
+    )
+    command = SimpleNamespace(
+        submit=lambda _request: receipt,
+        materialize=lambda _operation_id: deferred,
+    )
+
+    with patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+        return_value=command,
+    ):
+        response = client.post(
+            "/remember?wait=true",
+            json={
+                "content": "A durable fact remains available while local embeddings warm.",
+                "idempotency_key": "cold-embedding-route-1",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "queryable"
+    assert payload["materialization_state"] == "failed"
+    assert payload["fact_ids"] == ["fact-queryable"]
+    assert "retry" in payload["note"]
