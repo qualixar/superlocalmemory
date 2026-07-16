@@ -733,8 +733,6 @@ def run_store_fact_direct(
         )
         fact.canonical_entities = list(canonical.values())
     db.store_fact(fact)
-    # v3.4.5: Incremental sync to CozoDB/LanceDB (F-04)
-    _sync_to_graph_backends(fact)
     if fact.embedding and ann_index:
         ann_index.add(fact.fact_id, fact.embedding)
     # V3.2: VectorStore upsert (dual-write)
@@ -746,6 +744,9 @@ def run_store_fact_direct(
         )
     if graph_builder:
         graph_builder.build_edges(fact, profile_id)
+    # The graph projection must run after GraphBuilder: syncing immediately
+    # after SQLite fact insertion omitted every new fact edge from Cozo.
+    _sync_to_graph_backends(fact)
     # BM25 indexing
     bm25 = getattr(retrieval_engine, '_bm25', None) if retrieval_engine else None
     if bm25:

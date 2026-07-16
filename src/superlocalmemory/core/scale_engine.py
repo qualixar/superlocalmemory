@@ -219,9 +219,8 @@ class ScaleEngineManager:
 
     def _canonical_counts(self, conn: sqlite3.Connection) -> dict[str, int]:
         nodes = conn.execute(
-            "SELECT COUNT(*) FROM (SELECT source_id FROM graph_edges WHERE profile_id=? "
-            "UNION SELECT target_id FROM graph_edges WHERE profile_id=?)",
-            (self.profile_id, self.profile_id),
+            "SELECT COUNT(*) FROM canonical_entities WHERE profile_id=?",
+            (self.profile_id,),
         ).fetchone()[0]
         edges = conn.execute(
             "SELECT COUNT(*) FROM graph_edges WHERE profile_id=?", (self.profile_id,)

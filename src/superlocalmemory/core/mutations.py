@@ -60,6 +60,13 @@ def delete_fact_authorized(
         return {"ok": False, "error": f"Memory {fact_id} not found"}
     content_preview = dict(rows[0]).get("content", "")[:80]
     engine._db.delete_fact(fact_id)
+    try:
+        from superlocalmemory.core.backend_orchestrator import get_orchestrator
+        orchestrator = get_orchestrator()
+        if orchestrator is not None:
+            orchestrator.sync_deleted_fact(fact_id)
+    except Exception:
+        logger.warning("Derived projection deletion sync failed for %s", fact_id[:16])
     engine._hooks.run_post("delete", context)
     logger.info(
         "DELETE fact_id=%s actor=%s source_agent=%s content=%s",
@@ -114,6 +121,13 @@ def update_fact_authorized(
         except Exception as exc:
             logger.warning("UPDATE embedding refresh failed: %s", exc)
     engine._db.update_fact(fact_id, updates)
+    try:
+        from superlocalmemory.core.backend_orchestrator import get_orchestrator
+        orchestrator = get_orchestrator()
+        if orchestrator is not None:
+            orchestrator.sync_changed_fact(fact_id)
+    except Exception:
+        logger.warning("Derived projection update sync failed for %s", fact_id[:16])
     retrieval = getattr(engine, "_retrieval_engine", None)
     bm25 = getattr(retrieval, "_bm25", None) if retrieval else None
     if bm25:

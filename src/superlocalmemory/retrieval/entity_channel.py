@@ -810,37 +810,54 @@ class EntityGraphChannel:
         if not canonical_ids:
             return []
 
+        # Scoped/global recall has deliberately more complex authorization
+        # semantics than the promoted default-profile projection.  Never let
+        # a projection broaden that boundary: SQLite remains authoritative.
+        if include_global or include_shared:
+            return self._search_without_cozo(query, profile_id, top_k)
+
         try:
-            # Use CozoDB for spreading activation
-            scored = self._cozo.spreading_activation(
+            scored = self._cozo.recall_facts(
                 canonical_ids,
+                profile_id=profile_id,
                 depth=self._max_hops,
                 decay=self._decay,
-                top_k=top_k * 2,  # Fetch extra for filtering
+                threshold=self._threshold,
+                top_k=top_k * 2,
             )
 
-            # Map entity scores to fact scores
-            fact_scores: list[tuple[str, float]] = []
-            for entity_id, score in scored:
-                facts = self._db.get_facts_by_entity(
-                    entity_id,
-                    profile_id,
-                    include_global=include_global,
-                    include_shared=include_shared,
-                )
-                for fact in facts:
-                    fact_scores.append((fact.fact_id, score))
-
-            # Sort and return top_k
-            fact_scores.sort(key=lambda x: x[1], reverse=True)
-            return filter_authorized_results(
+            cozo_results = filter_authorized_results(
                 self._db,
-                fact_scores,
+                scored,
                 profile_id,
                 include_global=include_global,
                 include_shared=include_shared,
             )[:top_k]
+            # Shadow SQLite before accepting a projected answer.  The graph
+            # channel has optional PageRank/community enrichments, so exact
+            # score equality is neither required nor useful; result ordering
+            # and membership are the correctness contract.  Any divergence is
+            # recorded and fails closed to canonical SQLite.
+            sqlite_results = self._search_without_cozo(query, profile_id, top_k)
+            matches = [fact_id for fact_id, _ in cozo_results] == [
+                fact_id for fact_id, _ in sqlite_results
+            ]
+            record = getattr(self._cozo, "record_shadow_comparison", None)
+            if callable(record):
+                record(matches=matches, projected=cozo_results, canonical=sqlite_results)
+            return cozo_results if matches else sqlite_results
+        except Exception as exc:
+            record = getattr(self._cozo, "record_shadow_error", None)
+            if callable(record):
+                record(str(exc))
+            return self._search_without_cozo(query, profile_id, top_k)
 
-        except Exception:
-            # Fallback to in-memory adjacency (existing code path)
-            return []
+    def _search_without_cozo(
+        self, query: str, profile_id: str, top_k: int,
+    ) -> list[tuple[str, float]]:
+        """Run canonical SQLite entity recall without recursive projection use."""
+        cozo, self._cozo = self._cozo, None
+        try:
+            return self._search_locked(query, profile_id, top_k)
+        finally:
+            self._cozo = cozo

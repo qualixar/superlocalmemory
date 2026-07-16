@@ -715,6 +715,13 @@ async def lifespan(application: FastAPI):
                         logger.info("CozoDB backend wired into entity_graph channel")
                     except Exception as exc:
                         logger.warning("CozoDB channel injection failed: %s", exc)
+                semantic = getattr(re, '_semantic', None)
+                if semantic is not None and _lancedb_backend is not None:
+                    try:
+                        semantic.set_scale_vector_backend(_lancedb_backend)
+                        logger.info("LanceDB backend wired into semantic channel with SQLite shadow")
+                    except Exception as exc:
+                        logger.warning("LanceDB channel injection failed: %s", exc)
             logger.info("BackendOrchestrator: ready (cozo=%s, lancedb=%s)",
                          "active" if _cozo_backend else "off",
                          "active" if _lancedb_backend else "off")

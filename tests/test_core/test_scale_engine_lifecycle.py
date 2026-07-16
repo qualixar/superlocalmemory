@@ -33,8 +33,7 @@ class _Graph:
 
     def bulk_import_from_sqlite(self, conn, profile_id):
         nodes = conn.execute(
-            "SELECT COUNT(*) FROM (SELECT source_id FROM graph_edges WHERE profile_id=? "
-            "UNION SELECT target_id FROM graph_edges WHERE profile_id=?)", (profile_id, profile_id)
+            "SELECT COUNT(*) FROM canonical_entities WHERE profile_id=?", (profile_id,)
         ).fetchone()[0]
         edges = conn.execute("SELECT COUNT(*) FROM graph_edges WHERE profile_id=?", (profile_id,)).fetchone()[0]
         self.counts_path.write_text(json.dumps({"entities": nodes, "edges": edges}))
@@ -74,8 +73,10 @@ def manager(tmp_path):
     db.executescript(
         """
         CREATE TABLE graph_edges (source_id TEXT, target_id TEXT, profile_id TEXT);
+        CREATE TABLE canonical_entities (entity_id TEXT, profile_id TEXT);
         CREATE TABLE fact_embeddings_rowids (fact_id TEXT);
         INSERT INTO graph_edges VALUES ('a', 'b', 'default'), ('b', 'c', 'default');
+        INSERT INTO canonical_entities VALUES ('entity-a', 'default'), ('entity-b', 'default');
         INSERT INTO fact_embeddings_rowids VALUES ('a'), ('b');
         """
     )

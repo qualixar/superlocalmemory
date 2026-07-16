@@ -123,6 +123,15 @@ class TestWrite:
         fact_ids = {r[0] for r in results}
         assert "f0" not in fact_ids  # Now cold, excluded
 
+    def test_profile_scope_and_delete_are_projection_safe(self, backend):
+        backend.add_vectors(["same-name"], [_make_vec(0.1)], ["active"], "alpha")
+        backend.add_vectors(["other"], [_make_vec(0.1)], ["active"], "beta")
+        assert [fact_id for fact_id, _ in backend.similarity_search(
+            _make_vec(0.1), profile_id="alpha"
+        )] == ["same-name"]
+        backend.remove_vector("same-name")
+        assert backend.similarity_search(_make_vec(0.1), profile_id="alpha") == []
+
 
 class TestHealth:
     def test_health_counts_vectors(self, populated):

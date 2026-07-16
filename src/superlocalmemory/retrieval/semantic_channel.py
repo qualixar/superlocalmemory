@@ -34,6 +34,20 @@ logger = logging.getLogger(__name__)
 _VARIANCE_FLOOR: float = 1e-6
 
 
+class _LanceCandidateSource:
+    """Adapt the promoted Lance projection to the existing candidate contract."""
+
+    available = True
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+
+    def search(self, query_embedding: list[float], *, top_k: int, profile_id: str) -> list[tuple[str, float]]:
+        return self._backend.similarity_search(
+            query_embedding, top_k=top_k, profile_id=profile_id,
+        )
+
+
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity in [-1, 1]. Returns 0.0 on zero vectors."""
     norm_a = np.linalg.norm(a)
@@ -95,6 +109,9 @@ class SemanticChannel:
         # V3.3.26: Lazily instantiated FRQAD metric for mixed-precision scoring
         self._frqad_metric: object | None = None
         self._vector_store = vector_store
+        self._scale_vector_backend: Any | None = None
+        self._scale_shadow_checks = 0
+        self._scale_shadow_mismatches = 0
         # V3.3.19: TurboQuant 3-tier search (stateless, optional)
         self._qas = quantization_aware_search
 
@@ -123,6 +140,23 @@ class SemanticChannel:
 
         q_vec = np.array(query_embedding, dtype=np.float32)
 
+        # Lance is a derived projection.  It is never an authorization source
+        # and it never silently replaces the canonical sqlite-vec path: every
+        # promoted query is shadowed and falls back if membership/order differs.
+        if (
+            self._scale_vector_backend is not None
+            and not bool(getattr(self, "include_global", False))
+            and not bool(getattr(self, "include_shared", False))
+        ):
+            projected = self._search_via_lance(query_embedding, q_vec, profile_id, top_k)
+            canonical = self._search_without_lance(query_embedding, q_vec, profile_id, top_k)
+            self._scale_shadow_checks += 1
+            if [fid for fid, _ in projected] == [fid for fid, _ in canonical]:
+                return projected
+            self._scale_shadow_mismatches += 1
+            logger.warning("Lance semantic projection diverged from SQLite; using SQLite")
+            return canonical
+
         # --- FAST PATH: sqlite-vec KNN ---
         if self._vector_store and self._vector_store.available:
             results = self._search_via_vector_store(
@@ -134,6 +168,44 @@ class SemanticChannel:
 
         # --- FALLBACK: full-table scan (original code, unchanged) ---
         return self._search_full_scan(query_embedding, q_vec, profile_id, top_k)
+
+    def set_scale_vector_backend(self, backend: Any | None) -> None:
+        """Attach a parity-verified Lance projection without replacing SQLite."""
+        self._scale_vector_backend = backend
+
+    def scale_projection_telemetry(self) -> dict[str, int]:
+        return {
+            "shadow_checks": self._scale_shadow_checks,
+            "shadow_mismatches": self._scale_shadow_mismatches,
+        }
+
+    def _search_via_lance(
+        self, query_embedding: list[float], q_vec: np.ndarray, profile_id: str, top_k: int,
+    ) -> list[tuple[str, float]]:
+        original_store, original_qas = self._vector_store, self._qas
+        try:
+            self._vector_store = _LanceCandidateSource(self._scale_vector_backend)
+            # QAS indexes SQLite/quantized records and cannot represent Lance.
+            self._qas = None
+            return self._search_via_vector_store(query_embedding, q_vec, profile_id, top_k)
+        except Exception as exc:
+            logger.warning("Lance semantic projection failed closed to SQLite: %s", exc)
+            return []
+        finally:
+            self._vector_store, self._qas = original_store, original_qas
+
+    def _search_without_lance(
+        self, query_embedding: list[float], q_vec: np.ndarray, profile_id: str, top_k: int,
+    ) -> list[tuple[str, float]]:
+        backend, self._scale_vector_backend = self._scale_vector_backend, None
+        try:
+            if self._vector_store and self._vector_store.available:
+                results = self._search_via_vector_store(query_embedding, q_vec, profile_id, top_k)
+                if results:
+                    return results
+            return self._search_full_scan(query_embedding, q_vec, profile_id, top_k)
+        finally:
+            self._scale_vector_backend = backend
 
     def _search_via_vector_store(
         self,

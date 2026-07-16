@@ -119,6 +119,15 @@ class LanceDBVectorBackend:
         )
         return len(data)
 
+    @staticmethod
+    def _fact_predicate(fact_id: str) -> str:
+        """Build a Lance SQL literal without allowing predicate injection."""
+        return "fact_id = '" + fact_id.replace("'", "''") + "'"
+
+    def remove_vector(self, fact_id: str) -> None:
+        """Delete one derived vector after its canonical fact is deleted."""
+        self._table.delete(self._fact_predicate(fact_id))
+
     # ------------------------------------------------------------------
     # Read Path
     # ------------------------------------------------------------------
@@ -128,6 +137,7 @@ class LanceDBVectorBackend:
         query_vector: list[float],
         top_k: int = 50,
         tier_filter: list[str] | None = None,
+        profile_id: str = "default",
     ) -> list[tuple[str, float]]:
         """ANN search with optional tier filter.
 
@@ -148,7 +158,10 @@ class LanceDBVectorBackend:
 
             # Build tier filter string for LanceDB SQL-like where clause
             tier_str = ", ".join(f"'{t}'" for t in tier_filter)
-            results = search.where(f"tier IN ({tier_str})").to_list()
+            profile_literal = profile_id.replace("'", "''")
+            results = search.where(
+                f"tier IN ({tier_str}) AND profile_id = '{profile_literal}'"
+            ).to_list()
 
             # Convert distance → similarity (F-08)
             return [(r["fact_id"], 1.0 - r["_distance"]) for r in results]
@@ -180,11 +193,13 @@ class LanceDBVectorBackend:
 
         # Get tiers
         tier_map: dict[str, str] = {}
+        profile_map: dict[str, str] = {}
         try:
             for row in conn.execute(
-                "SELECT fact_id, COALESCE(lifecycle, 'active') FROM atomic_facts"
+                "SELECT fact_id, COALESCE(lifecycle, 'active'), profile_id FROM atomic_facts"
             ):
                 tier_map[row[0]] = row[1]
+                profile_map[row[0]] = row[2] or "default"
         except sqlite3.OperationalError:
             pass
 
@@ -213,15 +228,20 @@ class LanceDBVectorBackend:
                 "fact_id": fact_id,
                 "vector": vector,
                 "tier": tier,
-                "profile_id": "default",
+                "profile_id": profile_map.get(fact_id, "default"),
             })
 
         if data:
-            self.add_vectors(
-                [item["fact_id"] for item in data],
-                [item["vector"] for item in data],
-                [item["tier"] for item in data],
-            )
+            by_profile: dict[str, list[dict[str, Any]]] = {}
+            for item in data:
+                by_profile.setdefault(item["profile_id"], []).append(item)
+            for profile_id, records in by_profile.items():
+                self.add_vectors(
+                    [item["fact_id"] for item in records],
+                    [item["vector"] for item in records],
+                    [item["tier"] for item in records],
+                    profile_id,
+                )
 
         logger.info("LanceDB: imported %d vectors from sqlite-vec", len(data))
         return len(data)

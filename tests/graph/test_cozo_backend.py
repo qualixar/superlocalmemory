@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 import shutil
+import sqlite3
 from pathlib import Path
 
 from superlocalmemory.graph.cozo_backend import (
@@ -94,6 +95,43 @@ class TestSpreadingActivation:
         scores = dict(results)
         assert scores["e4"] == 1.0
         assert len(scores) == 1  # Only e4, no edges
+
+
+class TestCanonicalEntityProjection:
+    def test_bulk_projection_keeps_canonical_and_fact_namespaces_distinct(self, backend):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO canonical_entities VALUES
+                ('entity-ada', 'Ada', 'person', '2026-01-01', '2026-01-02', 2, 'default'),
+                ('entity-atlas', 'Atlas', 'project', '2026-01-01', '2026-01-02', 1, 'default');
+            INSERT INTO atomic_facts VALUES
+                ('fact-1', '["entity-ada"]', 'default'),
+                ('fact-2', '["entity-ada", "entity-atlas"]', 'default');
+            INSERT INTO graph_edges VALUES ('fact-1', 'fact-2', 'related', 1.0, 'default');
+        """)
+        backend.bulk_import_from_sqlite(conn)
+        health = backend.health_check()
+        assert health["entities"] == 2
+        assert health["edges"] == 1
+        assert [fact_id for fact_id, _ in backend.recall_facts(["entity-ada"])] == ["fact-1", "fact-2"]
+
+    def test_remove_fact_is_parameter_safe_and_removes_derived_records(self, backend):
+        unsafe_id = "fact-'quoted'"
+        backend.add_entity("entity-ada", "Ada", "person")
+        backend.add_fact_entities(unsafe_id, ["entity-ada"])
+        backend.add_edge(unsafe_id, "fact-2", "related")
+        backend.remove_fact(unsafe_id)
+        assert backend.recall_facts(["entity-ada"]) == []
 
 
 class TestPageRank:

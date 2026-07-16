@@ -157,15 +157,38 @@ class BackendOrchestrator:
                 self._sync_fact_embedding(fact)
 
     def _sync_fact_entities(self, fact: Any) -> None:
-        """Sync fact's entities and edges to CozoDB."""
+        """Synchronize one fact's canonical entity bridge and fact edges."""
         try:
+            # Retrying ingestion must not retain stale fact/entity links.
+            self._cozo.remove_fact(fact.fact_id)
             entities = getattr(fact, "canonical_entities", []) or []
+            profile_id = getattr(fact, "profile_id", "default") or "default"
             for eid in entities:
-                self._cozo.add_entity(eid, eid, "concept", {})
-                # Add edges from this entity to existing ones
-                for other in entities:
-                    if other != eid:
-                        self._cozo.add_edge(eid, other, "co_occurs", 1.0)
+                rows = self._db.execute(
+                    "SELECT canonical_name, entity_type, fact_count FROM canonical_entities "
+                    "WHERE entity_id = ? AND profile_id = ?",
+                    (eid, profile_id),
+                )
+                if rows:
+                    entity = dict(rows[0])
+                    self._cozo.add_entity(
+                        eid,
+                        entity.get("canonical_name") or eid,
+                        entity.get("entity_type") or "concept",
+                        {"fact_count": int(entity.get("fact_count") or 0)},
+                        profile_id,
+                    )
+            self._cozo.add_fact_entities(fact.fact_id, entities, profile_id)
+            for row in self._db.execute(
+                "SELECT source_id, target_id, edge_type, weight FROM graph_edges "
+                "WHERE profile_id = ? AND (source_id = ? OR target_id = ?)",
+                (profile_id, fact.fact_id, fact.fact_id),
+            ):
+                edge = dict(row)
+                self._cozo.add_edge(
+                    edge["source_id"], edge["target_id"], edge.get("edge_type") or "related",
+                    float(edge.get("weight") or 1.0), profile_id=profile_id,
+                )
         except Exception as exc:
             logger.debug("CozoDB incremental sync skipped: %s", exc)
 
@@ -177,9 +200,29 @@ class BackendOrchestrator:
                 tier = getattr(fact, "lifecycle", "active")
                 self._lancedb.add_vectors(
                     [fact.fact_id], [embedding], [tier],
+                    getattr(fact, "profile_id", "default") or "default",
                 )
         except Exception as exc:
             logger.debug("LanceDB incremental sync skipped: %s", exc)
+
+    def sync_deleted_fact(self, fact_id: str) -> None:
+        """Remove a fact from derived projections after canonical deletion."""
+        if self._cozo and self._cozo_status() == "active":
+            try:
+                self._cozo.remove_fact(fact_id)
+            except Exception as exc:
+                logger.warning("Cozo deletion sync failed for %s: %s", fact_id[:16], exc)
+        if self._lancedb and self._lancedb_status() == "active":
+            try:
+                self._lancedb.remove_vector(fact_id)
+            except Exception as exc:
+                logger.warning("Lance deletion sync failed for %s: %s", fact_id[:16], exc)
+
+    def sync_changed_fact(self, fact_id: str) -> None:
+        """Refresh projections after an authorized canonical fact update."""
+        fact = self._db.get_fact(fact_id)
+        if fact is not None:
+            self.sync_new_fact(fact)
 
     # ------------------------------------------------------------------
     # Backend Access
@@ -200,14 +243,11 @@ class BackendOrchestrator:
     def graph_retrieval_ready(self) -> bool:
         """Whether Cozo can be injected into entity recall.
 
-        The current projection mirrors fact-to-fact graph edges, whereas the
-        entity channel seeds canonical entity identifiers.  Keeping the
-        projection healthy is useful operationally, but routing those two ID
-        spaces together would silently return incomplete entity recall.  Hold
-        the route on SQLite until the canonical-entity projection and shadow
-        parity gate are implemented.
+        Cozo carries both canonical entity mappings and fact graph edges.  The
+        entity channel still shadows every projected result against SQLite and
+        fails closed on any mismatch, so availability never weakens recall.
         """
-        return False
+        return bool(self._cozo and self._cozo_status() == "active")
 
     # ------------------------------------------------------------------
     # Health Check
