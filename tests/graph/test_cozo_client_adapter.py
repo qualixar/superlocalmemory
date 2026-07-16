@@ -20,6 +20,16 @@ class _LegacyClient:
         self.closed = True
 
 
+class _ParameterizedClient(_LegacyClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.params = None
+
+    def run(self, _script: str, params=None):
+        self.params = params
+        return {"headers": ["id"], "rows": [["e1"]], "ok": True}
+
+
 def test_legacy_pycozo_rows_and_relation_import_are_normalized() -> None:
     legacy = _LegacyClient()
     adapter = _CozoClientAdapter(legacy)
@@ -38,3 +48,12 @@ def test_legacy_pycozo_rows_and_relation_import_are_normalized() -> None:
 
     adapter.close()
     assert legacy.closed
+
+
+def test_parameterized_queries_are_forwarded_without_string_interpolation() -> None:
+    client = _ParameterizedClient()
+    adapter = _CozoClientAdapter(client)
+
+    adapter.run("?[id] := *entity{id}, id == $id", {"id": "not-a-query"})
+
+    assert client.params == {"id": "not-a-query"}

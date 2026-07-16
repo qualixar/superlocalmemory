@@ -85,7 +85,7 @@ class _CozoClientAdapter:
         self._client = client
 
     def run(self, script: str, params: dict[str, Any] | None = None) -> Any:
-        result = self._client.run(script, params)
+        result = self._client.run(script) if params is None else self._client.run(script, params)
         return _CozoResult(result) if isinstance(result, dict) else result
 
     def put(self, relation: str, rows: list[dict[str, Any]]) -> None:
