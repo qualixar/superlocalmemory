@@ -173,7 +173,9 @@ class LanceDBVectorBackend:
     # Bulk Import (sqlite-vec → LanceDB)
     # ------------------------------------------------------------------
 
-    def bulk_import_from_sqlite(self, conn: sqlite3.Connection) -> int:
+    def bulk_import_from_sqlite(
+        self, conn: sqlite3.Connection, profile_id: str = "default",
+    ) -> int:
         """Export embeddings from sqlite-vec → LanceDB.
 
         sqlite-vec stores vectors as raw float32 little-endian blobs
@@ -196,7 +198,9 @@ class LanceDBVectorBackend:
         profile_map: dict[str, str] = {}
         try:
             for row in conn.execute(
-                "SELECT fact_id, COALESCE(lifecycle, 'active'), profile_id FROM atomic_facts"
+                "SELECT fact_id, COALESCE(lifecycle, 'active'), profile_id "
+                "FROM atomic_facts WHERE profile_id = ?",
+                (profile_id,),
             ):
                 tier_map[row[0]] = row[1]
                 profile_map[row[0]] = row[2] or "default"
@@ -216,7 +220,10 @@ class LanceDBVectorBackend:
         data = []
         for rowid, blob in rows:
             fact_id = row_map.get(rowid)
-            if fact_id is None:
+            # The rowid mapping is global, but a staged Scale Engine is
+            # explicitly profile-scoped.  Do not import a foreign profile by
+            # giving it a default tier/profile below.
+            if fact_id is None or fact_id not in profile_map:
                 continue
             try:
                 vector = self._decode_vector_blob(blob)
@@ -228,19 +235,19 @@ class LanceDBVectorBackend:
                 "fact_id": fact_id,
                 "vector": vector,
                 "tier": tier,
-                "profile_id": profile_map.get(fact_id, "default"),
+                "profile_id": profile_map.get(fact_id, profile_id),
             })
 
         if data:
             by_profile: dict[str, list[dict[str, Any]]] = {}
             for item in data:
                 by_profile.setdefault(item["profile_id"], []).append(item)
-            for profile_id, records in by_profile.items():
+            for record_profile_id, records in by_profile.items():
                 self.add_vectors(
                     [item["fact_id"] for item in records],
                     [item["vector"] for item in records],
                     [item["tier"] for item in records],
-                    profile_id,
+                    record_profile_id,
                 )
 
         logger.info("LanceDB: imported %d vectors from sqlite-vec", len(data))

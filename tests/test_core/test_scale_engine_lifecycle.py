@@ -52,8 +52,12 @@ class _Vectors:
         self.path.mkdir(parents=True, exist_ok=True)
         self.count_path = self.path / "count.txt"
 
-    def bulk_import_from_sqlite(self, conn):
-        count = conn.execute("SELECT COUNT(*) FROM fact_embeddings_rowids").fetchone()[0]
+    def bulk_import_from_sqlite(self, conn, profile_id="default"):
+        count = conn.execute(
+            "SELECT COUNT(*) FROM fact_embeddings_rowids fer "
+            "JOIN atomic_facts af ON af.fact_id = fer.fact_id WHERE af.profile_id = ?",
+            (profile_id,),
+        ).fetchone()[0]
         self.count_path.write_text(str(count))
 
     def health_check(self):
@@ -74,10 +78,12 @@ def manager(tmp_path):
         """
         CREATE TABLE graph_edges (source_id TEXT, target_id TEXT, profile_id TEXT);
         CREATE TABLE canonical_entities (entity_id TEXT, profile_id TEXT);
+        CREATE TABLE atomic_facts (fact_id TEXT, profile_id TEXT);
         CREATE TABLE fact_embeddings_rowids (fact_id TEXT);
         INSERT INTO graph_edges VALUES ('a', 'b', 'default'), ('b', 'c', 'default');
         INSERT INTO canonical_entities VALUES ('entity-a', 'default'), ('entity-b', 'default');
-        INSERT INTO fact_embeddings_rowids VALUES ('a'), ('b');
+        INSERT INTO atomic_facts VALUES ('a', 'default'), ('b', 'default'), ('foreign', 'other');
+        INSERT INTO fact_embeddings_rowids VALUES ('a'), ('b'), ('foreign');
         """
     )
     db.commit()
@@ -118,6 +124,16 @@ def test_verify_rejects_a_stage_when_canonical_data_changed(manager):
     db.close()
     with pytest.raises(ScaleEngineError, match="changed after preparation"):
         lifecycle.verify(prepared["stage_id"])
+
+
+def test_prepare_excludes_foreign_profile_vectors_from_parity(manager):
+    lifecycle, _ = manager
+    prepared = lifecycle.prepare()
+    # The fixture contains one vector owned by ``other``.  Promotion is
+    # default-profile-only, so both manifest and staged Lance count stay at 2.
+    assert prepared["canonical"]["vectors"] == 2
+    assert prepared["observed"]["vectors"] == 2
+    assert lifecycle.verify(prepared["stage_id"])["state"] == "verified"
 
 
 def test_rollback_requires_explicit_backup_and_returns_to_local_core(manager):

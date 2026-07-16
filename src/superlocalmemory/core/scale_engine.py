@@ -94,7 +94,7 @@ class ScaleEngineManager:
             cozo, lance = self._backend_factory(cozo_dir, lance_dir)
             with self._readonly_connection() as conn:
                 cozo.bulk_import_from_sqlite(conn, self.profile_id)
-                lance.bulk_import_from_sqlite(conn)
+                lance.bulk_import_from_sqlite(conn, self.profile_id)
                 canonical = self._canonical_counts(conn)
             observed = self._observed_counts(cozo, lance)
             manifest = {
@@ -226,7 +226,12 @@ class ScaleEngineManager:
             "SELECT COUNT(*) FROM graph_edges WHERE profile_id=?", (self.profile_id,)
         ).fetchone()[0]
         try:
-            vectors = conn.execute("SELECT COUNT(*) FROM fact_embeddings_rowids").fetchone()[0]
+            vectors = conn.execute(
+                "SELECT COUNT(*) FROM fact_embeddings_rowids fer "
+                "JOIN atomic_facts af ON af.fact_id = fer.fact_id "
+                "WHERE af.profile_id = ?",
+                (self.profile_id,),
+            ).fetchone()[0]
         except sqlite3.OperationalError:
             vectors = 0
         return {"entities": int(nodes), "edges": int(edges), "vectors": int(vectors)}
