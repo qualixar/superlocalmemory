@@ -685,11 +685,16 @@ async def lifespan(application: FastAPI):
             set_orchestrator(orch)
             _cozo_backend = orch.get_graph_backend()
             _lancedb_backend = orch.get_vector_backend()
-            # Inject CozoDB into entity_graph channel (already has the param).
+            # Cozo storage may be active before its canonical-entity retrieval
+            # projection is parity-proven. Never route mismatched ID spaces.
             re = getattr(engine, '_retrieval_engine', None)
             if re is not None:
                 eg = getattr(re, '_entity', None)
-                if eg is not None and _cozo_backend is not None:
+                if (
+                    eg is not None
+                    and _cozo_backend is not None
+                    and orch.graph_retrieval_ready()
+                ):
                     try:
                         eg._cozo = _cozo_backend
                         logger.info("CozoDB backend wired into entity_graph channel")

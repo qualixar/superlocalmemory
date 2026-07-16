@@ -197,6 +197,18 @@ class BackendOrchestrator:
             return self._lancedb
         return None
 
+    def graph_retrieval_ready(self) -> bool:
+        """Whether Cozo can be injected into entity recall.
+
+        The current projection mirrors fact-to-fact graph edges, whereas the
+        entity channel seeds canonical entity identifiers.  Keeping the
+        projection healthy is useful operationally, but routing those two ID
+        spaces together would silently return incomplete entity recall.  Hold
+        the route on SQLite until the canonical-entity projection and shadow
+        parity gate are implemented.
+        """
+        return False
+
     # ------------------------------------------------------------------
     # Health Check
     # ------------------------------------------------------------------

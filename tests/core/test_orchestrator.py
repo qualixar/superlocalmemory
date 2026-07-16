@@ -149,6 +149,11 @@ class TestBackendRouting:
         orch._update_status("cozo", "active")
         assert orch.get_graph_backend() is orch._cozo
 
+    def test_graph_retrieval_is_held_until_id_space_parity_is_proven(self, orch):
+        orch._cozo = MagicMock()
+        orch._update_status("cozo", "active")
+        assert orch.graph_retrieval_ready() is False
+
     def test_graph_backend_not_active_during_migration(self, orch):
         orch._cozo = MagicMock()
         orch._update_status("cozo", "migrating")
