@@ -6,6 +6,7 @@ from argparse import Namespace
 from superlocalmemory.cli.scale_engine_cmd import cmd_db_scale
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.core.scale_engine import ScaleEngineManager
+from superlocalmemory.storage.sqlite_vectors import CanonicalVectorError
 
 
 def test_adopt_uses_default_projection_without_changing_selected_profile(monkeypatch, capsys):
@@ -33,3 +34,23 @@ def test_adopt_uses_default_projection_without_changing_selected_profile(monkeyp
     assert captured["profile_id"] == "default"
     assert config.active_profile == "client-acme"
     assert '"restart_required": true' in capsys.readouterr().out
+
+
+def test_vector_contract_failure_is_reported_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(SLMConfig, "load", staticmethod(SLMConfig))
+    monkeypatch.setattr(
+        ScaleEngineManager,
+        "prepare",
+        lambda self: (_ for _ in ()).throw(
+            CanonicalVectorError("canonical vector mapping is incomplete")
+        ),
+    )
+
+    result = cmd_db_scale(
+        Namespace(scale_action="prepare", stage_id=None, backup_id=None)
+    )
+
+    assert result == 1
+    output = capsys.readouterr().out
+    assert "Scale Engine: canonical vector mapping is incomplete" in output
+    assert "Traceback" not in output

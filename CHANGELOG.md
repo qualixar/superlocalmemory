@@ -5,6 +5,14 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.5] - 2026-07-18 — Complete Scale Engine projection parity
+
+### Improved
+
+- Scale Engine vector preparation now reads the supported sqlite-vec virtual-table contract and joins vectors through canonical embedding metadata.
+- LanceDB projection imports are profile-scoped, lifecycle-aware, and processed in bounded batches to keep migration memory stable.
+- Scale verification and fingerprints now cover the same canonical vector rows that are written to LanceDB, so a partial vector projection cannot pass parity.
+
 ## [3.7.4] - 2026-07-18 — Scale Engine projection-parity release
 
 ### Fixed

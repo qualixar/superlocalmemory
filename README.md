@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.7.4</h1>
+<h1 align="center">SuperLocalMemory V3.7.5</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.7.4</code> — <strong>Scale Engine projection parity: normalized logical graph edges, durable promotion recovery, and honest runtime status.</strong><br/>
+<p align="center"><code>v3.7.5</code> — <strong>Scale Engine graph and vector projection parity, durable promotion recovery, and honest runtime status.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 

@@ -8,6 +8,7 @@ from argparse import Namespace
 def cmd_db_scale(args: Namespace) -> int:
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.scale_engine import ScaleEngineError, ScaleEngineManager
+    from superlocalmemory.storage.sqlite_vectors import CanonicalVectorError
 
     action = args.scale_action
     # Scale Engine projections are currently canonical-default-profile data.
@@ -42,7 +43,7 @@ def cmd_db_scale(args: Namespace) -> int:
             result = manager.rollback(args.backup_id)
         else:
             raise ScaleEngineError(f"unknown Scale Engine action: {action}")
-    except ScaleEngineError as exc:
+    except (ScaleEngineError, CanonicalVectorError) as exc:
         print(f"Scale Engine: {exc}")
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))

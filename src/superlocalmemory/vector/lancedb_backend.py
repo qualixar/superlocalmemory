@@ -20,6 +20,8 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.storage.sqlite_vectors import iter_canonical_vectors
+
 logger = logging.getLogger(__name__)
 
 # Optional import
@@ -178,80 +180,49 @@ class LanceDBVectorBackend:
     ) -> int:
         """Export embeddings from sqlite-vec → LanceDB.
 
-        sqlite-vec stores vectors as raw float32 little-endian blobs
-        in fact_embeddings_vector_chunks00, with rowid mapping in
-        fact_embeddings_rowids.
+        Reads the supported vec0 virtual table and joins row IDs through
+        ``embedding_metadata``. Shadow-table layouts are sqlite-vec internals
+        and must not be treated as a stable migration API.
 
         Returns number of vectors imported.
         """
-        # Get rowid → fact_id mapping
-        row_map: dict[int, str] = {}
-        try:
-            for row in conn.execute("SELECT rowid, fact_id FROM fact_embeddings_rowids"):
-                row_map[row[0]] = row[1]
-        except sqlite3.OperationalError:
-            logger.warning("fact_embeddings_rowids not found — no vectors to import")
-            return 0
-
-        # Get tiers
-        tier_map: dict[str, str] = {}
-        profile_map: dict[str, str] = {}
-        try:
-            for row in conn.execute(
-                "SELECT fact_id, COALESCE(lifecycle, 'active'), profile_id "
-                "FROM atomic_facts WHERE profile_id = ?",
-                (profile_id,),
-            ):
-                tier_map[row[0]] = row[1]
-                profile_map[row[0]] = row[2] or "default"
-        except sqlite3.OperationalError:
-            pass
-
-        # Read vectors from sqlite-vec
-        try:
-            rows = conn.execute(
-                "SELECT rowid, vector FROM fact_embeddings_vector_chunks00"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            logger.warning("fact_embeddings_vector_chunks00 not found")
-            return 0
-
-        # Reconstruct and batch import
-        data = []
-        for rowid, blob in rows:
-            fact_id = row_map.get(rowid)
-            # The rowid mapping is global, but a staged Scale Engine is
-            # explicitly profile-scoped.  Do not import a foreign profile by
-            # giving it a default tier/profile below.
-            if fact_id is None or fact_id not in profile_map:
-                continue
+        imported = 0
+        batch: list[tuple[str, list[float], str, str]] = []
+        for rowid, fact_id, tier, row_profile_id, blob in iter_canonical_vectors(
+            conn, profile_id
+        ):
             try:
                 vector = self._decode_vector_blob(blob)
             except Exception as exc:
-                logger.warning("Failed to decode vector for rowid %d: %s", rowid, exc)
-                continue
-            tier = tier_map.get(fact_id, "active")
-            data.append({
-                "fact_id": fact_id,
-                "vector": vector,
-                "tier": tier,
-                "profile_id": profile_map.get(fact_id, profile_id),
-            })
+                raise LanceDBError(
+                    f"Invalid canonical vector for rowid {rowid}: {exc}"
+                ) from exc
+            batch.append((fact_id, vector, tier, row_profile_id))
+            if len(batch) >= 256:
+                imported += self._flush_import_batch(batch)
+                batch.clear()
+        if batch:
+            imported += self._flush_import_batch(batch)
 
-        if data:
-            by_profile: dict[str, list[dict[str, Any]]] = {}
-            for item in data:
-                by_profile.setdefault(item["profile_id"], []).append(item)
-            for record_profile_id, records in by_profile.items():
-                self.add_vectors(
-                    [item["fact_id"] for item in records],
-                    [item["vector"] for item in records],
-                    [item["tier"] for item in records],
-                    record_profile_id,
-                )
+        logger.info("LanceDB: imported %d vectors from sqlite-vec", imported)
+        return imported
 
-        logger.info("LanceDB: imported %d vectors from sqlite-vec", len(data))
-        return len(data)
+    def _flush_import_batch(
+        self, batch: list[tuple[str, list[float], str, str]]
+    ) -> int:
+        """Write one bounded-memory, single-profile canonical vector batch."""
+        by_profile: dict[str, list[tuple[str, list[float], str]]] = {}
+        for fact_id, vector, tier, profile_id in batch:
+            by_profile.setdefault(profile_id, []).append((fact_id, vector, tier))
+        imported = 0
+        for profile_id, records in by_profile.items():
+            imported += self.add_vectors(
+                [item[0] for item in records],
+                [item[1] for item in records],
+                [item[2] for item in records],
+                profile_id,
+            )
+        return imported
 
     def _decode_vector_blob(self, blob: bytes) -> list[float]:
         """Decode sqlite-vec BLOB to list of floats.

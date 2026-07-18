@@ -4,11 +4,17 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import struct
 from pathlib import Path
 
 import pytest
+import sqlite_vec
 
 from superlocalmemory.core.scale_engine import ScaleEngineError, ScaleEngineManager
+from superlocalmemory.storage.sqlite_vectors import (
+    CanonicalVectorError,
+    count_canonical_vectors,
+)
 
 
 class _Config:
@@ -61,8 +67,11 @@ class _Vectors:
 
     def bulk_import_from_sqlite(self, conn, profile_id="default"):
         count = conn.execute(
-            "SELECT COUNT(*) FROM fact_embeddings_rowids fer "
-            "JOIN atomic_facts af ON af.fact_id = fer.fact_id WHERE af.profile_id = ?",
+            "SELECT COUNT(*) FROM fact_embeddings fe "
+            "JOIN embedding_metadata em ON em.vec_rowid = fe.rowid "
+            "JOIN atomic_facts af ON af.fact_id = em.fact_id "
+            "AND af.profile_id = em.profile_id "
+            "WHERE af.profile_id = ? AND fe.profile_id = af.profile_id",
             (profile_id,),
         ).fetchone()[0]
         self.count_path.write_text(str(count))
@@ -89,6 +98,9 @@ def _make_legacy_projection(lifecycle: ScaleEngineManager) -> tuple[Path, Path]:
 @pytest.fixture
 def manager(tmp_path):
     db = sqlite3.connect(tmp_path / "memory.db")
+    db.enable_load_extension(True)
+    sqlite_vec.load(db)
+    db.enable_load_extension(False)
     db.executescript(
         """
         CREATE TABLE graph_edges (
@@ -101,8 +113,17 @@ def manager(tmp_path):
         CREATE TABLE atomic_facts (
             fact_id TEXT, canonical_entities_json TEXT, lifecycle TEXT, profile_id TEXT
         );
-        CREATE TABLE fact_embeddings_rowids (fact_id TEXT);
-        CREATE TABLE fact_embeddings_vector_chunks00 (vector BLOB);
+        CREATE VIRTUAL TABLE fact_embeddings USING vec0(
+            profile_id TEXT PARTITION KEY,
+            embedding float[768] distance_metric=cosine
+        );
+        CREATE TABLE embedding_metadata (
+            vec_rowid INTEGER PRIMARY KEY,
+            fact_id TEXT NOT NULL UNIQUE,
+            profile_id TEXT NOT NULL,
+            model_name TEXT NOT NULL DEFAULT '',
+            dimension INTEGER NOT NULL DEFAULT 768
+        );
         INSERT INTO graph_edges VALUES
           ('a', 'b', 'related', 1.0, 'default'), ('b', 'c', 'related', 1.0, 'default');
         INSERT INTO canonical_entities VALUES
@@ -112,9 +133,19 @@ def manager(tmp_path):
           ('a', '["entity-a"]', 'active', 'default'),
           ('b', '["entity-b"]', 'active', 'default'),
           ('foreign', '[]', 'active', 'other');
-        INSERT INTO fact_embeddings_rowids VALUES ('a'), ('b'), ('foreign');
         """
     )
+    vector = struct.pack("<768f", *([0.25] * 768))
+    for fact_id, profile_id in (("a", "default"), ("b", "default"), ("foreign", "other")):
+        cursor = db.execute(
+            "INSERT INTO fact_embeddings(profile_id, embedding) VALUES (?, ?)",
+            (profile_id, vector),
+        )
+        db.execute(
+            "INSERT INTO embedding_metadata(vec_rowid, fact_id, profile_id) "
+            "VALUES (?, ?, ?)",
+            (cursor.lastrowid, fact_id, profile_id),
+        )
     db.commit()
     db.close()
     cfg = _Config(tmp_path)
@@ -187,6 +218,82 @@ def test_prepare_excludes_foreign_profile_vectors_from_parity(manager):
     assert prepared["canonical"]["vectors"] == 2
     assert prepared["observed"]["vectors"] == 2
     assert lifecycle.verify(prepared["stage_id"])["state"] == "verified"
+
+
+def test_prepare_rejects_metadata_that_points_to_a_missing_vector(manager):
+    lifecycle, _ = manager
+    with sqlite3.connect(lifecycle.db_path) as db:
+        db.execute(
+            "INSERT INTO atomic_facts VALUES (?, ?, ?, ?)",
+            ("missing-vector", "[]", "active", "default"),
+        )
+        db.execute(
+            "INSERT INTO embedding_metadata(vec_rowid, fact_id, profile_id) "
+            "VALUES (?, ?, ?)",
+            (9999, "missing-vector", "default"),
+        )
+
+    with pytest.raises(ScaleEngineError, match="canonical vector"):
+        lifecycle.prepare()
+
+
+def test_verify_translates_vector_corruption_to_scale_engine_error(manager):
+    lifecycle, _ = manager
+    prepared = lifecycle.prepare()
+    with sqlite3.connect(lifecycle.db_path) as db:
+        db.execute(
+            "INSERT INTO atomic_facts VALUES (?, ?, ?, ?)",
+            ("late-missing-vector", "[]", "active", "default"),
+        )
+        db.execute(
+            "INSERT INTO embedding_metadata(vec_rowid, fact_id, profile_id) "
+            "VALUES (?, ?, ?)",
+            (9998, "late-missing-vector", "default"),
+        )
+
+    with pytest.raises(ScaleEngineError, match="canonical vector"):
+        lifecycle.verify(prepared["stage_id"])
+
+
+def test_prepare_rejects_vector_partition_that_disagrees_with_fact_profile(manager):
+    lifecycle, _ = manager
+    with sqlite3.connect(lifecycle.db_path) as db:
+        db.enable_load_extension(True)
+        sqlite_vec.load(db)
+        db.enable_load_extension(False)
+        rowid = db.execute(
+            "SELECT vec_rowid FROM embedding_metadata WHERE fact_id='a'"
+        ).fetchone()[0]
+        blob = db.execute(
+            "SELECT embedding FROM fact_embeddings WHERE rowid=?", (rowid,)
+        ).fetchone()[0]
+        db.execute("DELETE FROM fact_embeddings WHERE rowid=?", (rowid,))
+        db.execute(
+            "INSERT INTO fact_embeddings(rowid, profile_id, embedding) VALUES (?, ?, ?)",
+            (rowid, "other", blob),
+        )
+
+    with pytest.raises(ScaleEngineError, match="canonical vector"):
+        lifecycle.prepare()
+
+
+def test_shadow_only_vector_payload_is_not_treated_as_empty(tmp_path):
+    db = sqlite3.connect(tmp_path / "shadow-only.db")
+    db.executescript(
+        """
+        CREATE TABLE fact_embeddings_rowids (
+            rowid INTEGER PRIMARY KEY, id INTEGER, chunk_id INTEGER, chunk_offset INTEGER
+        );
+        CREATE TABLE fact_embeddings_vector_chunks00 (
+            rowid INTEGER PRIMARY KEY, vectors BLOB NOT NULL
+        );
+        INSERT INTO fact_embeddings_rowids VALUES (1, 1, 1, 0);
+        INSERT INTO fact_embeddings_vector_chunks00 VALUES (1, X'00000000');
+        """
+    )
+
+    with pytest.raises(CanonicalVectorError, match="shadow"):
+        count_canonical_vectors(db, "default")
 
 
 def test_rollback_requires_explicit_backup_and_returns_to_local_core(manager):

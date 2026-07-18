@@ -7,9 +7,14 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import sqlite3
+
 import numpy as np
 import pytest
-import shutil
+import sqlite_vec
+
+from superlocalmemory.storage.sqlite_vectors import CanonicalVectorError
 
 # LanceDB is an optional backend (pip install superlocalmemory[lancedb]). When
 # it is absent these tests cannot run — skip cleanly instead of erroring at
@@ -131,6 +136,90 @@ class TestWrite:
         )] == ["same-name"]
         backend.remove_vector("same-name")
         assert backend.similarity_search(_make_vec(0.1), profile_id="alpha") == []
+
+    def test_bulk_import_reads_supported_sqlite_vec_virtual_table(self, backend):
+        conn = sqlite3.connect(":memory:")
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+        conn.executescript(
+            """
+            CREATE TABLE atomic_facts (
+                fact_id TEXT PRIMARY KEY,
+                lifecycle TEXT NOT NULL,
+                profile_id TEXT NOT NULL
+            );
+            CREATE TABLE embedding_metadata (
+                vec_rowid INTEGER PRIMARY KEY,
+                fact_id TEXT NOT NULL UNIQUE,
+                profile_id TEXT NOT NULL,
+                model_name TEXT NOT NULL DEFAULT '',
+                dimension INTEGER NOT NULL DEFAULT 768
+            );
+            CREATE VIRTUAL TABLE fact_embeddings USING vec0(
+                profile_id TEXT PARTITION KEY,
+                embedding float[768] distance_metric=cosine
+            );
+            INSERT INTO atomic_facts VALUES
+                ('default-a', 'active', 'default'),
+                ('default-b', 'warm', 'default'),
+                ('foreign', 'active', 'other');
+            """
+        )
+        for fact_id, profile_id, seed in (
+            ("default-a", "default", 0.1),
+            ("default-b", "default", 0.2),
+            ("foreign", "other", 0.3),
+        ):
+            cursor = conn.execute(
+                "INSERT INTO fact_embeddings(profile_id, embedding) VALUES (?, ?)",
+                (profile_id, np.full(768, seed, dtype=np.float32).tobytes()),
+            )
+            conn.execute(
+                "INSERT INTO embedding_metadata "
+                "(vec_rowid, fact_id, profile_id) VALUES (?, ?, ?)",
+                (cursor.lastrowid, fact_id, profile_id),
+            )
+        conn.commit()
+
+        assert backend.bulk_import_from_sqlite(conn, "default") == 2
+        assert backend.health_check()["vectors"] == 2
+        imported_ids = {
+            fact_id
+            for fact_id, _ in backend.similarity_search(
+                _make_vec(0.1), top_k=10, profile_id="default"
+            )
+        }
+        assert imported_ids == {"default-a", "default-b"}
+
+    def test_bulk_import_fails_closed_when_metadata_vector_is_missing(self, backend):
+        conn = sqlite3.connect(":memory:")
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+        conn.executescript(
+            """
+            CREATE TABLE atomic_facts (
+                fact_id TEXT PRIMARY KEY,
+                lifecycle TEXT NOT NULL,
+                profile_id TEXT NOT NULL
+            );
+            CREATE TABLE embedding_metadata (
+                vec_rowid INTEGER PRIMARY KEY,
+                fact_id TEXT NOT NULL UNIQUE,
+                profile_id TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE fact_embeddings USING vec0(
+                profile_id TEXT PARTITION KEY,
+                embedding float[768] distance_metric=cosine
+            );
+            INSERT INTO atomic_facts VALUES ('missing', 'active', 'default');
+            INSERT INTO embedding_metadata VALUES (999, 'missing', 'default');
+            """
+        )
+
+        with pytest.raises(CanonicalVectorError, match="canonical vector"):
+            backend.bulk_import_from_sqlite(conn, "default")
 
 
 class TestHealth:

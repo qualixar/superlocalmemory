@@ -23,6 +23,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from superlocalmemory.storage.logical_edges import count_logical_edges, iter_logical_edges
+from superlocalmemory.storage.sqlite_vectors import (
+    CanonicalVectorError,
+    count_canonical_vectors,
+    iter_canonical_vectors,
+    load_sqlite_vec_extension,
+)
 
 
 class ScaleEngineError(RuntimeError):
@@ -272,6 +278,9 @@ class ScaleEngineManager:
             self.config.scale_engine_state = "prepared"
             self._save_config()
             return manifest
+        except CanonicalVectorError as exc:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            raise ScaleEngineError(f"canonical vector projection failed: {exc}") from exc
         except Exception:
             shutil.rmtree(stage_dir, ignore_errors=True)
             raise
@@ -285,6 +294,8 @@ class ScaleEngineManager:
         try:
             self._recover_interrupted_promotion()
             return self._verify(stage_id)
+        except CanonicalVectorError as exc:
+            raise ScaleEngineError(f"canonical vector projection failed: {exc}") from exc
         finally:
             self._release_lifecycle_lock(lock_path)
 
@@ -301,7 +312,9 @@ class ScaleEngineManager:
                 source_fingerprint = self._projection_fingerprint(conn, canonical)
             observed = self._observed_counts(cozo, lance)
             if manifest["source_fingerprint"] != source_fingerprint:
-                raise ScaleEngineError("canonical SQLite changed after preparation; prepare a new stage")
+                raise ScaleEngineError(
+                    "canonical SQLite changed after preparation; prepare a new stage"
+                )
             if canonical != manifest["canonical"] or observed != canonical:
                 raise ScaleEngineError(
                     f"projection parity failed: canonical={canonical}, observed={observed}"
@@ -321,6 +334,8 @@ class ScaleEngineManager:
         try:
             self._recover_interrupted_promotion()
             return self._promote(stage_id)
+        except CanonicalVectorError as exc:
+            raise ScaleEngineError(f"canonical vector projection failed: {exc}") from exc
         finally:
             self._release_lifecycle_lock(lock_path)
 
@@ -341,7 +356,9 @@ class ScaleEngineManager:
             gate.execute("BEGIN IMMEDIATE")
             canonical = self._canonical_counts(gate)
             if manifest["source_fingerprint"] != self._projection_fingerprint(gate, canonical):
-                raise ScaleEngineError("canonical SQLite changed after verification; prepare a new stage")
+                raise ScaleEngineError(
+                    "canonical SQLite changed after verification; prepare a new stage"
+                )
             self._mkdir_durable(self.backup_root)
             journal = {
                 "schema_version": self.SCHEMA_VERSION,
@@ -368,7 +385,13 @@ class ScaleEngineManager:
                 self._replace_durable(destination, source)
                 move["state"] = "complete"
                 self._write_promotion_journal(journal)
-            manifest.update({"state": "promoted", "promoted_at": _utc_now(), "backup_id": backup_dir.name})
+            manifest.update(
+                {
+                    "state": "promoted",
+                    "promoted_at": _utc_now(),
+                    "backup_id": backup_dir.name,
+                }
+            )
             self._write_manifest(stage_dir, manifest)
             self.config.scale_engine_state = "promoted"
             self.config.graph_backend = "cozo"
@@ -447,7 +470,11 @@ class ScaleEngineManager:
             journal["state"] = "committed"
             self._write_promotion_journal(journal)
             self.promotion_journal_path.unlink(missing_ok=True)
-            return {"state": "local_core", "restored_backup": backup_id, "displaced": displaced.name}
+            return {
+                "state": "local_core",
+                "restored_backup": backup_id,
+                "displaced": displaced.name,
+            }
         except Exception as exc:
             try:
                 self._recover_interrupted_promotion()
@@ -465,6 +492,7 @@ class ScaleEngineManager:
     def _readonly_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         conn.execute("PRAGMA query_only=ON")
+        load_sqlite_vec_extension(conn)
         return conn
 
     def _canonical_counts(self, conn: sqlite3.Connection) -> dict[str, int]:
@@ -473,15 +501,7 @@ class ScaleEngineManager:
             (self.profile_id,),
         ).fetchone()[0]
         edges = count_logical_edges(conn, self.profile_id)
-        try:
-            vectors = conn.execute(
-                "SELECT COUNT(*) FROM fact_embeddings_rowids fer "
-                "JOIN atomic_facts af ON af.fact_id = fer.fact_id "
-                "WHERE af.profile_id = ?",
-                (self.profile_id,),
-            ).fetchone()[0]
-        except sqlite3.OperationalError:
-            vectors = 0
+        vectors = count_canonical_vectors(conn, self.profile_id)
         return {"entities": int(nodes), "edges": int(edges), "vectors": int(vectors)}
 
     def _observed_counts(self, cozo: Any, lance: Any) -> dict[str, int]:
@@ -489,7 +509,11 @@ class ScaleEngineManager:
         vector = lance.health_check()
         if graph.get("status") != "active" or vector.get("status") != "active":
             raise ScaleEngineError(f"projection health failed: cozo={graph}, lancedb={vector}")
-        return {"entities": int(graph["entities"]), "edges": int(graph["edges"]), "vectors": int(vector["vectors"])}
+        return {
+            "entities": int(graph["entities"]),
+            "edges": int(graph["edges"]),
+            "vectors": int(vector["vectors"]),
+        }
 
     def _projection_fingerprint(
         self, conn: sqlite3.Connection, counts: dict[str, int]
@@ -498,7 +522,12 @@ class ScaleEngineManager:
         digest = hashlib.sha256()
         digest.update(json.dumps(counts, sort_keys=True).encode())
         tables = (
-            ("canonical_entities", "entity_id, canonical_name, entity_type, first_seen, last_seen, fact_count, profile_id", "entity_id"),
+            (
+                "canonical_entities",
+                "entity_id, canonical_name, entity_type, first_seen, last_seen, "
+                "fact_count, profile_id",
+                "entity_id",
+            ),
             ("atomic_facts", "fact_id, canonical_entities_json, lifecycle, profile_id", "fact_id"),
         )
         for table, columns, ordering in tables:
@@ -516,18 +545,8 @@ class ScaleEngineManager:
                 self._digest_row(digest, "graph_edges", row)
         except sqlite3.OperationalError as exc:
             raise ScaleEngineError("canonical SQLite missing required graph_edges table") from exc
-        try:
-            rows = conn.execute(
-                "SELECT fer.rowid, fer.fact_id, vec.vector FROM fact_embeddings_rowids fer "
-                "JOIN atomic_facts af ON af.fact_id = fer.fact_id "
-                "LEFT JOIN fact_embeddings_vector_chunks00 vec ON vec.rowid = fer.rowid "
-                "WHERE af.profile_id=? ORDER BY fer.rowid",
-                (self.profile_id,),
-            )
-            for row in rows:
-                self._digest_row(digest, "fact_embeddings_rowids", row)
-        except sqlite3.OperationalError:
-            pass
+        for row in iter_canonical_vectors(conn, self.profile_id):
+            self._digest_row(digest, "fact_embeddings", row)
         return digest.hexdigest()
 
     @staticmethod
@@ -576,7 +595,9 @@ class ScaleEngineManager:
 
     def _require_default_profile(self) -> None:
         if self.profile_id != "default":
-            raise ScaleEngineError("Scale Engine promotion currently supports the default profile only")
+            raise ScaleEngineError(
+                "Scale Engine promotion currently supports the default profile only"
+            )
 
     def _require_canonical_db(self) -> None:
         if not self.db_path.exists():
