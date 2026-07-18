@@ -41,17 +41,20 @@ class ScaleEngineManager:
 
     MANIFEST_NAME = "scale-engine.json"
     SCHEMA_VERSION = 1
+    LIFECYCLE_LOCK = "scale-engine.lifecycle.lock"
+    PROMOTION_JOURNAL = "scale-engine.promotion.json"
 
     def __init__(
         self,
         config: Any,
         *,
         backend_factory: Callable[[Path, Path], tuple[Any, Any]] | None = None,
+        profile_id: str | None = None,
     ) -> None:
         self.config = config
         self.data_dir = Path(getattr(config, "data_dir", None) or config.base_dir)
         self.db_path = Path(getattr(config, "db_path", None) or self.data_dir / "memory.db")
-        self.profile_id = getattr(config, "active_profile", "default")
+        self.profile_id = profile_id or getattr(config, "active_profile", "default")
         self._backend_factory = backend_factory or self._real_backend_factory
 
     @property
@@ -66,6 +69,14 @@ class ScaleEngineManager:
     def active_paths(self) -> tuple[Path, Path]:
         return self.data_dir / "cozo", self.data_dir / "lance"
 
+    @property
+    def lifecycle_lock_path(self) -> Path:
+        return self.data_dir / self.LIFECYCLE_LOCK
+
+    @property
+    def promotion_journal_path(self) -> Path:
+        return self.data_dir / self.PROMOTION_JOURNAL
+
     def status(self) -> dict[str, Any]:
         manifests: list[dict[str, Any]] = []
         if self.staging_root.exists():
@@ -74,21 +85,93 @@ class ScaleEngineManager:
                     manifests.append(json.loads(path.read_text()))
                 except (OSError, json.JSONDecodeError):
                     manifests.append({"stage_id": path.parent.name, "state": "corrupt"})
-        return {
-            "state": getattr(self.config, "scale_engine_state", "local_core"),
-            "active": {"cozo": self.active_paths[0].exists(), "lance": self.active_paths[1].exists()},
-            "stages": manifests,
-            "backups": sorted(p.name for p in self.backup_root.glob("*") if p.is_dir()) if self.backup_root.exists() else [],
+        backups = (
+            sorted(p.name for p in self.backup_root.glob("*") if p.is_dir())
+            if self.backup_root.exists()
+            else []
+        )
+        paths_present = {
+            "cozo": self.active_paths[0].exists(),
+            "lance": self.active_paths[1].exists(),
         }
+        state = getattr(self.config, "scale_engine_state", "local_core")
+        legacy_projection_candidate = (
+            state == "local_core"
+            and all(paths_present.values())
+            and not manifests
+            and not backups
+            and self._has_legacy_projection_layout()
+        )
+        runtime = self._runtime_backend_status()
+        return {
+            "state": state,
+            # This command reads persisted state, not the live daemon. Never
+            # turn a last-known backend row into a present-tense routing claim.
+            "active": {"cozo": False, "lance": False},
+            "last_daemon_observation": runtime,
+            "paths_present": paths_present,
+            "retrieval_routing": (
+                "daemon_runtime_check_required" if state == "promoted" else "canonical_sqlite"
+            ),
+            "legacy_projection_candidate": legacy_projection_candidate,
+            "legacy_candidate_requires_confirmation": legacy_projection_candidate,
+            "migration_repair_required": (
+                self.promotion_journal_path.exists()
+                or (state == "local_core" and bool(manifests))
+            ),
+            "stages": manifests,
+            "backups": backups,
+        }
+
+    def adopt_legacy_projection(self) -> dict[str, Any] | None:
+        """Safely adopt a v3.5-era projection into the staged lifecycle.
+
+        A legacy projection proves only that an older runtime created files.
+        It cannot establish parity with today's canonical SQLite database.
+        Rebuild a fresh stage, verify it while the canonical database is
+        stable, and promote it atomically; the legacy directories become the
+        explicit rollback copy.
+        """
+        if not self.status()["legacy_projection_candidate"]:
+            return None
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            # Re-check inside the lock. A concurrent command may have
+            # completed promotion while this caller waited to acquire it.
+            if not self.status()["legacy_projection_candidate"]:
+                return None
+            prepared = self._prepare()
+            self._verify(prepared["stage_id"])
+            return self._promote(prepared["stage_id"])
+        except Exception:
+            # A failed adoption must leave the canonical path selected.  The
+            # stage is retained for operator inspection instead of deleting
+            # evidence about why an upgrade could not be completed.
+            self.config.scale_engine_state = "local_core"
+            self.config.graph_backend = "auto"
+            self.config.vector_backend = "auto"
+            self._save_config()
+            raise
+        finally:
+            self._release_lifecycle_lock(lock_path)
 
     def prepare(self) -> dict[str, Any]:
         """Build a new projection in a private staging directory."""
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            self._recover_interrupted_promotion()
+            return self._prepare()
+        finally:
+            self._release_lifecycle_lock(lock_path)
+
+    def _prepare(self) -> dict[str, Any]:
+        """Build a new projection while the caller owns the lifecycle lock."""
         self._require_default_profile()
         self._require_canonical_db()
         stage_id = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
         stage_dir = self.staging_root / stage_id
         cozo_dir, lance_dir = stage_dir / "cozo", stage_dir / "lance"
-        stage_dir.mkdir(parents=True, exist_ok=False)
+        self._mkdir_durable(stage_dir, exist_ok=False)
         cozo = lance = None
         try:
             cozo, lance = self._backend_factory(cozo_dir, lance_dir)
@@ -96,6 +179,7 @@ class ScaleEngineManager:
                 cozo.bulk_import_from_sqlite(conn, self.profile_id)
                 lance.bulk_import_from_sqlite(conn, self.profile_id)
                 canonical = self._canonical_counts(conn)
+                source_fingerprint = self._projection_fingerprint(conn, canonical)
             observed = self._observed_counts(cozo, lance)
             manifest = {
                 "schema_version": self.SCHEMA_VERSION,
@@ -105,7 +189,7 @@ class ScaleEngineManager:
                 "profile_id": self.profile_id,
                 "canonical": canonical,
                 "observed": observed,
-                "source_fingerprint": self._source_fingerprint(canonical),
+                "source_fingerprint": source_fingerprint,
             }
             self._write_manifest(stage_dir, manifest)
             self.config.scale_engine_state = "prepared"
@@ -120,6 +204,15 @@ class ScaleEngineManager:
 
     def verify(self, stage_id: str) -> dict[str, Any]:
         """Prove a staged projection matches the current canonical SQLite data."""
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            self._recover_interrupted_promotion()
+            return self._verify(stage_id)
+        finally:
+            self._release_lifecycle_lock(lock_path)
+
+    def _verify(self, stage_id: str) -> dict[str, Any]:
+        """Verify while the caller owns the lifecycle lock."""
         stage_dir, manifest = self._load_stage(stage_id)
         self._validate_manifest(manifest, state="prepared")
         self._require_default_profile()
@@ -128,8 +221,9 @@ class ScaleEngineManager:
             cozo, lance = self._backend_factory(stage_dir / "cozo", stage_dir / "lance")
             with self._readonly_connection() as conn:
                 canonical = self._canonical_counts(conn)
+                source_fingerprint = self._projection_fingerprint(conn, canonical)
             observed = self._observed_counts(cozo, lance)
-            if manifest["source_fingerprint"] != self._source_fingerprint(canonical):
+            if manifest["source_fingerprint"] != source_fingerprint:
                 raise ScaleEngineError("canonical SQLite changed after preparation; prepare a new stage")
             if canonical != manifest["canonical"] or observed != canonical:
                 raise ScaleEngineError(
@@ -146,6 +240,15 @@ class ScaleEngineManager:
 
     def promote(self, stage_id: str) -> dict[str, Any]:
         """Move a verified stage into active paths, preserving a rollback copy."""
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            self._recover_interrupted_promotion()
+            return self._promote(stage_id)
+        finally:
+            self._release_lifecycle_lock(lock_path)
+
+    def _promote(self, stage_id: str) -> dict[str, Any]:
+        """Promote while the caller owns the lifecycle lock."""
         stage_dir, manifest = self._load_stage(stage_id)
         self._validate_manifest(manifest, state="verified")
         staged = (stage_dir / "cozo", stage_dir / "lance")
@@ -153,39 +256,78 @@ class ScaleEngineManager:
             raise ScaleEngineError("verified stage is incomplete; prepare a new stage")
         backup_dir = self.backup_root / f"{stage_id}-{uuid.uuid4().hex[:6]}"
         active = self.active_paths
-        self.backup_root.mkdir(parents=True, exist_ok=True)
-        # Keep an explicit empty rollback point as well: a first promotion has
-        # no former projection directories, but rollback must still be able to
-        # return the installation to Local Core without deleting anything.
-        backup_dir.mkdir(parents=True, exist_ok=False)
-        moved_active: list[tuple[Path, Path]] = []
-        moved_stage: list[tuple[Path, Path]] = []
+        gate = sqlite3.connect(self.db_path, timeout=30)
         try:
+            # The stage was built from a point-in-time SQLite snapshot. Hold a
+            # short writer fence for the final fingerprint check and directory
+            # swap so no successful promotion can trail a canonical write.
+            gate.execute("BEGIN IMMEDIATE")
+            canonical = self._canonical_counts(gate)
+            if manifest["source_fingerprint"] != self._projection_fingerprint(gate, canonical):
+                raise ScaleEngineError("canonical SQLite changed after verification; prepare a new stage")
+            self._mkdir_durable(self.backup_root)
+            journal = {
+                "schema_version": self.SCHEMA_VERSION,
+                "operation": "promotion",
+                "state": "intent",
+                "stage_id": stage_id,
+                "backup_id": backup_dir.name,
+                "moves": [],
+            }
+            self._write_promotion_journal(journal)
+            self._mkdir_durable(backup_dir, exist_ok=False)
             for name, source, destination in zip(("cozo", "lance"), active, staged):
                 if source.exists():
                     target = backup_dir / name
-                    os.replace(source, target)
-                    moved_active.append((source, target))
-                os.replace(destination, source)
-                moved_stage.append((destination, source))
+                    move = {"name": name, "kind": "active_to_backup", "state": "intent"}
+                    journal["moves"].append(move)
+                    self._write_promotion_journal(journal)
+                    self._replace_durable(source, target)
+                    move["state"] = "complete"
+                    self._write_promotion_journal(journal)
+                move = {"name": name, "kind": "stage_to_active", "state": "intent"}
+                journal["moves"].append(move)
+                self._write_promotion_journal(journal)
+                self._replace_durable(destination, source)
+                move["state"] = "complete"
+                self._write_promotion_journal(journal)
             manifest.update({"state": "promoted", "promoted_at": _utc_now(), "backup_id": backup_dir.name})
             self._write_manifest(stage_dir, manifest)
             self.config.scale_engine_state = "promoted"
             self.config.graph_backend = "cozo"
             self.config.vector_backend = "lancedb"
             self._save_config()
+            journal["state"] = "committed"
+            self._write_promotion_journal(journal)
+            self.promotion_journal_path.unlink(missing_ok=True)
+            gate.rollback()
             return manifest
         except Exception as exc:
-            for staged_path, active_path in reversed(moved_stage):
-                if active_path.exists():
-                    os.replace(active_path, staged_path)
-            for active_path, backup_path in reversed(moved_active):
-                if backup_path.exists():
-                    os.replace(backup_path, active_path)
+            try:
+                gate.rollback()
+            except sqlite3.Error:
+                pass
+            try:
+                self._recover_interrupted_promotion()
+            except ScaleEngineError as recovery_error:
+                raise ScaleEngineError(
+                    f"promotion interrupted; automatic recovery needs repair: {recovery_error}"
+                ) from exc
             raise ScaleEngineError(f"promotion rolled back: {exc}") from exc
+        finally:
+            gate.close()
 
     def rollback(self, backup_id: str) -> dict[str, Any]:
         """Restore an explicitly named pre-promotion backup."""
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            self._recover_interrupted_promotion()
+            return self._rollback(backup_id)
+        finally:
+            self._release_lifecycle_lock(lock_path)
+
+    def _rollback(self, backup_id: str) -> dict[str, Any]:
+        """Roll back while the caller owns the lifecycle lock."""
         backup_dir = self.backup_root / backup_id
         if not backup_dir.is_dir():
             raise ScaleEngineError(f"backup does not exist: {backup_id}")
@@ -193,19 +335,47 @@ class ScaleEngineManager:
         active = self.active_paths
         displaced = self.backup_root / f"rollback-displaced-{uuid.uuid4().hex[:8]}"
         try:
+            journal = {
+                "schema_version": self.SCHEMA_VERSION,
+                "operation": "rollback",
+                "state": "intent",
+                "backup_id": backup_id,
+                "displaced_id": displaced.name,
+                "moves": [],
+            }
+            self._write_promotion_journal(journal)
             for name, source, target in zip(("cozo", "lance"), active, backup_paths):
                 if source.exists():
-                    displaced.mkdir(parents=True, exist_ok=True)
-                    os.replace(source, displaced / name)
+                    self._mkdir_durable(displaced)
+                    move = {"name": name, "kind": "active_to_displaced", "state": "intent"}
+                    journal["moves"].append(move)
+                    self._write_promotion_journal(journal)
+                    self._replace_durable(source, displaced / name)
+                    move["state"] = "complete"
+                    self._write_promotion_journal(journal)
                 if target.exists():
-                    os.replace(target, source)
+                    move = {"name": name, "kind": "backup_to_active", "state": "intent"}
+                    journal["moves"].append(move)
+                    self._write_promotion_journal(journal)
+                    self._replace_durable(target, source)
+                    move["state"] = "complete"
+                    self._write_promotion_journal(journal)
             self.config.scale_engine_state = "local_core"
             self.config.graph_backend = "auto"
             self.config.vector_backend = "auto"
             self._save_config()
+            journal["state"] = "committed"
+            self._write_promotion_journal(journal)
+            self.promotion_journal_path.unlink(missing_ok=True)
             return {"state": "local_core", "restored_backup": backup_id, "displaced": displaced.name}
         except Exception as exc:
-            raise ScaleEngineError(f"rollback failed; inspect {backup_dir}: {exc}") from exc
+            try:
+                self._recover_interrupted_promotion()
+            except ScaleEngineError as recovery_error:
+                raise ScaleEngineError(
+                    f"rollback interrupted; automatic recovery needs repair: {recovery_error}"
+                ) from exc
+            raise ScaleEngineError(f"rollback recovered: {exc}") from exc
 
     def _real_backend_factory(self, cozo_dir: Path, lance_dir: Path) -> tuple[Any, Any]:
         from superlocalmemory.graph.cozo_backend import CozoDBGraphBackend
@@ -243,16 +413,66 @@ class ScaleEngineManager:
             raise ScaleEngineError(f"projection health failed: cozo={graph}, lancedb={vector}")
         return {"entities": int(graph["entities"]), "edges": int(graph["edges"]), "vectors": int(vector["vectors"])}
 
-    def _source_fingerprint(self, counts: dict[str, int]) -> str:
+    def _projection_fingerprint(
+        self, conn: sqlite3.Connection, counts: dict[str, int]
+    ) -> str:
+        """Hash the exact projection source rows inside one SQLite snapshot."""
         digest = hashlib.sha256()
         digest.update(json.dumps(counts, sort_keys=True).encode())
-        for path in (self.db_path, self.db_path.with_name(self.db_path.name + "-wal")):
-            if path.exists():
-                digest.update(path.name.encode())
-                with path.open("rb") as handle:
-                    for block in iter(lambda: handle.read(1024 * 1024), b""):
-                        digest.update(block)
+        tables = (
+            ("canonical_entities", "entity_id, canonical_name, entity_type, first_seen, last_seen, fact_count, profile_id", "entity_id"),
+            ("atomic_facts", "fact_id, canonical_entities_json, lifecycle, profile_id", "fact_id"),
+            ("graph_edges", "source_id, target_id, edge_type, weight, profile_id", "source_id, target_id, edge_type"),
+        )
+        for table, columns, ordering in tables:
+            try:
+                rows = conn.execute(
+                    f"SELECT {columns} FROM {table} WHERE profile_id=? ORDER BY {ordering}",
+                    (self.profile_id,),
+                )
+                for row in rows:
+                    self._digest_row(digest, table, row)
+            except sqlite3.OperationalError as exc:
+                raise ScaleEngineError(f"canonical SQLite missing required {table} table") from exc
+        try:
+            rows = conn.execute(
+                "SELECT fer.rowid, fer.fact_id, vec.vector FROM fact_embeddings_rowids fer "
+                "JOIN atomic_facts af ON af.fact_id = fer.fact_id "
+                "LEFT JOIN fact_embeddings_vector_chunks00 vec ON vec.rowid = fer.rowid "
+                "WHERE af.profile_id=? ORDER BY fer.rowid",
+                (self.profile_id,),
+            )
+            for row in rows:
+                self._digest_row(digest, "fact_embeddings_rowids", row)
+        except sqlite3.OperationalError:
+            pass
         return digest.hexdigest()
+
+    @staticmethod
+    def _digest_row(digest: Any, table: str, row: Any) -> None:
+        digest.update(table.encode())
+        digest.update(json.dumps(list(row), default=str, separators=(",", ":")).encode())
+
+    def _has_legacy_projection_layout(self) -> bool:
+        cozo, lance = self.active_paths
+        return (cozo / "graph").is_dir() and (lance / "embeddings.lance").exists()
+
+    def _runtime_backend_status(self) -> dict[str, str]:
+        status = {"cozo": "unknown", "lance": "unknown"}
+        try:
+            with self._readonly_connection() as conn:
+                rows = conn.execute(
+                    "SELECT backend_name, status FROM backend_status "
+                    "WHERE backend_name IN ('cozo', 'lancedb')"
+                )
+                for name, value in rows:
+                    if name == "cozo":
+                        status["cozo"] = str(value)
+                    elif name == "lancedb":
+                        status["lance"] = str(value)
+        except sqlite3.OperationalError:
+            pass
+        return status
 
     def _load_stage(self, stage_id: str) -> tuple[Path, dict[str, Any]]:
         stage_dir = self.staging_root / stage_id
@@ -279,6 +499,201 @@ class ScaleEngineManager:
     def _require_canonical_db(self) -> None:
         if not self.db_path.exists():
             raise ScaleEngineError(f"canonical SQLite database not found: {self.db_path}")
+
+    def _acquire_lifecycle_lock(self) -> Path:
+        """Serialize every mutating lifecycle command across processes."""
+        lock_path = self.lifecycle_lock_path
+        descriptor = None
+        for attempt in range(2):
+            try:
+                descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError as exc:
+                if attempt == 0 and self._clear_dead_legacy_adoption_lock(lock_path):
+                    continue
+                raise ScaleEngineError(
+                    "Scale Engine lifecycle operation already in progress; retry after it completes"
+                ) from exc
+        if descriptor is None:
+            raise ScaleEngineError("could not acquire Scale Engine lifecycle lock")
+        try:
+            with os.fdopen(descriptor, "w") as lock_file:
+                json.dump({"pid": os.getpid(), "started_at": _utc_now()}, lock_file)
+        except Exception:
+            lock_path.unlink(missing_ok=True)
+            raise
+        return lock_path
+
+    @staticmethod
+    def _release_lifecycle_lock(lock_path: Path) -> None:
+        lock_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _clear_dead_legacy_adoption_lock(lock_path: Path) -> bool:
+        """Recover only a lock whose recorded process no longer exists."""
+        try:
+            owner = json.loads(lock_path.read_text())
+            pid = owner.get("pid")
+            if not isinstance(pid, int) or pid <= 0:
+                return False
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            lock_path.unlink(missing_ok=True)
+            return True
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        return False
+
+    def recover_interrupted_promotion(self) -> str | None:
+        """Recover a durable promotion journal before opening projection paths."""
+        lock_path = self._acquire_lifecycle_lock()
+        try:
+            return self._recover_interrupted_promotion()
+        finally:
+            self._release_lifecycle_lock(lock_path)
+
+    def _recover_interrupted_promotion(self) -> str | None:
+        """Finalize or reverse an interrupted directory swap under lifecycle lock."""
+        if not self.promotion_journal_path.exists():
+            return None
+        try:
+            journal = json.loads(self.promotion_journal_path.read_text())
+            backup_id = str(journal["backup_id"])
+            state = str(journal["state"])
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ScaleEngineError("invalid promotion journal; manual repair required") from exc
+        operation = str(journal.get("operation", "promotion"))
+        if state == "committed":
+            if operation == "promotion":
+                self.config.scale_engine_state = "promoted"
+                self.config.graph_backend = "cozo"
+                self.config.vector_backend = "lancedb"
+            elif operation == "rollback":
+                self.config.scale_engine_state = "local_core"
+                self.config.graph_backend = "auto"
+                self.config.vector_backend = "auto"
+            else:
+                raise ScaleEngineError(f"unknown journal operation: {operation!r}")
+            self._save_config()
+            self.promotion_journal_path.unlink(missing_ok=True)
+            return f"finalized_committed_{operation}"
+        if state != "intent":
+            raise ScaleEngineError(f"unknown promotion journal state: {state!r}")
+        backup_dir = self.backup_root / backup_id
+        active = dict(zip(("cozo", "lance"), self.active_paths))
+        stage_dir = self.staging_root / str(journal.get("stage_id", ""))
+        displaced_dir = self.backup_root / str(journal.get("displaced_id", ""))
+        moves = journal.get("moves")
+        if not isinstance(moves, list):
+            # Compatibility for journals written by the initial v3.7.3
+            # candidate before per-rename intents existed.
+            moves = [
+                {"name": name, "kind": "active_to_backup", "state": "complete"}
+                for name in journal.get("moved_active", [])
+            ] + [
+                {"name": name, "kind": "stage_to_active", "state": "complete"}
+                for name in journal.get("moved_stage", [])
+            ]
+        for move in reversed(moves):
+            self._reverse_journal_move(move, active, stage_dir, backup_dir, displaced_dir)
+        if operation == "promotion":
+            if backup_dir.exists() and not any(backup_dir.iterdir()):
+                backup_dir.rmdir()
+            self.config.scale_engine_state = "local_core"
+            self.config.graph_backend = "auto"
+            self.config.vector_backend = "auto"
+        elif operation == "rollback":
+            if displaced_dir.exists() and not any(displaced_dir.iterdir()):
+                displaced_dir.rmdir()
+            self.config.scale_engine_state = "promoted"
+            self.config.graph_backend = "cozo"
+            self.config.vector_backend = "lancedb"
+        else:
+            raise ScaleEngineError(f"unknown journal operation: {operation!r}")
+        self._save_config()
+        self.promotion_journal_path.unlink(missing_ok=True)
+        return f"reversed_interrupted_{operation}"
+
+    @staticmethod
+    def _reverse_journal_move(
+        move: Any,
+        active: dict[str, Path],
+        stage_dir: Path,
+        backup_dir: Path,
+        displaced_dir: Path,
+    ) -> None:
+        """Reverse one planned rename based on actual paths, not journal timing."""
+        if not isinstance(move, dict):
+            raise ScaleEngineError("invalid promotion journal move")
+        name = move.get("name")
+        kind = move.get("kind")
+        active_path = active.get(name)
+        if active_path is None:
+            raise ScaleEngineError(f"invalid promotion journal backend: {name!r}")
+        if kind == "stage_to_active":
+            source, target = active_path, stage_dir / name
+        elif kind == "active_to_backup":
+            source, target = backup_dir / name, active_path
+        elif kind == "active_to_displaced":
+            source, target = displaced_dir / name, active_path
+        elif kind == "backup_to_active":
+            source, target = active_path, backup_dir / name
+        else:
+            raise ScaleEngineError(f"invalid promotion journal move kind: {kind!r}")
+        if source.exists() and not target.exists():
+            ScaleEngineManager._replace_durable(source, target)
+        elif target.exists() and not source.exists():
+            return
+        else:
+            raise ScaleEngineError(f"cannot safely reconcile {kind} for {name}")
+
+    def _write_promotion_journal(self, journal: dict[str, Any]) -> None:
+        self._write_json_durable(self.promotion_journal_path, journal)
+
+    @staticmethod
+    def _write_json_durable(target: Path, payload: dict[str, Any]) -> None:
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        with temporary.open("w") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        ScaleEngineManager._fsync_directory(target.parent)
+
+    @staticmethod
+    def _replace_durable(source: Path, target: Path) -> None:
+        """Rename a projection path and persist both directory entries."""
+        os.replace(source, target)
+        ScaleEngineManager._fsync_directory(source.parent)
+        if target.parent != source.parent:
+            ScaleEngineManager._fsync_directory(target.parent)
+
+    @staticmethod
+    def _mkdir_durable(path: Path, *, exist_ok: bool = True) -> None:
+        """Create a directory and persist every new parent entry before rename."""
+        missing: list[Path] = []
+        ancestor = path
+        while not ancestor.exists():
+            missing.append(ancestor)
+            ancestor = ancestor.parent
+        path.mkdir(parents=True, exist_ok=exist_ok)
+        for created in reversed(missing):
+            ScaleEngineManager._fsync_directory(created.parent)
+
+    @staticmethod
+    def _fsync_directory(directory_path: Path) -> None:
+        """Best-effort directory-entry durability across local filesystems."""
+        try:
+            directory = os.open(directory_path, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            # The file itself is already durable where directory fsync is not
+            # supported by the local filesystem (notably some Windows setups).
+            pass
 
     def _save_config(self) -> None:
         save = getattr(self.config, "save", None)

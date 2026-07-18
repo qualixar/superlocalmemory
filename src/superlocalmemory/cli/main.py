@@ -270,8 +270,8 @@ def main() -> None:
     )
     db_scale_p.add_argument(
         "scale_action",
-        choices=("status", "prepare", "verify", "promote", "rollback"),
-        help="Lifecycle action. Prepare and verify never mutate active projection paths.",
+        choices=("status", "adopt", "prepare", "verify", "promote", "rollback"),
+        help="Lifecycle action. Adopt confirms a detected legacy projection; prepare and verify never mutate active paths.",
     )
     db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
     db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")

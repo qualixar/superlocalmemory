@@ -9,11 +9,23 @@ def cmd_db_scale(args: Namespace) -> int:
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.scale_engine import ScaleEngineError, ScaleEngineManager
 
-    manager = ScaleEngineManager(SLMConfig.load())
     action = args.scale_action
+    # Scale Engine projections are currently canonical-default-profile data.
+    # Adoption must not fail merely because the operator is working in another
+    # profile, and it must not rewrite that selected profile.
+    manager = ScaleEngineManager(
+        SLMConfig.load(), profile_id="default" if action == "adopt" else None
+    )
     try:
         if action == "status":
             result = manager.status()
+        elif action == "adopt":
+            result = manager.adopt_legacy_projection()
+            if result is None:
+                raise ScaleEngineError(
+                    "no confirmed legacy projection candidate; see `slm db scale status`"
+                )
+            result = {**result, "restart_required": True}
         elif action == "prepare":
             result = manager.prepare()
         elif action == "verify":

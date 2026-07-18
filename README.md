@@ -1,11 +1,14 @@
 <p align="center">
-  <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/slm-wordmark-dark.svg">
+    <img src="assets/branding/slm-wordmark-light.svg" alt="SuperLocalMemory" width="390">
+  </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.7.2</h1>
+<h1 align="center">SuperLocalMemory V3.7.3</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.7.2</code> — <strong>Reliability release: durable local writes, cross-platform installation, and bounded enrichment recovery.</strong><br/>
+<p align="center"><code>v3.7.3</code> — <strong>Scale Engine integrity release: explicit legacy adoption, durable promotion recovery, and honest runtime status.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -108,7 +111,7 @@ health surfaces expose the stages actually completed by the installed runtime.
 | **Retrieval and recall** | Semantic, lexical, temporal, Hopfield and spreading-activation candidate channels; RRF fusion, optional reranking and graph score enhancement | Healthy channels participate; response provenance states the evidence used. |
 | **Brain and learning** | Behavioral patterns, feedback/outcome records, rewards, consolidation, LightGBM-related ranking components, soft prompts, and guarded skill-evolution workflows | Learning is evidence-driven; it does not claim autonomous correctness or guaranteed improvement. |
 | **Knowledge graph and entities** | Canonical entities, aliases, entity profiles, graph edges, scenes, timelines, explorer and graph APIs | Stored/derived graph data is evidence, not an instruction authority. |
-| **Scale Engine** | SQLite + sqlite-vec are canonical. CozoDB graph and LanceDB vector projections are packaged and managed with prepare → verify → promote → rollback | Promotion is explicit and parity-gated; do not advertise an unverified projection as the source of truth. |
+| **Scale Engine** | SQLite + sqlite-vec are canonical. CozoDB graph and LanceDB vector projections are managed with prepare → verify → promote → rollback; a structurally detected pre-v3.7 projection can be explicitly adopted. | Promotion is parity-gated and crash-recoverable. Legacy adoption preserves the prior projection as a rollback backup; if proof fails, routing remains on canonical SQLite and status reports repair required. |
 | **Optimize** | Exact cache, tagged invalidation, safe compression, opt-in aggressive prose compression, CCR originals, proxy/MCP/skill surfaces | Only proxy intercepts a primary provider turn. MCP/skill cache results explicitly routed through SLM. |
 | **Mesh** | Authenticated peer messages, inbox/outbox, locks, offline queue, optional discovery and mesh MCP tools | Mesh is coordination, not automatic replicated memory or conflict resolution. |
 | **Governance and operations** | Provenance, audit/retention/policy surfaces, export/erasure controls, diagnostics, health, backups and daemon lifecycle | These are engineering controls, not a legal certification. |
@@ -227,10 +230,15 @@ optional reranking, and entity-graph score enhancement. The entity graph does
 not create an independent candidate in the current implementation. Core memory
 is SQLite-backed. SQLite and sqlite-vec remain the canonical source of truth.
 The packaged Scale Engine can maintain CozoDB graph and LanceDB vector
-projections, and it remains outside active retrieval paths until
-`slm db scale prepare`, `verify`, and `promote` prove parity against the
-canonical store. This makes the capability available on a fresh installation
-without silently migrating an existing user's data.
+projections, and it remains outside active retrieval paths until a staged
+parity witness proves it matches the canonical store. New installations remain
+on Local Core. During upgrade, `slm db scale status` can identify a positive
+pre-v3.7 layout candidate; the operator confirms it with `slm db scale adopt`.
+SLM then rebuilds from canonical SQLite, verifies it, and promotes it with a
+durable recovery journal while retaining the prior directories as a rollback
+backup. `adopt` reports `restart_required: true`; run `slm restart` before
+checking daemon health. If proof fails, recall remains on SQLite and status
+reports repair required.
 
 Canonical ingestion is a durable state machine: `raw → queryable → enriching →
 complete`, with `failed` retaining raw evidence, error details, attempt count,

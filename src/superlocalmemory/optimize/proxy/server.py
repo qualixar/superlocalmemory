@@ -12,12 +12,13 @@ from fastapi import APIRouter
 from fastapi.requests import Request
 from fastapi.responses import Response
 
+from superlocalmemory import __version__
 from superlocalmemory.optimize.config.schema import OptimizeConfig
 from superlocalmemory.optimize.proxy.lifecycle import HookChain
 
 logger = logging.getLogger("slm.optimize.proxy")
 
-_PROXY_VERSION = "3.7.1"
+_PROXY_VERSION = __version__
 _REQUEST_TIMEOUT_S = 300.0
 _CONNECT_TIMEOUT_S = 10.0
 _MAX_CONNECTIONS = 100

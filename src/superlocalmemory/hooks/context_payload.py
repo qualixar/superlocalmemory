@@ -19,10 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
+from superlocalmemory import __version__
 from superlocalmemory.core.security_primitives import redact_secrets
 
 
-VERSION = "3.7.1"
+VERSION = __version__
 DEFAULT_TOP_K = 10
 DEFAULT_DECISIONS_K = 5
 DEFAULT_MEMORIES_K = 10

@@ -28,6 +28,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from superlocalmemory import __version__
 from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.infra.data_root import state_path as runtime_state_path
 
@@ -40,7 +41,7 @@ _DEFAULT_DISABLED_FILE = _DEFAULT_VERSION_DIR / ".hooks-disabled"
 VERSION_DIR = _DEFAULT_VERSION_DIR
 VERSION_FILE = _DEFAULT_VERSION_FILE
 DISABLED_FILE = _DEFAULT_DISABLED_FILE
-HOOKS_VERSION = "3.7.1"
+HOOKS_VERSION = __version__
 
 # Cross-platform temp dir and backwards-compatible marker overrides. Runtime
 # defaults are root-namespaced and resolved when hook definitions are built.

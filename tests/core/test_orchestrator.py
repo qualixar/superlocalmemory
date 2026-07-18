@@ -106,6 +106,14 @@ class TestLifecycle:
                 assert orch.get_graph_backend() is None
                 assert orch.get_vector_backend() is None
 
+    def test_daemon_start_recovers_interrupted_promotion_without_auto_adoption(self, orch):
+        """Startup recovers a journal but never mutates a legacy root by itself."""
+        with patch.object(orch, "_recover_interrupted_scale_promotion") as recovery:
+            with patch.object(orch, "_detect_cozo", return_value=False):
+                with patch.object(orch, "_detect_lancedb", return_value=False):
+                    orch.on_daemon_start()
+        recovery.assert_called_once_with()
+
     def test_health_check_always_works(self, orch):
         """Health check returns valid structure even without backends."""
         result = orch.health_check()

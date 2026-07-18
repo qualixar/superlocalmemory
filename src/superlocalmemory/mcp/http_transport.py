@@ -16,6 +16,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 from sse_starlette.sse import EventSourceResponse
 from starlette.types import Receive, Scope, Send
+from superlocalmemory import __version__
 
 
 class ClosingEventSourceResponse(EventSourceResponse):
@@ -40,7 +41,7 @@ def install_streamable_http_resource_guard() -> None:
 class SLMFastMCP(FastMCP):
     """FastMCP with SLM release identity and deterministic SSE cleanup."""
 
-    def __init__(self, *args, product_version: str = "3.7.1", **kwargs) -> None:
+    def __init__(self, *args, product_version: str = __version__, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         # FastMCP delegates the initialize response to the low-level MCP
         # server. Without an explicit value it reports the installed ``mcp``

@@ -97,6 +97,8 @@ class BackendOrchestrator:
         except Exception as exc:
             logger.warning("Initial rebalance failed (non-fatal): %s", exc)
 
+        self._recover_interrupted_scale_promotion()
+
         # Backends may be installed with the product, but installing a wheel
         # is not authorization to mutate an existing data root.  Only a
         # verified, explicit promotion may initialize and migrate projections.
@@ -133,6 +135,19 @@ class BackendOrchestrator:
         logger.info("BackendOrchestrator: daemon ready (cozo=%s, lancedb=%s)",
                      "active" if self._cozo and self._cozo_status() == "active" else "off",
                      "active" if self._lancedb and self._lancedb_status() == "active" else "off")
+
+    def _recover_interrupted_scale_promotion(self) -> None:
+        """Repair an interrupted promotion; never auto-mutate a legacy root."""
+        try:
+            from superlocalmemory.core.scale_engine import ScaleEngineManager
+
+            result = ScaleEngineManager(self._config, profile_id="default").recover_interrupted_promotion()
+            if result:
+                logger.warning("Scale Engine promotion recovery: %s", result)
+        except Exception as exc:
+            # A scale projection is derived data. Startup must keep serving
+            # canonical SQLite even if optional recovery itself is unhealthy.
+            logger.error("Scale Engine recovery requires repair; Local Core remains active: %s", exc)
 
     # ------------------------------------------------------------------
     # Incremental Sync (F-04: called from store_pipeline)
