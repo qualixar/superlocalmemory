@@ -5,6 +5,15 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.4] - 2026-07-18 — Scale Engine projection-parity release
+
+### Fixed
+
+- Aligned CozoDB projection parity with SLM's logical graph-edge identity while retaining the strongest relationship weight.
+- Preserved canonical SQLite history when normalizing legacy repeated graph rows into derived scale projections.
+- Kept rejected projection manifests inspectable, retired replaceable stage payloads, and allowed a corrected, explicitly confirmed adoption retry.
+- Removed stale CozoDB graph edges when a fact is deleted and kept shadow-error telemetry side-effect free.
+
 ## [3.7.3] - 2026-07-18 — Scale Engine integrity release
 
 ### Fixed

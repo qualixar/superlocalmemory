@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from superlocalmemory.storage.logical_edges import count_logical_edges, iter_logical_edges
+
 
 class ScaleEngineError(RuntimeError):
     """A scale projection cannot safely advance to its next lifecycle state."""
@@ -98,8 +100,8 @@ class ScaleEngineManager:
         legacy_projection_candidate = (
             state == "local_core"
             and all(paths_present.values())
-            and not manifests
             and not backups
+            and not self.promotion_journal_path.exists()
             and self._has_legacy_projection_layout()
         )
         runtime = self._runtime_backend_status()
@@ -117,7 +119,17 @@ class ScaleEngineManager:
             "legacy_candidate_requires_confirmation": legacy_projection_candidate,
             "migration_repair_required": (
                 self.promotion_journal_path.exists()
-                or (state == "local_core" and bool(manifests))
+                or any(
+                    manifest.get("state") == "promoted" and state != "promoted"
+                    for manifest in manifests
+                )
+                or (
+                    state == "promoted"
+                    and any(
+                        manifest.get("state") in {"prepared", "verified"}
+                        for manifest in manifests
+                    )
+                )
             ),
             "stages": manifests,
             "backups": backups,
@@ -135,25 +147,90 @@ class ScaleEngineManager:
         if not self.status()["legacy_projection_candidate"]:
             return None
         lock_path = self._acquire_lifecycle_lock()
+        prepared: dict[str, Any] | None = None
         try:
             # Re-check inside the lock. A concurrent command may have
             # completed promotion while this caller waited to acquire it.
-            if not self.status()["legacy_projection_candidate"]:
+            current_status = self.status()
+            if not current_status["legacy_projection_candidate"]:
                 return None
+            retry_payloads = [
+                manifest["stage_id"]
+                for manifest in current_status["stages"]
+                if manifest.get("state") in {"prepared", "verified"}
+                and manifest.get("stage_id")
+            ]
             prepared = self._prepare()
             self._verify(prepared["stage_id"])
-            return self._promote(prepared["stage_id"])
-        except Exception:
+            promoted = self._promote(prepared["stage_id"])
+            retired: list[str] = []
+            retirement_failures: dict[str, str] = {}
+            for stage_id in retry_payloads:
+                try:
+                    self._retire_superseded_stage(stage_id)
+                    retired.append(stage_id)
+                except Exception as cleanup_exc:
+                    retirement_failures[stage_id] = str(cleanup_exc)
+            return {
+                **promoted,
+                "retired_stages": retired,
+                "retirement_failures": retirement_failures,
+            }
+        except Exception as exc:
             # A failed adoption must leave the canonical path selected.  The
-            # stage is retained for operator inspection instead of deleting
-            # evidence about why an upgrade could not be completed.
-            self.config.scale_engine_state = "local_core"
+            # manifest is retained for inspection, but its replaceable Cozo
+            # and Lance payloads are retired so repeated retries cannot grow
+            # the data root without bound.
+            retirement_error: Exception | None = None
+            unresolved_promotion = self.promotion_journal_path.exists()
+            if prepared is not None and not unresolved_promotion:
+                try:
+                    self._retire_rejected_stage(prepared["stage_id"], exc)
+                except Exception as cleanup_exc:
+                    retirement_error = cleanup_exc
+            self.config.scale_engine_state = (
+                "verified" if unresolved_promotion else "local_core"
+            )
             self.config.graph_backend = "auto"
             self.config.vector_backend = "auto"
             self._save_config()
+            if retirement_error is not None:
+                raise ScaleEngineError(
+                    f"{exc}; rejected stage retirement failed: {retirement_error}"
+                ) from exc
             raise
         finally:
             self._release_lifecycle_lock(lock_path)
+
+    def _retire_rejected_stage(self, stage_id: str, error: Exception) -> None:
+        """Keep rejection evidence while removing replaceable projection data."""
+        self._retire_stage_payload(
+            stage_id,
+            {
+                "state": "rejected",
+                "rejected_at": _utc_now(),
+                "failure": f"{type(error).__name__}: {error}",
+            },
+        )
+
+    def _retire_superseded_stage(self, stage_id: str) -> None:
+        """Retain an old retry manifest after a newer projection is promoted."""
+        self._retire_stage_payload(
+            stage_id,
+            {"state": "superseded", "superseded_at": _utc_now()},
+        )
+
+    def _retire_stage_payload(
+        self, stage_id: str, manifest_updates: dict[str, Any]
+    ) -> None:
+        """Remove derived stage bytes while retaining its durable manifest."""
+        stage_dir, manifest = self._load_stage(stage_id)
+        for payload in (stage_dir / "cozo", stage_dir / "lance"):
+            if payload.exists():
+                shutil.rmtree(payload)
+        self._fsync_directory(stage_dir)
+        manifest.update(manifest_updates)
+        self._write_manifest(stage_dir, manifest)
 
     def prepare(self) -> dict[str, Any]:
         """Build a new projection in a private staging directory."""
@@ -308,11 +385,14 @@ class ScaleEngineManager:
             except sqlite3.Error:
                 pass
             try:
-                self._recover_interrupted_promotion()
-            except ScaleEngineError as recovery_error:
+                recovery = self._recover_interrupted_promotion()
+            except Exception as recovery_error:
                 raise ScaleEngineError(
                     f"promotion interrupted; automatic recovery needs repair: {recovery_error}"
                 ) from exc
+            if recovery == "finalized_committed_promotion":
+                _, recovered_manifest = self._load_stage(stage_id)
+                return recovered_manifest
             raise ScaleEngineError(f"promotion rolled back: {exc}") from exc
         finally:
             gate.close()
@@ -392,9 +472,7 @@ class ScaleEngineManager:
             "SELECT COUNT(*) FROM canonical_entities WHERE profile_id=?",
             (self.profile_id,),
         ).fetchone()[0]
-        edges = conn.execute(
-            "SELECT COUNT(*) FROM graph_edges WHERE profile_id=?", (self.profile_id,)
-        ).fetchone()[0]
+        edges = count_logical_edges(conn, self.profile_id)
         try:
             vectors = conn.execute(
                 "SELECT COUNT(*) FROM fact_embeddings_rowids fer "
@@ -422,7 +500,6 @@ class ScaleEngineManager:
         tables = (
             ("canonical_entities", "entity_id, canonical_name, entity_type, first_seen, last_seen, fact_count, profile_id", "entity_id"),
             ("atomic_facts", "fact_id, canonical_entities_json, lifecycle, profile_id", "fact_id"),
-            ("graph_edges", "source_id, target_id, edge_type, weight, profile_id", "source_id, target_id, edge_type"),
         )
         for table, columns, ordering in tables:
             try:
@@ -434,6 +511,11 @@ class ScaleEngineManager:
                     self._digest_row(digest, table, row)
             except sqlite3.OperationalError as exc:
                 raise ScaleEngineError(f"canonical SQLite missing required {table} table") from exc
+        try:
+            for row in iter_logical_edges(conn, self.profile_id):
+                self._digest_row(digest, "graph_edges", row)
+        except sqlite3.OperationalError as exc:
+            raise ScaleEngineError("canonical SQLite missing required graph_edges table") from exc
         try:
             rows = conn.execute(
                 "SELECT fer.rowid, fer.fact_id, vec.vector FROM fact_embeddings_rowids fer "

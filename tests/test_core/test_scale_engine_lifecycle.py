@@ -36,7 +36,13 @@ class _Graph:
         nodes = conn.execute(
             "SELECT COUNT(*) FROM canonical_entities WHERE profile_id=?", (profile_id,)
         ).fetchone()[0]
-        edges = conn.execute("SELECT COUNT(*) FROM graph_edges WHERE profile_id=?", (profile_id,)).fetchone()[0]
+        edges = conn.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT 1 FROM graph_edges WHERE profile_id=? "
+            "GROUP BY source_id, target_id, COALESCE(edge_type, 'related')"
+            ")",
+            (profile_id,),
+        ).fetchone()[0]
         self.counts_path.write_text(json.dumps({"entities": nodes, "edges": edges}))
 
     def health_check(self):
@@ -147,6 +153,30 @@ def test_verify_rejects_a_stage_when_canonical_data_changed(manager):
     db.close()
     with pytest.raises(ScaleEngineError, match="changed after preparation"):
         lifecycle.verify(prepared["stage_id"])
+
+
+def test_projection_contract_normalizes_legacy_duplicate_edges_by_max_weight(manager):
+    """Raw legacy duplicates are one logical edge and retain strongest weight."""
+    lifecycle, _ = manager
+    with sqlite3.connect(lifecycle.db_path) as db:
+        initial_counts = lifecycle._canonical_counts(db)
+        initial_fingerprint = lifecycle._projection_fingerprint(db, initial_counts)
+        db.execute(
+            "INSERT INTO graph_edges VALUES ('a', 'b', 'related', 0.25, 'default')"
+        )
+        weaker_counts = lifecycle._canonical_counts(db)
+        weaker_fingerprint = lifecycle._projection_fingerprint(db, weaker_counts)
+        db.execute(
+            "INSERT INTO graph_edges VALUES ('a', 'b', 'related', 1.5, 'default')"
+        )
+        stronger_counts = lifecycle._canonical_counts(db)
+        stronger_fingerprint = lifecycle._projection_fingerprint(db, stronger_counts)
+
+    assert initial_counts["edges"] == 2
+    assert weaker_counts == initial_counts
+    assert weaker_fingerprint == initial_fingerprint
+    assert stronger_counts == initial_counts
+    assert stronger_fingerprint != initial_fingerprint
 
 
 def test_prepare_excludes_foreign_profile_vectors_from_parity(manager):
@@ -260,12 +290,13 @@ def test_adopt_legacy_is_a_noop_without_legacy_projection(manager):
     assert cfg.scale_engine_state == "local_core"
 
 
-def test_failed_legacy_adoption_preserves_legacy_paths_and_requires_repair(manager, monkeypatch):
-    """A parity failure never turns a legacy directory into a live backend."""
+def test_failed_legacy_adoption_preserves_paths_and_allows_corrected_retry(manager, monkeypatch):
+    """A rejected stage stays inspectable without permanently blocking adoption."""
     lifecycle, cfg = manager
     old_cozo, old_lance = _make_legacy_projection(lifecycle)
     (old_cozo / "legacy-marker").write_text("cozo")
     (old_lance / "legacy-marker").write_text("lance")
+    verify = lifecycle._verify
 
     def reject_parity(_: str):
         raise ScaleEngineError("simulated parity failure")
@@ -278,7 +309,43 @@ def test_failed_legacy_adoption_preserves_legacy_paths_and_requires_repair(manag
     assert cfg.scale_engine_state == "local_core"
     assert (old_cozo / "legacy-marker").read_text() == "cozo"
     assert (old_lance / "legacy-marker").read_text() == "lance"
-    assert lifecycle.status()["migration_repair_required"] is True
+    rejected = lifecycle.status()
+    assert rejected["legacy_projection_candidate"] is True
+    assert rejected["migration_repair_required"] is False
+    assert len(rejected["stages"]) == 1
+    rejected_manifest = rejected["stages"][0]
+    assert rejected_manifest["state"] == "rejected"
+    rejected_dir = lifecycle.staging_root / rejected_manifest["stage_id"]
+    assert (rejected_dir / lifecycle.MANIFEST_NAME).exists()
+    assert not (rejected_dir / "cozo").exists()
+    assert not (rejected_dir / "lance").exists()
+
+    monkeypatch.setattr(lifecycle, "_verify", verify)
+    promoted = lifecycle.adopt_legacy_projection()
+
+    assert promoted is not None
+    assert promoted["state"] == "promoted"
+    assert cfg.scale_engine_state == "promoted"
+
+
+def test_successful_adoption_retires_a_prior_prepared_retry_payload(manager):
+    """A 3.7.3-style rejected prepared stage cannot leak disk indefinitely."""
+    lifecycle, cfg = manager
+    _make_legacy_projection(lifecycle)
+    prior = lifecycle._prepare()
+    prior_dir = lifecycle.staging_root / prior["stage_id"]
+    assert (prior_dir / "cozo").exists()
+    assert (prior_dir / "lance").exists()
+    cfg.scale_engine_state = "local_core"
+
+    promoted = lifecycle.adopt_legacy_projection()
+
+    assert promoted is not None
+    assert promoted["retired_stages"] == [prior["stage_id"]]
+    prior_manifest = json.loads((prior_dir / lifecycle.MANIFEST_NAME).read_text())
+    assert prior_manifest["state"] == "superseded"
+    assert not (prior_dir / "cozo").exists()
+    assert not (prior_dir / "lance").exists()
 
 
 def test_legacy_adoption_refuses_a_second_writer(manager):
@@ -344,6 +411,84 @@ def test_recovery_reverses_an_interrupted_half_promotion(manager):
     assert (old_lance / "legacy-marker").read_text() == "lance"
     assert (stage_dir / "cozo").exists()
     assert not lifecycle.promotion_journal_path.exists()
+
+
+def test_adoption_preserves_stage_when_promotion_recovery_is_unresolved(manager, monkeypatch):
+    """Never retire bytes that an unresolved promotion journal still needs."""
+    lifecycle, cfg = manager
+    old_cozo, old_lance = _make_legacy_projection(lifecycle)
+    (old_cozo / "legacy-marker").write_text("cozo")
+    (old_lance / "legacy-marker").write_text("lance")
+    replace = ScaleEngineManager._replace_durable
+    calls = 0
+
+    def fail_forward_and_first_reverse(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            raise OSError("simulated rename failure")
+        if calls == 5:
+            raise ScaleEngineError("simulated reverse recovery failure")
+        replace(source, target)
+
+    monkeypatch.setattr(
+        ScaleEngineManager,
+        "_replace_durable",
+        staticmethod(fail_forward_and_first_reverse),
+    )
+
+    with pytest.raises(ScaleEngineError, match="automatic recovery needs repair"):
+        lifecycle.adopt_legacy_projection()
+
+    status = lifecycle.status()
+    assert lifecycle.promotion_journal_path.exists()
+    assert status["migration_repair_required"] is True
+    assert cfg.scale_engine_state == "verified"
+    assert status["stages"][0]["state"] == "verified"
+    stage_dir = lifecycle.staging_root / status["stages"][0]["stage_id"]
+    assert (stage_dir / "lance").exists()
+
+    monkeypatch.setattr(
+        ScaleEngineManager,
+        "_replace_durable",
+        staticmethod(replace),
+    )
+    assert lifecycle.recover_interrupted_promotion() == "reversed_interrupted_promotion"
+    assert (old_cozo / "legacy-marker").read_text() == "cozo"
+    assert (old_lance / "legacy-marker").read_text() == "lance"
+    assert not lifecycle.promotion_journal_path.exists()
+
+
+def test_adoption_succeeds_when_committed_journal_cleanup_recovers(manager, monkeypatch):
+    """A transient committed-journal unlink failure is still a promotion."""
+    lifecycle, cfg = manager
+    old_cozo, old_lance = _make_legacy_projection(lifecycle)
+    (old_cozo / "legacy-marker").write_text("cozo")
+    (old_lance / "legacy-marker").write_text("lance")
+    unlink = Path.unlink
+    journal_unlinks = 0
+
+    def fail_first_journal_unlink(path: Path, *args, **kwargs) -> None:
+        nonlocal journal_unlinks
+        if path == lifecycle.promotion_journal_path:
+            journal_unlinks += 1
+            if journal_unlinks == 1:
+                raise OSError("simulated first journal unlink failure")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_first_journal_unlink)
+
+    promoted = lifecycle.adopt_legacy_projection()
+
+    assert promoted is not None
+    assert promoted["state"] == "promoted"
+    assert cfg.scale_engine_state == "promoted"
+    assert journal_unlinks == 2
+    assert not lifecycle.promotion_journal_path.exists()
+    assert lifecycle.status()["migration_repair_required"] is False
+    backup = lifecycle.backup_root / promoted["backup_id"]
+    assert (backup / "cozo" / "legacy-marker").read_text() == "cozo"
+    assert (backup / "lance" / "legacy-marker").read_text() == "lance"
 
 
 def test_recovery_reverses_an_interrupted_rollback(manager):

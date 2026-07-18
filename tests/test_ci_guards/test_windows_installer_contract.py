@@ -141,7 +141,7 @@ def test_windows_dry_run_supports_an_exact_release_version() -> None:
             "-ToolManager",
             "uv",
             "-Version",
-            "3.7.3",
+            "3.7.4",
             "-DryRun",
             "-NonInteractive",
         ],
@@ -151,7 +151,7 @@ def test_windows_dry_run_supports_an_exact_release_version() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "tool install superlocalmemory==3.7.3" in result.stdout.lower()
+    assert "tool install superlocalmemory==3.7.4" in result.stdout.lower()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows runtime contract runs in Windows CI")

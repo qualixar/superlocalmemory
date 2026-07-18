@@ -6,15 +6,14 @@
 
 from __future__ import annotations
 
-import pytest
 import shutil
 import sqlite3
-from pathlib import Path
+
+import pytest
 
 from superlocalmemory.graph.cozo_backend import (
-    CozoDBGraphBackend,
-    CozoDBNotAvailable,
     _COZO_AVAILABLE,
+    CozoDBGraphBackend,
 )
 
 # CozoDB is an optional backend (pip install superlocalmemory[cozo]). When it
@@ -146,6 +145,38 @@ class TestCanonicalEntityProjection:
         backend.bulk_import_from_sqlite(conn)
         assert backend.health_check()["edges"] == 2
 
+    def test_bulk_projection_normalizes_duplicate_logical_edges_to_max_weight(self, backend):
+        """Legacy duplicate rows project once with their strongest weight."""
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO graph_edges VALUES
+                ('fact-1', 'fact-2', 'supersedes', 0.4, 'default'),
+                ('fact-1', 'fact-2', 'supersedes', 1.0, 'default'),
+                ('fact-1', 'fact-2', 'temporal', 0.8, 'default');
+        """)
+
+        imported = backend.bulk_import_from_sqlite(conn)
+        rows = backend._db.run(
+            "?[edge_type, weight] := "
+            "*edge{from_id, to_id, edge_type, weight, profile_id}, "
+            "from_id = $source, to_id = $target, profile_id = $profile",
+            {"source": "fact-1", "target": "fact-2", "profile": "default"},
+        ).values.tolist()
+
+        assert imported == 2
+        assert backend.health_check()["edges"] == 2
+        assert sorted(rows) == [["supersedes", 1.0], ["temporal", 0.8]]
+
     def test_remove_fact_is_parameter_safe_and_removes_derived_records(self, backend):
         unsafe_id = "fact-'quoted'"
         backend.add_entity("entity-ada", "Ada", "person")
@@ -153,6 +184,14 @@ class TestCanonicalEntityProjection:
         backend.add_edge(unsafe_id, "fact-2", "related")
         backend.remove_fact(unsafe_id)
         assert backend.recall_facts(["entity-ada"]) == []
+        assert backend.health_check()["edges"] == 0
+
+    def test_shadow_error_records_telemetry_without_mutating_graph(self, backend):
+        backend.add_edge("fact-1", "fact-2", "related")
+
+        backend.record_shadow_error("simulated shadow failure")
+
+        assert backend.health_check()["edges"] == 1
 
 
 class TestPageRank:

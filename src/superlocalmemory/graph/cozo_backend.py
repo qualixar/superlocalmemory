@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.storage.logical_edges import iter_logical_edges
+
 logger = logging.getLogger(__name__)
 
 # Optional import — CozoDB is an optional dependency
@@ -260,6 +262,12 @@ class CozoDBGraphBackend:
                 *fact_entity{fact_id, entity_id, profile_id}, fact_id = $fact_id
             :rm fact_entity {fact_id, entity_id => profile_id}
         """, {"fact_id": fact_id})
+        self._db.run("""
+            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
+                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
+                (from_id = $fact_id or to_id = $fact_id)
+            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+        """, {"fact_id": fact_id})
 
     def record_shadow_comparison(
         self,
@@ -280,12 +288,6 @@ class CozoDBGraphBackend:
     def record_shadow_error(self, error: str) -> None:
         self._shadow_errors += 1
         logger.warning("Cozo entity recall failed closed to SQLite: %s", error)
-        self._db.run("""
-            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
-                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
-                (from_id = $fact_id or to_id = $fact_id)
-            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
-        """, {"fact_id": fact_id})
 
     # ------------------------------------------------------------------
     # Bulk Import (SQLite → CozoDB)
@@ -358,22 +360,15 @@ class CozoDBGraphBackend:
 
         # Step 3: Export fact graph edges directly.  Fact graph traversal is
         # intentionally kept in its native fact-ID namespace.
-        edges_sql = """
-            SELECT source_id, target_id, edge_type, weight
-            FROM graph_edges WHERE profile_id = ?
-        """
-        edge_rows = conn.execute(edges_sql, (profile_id,)).fetchall()
-
         edge_dicts = []
-        for row in edge_rows:
-            ea, eb, etype, weight = row
+        for ea, eb, etype, weight, edge_profile in iter_logical_edges(conn, profile_id):
             edge_dicts.append({
                 "from_id": ea,
                 "to_id": eb,
-                "edge_type": etype or "related",
-                "weight": float(weight or 1.0),
+                "edge_type": etype,
+                "weight": float(weight),
                 "metadata": "{}",
-                "profile_id": profile_id,
+                "profile_id": edge_profile,
                 "created_at": now,
             })
 

@@ -7,9 +7,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 _ROOT = Path(__file__).resolve().parents[2]
-_FINAL_RELEASE = "3.7.3"
+_FINAL_RELEASE = "3.7.4"
+_FINAL_RELEASE_DATE = "2026-07-18"
 
 
 def test_v37_release_source_has_final_package_version() -> None:
@@ -19,3 +19,14 @@ def test_v37_release_source_has_final_package_version() -> None:
 
     assert match is not None
     assert match.group(1) == _FINAL_RELEASE
+
+
+def test_v37_citation_metadata_matches_the_release() -> None:
+    citation = (_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    version = re.search(r'^version:\s*"([^"]+)"', citation, re.MULTILINE)
+    release_date = re.search(r'^date-released:\s*"([^"]+)"', citation, re.MULTILINE)
+
+    assert version is not None
+    assert release_date is not None
+    assert version.group(1) == _FINAL_RELEASE
+    assert release_date.group(1) == _FINAL_RELEASE_DATE
