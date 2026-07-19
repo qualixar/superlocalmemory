@@ -2,7 +2,7 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Tests for superlocalmemory.retrieval.engine — 4-Channel Retrieval Engine.
+"""Tests for superlocalmemory.retrieval.engine — five-producer Retrieval Engine.
 
 Covers:
   - RetrievalEngine.recall() full pipeline

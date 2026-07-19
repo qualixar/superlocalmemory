@@ -17,7 +17,7 @@ the local memories before committing to the external call.
 
 PERFORMANCE
 ===========
-Cost: ~500-800ms warm (full 4-channel recall via SLM daemon). Fires only on
+Cost: ~500-800ms warm (full recall via SLM daemon). Fires only on
 WebSearch and WebFetch (5-20× per typical session), so per-session overhead
 is ~5-15s in exchange for grounded answers. NOT suitable for UserPromptSubmit
 (too frequent — would be a perf disaster).

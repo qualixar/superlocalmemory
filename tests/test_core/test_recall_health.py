@@ -1,6 +1,6 @@
 """Tests for the runtime recall-health monitor (v3.6.8).
 
-The monitor keeps the 6-channel recall path warm, detects a "warm-but-broken"
+The monitor keeps the full recall path warm, detects a "warm-but-broken"
 embedder at runtime (semantic channel silently returning 0 because the embedder
 returns None while the boot ``_embedding_warm`` flag still claims True), and
 self-heals it. These tests exercise the pure logic with fakes — no daemon, no

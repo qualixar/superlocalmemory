@@ -487,7 +487,15 @@ class ScaleEngineManager:
     def _real_backend_factory(self, cozo_dir: Path, lance_dir: Path) -> tuple[Any, Any]:
         from superlocalmemory.graph.cozo_backend import CozoDBGraphBackend
         from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
-        return CozoDBGraphBackend(str(cozo_dir / "graph")), LanceDBVectorBackend(str(lance_dir))
+        # v3.7.6 (#72): promote the configured embedding width into the new
+        # LanceDB store so a 1024d (or other) custom endpoint survives promotion.
+        dimension = getattr(
+            getattr(self.config, "embedding", None), "dimension", None
+        )
+        return (
+            CozoDBGraphBackend(str(cozo_dir / "graph")),
+            LanceDBVectorBackend(str(lance_dir), dimension=dimension),
+        )
 
     def _readonly_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)

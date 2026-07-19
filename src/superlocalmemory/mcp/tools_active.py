@@ -42,12 +42,13 @@ def _sqlite_emergency_recall(
     native BM25 ranking via ``ORDER BY fts.rank``. This is the Mem0 / Letta
     industry pattern — multi-process safe via SQLite WAL mode.
 
-    Quality degraded vs full 6-channel (no semantic, no entity graph, no
+    Quality degraded vs the full recall path (no semantic, no entity graph, no
     temporal/spreading-activation/Hopfield) but still provides real BM25
     math + age gate. Returns ``degraded_mode=True`` via the caller's flag.
 
     Used ONLY when Tier-1 (full daemon recall) fails completely. Normal
-    path is full 6-channel; this is the fire-alarm.
+    path is the full five-producer fusion + entity-graph enhancement;
+    this is the fire-alarm.
     """
     import re
 
@@ -186,9 +187,11 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 permanently relevant still surface). Default: 30.
                 Set to 0 to disable the age gate entirely.
 
-        Scoring: Uses 6-channel fusion (semantic + BM25 + entity_graph + temporal +
-        spreading_activation + hopfield) with Ebbinghaus exponential recency decay
-        and FSRS stability strengthening by access frequency.
+        Scoring: five candidate producers (semantic + BM25 + temporal +
+        spreading_activation + hopfield) feed RRF fusion; the entity graph then
+        applies an optional post-fusion score enhancement. Combined with
+        Ebbinghaus exponential recency decay and FSRS stability strengthening by
+        access frequency.
         """
         try:
             from superlocalmemory.hooks.rules_engine import RulesEngine
@@ -215,8 +218,9 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 search_query = "recent important decisions"
 
             # 2-tier recall (industry pattern: Hindsight / Zep / Supermemory):
-            # PRIMARY: full 6-channel via daemon (semantic + BM25 + entity + temporal
-            #          + Hopfield + spreading-activation, Fisher-Rao fusion, FSRS decay).
+            # PRIMARY: full recall via daemon — five candidate producers (semantic
+            #          + BM25 + temporal + Hopfield + spreading-activation) into RRF
+            #          fusion, then entity-graph post-fusion enhancement, FSRS decay.
             #          Fast because Ollama embed model is kept warm (keep_alive=-1
             #          + eager pre-warm at daemon boot).
             # EMERGENCY: direct FTS5 BM25 (Mem0 / Letta pattern). Used ONLY when

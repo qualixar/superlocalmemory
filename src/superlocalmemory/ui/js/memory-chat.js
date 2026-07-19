@@ -1,6 +1,6 @@
 // SuperLocalMemory v3.4.1 — Ask My Memory Chat Interface
 // Copyright (c) 2026 Varun Pratap Bhardwaj — AGPL-3.0-or-later
-// SSE streaming chat grounded in 6-channel memory retrieval
+// SSE streaming chat grounded in multi-producer memory retrieval
 
 // ============================================================================
 // STATE
@@ -320,7 +320,7 @@ function _loadChatMode() {
                     + '<i class="bi bi-info-circle"></i> <strong>Mode A</strong> — No LLM connected.<br>'
                     + 'Chat returns raw memory retrieval results.<br>'
                     + 'For AI-powered conversation, switch to <strong>Mode B</strong> (Ollama) or <strong>Mode C</strong> (Cloud) in the <strong>Settings</strong> tab.<br>'
-                    + '<br>You can also use the <strong>Recall Lab</strong> tab for full 6-channel search.'
+                    + '<br>You can also use the <strong>Recall Lab</strong> tab for full recall search.'
                     + '</div>';
             }
         }

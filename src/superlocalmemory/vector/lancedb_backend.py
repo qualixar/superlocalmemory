@@ -55,7 +55,11 @@ class LanceDBVectorBackend:
     # Valid tier values (F-27: validated before interpolation)
     VALID_TIERS: frozenset[str] = frozenset({"active", "warm", "cold", "archived"})
 
-    def __init__(self, db_path: str) -> None:
+    # Fallback embedding width when neither the caller nor an existing table
+    # specifies one. Matches the bundled nomic-embed-text-v1.5 model (768d).
+    DEFAULT_DIMENSION: int = 768
+
+    def __init__(self, db_path: str, dimension: int | None = None) -> None:
         if not _LANCEDB_AVAILABLE:
             raise LanceDBNotAvailable(
                 "LanceDB not installed. Run: pip install superlocalmemory[lancedb]"
@@ -63,22 +67,54 @@ class LanceDBVectorBackend:
         path = Path(db_path)
         path.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
+        # v3.7.6 (#72): the vector width is configurable so custom embedding
+        # endpoints (e.g. Qwen3-Embedding at 1024d) no longer collide with a
+        # hardcoded 768d schema/decode. An existing table's on-disk width always
+        # wins over the requested value to keep already-materialized stores
+        # readable after a config change.
+        self._dimension = int(dimension) if dimension else self.DEFAULT_DIMENSION
         self._db = lancedb.connect(self._db_path)  # type: ignore[union-attr]
         self._table = self._open_or_create_table()
 
+    @property
+    def dimension(self) -> int:
+        """Effective vector width used for this backend's schema and decode."""
+        return self._dimension
+
     def _open_or_create_table(self):
-        """Open existing table or create empty one."""
+        """Open existing table (adopting its width) or create one at self._dimension."""
         try:
-            return self._db.open_table("embeddings")
+            table = self._db.open_table("embeddings")
         except Exception:
             import pyarrow as pa
             schema = pa.schema([
                 pa.field("fact_id", pa.string(), nullable=False),
-                pa.field("vector", pa.list_(pa.float32(), list_size=768), nullable=False),
+                pa.field(
+                    "vector",
+                    pa.list_(pa.float32(), list_size=self._dimension),
+                    nullable=False,
+                ),
                 pa.field("tier", pa.string(), nullable=False),
                 pa.field("profile_id", pa.string(), nullable=False),
             ])
             return self._db.create_table("embeddings", schema=schema)
+        # Adopt the persisted width so decode/validation matches what is stored.
+        existing = self._table_vector_width(table)
+        if existing:
+            self._dimension = existing
+        return table
+
+    @staticmethod
+    def _table_vector_width(table) -> int | None:
+        """Best-effort read of the persisted vector list width, or None."""
+        try:
+            field = table.schema.field("vector")
+            list_size = getattr(field.type, "list_size", None)
+            if isinstance(list_size, int) and list_size > 0:
+                return list_size
+        except Exception:  # pragma: no cover — schema introspection is best-effort
+            logger.debug("Could not read persisted vector width", exc_info=True)
+        return None
 
     def close(self) -> None:
         """Release this backend's native table and connection references."""
@@ -230,13 +266,13 @@ class LanceDBVectorBackend:
         F-33: Validates dimension and L2 norm.
         sqlite-vec stores vectors as raw float32 little-endian bytes.
         """
-        expected_bytes = 768 * 4  # 3072
+        expected_bytes = self._dimension * 4
         if len(blob) != expected_bytes:
             raise ValueError(
                 f"Unexpected vector blob size: {len(blob)} (expected {expected_bytes})"
             )
 
-        vec = list(struct.unpack(f"{768}f", blob))
+        vec = list(struct.unpack(f"{self._dimension}f", blob))
 
         # F-33: Validate non-zero
         norm = sum(v * v for v in vec) ** 0.5

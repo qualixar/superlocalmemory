@@ -298,6 +298,36 @@ def _apply_single(
         _, _, logged_hash, _, status = existing
         if status == "complete":
             if logged_hash != ddl_hash:
+                # v3.7.6 (#70): a complete migration whose logged DDL hash no
+                # longer matches the current text is only a real failure if the
+                # schema it guarantees is actually absent. Historically-benign
+                # DDL edits (e.g. M002's V3.4.21 <-> S9-W1 variants that build the
+                # identical end-state) would otherwise brick readiness forever on
+                # upgrade. Consult the migration's own verify(); if the schema is
+                # in place, reconcile the log to the current hash and treat as
+                # already-applied instead of failing the daemon into permanent
+                # not_ready. Absent/failing verify keeps the hard failure.
+                mod = _MODULES.get(migration.name)
+                verify_fn = (
+                    getattr(mod, "verify", None) if mod is not None else None
+                )
+                if verify_fn is not None:
+                    try:
+                        if verify_fn(conn):
+                            if not dry_run:
+                                try:
+                                    _upsert_log(
+                                        conn, migration.name, ddl_hash, "complete"
+                                    )
+                                except sqlite3.Error:  # pragma: no cover
+                                    pass
+                            return (
+                                "skipped",
+                                "drift reconciled via verify — schema present, "
+                                "log re-hashed to current DDL",
+                            )
+                    except sqlite3.Error:  # pragma: no cover
+                        pass
                 detail = (
                     f"DDL drift detected for {migration.name}: "
                     f"logged={logged_hash[:8]}... current={ddl_hash[:8]}..."

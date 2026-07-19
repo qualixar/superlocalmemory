@@ -354,7 +354,12 @@ class BackendOrchestrator:
         try:
             from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
             lance_path = self._data_dir / "lance"
-            self._lancedb = LanceDBVectorBackend(str(lance_path))
+            # v3.7.6 (#72): honor the configured embedding width instead of the
+            # hardcoded 768d, so custom endpoints (e.g. 1024d Qwen3-Embedding) work.
+            dimension = getattr(
+                getattr(self._config, "embedding", None), "dimension", None
+            )
+            self._lancedb = LanceDBVectorBackend(str(lance_path), dimension=dimension)
             self._update_status("lancedb", "not_initialized")
             logger.info("LanceDB initialized at %s", lance_path)
         except Exception as exc:

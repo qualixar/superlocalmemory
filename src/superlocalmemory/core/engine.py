@@ -51,8 +51,9 @@ class MemoryEngine:
     """Main orchestrator for the SuperLocalMemory V3 memory system.
 
     Wires encoding (fact extraction, entity resolution, graph building,
-    consolidation) with retrieval (4-channel search, RRF fusion,
-    reranking) and all supporting layers (trust, learning, compliance).
+    consolidation) with retrieval (five candidate producers -> RRF fusion,
+    reranking, entity-graph post-fusion enhancement) and all supporting
+    layers (trust, learning, compliance).
 
     Usage::
 

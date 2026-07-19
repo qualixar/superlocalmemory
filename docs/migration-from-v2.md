@@ -10,7 +10,7 @@ Upgrade from SuperLocalMemory V2 to V3. Zero data loss, one command, rollback av
 
 | Area | V2 | V3 |
 |------|----|----|
-| **Retrieval** | Single-channel semantic search | 4-channel: Semantic + BM25 + Entity Graph + Temporal |
+| **Retrieval** | Single-channel semantic search | Five candidate producers (Semantic + BM25 + Temporal + Spreading-Activation + Hopfield) -> RRF fusion + entity-graph post-fusion enhancement |
 | **Modes** | One mode (cloud required for smart features) | Three modes: A (zero-cloud), B (local LLM), C (cloud LLM) |
 | **Math layer** | None | Fisher-Rao similarity, Sheaf consistency, Langevin lifecycle |
 | **Ingestion** | Basic text storage | 11-step pipeline: entities, facts, emotions, beliefs, graph, and more |
@@ -55,7 +55,7 @@ The migration:
 2. Moves data from `~/.superlocalmemory/` to `~/.superlocalmemory/`
 3. Creates a symlink (`~/.superlocalmemory/ -> ~/.superlocalmemory/`) so old IDE configs still work
 4. Extends the database schema with V3 tables (15 new tables)
-5. Re-indexes existing memories for 4-channel retrieval
+5. Re-indexes existing memories for multi-producer retrieval
 6. Sets Mode A as default (zero breaking changes)
 7. Verifies integrity
 
@@ -106,7 +106,7 @@ Confirm:
 slm recall "something you stored in V2"
 ```
 
-Results should match or exceed V2 quality. V3's 4-channel retrieval finds memories that V2's single-channel search might have missed.
+Results should match or exceed V2 quality. V3's multi-producer retrieval finds memories that V2's single-channel search might have missed.
 
 ### Explore V3 features
 

@@ -267,7 +267,7 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
     }
 
     # v3.4.43 — default PreToolUse entry: pre-web recall on WebSearch/WebFetch.
-    # Fires `slm hook before_web` which runs a 4-channel recall on the search
+    # Fires `slm hook before_web` which runs a recall on the search
     # query/URL and injects results as a system-reminder BEFORE the web call.
     # Encourages Claude to consider local memories before paying for new web
     # research. Independent of `include_gate` — this is value-add, not gating.

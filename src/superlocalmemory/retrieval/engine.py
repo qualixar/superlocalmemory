@@ -2,10 +2,13 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — Retrieval Engine (6-Channel Orchestrator).
+"""SuperLocalMemory V3 — retrieval orchestration.
 
-6 channels -> single RRF fusion -> optional cross-encoder rerank.
-Channels: semantic, BM25, entity_graph, temporal, spreading_activation, hopfield.
+Five parallel candidate producers (semantic, BM25, temporal, spreading
+activation, and Hopfield) feed single-pass RRF fusion; optional profile hits
+can join that fusion input. The entity graph may then score and boost fused
+candidates when enabled and within the recall time budget. It is not a sixth
+parallel candidate producer. Optional cross-encoder reranking follows fusion.
 Replaces V1's broken 10-channel triple-re-fusion pipeline.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
@@ -54,7 +57,12 @@ class EmbeddingProvider(Protocol):
 
 
 class RetrievalEngine:
-    """Six-channel retrieval orchestrator.
+    """Retrieval orchestrator: five candidate producers -> RRF fusion.
+
+    Five parallel candidate producers (semantic, BM25, temporal,
+    spreading_activation, hopfield) feed single-pass RRF fusion, followed by
+    optional cross-encoder rerank and an optional entity-graph post-fusion
+    score enhancement. Entity graph is not a sixth parallel candidate producer.
 
     Usage::
         engine = RetrievalEngine(db, config, channels, embedder)
@@ -627,10 +635,10 @@ class RetrievalEngine:
         v3.4.53: channels run in PARALLEL via ThreadPoolExecutor. Industry
         standard (EverMemOS, szl-recall, ContentPilot 2026): all channels
         are independent after embedding; running them serially wastes time
-        equal to the sum of all channel latencies. Parallel execution brings
-        total channel time from sum(semantic+bm25+entity+temporal+hopfield+sa)
-        down to max(semantic,bm25,entity,temporal,hopfield,sa) — roughly a
-        3-5x speedup for the channel phase.
+        equal to the sum of all producer latencies. When multiple producers are
+        enabled and healthy, parallel dispatch generally bounds the producer
+        phase by the slowest submitted producer, plus serial embedding and
+        result-collection overhead.
         """
         import os as _os_e
         import time as _time_e

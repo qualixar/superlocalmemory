@@ -500,7 +500,9 @@ def init_retrieval(
     trust_scorer: Any,
     vector_store: Any = None,
 ) -> Any:
-    """Create the RetrievalEngine with 6 channels. Returns it."""
+    """Create the RetrievalEngine — five candidate producers (semantic, BM25,
+    temporal, spreading_activation, hopfield) plus the entity graph used for
+    post-fusion score enhancement. Returns it."""
     from superlocalmemory.retrieval.engine import RetrievalEngine
     from superlocalmemory.retrieval.semantic_channel import SemanticChannel
     from superlocalmemory.retrieval.bm25_channel import BM25Channel

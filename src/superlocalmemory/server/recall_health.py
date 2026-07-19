@@ -1,4 +1,4 @@
-"""Runtime recall-health monitor — keep the 6-channel recall path warm,
+"""Runtime recall-health monitor — keep the full recall path warm,
 detect a "warm-but-broken" embedder at runtime, and self-heal it (v3.6.8).
 
 Why this exists

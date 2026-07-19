@@ -277,7 +277,7 @@ def _emit_event(
 
 
 # v3.4.53: Limit concurrent full (non-fast) recalls. Without this, N parallel
-# /recall calls spawn N × 6-channel threads → Ollama serialises, reranker
+# /recall calls spawn N × full-recall threads → Ollama serialises, reranker
 # lock queues, and total wall time is N × single-recall-time. 3 concurrent
 # full recalls gives parallelism benefit without resource oversaturation.
 import asyncio as _asyncio
@@ -775,7 +775,7 @@ async def lifespan(application: FastAPI):
         # v3.4.52: Ensure covering indexes for SpreadingActivation queries.
         # SQLite 3.45+ streaming merge (UNION ALL + ORDER BY + LIMIT) uses
         # these to seek directly to top-K rows per subquery, avoiding a
-        # full sort.  Without them full 6-channel recall takes 7-10s on
+        # full sort.  Without them full recall takes 7-10s on
         # >1M edges (the SpreadingActivation 4-UNION query disk-sorts every
         # node's neighbor list on each call).  With them: sub-second.
         try:
@@ -835,7 +835,7 @@ async def lifespan(application: FastAPI):
                 logger.warning("Embedding warmup failed: %s", exc)
 
         def _warmup_recall():
-            """v3.4.62: Fire a full 6-channel recall after embedding warms up.
+            """v3.4.62: Fire a full recall after embedding warms up.
 
             Loads the graph_edges table (347K rows, ~100 MB) into the SQLite
             page cache. Without this, the first user query takes 15-24s because
@@ -853,7 +853,7 @@ async def lifespan(application: FastAPI):
             try:
                 t0 = _t.monotonic()
                 # Fire 2 warmup queries: one to load the graph page cache,
-                # second to warm the reranker subprocess + all 6 channels.
+                # second to warm the reranker subprocess + all producers.
                 # Without this, dashboard POST /api/search hits 11s cold.
                 for wq in ("memory recall performance", "context injection retrieval"):
                     engine.recall(wq, limit=5)
@@ -1710,7 +1710,20 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                             content={"error": str(_identity_exc.detail)},
                         )
                     raise
-            if not check_api_key(headers, is_write=is_write):
+            # v3.7.6 (#71/#73/#74): require_http_mutation_actor above is the
+            # authoritative write-auth boundary — it accepts the daemon
+            # capability, the dashboard install token, a matching X-SLM-API-Key,
+            # or an uncredentialed loopback caller, and fails closed for everyone
+            # else. The legacy check_api_key gate only understands X-SLM-API-Key,
+            # so running it as a second gate 401'd write paths that stage 1 had
+            # already authorized: capability-authenticated daemon write-throughs
+            # (MCP `remember`, #71) and install-token dashboard writes / config
+            # tests (#73/#74) whenever an api_key file exists. Only fall back to
+            # check_api_key when the mutation-actor gate did not run — i.e. for
+            # non-write, non-recall requests, where it is a no-op for reads.
+            if not requires_mutation_actor and not check_api_key(
+                headers, is_write=is_write
+            ):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(
                     status_code=401,

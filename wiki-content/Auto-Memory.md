@@ -9,7 +9,7 @@ SuperLocalMemory can automatically capture and recall memories without explicit 
 **How it works:**
 1. Your IDE sends the conversation context to the MCP server (`slm mcp`)
 2. SuperLocalMemory extracts key terms and entities from your message
-3. It runs a 4-channel retrieval (semantic, keyword, entity graph, temporal)
+3. It runs a full recall (five candidate producers: semantic, keyword/BM25, temporal, spreading-activation, Hopfield; plus entity-graph enhancement)
 4. The top results are returned to your IDE
 5. Your IDE includes these memories in the AI's system prompt
 

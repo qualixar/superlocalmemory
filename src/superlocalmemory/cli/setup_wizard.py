@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +226,29 @@ def _download_compressor(model_name: str) -> bool:
     except Exception as exc:
         print(f"  ✗ Compression model error: {exc}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Embedding-provider detection (v3.7.6 #72)
+# ---------------------------------------------------------------------------
+
+def _embedding_is_remote(config: Any) -> bool:
+    """True when embeddings come from a remote/OpenAI-compatible endpoint.
+
+    In that case the local sentence-transformers download (768d nomic) is
+    unnecessary and would only waste bandwidth/disk (#72). Detection is by
+    provider name or the presence of a configured HTTP endpoint.
+    """
+    emb = getattr(config, "embedding", None)
+    if emb is None:
+        return False
+    provider = (getattr(emb, "provider", "") or "").strip().lower()
+    endpoint = (
+        getattr(emb, "api_endpoint", "")
+        or getattr(emb, "base_url", "")
+        or ""
+    )
+    return provider in ("openai", "openai-compatible", "remote") or bool(endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +479,17 @@ def run_wizard(auto: bool = False) -> None:
     print()
     print("─── Step 4/10: Download Embedding Model ───")
 
-    if not st_ok:
+    if _embedding_is_remote(config):
+        # v3.7.6 (#72): a remote/OpenAI-compatible embedding endpoint supplies
+        # its own vectors (any width, e.g. 1024d Qwen3-Embedding), so pulling the
+        # local 768d nomic model would be wasted bandwidth and could imply a
+        # dimension that does not match the endpoint.
+        emb = config.embedding
+        print("  ✓ Skipped — remote/OpenAI-compatible embedding endpoint configured")
+        print(f"    provider={getattr(emb, 'provider', '?')}, "
+              f"dimension={getattr(emb, 'dimension', '?')}")
+        print("    No local embedding model needed.")
+    elif not st_ok:
         print("  ⚠ Skipped (sentence-transformers not installed)")
         print("    Models will download on first use.")
     else:

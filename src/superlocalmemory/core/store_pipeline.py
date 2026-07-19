@@ -310,7 +310,7 @@ def run_store(
     # that fact extraction may abstract away (dates, names, specifics).
     # This ensures BM25 and semantic search can always find the original text.
     # V3.3.12: Extract entities from verbatim content so entity channel + temporal
-    # channel can find it (was entities=[] which made 4/6 channels blind).
+    # channel can find it (was entities=[] which blinded the entity-graph and temporal signals).
     # V3.3.20: Stronger verbatim filter — skip greetings, filler, short phrases.
     # Verbatim facts with just "Hey! How are you?" dilute embeddings and add noise.
     _MIN_VERBATIM_WORDS = 8

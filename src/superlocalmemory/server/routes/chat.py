@@ -4,7 +4,7 @@
 
 """Ask My Memory — SSE chat endpoint.
 
-Flow: query → 6-channel retrieval → format context → LLM stream → SSE
+Flow: query → full recall (five-producer fusion) → format context → LLM stream → SSE
 Mode A: No LLM, returns formatted retrieval results.
 Mode B: Ollama local streaming via /api/chat.
 Mode C: Cloud LLM streaming (OpenAI-compatible).
@@ -315,7 +315,7 @@ async def _stream_openai_compat(
 # ── Retrieval Helper ─────────────────────────────────────────────
 
 def _recall_memories(query: str, limit: int) -> list:
-    """Run 6-channel retrieval via WorkerPool (synchronous, runs in executor)."""
+    """Run full recall via WorkerPool (synchronous, runs in executor)."""
     from superlocalmemory.core.worker_pool import WorkerPool
     pool = WorkerPool.shared()
     result = pool.recall(query, limit=limit)

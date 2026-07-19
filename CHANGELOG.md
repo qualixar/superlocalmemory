@@ -5,6 +5,19 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.6] - 2026-07-19 — Auth, upgrade, and embedding-dimension fixes
+
+### Fixed
+
+- Writes authenticated by the daemon capability or the dashboard install token are no longer rejected once an `api_key` file is configured. The write path ran a redundant second gate that only understood `X-SLM-API-Key`, so capability-authenticated MCP `remember` write-throughs and install-token dashboard writes / config tests returned 401 "Invalid or missing API key" whenever opt-in API-key auth was enabled. The mutation-actor gate — which already accepts the daemon capability, the install token, a matching API key, or an uncredentialed loopback caller — is now the single authoritative write boundary. (#71, #73, #74)
+- Upgrading an install across a benign migration DDL change no longer leaves the daemon permanently `not_ready`. On a `ddl_sha256` mismatch for a migration already marked complete, the runner now consults the migration's `verify()`; when the schema end-state is present it reconciles the log to the current hash instead of failing readiness. Real drift with an absent schema is still surfaced as a failure. (#70)
+- The LanceDB vector backend now follows the configured embedding dimension instead of a hardcoded 768, so custom OpenAI-compatible endpoints (for example 1024-d Qwen3-Embedding) no longer hit a vector-dimension mismatch on initialization. An existing store's on-disk width is always honored, keeping already-materialized data readable after a configuration change. (#72)
+
+### Improved
+
+- `slm setup` skips the local 768-d embedding-model download when a remote/OpenAI-compatible embedding endpoint is configured, instead of forcing an unnecessary model fetch. (#72)
+- Aligned retrieval documentation and docstrings with the shipped architecture: five parallel candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) feed single-pass RRF fusion, followed by optional cross-encoder rerank and an entity-graph post-fusion score enhancement. The entity graph is not a sixth parallel candidate producer.
+
 ## [3.7.5] - 2026-07-18 — Complete Scale Engine projection parity
 
 ### Improved
