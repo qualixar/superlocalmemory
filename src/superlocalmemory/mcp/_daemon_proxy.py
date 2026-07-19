@@ -17,10 +17,8 @@ engine state exists in exactly one process: the daemon.
 """
 from __future__ import annotations
 
-import json
 import logging
 import urllib.parse
-import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,9 +37,6 @@ class DaemonPoolProxy:
     def __init__(self, port: int, *, timeout_s: float = 30.0) -> None:  # v3.4.59: 8s→30s — observed recall takes 13.4s on dense graph (2.1M edges); 8s always timed out → degraded mode
         self._port = port
         self._timeout = timeout_s
-
-    def _url(self, path: str) -> str:
-        return f"http://127.0.0.1:{self._port}{path}"
 
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
@@ -64,15 +59,18 @@ class DaemonPoolProxy:
             _params["include_shared"] = "true" if include_shared else "false"
         params = urllib.parse.urlencode(_params)
         try:
-            with urllib.request.urlopen(
-                self._url(f"/recall?{params}"), timeout=self._timeout,
-            ) as resp:
-                data = json.loads(resp.read().decode() or "{}")
+            from superlocalmemory.cli.daemon import daemon_request
+
+            data = daemon_request(
+                "GET",
+                f"/recall?{params}",
+                timeout_seconds=self._timeout,
+            )
         except Exception as exc:
             logger.warning("daemon /recall failed: %s", exc)
             return {"ok": False, "error": str(exc)}
         if not isinstance(data, dict):
-            return {"ok": False, "error": "non-dict response"}
+            return {"ok": False, "error": "owned daemon unavailable"}
         data.setdefault("ok", True)
         return data
 

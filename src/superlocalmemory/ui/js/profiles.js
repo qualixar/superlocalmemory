@@ -206,7 +206,9 @@ async function switchProfile(profileName) {
             method: 'POST'
         });
         var data = await response.json();
-        if (data.success || data.active_profile) {
+        var acknowledged = response.ok && data.success === true &&
+            data.active_profile === profileName && Number.isInteger(data.generation);
+        if (acknowledged) {
             showToast('Switched to profile: ' + profileName);
             loadProfiles();
             loadStats();
@@ -226,11 +228,18 @@ async function switchProfile(profileName) {
             if (typeof loadCompliance === 'function') loadCompliance();
             var activeTab = document.querySelector('#mainTabs .nav-link.active');
             if (activeTab) activeTab.click();
+            return true;
         } else {
-            showToast('Failed to switch profile');
+            showToast(data.detail || 'Daemon did not acknowledge the requested profile');
+            // Restore the selector from daemon runtime truth after any failure
+            // or mismatched acknowledgement.
+            loadProfiles();
+            return false;
         }
     } catch (error) {
         console.error('Error switching profile:', error);
         showToast('Error switching profile');
+        loadProfiles();
+        return false;
     }
 }

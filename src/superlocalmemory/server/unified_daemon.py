@@ -182,10 +182,26 @@ class EngineRecallAdapter:
     loaded a SECOND MemoryEngine. This adapter eliminates that duplication.
     """
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine, profile_runtime=None) -> None:
+        self._engine = engine
+        self._profile_runtime = profile_runtime
+
+    def set_engine(self, engine) -> None:
+        """Replace the engine while the profile runtime is exclusive."""
         self._engine = engine
 
     def recall(self, query: str, limit: int = 10, session_id: str = "") -> dict:
+        from contextlib import nullcontext
+
+        lease = (
+            self._profile_runtime.operation()
+            if self._profile_runtime is not None
+            else nullcontext()
+        )
+        with lease:
+            return self._recall(query, limit=limit, session_id=session_id)
+
+    def _recall(self, query: str, limit: int = 10, session_id: str = "") -> dict:
         response = self._engine.recall(
             query, limit=limit, session_id=session_id or None,
         )
@@ -229,6 +245,84 @@ class EngineRecallAdapter:
         }
 
 
+def _configure_scale_backends(engine, config) -> None:
+    """Attach optional graph/vector backends to one initialized engine."""
+    try:
+        from superlocalmemory.core.backend_orchestrator import (
+            BackendOrchestrator,
+            set_orchestrator,
+        )
+
+        orchestrator = BackendOrchestrator(config=config, db=engine._db)
+        orchestrator.on_daemon_start()
+        set_orchestrator(orchestrator)
+        cozo_backend = orchestrator.get_graph_backend()
+        lancedb_backend = orchestrator.get_vector_backend()
+        retrieval = getattr(engine, "_retrieval_engine", None)
+        if retrieval is not None:
+            entity_graph = getattr(retrieval, "_entity", None)
+            if (
+                entity_graph is not None
+                and cozo_backend is not None
+                and orchestrator.graph_retrieval_ready()
+            ):
+                entity_graph._cozo = cozo_backend
+            semantic = getattr(retrieval, "_semantic", None)
+            if semantic is not None and lancedb_backend is not None:
+                semantic.set_scale_vector_backend(lancedb_backend)
+        logger.info(
+            "BackendOrchestrator: ready (cozo=%s, lancedb=%s)",
+            "active" if cozo_backend else "off",
+            "active" if lancedb_backend else "off",
+        )
+    except Exception as exc:
+        logger.warning("BackendOrchestrator init failed (non-fatal): %s", exc)
+
+
+def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> None:
+    """Build and publish one coherent daemon engine for a saved config."""
+    from superlocalmemory.core.engine import MemoryEngine
+
+    old_engine = getattr(application.state, "engine", None)
+    new_engine = MemoryEngine(new_config)
+    try:
+        new_engine.initialize()
+        new_config.save(mode_change=mode_change)
+    except BaseException:
+        new_engine.close()
+        raise
+
+    # The profile transition barrier is exclusive here. Publish every
+    # long-lived reference before closing the former engine.
+    application.state.engine = new_engine
+    application.state.config = new_config
+    global _engine
+    _engine = new_engine
+    _observe_buffer.set_engine(new_engine)
+    adapter = getattr(application.state, "engine_recall_adapter", None)
+    if adapter is not None:
+        adapter.set_engine(new_engine)
+    _configure_scale_backends(new_engine, new_config)
+
+    old_health_stop = getattr(application.state, "recall_health_stop", None)
+    if old_health_stop is not None:
+        old_health_stop.set()
+    try:
+        from superlocalmemory.server.recall_health import start_recall_health_monitor
+
+        runtime = getattr(application.state, "profile_runtime", None)
+        _thread, health_stop, _state = start_recall_health_monitor(
+            new_engine, runtime=runtime,
+        )
+        application.state.recall_health_stop = health_stop
+    except Exception as exc:
+        application.state.recall_health_stop = None
+        logger.warning("recall-health restart failed (non-fatal): %s", exc)
+
+    if old_engine is not None and old_engine is not new_engine:
+        old_engine.close()
+
+
 # ---------------------------------------------------------------------------
 # v3.4.32: Recall-priority gate for the pending materializer.
 # All /remember writes go to pending.db and return fast; a background
@@ -248,6 +342,7 @@ from superlocalmemory.core.recall_gate import (
 # of pending memories — they accumulated forever, only being processed at
 # daemon startup via engine._process_pending_memories().
 _engine = None
+_profile_runtime = None
 
 
 def _emit_event(
@@ -679,54 +774,24 @@ async def lifespan(application: FastAPI):
             except Exception:
                 pass
 
-        application.state.engine = engine
-        application.state.config = config
+        from superlocalmemory.server.profile_runtime import bind_profile_runtime
+
+        profile_runtime = bind_profile_runtime(application.state, engine, config)
+        application.state.reconfigure_engine = (
+            lambda new_config, mode_change=False: _hot_reconfigure_engine(
+                application, new_config, mode_change=mode_change,
+            )
+        )
         # v3.4.38: Wire module-level _engine for the pending materializer.
-        global _engine
+        global _engine, _profile_runtime
+        _profile_runtime = profile_runtime
         _engine = engine
         logger.info("Unified daemon: MemoryEngine initialized (mode=%s)", config.mode.value)
 
         # v3.5.0: Backend Orchestrator — CozoDB (graph) + LanceDB (vector) backends.
         # Initialise AFTER engine so the retrieval channels exist to receive backends.
         # Migrates edges/embeddings automatically; fail-soft (non-blocking).
-        _cozo_backend = None
-        _lancedb_backend = None
-        try:
-            from superlocalmemory.core.backend_orchestrator import (
-                BackendOrchestrator, set_orchestrator,
-            )
-            orch = BackendOrchestrator(config=config, db=engine._db)
-            orch.on_daemon_start()
-            set_orchestrator(orch)
-            _cozo_backend = orch.get_graph_backend()
-            _lancedb_backend = orch.get_vector_backend()
-            # Cozo storage may be active before its canonical-entity retrieval
-            # projection is parity-proven. Never route mismatched ID spaces.
-            re = getattr(engine, '_retrieval_engine', None)
-            if re is not None:
-                eg = getattr(re, '_entity', None)
-                if (
-                    eg is not None
-                    and _cozo_backend is not None
-                    and orch.graph_retrieval_ready()
-                ):
-                    try:
-                        eg._cozo = _cozo_backend
-                        logger.info("CozoDB backend wired into entity_graph channel")
-                    except Exception as exc:
-                        logger.warning("CozoDB channel injection failed: %s", exc)
-                semantic = getattr(re, '_semantic', None)
-                if semantic is not None and _lancedb_backend is not None:
-                    try:
-                        semantic.set_scale_vector_backend(_lancedb_backend)
-                        logger.info("LanceDB backend wired into semantic channel with SQLite shadow")
-                    except Exception as exc:
-                        logger.warning("LanceDB channel injection failed: %s", exc)
-            logger.info("BackendOrchestrator: ready (cozo=%s, lancedb=%s)",
-                         "active" if _cozo_backend else "off",
-                         "active" if _lancedb_backend else "off")
-        except Exception as exc:
-            logger.warning("BackendOrchestrator init failed (non-fatal): %s", exc)
+        _configure_scale_backends(engine, config)
 
         # LLD-07 §4 — deferred migrations (e.g. M006 reward column) need to
         # run AFTER MemoryEngine.initialize() has bootstrapped runtime tables
@@ -855,8 +920,9 @@ async def lifespan(application: FastAPI):
                 # Fire 2 warmup queries: one to load the graph page cache,
                 # second to warm the reranker subprocess + all producers.
                 # Without this, dashboard POST /api/search hits 11s cold.
-                for wq in ("memory recall performance", "context injection retrieval"):
-                    engine.recall(wq, limit=5)
+                with profile_runtime.operation():
+                    for wq in ("memory recall performance", "context injection retrieval"):
+                        engine.recall(wq, limit=5)
                 elapsed = round((_t.monotonic() - t0) * 1000)
                 logger.info(
                     "Recall engine pre-warmed in %dms", elapsed,
@@ -928,7 +994,9 @@ async def lifespan(application: FastAPI):
             from superlocalmemory.server.recall_health import (
                 start_recall_health_monitor,
             )
-            _rh_thread, _rh_stop, _ = start_recall_health_monitor(engine)
+            _rh_thread, _rh_stop, _ = start_recall_health_monitor(
+                engine, runtime=profile_runtime,
+            )
             application.state.recall_health_stop = _rh_stop
         except Exception as _rh_exc:
             logger.warning(
@@ -944,12 +1012,14 @@ async def lifespan(application: FastAPI):
             from superlocalmemory.core.recall_queue import RecallQueue
             _queue_db = state_path("recall_queue.db")
             _recall_queue = RecallQueue(_queue_db)
+            _engine_recall_adapter = EngineRecallAdapter(engine, profile_runtime)
             _queue_consumer = QueueConsumer(
                 queue=_recall_queue,
-                pool=EngineRecallAdapter(engine),
+                pool=_engine_recall_adapter,
             )
             _queue_consumer.start()
             application.state.queue_consumer = _queue_consumer
+            application.state.engine_recall_adapter = _engine_recall_adapter
             application.state.recall_queue = _recall_queue
             logger.info("QueueConsumer started (recall_queue.db)")
 
@@ -966,6 +1036,7 @@ async def lifespan(application: FastAPI):
         except Exception as _qc_exc:
             logger.warning("QueueConsumer start failed (non-fatal): %s", _qc_exc)
             application.state.queue_consumer = None
+            application.state.engine_recall_adapter = None
             application.state.recall_queue = None
 
     except Exception:
@@ -1315,11 +1386,21 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("perf_log flush failed: %s", exc)
 
-    if engine is not None:
+    materializer_stopped = _stop_pending_materializer()
+    _profile_runtime = None
+    _engine = None
+    if engine is not None and materializer_stopped:
         try:
             engine.close()
         except Exception:
             pass
+    elif engine is not None:
+        # The process is already shutting down. Do not close a database/model
+        # object still owned by an admitted background operation; OS process
+        # teardown is safer than racing that writer with engine.close().
+        logger.warning(
+            "Engine close deferred because pending materializer is still active"
+        )
     _cleanup_process_descriptor(
         getattr(application.state, "daemon_descriptor", None),
     )
@@ -1362,9 +1443,19 @@ def create_app() -> FastAPI:
     application.state.daemon_descriptor = _process_descriptor(
         identity_port, SLM_VERSION, "starting",
     )
+    application.state.reconfigure_engine = (
+        lambda new_config, mode_change=False: _hot_reconfigure_engine(
+            application, new_config, mode_change=mode_change,
+        )
+    )
 
     # -- Middleware --
+    from superlocalmemory.server.profile_runtime import ProfileRuntimeMiddleware
     from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
+    application.add_middleware(
+        ProfileRuntimeMiddleware,
+        app_state=application.state,
+    )
     application.add_middleware(SecurityHeadersMiddleware)
     application.add_middleware(GZipMiddleware, minimum_size=1000)
     application.add_middleware(
@@ -1968,6 +2059,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         except Exception:
             _recall_health = {"recall_healthy": None}
         identity = getattr(application.state, "daemon_descriptor", None)
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+
+        profile_snapshot = get_profile_runtime(application.state).snapshot
         return {
             "status": "ok",
             "ready": fully_ready,
@@ -1985,6 +2079,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # Runtime readiness is more precise than descriptor lifecycle.
             # A process can be alive and identity-valid while retrieval warms.
             "state": runtime_state,
+            "active_profile": profile_snapshot.profile_id,
+            "profile_generation": profile_snapshot.generation,
         }
 
     @application.get("/recall")
@@ -2076,8 +2172,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
             )
             for _r in results:
                 _r["content"] = _sanitize_json_text(_r.get("content", ""))
+            from superlocalmemory.server.profile_runtime import get_profile_runtime
+
+            profile_snapshot = get_profile_runtime(application.state).snapshot
             return {
                 "ok": True,
+                "profile": profile_snapshot.profile_id,
+                "profile_generation": profile_snapshot.generation,
                 "query": search_query,
                 "query_type": response.query_type,
                 "result_count": len(results),
@@ -2312,17 +2413,54 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         # Non-blocking peek — status must never force a re-init.
         engine = getattr(application.state, "engine", None)
-        fact_count = engine.fact_count if engine else 0
-        mode = engine._config.mode.value if engine and hasattr(engine, '_config') else "unknown"
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+
+        profile_snapshot = get_profile_runtime(application.state).snapshot
+        config = getattr(application.state, "config", None)
+        fact_count = 0
+        entity_count = 0
+        edge_count = 0
+        if engine is not None:
+            try:
+                fact_count = engine._db.get_fact_count(profile_snapshot.profile_id)
+                entities = engine._db.execute(
+                    "SELECT COUNT(*) AS c FROM canonical_entities "
+                    "WHERE profile_id = ?",
+                    (profile_snapshot.profile_id,),
+                )
+                entity_count = int(dict(entities[0])["c"]) if entities else 0
+                edges = engine._db.execute(
+                    "SELECT COUNT(*) AS c FROM graph_edges WHERE profile_id = ?",
+                    (profile_snapshot.profile_id,),
+                )
+                edge_count = int(dict(edges[0])["c"]) if edges else 0
+            except Exception:
+                logger.debug("daemon status count query failed", exc_info=True)
+        db_path = getattr(config, "db_path", None)
+        db_size_mb = (
+            round(db_path.stat().st_size / 1024 / 1024, 2)
+            if db_path is not None and db_path.exists()
+            else 0.0
+        )
+        mode = getattr(getattr(config, "mode", None), "value", "unknown")
+        provider = getattr(getattr(config, "llm", None), "provider", "") or "none"
         return {
             "status": "running",
             "pid": os.getpid(),
             "uptime_s": round(time.monotonic() - (_start_time or time.monotonic())),
             "mode": mode,
+            "provider": provider,
             "fact_count": fact_count,
+            "entity_count": entity_count,
+            "edge_count": edge_count,
+            "base_dir": str(getattr(config, "base_dir", "")),
+            "db_path": str(db_path or ""),
+            "db_size_mb": db_size_mb,
             "idle_s": round(time.monotonic() - _last_activity),
             "port": application.state.daemon_descriptor.port,
             "legacy_port": _LEGACY_PORT,
+            "profile": profile_snapshot.profile_id,
+            "profile_generation": profile_snapshot.generation,
         }
 
     @application.get("/list")
@@ -2508,6 +2646,18 @@ def _materializer_actor_id() -> str:
     return f"daemon-capability:{descriptor.capability_fingerprint}"
 
 
+def _run_materializer_operation(runtime, engine_supplier, operation):
+    """Run one bounded background unit against an admitted engine snapshot."""
+    with runtime.operation():
+        # Resolve the engine only after admission. A concurrent mode/provider
+        # reconfiguration may have replaced the module-level engine while this
+        # worker was waiting at the transition barrier.
+        engine = engine_supplier()
+        if engine is None:
+            return None
+        return operation(engine)
+
+
 def _materialize_ingestion_one_pass(
     engine,
     *,
@@ -2609,6 +2759,10 @@ def _start_pending_materializer() -> None:
     """Drain M018 operations and backfill the legacy pending.db queue."""
     global _materializer_thread
 
+    if _materializer_thread is not None and _materializer_thread.is_alive():
+        return
+    _materializer_stop.clear()
+
     def _loop():
         from superlocalmemory.cli.pending_store import (
             get_pending, mark_done, mark_failed,
@@ -2624,9 +2778,12 @@ def _start_pending_materializer() -> None:
                 # not a stale local reference.
                 import superlocalmemory.server.unified_daemon as _ud
                 engine = _ud._engine
-                if engine is None:
+                runtime = _ud._profile_runtime
+                if engine is None or runtime is None:
                     if not _waiting_logged:
-                        logger.info("Materializer: waiting for engine to init...")
+                        logger.info(
+                            "Materializer: waiting for engine/runtime to init..."
+                        )
                         _waiting_logged = True
                     time.sleep(0.5)
                     continue
@@ -2634,10 +2791,18 @@ def _start_pending_materializer() -> None:
                     logger.info("Materializer: engine acquired, starting drain loop")
                     _engine_logged = True
 
-                durable_complete, durable_failed = _materialize_ingestion_one_pass(
-                    engine,
-                    limit=50,
+                cycle_result = _run_materializer_operation(
+                    runtime,
+                    lambda: _ud._engine,
+                    lambda admitted_engine: _materialize_ingestion_one_pass(
+                        admitted_engine,
+                        # One operation per lease bounds profile-switch wait
+                        # time without allowing engine components to rebind
+                        # halfway through an enrichment pipeline.
+                        limit=1,
+                    ),
                 )
+                durable_complete, durable_failed = cycle_result or (0, 0)
                 pending = get_pending(limit=50)
                 if not pending and not durable_complete and not durable_failed:
                     time.sleep(1.0)
@@ -2655,7 +2820,15 @@ def _start_pending_materializer() -> None:
                         time.sleep(0.5)
                         waits += 1
                     try:
-                        operation_id = _materialize_legacy_pending_item(engine, item)
+                        operation_id = _run_materializer_operation(
+                            runtime,
+                            lambda: _ud._engine,
+                            lambda admitted_engine: _materialize_legacy_pending_item(
+                                admitted_engine, item,
+                            ),
+                        )
+                        if operation_id is None:
+                            raise RuntimeError("resident engine became unavailable")
                         mark_done(item["id"])
                         _emit_event(
                             "memory.stored",
@@ -2681,6 +2854,21 @@ def _start_pending_materializer() -> None:
     )
     _materializer_thread.start()
     logger.info("Pending materializer started (recall-priority)")
+
+
+def _stop_pending_materializer(timeout: float = 5.0) -> bool:
+    """Stop and join the background writer before closing its engine."""
+    global _materializer_thread
+
+    _materializer_stop.set()
+    thread = _materializer_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            logger.warning("Pending materializer did not stop within %.1fs", timeout)
+            return False
+    _materializer_thread = None
+    return True
 
 
 def start_server(port: int = _DEFAULT_PORT) -> None:

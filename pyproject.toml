@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.7.6"
+version = "3.7.7"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -37,12 +37,12 @@ dependencies = [
     "numpy==2.4.4",
     "scipy==1.17.1",
     "networkx==3.6.1",
-    "mcp==1.27.1",
+    "mcp==1.28.1",
     "python-dateutil==2.9.0.post0",
     "rank-bm25==0.2.2",
     "vadersentiment==3.3.2",
     "einops==0.8.2",
-    "fastapi[all]==0.136.1",
+    "fastapi[all]==0.139.2",
     "uvicorn==0.46.0",
     "websockets==16.0",
     "zeroconf>=0.140",
@@ -59,7 +59,7 @@ dependencies = [
     "psutil==7.2.2",
     "structlog==25.5.0",
     "portalocker==3.2.0",
-    "cryptography==45.0.2",
+    "cryptography==48.0.1",
     # Semantic search + cross-encoder reranker. Do NOT use
     # sentence-transformers[onnx] — its extras pull optimum which
     # overrides the sentence-transformers pin via transitive deps.
@@ -67,8 +67,8 @@ dependencies = [
     "sentence-transformers==5.3.0",
     "optimum==2.1.0",
     "onnxruntime==1.24.4",
-    "transformers==4.57.6",
-    "huggingface_hub==0.36.2",
+    "transformers==5.5.4",
+    "huggingface_hub==1.5.0",
     "torch==2.11.0",
     "scikit-learn==1.8.0",
     # Vector KNN extension for the semantic channel.

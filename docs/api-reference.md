@@ -141,5 +141,9 @@ same-origin dashboard uses an install token, while configured API keys or mesh
 credentials authorize their documented remote surfaces. Caller-provided
 `agent_id` values never replace these credentials.
 
+Configuring an SLM API key does not revoke the local OS-user trust boundary:
+uncredentialed loopback mutations remain accepted and are protected from
+browser CSRF by the origin guard. Non-loopback callers must authenticate.
+
 The private daemon capability is process/filesystem state and must not be
 embedded in browser JavaScript, checked into source, or logged.

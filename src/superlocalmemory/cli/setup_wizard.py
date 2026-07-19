@@ -251,6 +251,23 @@ def _embedding_is_remote(config: Any) -> bool:
     return provider in ("openai", "openai-compatible", "remote") or bool(endpoint)
 
 
+def _build_wizard_config(mode):
+    """Apply mode-owned presets without erasing existing user-owned blocks."""
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.infra.data_root import state_path
+
+    template = SLMConfig.for_mode(mode)
+    if not state_path("config.json").exists():
+        return template
+    existing = SLMConfig.load()
+    existing.mode = mode
+    existing.llm = template.llm
+    existing.retrieval = template.retrieval
+    existing.math = template.math
+    existing.channel_weights = template.channel_weights
+    return existing
+
+
 # ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------
@@ -397,7 +414,7 @@ def run_wizard(auto: bool = False) -> None:
     from superlocalmemory.storage.models import Mode
 
     mode_map = {"a": Mode.A, "b": Mode.B, "c": Mode.C}
-    config = SLMConfig.for_mode(mode_map[choice])
+    config = _build_wizard_config(mode_map[choice])
 
     # -- Multi-scope (shared memory) opt-in — v3.6.15 --
     # OFF by default: your memories stay private to this profile (3.6.14 behaviour).

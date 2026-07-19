@@ -25,6 +25,27 @@ from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
 
+
+async def _runtime_profile(get_engine: Callable, explicit: str = "") -> str:
+    """Resolve an MCP default profile from daemon runtime truth."""
+    if explicit:
+        return explicit
+    import asyncio
+
+    try:
+        from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
+
+        if await asyncio.to_thread(is_daemon_running):
+            status = await asyncio.to_thread(daemon_request, "GET", "/status")
+            if isinstance(status, dict) and status.get("profile"):
+                return str(status["profile"])
+            raise RuntimeError("resident daemon did not report its active profile")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.debug("daemon profile resolution failed: %s", exc)
+    return str(get_engine().profile_id)
+
 def _emit_event(event_type: str, payload: dict | None = None,
                 source_agent: str = "mcp_client") -> None:
     """Emit an event to the EventBus (best-effort, never raises)."""
@@ -42,6 +63,7 @@ def _record_recall_hits(
     query: str,
     results: list[dict],
     *,
+    profile_id: str = "",
     query_id: str = "",
     fact_ids_candidates: list[str] | None = None,
 ) -> None:
@@ -63,7 +85,7 @@ def _record_recall_hits(
         )
 
         engine = get_engine()
-        pid = engine.profile_id
+        pid = profile_id or engine.profile_id
         slm_dir = canonical_data_root()
 
         shown_ids = [r.get("fact_id", "") for r in results[:10]
@@ -335,7 +357,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
             if result.get("ok"):
                 # Record implicit feedback: every returned result is a recall_hit
                 try:
-                    _record_recall_hits(get_engine, query, result.get("results", []))
+                    _record_recall_hits(
+                        get_engine,
+                        query,
+                        result.get("results", []),
+                        profile_id=str(result.get("profile", "")),
+                    )
                 except Exception:
                     pass  # Feedback is non-critical, never block recall
                 _emit_event("memory.recalled", {
@@ -370,7 +397,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Full-text search across memories using FTS5 with BM25 ranking."""
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = await _runtime_profile(get_engine, profile_id)
             facts = engine._db.search_facts_fts(query, pid, limit=limit)
             items = []
             for f in facts:
@@ -392,7 +419,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             ids = [fid.strip() for fid in fact_ids.split(",") if fid.strip()]
-            facts = engine._db.get_facts_by_ids(ids, engine.profile_id)
+            pid = await _runtime_profile(get_engine)
+            facts = engine._db.get_facts_by_ids(ids, pid)
             items = []
             for f in facts:
                 items.append({
@@ -417,7 +445,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """List most recently stored memories, newest first."""
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = await _runtime_profile(get_engine, profile_id)
             # v3.6.12 (search-2): push the limit into the query — was loading the
             # ENTIRE facts table (deserializing every 768-float embedding) just
             # to return the top N. get_all_facts preserves created_at DESC order.
@@ -440,7 +468,37 @@ def register_core_tools(server, get_engine: Callable) -> None:
     async def get_status() -> dict:
         """Get memory system status: fact count, entity count, mode, profile, db size."""
         try:
+            import asyncio
             import os
+
+            from superlocalmemory.cli.daemon import (
+                daemon_request,
+                is_daemon_running,
+            )
+
+            if await asyncio.to_thread(is_daemon_running):
+                daemon_status = await asyncio.to_thread(
+                    daemon_request,
+                    "GET",
+                    "/status",
+                )
+                if isinstance(daemon_status, dict) and daemon_status.get("profile"):
+                    return {
+                        "success": True,
+                        "mode": daemon_status.get("mode", "unknown"),
+                        "provider": daemon_status.get("provider", "none"),
+                        "profile": daemon_status["profile"],
+                        "base_dir": daemon_status.get("base_dir", ""),
+                        "db_path": daemon_status.get("db_path", ""),
+                        "db_size_mb": float(daemon_status.get("db_size_mb", 0.0)),
+                        "fact_count": int(daemon_status.get("fact_count", 0)),
+                        "entity_count": int(daemon_status.get("entity_count", 0)),
+                        "edge_count": int(daemon_status.get("edge_count", 0)),
+                        "profile_generation": int(
+                            daemon_status.get("profile_generation", 0)
+                        ),
+                    }
+
             engine = get_engine()
             pid = engine.profile_id
             fact_count = engine._db.get_fact_count(pid)
@@ -474,6 +532,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "fact_count": fact_count,
                 "entity_count": entity_count,
                 "edge_count": edge_count,
+                "profile_generation": 0,
             }
         except Exception as exc:
             logger.exception("get_status failed")
@@ -484,7 +543,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Rebuild knowledge graph edges for all facts in the active profile."""
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = await _runtime_profile(get_engine, profile_id)
             authorization = authorize_mcp_mutation(
                 engine,
                 "update",
@@ -511,6 +570,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
     async def switch_profile(profile_id: str) -> dict:
         """Switch the active memory profile. All operations scope to this profile."""
         try:
+            import asyncio
+
             engine = get_engine()
             old = engine.profile_id
             authorization = authorize_mcp_mutation(
@@ -520,18 +581,57 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 profile_id=profile_id,
                 content_preview=f"{old} -> {profile_id}",
             )
-            engine.profile_id = profile_id
+            from superlocalmemory.cli.daemon import (
+                daemon_request,
+                is_daemon_running,
+            )
 
-            # Persist to both config stores so CLI and Dashboard stay in sync
-            try:
-                from superlocalmemory.server.routes.helpers import (
-                    ensure_profile_in_db, set_active_profile_everywhere,
+            generation = 0
+            if await asyncio.to_thread(is_daemon_running):
+                result = await asyncio.to_thread(
+                    daemon_request,
+                    "POST",
+                    f"/api/profiles/{profile_id}/switch",
                 )
-                ensure_profile_in_db(profile_id)
-                set_active_profile_everywhere(profile_id)
-            except ImportError:
-                # Dashboard not installed — profile switch still works for MCP/CLI
-                logger.debug("Dashboard routes not available, profile set in engine only")
+                if not result or not result.get("success"):
+                    return {
+                        "success": False,
+                        "error": "resident daemon rejected the profile switch",
+                    }
+                acknowledged = str(result.get("active_profile", ""))
+                if acknowledged != profile_id:
+                    return {
+                        "success": False,
+                        "error": "resident daemon acknowledged a different profile",
+                    }
+                generation = int(result.get("generation", 0))
+            else:
+                rows = engine._db.execute(
+                    "SELECT 1 FROM profiles WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                if not rows:
+                    return {
+                        "success": False,
+                        "error": f"Profile '{profile_id}' does not exist.",
+                    }
+                from superlocalmemory.server.profile_runtime import (
+                    persist_active_profile,
+                )
+
+                persistence = persist_active_profile(profile_id)
+                try:
+                    engine.profile_id = profile_id
+                    engine._config.active_profile = profile_id
+                except BaseException:
+                    engine.profile_id = old
+                    engine._config.active_profile = old
+                    persistence.rollback()
+                    raise
+
+            # Synchronize this MCP process only after daemon acknowledgement.
+            engine.profile_id = profile_id
+            engine._config.active_profile = profile_id
 
             # v3.6.12 (search-3): recall/delete run in a separate worker
             # subprocess that caches its engine (and profile_id) at init. Recycle
@@ -547,6 +647,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "success": True,
                 "previous_profile": old,
                 "current_profile": profile_id,
+                "generation": generation,
             }
         except Exception as exc:
             logger.exception("switch_profile failed")
@@ -569,7 +670,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Get memory usage breakdown by fact type and lifecycle state."""
         try:
             engine = get_engine()
-            pid = engine.profile_id
+            pid = await _runtime_profile(get_engine)
             facts = engine._db.get_all_facts(pid)
             by_type: dict[str, int] = {}
             by_lifecycle: dict[str, int] = {}
@@ -594,11 +695,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Get learned behavioral patterns (interests, refinements, archival habits)."""
         try:
             engine = get_engine()
+            pid = await _runtime_profile(get_engine)
             from superlocalmemory.learning.behavioral import BehavioralPatternStore
             store = BehavioralPatternStore(engine._db.db_path)
             ptype = pattern_type if pattern_type else None
             patterns = store.get_patterns(
-                engine.profile_id, pattern_type=ptype, limit=limit,
+                pid, pattern_type=ptype, limit=limit,
             )
             return {"success": True, "patterns": patterns, "count": len(patterns)}
         except Exception as exc:
@@ -610,18 +712,19 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Correct or annotate a learned behavioral pattern to improve retrieval."""
         try:
             engine = get_engine()
+            pid = await _runtime_profile(get_engine)
             authorization = authorize_mcp_mutation(
                 engine,
                 "update",
                 mutation_source="mcp-correct-pattern",
-                profile_id=engine.profile_id,
+                profile_id=pid,
                 fact_id=pattern_id,
                 content_preview=correction,
             )
             from superlocalmemory.learning.behavioral import BehavioralPatternStore
             store = BehavioralPatternStore(engine._db.db_path)
             store.record(
-                engine.profile_id,
+                pid,
                 pattern_type="correction",
                 pattern_key=pattern_id,
                 metadata={"correction": correction},
@@ -649,6 +752,34 @@ def register_core_tools(server, get_engine: Callable) -> None:
             from superlocalmemory.mcp.agent_context import get_current_agent_id
             agent_id = get_current_agent_id()
         try:
+            import asyncio
+            import urllib.parse
+
+            from superlocalmemory.cli.daemon import (
+                daemon_request,
+                is_daemon_running,
+            )
+
+            if await asyncio.to_thread(is_daemon_running):
+                path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+                result = await asyncio.to_thread(
+                    daemon_request, "DELETE", path,
+                )
+                if isinstance(result, dict) and result.get("success"):
+                    _emit_event("memory.deleted", {
+                        "fact_id": fact_id,
+                        "agent_id": agent_id,
+                    }, source_agent=agent_id)
+                    return {
+                        "success": True, "deleted": fact_id,
+                        "agent_id": agent_id,
+                    }
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "error": "resident daemon rejected the delete operation",
+                }
+
             from superlocalmemory.core.worker_pool import WorkerPool
             pool = WorkerPool.shared()
             result = pool._send({
@@ -691,6 +822,33 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             if not content or not content.strip():
                 return {"success": False, "error": "content cannot be empty"}
+            import asyncio
+            import urllib.parse
+
+            from superlocalmemory.cli.daemon import (
+                daemon_request,
+                is_daemon_running,
+            )
+
+            if await asyncio.to_thread(is_daemon_running):
+                path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+                result = await asyncio.to_thread(
+                    daemon_request,
+                    "PATCH",
+                    path,
+                    {"content": content.strip()},
+                )
+                if isinstance(result, dict) and result.get("success"):
+                    return {
+                        "success": True, "fact_id": fact_id,
+                        "content": content.strip(),
+                    }
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "error": "resident daemon rejected the update operation",
+                }
+
             from superlocalmemory.core.worker_pool import WorkerPool
             pool = WorkerPool.shared()
             result = pool._send({

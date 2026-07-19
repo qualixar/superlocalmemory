@@ -233,7 +233,12 @@ def dict_factory(cursor: sqlite3.Cursor, row: tuple) -> dict:
 
 
 def get_active_profile() -> str:
-    """Read the active profile from profiles.json. Falls back to 'default'."""
+    """Read request runtime truth, falling back to the compatibility cache."""
+    from superlocalmemory.server.profile_runtime import current_request_profile
+
+    runtime_profile = current_request_profile()
+    if runtime_profile:
+        return runtime_profile
     config_file = MEMORY_DIR / "profiles.json"
     if config_file.exists():
         try:
@@ -330,22 +335,10 @@ def sync_profiles() -> list[dict]:
 
 
 def set_active_profile_everywhere(name: str) -> None:
-    """Persist the active profile to BOTH profiles.json and config.json."""
-    # profiles.json
-    config = _load_profiles_json()
-    config['active_profile'] = name
-    _save_profiles_json(config)
+    """Persist active profile through the crash-safe compatibility writer."""
+    from superlocalmemory.server.profile_runtime import persist_active_profile
 
-    # config.json (read by Engine/MCP on startup)
-    config_path = MEMORY_DIR / "config.json"
-    cfg = {}
-    if config_path.exists():
-        try:
-            cfg = json.loads(config_path.read_text())
-        except (json.JSONDecodeError, IOError):
-            pass
-    cfg['active_profile'] = name
-    config_path.write_text(json.dumps(cfg, indent=2))
+    persist_active_profile(name)
 
 
 def delete_profile_from_db(name: str) -> None:

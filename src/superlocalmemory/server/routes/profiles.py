@@ -10,6 +10,7 @@ Routes: /api/profiles, /api/profiles/{name}/switch,
 SQLite is the single source of truth for profiles. profiles.json
 is kept in sync as a cache for backward compatibility.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -21,8 +22,12 @@ from .helpers import (
     get_db_connection, validate_profile_name,
     ProfileSwitch, DB_PATH,
     sync_profiles, ensure_profile_in_db, ensure_profile_in_json,
-    set_active_profile_everywhere, delete_profile_from_db,
+    delete_profile_from_db,
     _load_profiles_json, _save_profiles_json,
+)
+from superlocalmemory.server.profile_runtime import (
+    commit_daemon_profile_switch,
+    get_profile_runtime,
 )
 
 logger = logging.getLogger("superlocalmemory.routes.profiles")
@@ -54,12 +59,11 @@ def _get_memory_count(profile: str) -> int:
 
 
 @router.get("/api/profiles")
-async def list_profiles():
+async def list_profiles(request: Request):
     """List available memory profiles (synced from SQLite + profiles.json)."""
     try:
         merged = sync_profiles()
-        json_config = _load_profiles_json()
-        active = json_config.get('active_profile', 'default')
+        active = get_profile_runtime(request.app.state).snapshot.profile_id
 
         profiles = []
         for p in merged:
@@ -108,14 +112,17 @@ async def switch_profile(name: str, request: Request):
             source_agent_id="http-profile-switch",
             profile_id=name,
         )
-        previous = _load_profiles_json().get('active_profile', 'default')
-        set_active_profile_everywhere(name)
-
-        # Update last_used in profiles.json
-        json_config = _load_profiles_json()
-        if name in json_config.get('profiles', {}):
-            json_config['profiles'][name]['last_used'] = datetime.now(timezone.utc).isoformat()
-            _save_profiles_json(json_config)
+        runtime = get_profile_runtime(request.app.state)
+        previous = runtime.snapshot.profile_id
+        snapshot = await asyncio.to_thread(
+            runtime.transition,
+            name,
+            lambda prior, target: commit_daemon_profile_switch(
+                request.app.state,
+                prior,
+                target,
+            ),
+        )
 
         count = _get_memory_count(name)
 
@@ -130,6 +137,7 @@ async def switch_profile(name: str, request: Request):
         return {
             "success": True, "active_profile": name,
             "previous_profile": previous, "memory_count": count,
+            "generation": snapshot.generation,
             "message": f"Switched to profile '{name}' ({count} memories).",
         }
 
@@ -184,9 +192,11 @@ async def delete_profile(name: str, request: Request):
         if name not in merged_ids:
             raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
 
-        json_config = _load_profiles_json()
-        if json_config.get('active_profile') == name:
+        runtime = get_profile_runtime(request.app.state)
+        if runtime.snapshot.profile_id == name:
             raise HTTPException(status_code=400, detail="Cannot delete active profile.")
+
+        json_config = _load_profiles_json()
 
         authorization = authorize_route_mutation(
             request,

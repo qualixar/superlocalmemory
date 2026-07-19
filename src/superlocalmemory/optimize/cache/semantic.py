@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Backward-compatible exported default; runtime validation uses _embed_dim.
 _EMBED_DIM: int = 768
 _DEFAULT_MAX_TURNS: int = 6
 _DEFAULT_CONTEXT_WINDOW: int = 3
@@ -79,10 +80,13 @@ class VCacheSemantic(SemanticTier):
         config: "OptimizeConfig",
         *,
         embedder: Callable[[str], list[float] | np.ndarray | None] | None = None,
+        embedding_dimension: int | None = None,
     ) -> None:
         self._db = db
         self._config = config
         self._embedder = embedder
+        self._embed_dim = embedding_dimension
+        self._dimension_lock = threading.Lock()
         # TODO(v3.7): when entry_count > 10_000, promote to sqlite-vec. Config flag: semantic_use_vec.
 
         self._boundary_store = BoundaryStore(
@@ -94,7 +98,9 @@ class VCacheSemantic(SemanticTier):
             step=float(getattr(config, "semantic_boundary_step", 0.01)),
             epsilon=float(getattr(config, "semantic_error_target", _DEFAULT_ERROR_TARGET)),
         )
-        self._centroid_store = CentroidStore()
+        self._centroid_store = CentroidStore(
+            embedding_dimension=embedding_dimension,
+        )
         self._context_key_builder = ContextKeyBuilder(
             window_turns=int(getattr(config, "semantic_context_window_turns", _DEFAULT_CONTEXT_WINDOW))
         )
@@ -145,10 +151,10 @@ class VCacheSemantic(SemanticTier):
                 if embed is None:
                     return None
             vec = np.asarray(embed, dtype=np.float32)
-            if vec.shape[0] != _EMBED_DIM:
+            if not self._accept_dimension(vec):
                 logger.debug(
-                    "VCacheSemantic.lookup: skip — embed dim=%d (expected %d)",
-                    vec.shape[0], _EMBED_DIM,
+                    "VCacheSemantic.lookup: skip — embed dim=%s (expected %s)",
+                    vec.shape, self._embed_dim,
                 )
                 return None
             return self._lookup_inner(req, tenant_id, vec)
@@ -266,6 +272,16 @@ class VCacheSemantic(SemanticTier):
         close = getattr(self._embedder, "close", None)
         if callable(close):
             close()
+
+    def _accept_dimension(self, vector: np.ndarray) -> bool:
+        """Lock one configured/inferred vector width for this cache instance."""
+        if vector.ndim != 1 or vector.size == 0:
+            return False
+        with self._dimension_lock:
+            if self._embed_dim is None:
+                self._embed_dim = int(vector.shape[0])
+                self._centroid_store._embedding_dimension = self._embed_dim
+            return int(vector.shape[0]) == self._embed_dim
 
     # ------------------------------------------------------------------
     # Internal lookup
@@ -387,7 +403,7 @@ class VCacheSemantic(SemanticTier):
             for entry_id, blob, ctx_fp in rows:  # C-10: unpack persisted context_fp
                 try:
                     v = np.frombuffer(blob, dtype=np.float32).copy()
-                    if v.shape[0] == _EMBED_DIM:
+                    if self._accept_dimension(v):
                         entries.append((entry_id, ctx_fp, v))
                 except Exception:
                     continue
@@ -436,10 +452,11 @@ class VCacheSemantic(SemanticTier):
     ) -> None:
         """Persist vector + boundary record; update in-memory index + centroid."""
         vec = np.asarray(embed, dtype=np.float32)
-        if vec.shape[0] != _EMBED_DIM:
+        if not self._accept_dimension(vec):
             logger.warning(
-                "VCacheSemantic._set_inner: unexpected embedding dim %d (expected %d) "
-                "for entry=%s — skipping", vec.shape[0], _EMBED_DIM, entry_id,
+                "VCacheSemantic._set_inner: unexpected embedding shape %s "
+                "(expected %s) for entry=%s — skipping",
+                vec.shape, self._embed_dim, entry_id,
             )
             return
 
@@ -450,8 +467,8 @@ class VCacheSemantic(SemanticTier):
             tenant_id=tenant_id,
             vector=vec_bytes,
             meta={
-                "model": "nomic-ai/nomic-embed-text-v1.5",
-                "dim": _EMBED_DIM,
+                "model": "configured-embedding-provider",
+                "dim": self._embed_dim,
                 "context_fp": context_fp,
             },
         )

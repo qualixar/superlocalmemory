@@ -96,6 +96,12 @@ class _LazySemanticEmbedder:
                     self._service = EmbeddingService(SLMConfig.load().embedding)
         return self._service.embed(text)
 
+    @property
+    def dimension(self) -> int:
+        from superlocalmemory.core.config import SLMConfig
+
+        return int(SLMConfig.load().embedding.dimension)
+
     def close(self) -> None:
         service = self._service
         self._service = None
@@ -492,6 +498,7 @@ class CacheManager:
             db=self._db,
             config=optimize_config,
             embedder=desired_embedder,
+            embedding_dimension=getattr(desired_embedder, "dimension", None),
         ))
 
     # ---- core request path ----

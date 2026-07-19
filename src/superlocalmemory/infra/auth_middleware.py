@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
-"""Opt-in API-key authentication middleware.
+"""API-key primitives used by the unified identity boundary.
 
-When ``~/.superlocalmemory/api_key`` exists, write endpoints require the
-``X-SLM-API-Key`` header.  Read endpoints remain open for backward
-compatibility.  If the key file is absent auth is completely disabled --
-all requests pass.
+A configured key authorizes remote callers that present ``X-SLM-API-Key``.
+The unified daemon separately trusts exact-process capabilities, the
+same-origin dashboard install token, and uncredentialed loopback peers as the
+local OS-user boundary. Read endpoints remain open for backward compatibility.
 
 V3 change: base directory moved from ``~/.claude-memory/`` to
 ``~/.superlocalmemory/``.

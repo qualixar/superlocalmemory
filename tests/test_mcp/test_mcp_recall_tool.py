@@ -194,7 +194,9 @@ class TestRecallTool:
              patch("superlocalmemory.mcp.tools_core._record_recall_hits") as mock_record:
             asyncio.run(recall("feedback query"))
 
-        mock_record.assert_called_once_with(get_engine, "feedback query", results_data)
+        mock_record.assert_called_once_with(
+            get_engine, "feedback query", results_data, profile_id="",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -310,7 +310,7 @@ def test_apply_all_recovers_from_failed_status(
     assert "M001_add_signal_features_columns" in stats["applied"]
 
 
-def test_apply_all_ddl_drift_reconciles_when_schema_present(
+def test_apply_all_allowlisted_ddl_drift_reconciles_when_schema_present(
     fresh_dbs: tuple[Path, Path],
 ) -> None:
     """v3.7.6 (#70): drift on a complete migration whose schema is actually in
@@ -318,25 +318,25 @@ def test_apply_all_ddl_drift_reconciles_when_schema_present(
     and the run stays healthy — instead of failing readiness forever."""
     learning_db, memory_db = fresh_dbs
     mr.apply_all(learning_db, memory_db)
-    # A benign historical hash: the schema M001 guarantees is present, only the
-    # logged fingerprint differs (the exact shape that bricked #70 upgrades).
+    # A known historical M002 hash may reconcile only after full verification.
     with sqlite3.connect(learning_db) as conn:
         conn.execute(
-            "UPDATE migration_log SET ddl_sha256 = 'deadbeef' "
-            "WHERE name = 'M001_add_signal_features_columns'"
+            "UPDATE migration_log SET ddl_sha256 = ? "
+            "WHERE name = 'M002_model_state_history'",
+            ("347eeb2ec8aac89f7cbf373da49ac9446be9ed150e6105c382c656cd22426d4b",),
         )
         conn.commit()
     stats = mr.apply_all(learning_db, memory_db)
     # Not a failure — reconciled, not bricked.
-    assert "M001_add_signal_features_columns" not in stats["failed"]
-    detail = stats.get("details", {}).get("M001_add_signal_features_columns", "")
+    assert "M002_model_state_history" not in stats["failed"]
+    detail = stats.get("details", {}).get("M002_model_state_history", "")
     assert "reconcile" in detail.lower()
     # Log re-hashed to the current DDL so the next start is clean.
-    current_hash = hashlib.sha256(mr._M001.DDL.encode("utf-8")).hexdigest()
+    current_hash = hashlib.sha256(mr._M002.DDL.encode("utf-8")).hexdigest()
     with sqlite3.connect(learning_db) as conn:
         logged = conn.execute(
             "SELECT ddl_sha256 FROM migration_log "
-            "WHERE name = 'M001_add_signal_features_columns'"
+            "WHERE name = 'M002_model_state_history'"
         ).fetchone()[0]
     assert logged == current_hash
 
@@ -354,11 +354,50 @@ def test_m002_36x_hash_reconciles_on_upgrade_not_bricked(
         conn.execute(
             "UPDATE migration_log SET ddl_sha256 = ?, status = 'complete' "
             "WHERE name = 'M002_model_state_history'",
-            ("d28666fa" + "0" * 56,),
+            ("d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7",),
         )
         conn.commit()
     upgraded = mr.apply_all(learning_db, memory_db)
     assert "M002_model_state_history" not in upgraded["failed"]
+
+
+def test_unknown_migration_hash_never_reconciles(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A fabricated hash remains a hard integrity failure."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = 'deadbeef' "
+            "WHERE name = 'M002_model_state_history'"
+        )
+    result = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" in result["failed"]
+
+
+def test_allowlisted_hash_does_not_hide_missing_required_index(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """Known DDL history cannot re-hash a semantically damaged schema."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    historical = "d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7"
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute("DROP INDEX idx_model_active")
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ? "
+            "WHERE name = 'M002_model_state_history'",
+            (historical,),
+        )
+    result = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" in result["failed"]
+    with sqlite3.connect(learning_db) as conn:
+        logged = conn.execute(
+            "SELECT ddl_sha256 FROM migration_log "
+            "WHERE name = 'M002_model_state_history'"
+        ).fetchone()[0]
+    assert logged == historical
 
 
 def test_apply_all_drift_with_absent_schema_still_fails(

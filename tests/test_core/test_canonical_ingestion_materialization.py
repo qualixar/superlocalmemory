@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from superlocalmemory.core.ingestion_command import (
 from superlocalmemory.server.unified_daemon import (
     _materialize_ingestion_one_pass,
     _materialize_legacy_pending_item,
+    _run_materializer_operation,
 )
 from superlocalmemory.storage.migrations import M018_ingestion_operations
 from superlocalmemory.storage.models import AtomicFact, FactType
@@ -270,6 +272,45 @@ def test_background_one_pass_completes_queryable_operation(
 
     assert (completed, failed) == (1, 0)
     assert command.repository.get(receipt.operation_id).state is IngestionState.COMPLETE
+
+
+def test_materializer_operation_drains_before_profile_switch() -> None:
+    """Background enrichment must not use engine components during a rebind."""
+    from superlocalmemory.server.profile_runtime import ProfileRuntime
+
+    runtime = ProfileRuntime("alpha")
+    operation_entered = threading.Event()
+    release_operation = threading.Event()
+    switch_committed = threading.Event()
+    seen: dict[str, str] = {}
+    engine = SimpleNamespace(profile_id="alpha")
+
+    def _materialize(current_engine):
+        seen["profile"] = current_engine.profile_id
+        operation_entered.set()
+        assert release_operation.wait(2)
+        return "complete"
+
+    materializer = threading.Thread(
+        target=_run_materializer_operation,
+        args=(runtime, lambda: engine, _materialize),
+    )
+    switch = threading.Thread(
+        target=runtime.transition,
+        args=("beta", lambda previous, target: switch_committed.set()),
+    )
+    materializer.start()
+    assert operation_entered.wait(2)
+    switch.start()
+    assert not switch_committed.wait(0.05)
+
+    release_operation.set()
+    materializer.join(2)
+    switch.join(2)
+
+    assert seen == {"profile": "alpha"}
+    assert switch_committed.is_set()
+    assert runtime.snapshot.profile_id == "beta"
 
 
 def test_bm25_only_runtime_does_not_require_unconfigured_vector_projectors(

@@ -19,6 +19,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v3", tags=["v3"])
 
 
+async def _apply_runtime_config(request: Request, config, *, mode_change: bool) -> None:
+    """Persist and hot-swap config only after the daemon transition succeeds."""
+    import asyncio
+
+    authorization = authorize_route_mutation(
+        request,
+        operation="update",
+        source_agent_id="dashboard-config",
+        profile_id=getattr(config, "active_profile", "default"),
+    )
+    from superlocalmemory.server.profile_runtime import reconfigure_daemon_engine
+
+    await asyncio.to_thread(
+        reconfigure_daemon_engine,
+        request.app.state,
+        config,
+        mode_change=mode_change,
+    )
+    authorization.complete()
+
+
 # ── Dashboard ────────────────────────────────────────────────
 
 @router.get("/dashboard")
@@ -26,7 +47,10 @@ async def dashboard(request: Request):
     """Dashboard summary: mode, memory count, health score, recent activity."""
     try:
         from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+
+        active_profile = get_profile_runtime(request.app.state).snapshot.profile_id
 
         # Read stats directly from SQLite (dashboard doesn't load engine)
         import sqlite3
@@ -38,12 +62,24 @@ async def dashboard(request: Request):
                 conn = sqlite3.connect(str(db_path))
                 cursor = conn.cursor()
                 try:
-                    cursor.execute("SELECT COUNT(*) FROM atomic_facts")
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM atomic_facts WHERE profile_id = ?",
+                        (active_profile,),
+                    )
                     fact_count = cursor.fetchone()[0]
                 except Exception:
                     pass
                 try:
-                    cursor.execute("SELECT COUNT(*) FROM memories")
+                    try:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM memories WHERE profile_id = ?",
+                            (active_profile,),
+                        )
+                    except Exception:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM memories WHERE profile = ?",
+                            (active_profile,),
+                        )
                     memory_count = cursor.fetchone()[0]
                 except Exception:
                     pass
@@ -58,7 +94,7 @@ async def dashboard(request: Request):
             "model": config.llm.model or "",
             "memory_count": memory_count,
             "fact_count": fact_count,
-            "profile": config.active_profile,
+            "profile": active_profile,
             "base_dir": str(config.base_dir),
             "version": SLM_VERSION,
         }
@@ -69,11 +105,11 @@ async def dashboard(request: Request):
 # ── Mode ─────────────────────────────────────────────────────
 
 @router.get("/mode")
-async def get_mode():
+async def get_mode(request: Request):
     """Get current mode, provider, model — single source of truth for UI."""
     try:
         from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
         current = config.mode.value
         return {
             "mode": current,
@@ -132,8 +168,9 @@ async def set_mode(request: Request):
         old_config.retrieval = _template.retrieval
         old_config.math = _template.math
         old_config.channel_weights = _template.channel_weights
-        old_config.save(mode_change=True)
         new_config = old_config
+
+        await _apply_runtime_config(request, new_config, mode_change=True)
 
         # Audit the change before we lose context — proves who/when/what.
         # Captures the phantom-write case where `for_mode(C)` auto-defaults
@@ -150,10 +187,6 @@ async def set_mode(request: Request):
             old_config.embedding.provider != new_config.embedding.provider
             or old_config.embedding.model_name != new_config.embedding.model_name
         )
-
-        # Invalidate engine; next engine-backed request lazy-inits with new config.
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
 
         return {
             "success": True,
@@ -227,7 +260,7 @@ async def set_full_config(request: Request):
 
         # v3.6.12 (settings-1): mode_change=True is required to persist the new
         # mode — save() without it hits a guard that preserves the old mode.
-        config.save(mode_change=True)
+        await _apply_runtime_config(request, config, mode_change=True)
 
         log_mode_change(
             old_mode, new_mode,
@@ -236,15 +269,13 @@ async def set_full_config(request: Request):
             source="POST /api/v3/mode/set",
         )
 
-        # Kill existing worker so next request uses new config
+        # Recycle only out-of-process fallbacks; the resident daemon engine was
+        # already acknowledged and hot-swapped by _apply_runtime_config().
         try:
             from superlocalmemory.core.worker_pool import WorkerPool
             WorkerPool.shared().shutdown()
         except Exception:
             pass
-
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
 
         return {
             "success": True,
@@ -309,7 +340,7 @@ async def set_embedding_config(request: Request):
             api_version=old_emb.api_version,
             deployment_name=old_emb.deployment_name,
         )
-        config.save()
+        await _apply_runtime_config(request, config, mode_change=False)
 
         needs_reindex = (
             old_emb.provider != new_provider
@@ -323,9 +354,6 @@ async def set_embedding_config(request: Request):
             WorkerPool.shared().shutdown()
         except Exception:
             pass
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
-
         return {
             "success": True,
             "provider": new_provider,
@@ -335,6 +363,55 @@ async def set_embedding_config(request: Request):
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/scope/config")
+async def get_scope_config(request: Request):
+    """Return runtime multi-scope defaults used by daemon writes and recalls."""
+    try:
+        from superlocalmemory.core.config import SLMConfig
+
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
+        return {"success": True, **config.scope.as_dict()}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.put("/scope/config")
+async def set_scope_config(request: Request):
+    """Validate, persist, and hot-apply explicit multi-scope defaults."""
+    try:
+        body = await request.json()
+        from superlocalmemory.core.config import SLMConfig, ScopeConfig
+
+        config = SLMConfig.load()
+        current = config.scope
+        default_scope = body.get("default_scope", current.default_scope)
+        if default_scope not in {"personal", "shared", "global"}:
+            return JSONResponse(
+                {"error": "default_scope must be personal, shared, or global"},
+                status_code=400,
+            )
+        include_global = body.get(
+            "recall_include_global", current.recall_include_global,
+        )
+        include_shared = body.get(
+            "recall_include_shared", current.recall_include_shared,
+        )
+        if not isinstance(include_global, bool) or not isinstance(include_shared, bool):
+            return JSONResponse(
+                {"error": "recall scope flags must be booleans"},
+                status_code=400,
+            )
+        config.scope = ScopeConfig(
+            default_scope=default_scope,
+            recall_include_global=include_global,
+            recall_include_shared=include_shared,
+        )
+        await _apply_runtime_config(request, config, mode_change=False)
+        return {"success": True, **config.scope.as_dict()}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @router.post("/embedding/test")

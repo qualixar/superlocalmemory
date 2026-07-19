@@ -33,3 +33,28 @@ def test_local_sentence_transformers_is_not_remote():
 
 def test_missing_embedding_section_is_not_remote():
     assert _embedding_is_remote(SimpleNamespace()) is False
+
+
+def test_reconfigure_preserves_existing_custom_embedding(tmp_path, monkeypatch):
+    """Re-running setup cannot replace a 1024d endpoint with local 768d."""
+    monkeypatch.setenv("SLM_BASE_DIR", str(tmp_path))
+    from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
+    from superlocalmemory.storage.models import Mode
+    from superlocalmemory.cli.setup_wizard import _build_wizard_config
+
+    existing = SLMConfig.for_mode(Mode.C)
+    existing.embedding = EmbeddingConfig(
+        provider="openai",
+        api_endpoint="http://127.0.0.1:8045/v1/embeddings",
+        model_name="qwen3-embedding",
+        dimension=1024,
+    )
+    existing.save(mode_change=True)
+
+    rebuilt = _build_wizard_config(Mode.A)
+
+    assert rebuilt.mode is Mode.A
+    assert rebuilt.embedding.provider == "openai"
+    assert rebuilt.embedding.api_endpoint == "http://127.0.0.1:8045/v1/embeddings"
+    assert rebuilt.embedding.model_name == "qwen3-embedding"
+    assert rebuilt.embedding.dimension == 1024

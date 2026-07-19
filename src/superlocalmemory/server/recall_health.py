@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ def _heal_embedder(engine, *, log) -> bool:
 
 
 def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
-                    log=logger) -> RecallHealth:
+                    log=logger, runtime=None) -> RecallHealth:
     """One monitor tick: re-warm (Tier 1), probe (Tier 2), self-heal (Tier 3).
 
     Mutates and returns ``state``. Never raises — a timed-out / failing recall
@@ -129,7 +130,9 @@ def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
     # Tier 1: re-warm. A real full-fusion recall keeps the graph page cache hot
     # and the embedder resident.
     try:
-        resp = engine.recall(probe, limit=3, fast=False)
+        lease = runtime.operation() if runtime is not None else nullcontext()
+        with lease:
+            resp = engine.recall(probe, limit=3, fast=False)
     except Exception as exc:
         state.healthy = False
         state.consecutive_failures += 1
@@ -183,7 +186,7 @@ def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
 
 def health_monitor_loop(engine, *, interval_s: int, stop_event: threading.Event,
                         state: RecallHealth, probe: str = DEFAULT_PROBE,
-                        log=logger) -> None:
+                        log=logger, runtime=None) -> None:
     """Background loop. Sleeps ``interval_s`` between ticks; exits promptly when
     ``stop_event`` is set. An initial short delay avoids racing boot warmup."""
     # Initial delay (bounded) so we don't pile onto the boot warmup threads.
@@ -191,7 +194,9 @@ def health_monitor_loop(engine, *, interval_s: int, stop_event: threading.Event,
         return
     while not stop_event.is_set():
         try:
-            run_health_tick(engine, state, probe=probe, log=log)
+            run_health_tick(
+                engine, state, probe=probe, log=log, runtime=runtime,
+            )
         except Exception as exc:  # pragma: no cover - belt & suspenders
             log.warning("recall-health: tick crashed (non-fatal): %s", exc)
         if stop_event.wait(interval_s):
@@ -204,7 +209,8 @@ _GLOBAL_STATE = RecallHealth()
 
 
 def start_recall_health_monitor(engine, *, interval_s: int = DEFAULT_INTERVAL_S,
-                                probe: str = DEFAULT_PROBE, log=None):
+                                probe: str = DEFAULT_PROBE, log=None,
+                                runtime=None):
     """Start the monitor as a daemon thread. Returns ``(thread, stop_event,
     state)``. The state is the shared module-level state read by
     :func:`get_recall_health`."""
@@ -215,7 +221,7 @@ def start_recall_health_monitor(engine, *, interval_s: int = DEFAULT_INTERVAL_S,
         target=health_monitor_loop,
         kwargs=dict(
             engine=engine, interval_s=interval_s, stop_event=stop,
-            state=state, probe=probe, log=log,
+            state=state, probe=probe, log=log, runtime=runtime,
         ),
         daemon=True,
         name="recall-health",

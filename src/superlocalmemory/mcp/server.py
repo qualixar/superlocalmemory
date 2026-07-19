@@ -89,6 +89,7 @@ _ESSENTIAL_TOOLS: set[str] = {
     # Core memory operations (8)
     "remember", "recall", "search", "fetch",
     "list_recent", "delete_memory", "update_memory", "get_status",
+    "switch_profile",
     # Session lifecycle (3)
     "session_init", "observe", "close_session",
     # Feedback / learning signals — reachable Dash-Core path for

@@ -44,6 +44,7 @@ CANONICAL_STATUS_FIELDS = frozenset({
     "fact_count",
     "entity_count",
     "edge_count",
+    "profile_generation",
 })
 
 # Fields that were present in v3.6.12 CLI json output — must never be removed.

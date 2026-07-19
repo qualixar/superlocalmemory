@@ -110,7 +110,7 @@ def _register_every_tool(target) -> None:
 @pytest.mark.parametrize(
     ("exposure", "profile", "expected_count"),
     (
-        ("essential", "", 38),
+        ("essential", "", 39),
         ("named-core", "core", 14),
         ("whole", "whole", 81),
     ),

@@ -5,6 +5,20 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.7] - 2026-07-20 — Profile isolation and runtime integrity
+
+### Fixed
+
+- Fixes daemon-aware profile switching and profile-isolated CLI reads/writes. Profile transitions now drain admitted operations, atomically rebind the resident engine, persist only after a successful transition, and return a generation-stamped acknowledgement to CLI, dashboard/API, and MCP callers without restarting the daemon.
+- Dashboard mode, provider, embedding, and memory-visibility changes now take effect through the same daemon-owned runtime transition boundary. Existing custom embedding settings survive setup-mode changes, and Optimize cache vectors follow the configured embedding dimension instead of assuming 768 dimensions.
+- Migration reconciliation now accepts only explicitly allowlisted historical hashes and verifies the complete required schema before updating migration metadata; unknown or structurally incomplete drift fails closed.
+- Restored cross-platform UI test discovery and added dependency and high-severity static security gates to CI.
+- Upgraded the audited web, MCP, cryptography, and Transformers dependency stack to patched releases. Three narrowly scoped NLTK, setuptools, and PyTorch advisories are tracked as exact, dated exceptions; PyTorch remains on the proven 2.11 runtime because the combined native/ML upgrade produced a full-suite process crash and could not be attributed safely to one package.
+
+### Added
+
+- Dashboard controls and API/CLI configuration support for the default write scope and explicit shared/global recall opt-ins. Personal-only recall remains the default.
+
 ## [3.7.6] - 2026-07-19 — Auth, upgrade, and embedding-dimension fixes
 
 ### Fixed

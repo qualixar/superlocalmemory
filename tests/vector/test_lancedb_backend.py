@@ -55,6 +55,23 @@ def _make_vec(seed: float = 0.5) -> list[float]:
     return np.full(768, seed, dtype=np.float32).tolist()
 
 
+def _load_sqlite_vec_or_skip(conn: sqlite3.Connection) -> None:
+    """Load sqlite-vec where CPython exposes extension loading."""
+    enable = getattr(conn, "enable_load_extension", None)
+    if not callable(enable):
+        pytest.skip("this CPython build does not support SQLite extensions")
+    try:
+        enable(True)
+        sqlite_vec.load(conn)
+    except (AttributeError, sqlite3.Error) as exc:
+        pytest.skip(f"sqlite-vec extension loading unavailable: {exc}")
+    finally:
+        try:
+            enable(False)
+        except (AttributeError, sqlite3.Error):
+            pass
+
+
 class TestLifecycle:
     def test_open_and_close(self):
         from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
@@ -139,9 +156,7 @@ class TestWrite:
 
     def test_bulk_import_reads_supported_sqlite_vec_virtual_table(self, backend):
         conn = sqlite3.connect(":memory:")
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+        _load_sqlite_vec_or_skip(conn)
         conn.executescript(
             """
             CREATE TABLE atomic_facts (
@@ -194,9 +209,7 @@ class TestWrite:
 
     def test_bulk_import_fails_closed_when_metadata_vector_is_missing(self, backend):
         conn = sqlite3.connect(":memory:")
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+        _load_sqlite_vec_or_skip(conn)
         conn.executescript(
             """
             CREATE TABLE atomic_facts (

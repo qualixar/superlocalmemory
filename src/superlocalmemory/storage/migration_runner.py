@@ -120,6 +120,17 @@ _MODULES = {
 
 logger = logging.getLogger(__name__)
 
+# Exact historical DDL fingerprints whose resulting schema is intentionally
+# accepted by the current migration. Unknown hashes are never reconciled.
+_KNOWN_EQUIVALENT_DDL_HASHES: dict[str, frozenset[str]] = {
+    _M002.NAME: frozenset({
+        # v3.4.21 hardened copy-forward variant.
+        "347eeb2ec8aac89f7cbf373da49ac9446be9ed150e6105c382c656cd22426d4b",
+        # v3.4.22 model_version-default variant shipped through 3.6.x.
+        "d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7",
+    }),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Migration:
@@ -307,11 +318,14 @@ def _apply_single(
                 # in place, reconcile the log to the current hash and treat as
                 # already-applied instead of failing the daemon into permanent
                 # not_ready. Absent/failing verify keeps the hard failure.
+                allowed_hashes = _KNOWN_EQUIVALENT_DDL_HASHES.get(
+                    migration.name, frozenset(),
+                )
                 mod = _MODULES.get(migration.name)
                 verify_fn = (
                     getattr(mod, "verify", None) if mod is not None else None
                 )
-                if verify_fn is not None:
+                if logged_hash in allowed_hashes and verify_fn is not None:
                     try:
                         if verify_fn(conn):
                             if not dry_run:
@@ -323,8 +337,8 @@ def _apply_single(
                                     pass
                             return (
                                 "skipped",
-                                "drift reconciled via verify — schema present, "
-                                "log re-hashed to current DDL",
+                                "allowlisted historical DDL reconciled after "
+                                "full schema verification",
                             )
                     except sqlite3.Error:  # pragma: no cover
                         pass

@@ -612,6 +612,8 @@ def cmd_config(args: Namespace) -> None:
             "evolution.enabled", "evolution.backend", "evolution.max_evolutions_per_cycle",
             "mesh_enabled", "daemon_idle_timeout", "entity_compilation_enabled",
             "graph_backend", "vector_backend", "scale_engine_state",
+            "scope.default_scope", "scope.recall_include_global",
+            "scope.recall_include_shared",
         }
         if key not in _ALLOWED_CONFIG_KEYS:
             if use_json:
@@ -649,6 +651,60 @@ def cmd_config(args: Namespace) -> None:
                     parsed_value = float(value)
                 except ValueError:
                     parsed_value = value
+
+        if key == "scope.default_scope" and parsed_value not in {
+            "personal", "shared", "global",
+        }:
+            message = "scope.default_scope must be personal, shared, or global"
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("config", error={
+                    "code": "INVALID_VALUE", "message": message,
+                })
+            else:
+                print(f"Error: {message}")
+            sys.exit(1)
+        if key in {
+            "scope.recall_include_global", "scope.recall_include_shared",
+        } and not isinstance(parsed_value, bool):
+            message = f"{key} must be true or false"
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("config", error={
+                    "code": "INVALID_VALUE", "message": message,
+                })
+            else:
+                print(f"Error: {message}")
+            sys.exit(1)
+
+        if key.startswith("scope."):
+            from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
+
+            if is_daemon_running():
+                field = key.split(".", 1)[1]
+                result = daemon_request(
+                    "PUT", "/api/v3/scope/config", {field: parsed_value},
+                )
+                if not isinstance(result, dict) or result.get("success") is not True:
+                    message = "resident daemon rejected the scope configuration"
+                    if use_json:
+                        from superlocalmemory.cli.json_output import json_print
+                        json_print("config", error={
+                            "code": "CONFIG_APPLY_FAILED", "message": message,
+                        })
+                    else:
+                        print(f"Error: {message}")
+                    sys.exit(1)
+                old_value = None
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("config", data={
+                        "key": key, "old_value": old_value,
+                        "new_value": result.get(field), "runtime": "daemon",
+                    })
+                else:
+                    print(f"{key}: applied to resident daemon -> {result.get(field)}")
+                return
 
         # Set via dot-notation (e.g. "evolution.enabled" -> cfg["evolution"]["enabled"])
         parts = key.split(".")
@@ -1579,9 +1635,46 @@ def cmd_status(args: Namespace) -> None:
     from superlocalmemory.core.config import SLMConfig
 
     config = SLMConfig.load()
+    daemon_status = None
+    try:
+        from superlocalmemory.cli.daemon import (
+            daemon_request,
+            is_daemon_running,
+        )
+
+        if is_daemon_running():
+            candidate = daemon_request("GET", "/status")
+            if isinstance(candidate, dict) and candidate.get("profile"):
+                daemon_status = candidate
+    except Exception:
+        logger.debug(
+            "cmd_status: daemon runtime status unavailable; using offline view",
+            exc_info=True,
+        )
 
     if getattr(args, 'json', False):
         from superlocalmemory.cli.json_output import json_print
+
+        if daemon_status is not None:
+            data = {
+                "mode": str(daemon_status.get("mode", "unknown")).upper(),
+                "provider": daemon_status.get("provider", "none"),
+                "profile": daemon_status["profile"],
+                "base_dir": daemon_status.get("base_dir", str(config.base_dir)),
+                "db_path": daemon_status.get("db_path", str(config.db_path)),
+                "db_size_mb": float(daemon_status.get("db_size_mb", 0.0)),
+                "fact_count": int(daemon_status.get("fact_count", 0)),
+                "entity_count": int(daemon_status.get("entity_count", 0)),
+                "edge_count": int(daemon_status.get("edge_count", 0)),
+                "profile_generation": int(
+                    daemon_status.get("profile_generation", 0)
+                ),
+            }
+            json_print("status", data=data, next_actions=[
+                {"command": "slm health --json", "description": "Check math layer health"},
+                {"command": "slm list --json", "description": "List recent memories"},
+            ])
+            return
 
         # WP-02 D8: canonical key set — db_size_mb always present (0.0 if absent).
         db_size_mb = 0.0
@@ -1635,6 +1728,7 @@ def cmd_status(args: Namespace) -> None:
             "fact_count": fact_count,
             "entity_count": entity_count,
             "edge_count": edge_count,
+            "profile_generation": 0,
         }
         json_print("status", data=data, next_actions=[
             {"command": "slm health --json", "description": "Check math layer health"},
@@ -1645,6 +1739,10 @@ def cmd_status(args: Namespace) -> None:
     print("SuperLocalMemory V3")
     print(f"  Mode: {config.mode.value.upper()}")
     print(f"  Provider: {config.llm.provider or 'none'}")
+    print(
+        f"  Profile: "
+        f"{daemon_status.get('profile') if daemon_status else config.active_profile}"
+    )
     print(f"  Base dir: {config.base_dir}")
     print(f"  Database: {config.db_path}")
     if config.db_path.exists():
@@ -2522,6 +2620,42 @@ def cmd_dashboard(args: Namespace) -> None:
 # -- Profiles (supports --json) -------------------------------------------
 
 
+def _switch_profile_runtime(config, profile_name: str) -> dict:
+    """Switch through the resident daemon, or persist an offline fallback."""
+    from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
+
+    if is_daemon_running():
+        result = daemon_request(
+            "POST",
+            f"/api/profiles/{profile_name}/switch",
+        )
+        if not result or not result.get("success"):
+            raise RuntimeError(
+                "resident daemon did not acknowledge the profile switch"
+            )
+        acknowledged = str(result.get("active_profile", ""))
+        if acknowledged != profile_name:
+            raise RuntimeError(
+                "resident daemon acknowledged a different active profile"
+            )
+        return {
+            "action": "switched",
+            "profile": acknowledged,
+            "generation": int(result.get("generation", 0)),
+            "runtime": "daemon",
+        }
+
+    from superlocalmemory.server.profile_runtime import persist_active_profile
+
+    persist_active_profile(profile_name)
+    config.active_profile = profile_name
+    return {
+        "action": "switched",
+        "profile": profile_name,
+        "runtime": "offline",
+    }
+
+
 def cmd_profile(args: Namespace) -> None:
     """Profile management (list, switch, create).
 
@@ -2532,7 +2666,7 @@ def cmd_profile(args: Namespace) -> None:
     from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage import schema
     from superlocalmemory.server.routes.helpers import (
-        ensure_profile_in_json, set_active_profile_everywhere,
+        ensure_profile_in_json,
     )
 
     config = SLMConfig.load()
@@ -2552,10 +2686,25 @@ def cmd_profile(args: Namespace) -> None:
                            {"command": "slm profile switch <name> --json", "description": "Switch profile"},
                        ])
         elif args.action == "switch":
-            set_active_profile_everywhere(args.name)
-            config.active_profile = args.name
-            config.save()
-            json_print("profile", data={"action": "switched", "profile": args.name})
+            rows = db.execute(
+                "SELECT 1 FROM profiles WHERE profile_id = ?",
+                (args.name,),
+            )
+            if not rows:
+                json_print("profile", error={
+                    "code": "PROFILE_NOT_FOUND",
+                    "message": f"Profile '{args.name}' does not exist.",
+                })
+                sys.exit(1)
+            try:
+                result = _switch_profile_runtime(config, args.name)
+            except Exception as exc:
+                json_print("profile", error={
+                    "code": "PROFILE_SWITCH_FAILED",
+                    "message": str(exc),
+                })
+                sys.exit(1)
+            json_print("profile", data=result)
         elif args.action == "create":
             db.execute(
                 "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",
@@ -2576,10 +2725,21 @@ def cmd_profile(args: Namespace) -> None:
             d = dict(r)
             print(f"  - {d['profile_id']}: {d.get('name', '')}")
     elif args.action == "switch":
-        set_active_profile_everywhere(args.name)
-        config.active_profile = args.name
-        config.save()
-        print(f"Switched to profile: {args.name}")
+        rows = db.execute(
+            "SELECT 1 FROM profiles WHERE profile_id = ?",
+            (args.name,),
+        )
+        if not rows:
+            print(f"Profile '{args.name}' does not exist.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            result = _switch_profile_runtime(config, args.name)
+        except Exception as exc:
+            print(f"Profile switch failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+        generation = result.get("generation")
+        suffix = f" (generation {generation})" if generation is not None else ""
+        print(f"Switched to profile: {args.name}{suffix}")
     elif args.action == "create":
         db.execute(
             "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",

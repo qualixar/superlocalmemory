@@ -29,14 +29,43 @@ _REQUIRED_COLS = frozenset({
 
 
 def verify(conn: sqlite3.Connection) -> bool:
-    """Return True if the rebuilt model_state schema is in place."""
+    """Verify columns plus both indexes promised by this migration."""
     try:
-        cols = {r[1] for r in conn.execute(
+        cols = {r[1]: r for r in conn.execute(
             "PRAGMA table_info(learning_model_state)"
         ).fetchall()}
+        index_rows = conn.execute(
+            "PRAGMA index_list(learning_model_state)"
+        ).fetchall()
     except sqlite3.Error:
         return False
-    return _REQUIRED_COLS <= cols
+    if not _REQUIRED_COLS <= set(cols):
+        return False
+
+    indexes = {row[1]: row for row in index_rows}
+    active = indexes.get("idx_model_active")
+    profile_time = indexes.get("idx_model_profile_time")
+    if active is None or profile_time is None:
+        return False
+    # idx_model_active must remain a UNIQUE partial index.
+    if int(active[2]) != 1 or int(active[4]) != 1:
+        return False
+    active_cols = [row[2] for row in conn.execute(
+        "PRAGMA index_info(idx_model_active)"
+    ).fetchall()]
+    time_cols = [row[2] for row in conn.execute(
+        "PRAGMA index_info(idx_model_profile_time)"
+    ).fetchall()]
+    if active_cols != ["profile_id"]:
+        return False
+    if time_cols != ["profile_id", "trained_at"]:
+        return False
+    sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+        ("idx_model_active",),
+    ).fetchone()
+    normalized = " ".join(str(sql_row[0] if sql_row else "").lower().split())
+    return "where is_active = 1" in normalized
 
 
 # IMPORTANT: this DDL shipped in V3.4.21.  Migration hashes are immutable

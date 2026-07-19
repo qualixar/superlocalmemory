@@ -1058,9 +1058,40 @@
                                 </button>
                                 <span id="settings-emb-test-result" class="ms-2 small"></span>
                             </div>
-                            <div id="settings-emb-info" class="small text-muted mt-1">
+                        <div id="settings-emb-info" class="small text-muted mt-1">
                                 Using local <strong>nomic-embed-text-v1.5</strong> (768d)
                             </div>
+                        </div>
+
+                        <!-- Step 4: Scope defaults (shared/global remain opt-in) -->
+                        <div class="mt-3 pt-3 border-top" id="settings-scope-panel">
+                            <h6 class="text-muted"><i class="bi bi-shield-lock"></i> Step 4: Memory Visibility</h6>
+                            <p class="small text-muted mb-2">
+                                Personal-only is the privacy-safe default. Enable broader visibility deliberately.
+                            </p>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small" for="settings-default-scope">Default write scope</label>
+                                    <select class="form-select form-select-sm" id="settings-default-scope">
+                                        <option value="personal">Personal (recommended)</option>
+                                        <option value="shared">Shared</option>
+                                        <option value="global">Global</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="settings-recall-shared">
+                                        <label class="form-check-label small" for="settings-recall-shared">Include shared memories by default</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="settings-recall-global">
+                                        <label class="form-check-label small" for="settings-recall-global">Include global memories by default</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="settings-scope-status" class="small text-muted mt-2"></div>
                         </div>
 
                         <!-- Save button -->
