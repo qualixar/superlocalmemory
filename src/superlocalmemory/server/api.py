@@ -6,6 +6,23 @@
 SuperLocalMemory V3 - FastAPI API Server
 Provides REST endpoints for memory visualization and exploration.
 Uses V3 MemoryEngine for all operations.
+
+v3.7.8 (WS3 F4): ``create_app()`` in this module is a standalone/legacy app
+factory. The running daemon serves ``superlocalmemory.server.unified_daemon:
+create_app`` (see ``unified_daemon.py``'s uvicorn config); THIS factory is
+reachable only via direct ``python -m superlocalmemory.server.api`` /
+programmatic use and the tests that exercise it directly
+(``tests/test_api/test_api_lifespan_contract.py``,
+``tests/test_security/test_rate_limit_e2e.py``). Its ``auth_middleware``
+below intentionally keeps the older, simpler ``check_api_key``-only gate
+(unconditional per-write check, no daemon-capability / install-token
+identity layer) because it predates and is independent of the unified
+daemon's richer ``write_identity.require_http_mutation_actor`` boundary and
+the ``SLM_REQUIRE_API_KEY_LOOPBACK`` opt-in (see
+``infra/auth_middleware.py``). Do not treat this module's auth posture as
+the production write boundary -- that is ``unified_daemon.py``'s
+``auth_middleware``. ``UI_DIR`` below is still imported by
+``unified_daemon.py`` and must not be removed.
 """
 
 import json

@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.7.7"
+version = "3.7.8"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -97,7 +97,6 @@ search = [
     "einops==0.8.2",
     "torch==2.11.0",
     "scikit-learn==1.8.0",
-    "geoopt>=0.5.0",
     "onnxruntime==1.24.4",
 ]
 ui = [

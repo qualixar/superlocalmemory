@@ -365,15 +365,6 @@ V32_DDL: list[str] = [
     """,
 ]
 
-# vec0 virtual table DDL — executed by VectorStore ONLY (requires extension loaded first).
-# NOT in V32_DDL because executescript cannot load extensions mid-script.
-V32_VEC0_DDL: Final[str] = """
-CREATE VIRTUAL TABLE IF NOT EXISTS fact_embeddings USING vec0(
-    profile_id TEXT PARTITION KEY,
-    embedding float[768] distance_metric=cosine
-);
-"""
-
 # ---------------------------------------------------------------------------
 # Rollback DDL (reverse FK order -- Rule 20)
 # ---------------------------------------------------------------------------

@@ -1999,7 +1999,7 @@ def cmd_doctor(args: Namespace) -> None:
 
     # 3. Search deps
     search_mods = {"sentence_transformers": "sentence-transformers", "torch": "torch",
-                   "sklearn": "scikit-learn", "geoopt": "geoopt"}
+                   "sklearn": "scikit-learn"}
     search_ok = []
     for mod, pkg in search_mods.items():
         try:
@@ -2008,7 +2008,7 @@ def cmd_doctor(args: Namespace) -> None:
         except Exception:  # dependency import may fail after module discovery
             pass
     if len(search_ok) == len(search_mods):
-        _check("Search deps", "PASS", "sentence-transformers, torch, sklearn, geoopt")
+        _check("Search deps", "PASS", "sentence-transformers, torch, sklearn")
     else:
         missing = set(search_mods) - set(search_ok)
         _check("Search deps", "WARN", f"Missing: {', '.join(missing)}",

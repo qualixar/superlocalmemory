@@ -205,3 +205,171 @@ class TestChoosePool:
         )
         pool = mod.choose_pool()
         assert not isinstance(pool, DaemonPoolProxy)
+
+
+# ---------------------------------------------------------------------------
+# SEC-H-01: switch_profile daemon-branch local re-validation.
+#
+# The daemon-branch of the switch_profile MCP tool must not blindly trust
+# the daemon's HTTP acknowledgement. It must (a) confirm the daemon actually
+# acknowledged the REQUESTED profile_id and (b) locally re-validate that the
+# profile exists in this process's own engine._db handle before syncing
+# engine.profile_id / engine._config.active_profile. Only a fully confirmed
+# profile_id may ever be applied to local state.
+# ---------------------------------------------------------------------------
+
+class _RecordingServer:
+    """Minimal @server.tool() capture, matching the tools_core convention."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, object] = {}
+
+    def tool(self, *args, **kwargs):
+        def register(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return register
+
+
+def _switch_profile_tool(engine):
+    from superlocalmemory.mcp.tools_core import register_core_tools
+    from unittest.mock import MagicMock
+
+    server = _RecordingServer()
+    register_core_tools(server, MagicMock(return_value=engine))
+    return server.tools["switch_profile"]
+
+
+def _daemon_engine(starting_profile: str = "owner-profile"):
+    from unittest.mock import MagicMock
+
+    engine = MagicMock()
+    engine.profile_id = starting_profile
+    engine._config.active_profile = starting_profile
+    # run_pre must not raise for these happy/guard-path tests (contrast
+    # with test_core_control_mutation_policy.py which deliberately makes
+    # it raise to test the earlier policy-rejection path).
+    engine._hooks.run_pre.return_value = None
+    return engine
+
+
+class TestSwitchProfileDaemonLocalConsistency:
+    def test_daemon_acknowledged_switch_syncs_to_confirmed_profile(
+        self, monkeypatch
+    ):
+        """(a) A daemon-acknowledged switch, confirmed to exist locally,
+        syncs engine.profile_id to the ACKNOWLEDGED profile."""
+        import asyncio
+
+        engine = _daemon_engine("owner-profile")
+        # Local DB confirms the target profile exists.
+        engine._db.execute.return_value = [(1,)]
+
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.is_daemon_running",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            lambda method, path: {
+                "success": True,
+                "active_profile": "team-profile",
+                "generation": 7,
+            },
+        )
+
+        tool = _switch_profile_tool(engine)
+        result = asyncio.run(tool("team-profile"))
+
+        assert result["success"] is True
+        assert result["current_profile"] == "team-profile"
+        assert engine.profile_id == "team-profile"
+        assert engine._config.active_profile == "team-profile"
+
+    def test_daemon_response_missing_acknowledgement_does_not_sync_state(
+        self, monkeypatch
+    ):
+        """(b) A malformed daemon response (no active_profile field) must
+        NOT silently sync local state to the unvalidated request value."""
+        import asyncio
+
+        engine = _daemon_engine("owner-profile")
+        engine._db.execute.return_value = [(1,)]
+
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.is_daemon_running",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            lambda method, path: {"success": True},  # no active_profile
+        )
+
+        tool = _switch_profile_tool(engine)
+        result = asyncio.run(tool("team-profile"))
+
+        assert result["success"] is False
+        assert engine.profile_id == "owner-profile"
+        assert engine._config.active_profile == "owner-profile"
+
+    def test_daemon_response_mismatched_acknowledgement_does_not_sync_state(
+        self, monkeypatch
+    ):
+        """(b) A daemon response acknowledging a DIFFERENT profile than the
+        one requested must not sync local state to either value."""
+        import asyncio
+
+        engine = _daemon_engine("owner-profile")
+        engine._db.execute.return_value = [(1,)]
+
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.is_daemon_running",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            lambda method, path: {
+                "success": True,
+                "active_profile": "some-other-profile",
+                "generation": 3,
+            },
+        )
+
+        tool = _switch_profile_tool(engine)
+        result = asyncio.run(tool("team-profile"))
+
+        assert result["success"] is False
+        assert engine.profile_id == "owner-profile"
+        assert engine._config.active_profile == "owner-profile"
+
+    def test_daemon_confirmed_profile_missing_locally_does_not_sync_state(
+        self, monkeypatch
+    ):
+        """(b) Even when the daemon correctly acknowledges the requested
+        profile, if this process's OWN local DB has no such profile row,
+        the tool must not blindly overwrite local state — it errors."""
+        import asyncio
+
+        engine = _daemon_engine("owner-profile")
+        # Local DB does NOT have this profile (e.g. stale/divergent handle).
+        engine._db.execute.return_value = []
+
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.is_daemon_running",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.daemon_request",
+            lambda method, path: {
+                "success": True,
+                "active_profile": "team-profile",
+                "generation": 5,
+            },
+        )
+
+        tool = _switch_profile_tool(engine)
+        result = asyncio.run(tool("team-profile"))
+
+        assert result["success"] is False
+        assert engine.profile_id == "owner-profile"
+        assert engine._config.active_profile == "owner-profile"

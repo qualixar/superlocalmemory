@@ -587,6 +587,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             )
 
             generation = 0
+            # Only the profile_id explicitly confirmed by this process
+            # (daemon-acknowledged + locally-validated, or locally
+            # validated directly) is ever synced into engine state.
+            confirmed_profile_id = None
             if await asyncio.to_thread(is_daemon_running):
                 result = await asyncio.to_thread(
                     daemon_request,
@@ -599,12 +603,35 @@ def register_core_tools(server, get_engine: Callable) -> None:
                         "error": "resident daemon rejected the profile switch",
                     }
                 acknowledged = str(result.get("active_profile", ""))
-                if acknowledged != profile_id:
+                if not acknowledged or acknowledged != profile_id:
                     return {
                         "success": False,
                         "error": "resident daemon acknowledged a different profile",
                     }
+                # Local consistency guard (SEC-H-01): the daemon's HTTP
+                # acknowledgement alone is not sufficient — this MCP
+                # process must also confirm the profile exists in its
+                # own local DB handle before syncing local state to it.
+                # Mirrors the existence check the no-daemon branch already
+                # performs below.
+                local_rows = engine._db.execute(
+                    "SELECT 1 FROM profiles WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                if not local_rows:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"resident daemon acknowledged profile "
+                            f"'{acknowledged}' but it does not exist in "
+                            f"this process's local profile store"
+                        ),
+                    }
                 generation = int(result.get("generation", 0))
+                # Sync target is the DAEMON-CONFIRMED value, never the raw
+                # caller-supplied profile_id, even though they are equal
+                # here by construction (checked above).
+                confirmed_profile_id = acknowledged
             else:
                 rows = engine._db.execute(
                     "SELECT 1 FROM profiles WHERE profile_id = ?",
@@ -628,10 +655,21 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     engine._config.active_profile = old
                     persistence.rollback()
                     raise
+                confirmed_profile_id = profile_id
 
-            # Synchronize this MCP process only after daemon acknowledgement.
-            engine.profile_id = profile_id
-            engine._config.active_profile = profile_id
+            if not confirmed_profile_id:
+                # Defensive: should be unreachable — every path above
+                # either returns an error or sets confirmed_profile_id.
+                return {
+                    "success": False,
+                    "error": "profile switch could not be confirmed",
+                }
+
+            # Synchronize this MCP process only after confirmation
+            # (daemon-acknowledged + locally-validated, or directly
+            # locally-validated in the no-daemon branch above).
+            engine.profile_id = confirmed_profile_id
+            engine._config.active_profile = confirmed_profile_id
 
             # v3.6.12 (search-3): recall/delete run in a separate worker
             # subprocess that caches its engine (and profile_id) at init. Recycle

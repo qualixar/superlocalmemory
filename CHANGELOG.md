@@ -5,6 +5,22 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.8] - 2026-07-20 — Profile-isolation leak fix, loopback auth opt-in, hardening
+
+### Fixed
+
+- **Cross-profile recall leak (critical).** After a profile switch, the dashboard Chat, memory-facts, and cluster-summary routes read from a long-lived `WorkerPool` subprocess that cached the previous profile for up to 120 seconds, so those views could return the prior profile's memories while the UI reported the new one. Those routes now read the daemon's resident, lease-protected engine — which `commit_daemon_profile_switch` rebinds synchronously on every switch, exactly as the `/recall` and `/remember` endpoints already do — so recall always reflects the current profile. Added full-daemon isolation regression tests that store under one profile, switch, and assert the other profile's data is never returned.
+- Removed a dead consolidation-trigger fast path (`WorkerPool.send_command`, a method that never existed and silently fell through on every call) and placed the remaining direct-consolidation path under the profile-runtime lease so a concurrent switch cannot commit mid-consolidation.
+- The MCP `switch_profile` tool now synchronizes local engine state only to the profile the daemon actually acknowledged, and re-validates that the profile exists locally before adopting it, instead of trusting the response body.
+
+### Added
+
+- `SLM_REQUIRE_API_KEY_LOOPBACK` opt-in. When set together with a configured `api_key` file, uncredentialed loopback writes must also present a matching `X-SLM-API-Key`, restoring the strict posture for shared-host operators. Default behavior is unchanged (local-first): the flag is a no-op unless explicitly enabled. This is a single, explicit control rather than overloading "an api_key file exists" with two meanings — the overload that caused the 3.7.6 write-auth regressions.
+
+### Changed
+
+- Removed the dead `V32_VEC0_DDL` schema constant and retired the now-inert unconditional `check_api_key` write gate (repurposed as the sole enforcement point for the loopback opt-in). The legacy `api.py`/`ui.py` app factories are documented as not served by the daemon.
+
 ## [3.7.7] - 2026-07-20 — Profile isolation and runtime integrity
 
 ### Fixed

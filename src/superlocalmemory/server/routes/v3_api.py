@@ -1462,7 +1462,8 @@ async def trigger_consolidation(request: Request):
     """Trigger consolidation manually.
 
     Body: {"lightweight": false, "profile": ""}
-    Uses WorkerPool for thread safety (Rule 18).
+    Runs under the daemon's profile-runtime operation lease (Rule 18) so a
+    concurrent profile switch cannot commit mid-consolidation.
     """
     try:
         body = await request.json()
@@ -1478,44 +1479,42 @@ async def trigger_consolidation(request: Request):
             profile_id=pid,
         )
 
-        # Use WorkerPool to run consolidation in the worker subprocess (Rule 18)
-        try:
-            from superlocalmemory.core.worker_pool import WorkerPool
-            pool = WorkerPool.shared()
-            result = pool.send_command({
-                "action": "consolidate",
-                "profile_id": pid,
-                "lightweight": lightweight,
-            })
-            if result and result.get("ok"):
-                authorization.complete()
-                return {"success": True, **result}
-        except Exception:
-            pass
-
-        # Fallback: direct consolidation if WorkerPool unavailable
+        # v3.7.8 SEC-M-01: the prior "WorkerPool" fast path called
+        # ``pool.send_command(...)``, a method that does not exist on
+        # WorkerPool — every call raised AttributeError, was silently
+        # swallowed by the bare ``except``, and fell through to this direct
+        # path unconditionally. That dead branch is removed; consolidation
+        # always runs directly against a lease-protected DB connection so a
+        # concurrent profile switch cannot commit mid-consolidation.
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage import schema as _schema
         from superlocalmemory.core.consolidation_engine import ConsolidationEngine
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
 
-        config = SLMConfig.load()
-        db = DatabaseManager(config.db_path)
-        db.initialize(_schema)
+        runtime = get_profile_runtime(request.app.state)
+        with runtime.operation():
+            config = SLMConfig.load()
+            db = DatabaseManager(config.db_path)
+            db.initialize(_schema)
 
-        engine = ConsolidationEngine(db=db, config=config.consolidation, slm_config=config)
-        result = engine.consolidate(profile_id=pid, lightweight=lightweight)
+            engine = ConsolidationEngine(
+                db=db, config=config.consolidation, slm_config=config,
+            )
+            result = engine.consolidate(profile_id=pid, lightweight=lightweight)
 
-        # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
-        try:
-            from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
-            learning_db = config.base_dir / "learning.db"
-            cw = ConsolidationWorker(str(config.db_path), str(learning_db))
-            pattern_count = cw._generate_patterns(pid, False)
-            result["patterns_mined"] = pattern_count
-            logger.info("Auto-mined %d patterns after consolidation", pattern_count)
-        except Exception as exc:
-            logger.debug("Pattern mining after consolidation failed: %s", exc)
+            # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
+            try:
+                from superlocalmemory.learning.consolidation_worker import (
+                    ConsolidationWorker,
+                )
+                learning_db = config.base_dir / "learning.db"
+                cw = ConsolidationWorker(str(config.db_path), str(learning_db))
+                pattern_count = cw._generate_patterns(pid, False)
+                result["patterns_mined"] = pattern_count
+                logger.info("Auto-mined %d patterns after consolidation", pattern_count)
+            except Exception as exc:
+                logger.debug("Pattern mining after consolidation failed: %s", exc)
 
         authorization.complete()
         return {"success": True, **result}

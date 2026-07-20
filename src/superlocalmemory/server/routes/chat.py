@@ -76,7 +76,7 @@ async def chat_stream(request: Request):
     limit = min(body.get("limit", 10), 20)
 
     return StreamingResponse(
-        _stream_chat(query, mode, limit),
+        _stream_chat(request.app.state, query, mode, limit),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -89,15 +89,18 @@ async def chat_stream(request: Request):
 # ── Core Chat Logic ──────────────────────────────────────────────
 
 async def _stream_chat(
-    query: str, mode: str, limit: int,
+    app_state, query: str, mode: str, limit: int,
 ) -> AsyncGenerator[str, None]:
     """Retrieve memories, then stream LLM response with citations."""
 
-    # Step 1: Retrieve memories via WorkerPool (run in executor to avoid blocking)
+    # Step 1: Retrieve memories via the daemon's resident engine (run in
+    # executor to avoid blocking the event loop).
     memories = []
     try:
         loop = asyncio.get_event_loop()
-        memories = await loop.run_in_executor(None, _recall_memories, query, limit)
+        memories = await loop.run_in_executor(
+            None, _recall_memories, app_state, query, limit,
+        )
     except Exception as exc:
         yield _sse_event("error", json.dumps({"message": f"Retrieval failed: {exc}"}))
         yield _sse_event("done", "")
@@ -314,14 +317,62 @@ async def _stream_openai_compat(
 
 # ── Retrieval Helper ─────────────────────────────────────────────
 
-def _recall_memories(query: str, limit: int) -> list:
-    """Run full recall via WorkerPool (synchronous, runs in executor)."""
-    from superlocalmemory.core.worker_pool import WorkerPool
-    pool = WorkerPool.shared()
-    result = pool.recall(query, limit=limit)
-    if result.get("ok"):
-        return result.get("results", [])
-    return []
+def _recall_memories(app_state, query: str, limit: int) -> list:
+    """Run full recall via the daemon's resident, lease-protected engine.
+
+    v3.7.8 CRITICAL fix: this used to go through ``WorkerPool.shared()``, a
+    long-lived subprocess that caches its OWN ``MemoryEngine`` + profile_id
+    at process init and is never recycled on a profile switch. That meant a
+    switch could serve the OLD profile's memories to this chat endpoint for
+    up to 120s — a cross-profile data leak. ``application.state.engine`` is
+    rebound synchronously by ``commit_daemon_profile_switch``, so reading it
+    (via the queue-consumer's engine adapter, which already holds the same
+    profile-runtime lease the daemon's own ``/recall`` route uses) always
+    reflects the current profile.
+    """
+    adapter = getattr(app_state, "engine_recall_adapter", None)
+    if adapter is not None:
+        result = adapter.recall(query, limit=limit)
+        if result.get("ok"):
+            return result.get("results", [])
+        return []
+    # Fallback (adapter unavailable, e.g. queue-consumer failed to start):
+    # recall directly against the resident engine under the same profile
+    # lease the HTTP /recall route uses. Never fall back to WorkerPool —
+    # that reintroduces the stale-profile leak this fix closes.
+    return _recall_via_resident_engine(app_state, query, limit)
+
+
+def _recall_via_resident_engine(app_state, query: str, limit: int) -> list:
+    """Lease-protected direct-engine recall, mirroring the /recall route."""
+    from superlocalmemory.server.profile_runtime import get_profile_runtime
+    from superlocalmemory.server.routes.helpers import get_engine_lazy
+
+    runtime = get_profile_runtime(app_state)
+    with runtime.operation():
+        engine = get_engine_lazy(app_state)
+        if engine is None:
+            return []
+        response = engine.recall(query, limit=limit)
+        memory_ids = list({
+            r.fact.memory_id for r in response.results[:limit]
+            if r.fact.memory_id
+        })
+        memory_map = (
+            engine._db.get_memory_content_batch(memory_ids) if memory_ids else {}
+        )
+        from superlocalmemory.server.recall_serializer import (
+            serialize_recall_response,
+        )
+        _rc = getattr(engine._config, "retrieval", None)
+        results, _no_confident_match = serialize_recall_response(
+            response,
+            limit=limit,
+            memory_map=memory_map,
+            per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
+            total_max=getattr(_rc, "recall_total_max_chars", 12000),
+        )
+        return results
 
 
 # ── SSE Formatting ───────────────────────────────────────────────

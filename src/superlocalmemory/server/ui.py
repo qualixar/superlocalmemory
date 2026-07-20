@@ -15,6 +15,16 @@ All route handlers live in routes/ directory:
     routes/events.py    -- /events/stream (SSE), /api/events [v2.5]
     routes/agents.py    -- /api/agents, /api/trust [v2.5]
     routes/ws.py        -- /ws/updates (WebSocket)
+
+v3.7.8 (WS3 F4): ``create_app()`` in this module is a standalone/legacy app
+factory, NOT the app the running daemon serves -- that is
+``superlocalmemory.server.unified_daemon:create_app`` (see that module's
+uvicorn config). This module's ``auth_middleware`` keeps the older,
+unconditional ``check_api_key``-only write gate (no daemon-capability /
+install-token identity layer, no ``SLM_REQUIRE_API_KEY_LOOPBACK`` opt-in --
+see ``infra/auth_middleware.py`` for that). Treat this file as a standalone
+entry point only; the production write-auth boundary lives in
+``unified_daemon.py``.
 """
 
 import logging

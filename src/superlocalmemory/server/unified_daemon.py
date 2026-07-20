@@ -1726,6 +1726,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         from superlocalmemory.infra.auth_middleware import (
             authorize_http_mcp_request,
             check_api_key,
+            loopback_strict_mode_enabled,
         )
         from superlocalmemory.server.write_identity import (
             require_http_mutation_actor,
@@ -1801,25 +1802,52 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                             content={"error": str(_identity_exc.detail)},
                         )
                     raise
-            # v3.7.6 (#71/#73/#74): require_http_mutation_actor above is the
-            # authoritative write-auth boundary — it accepts the daemon
-            # capability, the dashboard install token, a matching X-SLM-API-Key,
-            # or an uncredentialed loopback caller, and fails closed for everyone
-            # else. The legacy check_api_key gate only understands X-SLM-API-Key,
-            # so running it as a second gate 401'd write paths that stage 1 had
-            # already authorized: capability-authenticated daemon write-throughs
-            # (MCP `remember`, #71) and install-token dashboard writes / config
-            # tests (#73/#74) whenever an api_key file exists. Only fall back to
-            # check_api_key when the mutation-actor gate did not run — i.e. for
-            # non-write, non-recall requests, where it is a no-op for reads.
-            if not requires_mutation_actor and not check_api_key(
-                headers, is_write=is_write
-            ):
-                from fastapi.responses import JSONResponse
-                return JSONResponse(
-                    status_code=401,
-                    content={"error": "Invalid or missing API key."},
-                )
+                # v3.7.6 (#71/#73/#74): require_http_mutation_actor above is
+                # the authoritative write-auth boundary — it accepts the
+                # daemon capability, the dashboard install token, a matching
+                # X-SLM-API-Key, or an uncredentialed loopback caller, and
+                # fails closed for everyone else. Running check_api_key as an
+                # unconditional second gate used to 401 write paths stage 1
+                # had already authorized: capability-authenticated daemon
+                # write-throughs (MCP `remember`, #71) and install-token
+                # dashboard writes / config tests (#73/#74) whenever an
+                # api_key file existed.
+                #
+                # v3.7.8 (F1/F2): that fix silently narrowed the api_key
+                # feature — a configured api_key file used to force even
+                # loopback writes to present a credential; after #71/#73/#74
+                # loopback writes need none, with no opt-back-in. This is the
+                # single enforcement point for the opt-in strict posture
+                # (SLM_REQUIRE_API_KEY_LOOPBACK): re-run check_api_key, but
+                # ONLY for the uncredentialed-loopback case — a caller who
+                # presented none of the three credential headers above and
+                # was authorized purely by being loopback. Credentialed
+                # callers (capability / install token / api key) were already
+                # validated by require_http_mutation_actor and are never
+                # re-gated here, so #71/#73/#74 stay fixed.
+                if loopback_strict_mode_enabled():
+                    _has_credential = any(
+                        headers.get(_h)
+                        for _h in (
+                            "x-slm-daemon-capability",
+                            "x-install-token",
+                            "x-slm-api-key",
+                        )
+                    )
+                    if not _has_credential and not check_api_key(
+                        headers, is_write=True
+                    ):
+                        from fastapi.responses import JSONResponse
+                        return JSONResponse(
+                            status_code=401,
+                            content={
+                                "error": (
+                                    "SLM_REQUIRE_API_KEY_LOOPBACK is set: "
+                                    "loopback writes must present a matching "
+                                    "X-SLM-API-Key."
+                                )
+                            },
+                        )
             return await call_next(request)
     except Exception as _auth_exc:
         # v3.6.12 (failopen-1): security middleware must NEVER fail open silently.

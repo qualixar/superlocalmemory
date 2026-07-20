@@ -143,9 +143,11 @@ async def test_citation_preview_is_sanitized_before_sse_serialization(
         "score": 0.75,
         "trust_score": 0.25,
     }
-    monkeypatch.setattr(chat, "_recall_memories", lambda query, limit: [memory])
+    monkeypatch.setattr(
+        chat, "_recall_memories", lambda app_state, query, limit: [memory],
+    )
 
-    events = await _collect(chat._stream_chat("show it", "a", 1))
+    events = await _collect(chat._stream_chat(object(), "show it", "a", 1))
     citation_event = next(event for event in events if event.startswith("event: citation"))
     citation_data = json.loads(citation_event.split("data: ", 1)[1])
 

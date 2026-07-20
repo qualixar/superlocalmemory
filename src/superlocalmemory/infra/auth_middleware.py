@@ -15,6 +15,7 @@ V3 change: base directory moved from ``~/.claude-memory/`` to
 import hashlib
 import hmac
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,13 @@ logger = logging.getLogger("superlocalmemory.auth")
 # V3 base directory
 MEMORY_DIR = DynamicStatePath()
 API_KEY_FILE = DynamicStatePath("api_key")
+
+# v3.7.8 (F1): opt-in env flag that restores the pre-v3.7.6 shared-host
+# posture -- when set AND an api_key file is configured, uncredentialed
+# loopback writes must also present a matching X-SLM-API-Key. Default OFF
+# preserves the v3.7.6 local-first fix (#71/#73/#74): loopback callers are
+# trusted as the local OS-user boundary without needing any credential.
+SLM_REQUIRE_API_KEY_LOOPBACK_ENV = "SLM_REQUIRE_API_KEY_LOOPBACK"
 
 
 def _load_api_key_hash(key_file: Optional[Path] = None) -> Optional[str]:
@@ -94,6 +102,26 @@ def verify_api_key(
         return False
     actual = hashlib.sha256(presented.encode()).hexdigest()
     return hmac.compare_digest(actual, expected)
+
+
+def loopback_strict_mode_enabled(key_file: Optional[Path] = None) -> bool:
+    """Whether uncredentialed loopback writes must present the API key.
+
+    v3.7.8 (F1/F2): opt-in via ``SLM_REQUIRE_API_KEY_LOOPBACK`` (any of
+    "1"/"true"/"yes"/"on", case-insensitive). This is the sole enforcement
+    point for the strict shared-host posture -- it is checked ONLY for the
+    uncredentialed-loopback case (a caller presenting none of
+    X-SLM-Daemon-Capability / X-Install-Token / X-SLM-API-Key). Callers who
+    already present a valid capability or install token are unaffected: those
+    are stronger, explicit credentials and this flag never re-litigates them.
+
+    Returns ``False`` (no-op) when the flag is unset/false, OR when no
+    api_key file is configured -- there is nothing to require in that case.
+    """
+    raw = os.environ.get(SLM_REQUIRE_API_KEY_LOOPBACK_ENV, "")
+    if raw.strip().lower() not in ("1", "true", "yes", "on"):
+        return False
+    return _load_api_key_hash(key_file) is not None
 
 
 def authorize_http_mcp_request(

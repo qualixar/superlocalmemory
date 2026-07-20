@@ -771,19 +771,6 @@ wheels = [
 ]
 
 [[package]]
-name = "geoopt"
-version = "0.5.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scipy" },
-    { name = "torch" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/0f/f8d4afc40ffd1d2e8a4386bad152176cdc726b077c9bd5d65621b122559d/geoopt-0.5.1-py3-none-any.whl", hash = "sha256:d6ee06e943e7e882ba785db09a6d705d34b8bf5408d4d546b3a8ac2e4ff3496d", size = 90072, upload-time = "2025-06-19T20:13:58.92Z" },
-]
-
-[[package]]
 name = "google-api-core"
 version = "2.30.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3103,7 +3090,7 @@ wheels = [
 
 [[package]]
 name = "superlocalmemory"
-version = "3.7.7"
+version = "3.7.8"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -3157,7 +3144,6 @@ dev = [
 full = [
     { name = "einops" },
     { name = "fastapi", extra = ["all"] },
-    { name = "geoopt" },
     { name = "google-api-python-client" },
     { name = "google-auth-oauthlib" },
     { name = "icalendar" },
@@ -3199,7 +3185,6 @@ scale = [
 ]
 search = [
     { name = "einops" },
-    { name = "geoopt" },
     { name = "onnxruntime" },
     { name = "optimum" },
     { name = "scikit-learn" },
@@ -3228,7 +3213,6 @@ requires-dist = [
     { name = "einops", marker = "extra == 'search'", specifier = "==0.8.2" },
     { name = "fastapi", extras = ["all"], specifier = "==0.139.2" },
     { name = "fastapi", extras = ["all"], marker = "extra == 'ui'", specifier = ">=0.135.1" },
-    { name = "geoopt", marker = "extra == 'search'", specifier = ">=0.5.0" },
     { name = "google-api-python-client", marker = "extra == 'ingestion'", specifier = ">=2.100.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'ingestion'", specifier = ">=1.2.0" },
     { name = "httpx", specifier = "==0.28.1" },

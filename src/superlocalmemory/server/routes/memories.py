@@ -662,14 +662,28 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
         if not members:
             raise HTTPException(status_code=404, detail="Cluster not found")
         # Generate cluster summary
+        # v3.7.8: previously routed through WorkerPool.shared(), a subprocess
+        # cache never recycled on a profile switch (CRITICAL cross-profile
+        # leak — up to 120s stale). Use the daemon's own resident,
+        # lease-protected engine's config instead; the summarizer only
+        # consumes already profile-filtered `texts` above, so this closes
+        # the stale-engine window without changing behavior.
         summary = ""
         try:
-            from superlocalmemory.core.worker_pool import WorkerPool
-            pool = WorkerPool.shared()
             texts = [m.get("content", "")[:200] for m in members[:10] if m.get("content")]
             if texts:
-                result = pool.summarize(texts)
-                summary = result.get("summary", "") if result.get("ok") else ""
+                from superlocalmemory.core.summarizer import Summarizer
+                from superlocalmemory.server.profile_runtime import get_profile_runtime
+                from superlocalmemory.server.routes.helpers import get_engine_lazy
+
+                runtime = get_profile_runtime(request.app.state)
+                with runtime.operation():
+                    engine = get_engine_lazy(request.app.state)
+                    if engine is not None:
+                        summarizer = Summarizer(engine._config)
+                        summary = summarizer.summarize_cluster(
+                            [{"content": t} for t in texts]
+                        ) or ""
         except Exception:
             pass
 
@@ -687,14 +701,47 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
 
 @router.get("/api/memories/{memory_id}/facts")
 async def get_memory_facts(request: Request, memory_id: str):
-    """Get original memory text with all its child atomic facts."""
+    """Get original memory text with all its child atomic facts.
+
+    v3.7.8: previously routed through WorkerPool.shared(), a subprocess
+    engine cached at process init and never recycled on a profile switch
+    (CRITICAL cross-profile leak — served the OLD profile's facts for up to
+    120s after a switch). Uses the daemon's own resident, lease-protected
+    engine instead, exactly like the /recall route.
+    """
     try:
-        from superlocalmemory.core.worker_pool import WorkerPool
-        pool = WorkerPool.shared()
-        result = pool.get_memory_facts(memory_id)
-        if result.get("ok"):
-            return result
-        raise HTTPException(status_code=404, detail="Memory not found")
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+        from superlocalmemory.server.routes.helpers import get_engine_lazy
+
+        runtime = get_profile_runtime(request.app.state)
+        with runtime.operation():
+            engine = get_engine_lazy(request.app.state)
+            if engine is None:
+                raise HTTPException(status_code=503, detail="Engine not initialized")
+            active_profile = engine.profile_id
+            mem_map = engine._db.get_memory_content_batch([memory_id])
+            original = mem_map.get(memory_id, "")
+            facts = engine._db.get_facts_by_memory_id(memory_id, active_profile)
+        fact_list = [
+            {
+                "fact_id": f.fact_id,
+                "content": f.content,
+                "fact_type": (
+                    f.fact_type.value if hasattr(f.fact_type, "value")
+                    else str(f.fact_type)
+                ),
+                "confidence": round(f.confidence, 3),
+                "created_at": f.created_at,
+            }
+            for f in facts
+        ]
+        return {
+            "ok": True,
+            "memory_id": memory_id,
+            "original_content": original,
+            "facts": fact_list,
+            "fact_count": len(fact_list),
+        }
     except HTTPException:
         raise
     except Exception as e:
