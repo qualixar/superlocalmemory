@@ -80,6 +80,13 @@ def _wrap_python_cmd(hook_name: str) -> str:
     return f"slm hook {hook_name} 2>/dev/null || true"
 
 
+def _wrap_slm_cmd(slm_args: str) -> str:
+    """Wrap a generic slm CLI command with error absorption."""
+    if sys.platform == "win32":
+        return f'cmd /c "slm {slm_args} 2>NUL || exit /b 0"'
+    return f"slm {slm_args} 2>/dev/null || true"
+
+
 # ---------------------------------------------------------------------------
 # Hook definitions for settings.json
 # ---------------------------------------------------------------------------
@@ -168,6 +175,13 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                         "type": "command",
                         "command": _wrap_python_cmd("stop_outcome"),
                         "timeout": 10000,
+                    },
+                    # Commit temporal summaries so session decisions survive beyond
+                    # the git-state snapshot written by `slm hook stop`.
+                    {
+                        "type": "command",
+                        "command": _wrap_slm_cmd("session close"),
+                        "timeout": 15000,
                     },
                 ]
             }
