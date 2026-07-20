@@ -295,3 +295,74 @@ class TestEmbeddingServiceTimeout:
         assert service._subprocess_embed(["dependency failure witness"]) is None
         assert service.is_available is False
         killed.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Availability tri-state (regression for v3.7.8 self-heal brick)
+# ---------------------------------------------------------------------------
+
+class TestEmbeddingAvailabilityTriState:
+    """The ``_available`` flag is a tri-state and recall-health depends on it.
+
+    v3.7.8 added ``if not self._available: return None`` to ``_subprocess_embed``.
+    ``recall_health._heal_embedder`` sets ``_available = None`` to force a
+    re-probe (the OllamaEmbedder convention). Because ``None`` is falsy, that
+    guard made every self-heal tick short-circuit the probe embed and leave the
+    flag stuck at ``None`` — permanently bricking the local subprocess worker
+    (semantic/hopfield/spreading_activation dead) until the daemon restarted,
+    and re-bricking on the first heal tick after each restart.
+    """
+
+    def _wire_ok_worker(self, service, monkeypatch, vectors):
+        import io
+        import json as _json
+
+        worker = MagicMock()
+        worker.stdin = io.StringIO()
+        worker.stdout = io.StringIO(
+            _json.dumps({"ok": True, "vectors": vectors, "dim": len(vectors[0])})
+            + "\n",
+        )
+
+        def _ensure() -> None:
+            service._worker_proc = worker
+
+        monkeypatch.setattr(service, "_ensure_worker", _ensure)
+        monkeypatch.setattr(service, "_reset_idle_timer", lambda: None)
+        return worker
+
+    def test_none_availability_reprobes_and_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """self-heal set ``_available = None`` — the next embed must re-probe the
+        worker, not short-circuit to None."""
+        service = EmbeddingService(EmbeddingConfig())
+        service._available = None  # recall_health._heal_embedder reset
+        self._wire_ok_worker(service, monkeypatch, [[0.1, 0.2, 0.3]])
+
+        assert service._subprocess_embed(["heal probe"]) == [[0.1, 0.2, 0.3]]
+
+    def test_successful_embed_resets_available_to_true(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A proven-healthy embed clears the transient ``None`` back to True so
+        the flag no longer lingers falsy."""
+        service = EmbeddingService(EmbeddingConfig())
+        service._available = None
+        self._wire_ok_worker(service, monkeypatch, [[1.0, 2.0]])
+
+        service._subprocess_embed(["witness"])
+        assert service._available is True
+
+    def test_explicit_false_still_short_circuits(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A terminal disable (``False``) must still block without touching the
+        worker — preserves the v3.7.8 "don't churn a dead worker" intent."""
+        service = EmbeddingService(EmbeddingConfig())
+        service._available = False
+        ensure = MagicMock()
+        monkeypatch.setattr(service, "_ensure_worker", ensure)
+
+        assert service._subprocess_embed(["blocked"]) is None
+        ensure.assert_not_called()

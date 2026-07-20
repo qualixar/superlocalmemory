@@ -295,7 +295,13 @@ class EmbeddingService:
         never hangs indefinitely on cold model loads or network issues.
         """
         with self._lock:
-            if not self._available:
+            # Only an explicit terminal disable (``False``) short-circuits. A
+            # ``None`` availability is the recall-health self-heal's "re-probe"
+            # signal (recall_health._heal_embedder) — it must fall through and
+            # respawn the worker, matching OllamaEmbedder's tri-state
+            # convention. Using ``not self._available`` here bricked the local
+            # worker on the first heal tick, because ``None`` is falsy.
+            if self._available is False:
                 return None
             # Worker recycling: restart after N requests to prevent
             # C++ allocator fragmentation over long-running sessions.
@@ -348,6 +354,11 @@ class EmbeddingService:
                     self._available = False
                     self._kill_worker()
                     return None
+                # A successful embed proves the worker is healthy, so clear any
+                # transient/``None`` availability left by a self-heal re-probe
+                # back to a definite ``True``. Without this the flag lingers at
+                # ``None`` and the next ``not``-style check elsewhere re-blocks.
+                self._available = True
                 self._reset_idle_timer()
                 self._request_count += 1
                 return resp["vectors"]
