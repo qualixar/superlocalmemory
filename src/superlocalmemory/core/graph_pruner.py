@@ -350,8 +350,12 @@ def _cap_node_degree(
     Algorithm (single-pass window function — no Python loops):
       1. ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY weight DESC) ranks
          every edge per node in one full table scan.
-      2. Edges with rn > max_degree are deleted in a single DELETE statement.
-      Requires SQLite 3.25+ (window functions). System is on 3.53.1.
+      2. Excess edge IDs are collected in a reusable temp table.
+      3. A single DELETE statement removes them; rowcount is returned.
+      4. The temp table is created once and cleared via DELETE (not DROP) —
+         DROP TABLE acquires an EXCLUSIVE lock that conflicts with concurrent
+         writers, causing "database is locked".  Using CREATE...IF NOT EXISTS
+         plus DELETE FROM avoids that conflict while preserving rowcount.
     """
     # gi-03: cap BOTH out-degree (PARTITION BY source_id) AND in-degree
     # (PARTITION BY target_id). Previously only out-degree was capped, so hub
@@ -379,9 +383,13 @@ def _cap_node_degree(
         )
         return excess
 
-    # Step 1: collect edges exceeding the cap in either direction (one pass).
-    c.execute("DROP TABLE IF EXISTS _slm_cap_del")
-    c.execute("CREATE TEMP TABLE _slm_cap_del (edge_id TEXT PRIMARY KEY)")
+    # CREATE IF NOT EXISTS + DELETE FROM instead of DROP + CREATE.
+    # DROP TABLE acquires EXCLUSIVE which conflicts with concurrent writers.
+    # CREATE IF NOT EXISTS is idempotent; DELETE FROM clears prior contents.
+    c.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _slm_cap_del (edge_id TEXT PRIMARY KEY)"
+    )
+    c.execute("DELETE FROM _slm_cap_del")
     c.execute(
         """
         INSERT OR IGNORE INTO _slm_cap_del (edge_id)
@@ -396,7 +404,6 @@ def _cap_node_degree(
         (profile_id, max_degree, max_degree),
     )
 
-    # Step 2: delete the over-cap edges (single DELETE).
     c.execute(
         """
         DELETE FROM graph_edges
@@ -406,8 +413,6 @@ def _cap_node_degree(
         (profile_id,),
     )
     deleted = c.rowcount
-
-    c.execute("DROP TABLE IF EXISTS _slm_cap_del")
 
     logger.info(
         "_cap_node_degree: deleted %d low-weight edges (max_degree=%d, in+out capped)",
