@@ -142,9 +142,10 @@ once you have the `fact_id` for full content.
 
 ## How multi-channel retrieval works
 
-`recall` runs four channels in parallel — semantic vector similarity, lexical
-BM25, temporal recency, and structural/graph — then fuses them with Reciprocal
-Rank Fusion (RRF) and applies a reranker. The `channel_weights` field in the
+`recall` runs five candidate producers in parallel — semantic vector similarity,
+lexical BM25, temporal recency, spreading activation, and Hopfield — then fuses
+them with Reciprocal Rank Fusion (RRF), applies a reranker, and layers an
+optional entity-graph post-fusion score enhancement. The `channel_weights` field in the
 response shows how each channel contributed for that query. Weights adapt over
 time based on engagement signals attributed via `session_id`.
 
@@ -201,4 +202,4 @@ trusts that what you surface came from the store.
 
 ---
 
-*SuperLocalMemory v3.6.17 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later*

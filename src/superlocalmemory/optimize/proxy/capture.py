@@ -28,9 +28,10 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.infra.data_root import state_path
+
 logger = logging.getLogger("slm.optimize.proxy.capture")
 
-_CAPTURE_DIRNAME = ".superlocalmemory"
 _CAPTURE_FILENAME = "optimize_capture.jsonl"
 _CAPTURE_ENV = "SLM_OPTIMIZE_CAPTURE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -51,7 +52,7 @@ def capture_enabled() -> bool:
 
 
 def _capture_path() -> Path:
-    return Path.home() / _CAPTURE_DIRNAME / _CAPTURE_FILENAME
+    return state_path(_CAPTURE_FILENAME)
 
 
 class ShadowCapture:

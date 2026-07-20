@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-import pytest
 import shutil
-from pathlib import Path
+import sqlite3
+
+import pytest
 
 from superlocalmemory.graph.cozo_backend import (
-    CozoDBGraphBackend,
-    CozoDBNotAvailable,
     _COZO_AVAILABLE,
+    CozoDBGraphBackend,
 )
 
 # CozoDB is an optional backend (pip install superlocalmemory[cozo]). When it
@@ -94,6 +94,104 @@ class TestSpreadingActivation:
         scores = dict(results)
         assert scores["e4"] == 1.0
         assert len(scores) == 1  # Only e4, no edges
+
+
+class TestCanonicalEntityProjection:
+    def test_bulk_projection_keeps_canonical_and_fact_namespaces_distinct(self, backend):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO canonical_entities VALUES
+                ('entity-ada', 'Ada', 'person', '2026-01-01', '2026-01-02', 2, 'default'),
+                ('entity-atlas', 'Atlas', 'project', '2026-01-01', '2026-01-02', 1, 'default');
+            INSERT INTO atomic_facts VALUES
+                ('fact-1', '["entity-ada"]', 'default'),
+                ('fact-2', '["entity-ada", "entity-atlas"]', 'default');
+            INSERT INTO graph_edges VALUES ('fact-1', 'fact-2', 'related', 1.0, 'default');
+        """)
+        backend.bulk_import_from_sqlite(conn)
+        health = backend.health_check()
+        assert health["entities"] == 2
+        assert health["edges"] == 1
+        assert [fact_id for fact_id, _ in backend.recall_facts(["entity-ada"])] == ["fact-1", "fact-2"]
+
+    def test_bulk_projection_preserves_parallel_typed_fact_edges(self, backend):
+        """Projection parity must not collapse distinct canonical edge types."""
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO graph_edges VALUES
+                ('fact-1', 'fact-2', 'related', 1.0, 'default'),
+                ('fact-1', 'fact-2', 'temporal', 0.8, 'default');
+        """)
+        backend.bulk_import_from_sqlite(conn)
+        assert backend.health_check()["edges"] == 2
+
+    def test_bulk_projection_normalizes_duplicate_logical_edges_to_max_weight(self, backend):
+        """Legacy duplicate rows project once with their strongest weight."""
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, canonical_name TEXT, entity_type TEXT,
+                first_seen TEXT, last_seen TEXT, fact_count INTEGER, profile_id TEXT
+            );
+            CREATE TABLE atomic_facts (
+                fact_id TEXT, canonical_entities_json TEXT, profile_id TEXT
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL, profile_id TEXT
+            );
+            INSERT INTO graph_edges VALUES
+                ('fact-1', 'fact-2', 'supersedes', 0.4, 'default'),
+                ('fact-1', 'fact-2', 'supersedes', 1.0, 'default'),
+                ('fact-1', 'fact-2', 'temporal', 0.8, 'default');
+        """)
+
+        imported = backend.bulk_import_from_sqlite(conn)
+        rows = backend._db.run(
+            "?[edge_type, weight] := "
+            "*edge{from_id, to_id, edge_type, weight, profile_id}, "
+            "from_id = $source, to_id = $target, profile_id = $profile",
+            {"source": "fact-1", "target": "fact-2", "profile": "default"},
+        ).values.tolist()
+
+        assert imported == 2
+        assert backend.health_check()["edges"] == 2
+        assert sorted(rows) == [["supersedes", 1.0], ["temporal", 0.8]]
+
+    def test_remove_fact_is_parameter_safe_and_removes_derived_records(self, backend):
+        unsafe_id = "fact-'quoted'"
+        backend.add_entity("entity-ada", "Ada", "person")
+        backend.add_fact_entities(unsafe_id, ["entity-ada"])
+        backend.add_edge(unsafe_id, "fact-2", "related")
+        backend.remove_fact(unsafe_id)
+        assert backend.recall_facts(["entity-ada"]) == []
+        assert backend.health_check()["edges"] == 0
+
+    def test_shadow_error_records_telemetry_without_mutating_graph(self, backend):
+        backend.add_edge("fact-1", "fact-2", "related")
+
+        backend.record_shadow_error("simulated shadow failure")
+
+        assert backend.health_check()["edges"] == 1
 
 
 class TestPageRank:

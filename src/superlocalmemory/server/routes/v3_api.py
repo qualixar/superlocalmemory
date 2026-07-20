@@ -9,14 +9,35 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v3", tags=["v3"])
+
+
+async def _apply_runtime_config(request: Request, config, *, mode_change: bool) -> None:
+    """Persist and hot-swap config only after the daemon transition succeeds."""
+    import asyncio
+
+    authorization = authorize_route_mutation(
+        request,
+        operation="update",
+        source_agent_id="dashboard-config",
+        profile_id=getattr(config, "active_profile", "default"),
+    )
+    from superlocalmemory.server.profile_runtime import reconfigure_daemon_engine
+
+    await asyncio.to_thread(
+        reconfigure_daemon_engine,
+        request.app.state,
+        config,
+        mode_change=mode_change,
+    )
+    authorization.complete()
 
 
 # ── Dashboard ────────────────────────────────────────────────
@@ -26,7 +47,10 @@ async def dashboard(request: Request):
     """Dashboard summary: mode, memory count, health score, recent activity."""
     try:
         from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+
+        active_profile = get_profile_runtime(request.app.state).snapshot.profile_id
 
         # Read stats directly from SQLite (dashboard doesn't load engine)
         import sqlite3
@@ -38,12 +62,24 @@ async def dashboard(request: Request):
                 conn = sqlite3.connect(str(db_path))
                 cursor = conn.cursor()
                 try:
-                    cursor.execute("SELECT COUNT(*) FROM atomic_facts")
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM atomic_facts WHERE profile_id = ?",
+                        (active_profile,),
+                    )
                     fact_count = cursor.fetchone()[0]
                 except Exception:
                     pass
                 try:
-                    cursor.execute("SELECT COUNT(*) FROM memories")
+                    try:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM memories WHERE profile_id = ?",
+                            (active_profile,),
+                        )
+                    except Exception:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM memories WHERE profile = ?",
+                            (active_profile,),
+                        )
                     memory_count = cursor.fetchone()[0]
                 except Exception:
                     pass
@@ -58,7 +94,7 @@ async def dashboard(request: Request):
             "model": config.llm.model or "",
             "memory_count": memory_count,
             "fact_count": fact_count,
-            "profile": config.active_profile,
+            "profile": active_profile,
             "base_dir": str(config.base_dir),
             "version": SLM_VERSION,
         }
@@ -69,11 +105,11 @@ async def dashboard(request: Request):
 # ── Mode ─────────────────────────────────────────────────────
 
 @router.get("/mode")
-async def get_mode():
+async def get_mode(request: Request):
     """Get current mode, provider, model — single source of truth for UI."""
     try:
         from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
         current = config.mode.value
         return {
             "mode": current,
@@ -123,20 +159,18 @@ async def set_mode(request: Request):
                 status_code=400,
             )
 
-        new_config = SLMConfig.for_mode(
-            Mode(new_mode),
-            llm_provider=old_config.llm.provider,
-            llm_model=old_config.llm.model,
-            llm_api_key=old_config.llm.api_key,
-            llm_api_base=old_config.llm.api_base,
-            embedding_provider=old_config.embedding.provider,
-            embedding_endpoint=old_config.embedding.api_endpoint,
-            embedding_key=old_config.embedding.api_key,
-            embedding_model_name=old_config.embedding.model_name,
-            embedding_dimension=old_config.embedding.dimension,
-        )
-        new_config.active_profile = old_config.active_profile
-        new_config.save(mode_change=True)
+        # Apply new mode's structural presets (retrieval, math, channel_weights)
+        # by building a fresh template, then graft them onto the loaded config so
+        # all user-tuned blocks (forgetting, injection, consolidation, scope, …)
+        # are preserved across the mode switch.
+        _template = SLMConfig.for_mode(Mode(new_mode))
+        old_config.mode = Mode(new_mode)
+        old_config.retrieval = _template.retrieval
+        old_config.math = _template.math
+        old_config.channel_weights = _template.channel_weights
+        new_config = old_config
+
+        await _apply_runtime_config(request, new_config, mode_change=True)
 
         # Audit the change before we lose context — proves who/when/what.
         # Captures the phantom-write case where `for_mode(C)` auto-defaults
@@ -153,10 +187,6 @@ async def set_mode(request: Request):
             old_config.embedding.provider != new_config.embedding.provider
             or old_config.embedding.model_name != new_config.embedding.model_name
         )
-
-        # Invalidate engine; next engine-backed request lazy-inits with new config.
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
 
         return {
             "success": True,
@@ -184,36 +214,53 @@ async def set_full_config(request: Request):
         if new_mode not in ("a", "b", "c"):
             return JSONResponse({"error": "Invalid mode"}, status_code=400)
 
-        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.config import SLMConfig, EmbeddingConfig, LLMConfig
         from superlocalmemory.storage.models import Mode
         from superlocalmemory.server.routes.helpers import log_mode_change
-        old = SLMConfig.load()
-        old_mode = old.mode.value
-        # v3.6.12 (settings-2): honor a custom endpoint for ANY provider — the
-        # old code forced api_base="" for everything except ollama, so a
-        # llama.cpp / LM Studio / Azure-OpenAI endpoint configured in the
-        # dashboard could never be saved (Test Connection then probed the wrong
-        # URL → 401). Accept both base_url and endpoint; default ollama locally.
+        config = SLMConfig.load()
+        old_mode = config.mode.value
+
+        # v3.6.12 (settings-2): honor a custom endpoint for ANY provider.
         _endpoint = (body.get("base_url", "") or body.get("endpoint", "")).strip()
         if not _endpoint and provider == "ollama":
             _endpoint = "http://localhost:11434"
-        config = SLMConfig.for_mode(
-            Mode(new_mode),
-            llm_provider=provider if provider != "none" else "",
-            llm_model=model,
-            llm_api_key=api_key,
-            llm_api_base=_endpoint,
-            embedding_provider=body.get("embedding_provider", ""),
-            embedding_endpoint=body.get("embedding_endpoint", ""),
-            embedding_key=body.get("embedding_key", ""),
-            embedding_model_name=body.get("embedding_model", ""),
-            embedding_dimension=int(body.get("embedding_dimension", 0) or 0),
+
+        # Mutate only the fields the dashboard sent — all other config blocks
+        # (forgetting, injection, retrieval, math, consolidation, scope, …) are
+        # preserved because we loaded the full existing config above.
+        config.mode = Mode(new_mode)
+        config.llm = LLMConfig(
+            provider=provider if provider != "none" else "",
+            model=model,
+            api_key=api_key,
+            api_base=_endpoint,
         )
-        config.active_profile = old.active_profile
-        # v3.6.12 (settings-1): an explicit user-driven mode switch must persist.
-        # save() without mode_change=True hits the guard that PRESERVES the old
-        # mode, so /mode/set silently no-op'd the switch while returning success.
-        config.save(mode_change=True)
+
+        # Update embedding only when the dashboard explicitly sent those fields;
+        # absence means "leave it alone" (AIDEV-86 / broader fix).
+        _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
+                       "embedding_model", "embedding_dimension")
+        if any(k in body for k in _emb_fields):
+            config.embedding = EmbeddingConfig(
+                provider=body.get("embedding_provider", ""),
+                api_endpoint=body.get("embedding_endpoint", ""),
+                api_key=body.get("embedding_key", ""),
+                model_name=body.get("embedding_model", ""),
+                dimension=int(body.get("embedding_dimension", 0) or 0),
+            )
+
+        # When the mode actually changed, apply the new mode's structural presets
+        # (retrieval topology, math thresholds, channel weights) so the user gets
+        # the right runtime behaviour for their chosen mode.
+        if new_mode != old_mode:
+            _template = SLMConfig.for_mode(Mode(new_mode))
+            config.retrieval = _template.retrieval
+            config.math = _template.math
+            config.channel_weights = _template.channel_weights
+
+        # v3.6.12 (settings-1): mode_change=True is required to persist the new
+        # mode — save() without it hits a guard that preserves the old mode.
+        await _apply_runtime_config(request, config, mode_change=True)
 
         log_mode_change(
             old_mode, new_mode,
@@ -222,15 +269,13 @@ async def set_full_config(request: Request):
             source="POST /api/v3/mode/set",
         )
 
-        # Kill existing worker so next request uses new config
+        # Recycle only out-of-process fallbacks; the resident daemon engine was
+        # already acknowledged and hot-swapped by _apply_runtime_config().
         try:
             from superlocalmemory.core.worker_pool import WorkerPool
             WorkerPool.shared().shutdown()
         except Exception:
             pass
-
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
 
         return {
             "success": True,
@@ -295,7 +340,7 @@ async def set_embedding_config(request: Request):
             api_version=old_emb.api_version,
             deployment_name=old_emb.deployment_name,
         )
-        config.save()
+        await _apply_runtime_config(request, config, mode_change=False)
 
         needs_reindex = (
             old_emb.provider != new_provider
@@ -309,9 +354,6 @@ async def set_embedding_config(request: Request):
             WorkerPool.shared().shutdown()
         except Exception:
             pass
-        if hasattr(request.app.state, "engine"):
-            request.app.state.engine = None
-
         return {
             "success": True,
             "provider": new_provider,
@@ -321,6 +363,55 @@ async def set_embedding_config(request: Request):
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/scope/config")
+async def get_scope_config(request: Request):
+    """Return runtime multi-scope defaults used by daemon writes and recalls."""
+    try:
+        from superlocalmemory.core.config import SLMConfig
+
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
+        return {"success": True, **config.scope.as_dict()}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.put("/scope/config")
+async def set_scope_config(request: Request):
+    """Validate, persist, and hot-apply explicit multi-scope defaults."""
+    try:
+        body = await request.json()
+        from superlocalmemory.core.config import SLMConfig, ScopeConfig
+
+        config = SLMConfig.load()
+        current = config.scope
+        default_scope = body.get("default_scope", current.default_scope)
+        if default_scope not in {"personal", "shared", "global"}:
+            return JSONResponse(
+                {"error": "default_scope must be personal, shared, or global"},
+                status_code=400,
+            )
+        include_global = body.get(
+            "recall_include_global", current.recall_include_global,
+        )
+        include_shared = body.get(
+            "recall_include_shared", current.recall_include_shared,
+        )
+        if not isinstance(include_global, bool) or not isinstance(include_shared, bool):
+            return JSONResponse(
+                {"error": "recall scope flags must be booleans"},
+                status_code=400,
+            )
+        config.scope = ScopeConfig(
+            default_scope=default_scope,
+            recall_include_global=include_global,
+            recall_include_shared=include_shared,
+        )
+        await _apply_runtime_config(request, config, mode_change=False)
+        return {"success": True, **config.scope.as_dict()}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @router.post("/embedding/test")
@@ -607,8 +698,7 @@ async def set_provider(request: Request):
         model = body.get("model", "")
         base_url = body.get("base_url", "")
 
-        from superlocalmemory.core.config import SLMConfig
-        from superlocalmemory.storage.models import Mode
+        from superlocalmemory.core.config import SLMConfig, LLMConfig
         config = SLMConfig.load()
 
         # Use preset base_url if not provided
@@ -619,15 +709,14 @@ async def set_provider(request: Request):
             if not model:
                 model = preset.get("model", "")
 
-        new_config = SLMConfig.for_mode(
-            config.mode,
-            llm_provider=provider,
-            llm_model=model,
-            llm_api_key=api_key,
-            llm_api_base=base_url,
+        # Mutate only the LLM block — all other config is preserved.
+        config.llm = LLMConfig(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            api_base=base_url,
         )
-        new_config.active_profile = config.active_profile
-        new_config.save()
+        config.save()
 
         return {"success": True, "provider": provider, "model": model}
     except Exception as e:
@@ -666,17 +755,16 @@ async def recall_trace(request: Request):
         )
         elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
 
-        results = []
-        for r in response.results[:limit]:
-            results.append({
-                "fact_id": r.fact.fact_id,
-                "memory_id": getattr(r.fact, "memory_id", ""),
-                "content": r.fact.content[:300],
-                "score": round(r.score, 4),
-                "confidence": round(getattr(r, "confidence", 0.0), 4),
-                "channel_scores": getattr(r, "channel_scores", {}),
-                "created_at": getattr(r.fact, "created_at", ""),
-            })
+        from superlocalmemory.server.recall_serializer import (
+            recall_response_metadata,
+            serialize_recall_response,
+        )
+        results, no_confident_match = serialize_recall_response(
+            response,
+            limit=limit,
+            per_fact_max=300,
+            total_max=max(300, limit * 300),
+        )
 
         # Record learning signals (non-blocking, non-critical)
         try:
@@ -692,6 +780,8 @@ async def recall_trace(request: Request):
             "retrieval_time_ms": elapsed_ms,
             "results": results,
             "synthesis": "",
+            "no_confident_match": no_confident_match,
+            **recall_response_metadata(response),
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -701,7 +791,8 @@ def _record_learning_signals(query: str, results: list) -> None:
     """Record feedback + co-retrieval + confidence boost for any recall."""
     from superlocalmemory.core.config import SLMConfig
 
-    slm_dir = Path.home() / ".superlocalmemory"
+    from superlocalmemory.infra.data_root import canonical_data_root
+    slm_dir = canonical_data_root()
     config = SLMConfig.load()
     pid = config.active_profile
     fact_ids = [r.get("fact_id", "") for r in results[:10] if r.get("fact_id")]
@@ -958,6 +1049,12 @@ async def run_consolidation(request: Request):
 
         config = SLMConfig.load()
         learning_db = DB_PATH.parent / "learning.db"
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-learning-consolidate",
+            profile_id=config.active_profile,
+        )
         result = await run_in_threadpool(
             run_consolidation_isolated,
             str(DB_PATH),
@@ -976,7 +1073,10 @@ async def run_consolidation(request: Request):
             except Exception:
                 pass
         stats = result.get("stats") or {}
+        authorization.complete()
         return {"success": True, **stats}
+    except HTTPException:
+        raise
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -1362,7 +1462,8 @@ async def trigger_consolidation(request: Request):
     """Trigger consolidation manually.
 
     Body: {"lightweight": false, "profile": ""}
-    Uses WorkerPool for thread safety (Rule 18).
+    Runs under the daemon's profile-runtime operation lease (Rule 18) so a
+    concurrent profile switch cannot commit mid-consolidation.
     """
     try:
         body = await request.json()
@@ -1371,46 +1472,54 @@ async def trigger_consolidation(request: Request):
 
         from superlocalmemory.server.routes.helpers import get_active_profile
         pid = profile or get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-consolidation-trigger",
+            profile_id=pid,
+        )
 
-        # Use WorkerPool to run consolidation in the worker subprocess (Rule 18)
-        try:
-            from superlocalmemory.core.worker_pool import WorkerPool
-            pool = WorkerPool.shared()
-            result = pool.send_command({
-                "action": "consolidate",
-                "profile_id": pid,
-                "lightweight": lightweight,
-            })
-            if result and result.get("ok"):
-                return {"success": True, **result}
-        except Exception:
-            pass
-
-        # Fallback: direct consolidation if WorkerPool unavailable
+        # v3.7.8 SEC-M-01: the prior "WorkerPool" fast path called
+        # ``pool.send_command(...)``, a method that does not exist on
+        # WorkerPool — every call raised AttributeError, was silently
+        # swallowed by the bare ``except``, and fell through to this direct
+        # path unconditionally. That dead branch is removed; consolidation
+        # always runs directly against a lease-protected DB connection so a
+        # concurrent profile switch cannot commit mid-consolidation.
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage import schema as _schema
         from superlocalmemory.core.consolidation_engine import ConsolidationEngine
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
 
-        config = SLMConfig.load()
-        db = DatabaseManager(config.db_path)
-        db.initialize(_schema)
+        runtime = get_profile_runtime(request.app.state)
+        with runtime.operation():
+            config = SLMConfig.load()
+            db = DatabaseManager(config.db_path)
+            db.initialize(_schema)
 
-        engine = ConsolidationEngine(db=db, config=config.consolidation, slm_config=config)
-        result = engine.consolidate(profile_id=pid, lightweight=lightweight)
+            engine = ConsolidationEngine(
+                db=db, config=config.consolidation, slm_config=config,
+            )
+            result = engine.consolidate(profile_id=pid, lightweight=lightweight)
 
-        # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
-        try:
-            from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
-            learning_db = config.base_dir / "learning.db"
-            cw = ConsolidationWorker(str(config.db_path), str(learning_db))
-            pattern_count = cw._generate_patterns(pid, False)
-            result["patterns_mined"] = pattern_count
-            logger.info("Auto-mined %d patterns after consolidation", pattern_count)
-        except Exception as exc:
-            logger.debug("Pattern mining after consolidation failed: %s", exc)
+            # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
+            try:
+                from superlocalmemory.learning.consolidation_worker import (
+                    ConsolidationWorker,
+                )
+                learning_db = config.base_dir / "learning.db"
+                cw = ConsolidationWorker(str(config.db_path), str(learning_db))
+                pattern_count = cw._generate_patterns(pid, False)
+                result["patterns_mined"] = pattern_count
+                logger.info("Auto-mined %d patterns after consolidation", pattern_count)
+            except Exception as exc:
+                logger.debug("Pattern mining after consolidation failed: %s", exc)
 
+        authorization.complete()
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1478,7 +1587,7 @@ async def update_core_memory_block(block_id: str, request: Request):
                 status_code=400,
             )
 
-        from superlocalmemory.server.routes.helpers import DB_PATH
+        from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
         import sqlite3
         from datetime import datetime, timezone
 
@@ -1488,14 +1597,24 @@ async def update_core_memory_block(block_id: str, request: Request):
                 status_code=404,
             )
 
+        pid = get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-core-memory-update",
+            profile_id=pid,
+            fact_id=block_id,
+            content_preview=str(content),
+        )
+
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
 
         # Verify block exists
         existing = conn.execute(
             "SELECT block_id, profile_id, block_type, version "
-            "FROM core_memory_blocks WHERE block_id = ?",
-            (block_id,),
+            "FROM core_memory_blocks WHERE block_id = ? AND profile_id = ?",
+            (block_id, pid),
         ).fetchone()
 
         if not existing:
@@ -1512,8 +1631,8 @@ async def update_core_memory_block(block_id: str, request: Request):
         conn.execute(
             "UPDATE core_memory_blocks SET content = ?, char_count = ?, "
             "version = ?, compiled_by = 'manual', updated_at = ? "
-            "WHERE block_id = ?",
-            (content, len(content), new_version, now, block_id),
+            "WHERE block_id = ? AND profile_id = ?",
+            (content, len(content), new_version, now, block_id, pid),
         )
         conn.commit()
 
@@ -1521,12 +1640,15 @@ async def update_core_memory_block(block_id: str, request: Request):
         updated = conn.execute(
             "SELECT block_id, block_type, content, char_count, version, "
             "compiled_by, updated_at FROM core_memory_blocks "
-            "WHERE block_id = ?",
-            (block_id,),
+            "WHERE block_id = ? AND profile_id = ?",
+            (block_id, pid),
         ).fetchone()
         conn.close()
 
+        authorization.complete()
         return dict(updated) if updated else {"block_id": block_id, "updated": True}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1652,6 +1774,12 @@ async def run_forgetting(request: Request):
         if not DB_PATH.exists():
             return {"success": False, "error": "Database not found"}
 
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-forgetting-run",
+            profile_id=pid,
+        )
         conn = _sqlite3.connect(str(DB_PATH))
         conn.row_factory = _sqlite3.Row
 
@@ -1695,13 +1823,19 @@ async def run_forgetting(request: Request):
                 (pid,),
             )
 
+            from superlocalmemory.core.lifecycle_state import reconcile_profile_lifecycle
+            reconcile_profile_lifecycle(conn, pid)
+
             conn.commit()
         except Exception as exc:
             conn.close()
             return {"success": False, "error": str(exc)}
 
         conn.close()
+        authorization.complete()
         return {"success": True, "facts_decayed": updated, "profile": pid}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -2071,12 +2205,21 @@ async def run_community_detection(request: Request):
         from superlocalmemory.core.graph_analyzer import GraphAnalyzer
 
         pid = get_active_profile()
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-community-detection",
+            profile_id=pid,
+        )
         db = DatabaseManager(DB_PATH)
         db.initialize(_schema)
 
         analyzer = GraphAnalyzer(db)
         result = analyzer.compute_and_store(pid)
+        authorization.complete()
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

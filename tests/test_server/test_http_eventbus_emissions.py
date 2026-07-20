@@ -14,6 +14,7 @@ All tests mock the EventBus so no database or daemon is required.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 import unittest.mock as mock
 
 from superlocalmemory.infra.event_bus import VALID_EVENT_TYPES
@@ -66,27 +67,46 @@ def test_emit_event_uses_http_protocol(tmp_path):
 
 def test_enqueue_emits_memory_observed():
     buf = ObserveBuffer(debounce_sec=60)  # long debounce — no flush in test
+    buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
     emitted: list[tuple] = []
 
     with mock.patch(
         "superlocalmemory.server.unified_daemon._emit_event",
         side_effect=lambda et, payload=None, **kw: emitted.append((et, payload)),
-    ):
-        buf.enqueue("hello world")
+    ), mock.patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto, mock.patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+    ) as build:
+        auto.return_value.evaluate.return_value = SimpleNamespace(
+            capture=True, category="decision", confidence=0.75, reason="matched"
+        )
+        build.return_value.submit.return_value = SimpleNamespace(
+            operation_id="op-1", fact_ids=("fact-1",), state=SimpleNamespace(value="queryable")
+        )
+        result = buf.enqueue("we decided to use sqlite for durable storage")
 
+    assert result["durable"] is True
     assert any(et == "memory.observed" for et, _ in emitted)
 
 
 def test_enqueue_duplicate_does_not_emit():
     buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
     emitted: list[str] = []
 
     with mock.patch(
         "superlocalmemory.server.unified_daemon._emit_event",
         side_effect=lambda et, **kw: emitted.append(et),
-    ):
-        buf.enqueue("same content")
-        buf.enqueue("same content")  # duplicate — no event
+    ), mock.patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto, mock.patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+    ) as build:
+        auto.return_value.evaluate.return_value = SimpleNamespace(
+            capture=True, category="decision", confidence=0.75, reason="matched"
+        )
+        build.return_value.submit.return_value = SimpleNamespace(
+            operation_id="op-1", fact_ids=("fact-1",), state=SimpleNamespace(value="queryable")
+        )
+        buf.enqueue("we decided to use the same durable content")
+        buf.enqueue("we decided to use the same durable content")
 
     assert emitted.count("memory.observed") == 1
 
@@ -96,7 +116,8 @@ def test_enqueue_duplicate_does_not_emit():
 # ---------------------------------------------------------------------------
 
 def _flush_with_decision(capture: bool) -> list[tuple[str, dict | None]]:
-    buf = ObserveBuffer(debounce_sec=0.01)
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
     emitted: list[tuple[str, dict | None]] = []
 
     decision = mock.MagicMock()
@@ -112,9 +133,15 @@ def _flush_with_decision(capture: bool) -> list[tuple[str, dict | None]]:
         side_effect=lambda et, payload=None, **kw: emitted.append((et, payload)),
     ):
         MockAC.return_value.evaluate.return_value = decision
-        buf.set_engine(object())
-        buf.enqueue("some content")
-        time.sleep(0.15)
+        command = mock.MagicMock()
+        command.submit.return_value = SimpleNamespace(
+            operation_id="op-1", fact_ids=("fact-1",), state=SimpleNamespace(value="queryable")
+        )
+        with mock.patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+            return_value=command,
+        ):
+            buf.enqueue("we decided to use some durable content")
 
     return emitted
 

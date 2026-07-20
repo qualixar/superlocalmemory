@@ -26,7 +26,7 @@ References:
     the classical compact groups.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from superlocalmemory.core.config import PolarQuantConfig
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +114,7 @@ class PolarQuantEncoder:
         """
         path_str = self._config.rotation_matrix_path
         if not path_str:
-            path_str = str(
-                Path.home() / ".superlocalmemory" / f"polar_rotation_{self._d}.npy",
-            )
+            path_str = str(state_path(f"polar_rotation_{self._d}.npy"))
 
         path = Path(path_str)
 

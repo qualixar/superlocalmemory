@@ -1,6 +1,6 @@
 # IDE Setup
 
-SuperLocalMemory works with 17+ IDEs via the Model Context Protocol (MCP). The fastest way to connect is auto-detection.
+SuperLocalMemory provides documented MCP configurations for named clients. Run `slm connect --list` to see the current release surface; other MCP-compatible clients can be configured manually but are not automatically release-verified.
 
 ## Auto-Detection (Recommended)
 
@@ -10,6 +10,11 @@ slm connect --list # See which IDEs are configured
 ```
 
 After running, restart your IDE to activate the connection.
+
+`slm connect` writes only product-authored connection and memory protocol to
+IDE instruction files. It does not copy recalled topics, decisions, entities,
+or memory text into those high-trust files. Dynamic context is fetched through
+MCP at runtime and is delivered as bounded, untrusted evidence.
 
 ## Manual Setup by IDE
 

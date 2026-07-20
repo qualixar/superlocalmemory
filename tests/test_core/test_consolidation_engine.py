@@ -333,6 +333,11 @@ class TestConsolidationPromote:
         result = engine._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "warm"
+        retention = tmp_db.execute(
+            "SELECT lifecycle_zone FROM fact_retention WHERE fact_id = ?",
+            (fid,),
+        )
+        assert retention and dict(retention[0])["lifecycle_zone"] == "warm"
 
     def test_promote_requires_min_access(
         self, engine: ConsolidationEngine, tmp_db: DatabaseManager,

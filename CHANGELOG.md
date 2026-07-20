@@ -5,6 +5,146 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.8] - 2026-07-20 — Profile-isolation leak fix, loopback auth opt-in, hardening
+
+### Fixed
+
+- **Cross-profile recall leak (critical).** After a profile switch, the dashboard Chat, memory-facts, and cluster-summary routes read from a long-lived `WorkerPool` subprocess that cached the previous profile for up to 120 seconds, so those views could return the prior profile's memories while the UI reported the new one. Those routes now read the daemon's resident, lease-protected engine — which `commit_daemon_profile_switch` rebinds synchronously on every switch, exactly as the `/recall` and `/remember` endpoints already do — so recall always reflects the current profile. Added full-daemon isolation regression tests that store under one profile, switch, and assert the other profile's data is never returned.
+- Removed a dead consolidation-trigger fast path (`WorkerPool.send_command`, a method that never existed and silently fell through on every call) and placed the remaining direct-consolidation path under the profile-runtime lease so a concurrent switch cannot commit mid-consolidation.
+- The MCP `switch_profile` tool now synchronizes local engine state only to the profile the daemon actually acknowledged, and re-validates that the profile exists locally before adopting it, instead of trusting the response body.
+
+### Added
+
+- `SLM_REQUIRE_API_KEY_LOOPBACK` opt-in. When set together with a configured `api_key` file, uncredentialed loopback writes must also present a matching `X-SLM-API-Key`, restoring the strict posture for shared-host operators. Default behavior is unchanged (local-first): the flag is a no-op unless explicitly enabled. This is a single, explicit control rather than overloading "an api_key file exists" with two meanings — the overload that caused the 3.7.6 write-auth regressions.
+
+### Changed
+
+- Removed the dead `V32_VEC0_DDL` schema constant and retired the now-inert unconditional `check_api_key` write gate (repurposed as the sole enforcement point for the loopback opt-in). The legacy `api.py`/`ui.py` app factories are documented as not served by the daemon.
+
+## [3.7.7] - 2026-07-20 — Profile isolation and runtime integrity
+
+### Fixed
+
+- Fixes daemon-aware profile switching and profile-isolated CLI reads/writes. Profile transitions now drain admitted operations, atomically rebind the resident engine, persist only after a successful transition, and return a generation-stamped acknowledgement to CLI, dashboard/API, and MCP callers without restarting the daemon.
+- Dashboard mode, provider, embedding, and memory-visibility changes now take effect through the same daemon-owned runtime transition boundary. Existing custom embedding settings survive setup-mode changes, and Optimize cache vectors follow the configured embedding dimension instead of assuming 768 dimensions.
+- Migration reconciliation now accepts only explicitly allowlisted historical hashes and verifies the complete required schema before updating migration metadata; unknown or structurally incomplete drift fails closed.
+- Restored cross-platform UI test discovery and added dependency and high-severity static security gates to CI.
+- Upgraded the audited web, MCP, cryptography, and Transformers dependency stack to patched releases. Three narrowly scoped NLTK, setuptools, and PyTorch advisories are tracked as exact, dated exceptions; PyTorch remains on the proven 2.11 runtime because the combined native/ML upgrade produced a full-suite process crash and could not be attributed safely to one package.
+
+### Added
+
+- Dashboard controls and API/CLI configuration support for the default write scope and explicit shared/global recall opt-ins. Personal-only recall remains the default.
+
+## [3.7.6] - 2026-07-19 — Auth, upgrade, and embedding-dimension fixes
+
+### Fixed
+
+- Writes authenticated by the daemon capability or the dashboard install token are no longer rejected once an `api_key` file is configured. The write path ran a redundant second gate that only understood `X-SLM-API-Key`, so capability-authenticated MCP `remember` write-throughs and install-token dashboard writes / config tests returned 401 "Invalid or missing API key" whenever opt-in API-key auth was enabled. The mutation-actor gate — which already accepts the daemon capability, the install token, a matching API key, or an uncredentialed loopback caller — is now the single authoritative write boundary. (#71, #73, #74)
+- Upgrading an install across a benign migration DDL change no longer leaves the daemon permanently `not_ready`. On a `ddl_sha256` mismatch for a migration already marked complete, the runner now consults the migration's `verify()`; when the schema end-state is present it reconciles the log to the current hash instead of failing readiness. Real drift with an absent schema is still surfaced as a failure. (#70)
+- The LanceDB vector backend now follows the configured embedding dimension instead of a hardcoded 768, so custom OpenAI-compatible endpoints (for example 1024-d Qwen3-Embedding) no longer hit a vector-dimension mismatch on initialization. An existing store's on-disk width is always honored, keeping already-materialized data readable after a configuration change. (#72)
+
+### Improved
+
+- `slm setup` skips the local 768-d embedding-model download when a remote/OpenAI-compatible embedding endpoint is configured, instead of forcing an unnecessary model fetch. (#72)
+- Aligned retrieval documentation and docstrings with the shipped architecture: five parallel candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) feed single-pass RRF fusion, followed by optional cross-encoder rerank and an entity-graph post-fusion score enhancement. The entity graph is not a sixth parallel candidate producer.
+
+## [3.7.5] - 2026-07-18 — Complete Scale Engine projection parity
+
+### Improved
+
+- Scale Engine vector preparation now reads the supported sqlite-vec virtual-table contract and joins vectors through canonical embedding metadata.
+- LanceDB projection imports are profile-scoped, lifecycle-aware, and processed in bounded batches to keep migration memory stable.
+- Scale verification and fingerprints now cover the same canonical vector rows that are written to LanceDB, so a partial vector projection cannot pass parity.
+
+## [3.7.4] - 2026-07-18 — Scale Engine projection-parity release
+
+### Fixed
+
+- Aligned CozoDB projection parity with SLM's logical graph-edge identity while retaining the strongest relationship weight.
+- Preserved canonical SQLite history when normalizing legacy repeated graph rows into derived scale projections.
+- Kept rejected projection manifests inspectable, retired replaceable stage payloads, and allowed a corrected, explicitly confirmed adoption retry.
+- Removed stale CozoDB graph edges when a fact is deleted and kept shadow-error telemetry side-effect free.
+
+## [3.7.3] - 2026-07-18 — Scale Engine integrity release
+
+### Fixed
+
+- Added explicit, structurally verified adoption for pre-v3.7 CozoDB/LanceDB projections.
+- Added durable promotion recovery, lifecycle serialization, and a final canonical-source consistency fence.
+- Made Scale Engine status distinguish installed projection paths, lifecycle state, and live daemon backend health.
+- Unified shipped runtime identity metadata at the release version.
+
+## [3.7.2] - 2026-07-16 — Reliability release
+
+### Fixed
+
+- Strengthened daemon-owned local write coordination across Mesh and MCP paths.
+- Kept durable facts queryable when optional enrichment needs a controlled retry.
+- Preserved graph-aware retrieval through the canonical fallback when sqlite-vec is unavailable.
+- Bounded local embedding-worker dependency failures to prevent repeated worker respawns.
+- Hardened Windows RAM reservations and cross-platform installer validation.
+
+## [3.7.1] - 2026-07-16 — Installer-parity hotfix
+
+### Fixed
+
+- Included the full `plugin-src/` build inputs in the npm artifact so the npm-owned Python runtime can build with the same Codex skill data files as the PyPI artifact.
+- Added a release gate that fails when any Python `data-files` build source is absent from `npm pack` output.
+- Corrected first-run configuration metadata to use the installed runtime version instead of a stale historical version.
+- Kept background reranker warmup informational on first run; fallback retrieval remains explicit and `slm doctor` remains the diagnostic path.
+
+## [3.7.0] - 2026-07-16 — Release package
+
+V3.7 packages the audit-hardening stream: fail-closed release promotion,
+exact artifact testing, evidence and checksums, canonical version/license
+guards, daemon identity and mutation authorization, and retrieval/ingestion
+integrity fixes. Publication remains gated on the final evidence bundle and
+registry verification.
+
+## [3.6.23] - 2026-07-12 — Cross-platform data-root and maintenance hardening
+
+### Fixed
+
+- Resolved the server data directory from the supported environment variables instead of a hard-coded path.
+- Made Langevin maintenance backfill tolerate timezone-naive `created_at` values.
+- Applied the coordinated cross-platform release patch and reconciled package metadata at 3.6.23.
+
+## [3.6.22] - 2026-06-30 — Provider response hardening
+
+### Fixed
+
+- Treated an empty HTTP 200 provider body as a controlled provider error instead of leaking a `JSONDecodeError`.
+- Completed the remaining dashboard audit fixes included in the 3.6.22 release tag.
+
+## [3.6.21] - 2026-06-30 — Dashboard audit and settings preservation
+
+### Fixed
+
+- Preserved unrelated user settings when dashboard and MCP configuration paths write updates.
+- Completed the dashboard UI audit and browser-side mesh authentication repair for issue #60.
+
+## [3.6.20] - 2026-06-26 — Remote mesh authentication repair
+
+### Fixed
+
+- Accepted the supported bearer-token authentication path in the mesh broker and removed the superseded validation path.
+
+## [3.6.19] - 2026-06-24 — Plugin hook source correction
+
+### Fixed
+
+- Moved the session mandate hook into `plugin-src`, the actual build source, so npm prepack no longer overwrites the shipped hook with stale content.
+
+## [3.6.18] - 2026-06-24 — Session mandate and atomic installer state
+
+### Added
+
+- Added the `session_init` mandate, plugin auto-install support, migration M017, and garbage-collection-safe tests.
+
+### Fixed
+
+- Made `settings.json` replacement atomic and hook installation idempotent across repeated installer runs.
+
 ## [3.6.17] - 2026-06-21 — Community PR round + dashboard-feedback fix + SQLite tuning
 
 Eight community pull requests merged after line-by-line review, plus fixes for the open issues. Every change was validated against the full test suite under the real 3.12 runtime; default single-machine behavior is unchanged.

@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from superlocalmemory.infra.data_root import state_path
+
 logger = logging.getLogger("superlocalmemory.events")
 
 # Default retention windows (hours)
@@ -66,7 +68,7 @@ class EventBus:
     def get_instance(cls, db_path: Optional[Path] = None) -> "EventBus":
         """Get or create the singleton EventBus for a database path."""
         if db_path is None:
-            db_path = Path.home() / ".superlocalmemory" / "memory.db"
+            db_path = state_path("memory.db")
 
         key = str(db_path)
         with cls._instances_lock:

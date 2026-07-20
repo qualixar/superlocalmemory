@@ -12,7 +12,7 @@ the entire index. This version persists tokens to the DB via
 store_bm25_tokens / get_all_bm25_tokens and cold-loads on init.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ import re
 from typing import TYPE_CHECKING
 
 from rank_bm25 import BM25Plus
+
+from superlocalmemory.storage.database import _scope_where
 
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
@@ -72,6 +74,7 @@ class BM25Channel:
         self._bm25: BM25Plus | None = None
         self._dirty: bool = False
         self._loaded_profiles: set[str] = set()
+        self._loaded_scope_key: tuple[str, bool, bool] | None = None
 
     @property
     def document_count(self) -> int:
@@ -82,18 +85,31 @@ class BM25Channel:
 
         Idempotent: subsequent calls for the same profile are no-ops.
         """
-        if profile_id in self._loaded_profiles:
+        include_global = bool(getattr(self, "include_global", False))
+        include_shared = bool(getattr(self, "include_shared", False))
+        scope_key = (profile_id, include_global, include_shared)
+        if scope_key == self._loaded_scope_key:
             return
 
-        token_map = self._db.get_all_bm25_tokens(profile_id)
-        _inc_global = getattr(self, 'include_global', False)
-        _inc_shared = getattr(self, 'include_shared', False)
+        # A legacy in-memory index is a visibility-specific view. Reusing a
+        # corpus warmed under another profile/scope leaks private documents or
+        # omits newly enabled global/shared documents.
+        self._corpus = []
+        self._fact_ids = []
+        self._fact_id_set = set()
+        self._raw_texts = []
+        self._bm25 = None
+        token_map = self._db.get_all_bm25_tokens(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         if not token_map:
             # Fallback: tokenize facts directly if no pre-stored tokens
             facts = self._db.get_all_facts(
                 profile_id,
-                include_global=_inc_global,
-                include_shared=_inc_shared,
+                include_global=include_global,
+                include_shared=include_shared,
             )
             for fact in facts:
                 if fact.fact_id in self._fact_id_set:
@@ -112,8 +128,8 @@ class BM25Channel:
             try:
                 facts = self._db.get_all_facts(
                     profile_id,
-                    include_global=_inc_global,
-                    include_shared=_inc_shared,
+                    include_global=include_global,
+                    include_shared=include_shared,
                 )
                 fact_content_map = {f.fact_id: f.content for f in facts}
             except Exception:
@@ -128,6 +144,7 @@ class BM25Channel:
 
         self._dirty = True
         self._loaded_profiles.add(profile_id)
+        self._loaded_scope_key = scope_key
         logger.debug(
             "BM25 cold-loaded %d documents for profile=%s",
             len(token_map) if token_map else 0, profile_id,
@@ -176,14 +193,20 @@ class BM25Channel:
         # Quote each token so query punctuation can't break FTS5 MATCH syntax;
         # OR-join for high recall (any token may match).
         match_expr = " OR ".join('"' + t.replace('"', "") + '"' for t in tokens)
+        where, params = _scope_where(
+            profile_id,
+            include_global=bool(getattr(self, "include_global", False)),
+            include_shared=bool(getattr(self, "include_shared", False)),
+            prefix="af",
+        )
         sql = (
             "SELECT af.fact_id AS fact_id, bm25(atomic_facts_fts) AS rank "
             "FROM atomic_facts_fts "
             "JOIN atomic_facts af ON af.rowid = atomic_facts_fts.rowid "
-            "WHERE atomic_facts_fts MATCH ? AND af.profile_id = ? "
+            f"WHERE atomic_facts_fts MATCH ? AND {where} "
             "ORDER BY rank LIMIT ?"
         )
-        rows = self._db.execute(sql, (match_expr, profile_id, int(top_k)))
+        rows = self._db.execute(sql, (match_expr, *params, int(top_k)))
         out: list[tuple[str, float]] = []
         for r in rows:
             d = dict(r)
@@ -263,3 +286,4 @@ class BM25Channel:
         self._bm25 = None
         self._dirty = False
         self._loaded_profiles = set()
+        self._loaded_scope_key = None

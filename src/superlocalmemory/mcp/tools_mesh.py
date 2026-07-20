@@ -17,7 +17,6 @@ Auto-heartbeat keeps the session alive as long as the MCP server is running.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import threading
@@ -38,18 +37,6 @@ _HEARTBEAT_THREAD: threading.Thread | None = None
 _REGISTERED = False
 
 
-def _daemon_url() -> str:
-    """Get the daemon base URL."""
-    port = 8765
-    try:
-        port_file = os.path.join(os.path.expanduser("~"), ".superlocalmemory", "daemon.port")
-        if os.path.exists(port_file):
-            port = int(open(port_file).read().strip())
-    except Exception:
-        pass
-    return f"http://127.0.0.1:{port}"
-
-
 def _detect_project_path() -> str:
     """Detect current project path from env or cwd."""
     return (
@@ -60,15 +47,11 @@ def _detect_project_path() -> str:
 
 
 def _mesh_request(method: str, path: str, body: dict | None = None) -> dict | None:
-    """Send request to daemon mesh broker."""
-    import urllib.request
-    url = f"{_daemon_url()}/mesh{path}"
+    """Send an exact-instance, capability-authenticated mesh request."""
     try:
-        data = json.dumps(body).encode() if body else None
-        headers = {"Content-Type": "application/json"} if data else {}
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        resp = urllib.request.urlopen(req, timeout=10)
-        return json.loads(resp.read().decode())
+        from superlocalmemory.cli.daemon import daemon_request
+
+        return daemon_request(method, f"/mesh{path}", body)
     except Exception as exc:
         logger.debug("Mesh request failed: %s %s — %s", method, path, exc)
         return None
@@ -232,8 +215,9 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
     async def mesh_state(key: str = "", value: str = "", action: str = "get") -> dict:
         """Get or set shared state across all sessions.
 
-        Shared state is visible to all peers. Use for coordinating work:
-        server IPs, API keys, feature flags, task assignments.
+        Shared state is visible to authenticated peers. Use it for non-secret
+        coordination metadata such as feature flags and task assignments.
+        Credentials, tokens, passwords, and API keys are rejected.
 
         Args:
             key: State key name

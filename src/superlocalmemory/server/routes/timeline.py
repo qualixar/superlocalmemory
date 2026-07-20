@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v3/timeline", tags=["timeline"])
 
 VALID_RANGES = {"1d", "7d", "30d", "90d", "365d"}
-VALID_GROUP_BY = {"category", "community"}
+# ``date`` is the dashboard's chronological view.  It does not need an extra
+# enrichment pass because each returned event already carries its timestamp,
+# but it is a first-class grouping selection and must not be rejected at the
+# API boundary.
+VALID_GROUP_BY = {"category", "community", "date"}
 INTERNAL_CEILING = 5000
 
 

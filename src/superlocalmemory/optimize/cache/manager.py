@@ -79,6 +79,39 @@ class NoOpSemantic(SemanticTier):
         return False
 
 
+class _LazySemanticEmbedder:
+    """Start the canonical embedding service only after an opted-in lookup."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._service = None
+
+    def __call__(self, text: str) -> list[float] | None:
+        if self._service is None:
+            with self._lock:
+                if self._service is None:
+                    from superlocalmemory.core.config import SLMConfig
+                    from superlocalmemory.core.embeddings import EmbeddingService
+
+                    self._service = EmbeddingService(SLMConfig.load().embedding)
+        return self._service.embed(text)
+
+    @property
+    def dimension(self) -> int:
+        from superlocalmemory.core.config import SLMConfig
+
+        return int(SLMConfig.load().embedding.dimension)
+
+    def close(self) -> None:
+        service = self._service
+        self._service = None
+        if service is not None:
+            try:
+                service.unload()
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -130,13 +163,23 @@ class CacheManager:
         self._metrics = CacheMetrics()
 
     @classmethod
-    def get_instance(cls) -> "CacheManager":
+    def get_instance(
+        cls,
+        *,
+        optimize_config: Any | None = None,
+        semantic_embedder: Callable[[str], list[float] | None] | None = None,
+    ) -> "CacheManager":
         if cls._instance is None:
             with cls._instance_lock:
                 if cls._instance is None:
                     from superlocalmemory.optimize.storage.db import CacheDB as _CacheDB
                     _db = _CacheDB.get_default()
                     cls._instance = cls(db=_db)
+        if optimize_config is not None:
+            cls._instance.configure_semantic(
+                optimize_config,
+                embedder=semantic_embedder,
+            )
         return cls._instance
 
     @classmethod
@@ -149,6 +192,7 @@ class CacheManager:
         """Reset the singleton (testing only)."""
         with cls._instance_lock:
             if cls._instance is not None:
+                cls._instance._close_semantic()
                 try:
                     cls._instance._db.close()  # type: ignore[attr-defined]
                 except Exception:
@@ -416,7 +460,46 @@ class CacheManager:
         MetricsCollector.get_instance().on_miss()
 
     def set_semantic_tier(self, tier: SemanticTier) -> None:
+        self._close_semantic()
         self._semantic = tier
+
+    def _close_semantic(self) -> None:
+        close = getattr(self._semantic, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def configure_semantic(
+        self,
+        optimize_config: Any,
+        *,
+        embedder: Callable[[str], list[float] | None] | None = None,
+    ) -> None:
+        """Wire or disable the real semantic tier from live proxy config."""
+        enabled = bool(getattr(optimize_config, "semantic_enabled", False))
+        if not enabled:
+            if not isinstance(self._semantic, NoOpSemantic):
+                self.set_semantic_tier(NoOpSemantic())
+            return
+
+        from superlocalmemory.optimize.cache.semantic import VCacheSemantic
+
+        desired_embedder = embedder or _LazySemanticEmbedder()
+        current = self._semantic
+        if (
+            isinstance(current, VCacheSemantic)
+            and current._config == optimize_config
+            and (embedder is None or current._embedder is embedder)
+        ):
+            return
+        self.set_semantic_tier(VCacheSemantic(
+            db=self._db,
+            config=optimize_config,
+            embedder=desired_embedder,
+            embedding_dimension=getattr(desired_embedder, "dimension", None),
+        ))
 
     # ---- core request path ----
 

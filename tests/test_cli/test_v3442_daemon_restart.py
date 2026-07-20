@@ -23,9 +23,8 @@ The fix:
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
-
-import pytest
+from itertools import chain, repeat
+from unittest.mock import MagicMock, patch
 
 
 class TestStartDaemonSubprocessHelper:
@@ -84,6 +83,16 @@ class TestStartDaemonSubprocessHelper:
 
         assert result is False
 
+    def test_refuses_to_spawn_when_a_listener_already_owns_the_port(self) -> None:
+        from superlocalmemory.cli import daemon as _daemon
+
+        with patch.object(_daemon, "is_daemon_running", return_value=False), patch.object(
+            _daemon, "_has_tcp_listener", return_value=True,
+        ), patch("subprocess.Popen") as popen:
+            assert not _daemon._start_daemon_subprocess()
+
+        popen.assert_not_called()
+
 
 class TestEnsureDaemonStillWorks:
     """ensure_daemon() must keep its existing semantics for non-restart callers."""
@@ -95,10 +104,13 @@ class TestEnsureDaemonStillWorks:
         with patch.object(_daemon, "is_daemon_running", return_value=True):
             assert _daemon.ensure_daemon() is True
 
-    def test_ensure_daemon_delegates_to_helper_after_lock(self, tmp_path) -> None:
+    def test_ensure_daemon_delegates_to_helper_after_lock(
+        self, tmp_path, monkeypatch,
+    ) -> None:
         """ensure_daemon now delegates the actual spawn to the helper."""
         from superlocalmemory.cli import daemon as _daemon
 
+        monkeypatch.setenv("SLM_TEST_ALLOW_DAEMON_SPAWN", "1")
         with patch.object(_daemon, "is_daemon_running", side_effect=[False, False]), \
              patch.object(_daemon, "_LOCK_FILE", tmp_path / "daemon.lock"), \
              patch.object(_daemon, "_start_daemon_subprocess", return_value=True) as helper:
@@ -107,13 +119,64 @@ class TestEnsureDaemonStillWorks:
         helper.assert_called_once()
 
 
+class TestOwnedDaemonShutdownWait:
+    """Restart must wait for port release, not merely descriptor removal."""
+
+    def test_wait_requires_process_exit_and_port_release(self) -> None:
+        from types import SimpleNamespace
+        from superlocalmemory.cli import daemon as _daemon
+
+        descriptor = SimpleNamespace(port=18765)
+        with patch.object(
+            _daemon, "_descriptor_process_is_alive",
+            side_effect=chain([True, False], repeat(False)),
+        ), patch.object(
+            _daemon, "_is_port_available", side_effect=[False, True],
+        ), patch.object(_daemon.time, "sleep"):
+            assert _daemon.wait_for_owned_daemon_shutdown(descriptor, timeout=1)
+
+    def test_wait_refuses_restart_when_port_remains_owned(self) -> None:
+        from types import SimpleNamespace
+        from superlocalmemory.cli import daemon as _daemon
+
+        descriptor = SimpleNamespace(port=18765)
+        with patch.object(
+            _daemon, "_descriptor_process_is_alive", return_value=False,
+        ), patch.object(
+            _daemon, "_is_port_available", return_value=False,
+        ), patch.object(_daemon.time, "monotonic", side_effect=[0, 0, 2]), patch.object(
+            _daemon.time, "sleep",
+        ):
+            assert not _daemon.wait_for_owned_daemon_shutdown(descriptor, timeout=1)
+
+    def test_zombie_descriptor_process_is_not_treated_as_alive(self) -> None:
+        from types import SimpleNamespace
+        import psutil
+        from superlocalmemory.cli import daemon as _daemon
+
+        process = MagicMock()
+        process.is_running.return_value = True
+        process.status.return_value = psutil.STATUS_ZOMBIE
+        descriptor = SimpleNamespace(pid=99991, process_create_time=1.0)
+        with patch.object(_daemon, "_is_pid_alive", return_value=True), patch(
+            "psutil.Process", return_value=process,
+        ):
+            assert _daemon._descriptor_process_is_alive(descriptor) is False
+
+
 class TestRestartStep3UsesHelperNotEnsureDaemon:
     """B1 regression guard: Step 3 must NOT call ensure_daemon (would self-deadlock)."""
 
     def test_cmd_restart_imports_start_daemon_subprocess_not_ensure_daemon_in_step3(self) -> None:
         """The fix is observable in the source: Step 3 imports the helper, not ensure_daemon."""
         from pathlib import Path
-        commands_py = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "cli" / "commands.py"
+        commands_py = (
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "superlocalmemory"
+            / "cli"
+            / "commands.py"
+        )
         text = commands_py.read_text()
 
         # Find the cmd_restart function body
@@ -131,3 +194,15 @@ class TestRestartStep3UsesHelperNotEnsureDaemon:
             "cmd_restart must not import ensure_daemon — that re-introduces the "
             "v3.4.13→v3.4.41 self-deadlock bug."
         )
+
+
+def test_restart_never_scans_or_kills_machine_wide_processes() -> None:
+    """V3.7 restart is namespace-owned, never process-name-wide."""
+    import inspect
+
+    from superlocalmemory.cli.commands import cmd_restart
+
+    source = inspect.getsource(cmd_restart)
+    assert "process_iter" not in source
+    assert "pkill" not in source
+    assert "stop_daemon" in source

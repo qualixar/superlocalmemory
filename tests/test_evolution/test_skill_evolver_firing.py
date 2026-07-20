@@ -88,6 +88,10 @@ def stop_env(
         return True
 
     monkeypatch.setattr(hh, "_daemon_post", _fake_daemon_post)
+    # Cognitive consolidation owns a detached subprocess and is unrelated to
+    # these evolution-trigger tests. Keep that independent lifecycle out of
+    # this fixture rather than leaking a live Popen at test teardown.
+    monkeypatch.setattr(hh, "_maybe_consolidate", lambda: None)
 
     # Record SkillEvolver.run_post_session calls.
     evolver_calls: list[dict[str, Any]] = []

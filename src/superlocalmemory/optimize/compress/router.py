@@ -18,10 +18,15 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest, CompressHook
 from superlocalmemory.optimize.config.store import ConfigStore
+
+if TYPE_CHECKING:
+    from superlocalmemory.optimize.compress.align import CacheAligner
+    from superlocalmemory.optimize.compress.ccr import CCRStore
+    from superlocalmemory.optimize.compress.prose_llmlingua import LLMLinguaCompressor
 
 logger = logging.getLogger("slm.optimize.compress.router")
 

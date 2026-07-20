@@ -10,18 +10,18 @@ FastMCP settings. Mirrors unified_daemon.py's stateless block.
 
 from __future__ import annotations
 
-import importlib
+from types import SimpleNamespace
 
 import pytest
 
 from superlocalmemory.core import remote_mode
 
 
-def _fresh_fastmcp():
-    """A fresh FastMCP server instance (re-import to avoid cross-test state)."""
-    import superlocalmemory.mcp.server as server_mod
-    importlib.reload(server_mod)
-    return server_mod.server
+def _fresh_fastmcp_settings():
+    """Minimal settings double; rebuilding FastMCP in-process is unsafe."""
+    return SimpleNamespace(
+        settings=SimpleNamespace(stateless_http=False, json_response=False),
+    )
 
 
 def test_mcp_stateless_predicate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,11 +37,12 @@ def test_daemon_wiring_flips_stateless_when_opted_in(monkeypatch: pytest.MonkeyP
     FastMCP settings must enable stateless_http + json_response so a forwarder
     can call tools/call without an Mcp-Session-Id."""
     monkeypatch.setenv("SLM_MCP_STATELESS", "1")
-    fastmcp = _fresh_fastmcp()
-    # exact wiring performed by unified_daemon.create_app()
-    if remote_mode.mcp_stateless():
-        fastmcp.settings.stateless_http = True
-        fastmcp.settings.json_response = True
+    from superlocalmemory.server.unified_daemon import (
+        _configure_mcp_transport_settings,
+    )
+
+    fastmcp = _fresh_fastmcp_settings()
+    _configure_mcp_transport_settings(fastmcp)
     assert fastmcp.settings.stateless_http is True
     assert fastmcp.settings.json_response is True
 
@@ -51,7 +52,15 @@ def test_daemon_wiring_stays_stateful_by_default(monkeypatch: pytest.MonkeyPatch
     rely on sessions); the daemon must NOT flip stateless."""
     monkeypatch.delenv("SLM_REMOTE", raising=False)
     monkeypatch.delenv("SLM_MCP_STATELESS", raising=False)
-    fastmcp = _fresh_fastmcp()
+    from superlocalmemory.server.unified_daemon import (
+        _configure_mcp_transport_settings,
+    )
+
+    fastmcp = _fresh_fastmcp_settings()
+    # Prove the helper resets a singleton that was stateless in a prior app.
+    fastmcp.settings.stateless_http = True
+    fastmcp.settings.json_response = True
+    _configure_mcp_transport_settings(fastmcp)
     assert remote_mode.mcp_stateless() is False
-    # The daemon's `if mcp_stateless():` block would NOT run → settings untouched.
     assert fastmcp.settings.stateless_http is False
+    assert fastmcp.settings.json_response is False

@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _VARIANCE_FLOOR: float = 1e-6
-_EMBED_DIM: int = 768
 
 # Stage-9 fix: cap the NUMBER of tenants held in memory.  The per-tenant entry
 # caps (WP-A/B) bound depth, but _centroids/_counts grew once per distinct
@@ -59,11 +58,16 @@ class CentroidStore:
     Centroid update rule (Welford running mean — exact, O(1) per update):
         new_centroid = old_centroid * (n / (n+1)) + new_vec * (1 / (n+1))
     """
-    def __init__(self, max_tenants: int = _MAX_TENANTS) -> None:
+    def __init__(
+        self,
+        max_tenants: int = _MAX_TENANTS,
+        embedding_dimension: int | None = None,
+    ) -> None:
         # OrderedDict for O(1) LRU eviction by tenant count.
         self._centroids: "OrderedDict[str, np.ndarray]" = OrderedDict()  # tenant → vec
         self._counts: "OrderedDict[str, int]" = OrderedDict()            # tenant → count
         self._max_tenants = max_tenants
+        self._embedding_dimension = embedding_dimension
         self._lock = threading.RLock()
 
     def _evict_tenants_if_needed(self) -> None:
@@ -89,7 +93,9 @@ class CentroidStore:
             for _entry_id, blob, _ctx_fp in rows:
                 try:
                     vec = np.frombuffer(blob, dtype=np.float32).copy()
-                    if vec.shape[0] == _EMBED_DIM:
+                    if self._embedding_dimension is None:
+                        self._embedding_dimension = int(vec.shape[0])
+                    if vec.shape[0] == self._embedding_dimension:
                         vectors.append(vec)
                 except Exception:
                     continue
@@ -116,7 +122,17 @@ class CentroidStore:
         """
         try:
             vec = new_vector.astype(np.float32)
+            if vec.ndim != 1 or vec.size == 0:
+                return
             with self._lock:
+                if self._embedding_dimension is None:
+                    self._embedding_dimension = int(vec.shape[0])
+                if vec.shape[0] != self._embedding_dimension:
+                    logger.warning(
+                        "CentroidStore.update skipped dimension %d; expected %d",
+                        vec.shape[0], self._embedding_dimension,
+                    )
+                    return
                 if tenant_id not in self._centroids:
                     self._centroids[tenant_id] = vec.copy()
                     self._counts[tenant_id] = 1
@@ -156,6 +172,8 @@ class CentroidStore:
             if centroid is None or count < 5:
                 return False
             q = query_vector.astype(np.float32)
+            if q.shape != centroid.shape:
+                return False
             sim = _cosine_similarity(q, centroid)
             threshold = 1.0 - distance_floor
             if sim < threshold:

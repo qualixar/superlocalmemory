@@ -401,7 +401,9 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
 
 def _install_token_path() -> Path:  # pragma: no cover — monkeypatched in tests
     """Default install-token location — override in tests via monkeypatch."""
-    return Path.home() / ".superlocalmemory" / ".install_token"
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path(".install_token")
 
 
 def ensure_install_token() -> str:

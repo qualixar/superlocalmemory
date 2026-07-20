@@ -1,39 +1,47 @@
 # Active Memory (V3.1)
 
-SuperLocalMemory V3.1 transforms the memory system from a passive database into an **active intelligence layer** that learns from your usage patterns and improves over time — at zero token cost.
+This page describes the active-memory components introduced in V3.1. The
+current release includes local feedback, outcome, co-retrieval, and adaptive
+ranking machinery. It does not guarantee that ranking improves for every
+corpus, and it does not treat result exposure as proof of relevance.
 
 ## How It Works
 
-Every time you recall a memory, the system collects learning signals:
+Recall can emit local telemetry that later feedback or outcomes can qualify:
 
 ```
-Recall → Feedback Signal → Co-Retrieval Graph → Confidence Boost → Adaptive Ranking
+Recall → Exposure telemetry → Explicit feedback/outcome → Adaptive ranking
 ```
 
-No LLM tokens are spent. All learning happens through mathematical signals computed locally.
+The feedback/ranking path itself can operate locally. Provider-backed
+extraction or other optional integrations have separate network and token
+behavior.
 
 ## Three Learning Phases
 
 | Phase | Signals Needed | What Changes |
 |-------|---------------|-------------|
-| **1. Baseline** | 0-19 | Standard cross-encoder ranking |
-| **2. Rule-Based** | 20+ | Heuristic boosts: recency, access frequency, trust score |
-| **3. ML Model** | 200+ | LightGBM model trained on YOUR specific usage patterns |
+| **1. Baseline** | Insufficient labeled outcomes | Configured retrieval and reranking |
+| **2. Rule-Based** | Local signals available | Declared heuristic ranking adjustments |
+| **3. ML Model** | Training gate satisfied | Optional local learned ranker |
 
-Phase transitions are automatic. Each recall generates ~5 signals (one per returned fact). Typical users reach Phase 2 in a day of normal work and Phase 3 within a week.
+Signal counts and training readiness depend on actual use and explicit outcome
+coverage. V3.7 publishes no time-to-training guarantee.
 
 ## Four Learning Signals
 
 ### 1. Co-Retrieval
 When memories are retrieved together repeatedly, they form implicit connections. The system learns that these memories are related — even if they don't share keywords.
 
-### 2. Confidence Lifecycle
-- **Accessed facts get boosted** (+0.02 per recall, capped at 1.0)
-- **Unused facts decay** (-0.001/day after 7 days of no access, floor at 0.1)
-- This creates a natural "memory importance" ranking without manual curation.
+### 2. Lifecycle signals
+Recency, access, trust, and lifecycle state can affect internal ranking utility.
+They do not change `relevance_score` or `memory_confidence` into answer
+probabilities. See [Score Contract v2](Retrieval-Score-Contract).
 
 ### 3. Channel Performance
-SLM uses 4 retrieval channels (semantic, BM25, entity graph, temporal). The system tracks which channel produces the best results for different query types and adjusts channel weights accordingly.
+Current candidate producers are dense semantic, BM25 lexical, temporal,
+Hopfield associative, and spreading activation. Entity-graph information is a
+post-fusion score enhancement in the current implementation.
 
 ### 4. Entropy Gap
 When new content arrives, the system measures how "surprising" it is relative to existing memories. High-entropy content (genuinely new information) gets prioritized for deeper indexing.
@@ -66,7 +74,8 @@ slm session-context  # Returns top-10 relevant memories for current project
 slm hooks install  # One-time setup
 ```
 
-This installs a Claude Code hook that auto-injects memory context at the start of every session. The developer never types a command — context appears automatically.
+This explicitly installs supported Claude Code hooks. The current package
+installers do not install hooks or edit IDE configuration implicitly.
 
 ## MCP Tools
 
@@ -101,16 +110,12 @@ The Behavioral tab shows:
 - **Outcome tracking** (success/failure/partial)
 - **Cross-project pattern transfer**
 
-## Competitive Advantage
+## Limitations
 
-| System | Learning Cost | Learning Method |
-|--------|-------------|----------------|
-| Mem0 | LLM call per operation | Cloud extraction |
-| Zep | LLM call per operation | Temporal KG |
-| Letta | LLM call per operation | Agent self-writing |
-| **SLM V3.1** | **$0 (zero tokens)** | **Mathematical signals** |
-
-SLM is the only memory system that learns without spending tokens.
+Adaptive ranking needs representative feedback and held-out evaluation. A
+retrieved fact is only an exposure event until explicit feedback or a qualified
+outcome exists. V3.7 does not publish a uniqueness claim, guaranteed learning
+curve, or calibrated answer-confidence result for this subsystem.
 
 ---
 

@@ -22,13 +22,17 @@ Parameters:
 - typed mu: entity=1.2, causal=1.3, semantic=0.8, temporal=0.9
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
+
+from superlocalmemory.retrieval.scope_policy import (
+    authorized_fact_ids,
+    filter_authorized_results,
+)
 
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
@@ -64,6 +68,9 @@ class BridgeDiscovery:
         seed_ids: list[str],
         profile_id: str,
         max_bridges: int = 10,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[tuple[str, float]]:
         """Find bridge facts connecting seed results.
 
@@ -78,13 +85,36 @@ class BridgeDiscovery:
         if len(seed_ids) < 2:
             return []
 
+        allowed_seeds = authorized_fact_ids(
+            self._db,
+            seed_ids,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        if any(seed_id not in allowed_seeds for seed_id in seed_ids):
+            return []
+
+        try:
+            visible_seed_facts = self._db.get_facts_by_ids(
+                seed_ids,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+        except Exception:
+            return []
+        seed_facts = {fact.fact_id: fact for fact in visible_seed_facts}
+        if any(seed_id not in seed_facts for seed_id in seed_ids):
+            return []
+
         bridges: list[tuple[str, float]] = []
         seen = set(seed_ids)
 
         # Check consecutive pairs for entity overlap
         for i in range(len(seed_ids) - 1):
-            fact_a = self._db.get_fact(seed_ids[i])
-            fact_b = self._db.get_fact(seed_ids[i + 1])
+            fact_a = seed_facts.get(seed_ids[i])
+            fact_b = seed_facts.get(seed_ids[i + 1])
             if not fact_a or not fact_b:
                 continue
 
@@ -98,7 +128,12 @@ class BridgeDiscovery:
             # Strategy 1: Entity bridge (union minus intersection)
             bridge_entities = (entities_a | entities_b) - (entities_a & entities_b)
             for eid in bridge_entities:
-                entity_facts = self._db.get_facts_by_entity(eid, profile_id)
+                entity_facts = self._db.get_facts_by_entity(
+                    eid,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
                 for f in entity_facts[:5]:
                     if f.fact_id not in seen:
                         seen.add(f.fact_id)
@@ -112,7 +147,13 @@ class BridgeDiscovery:
                 break
 
         bridges.sort(key=lambda x: x[1], reverse=True)
-        return bridges[:max_bridges]
+        return filter_authorized_results(
+            self._db,
+            bridges,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )[:max_bridges]
 
     def spreading_activation(
         self,
@@ -120,6 +161,9 @@ class BridgeDiscovery:
         profile_id: str,
         max_depth: int = _MAX_DEPTH,
         budget: int = _NODE_BUDGET,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[tuple[str, float]]:
         """Spreading activation from seed facts through the graph.
 
@@ -135,6 +179,16 @@ class BridgeDiscovery:
         Returns:
             List of (fact_id, activation_score) for activated facts.
         """
+        allowed_seeds = authorized_fact_ids(
+            self._db,
+            seed_ids,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        if any(seed_id not in allowed_seeds for seed_id in seed_ids):
+            return []
+
         activations: dict[str, float] = {fid: 1.0 for fid in seed_ids}
         frontier = list(seed_ids)
 
@@ -145,7 +199,12 @@ class BridgeDiscovery:
                 if current_activation < 0.01:
                     continue
 
-                edges = self._db.get_edges_for_node(fid, profile_id)
+                edges = self._db.get_edges_for_node(
+                    fid,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
                 for edge in edges:
                     other_id = (
                         edge.target_id
@@ -171,4 +230,10 @@ class BridgeDiscovery:
             if fid not in set(seed_ids) and score > 0.01
         ]
         results.sort(key=lambda x: x[1], reverse=True)
-        return results[:budget]
+        return filter_authorized_results(
+            self._db,
+            results,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )[:budget]

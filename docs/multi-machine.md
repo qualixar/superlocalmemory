@@ -72,10 +72,12 @@ When `SLM_MESH_DISCOVERY=on` (default) and `zeroconf` is installed, SLM automati
 
 Install zeroconf support:
 ```bash
-pip install "superlocalmemory[mesh]"
+python -m pip install "superlocalmemory[mesh]"
 # or
-pip install zeroconf
+python -m pip install zeroconf
 ```
+
+Run these commands only while the SLM Python virtual environment is active.
 
 ## MCP Tools — Unchanged
 

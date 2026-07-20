@@ -8,13 +8,17 @@ Reference for all SLM v3.6 Optimize configuration options.
 
 ## Config File
 
-All settings are stored in a single JSON file that the daemon hot-reloads on change:
+Optimize settings are stored in a single JSON file:
 
 ```bash
 ~/.superlocalmemory/optimize.json
 ```
 
-**Hot-reload:** config changes are picked up within 2 seconds via a background watchdog thread. No daemon restart required.
+**Runtime behavior:** When proxy routes were mounted at daemon startup, cache and
+compression changes saved through the daemon API reload immediately; direct file
+edits and standalone CLI writes are detected by the watchdog within 2 seconds.
+Changing `proxy_enabled` is different: it is evaluated during daemon startup, so
+config file changes do not mount proxy routes in an already-running daemon.
 
 **Write via:**
 - **UI** — Dashboard → Optimize tab (runtime toggles, TTL sliders, per-provider settings)
@@ -28,9 +32,9 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Master Optimize ON/OFF (changed from `false` in v3.6.0 final) |
-| `proxy_enabled` | bool | `false` | Proxy server auto-start |
-| `config_version` | int | `0` | Incremented on each save — triggers hot-reload |
+| `enabled` | bool | `false` | SDK adapter enablement; it does not gate proxy route mounting |
+| `proxy_enabled` | bool | `false` | Mount proxy routes at daemon startup; changing it requires a daemon restart |
+| `config_version` | int | `1` | Revision written by `ConfigStore.save()`; it does not trigger hot-reload |
 
 ---
 
@@ -48,13 +52,18 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 | `semantic_centroid_defense` | bool | `true` | Enable SAFE-CACHE centroid defense |
 | `semantic_multiturn_guard` | bool | `true` | Multi-turn guard — skips semantic after `max_turns_for_semantic` |
 | `semantic_ann_top_k` | int | `5` | ANN search — top-K candidates |
-| `semantic_boundary_ceiling` | float | `0.99` | vCache boundary ceiling |
+| `semantic_boundary_init` | float | `0.95` | Initial semantic-cache decision boundary |
+| `semantic_boundary_floor` | float | `0.85` | Lowest adaptive semantic-cache boundary |
+| `semantic_boundary_ceiling` | float | `0.995` | Highest adaptive semantic-cache boundary |
 | `semantic_boundary_step` | float | `0.01` | vCache boundary adjustment step |
 | `semantic_max_turns_for_semantic` | int | `6` | Max conversation turns before semantic cache is bypassed |
 | `semantic_context_window_turns` | int | `3` | Context window size for multi-turn matching |
-| `semantic_centroid_distance_floor` | float | `0.70` | Minimum centroid distance for safe return |
+| `semantic_centroid_distance_floor` | float | `0.15` | Minimum centroid distance for safe return |
 | `semantic_verifier_model` | str | `""` | Optional model for verify path |
-| `semantic_pad_latency_ms` | int | `50` | Randomized padding for CacheAttack mitigation |
+| `semantic_pad_latency_ms` | float | `0` | Optional latency padding for CacheAttack mitigation |
+| `semantic_centroid_min_similarity` | float | `0.85` | Minimum centroid similarity for a semantic-cache candidate |
+| `semantic_max_index_entries` | int | `10000` | Maximum semantic-cache index entries |
+| `semantic_max_tenants` | int | `10000` | Maximum semantic-cache tenants |
 
 > **Tuning the semantic tier (read before enabling).** The semantic cache is
 > **off by default** because, unlike the exact cache, a too-loose threshold can
@@ -88,14 +97,16 @@ All settings are stored in a single JSON file that the daemon hot-reloads on cha
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `compress_enabled` | bool | `true` | Enable compression |
-| `compress_mode` | str | `"safe"` | `"safe"` (lossless extractive) or `"aggressive"` (lossy prose allowed) |
-| `compress_code` | bool | `true` | Code/JSON extractive compression |
+| `compress_enabled` | bool | `false` | Enable compression |
+| `compress_mode` | str | `"safe"` | `"safe"` (lossless whitespace normalization) or `"aggressive"` (lossy prose allowed) |
 | `compress_prose` | bool | `false` | Prose compression (LLMLingua-2, opt-in) |
-| `compress_ccr` | bool | `false` | Compressed Context Retrieval (reversible) |
-| `compress_align` | bool | `true` | CacheAligner prefix stabilization |
-| `compress_json` | bool | `true` | JSON-specific extractive compression |
-| `compress_protect_recent` | int | `2` | Number of most recent messages to skip compression |
+| `compress_protect_recent` | int | `4` | Number of most recent messages to skip compression |
+
+Layer 1 lossless whitespace normalization runs whenever compression is enabled.
+Layer 2 prose compression requires `compress_mode="aggressive"`,
+`compress_prose=true`, and the optional LLMLingua dependency. The legacy
+`code`, `ccr`, and `align` compression subcommands and their configuration
+fields were removed in v3.6.10; they are not active configuration options.
 
 ---
 
@@ -156,9 +167,9 @@ The optimize module uses a separate SQLite database:
 
 ```json
 {
-  "enabled": true,
+  "enabled": false,
   "proxy_enabled": false,
-  "config_version": 42,
+  "config_version": 1,
   "cache_enabled": true,
   "semantic_enabled": false,
   "semantic_return_threshold": 0.98,
@@ -168,14 +179,18 @@ The optimize module uses a separate SQLite database:
   "semantic_centroid_defense": true,
   "semantic_multiturn_guard": true,
   "semantic_ann_top_k": 5,
-  "compress_enabled": true,
+  "semantic_boundary_init": 0.95,
+  "semantic_boundary_floor": 0.85,
+  "semantic_boundary_ceiling": 0.995,
+  "semantic_centroid_distance_floor": 0.15,
+  "semantic_pad_latency_ms": 0,
+  "semantic_centroid_min_similarity": 0.85,
+  "semantic_max_index_entries": 10000,
+  "semantic_max_tenants": 10000,
+  "compress_enabled": false,
   "compress_mode": "safe",
-  "compress_code": true,
-  "compress_json": true,
   "compress_prose": false,
-  "compress_ccr": false,
-  "compress_align": true,
-  "compress_protect_recent": 2,
+  "compress_protect_recent": 4,
   "ttl": {
     "exact_seconds": 86400,
     "semantic_seconds": 3600,

@@ -6,12 +6,12 @@ on:
   push:
     paths:
       - 'plugin-src/**'
-      - 'scripts/build-plugin.js'
+      - 'scripts/build-plugin.mjs'
       - '.github/workflows/plugin-validate.yml'
   pull_request:
     paths:
       - 'plugin-src/**'
-      - 'scripts/build-plugin.js'
+      - 'scripts/build-plugin.mjs'
       - '.github/workflows/plugin-validate.yml'
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
         run: npm run build:plugin
 
       - name: Verify build is in-sync
-        run: node scripts/build-plugin.js --check
+        run: node scripts/build-plugin.mjs --check
 
       - name: Validate plugin manifest (AC-1)
         # Validate from repo root; claude plugin validate finds .claude-plugin/marketplace.json

@@ -12,12 +12,11 @@ All adapters inherit this. Enforces stateless, safe, cross-platform operation:
   - Structured logging
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import signal
@@ -132,35 +131,30 @@ class BaseAdapter:
 
     def _ingest(self, item: IngestItem) -> bool:
         """POST to daemon /ingest endpoint. Returns True on success."""
-        try:
-            import urllib.request
-            payload = json.dumps({
-                "content": item.content,
-                "source_type": self.source_type,
-                "dedup_key": item.dedup_key,
-                "metadata": item.metadata if item.metadata else {},
-            }).encode()
-            req = urllib.request.Request(
-                f"{self.daemon_url}/ingest",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            resp = urllib.request.urlopen(req, timeout=30)
-            data = json.loads(resp.read().decode())
-            if data.get("ingested"):
-                self._items_this_hour += 1
-                self._total_ingested += 1
-                return True
-            return False  # Already ingested (dedup)
-        except Exception as exc:
-            error_str = str(exc)
-            if "429" in error_str:
-                logger.info("Daemon returned 429, backing off 5s")
-                self._stop_event.wait(5)
-                return self._ingest(item)  # Retry once
-            logger.debug("Ingest failed: %s", exc)
-            return False
+        payload = {
+            "content": item.content,
+            "source_type": self.source_type,
+            "dedup_key": item.dedup_key,
+            "metadata": item.metadata if item.metadata else {},
+        }
+        for attempt in range(2):
+            try:
+                from superlocalmemory.cli.daemon import daemon_request
+
+                data = daemon_request("POST", "/ingest", payload)
+                if data and data.get("ingested"):
+                    self._items_this_hour += 1
+                    self._total_ingested += 1
+                    return True
+                return False  # Already ingested (dedup)
+            except Exception as exc:
+                if "429" in str(exc) and attempt == 0:
+                    logger.info("Daemon returned 429, backing off 5s")
+                    self._stop_event.wait(5)
+                    continue
+                logger.debug("Ingest failed: %s", exc)
+                return False
+        return False
 
     def _rate_limited(self) -> bool:
         if time.time() - self._hour_start > 3600:

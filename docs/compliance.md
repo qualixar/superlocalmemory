@@ -1,191 +1,103 @@
-# Compliance
-> SuperLocalMemory V3 Documentation
-> https://superlocalmemory.com | Part of Qualixar
+# Compliance Controls and Limits
 
-SuperLocalMemory is designed for organizations that need to meet data protection and privacy regulations. Mode A satisfies the strictest requirements by keeping all data local.
+> SuperLocalMemory V3 documentation · not legal advice or certification
 
----
+SuperLocalMemory exposes local storage, scoped recall, erasure mutations,
+provenance, policy hooks, and audit records that can support a compliance
+program. Whether a deployment meets the EU AI Act, GDPR, HIPAA, SOC 2, or any
+other requirement depends on the use case, operator role, configuration,
+surrounding systems, and verified operating procedures.
 
-## EU AI Act
+## Data-flow boundary
 
-The EU AI Act (Regulation 2024/1689) establishes requirements for AI systems operating in the European Union.
+| Mode | Core memory path | Network considerations |
+|---|---|---|
+| A | Can store and retrieve through the configured local data root without a cloud model provider | Model/dependency downloads, connectors, backup, proxy providers, remote embedding endpoints, and other enabled integrations remain separate network paths |
+| B | Adds an operator-configured Ollama endpoint | Verify where Ollama runs and which data it receives |
+| C | Adds configured provider calls | Provider terms, retention, region, logging, access, and data-processing agreements become part of the deployment |
 
-### Mode A: Full Compliance by Architecture
+“Local-first” describes the default core state location. It does not mean that
+every optional feature is offline or that operating-system processes cannot
+access the data root.
 
-In Mode A, SuperLocalMemory operates as a local data retrieval system with zero cloud dependency:
+## Erasure and lifecycle
 
-| Requirement | How Mode A satisfies it |
-|-------------|------------------------|
-| **Data sovereignty** | All data stored and processed locally. Nothing leaves the device. |
-| **Right to erasure** | `slm forget` deletes data from the local database. No cloud logs exist to purge. |
-| **Transparency** | The retrieval pipeline is fully auditable. No black-box AI decisions. |
-| **Risk classification** | A local retrieval system with no autonomous decision-making qualifies as minimal risk. |
-
-### Mode B: Full Compliance
-
-Mode B uses a local LLM (Ollama). Data never leaves the device. Same compliance posture as Mode A.
-
-### Mode C: Shared Responsibility
-
-Mode C sends recall queries to a cloud LLM provider. In this mode:
-
-- **Your data** (stored memories) remains local
-- **Queries** are sent to the cloud provider
-- The cloud provider's compliance posture applies to those queries
-- A Data Processing Agreement (DPA) with your provider is recommended
-
-## GDPR
-
-The General Data Protection Regulation applies to personal data of EU residents.
-
-### Right to Erasure (Article 17)
+Use the supported mutation commands for the installed release:
 
 ```bash
-# Delete specific memories
-slm forget "John's phone number"
-slm forget --id 42
-
-# Delete all memories before a date
-slm forget --before "2025-01-01"
-
-# Delete an entire profile
-slm profile delete client-eu
+slm forget "query" --dry-run
+slm forget "query" --yes
+slm delete <fact_id> --yes
 ```
 
-Deletion is permanent. In Mode A, there are no cloud copies to worry about.
+A complete erasure claim requires proof that deletion propagates through:
 
-### Data Portability (Article 20)
+- relational facts and raw evidence;
+- FTS, graph, temporal, vector, cache, and optional backend projections;
+- context injection and active sessions;
+- exports, backups, snapshots, logs, queues, and recovery artifacts; and
+- any configured provider, connector, mesh peer, or external system.
 
-```bash
-# Export all memories for a profile
-slm profile export work > work-data.json
+The V3.7 release gate includes this lifecycle propagation matrix. Do not delete
+only `memory.db` and call the deployment erased: the data root can also contain
+configuration, logs, queues, credentials, models, derived indexes, and optional
+backend state.
 
-# The export is standard JSON — readable by any system
-```
+## Scope and access control
 
-### Data Minimization (Article 5)
+Personal memory is profile-scoped by default. Shared and global scopes are
+opt-in and remain subject to the configured scope policy.
 
-The entropy gate in the ingestion pipeline filters out redundant and low-value information automatically. Only memories with sufficient information value are stored.
+Profiles are a product-level organization and recall boundary inside one
+installation. They are not a substitute for operating-system accounts,
+filesystem permissions, process isolation, host isolation, or a multi-tenant
+authorization service. Sensitive deployments should isolate data roots and
+run the frozen release's cross-scope negative matrix.
 
-### Purpose Limitation
+Mutation authority does not come from a caller-selected `agent_id`. It derives
+from a verified daemon capability and target instance, same-origin install
+token, configured SLM API key, local loopback principal, or documented mesh
+credential. Agent and IDE names remain attribution metadata.
 
-Profiles enforce purpose limitation. Client A's data is stored in Client A's profile and is never accessible from another profile.
+## Transparency and scores
 
-## Retention Policies
+`slm trace` and the MCP/HTTP trace surfaces expose recorded channel
+contributions and score metadata. Under [Score Contract
+v2](retrieval-score-contract.md):
 
-Named retention policies automate data lifecycle management.
+- `relevance_score` is query-relative relevance;
+- `ranking_score` is internal diagnostic utility;
+- `memory_confidence` is stored assertion metadata; and
+- `answer_confidence` is `null` while calibration is unproven.
 
-### Built-in policies
+Traceability supports technical review; it is not automatically a legally
+sufficient explanation. The current release must not present an uncalibrated
+retrieval score as answer certainty.
 
-| Policy | Retention period | Use case |
-|--------|:----------------:|----------|
-| `indefinite` | Forever | Default. No automatic deletion. |
-| `gdpr-30d` | 30 days | GDPR-compliant short retention |
-| `hipaa-7y` | 7 years | HIPAA medical records requirement |
+## Audit and provenance
 
-### Apply a policy
+SLM can record provenance, policy events, and hash-chained audit entries. A hash
+chain is tamper-evident when verified; it is not tamper-proof storage. Operators
+must validate which operations are covered, who can modify or delete the log,
+how long it is retained, where it is backed up, and how verification failures
+are handled.
 
-```bash
-slm retention set gdpr-30d
-```
+Use the installed dashboard and MCP audit/provenance tools documented by the
+active tool profile. The repository does not claim a standalone `slm audit` or
+`slm retention` CLI command unless it appears in `slm --help` for that release.
 
-This applies to the active profile. Memories older than the retention period are automatically archived and then deleted.
+## Deployment checklist
 
-### Custom policies
-
-```bash
-slm retention set custom --days 90
-```
-
-### Per-profile policies
-
-Different profiles can have different policies:
-
-```bash
-slm profile switch client-eu
-slm retention set gdpr-30d
-
-slm profile switch internal
-slm retention set indefinite
-```
-
-## Access Control
-
-SuperLocalMemory uses Attribute-Based Access Control (ABAC) per profile.
-
-- Each profile is an isolated access boundary
-- No cross-profile data access is possible
-- Profile switching requires the `slm profile switch` command
-- The audit trail logs all profile switches
-
-## Audit Trail
-
-Every memory operation is logged in a tamper-evident hash chain.
-
-### View the audit trail
-
-```bash
-slm audit                    # Recent entries
-slm audit --limit 100        # Last 100 entries
-slm audit --action store     # Only store operations
-slm audit --action delete    # Only delete operations
-```
-
-### Verify integrity
-
-```bash
-slm audit --verify
-```
-
-This checks the hash chain for tampering. Each entry contains a hash of the previous entry, creating a blockchain-like chain. Any modification to a past entry breaks the chain and is detected.
-
-### What gets logged
-
-| Action | What is recorded |
-|--------|-----------------|
-| `store` | Memory ID, timestamp, profile, content hash |
-| `recall` | Query, timestamp, profile, result count |
-| `delete` | Memory ID, timestamp, profile, reason |
-| `profile_switch` | From profile, to profile, timestamp |
-| `mode_change` | From mode, to mode, timestamp |
-| `migration` | Source version, target version, timestamp |
-
-## HIPAA
-
-For healthcare applications:
-
-1. Use Mode A (zero cloud) to ensure PHI never leaves the device
-2. Apply the `hipaa-7y` retention policy
-3. Use per-patient or per-case profiles for isolation
-4. Enable audit trail verification for compliance audits
-
-```bash
-slm profile create patient-12345
-slm profile switch patient-12345
-slm retention set hipaa-7y
-```
-
-## SOC 2
-
-SuperLocalMemory supports SOC 2 requirements through:
-
-- **Access controls:** Profile-based isolation with ABAC
-- **Audit logging:** Hash-chained, tamper-evident audit trail
-- **Data encryption:** SQLite database can be encrypted at rest using OS-level encryption (FileVault, BitLocker, LUKS)
-- **Change management:** All configuration changes are logged
-
-## Compliance Checklist
-
-| Requirement | Mode A | Mode B | Mode C |
-|-------------|:------:|:------:|:------:|
-| Data stays on device | Yes | Yes | Partial (queries sent to cloud) |
-| No cloud dependency | Yes | Yes | No |
-| Right to erasure | Yes | Yes | Yes (local); cloud logs depend on provider |
-| Audit trail | Yes | Yes | Yes |
-| Retention policies | Yes | Yes | Yes |
-| Profile isolation | Yes | Yes | Yes |
-| Tamper detection | Yes | Yes | Yes |
-
----
-
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+1. Inventory the canonical data root and every external data flow.
+2. Choose the minimum necessary mode, connectors, providers, backup, and mesh
+   configuration.
+3. Isolate operating-system identity, filesystem permissions, network access,
+   API keys, mesh secrets, and backups.
+4. Verify store, recall, scope, update, forget, export, backup, restore, and
+   recovery on the frozen artifact.
+5. Verify rendered context remains untrusted evidence under stored prompt-
+   injection attacks.
+6. Verify audit coverage, integrity checks, retention, and operator response.
+7. Obtain qualified legal, privacy, and security review for the actual use
+   case. SuperLocalMemory does not provide a BAA, DPA, or certification by
+   itself.

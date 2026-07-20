@@ -258,19 +258,43 @@ def test_resolve_profile_known_returns_frozenset():
     assert isinstance(result, frozenset)
 
 
-def test_resolve_profile_unknown_returns_essential_and_warns(caplog):
+def test_resolve_profile_deprecated_alias_returns_canonical_and_warns(caplog):
     mod = _get_module()
     with caplog.at_level(logging.WARNING, logger="superlocalmemory.mcp.server"):
         result = mod._resolve_profile_allowed(
+            "full38", mod._PROFILE_DEFINITIONS, mod._ESSENTIAL_TOOLS
+        )
+    assert result == mod._PROFILE_DEFINITIONS["full"]
+    warning_texts = caplog.messages  # documented pytest API (getMessage-interpolated)
+    assert any("full38" in t and "full" in t for t in warning_texts), (
+        f"Expected warning mapping 'full38' to 'full', got: {warning_texts}"
+    )
+
+
+def test_resolve_profile_all_published_legacy_aliases():
+    mod = _get_module()
+    expected = {
+        "core14": mod._PROFILE_DEFINITIONS["core"],
+        "code20": mod._PROFILE_DEFINITIONS["code"],
+        "mesh8": mod._PROFILE_DEFINITIONS["mesh"],
+        "full38": mod._PROFILE_DEFINITIONS["full"],
+        "power50": mod._PROFILE_DEFINITIONS["power"],
+        "whole81": None,
+    }
+    for alias, allowed in expected.items():
+        assert mod._resolve_profile_allowed(
+            alias, mod._PROFILE_DEFINITIONS, mod._ESSENTIAL_TOOLS
+        ) == allowed
+
+
+def test_resolve_profile_unknown_fails_closed():
+    mod = _get_module()
+    import pytest
+
+    with pytest.raises(ValueError, match=r"banana.*core.*whole"):
+        mod._resolve_profile_allowed(
             "banana", mod._PROFILE_DEFINITIONS, mod._ESSENTIAL_TOOLS
         )
-    assert result == mod._ESSENTIAL_TOOLS, (
-        f"Unknown profile should fail-open to _ESSENTIAL_TOOLS, got {result!r}"
-    )
-    warning_texts = caplog.messages  # documented pytest API (getMessage-interpolated)
-    assert any("banana" in t for t in warning_texts), (
-        f"Expected warning mentioning 'banana', got: {warning_texts}"
-    )
 
 
 # ---------------------------------------------------------------------------

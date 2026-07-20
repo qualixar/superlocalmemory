@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +16,9 @@ class TestHealthCheckRegistry:
 
     def test_register_and_run(self):
         from superlocalmemory.core.health_monitor import (
-            register_health_check, run_all_health_checks, _HEALTH_CHECKS,
+            _HEALTH_CHECKS,
+            register_health_check,
+            run_all_health_checks,
         )
         # Clear registry for test isolation
         original = list(_HEALTH_CHECKS)
@@ -42,7 +44,9 @@ class TestHealthCheckRegistry:
 
     def test_check_exception_handled(self):
         from superlocalmemory.core.health_monitor import (
-            register_health_check, run_all_health_checks, _HEALTH_CHECKS,
+            _HEALTH_CHECKS,
+            register_health_check,
+            run_all_health_checks,
         )
         original = list(_HEALTH_CHECKS)
         _HEALTH_CHECKS.clear()
@@ -64,7 +68,7 @@ class TestHealthCheckRegistry:
 class TestStructuredLogging:
 
     def test_setup_creates_log_file(self, tmp_path):
-        from superlocalmemory.core.health_monitor import setup_structured_logging, log_structured
+        from superlocalmemory.core.health_monitor import log_structured, setup_structured_logging
         log_dir = tmp_path / "logs"
         setup_structured_logging(log_dir)
         log_structured(level="info", operation="test", message="hello structured")
@@ -81,10 +85,10 @@ class TestHealthMonitorInit:
     def test_monitor_without_psutil(self):
         """Health monitor should not crash if psutil unavailable."""
         from superlocalmemory.core.health_monitor import HealthMonitor
-        monitor = HealthMonitor(enable_structured_logging=False)
-        # If psutil is actually available, this test still passes.
-        # The monitor handles ImportError gracefully.
-        assert monitor._budget_mb == 4096
+
+        with patch("superlocalmemory.core.health_monitor.PSUTIL_AVAILABLE", False):
+            monitor = HealthMonitor(enable_structured_logging=False)
+        assert monitor._budget_mb == 8000
         assert monitor._heartbeat_timeout == 60
 
     @pytest.mark.skipif(

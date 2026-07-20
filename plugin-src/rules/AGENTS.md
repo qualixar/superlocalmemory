@@ -1,7 +1,7 @@
 # SuperLocalMemory — Agent Rules
 
 > Drop into any IDE agent config or AGENTS.md to give agents disciplined SLM usage.
-> SLM is local-first: every MCP tool runs on the user's machine, zero cloud calls.
+> SLM is local-first: MCP memory tools use the configured local runtime. Optional providers, connectors, backup, and downloads have separate network behavior.
 > Prefer MCP tools when the server is running; use the CLI fallback table when not.
 
 ---
@@ -88,4 +88,4 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | `slm_cache_get`    | `key`                                                                          | KV cache get; returns hit, value   |
 | `slm_optimize_stats` | `()`                                                                         | Returns compress_runs, tokens_saved_compress, cache_kv_hits |
 
-SuperLocalMemory v3.6.17 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later

@@ -19,27 +19,80 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import shlex
 import sys
 import tempfile
 from pathlib import Path
 
+from superlocalmemory import __version__
+from superlocalmemory.infra.data_root import canonical_data_root
+from superlocalmemory.infra.data_root import state_path as runtime_state_path
+
 logger = logging.getLogger(__name__)
 
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
-VERSION_DIR = Path.home() / ".superlocalmemory" / "hooks"
-VERSION_FILE = VERSION_DIR / ".version"
-DISABLED_FILE = VERSION_DIR / ".hooks-disabled"
-HOOKS_VERSION = "3.4.43"
+_DEFAULT_VERSION_DIR = runtime_state_path("hooks")
+_DEFAULT_VERSION_FILE = _DEFAULT_VERSION_DIR / ".version"
+_DEFAULT_DISABLED_FILE = _DEFAULT_VERSION_DIR / ".hooks-disabled"
+VERSION_DIR = _DEFAULT_VERSION_DIR
+VERSION_FILE = _DEFAULT_VERSION_FILE
+DISABLED_FILE = _DEFAULT_DISABLED_FILE
+HOOKS_VERSION = __version__
 
-# Cross-platform temp dir and marker paths
+# Cross-platform temp dir and backwards-compatible marker overrides. Runtime
+# defaults are root-namespaced and resolved when hook definitions are built.
 _TMP = tempfile.gettempdir()
-_MARKER = f"{_TMP}/slm-session-initialized"
-_START_MARKER = f"{_TMP}/slm-session-start-time"
+_DEFAULT_MARKER = os.path.join(_TMP, "slm-session-initialized")
+_DEFAULT_START_MARKER = os.path.join(_TMP, "slm-session-start-time")
+_MARKER = _DEFAULT_MARKER
+_START_MARKER = _DEFAULT_START_MARKER
 
 # Tools that the gate should block (everything except SLM/ToolSearch)
 _GATED_TOOLS = "Bash|Read|Write|Edit|Glob|Grep|Agent|WebFetch|WebSearch|NotebookEdit"
+
+
+def _version_dir() -> Path:
+    """Resolve hook metadata under the selected data root.
+
+    Assigning ``VERSION_DIR`` remains a supported test/embedder override.
+    """
+    if VERSION_DIR != _DEFAULT_VERSION_DIR:
+        return VERSION_DIR
+    return runtime_state_path("hooks")
+
+
+def _version_file() -> Path:
+    if VERSION_FILE != _DEFAULT_VERSION_FILE:
+        return VERSION_FILE
+    return _version_dir() / ".version"
+
+
+def _disabled_file() -> Path:
+    if DISABLED_FILE != _DEFAULT_DISABLED_FILE:
+        return DISABLED_FILE
+    return _version_dir() / ".hooks-disabled"
+
+
+def _root_namespace() -> str:
+    return hashlib.sha256(
+        str(canonical_data_root()).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _marker_path() -> str:
+    if _MARKER != _DEFAULT_MARKER:
+        return _MARKER
+    return os.path.join(_TMP, f"slm-session-initialized-{_root_namespace()}")
+
+
+def _start_marker_path() -> str:
+    if _START_MARKER != _DEFAULT_START_MARKER:
+        return _START_MARKER
+    return os.path.join(_TMP, f"slm-session-start-time-{_root_namespace()}")
 
 # ---------------------------------------------------------------------------
 # Platform-specific gate commands (shell built-ins only — CANNOT crash)
@@ -51,33 +104,60 @@ def _gate_cmd() -> str:
     Logic: if initialized → allow. If no session started → allow. Else → block.
     Uses specific matcher to exclude SLM tools, so no stdin parsing needed.
     """
+    marker = _marker_path()
+    start_marker = _start_marker_path()
     if sys.platform == "win32":
-        marker_win = _MARKER.replace("/", "\\")
-        start_win = _START_MARKER.replace("/", "\\")
+        marker_win = marker.replace("/", "\\")
+        start_win = start_marker.replace("/", "\\")
         return (
-            f'cmd /c "if exist {marker_win} (exit /b 0)'
-            f' else if not exist {start_win} (exit /b 0)'
+            f'cmd /c "if exist "{marker_win}" (exit /b 0)'
+            f' else if not exist "{start_win}" (exit /b 0)'
             f' else (echo [SLM] Call mcp__superlocalmemory__session_init first & exit /b 2)"'
         )
     return (
-        f"test -f {_MARKER}"
-        f" || test ! -f {_START_MARKER}"
+        f"test -f {shlex.quote(marker)}"
+        f" || test ! -f {shlex.quote(start_marker)}"
         " || { echo '[SLM] Call mcp__superlocalmemory__session_init first'; exit 2; }"
     )
 
 
 def _init_done_cmd() -> str:
     """Init-done command: pure shell touch, ~1ms."""
+    marker = _marker_path()
     if sys.platform == "win32":
-        return f'cmd /c "echo.>{_MARKER.replace("/", chr(92))}"'
-    return f"touch {_MARKER}"
+        marker_win = marker.replace("/", "\\")
+        return f'cmd /c "echo.>"{marker_win}""'
+    return f"touch {shlex.quote(marker)}"
 
 
 def _wrap_python_cmd(hook_name: str) -> str:
     """Wrap a Python hook with error absorption. Any crash → invisible."""
+    marker = _marker_path()
+    start_marker = _start_marker_path()
     if sys.platform == "win32":
+        marker_win = marker.replace("/", "\\")
+        start_win = start_marker.replace("/", "\\")
+        if hook_name == "start":
+            return (
+                f'cmd /c "slm hook start 2>NUL & echo.>"{start_win}"'
+                ' & exit /b 0"'
+            )
+        if hook_name == "stop":
+            return (
+                f'cmd /c "slm hook stop 2>NUL & del /q "{marker_win}"'
+                f' "{start_win}" 2>NUL & exit /b 0"'
+            )
         return f'cmd /c "slm hook {hook_name} 2>NUL || exit /b 0"'
-    return f"slm hook {hook_name} 2>/dev/null || true"
+
+    command = f"slm hook {hook_name} 2>/dev/null || true"
+    if hook_name == "start":
+        return f"{command}; touch {shlex.quote(start_marker)}"
+    if hook_name == "stop":
+        return (
+            f"{command}; rm -f {shlex.quote(marker)} "
+            f"{shlex.quote(start_marker)}"
+        )
+    return command
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +172,18 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
     """
     defs: dict[str, list] = {
         "SessionStart": [
+            # v3.6.23: advisory SLM session-init hint fires first.
+            # mcp__superlocalmemory__session_init may be deferred, so some
+            # hosts need ToolSearch before they can invoke the tool.
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": _wrap_python_cmd("mandate"),
+                        "timeout": 5000,
+                    }
+                ]
+            },
             {
                 "hooks": [
                     {
@@ -100,7 +192,7 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                         "timeout": 15000,
                     }
                 ]
-            }
+            },
         ],
         "PostToolUse": [
             {
@@ -175,7 +267,7 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
     }
 
     # v3.4.43 — default PreToolUse entry: pre-web recall on WebSearch/WebFetch.
-    # Fires `slm hook before_web` which runs a 4-channel recall on the search
+    # Fires `slm hook before_web` which runs a recall on the search
     # query/URL and injects results as a system-reminder BEFORE the web call.
     # Encourages Claude to consider local memories before paying for new web
     # research. Independent of `include_gate` — this is value-add, not gating.
@@ -278,9 +370,31 @@ def _read_settings() -> dict:
 
 
 def _write_settings(settings: dict) -> None:
-    """Write settings.json with pretty formatting."""
+    """Write settings.json atomically — tmp file + rename.
+
+    Direct .write_text() would truncate the file on a crash mid-write,
+    destroying the user's entire Claude Code configuration. The tmp-then-rename
+    pattern is atomic on POSIX (os.replace) and near-atomic on Windows: either
+    the full new content lands or the original file is untouched.
+
+    Never overwrites non-SLM settings — _merge_hooks() guarantees that only
+    the SLM hooks entries change; all other keys are preserved from the read.
+    """
     CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
+    content = json.dumps(settings, indent=2) + "\n"
+    # Write to a sibling tmp file in the same directory so os.replace is atomic
+    # (cross-device rename would fail; same-dir rename is guaranteed atomic).
+    tmp_path = CLAUDE_SETTINGS.with_suffix(".json.slm_tmp")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, CLAUDE_SETTINGS)
+    except Exception:
+        # Best-effort cleanup of the tmp file on failure
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +425,14 @@ def install_hooks(include_gate: bool = False) -> dict:
         result["errors"].append(f"Settings update failed: {exc}")
 
     try:
-        VERSION_DIR.mkdir(parents=True, exist_ok=True)
-        VERSION_FILE.write_text(HOOKS_VERSION)
+        version_dir = _version_dir()
+        version_file = _version_file()
+        disabled_file = _disabled_file()
+        version_dir.mkdir(parents=True, exist_ok=True)
+        version_file.write_text(HOOKS_VERSION)
         # Clear disabled marker — explicit install means user wants hooks
-        if DISABLED_FILE.exists():
-            DISABLED_FILE.unlink()
+        if disabled_file.exists():
+            disabled_file.unlink()
     except Exception as exc:
         result["errors"].append(f"Version file failed: {exc}")
 
@@ -339,11 +456,14 @@ def remove_hooks() -> dict:
         result["errors"].append(f"Settings cleanup failed: {exc}")
 
     try:
-        if VERSION_FILE.exists():
-            VERSION_FILE.unlink()
+        version_dir = _version_dir()
+        version_file = _version_file()
+        disabled_file = _disabled_file()
+        if version_file.exists():
+            version_file.unlink()
         # Mark as explicitly disabled — auto-install will respect this
-        VERSION_DIR.mkdir(parents=True, exist_ok=True)
-        DISABLED_FILE.write_text("removed by user\n")
+        version_dir.mkdir(parents=True, exist_ok=True)
+        disabled_file.write_text("removed by user\n")
     except Exception:
         pass
 
@@ -353,9 +473,10 @@ def remove_hooks() -> dict:
 def check_status() -> dict:
     """Check SLM hook installation status."""
     installed_version = ""
-    if VERSION_FILE.exists():
+    version_file = _version_file()
+    if version_file.exists():
         try:
-            installed_version = VERSION_FILE.read_text().strip()
+            installed_version = version_file.read_text().strip()
         except Exception:
             pass
 
@@ -436,13 +557,15 @@ def auto_install_if_needed() -> dict | None:
     Fast path: version file exists and matches → ~0.1ms, returns None.
     """
     try:
+        disabled_file = _disabled_file()
+        version_file = _version_file()
         # Respect explicit opt-out
-        if DISABLED_FILE.exists():
+        if disabled_file.exists():
             return None
 
         # Already installed and current → skip
-        if VERSION_FILE.exists():
-            installed = VERSION_FILE.read_text().strip()
+        if version_file.exists():
+            installed = version_file.read_text().strip()
             if installed == HOOKS_VERSION:
                 return None
 
@@ -461,13 +584,14 @@ def auto_install_if_needed() -> dict | None:
 def auto_upgrade_check() -> None:
     """Silent auto-upgrade on version mismatch. ~0.1ms when current."""
     try:
-        if not VERSION_FILE.exists():
-            legacy_script = VERSION_DIR / "slm-session-start.sh"
+        version_file = _version_file()
+        if not version_file.exists():
+            legacy_script = _version_dir() / "slm-session-start.sh"
             if legacy_script.exists():
                 _migrate_legacy_hooks()
             return
 
-        installed = VERSION_FILE.read_text().strip()
+        installed = version_file.read_text().strip()
         if installed == HOOKS_VERSION:
             return
 
@@ -495,8 +619,8 @@ def _migrate_legacy_hooks() -> None:
             hook_defs = _hook_definitions(include_gate=False)
             settings = _merge_hooks(settings, hook_defs)
             _write_settings(settings)
-            VERSION_DIR.mkdir(parents=True, exist_ok=True)
-            VERSION_FILE.write_text(HOOKS_VERSION)
+            _version_dir().mkdir(parents=True, exist_ok=True)
+            _version_file().write_text(HOOKS_VERSION)
             logger.info("Migrated legacy bash hooks to hybrid hooks (v%s)", HOOKS_VERSION)
     except Exception as exc:
         logger.debug("Legacy hook migration failed: %s", exc)

@@ -140,4 +140,4 @@ Content over 1 MB (1 000 000 bytes UTF-8) is processed but `reversible` is force
 
 ---
 
-SuperLocalMemory v3.6.17 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later

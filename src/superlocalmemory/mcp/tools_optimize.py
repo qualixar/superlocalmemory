@@ -219,10 +219,17 @@ def register_optimize_tools(server) -> None:
             norm_tid = _normalize_tenant_id(tenant)
             ttl_exp = time.time() + ttl_seconds
 
-            CacheDB.get_default().set(
+            db = CacheDB.get_default()
+            db.set(
                 cache_key, norm_tid, value_bytes,
                 model="mcp-kv", ttl_expires=ttl_exp, tags=["mcp-kv"],
             )
+            # ``tag_json`` is descriptive only; tag invalidation joins the
+            # normalized llmcache_tags index.  CacheManager registers that
+            # index itself, whereas this direct MCP KV surface writes to
+            # CacheDB.  Register it here so ``slm cache invalidate --tag
+            # mcp-kv`` actually removes entries created by slm_cache_set.
+            db.tag_register(cache_key, norm_tid, ["mcp-kv"])
             return {"ok": True, "stored": True, "note": None}
 
         except Exception as exc:

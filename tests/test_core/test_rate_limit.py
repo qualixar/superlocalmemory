@@ -101,6 +101,19 @@ def test_per_pid_dict_ttl_eviction():
     )
 
 
+def test_per_agent_dict_ttl_eviction_does_not_raise():
+    rl = _imports()
+    lim = rl.LayeredRateLimiter(
+        global_rps=1000, per_pid_rps=1000, per_agent_rps=1000, idle_ttl_s=1,
+    )
+    lim.check_and_consume(pid=1, agent_id="expired-agent")
+    lim._per_agent["expired-agent"].last_used = 0
+
+    lim._sweep(time.monotonic())
+
+    assert "expired-agent" not in lim._per_agent
+
+
 def test_rate_limited_error_carries_envelope_code():
     rl = _imports()
     from superlocalmemory.core.error_envelope import ErrorCode

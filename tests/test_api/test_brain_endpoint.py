@@ -711,7 +711,7 @@ def test_meta_now_shape() -> None:
     from superlocalmemory.server.routes.brain import _meta_now
     meta = _meta_now()
     assert meta["honest_labels"] is True
-    assert meta["version"] == "3.4.23"
+    assert meta["version"] == "3.7.7"
     assert meta["generated_at"].endswith("Z")
 
 

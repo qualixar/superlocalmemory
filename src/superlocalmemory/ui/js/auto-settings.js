@@ -27,6 +27,50 @@ async function loadAutoSettings() {
     }
 }
 
+async function loadScopeSettings() {
+    try {
+        var response = await fetch('/api/v3/scope/config');
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var data = await response.json();
+        var defaultScope = document.getElementById('settings-default-scope');
+        var shared = document.getElementById('settings-recall-shared');
+        var globalScope = document.getElementById('settings-recall-global');
+        if (defaultScope) defaultScope.value = data.default_scope || 'personal';
+        if (shared) shared.checked = data.recall_include_shared === true;
+        if (globalScope) globalScope.checked = data.recall_include_global === true;
+    } catch (error) {
+        var status = document.getElementById('settings-scope-status');
+        if (status) status.textContent = 'Could not load runtime visibility settings.';
+    }
+}
+
+async function saveScopeSettings() {
+    var status = document.getElementById('settings-scope-status');
+    var payload = {
+        default_scope: document.getElementById('settings-default-scope')?.value || 'personal',
+        recall_include_shared: document.getElementById('settings-recall-shared')?.checked === true,
+        recall_include_global: document.getElementById('settings-recall-global')?.checked === true,
+    };
+    if (status) status.textContent = 'Applying to daemon...';
+    try {
+        var response = await fetch('/api/v3/scope/config', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        var data = await response.json();
+        if (!response.ok || data.success !== true) {
+            throw new Error(data.error || 'daemon rejected visibility settings');
+        }
+        if (status) status.textContent = 'Applied to the resident daemon.';
+        return true;
+    } catch (error) {
+        if (status) status.textContent = 'Not applied: ' + error.message;
+        await loadScopeSettings();
+        return false;
+    }
+}
+
 function saveAutoCaptureConfig() {
     var payload = {
         enabled: document.getElementById('auto-capture-toggle')?.checked,
@@ -52,17 +96,14 @@ function saveAutoRecallConfig() {
     }).catch(function(e) { console.log('Save auto-recall error:', e); });
 }
 
-// Bind change listeners for auto-capture toggles
-document.querySelectorAll('#auto-capture-toggle, #auto-capture-decisions, #auto-capture-bugs').forEach(function(el) {
-    if (el) {
-        el.addEventListener('change', saveAutoCaptureConfig);
-    }
-});
-
-// Bind change listeners for auto-recall toggles
-document.querySelectorAll('#auto-recall-toggle, #auto-recall-session').forEach(function(el) {
-    if (el) {
-        el.addEventListener('change', saveAutoRecallConfig);
+// Use delegation so listeners work even when the settings pane is injected lazily.
+document.addEventListener('change', function(e) {
+    var id = e.target && e.target.id;
+    if (!id) return;
+    if (id === 'auto-capture-toggle' || id === 'auto-capture-decisions' || id === 'auto-capture-bugs') {
+        saveAutoCaptureConfig();
+    } else if (id === 'auto-recall-toggle' || id === 'auto-recall-session') {
+        saveAutoRecallConfig();
     }
 });
 
@@ -536,6 +577,9 @@ document.getElementById('settings-save-all')?.addEventListener('click', saveAllS
 document.getElementById('settings-test-btn')?.addEventListener('click', testConnection);
 document.getElementById('settings-emb-provider')?.addEventListener('change', updateEmbeddingUI);
 document.getElementById('settings-emb-test-btn')?.addEventListener('click', testEmbeddingEndpoint);
+['settings-default-scope', 'settings-recall-shared', 'settings-recall-global'].forEach(function(id) {
+    document.getElementById(id)?.addEventListener('change', saveScopeSettings);
+});
 
 // Mode radio buttons
 document.querySelectorAll('input[name="settings-mode-radio"]').forEach(function(radio) {
@@ -545,6 +589,7 @@ document.querySelectorAll('input[name="settings-mode-radio"]').forEach(function(
 // Load settings when the settings tab is shown
 document.getElementById('settings-tab')?.addEventListener('shown.bs.tab', function() {
     loadAutoSettings();
+    loadScopeSettings();
     loadModeSettings();
     loadEmbeddingSettings();
     updateModeUI();

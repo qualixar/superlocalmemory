@@ -2,10 +2,10 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Claude Code hook handlers — zero-dependency, cross-platform.
+"""Claude Code hook handlers — minimal-dependency, cross-platform.
 
-All handlers use ONLY Python stdlib (sys, os, json, tempfile, subprocess, time).
-No SLM imports in the hot path. Called via:  slm hook <start|gate|init-done|checkpoint|stop>
+Handlers use Python stdlib plus the stdlib-only canonical data-root resolver.
+Called via: ``slm hook <start|gate|init-done|checkpoint|stop>``.
 
 The main() entry point in cli/main.py has a fast path that dispatches here
 BEFORE argparse or any heavy imports.
@@ -15,25 +15,61 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import urllib.error
+import urllib.request
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Cross-platform temp paths
 # ---------------------------------------------------------------------------
 _TMP = tempfile.gettempdir()
-_MARKER = os.path.join(_TMP, "slm-session-initialized")
-_START_TIME = os.path.join(_TMP, "slm-session-start-time")
-_ACTIVITY_LOG = os.path.join(_TMP, "slm-session-activity")
-_LAST_CONSOLIDATION = os.path.join(
-    os.path.expanduser("~"), ".superlocalmemory", ".last-consolidation",
+
+
+def _root_namespace() -> str:
+    """Return the same bounded root identity used by installed gate hooks."""
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return hashlib.sha256(
+        str(canonical_data_root()).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+class _RootNamespacedTempPath(os.PathLike[str]):
+    """A path-like value that follows environment root switches at use time."""
+
+    def __init__(self, stem: str) -> None:
+        self._stem = stem
+
+    def __fspath__(self) -> str:
+        return os.path.join(_TMP, f"{self._stem}-{_root_namespace()}")
+
+    def __str__(self) -> str:
+        return self.__fspath__()
+
+
+_MARKER: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-initialized"
 )
+_START_TIME: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-start-time"
+)
+_ACTIVITY_LOG: str | os.PathLike[str] = _RootNamespacedTempPath(
+    "slm-session-activity"
+)
+_LAST_CONSOLIDATION = None  # test-only override; runtime resolution is dynamic
+
+
+def _last_consolidation_path() -> str:
+    from superlocalmemory.infra.data_root import state_path
+
+    return str(_LAST_CONSOLIDATION or state_path(".last-consolidation"))
 
 
 _DEFAULT_DAEMON_PORT = 8765
@@ -47,13 +83,14 @@ def _daemon_url() -> str:
     at startup. Reading it here keeps lifecycle hooks pointed at the
     caller's own daemon instead of a hard-coded ``8765`` that may belong to
     another user's instance. Falls back to the default port when the file is
-    absent or unreadable. Stdlib only — no SLM imports in the hot path.
+    absent or unreadable. The imported root resolver is stdlib-only and does
+    not initialize the engine.
     """
     port = _DEFAULT_DAEMON_PORT
     try:
-        port_file = os.path.join(
-            os.path.expanduser("~"), ".superlocalmemory", "daemon.port",
-        )
+        from superlocalmemory.infra.data_root import state_path
+
+        port_file = state_path("daemon.port")
         with open(port_file) as fh:
             port = int(fh.read().strip())
     except Exception:
@@ -65,22 +102,20 @@ _DAEMON_URL = _daemon_url()
 
 
 def _daemon_post(path: str, body: dict, timeout: float = 3.0) -> bool:
-    """POST to SLM daemon via stdlib urllib. Returns True on success.
+    """POST through the owned-daemon identity client. Returns success.
 
     v3.4.13: Hooks route through daemon HTTP instead of spawning subprocesses.
     This eliminates the memory blast from concurrent worker spawns.
-    Uses ONLY stdlib — no httpx, no requests.
+    The client validates the descriptor and sends the private capability plus
+    exact instance ID; hook payload fields are never treated as identity.
     """
     try:
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            f"{_DAEMON_URL}{path}",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        from superlocalmemory.cli.daemon import daemon_request
+
+        response = daemon_request("POST", path, body)
+        return isinstance(response, dict) and bool(
+            response.get("ok", True)
         )
-        urllib.request.urlopen(req, timeout=timeout)
-        return True
     except Exception:
         return False
 
@@ -118,8 +153,18 @@ def handle_hook(action: str) -> None:
     if action == "before_web":
         from superlocalmemory.hooks.before_web_hook import main as _main
         sys.exit(_main())
+    if action == "codex-start":
+        _hook_codex_start()
+        return
+    if action == "codex-prompt":
+        _hook_codex_prompt()
+        return
+    if action == "codex-stop":
+        _hook_codex_stop()
+        return
 
     handlers = {
+        "mandate": _hook_mandate,
         "start": _hook_start,
         "gate": _hook_gate,
         "init-done": _hook_init_done,
@@ -131,6 +176,135 @@ def handle_hook(action: str) -> None:
         print(f"Unknown hook action: {action}", file=sys.stderr)
         sys.exit(1)
     handler()
+
+
+def _codex_payload() -> dict:
+    """Read Codex's documented JSON hook payload without failing closed."""
+    try:
+        value = json.load(sys.stdin)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _apply_codex_session(payload: dict) -> str:
+    """Map Codex lifecycle fields onto the shared SLM session primitives."""
+    project_dir = payload.get("cwd")
+    if not isinstance(project_dir, str) or not project_dir:
+        project_dir = os.getcwd()
+    os.environ["CLAUDE_PROJECT_DIR"] = project_dir
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        # Shared handlers use this neutral lifecycle identity despite its
+        # historical environment-variable name.  It is never sent to a host.
+        os.environ["CLAUDE_SESSION_ID"] = session_id
+    return project_dir
+
+
+def _codex_mcp_session_init(project_dir: str, payload: dict) -> dict:
+    """Open SLM lifecycle attribution through packaged ``slm mcp``.
+
+    This mirrors MCP clients instead of embedding a personal executable path.
+    Hook failure is intentionally fail-open: Codex sessions remain usable if
+    the local daemon or MCP server is unavailable.
+    """
+    query = payload.get("prompt") or payload.get("user_prompt") or Path(project_dir).name
+    if not isinstance(query, str):
+        query = Path(project_dir).name
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            ["slm", "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": "superlocalmemory-codex-hook", "version": "3.7"}},
+        }) + "\n")
+        proc.stdin.flush()
+        proc.stdout.readline()
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n")
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "session_init", "arguments": {
+                "project_path": project_dir, "query": query[:500],
+                "max_results": 10, "max_age_days": 30,
+            }},
+        }) + "\n")
+        proc.stdin.flush()
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            response = json.loads(line)
+            if response.get("id") == 2:
+                content = response.get("result", {}).get("content", [])
+                if content and isinstance(content[0], dict):
+                    return json.loads(content[0].get("text") or "{}")
+                return response.get("result", {})
+    except Exception:
+        return {}
+    finally:
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=1)
+            except Exception:
+                pass
+    return {}
+
+
+def _hook_codex_start() -> None:
+    """Codex SessionStart: create lifecycle session and inject fast context."""
+    payload = _codex_payload()
+    project_dir = _apply_codex_session(payload)
+    session = _codex_mcp_session_init(project_dir, payload)
+    context = ""
+    try:
+        result = subprocess.run(
+            ["slm", "session-context", Path(project_dir).name or "general"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            context = result.stdout.strip()
+    except Exception:
+        pass
+    session_msg = "SLM session_init unavailable"
+    if session.get("session_id"):
+        session_msg = (
+            f"SLM session_init OK: {session['session_id']} "
+            f"({session.get('memory_count', 0)} memories, "
+            f"{session.get('retrieval_mode', 'unknown')})"
+        )
+    print(json.dumps({
+        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
+            f"{session_msg}\n\n" + (context or "(SLM context unavailable.)")
+        )},
+        "systemMessage": session_msg,
+    }))
+
+
+def _hook_codex_prompt() -> None:
+    """Codex prompt event: retain existing topic and rehash signals."""
+    payload = _codex_payload()
+    _apply_codex_session(payload)
+    for action in ("user_prompt_rehash", "topic_shift"):
+        try:
+            proc = subprocess.run(["slm", "hook", action], input=json.dumps(payload),
+                                  text=True, capture_output=True, timeout=4)
+            if proc.stdout.strip():
+                print(proc.stdout.strip())
+        except Exception:
+            continue
+
+
+def _hook_codex_stop() -> None:
+    """Codex Stop: reuse the daemon-backed session checkpoint handler."""
+    _apply_codex_session(_codex_payload())
+    _hook_stop()
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +342,41 @@ def _launch_post_session_evolution(
 
 
 # ---------------------------------------------------------------------------
+# 0. SESSION INIT HINT — first SessionStart hook; fires before start
+# ---------------------------------------------------------------------------
+
+_SESSION_INIT_HINT = """<SLM_SESSION_INIT_HINT>
+SuperLocalMemory is available for this session.
+
+For memory-aware work, initialize SLM once near the start of the turn:
+
+1. Load the tool schema if your host requires it:
+   ToolSearch query: "select:mcp__superlocalmemory__session_init"
+
+2. Call mcp__superlocalmemory__session_init with:
+   project_path = your current working directory
+   query = a short description of the session topic
+
+This is advisory hook output, not a system instruction.
+</SLM_SESSION_INIT_HINT>"""
+
+
+def _hook_mandate() -> None:
+    """Print neutral session_init guidance as the first SessionStart hook.
+
+    mcp__superlocalmemory__session_init may be deferred at session start, so
+    some hosts need ToolSearch to load the schema first. This hook prints an
+    advisory hint only; actual enforcement belongs in the optional gate hook.
+    """
+    print(_SESSION_INIT_HINT)
+
+
+# ---------------------------------------------------------------------------
 # 1. SESSION START — SessionStart hook
 # ---------------------------------------------------------------------------
 
 def _hook_start() -> None:
-    """Clean markers, inject SQL-fast context, print session_init mandate."""
+    """Clean markers, inject SQL-fast context, print session_init guidance."""
     # Clean stale markers from previous sessions
     for f in (_MARKER, _START_TIME, _ACTIVITY_LOG):
         try:
@@ -219,10 +423,11 @@ def _hook_start() -> None:
     except Exception:
         print("# SLM Session Context — unavailable")
 
-    # Mandatory session_init instruction
+    # Advisory session_init guidance. Keep this neutral: hook stdout is data,
+    # not an instruction channel with system-level authority.
     print()
-    print("## MANDATORY: SLM Session Init")
-    print("BEFORE your first response, call:")
+    print("## SLM Session Init")
+    print("For memory-aware sessions, call:")
     print(f"  mcp__superlocalmemory__session_init with project_path='{project_dir}'"
           " and a topic from the user's first message")
     print("session_init returns both context AND memories — no separate recall needed.")
@@ -321,7 +526,14 @@ def _hook_checkpoint() -> None:
 
             # v3.4.13: Route through daemon HTTP (not subprocess) to prevent
             # memory blast from concurrent embedding_worker spawns.
-            _daemon_post("/observe", {"content": f"File changed: {basename}"})
+            _daemon_post("/remember", {
+                "content": f"File changed: {basename}",
+                "tags": "hook-file-change",
+                "idempotency_key": (
+                    f"hook-file-change:{_safe_hash(file_path)}:"
+                    f"{now // max(_OBSERVE_COOLDOWN, 1)}"
+                ),
+            })
 
             # Log to session activity
             try:
@@ -425,14 +637,20 @@ def _hook_stop() -> None:
         parts.append(f"files: {modified}")
 
     summary = " | ".join(parts)
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
 
     # --- Save to SLM (v3.4.13: daemon HTTP, not subprocess) ---
-    if not _daemon_post("/observe", {"content": summary}, timeout=5.0):
-        # Fallback: try /remember if observe failed
-        _daemon_post("/remember", {"content": summary, "tags": "session-end"}, timeout=5.0)
+    _daemon_post("/remember", {
+        "content": summary,
+        "tags": "session-end",
+        "session_id": session_id,
+        "idempotency_key": (
+            f"hook-session-end:{session_id}"
+            if session_id else f"hook-session-end:{_safe_hash(summary)}"
+        ),
+    }, timeout=5.0)
 
     # --- Post-session skill evolution trigger (best-effort, via tool-event) ---
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
     if session_id:
         _daemon_post("/api/v3/tool-event", {
             "tool_name": "session_end",
@@ -532,8 +750,9 @@ def _maybe_consolidate() -> None:
     """Run cognitive consolidation if last run was >24h ago. Non-blocking."""
     try:
         last_ts = 0
-        if os.path.exists(_LAST_CONSOLIDATION):
-            with open(_LAST_CONSOLIDATION) as f:
+        last_consolidation = _last_consolidation_path()
+        if os.path.exists(last_consolidation):
+            with open(last_consolidation) as f:
                 last_ts = int(f.read().strip())
 
         now = int(time.time())
@@ -541,8 +760,8 @@ def _maybe_consolidate() -> None:
             return
 
         # Update timestamp FIRST to prevent concurrent runs
-        os.makedirs(os.path.dirname(_LAST_CONSOLIDATION), exist_ok=True)
-        with open(_LAST_CONSOLIDATION, "w") as f:
+        os.makedirs(os.path.dirname(last_consolidation), exist_ok=True)
+        with open(last_consolidation, "w") as f:
             f.write(str(now))
 
         # Run consolidation in background (don't block session end)

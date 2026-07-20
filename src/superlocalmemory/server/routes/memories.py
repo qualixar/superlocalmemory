@@ -25,6 +25,44 @@ def _get_engine(request: Request):
     return get_engine_lazy(request.app.state)
 
 
+def _authorize_memory_mutation(
+    request: Request,
+    operation: str,
+    fact_id: str,
+    *,
+    content_preview: str = "",
+    run_pre_hook: bool = True,
+):
+    """Authenticate a mutation, optionally gating route-owned direct SQL."""
+    from superlocalmemory.server.write_identity import require_write_actor
+
+    actor_id = require_write_actor(
+        request,
+        getattr(request.app.state, "daemon_descriptor", None),
+        actor_kind="dashboard",
+    )
+    engine = _get_engine(request)
+    if engine is None:
+        raise HTTPException(503, detail="Engine not initialized")
+    profile_id = engine.profile_id
+    context = {
+        "operation": operation,
+        "agent_id": actor_id,
+        "source_agent_id": "dashboard",
+        "profile_id": profile_id,
+        "fact_id": fact_id,
+    }
+    if content_preview:
+        context["content_preview"] = content_preview[:100]
+    if run_pre_hook:
+        try:
+            engine._hooks.run_pre(operation, context)
+        except Exception as exc:
+            logger.warning("Dashboard %s authorization rejected: %s", operation, exc)
+            raise HTTPException(403, detail="Write authorization rejected") from exc
+    return engine, profile_id, context
+
+
 def _preview(content: str | None) -> str:
     """Truncate content for preview display."""
     if not content:
@@ -430,23 +468,24 @@ async def search_memories(request: Request, body: SearchRequest):
                 lambda: engine.recall(body.query, limit=body.limit, fast=False),
             )
             elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
-            results = []
-            for r in response.results[: body.limit]:
-                results.append({
-                    "fact_id": r.fact.fact_id,
-                    "memory_id": getattr(r.fact, "memory_id", ""),
-                    "content": r.fact.content[:300],
-                    "score": round(r.score, 4),
-                    "confidence": round(getattr(r, "confidence", 0.0), 4),
-                    "channel_scores": getattr(r, "channel_scores", {}),
-                    "created_at": getattr(r.fact, "created_at", ""),
-                })
+            from superlocalmemory.server.recall_serializer import (
+                recall_response_metadata,
+                serialize_recall_response,
+            )
+            results, no_confident_match = serialize_recall_response(
+                response,
+                limit=body.limit,
+                per_fact_max=300,
+                total_max=max(300, body.limit * 300),
+            )
             return {
                 "query": body.query,
                 "results": results,
                 "total": len(results),
                 "query_type": getattr(response, "query_type", "semantic"),
                 "retrieval_time_ms": elapsed_ms,
+                "no_confident_match": no_confident_match,
+                **recall_response_metadata(response),
             }
 
         # Fallback: direct DB text search (engine not yet initialised)
@@ -455,18 +494,35 @@ async def search_memories(request: Request, body: SearchRequest):
         cursor = conn.cursor()
         active_profile = get_active_profile()
         cursor.execute("""
-            SELECT fact_id as id, content, confidence as score,
+            SELECT fact_id, content, confidence as memory_confidence,
                    fact_type as category, created_at
             FROM atomic_facts
             WHERE profile_id = ? AND content LIKE ?
             ORDER BY confidence DESC LIMIT ?
         """, (active_profile, f'%{body.query}%', body.limit))
-        results = cursor.fetchall()
+        rows = cursor.fetchall()
         conn.close()
+
+        results = [{
+            **row,
+            "score": None,
+            "relevance_score": None,
+            "ranking_score": None,
+            "confidence": row.get("memory_confidence"),
+            "rank_position": position,
+        } for position, row in enumerate(rows, start=1)]
 
         return {
             "query": body.query, "results": results, "total": len(results),
             "query_type": "text_search", "retrieval_time_ms": 0,
+            "retrieval_mode": "degraded_lexical",
+            "score_contract_version": "2",
+            "calibration_status": "uncalibrated",
+            "calibration_id": None,
+            "answer_confidence": None,
+            "abstained": not bool(results),
+            "abstention_reason": None if results else "no_candidates",
+            "no_confident_match": False,
         }
 
     except Exception as e:
@@ -606,14 +662,28 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
         if not members:
             raise HTTPException(status_code=404, detail="Cluster not found")
         # Generate cluster summary
+        # v3.7.8: previously routed through WorkerPool.shared(), a subprocess
+        # cache never recycled on a profile switch (CRITICAL cross-profile
+        # leak — up to 120s stale). Use the daemon's own resident,
+        # lease-protected engine's config instead; the summarizer only
+        # consumes already profile-filtered `texts` above, so this closes
+        # the stale-engine window without changing behavior.
         summary = ""
         try:
-            from superlocalmemory.core.worker_pool import WorkerPool
-            pool = WorkerPool.shared()
             texts = [m.get("content", "")[:200] for m in members[:10] if m.get("content")]
             if texts:
-                result = pool.summarize(texts)
-                summary = result.get("summary", "") if result.get("ok") else ""
+                from superlocalmemory.core.summarizer import Summarizer
+                from superlocalmemory.server.profile_runtime import get_profile_runtime
+                from superlocalmemory.server.routes.helpers import get_engine_lazy
+
+                runtime = get_profile_runtime(request.app.state)
+                with runtime.operation():
+                    engine = get_engine_lazy(request.app.state)
+                    if engine is not None:
+                        summarizer = Summarizer(engine._config)
+                        summary = summarizer.summarize_cluster(
+                            [{"content": t} for t in texts]
+                        ) or ""
         except Exception:
             pass
 
@@ -631,14 +701,47 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
 
 @router.get("/api/memories/{memory_id}/facts")
 async def get_memory_facts(request: Request, memory_id: str):
-    """Get original memory text with all its child atomic facts."""
+    """Get original memory text with all its child atomic facts.
+
+    v3.7.8: previously routed through WorkerPool.shared(), a subprocess
+    engine cached at process init and never recycled on a profile switch
+    (CRITICAL cross-profile leak — served the OLD profile's facts for up to
+    120s after a switch). Uses the daemon's own resident, lease-protected
+    engine instead, exactly like the /recall route.
+    """
     try:
-        from superlocalmemory.core.worker_pool import WorkerPool
-        pool = WorkerPool.shared()
-        result = pool.get_memory_facts(memory_id)
-        if result.get("ok"):
-            return result
-        raise HTTPException(status_code=404, detail="Memory not found")
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
+        from superlocalmemory.server.routes.helpers import get_engine_lazy
+
+        runtime = get_profile_runtime(request.app.state)
+        with runtime.operation():
+            engine = get_engine_lazy(request.app.state)
+            if engine is None:
+                raise HTTPException(status_code=503, detail="Engine not initialized")
+            active_profile = engine.profile_id
+            mem_map = engine._db.get_memory_content_batch([memory_id])
+            original = mem_map.get(memory_id, "")
+            facts = engine._db.get_facts_by_memory_id(memory_id, active_profile)
+        fact_list = [
+            {
+                "fact_id": f.fact_id,
+                "content": f.content,
+                "fact_type": (
+                    f.fact_type.value if hasattr(f.fact_type, "value")
+                    else str(f.fact_type)
+                ),
+                "confidence": round(f.confidence, 3),
+                "created_at": f.created_at,
+            }
+            for f in facts
+        ]
+        return {
+            "ok": True,
+            "memory_id": memory_id,
+            "original_content": original,
+            "facts": fact_list,
+            "fact_count": len(fact_list),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -739,22 +842,20 @@ async def get_fact_detail(request: Request, fact_id: str):
 @router.delete("/api/memories/{fact_id}")
 async def delete_memory(request: Request, fact_id: str):
     """Delete a specific memory (atomic fact) by ID."""
+    engine, _active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id, run_pre_hook=False,
+    )
     try:
-        conn = get_db_connection()
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        active_profile = get_active_profile()
-        # Verify it exists and belongs to this profile
-        cursor.execute(
-            "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, active_profile),
+        from superlocalmemory.core.mutations import delete_fact_authorized
+
+        result = delete_fact_authorized(
+            engine,
+            fact_id,
+            trusted_actor_id=hook_context["agent_id"],
+            source_agent_id="dashboard",
         )
-        if not cursor.fetchone():
-            conn.close()
+        if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
-        cursor.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
-        conn.commit()
-        conn.close()
         return {"success": True, "deleted": fact_id}
     except HTTPException:
         raise
@@ -772,11 +873,13 @@ async def forget_memory(request: Request, fact_id: str):
     future ``slm restore`` can bring it back.
     """
     import json as _json
+    engine, active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id,
+    )
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         cursor.execute(
             "SELECT fact_id, content, importance, confidence, "
             "       canonical_entities_json, embedding, created_at "
@@ -813,6 +916,7 @@ async def forget_memory(request: Request, fact_id: str):
         )
         conn.commit()
         conn.close()
+        engine._hooks.run_post("delete", hook_context)
         return {"success": True, "fact_id": fact_id, "archived_at": archived_at}
     except HTTPException:
         raise
@@ -830,6 +934,9 @@ async def merge_memory(request: Request, fact_id: str):
     the loser's ``merged_into`` column. The loser is archived so it
     no longer appears in default recall. The winner is untouched.
     """
+    engine, active_profile, hook_context = _authorize_memory_mutation(
+        request, "delete", fact_id,
+    )
     try:
         body = await request.json()
         kept = str((body or {}).get("into", "")).strip()
@@ -843,7 +950,6 @@ async def merge_memory(request: Request, fact_id: str):
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
         # Both must belong to the active profile.
         cursor.execute(
             "SELECT fact_id FROM atomic_facts "
@@ -874,6 +980,7 @@ async def merge_memory(request: Request, fact_id: str):
         )
         conn.commit()
         conn.close()
+        engine._hooks.run_post("delete", hook_context)
         return {
             "success": True,
             "merged": fact_id,
@@ -894,23 +1001,24 @@ async def edit_memory(request: Request, fact_id: str):
         new_content = (body.get("content") or "").strip()
         if not new_content:
             raise HTTPException(status_code=400, detail="content is required")
-        conn = get_db_connection()
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        active_profile = get_active_profile()
-        cursor.execute(
-            "SELECT fact_id FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, active_profile),
+        engine, _active_profile, hook_context = _authorize_memory_mutation(
+            request,
+            "update",
+            fact_id,
+            content_preview=new_content,
+            run_pre_hook=False,
         )
-        if not cursor.fetchone():
-            conn.close()
+        from superlocalmemory.core.mutations import update_fact_authorized
+
+        result = update_fact_authorized(
+            engine,
+            fact_id,
+            new_content,
+            trusted_actor_id=hook_context["agent_id"],
+            source_agent_id="dashboard",
+        )
+        if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
-        cursor.execute(
-            "UPDATE atomic_facts SET content = ? WHERE fact_id = ?",
-            (new_content, fact_id),
-        )
-        conn.commit()
-        conn.close()
         return {"success": True, "fact_id": fact_id, "content": new_content}
     except HTTPException:
         raise

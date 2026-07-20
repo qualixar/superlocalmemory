@@ -1,5 +1,5 @@
 // SuperLocalMemory V2.6.5 - Interactive Knowledge Graph - Filtering Module
-// Copyright (c) 2026 Varun Pratap Bhardwaj — Elastic License 2.0
+// Copyright (c) 2026 Varun Pratap Bhardwaj — GNU Affero General Public License v3.0 or later
 // Part of modular graph visualization system (split from monolithic graph-cytoscape.js)
 
 // ============================================================================

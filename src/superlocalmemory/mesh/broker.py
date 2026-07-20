@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger("superlocalmemory.mesh")
 import os as _os
@@ -37,6 +37,11 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data dumps
 MESSAGE_TTL_HOURS = 48   # Offline messages expire after 48h
 MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+
+_T = TypeVar("_T")
+_WRITE_RETRY_ATTEMPTS = 6
+_WRITE_RETRY_BASE_SECONDS = 0.025
+_WRITE_BUSY_TIMEOUT_MS = 250
 
 
 class MeshBroker:
@@ -109,22 +114,64 @@ class MeshBroker:
     # -- Connection helper --
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
+        # WAL is configured during database initialization and persists with the
+        # database. Reissuing journal_mode=WAL for every short-lived mesh
+        # connection is itself a schema-level write that can contend with the
+        # daemon. Mesh writes below use bounded whole-transaction retries.
+        conn = sqlite3.connect(
+            self._db_path,
+            timeout=_WRITE_BUSY_TIMEOUT_MS / 1000,
+        )
+        conn.execute(f"PRAGMA busy_timeout={_WRITE_BUSY_TIMEOUT_MS}")
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _is_transient_lock(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database is busy" in message
+
+    def _write_with_retry(
+        self,
+        operation: Callable[[sqlite3.Connection], _T],
+    ) -> _T:
+        """Run one idempotent mesh mutation with a bounded SQLite retry budget.
+
+        SQLite WAL lets reads continue while a write is in progress, but it
+        still permits a single writer. Retrying the entire short transaction on
+        a fresh connection avoids leaking a transient writer collision to an
+        agent heartbeat or mesh command.
+        """
+        last_error: sqlite3.OperationalError | None = None
+        for attempt in range(_WRITE_RETRY_ATTEMPTS):
+            conn = self._conn()
+            try:
+                return operation(conn)
+            except sqlite3.OperationalError as exc:
+                if not self._is_transient_lock(exc):
+                    raise
+                last_error = exc
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+            finally:
+                conn.close()
+
+            if attempt < _WRITE_RETRY_ATTEMPTS - 1:
+                time.sleep(_WRITE_RETRY_BASE_SECONDS * (2 ** attempt))
+
+        assert last_error is not None
+        raise last_error
 
     # -- Peers --
 
     def register_peer(self, session_id: str, summary: str = "",
                       host: str = "", port: int = 0,
                       project_path: str = "", agent_type: str = "unknown") -> dict:
-        conn = self._conn()
-        try:
+        def _register(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
-            if not host:
-                host = self._host
+            effective_host = host or self._host
             # Idempotent: update if same session_id exists
             existing = conn.execute(
                 "SELECT peer_id FROM mesh_peers WHERE session_id = ?",
@@ -135,7 +182,7 @@ class MeshBroker:
                 conn.execute(
                     "UPDATE mesh_peers SET summary=?, host=?, port=?, last_heartbeat=?, "
                     "status='active', project_path=?, agent_type=? WHERE peer_id=?",
-                    (summary, host, port, now, project_path, agent_type, peer_id),
+                    (summary, effective_host, port, now, project_path, agent_type, peer_id),
                 )
             else:
                 peer_id = str(uuid.uuid4())[:12]
@@ -143,7 +190,7 @@ class MeshBroker:
                     "INSERT INTO mesh_peers (peer_id, session_id, summary, status, host, port, "
                     "registered_at, last_heartbeat, project_path, agent_type) "
                     "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)",
-                    (peer_id, session_id, summary, host, port, now, now, project_path, agent_type),
+                    (peer_id, session_id, summary, effective_host, port, now, now, project_path, agent_type),
                 )
             self._log_event(conn, "peer_registered", peer_id, {
                 "session_id": session_id, "project_path": project_path,
@@ -153,12 +200,11 @@ class MeshBroker:
             # v3.4.6: Deliver pending broadcast/project messages on registration
             pending = self._get_pending_for_peer(conn, peer_id, project_path)
             return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending)}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_register)
 
     def deregister_peer(self, peer_id: str) -> dict:
-        conn = self._conn()
-        try:
+        def _deregister(conn: sqlite3.Connection) -> dict:
             row = conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (peer_id,)).fetchone()
             if not row:
                 return {"ok": False, "error": "peer not found"}
@@ -166,12 +212,11 @@ class MeshBroker:
             self._log_event(conn, "peer_deregistered", peer_id)
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_deregister)
 
     def heartbeat(self, peer_id: str) -> dict:
-        conn = self._conn()
-        try:
+        def _heartbeat(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             cursor = conn.execute(
                 "UPDATE mesh_peers SET last_heartbeat=?, status='active' WHERE peer_id=?",
@@ -181,12 +226,11 @@ class MeshBroker:
                 return {"ok": False, "error": "peer not found"}
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_heartbeat)
 
     def update_summary(self, peer_id: str, summary: str) -> dict:
-        conn = self._conn()
-        try:
+        def _update_summary(conn: sqlite3.Connection) -> dict:
             cursor = conn.execute(
                 "UPDATE mesh_peers SET summary=? WHERE peer_id=?",
                 (summary, peer_id),
@@ -195,8 +239,8 @@ class MeshBroker:
                 return {"ok": False, "error": "peer not found"}
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_update_summary)
 
     def list_peers(self) -> list[dict]:
         conn = self._conn()
@@ -219,8 +263,19 @@ class MeshBroker:
             return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
                     "Mesh messages are notifications — reference a file path instead."}
 
-        conn = self._conn()
-        try:
+        # Remote delivery is an external side effect, so do it outside the
+        # retry envelope. Local writes below are retried as a whole short
+        # transaction when another daemon-owned operation has SQLite's writer.
+        if to_peer in self._remote_peers and self._sync_client:
+            return self._sync_client.send_to_remote(to_peer, {
+                "from_peer": from_peer,
+                "to": to_peer,
+                "content": content,
+                "type": msg_type,
+            })
+
+        def _send(conn: sqlite3.Connection) -> dict:
+            nonlocal to_peer, project_path
             now = datetime.now(timezone.utc).isoformat()
             expires_at = self._compute_expires(now)
 
@@ -233,14 +288,6 @@ class MeshBroker:
                 to_peer = "project"
             else:
                 target_type = "peer"
-                # Check if this is a remote peer — proxy to remote SLM
-                if to_peer in self._remote_peers and self._sync_client:
-                    return self._sync_client.send_to_remote(to_peer, {
-                        "from_peer": from_peer,
-                        "to": to_peer,
-                        "content": content,
-                        "type": msg_type,
-                    })
                 # Verify recipient exists for direct messages
                 if not conn.execute("SELECT 1 FROM mesh_peers WHERE peer_id=?", (to_peer,)).fetchone():
                     return {"ok": False, "error": "recipient peer not found"}
@@ -272,8 +319,8 @@ class MeshBroker:
             conn.commit()
             return {"ok": True, "id": cursor.lastrowid, "target_type": target_type,
                     "expires_at": expires_at}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_send)
 
     def get_inbox(self, peer_id: str, project_path: str = "") -> list[dict]:
         """Get all messages for this peer: direct + broadcast + project."""
@@ -301,6 +348,7 @@ class MeshBroker:
                 "FROM mesh_messages m "
                 "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
                 "WHERE m.target_type='broadcast' AND m.from_peer != ? "
+                "AND r.peer_id IS NULL "
                 "AND (m.expires_at IS NULL OR m.expires_at > ?) "
                 "ORDER BY m.created_at DESC LIMIT 50",
                 (peer_id, peer_id, now),
@@ -316,6 +364,7 @@ class MeshBroker:
                     "FROM mesh_messages m "
                     "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
                     "WHERE m.target_type='project' AND m.project_path=? AND m.from_peer != ? "
+                    "AND r.peer_id IS NULL "
                     "AND (m.expires_at IS NULL OR m.expires_at > ?) "
                     "ORDER BY m.created_at DESC LIMIT 50",
                     (peer_id, project_path, peer_id, now),
@@ -329,8 +378,7 @@ class MeshBroker:
             conn.close()
 
     def mark_read(self, peer_id: str, message_ids: list[int]) -> dict:
-        conn = self._conn()
-        try:
+        def _mark_read(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             for msg_id in message_ids:
                 # Check if this is a direct message or broadcast/project
@@ -354,8 +402,8 @@ class MeshBroker:
                     )
             conn.commit()
             return {"ok": True, "marked": len(message_ids)}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_mark_read)
 
     # -- State --
 
@@ -368,8 +416,7 @@ class MeshBroker:
             conn.close()
 
     def set_state(self, key: str, value: str, set_by: str) -> dict:
-        conn = self._conn()
-        try:
+        def _set_state(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 "INSERT INTO mesh_state (key, value, set_by, updated_at) VALUES (?, ?, ?, ?) "
@@ -378,8 +425,8 @@ class MeshBroker:
             )
             conn.commit()
             return {"ok": True}
-        finally:
-            conn.close()
+
+        return self._write_with_retry(_set_state)
 
     def get_state_key(self, key: str) -> dict | None:
         conn = self._conn()
@@ -394,8 +441,23 @@ class MeshBroker:
     # -- Locks --
 
     def lock_action(self, file_path: str, locked_by: str, action: str) -> dict:
-        conn = self._conn()
-        try:
+        if action == "query":
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT locked_by, locked_at FROM mesh_locks WHERE file_path=?",
+                    (file_path,),
+                ).fetchone()
+                if row:
+                    return {"locked": True, "by": row["locked_by"], "since": row["locked_at"]}
+                return {"locked": False}
+            finally:
+                conn.close()
+
+        if action not in {"acquire", "release"}:
+            return {"ok": False, "error": f"unknown action: {action}"}
+
+        def _lock_action(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
 
             if action == "acquire":
@@ -427,18 +489,9 @@ class MeshBroker:
                 return {"ok": False, "action": "not_released",
                         "error": "no lock held by this peer for that file"}
 
-            elif action == "query":
-                row = conn.execute(
-                    "SELECT locked_by, locked_at FROM mesh_locks WHERE file_path=?",
-                    (file_path,),
-                ).fetchone()
-                if row:
-                    return {"locked": True, "by": row["locked_by"], "since": row["locked_at"]}
-                return {"locked": False}
+            raise AssertionError("validated action was not handled")
 
-            return {"ok": False, "error": f"unknown action: {action}"}
-        finally:
-            conn.close()
+        return self._write_with_retry(_lock_action)
 
     # -- Helpers (v3.4.6) --
 
@@ -525,8 +578,7 @@ class MeshBroker:
                 logger.debug("Mesh cleanup error: %s", exc)
 
     def _run_cleanup(self) -> None:
-        conn = self._conn()
-        try:
+        def _cleanup(conn: sqlite3.Connection) -> None:
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
             # Mark stale peers (no heartbeat for 5 min)
@@ -570,5 +622,5 @@ class MeshBroker:
                 (now_iso,),
             )
             conn.commit()
-        finally:
-            conn.close()
+
+        self._write_with_retry(_cleanup)

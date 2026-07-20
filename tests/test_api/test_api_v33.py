@@ -40,6 +40,13 @@ def _make_app():
     from fastapi import FastAPI
 
     app = FastAPI()
+    app.state.engine = MagicMock(profile_id="default")
+
+    @app.middleware("http")
+    async def _authenticated_test_request(request, call_next):
+        request.state.authenticated_actor = "test:verified"
+        return await call_next(request)
+
     app.include_router(router)
     return app
 
@@ -341,6 +348,17 @@ class TestForgettingRun:
             assert data["success"] is True
             assert "facts_decayed" in data
             assert data["profile"] == "default"
+
+        conn = sqlite3.connect(str(db_path))
+        mismatches = conn.execute(
+            "SELECT COUNT(*) FROM atomic_facts af "
+            "JOIN fact_retention fr ON fr.fact_id = af.fact_id "
+            "WHERE af.profile_id = 'default' AND af.lifecycle != "
+            "CASE WHEN fr.lifecycle_zone IN ('archive', 'forgotten') "
+            "THEN 'archived' ELSE fr.lifecycle_zone END"
+        ).fetchone()[0]
+        conn.close()
+        assert mismatches == 0
 
     def test_run_forgetting_no_db(self, tmp_path):
         """POST /forgetting/run with no DB returns error gracefully."""

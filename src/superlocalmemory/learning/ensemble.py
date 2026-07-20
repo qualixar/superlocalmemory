@@ -269,6 +269,17 @@ def ensemble_rerank(
         for b, l in zip(n_bandit, n_lgbm)
     ]
 
+    # Retain the model/policy utility for auditability without overwriting the
+    # public query-relative relevance score.
+    for candidate, utility in zip(candidates, blended):
+        if isinstance(candidate, dict):
+            candidate["ranking_score"] = float(utility)
+        else:
+            try:
+                candidate.ranking_score = float(utility)
+            except (AttributeError, TypeError):
+                pass
+
     # Stable-sort descending so equal scores preserve original order.
     indexed = list(enumerate(candidates))
     indexed.sort(key=lambda pair: -blended[pair[0]])

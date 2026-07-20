@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.storage.logical_edges import iter_logical_edges
+
 logger = logging.getLogger(__name__)
 
 # Optional import — CozoDB is an optional dependency
@@ -51,6 +53,62 @@ class CozoDBQueryError(CozoDBError):
     """Datalog query execution failed."""
 
 
+class _CozoRows:
+    """Small pandas-values compatible view for PyCozo's dict results."""
+
+    def __init__(self, rows: list[list[Any]]) -> None:
+        self._rows = rows
+
+    def tolist(self) -> list[list[Any]]:
+        return self._rows
+
+
+class _CozoResult:
+    """Normalize old PyCozo dict responses to the dataframe surface we use."""
+
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self.values = _CozoRows(list(result.get("rows", []))) if isinstance(result, dict) else result.values
+
+    def __len__(self) -> int:
+        return len(self.values.tolist())
+
+
+class _CozoClientAdapter:
+    """Bridge PyCozo 0.3 embedded bindings and later client conveniences.
+
+    PyCozo 0.3 is the last client compatible with the published macOS native
+    binding. It returns dictionaries and exposes ``import_relations`` rather
+    than ``put``; later clients return dataframe-like values and add ``put``.
+    SLM only needs relation upserts and row results, so normalize those here.
+    """
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def run(self, script: str, params: dict[str, Any] | None = None) -> Any:
+        result = self._client.run(script) if params is None else self._client.run(script, params)
+        return _CozoResult(result) if isinstance(result, dict) else result
+
+    def put(self, relation: str, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        put = getattr(self._client, "put", None)
+        if callable(put):
+            put(relation, rows)
+            return
+        headers = list(rows[0])
+        self._client.import_relations({
+            relation: {
+                "headers": headers,
+                "rows": [[row.get(header) for header in headers] for row in rows],
+            },
+        })
+
+    def close(self) -> None:
+        self._client.close()
+
+
 # ---------------------------------------------------------------------------
 # CozoDBGraphBackend
 # ---------------------------------------------------------------------------
@@ -70,7 +128,11 @@ class CozoDBGraphBackend:
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
-        self._db = _CozoClient("rocksdb", self._db_path)  # type: ignore[misc]
+        client = _CozoClient("rocksdb", self._db_path, dataframe=False)  # type: ignore[misc]
+        self._db = _CozoClientAdapter(client)
+        self._shadow_checks = 0
+        self._shadow_mismatches = 0
+        self._shadow_errors = 0
         self._ensure_schema()
 
     def close(self) -> None:
@@ -100,11 +162,26 @@ class CozoDBGraphBackend:
         try:
             self._db.run("""
                 :create edge {
-                    from_id: String, to_id: String =>
-                    edge_type: String, weight: Float default 1.0,
+                    from_id: String, to_id: String, edge_type: String =>
+                    weight: Float default 1.0,
                     metadata: String default '{}',
                     profile_id: String default 'default',
                     created_at: String
+                }
+            """)
+        except Exception:
+            pass
+
+        # The entity recall channel resolves a query to canonical entity IDs,
+        # while graph_edges links fact IDs.  Keeping those relations separate
+        # is essential: treating fact IDs as entities produces a healthy but
+        # semantically incompatible graph.  ``fact_entity`` is the bridge
+        # that lets Cozo traverse the same two spaces as the SQLite channel.
+        try:
+            self._db.run("""
+                :create fact_entity {
+                    fact_id: String, entity_id: String =>
+                    profile_id: String default 'default'
                 }
             """)
         except Exception:
@@ -158,6 +235,60 @@ class CozoDBGraphBackend:
             "created_at": now,
         }])
 
+    def add_fact_entities(
+        self,
+        fact_id: str,
+        entity_ids: list[str],
+        profile_id: str = "default",
+    ) -> None:
+        """Upsert the canonical entities attached to one fact.
+
+        This is deliberately a separate relation from ``edge``.  Fact edges
+        and canonical entity IDs are different namespaces in SLM.
+        """
+        self._db.put("fact_entity", [
+            {"fact_id": fact_id, "entity_id": entity_id, "profile_id": profile_id}
+            for entity_id in dict.fromkeys(entity_ids)
+            if entity_id
+        ])
+
+    def remove_fact(self, fact_id: str) -> None:
+        """Remove a fact's derived graph records using bound query values."""
+        # Cozo :rm needs every non-key column in the output relation.  Binding
+        # ``fact_id`` keeps apostrophes and Datalog syntax in external IDs from
+        # becoming executable query text.
+        self._db.run("""
+            ?[fact_id, entity_id, profile_id] :=
+                *fact_entity{fact_id, entity_id, profile_id}, fact_id = $fact_id
+            :rm fact_entity {fact_id, entity_id => profile_id}
+        """, {"fact_id": fact_id})
+        self._db.run("""
+            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
+                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
+                (from_id = $fact_id or to_id = $fact_id)
+            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+        """, {"fact_id": fact_id})
+
+    def record_shadow_comparison(
+        self,
+        *,
+        matches: bool,
+        projected: list[tuple[str, float]],
+        canonical: list[tuple[str, float]],
+    ) -> None:
+        """Retain aggregate parity telemetry without persisting recalled text."""
+        self._shadow_checks += 1
+        if not matches:
+            self._shadow_mismatches += 1
+            logger.warning(
+                "Cozo entity recall diverged from canonical SQLite; using SQLite "
+                "(projected=%d canonical=%d)", len(projected), len(canonical),
+            )
+
+    def record_shadow_error(self, error: str) -> None:
+        self._shadow_errors += 1
+        logger.warning("Cozo entity recall failed closed to SQLite: %s", error)
+
     # ------------------------------------------------------------------
     # Bulk Import (SQLite → CozoDB)
     # ------------------------------------------------------------------
@@ -178,53 +309,66 @@ class CozoDBGraphBackend:
         if tier_filter is None:
             tier_filter = ["active", "warm"]
 
-        # Step 1: Export all unique node IDs from graph_edges as entities.
-        # graph_edges uses fact IDs as nodes. canonical_entities uses separate entity IDs.
-        # CozoDB graph mirrors the graph_edges adjacency — node = fact ID.
+        # Step 1: Export canonical entity records.  Do *not* synthesize
+        # entities from graph_edges: those are fact IDs and belong to the
+        # separate fact graph relation below.
         entities_sql = """
-            SELECT DISTINCT node_id FROM (
-                SELECT source_id as node_id FROM graph_edges WHERE profile_id = ?
-                UNION
-                SELECT target_id as node_id FROM graph_edges WHERE profile_id = ?
-            )
+            SELECT entity_id, canonical_name, entity_type, first_seen, last_seen, fact_count
+            FROM canonical_entities WHERE profile_id = ?
         """
-        rows = conn.execute(entities_sql, (profile_id, profile_id)).fetchall()
+        rows = conn.execute(entities_sql, (profile_id,)).fetchall()
 
         entity_dicts = []
         now = datetime.now().isoformat()
-        for (nid,) in rows:
+        for entity_id, name, entity_type, first_seen, last_seen, fact_count in rows:
             entity_dicts.append({
-                "id": nid,
-                "name": nid[:12],
-                "entity_type": "fact_node",
+                "id": entity_id,
+                "name": name,
+                "entity_type": entity_type or "concept",
                 "tier": "active",
-                "properties": "{}",
+                "properties": json.dumps({"fact_count": int(fact_count or 0)}),
                 "profile_id": profile_id,
-                "created_at": now,
-                "updated_at": now,
+                "created_at": first_seen or now,
+                "updated_at": last_seen or now,
             })
 
         if entity_dicts:
             self._db.put("entity", entity_dicts)
         logger.info("CozoDB: imported %d entities", len(entity_dicts))
 
-        # Step 2: Export edges directly (source_id/target_id are fact IDs)
-        edges_sql = """
-            SELECT source_id, target_id, edge_type, weight
-            FROM graph_edges WHERE profile_id = ?
+        # Step 2: Export fact-to-canonical-entity mappings.  This relation is
+        # what allows a canonical query seed to enter the fact graph.
+        facts_sql = """
+            SELECT fact_id, canonical_entities_json
+            FROM atomic_facts WHERE profile_id = ?
         """
-        edge_rows = conn.execute(edges_sql, (profile_id,)).fetchall()
+        fact_entity_dicts: list[dict[str, str]] = []
+        for fact_id, raw_entities in conn.execute(facts_sql, (profile_id,)).fetchall():
+            try:
+                entity_ids = json.loads(raw_entities or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                entity_ids = []
+            for entity_id in dict.fromkeys(entity_ids):
+                if entity_id:
+                    fact_entity_dicts.append({
+                        "fact_id": fact_id,
+                        "entity_id": str(entity_id),
+                        "profile_id": profile_id,
+                    })
+        if fact_entity_dicts:
+            self._db.put("fact_entity", fact_entity_dicts)
 
+        # Step 3: Export fact graph edges directly.  Fact graph traversal is
+        # intentionally kept in its native fact-ID namespace.
         edge_dicts = []
-        for row in edge_rows:
-            ea, eb, etype, weight = row
+        for ea, eb, etype, weight, edge_profile in iter_logical_edges(conn, profile_id):
             edge_dicts.append({
                 "from_id": ea,
                 "to_id": eb,
-                "edge_type": etype or "related",
-                "weight": float(weight or 1.0),
+                "edge_type": etype,
+                "weight": float(weight),
                 "metadata": "{}",
-                "profile_id": profile_id,
+                "profile_id": edge_profile,
                 "created_at": now,
             })
 
@@ -233,6 +377,83 @@ class CozoDBGraphBackend:
         logger.info("CozoDB: imported %d edges", len(edge_dicts))
 
         return len(edge_dicts)
+
+    def recall_facts(
+        self,
+        seed_entity_ids: list[str],
+        *,
+        profile_id: str = "default",
+        depth: int = 4,
+        decay: float = 0.7,
+        threshold: float = 0.05,
+        top_k: int = 50,
+    ) -> list[tuple[str, float]]:
+        """Mirror SLM's entity-to-fact/fact-graph activation in Cozo storage.
+
+        Query values never enter Datalog source.  Cozo is used as the durable
+        projection; activation runs in Python so the algorithm stays aligned
+        with the SQLite in-memory channel and can be shadow-compared exactly.
+        """
+        if not seed_entity_ids:
+            return []
+        entity_rows = self._db.run(
+            "?[fact_id, entity_id] := *fact_entity{fact_id, entity_id, profile_id}, profile_id = $profile_id",
+            {"profile_id": profile_id},
+        )
+        edge_rows = self._db.run(
+            "?[from_id, to_id, weight] := *edge{from_id, to_id, weight, profile_id}, profile_id = $profile_id",
+            {"profile_id": profile_id},
+        )
+        entity_to_facts: dict[str, list[str]] = {}
+        fact_to_entities: dict[str, list[str]] = {}
+        for fact_id, entity_id in entity_rows.values.tolist() if len(entity_rows) else []:
+            entity_to_facts.setdefault(str(entity_id), []).append(str(fact_id))
+            fact_to_entities.setdefault(str(fact_id), []).append(str(entity_id))
+        adjacency: dict[str, list[tuple[str, float]]] = {}
+        for source_id, target_id, weight in edge_rows.values.tolist() if len(edge_rows) else []:
+            source, target = str(source_id), str(target_id)
+            # Match EntityGraphChannel: graph edges are bidirectional during
+            # activation even when stored as directed rows.
+            adjacency.setdefault(source, []).append((target, float(weight)))
+            adjacency.setdefault(target, []).append((source, float(weight)))
+
+        activation: dict[str, float] = {}
+        visited_entities = set(seed_entity_ids)
+        for entity_id in seed_entity_ids:
+            for fact_id in entity_to_facts.get(entity_id, ()):
+                activation[fact_id] = max(activation.get(fact_id, 0.0), 1.0)
+        frontier = set(activation)
+        for hop in range(1, depth):
+            hop_decay = decay ** hop
+            if hop_decay < threshold:
+                break
+            next_frontier: set[str] = set()
+            for fact_id in frontier:
+                for neighbor_id, _weight in adjacency.get(fact_id, ()):
+                    # SQLite intentionally ignores edge weights when graph
+                    # metrics are unavailable; use that same baseline here.
+                    score = activation[fact_id] * decay
+                    if score >= threshold and score > activation.get(neighbor_id, 0.0):
+                        activation[neighbor_id] = score
+                        next_frontier.add(neighbor_id)
+            for fact_id in frontier:
+                for entity_id in fact_to_entities.get(fact_id, ()):
+                    if entity_id in visited_entities:
+                        continue
+                    visited_entities.add(entity_id)
+                    for related_fact_id in entity_to_facts.get(entity_id, ()):
+                        if hop_decay > activation.get(related_fact_id, 0.0):
+                            activation[related_fact_id] = hop_decay
+                            next_frontier.add(related_fact_id)
+            frontier = next_frontier
+            if not frontier:
+                break
+        results = [(fact_id, score) for fact_id, score in activation.items() if score >= threshold]
+        if not results:
+            return []
+        maximum = max(score for _, score in results)
+        results = [(fact_id, score / maximum) for fact_id, score in results]
+        return sorted(results, key=lambda item: item[1], reverse=True)[:top_k]
 
     # ------------------------------------------------------------------
     # Spreading Activation (Python BFS over CozoDB edges)
@@ -267,10 +488,10 @@ class CozoDBGraphBackend:
             for entity_id in current_frontier:
                 # Query all outgoing edges from this entity
                 try:
-                    result = self._db.run(f"""
+                    result = self._db.run("""
                         ?[to_id, weight] :=
-                            *edge{{from_id: '{entity_id}', to_id, weight}}
-                    """)
+                            *edge{from_id, to_id, weight}, from_id = $entity_id
+                    """, {"entity_id": entity_id})
                     df = result if hasattr(result, "values") else result
                     if df is None or len(df) == 0:
                         continue
@@ -497,6 +718,9 @@ class CozoDBGraphBackend:
                 "status": "active",
                 "entities": int(ec),
                 "edges": int(edc),
+                "shadow_checks": self._shadow_checks,
+                "shadow_mismatches": self._shadow_mismatches,
+                "shadow_errors": self._shadow_errors,
                 "db_path": self._db_path,
             }
         except Exception as exc:
@@ -520,6 +744,10 @@ class CozoDBGraphBackend:
             pass
         try:
             self._db.run("::remove edge")
+        except Exception:
+            pass
+        try:
+            self._db.run("::remove fact_entity")
         except Exception:
             pass
 

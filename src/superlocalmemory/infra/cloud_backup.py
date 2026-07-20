@@ -25,11 +25,21 @@ from datetime import datetime, UTC, timezone
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.infra.data_root import canonical_data_root
+
 logger = logging.getLogger("superlocalmemory.cloud_backup")
 
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
+MEMORY_DIR = None  # test-only compatibility override
+DB_PATH = None  # test-only compatibility override
 KEYRING_SERVICE = "superlocalmemory"
+
+
+def _memory_dir() -> Path:
+    return Path(MEMORY_DIR) if MEMORY_DIR is not None else canonical_data_root()
+
+
+def _default_db_path() -> Path:
+    return Path(DB_PATH) if DB_PATH is not None else _memory_dir() / "memory.db"
 
 # Stage-9 fix: hoist NoKeyringError to module scope.  Previously each function
 # did `from keyring.errors import NoKeyringError` INSIDE the same try whose
@@ -52,7 +62,7 @@ except Exception:  # keyring not installed at all
 
 def _get_credential_store() -> Path:
     """Fallback plaintext-local-file credential store for systems without a keychain."""
-    return MEMORY_DIR / ".credentials.json"
+    return _memory_dir() / ".credentials.json"
 
 
 def _atomic_write_creds(store_path: Path, data: dict) -> None:
@@ -210,7 +220,7 @@ def _delete_credential(key: str) -> bool:
 
 def get_destinations(db_path: Path | None = None) -> list[dict[str, Any]]:
     """List all configured backup destinations."""
-    path = db_path or DB_PATH
+    path = db_path or _default_db_path()
     if not path.exists():
         return []
     conn = sqlite3.connect(str(path))
@@ -237,7 +247,7 @@ def add_destination(
     from superlocalmemory.storage.models import _new_id
 
     dest_id = _new_id()
-    path = db_path or DB_PATH
+    path = db_path or _default_db_path()
     conn = sqlite3.connect(str(path))
     try:
         conn.execute(
@@ -256,7 +266,7 @@ def add_destination(
 
 def remove_destination(dest_id: str, db_path: Path | None = None) -> bool:
     """Remove a backup destination and its credentials."""
-    path = db_path or DB_PATH
+    path = db_path or _default_db_path()
     conn = sqlite3.connect(str(path))
     try:
         row = conn.execute(
@@ -282,7 +292,7 @@ def update_sync_status(
     db_path: Path | None = None,
 ) -> None:
     """Update the sync status of a destination."""
-    path = db_path or DB_PATH
+    path = db_path or _default_db_path()
     conn = sqlite3.connect(str(path))
     try:
         conn.execute(
@@ -731,7 +741,7 @@ def _find_latest_backup_set(backup_dir: Path) -> list[Path]:
 
 def sync_all_destinations(db_path: Path | None = None) -> dict[str, Any]:
     """Sync latest backup set (ALL databases) to all enabled cloud destinations."""
-    path = db_path or DB_PATH
+    path = db_path or _default_db_path()
     results: dict[str, Any] = {}
 
     destinations = get_destinations(path)

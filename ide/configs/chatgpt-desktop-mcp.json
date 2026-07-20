@@ -12,5 +12,5 @@
     "step7": "In any chat, click + -> More -> select SuperLocalMemory connector"
   },
   "_alternative_transport": "For Streamable HTTP (recommended): slm serve --transport streamable-http --port 8417",
-  "_note": "100% local -- your MCP server runs on YOUR machine. The tunnel just makes it reachable by ChatGPT servers. All data stays in ~/.superlocalmemory/memory.db"
+  "_note": "The MCP server and core memory state run locally. A tunnel transmits requested MCP data to ChatGPT; review that data path and any optional integrations before enabling it."
 }

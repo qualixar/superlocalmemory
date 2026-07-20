@@ -331,8 +331,15 @@ class TestModeConfig:
 
     def test_mode_c_has_cloud(self, db_path: Path) -> None:
         config = SLMConfig.for_mode(Mode.C, base_dir=db_path.parent)
+        # Mode C = cloud LLM for generation...
         assert config.llm.provider == "openrouter"
-        assert config.embedding.dimension == 3072
+        assert config.llm.is_available
+        # ...but LOCAL embeddings by default (v3.4.24+): embeddings stay
+        # on-device (privacy-preserving); a cloud embedding endpoint is opt-in
+        # via the "openai" provider. The old 3072-dim cloud-embedding default
+        # was retired, so Mode C ships the same local 768-dim nomic model.
+        assert config.embedding.dimension == 768
+        assert not config.embedding.is_cloud
 
     def test_mode_a_local_embedding(self, db_path: Path) -> None:
         config = SLMConfig.for_mode(Mode.A, base_dir=db_path.parent)

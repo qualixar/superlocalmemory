@@ -88,7 +88,7 @@ def test_skill_files_exist_at_both_paths():
     assert _SKILL_FILE.exists(), (
         f"Missing plugin skill: {_SKILL_FILE.relative_to(_REPO_ROOT)}\n"
         "slm-compress is the replacement for retired slm-optimize in v3.6.14.\n"
-        "Run: node scripts/build-plugin.js to regenerate plugin/"
+        "Run: node scripts/build-plugin.mjs to regenerate plugin/"
     )
     assert _SRC_SKILL_FILE.exists(), (
         f"Missing source skill: {_SRC_SKILL_FILE.relative_to(_REPO_ROOT)}"

@@ -21,11 +21,11 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 
 from superlocalmemory.core.config import AutoInvokeConfig
+from superlocalmemory.core.injection import InjectableMemory, render_context
 
 logger = logging.getLogger(__name__)
 
@@ -90,16 +90,19 @@ class AutoInvoker:
                 limit=self._config.max_memories_injected,
             )
 
-            memory_context = self.format_for_injection(results) if results else ""
-
-            # V3.3: Inject soft prompts (priority over memory context)
             soft_prompt_text = self._get_soft_prompt_text()
-            if soft_prompt_text and self._prompt_injector is not None:
-                return self._prompt_injector.inject_into_context(
-                    soft_prompt_text, memory_context,
-                )
-
-            return soft_prompt_text + ("\n\n" + memory_context if memory_context else "") if soft_prompt_text else memory_context
+            if soft_prompt_text:
+                results = [
+                    {
+                        "fact_id": "",
+                        "content": soft_prompt_text,
+                        "fact_type": "behavioral-pattern",
+                        "score": 0.0,
+                        "contextual_description": "",
+                    },
+                    *results,
+                ]
+            return self.format_for_injection(results) if results else ""
         except Exception as exc:
             logger.debug("Auto-invoke failed: %s", exc)
             return ""
@@ -476,29 +479,24 @@ class AutoInvoker:
     # ------------------------------------------------------------------
 
     def format_for_injection(self, results: list[dict]) -> str:
-        """Format results for system prompt injection.
-
-        Output: Markdown list with content previews and context.
-        """
+        """Format results as bounded, untrusted evidence with provenance."""
         if not results:
             return ""
 
-        lines = ["# Relevant Memory Context", ""]
+        memories: list[InjectableMemory] = []
         for r in results:
-            content_preview = r["content"][:200]
+            content = str(r.get("content", ""))
             ctx = r.get("contextual_description", "")
-
-            line = f"- [{r['fact_type']}] {content_preview}"
             if ctx:
-                line += f"\n  > Context: {ctx}"
-            lines.append(line)
-
-        lines.append("")
-        lines.append(
-            f"_Auto-invoked {len(results)} memories "
-            f"(FOK >= {self._config.fok_threshold})_"
-        )
-        return "\n".join(lines)
+                content += f"\nContext: {ctx}"
+            memories.append(InjectableMemory(
+                content=content,
+                score=float(r.get("score", 0.0) or 0.0),
+                fact_id=str(r.get("fact_id", "")),
+                source_type=str(r.get("fact_type", "auto-invoke")),
+                source_id=f"fok-threshold:{self._config.fok_threshold}",
+            ))
+        return render_context(memories, mode="B", cfg=None, wrap=True)
 
     # ------------------------------------------------------------------
     # V3.3: Soft prompt injection

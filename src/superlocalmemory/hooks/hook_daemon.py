@@ -29,17 +29,19 @@ import threading
 import time
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import state_path
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SOCK_NAME = "hook_daemon.sock"
 
 
 def _default_sock_path() -> Path:
-    return Path.home() / ".superlocalmemory" / _DEFAULT_SOCK_NAME
+    return state_path(_DEFAULT_SOCK_NAME)
 
 
 def _default_queue_db_path() -> Path:
-    return Path.home() / ".superlocalmemory" / "recall_queue.db"
+    return state_path("recall_queue.db")
 
 
 class HookDaemon:

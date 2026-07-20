@@ -9,7 +9,9 @@ var recallLabState = {
     synthesis: '',
 };
 
-document.getElementById('recall-lab-search')?.addEventListener('click', function() {
+// Delegation handles the case where the recall-lab tab pane is injected after parse time.
+document.addEventListener('click', function(e) {
+    if (!e.target || e.target.id !== 'recall-lab-search') return;
     var query = document.getElementById('recall-lab-query').value.trim();
     if (!query) return;
 
@@ -287,6 +289,10 @@ function buildChannelBar(name, score, max, color) {
     return row;
 }
 
-document.getElementById('recall-lab-query')?.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') document.getElementById('recall-lab-search')?.click();
+document.addEventListener('keydown', function(e) {
+    if (!e.target || e.target.id !== 'recall-lab-query') return;
+    if (e.key === 'Enter') {
+        var btn = document.getElementById('recall-lab-search');
+        if (btn) btn.click();
+    }
 });

@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
+
 import pytest
-from pathlib import Path
 
 pytestmark = pytest.mark.slow
 
@@ -17,7 +19,7 @@ def mesh_db(tmp_path):
     """Create a temp DB with mesh tables (v3.4.3 base + v3.4.6 enhancements)."""
     db_path = tmp_path / "mesh_test.db"
     conn = sqlite3.connect(str(db_path))
-    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_DDL, _MESH_V346_ALTERS
+    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL
     conn.executescript(_MESH_DDL)
     for alter_sql in _MESH_V346_ALTERS:
         try:
@@ -68,6 +70,40 @@ class TestMeshPeers:
         result = broker.heartbeat("fake-id")
         assert result["ok"] is False
 
+    def test_heartbeat_retries_a_transient_writer_lock(self, broker, mesh_db, monkeypatch):
+        """A busy peer write must not make an otherwise healthy heartbeat fail.
+
+        WAL allows readers alongside a writer, but SQLite still admits only one
+        writer at a time.  The broker owns a short retry budget so concurrent
+        agent heartbeats are retried rather than surfaced as ``database is
+        locked`` to the caller.
+        """
+        peer = broker.register_peer("locked-session")
+
+        def _zero_wait_connection():
+            conn = sqlite3.connect(str(mesh_db), timeout=0)
+            conn.execute("PRAGMA busy_timeout=0")
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(broker, "_conn", _zero_wait_connection)
+        lock_holder = sqlite3.connect(
+            str(mesh_db), timeout=0, check_same_thread=False,
+        )
+        lock_holder.execute("BEGIN IMMEDIATE")
+
+        def _release_lock():
+            time.sleep(0.05)
+            lock_holder.rollback()
+            lock_holder.close()
+
+        releaser = threading.Thread(target=_release_lock)
+        releaser.start()
+        try:
+            assert broker.heartbeat(peer["peer_id"]) == {"ok": True}
+        finally:
+            releaser.join(timeout=1)
+
     def test_update_summary(self, broker):
         r = broker.register_peer("session-1", summary="old")
         broker.update_summary(r["peer_id"], "new summary")
@@ -98,6 +134,39 @@ class TestMeshMessages:
         result = broker.send_message(r1["peer_id"], "fake", "hello")
         assert result["ok"] is False
 
+    def test_send_retries_a_transient_writer_lock(self, broker, mesh_db, monkeypatch):
+        """Peer messaging shares the same bounded writer contract as heartbeat."""
+        sender = broker.register_peer("sender")
+        recipient = broker.register_peer("recipient")
+
+        def _zero_wait_connection():
+            conn = sqlite3.connect(str(mesh_db), timeout=0)
+            conn.execute("PRAGMA busy_timeout=0")
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(broker, "_conn", _zero_wait_connection)
+        lock_holder = sqlite3.connect(
+            str(mesh_db), timeout=0, check_same_thread=False,
+        )
+        lock_holder.execute("BEGIN IMMEDIATE")
+
+        def _release_lock():
+            time.sleep(0.05)
+            lock_holder.rollback()
+            lock_holder.close()
+
+        releaser = threading.Thread(target=_release_lock)
+        releaser.start()
+        try:
+            result = broker.send_message(
+                sender["peer_id"], recipient["peer_id"], "retry this message",
+            )
+        finally:
+            releaser.join(timeout=1)
+
+        assert result["ok"] is True
+
     def test_mark_read(self, broker):
         r1 = broker.register_peer("s1")
         r2 = broker.register_peer("s2")
@@ -106,7 +175,16 @@ class TestMeshMessages:
         msg_id = inbox[0]["id"]
         broker.mark_read(r2["peer_id"], [msg_id])
         inbox2 = broker.get_inbox(r2["peer_id"])
-        assert inbox2[0]["read"] == 1
+        # get_inbox is an unread queue: acknowledged messages disappear.
+        assert inbox2 == []
+        conn = broker._conn()
+        try:
+            row = conn.execute(
+                "SELECT read FROM mesh_messages WHERE id=?", (msg_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == 1
 
 
 class TestMeshState:
@@ -221,7 +299,18 @@ class TestMeshBroadcast:
         assert inbox[0]["read"] == 0
         broker.mark_read(r2["peer_id"], [inbox[0]["id"]])
         inbox2 = broker.get_inbox(r2["peer_id"])
-        assert inbox2[0]["read"] == 1  # Now marked read via mesh_reads
+        assert inbox2 == []  # Read broadcast is not redelivered.
+
+    def test_broadcast_marked_read_is_not_redelivered(self, broker):
+        """Inbox is an unread delivery queue, not a permanent event feed."""
+        sender = broker.register_peer("sender")
+        recipient = broker.register_peer("recipient")
+        broker.send_message(sender["peer_id"], "broadcast", "deliver once")
+
+        first_inbox = broker.get_inbox(recipient["peer_id"])
+        broker.mark_read(recipient["peer_id"], [first_inbox[0]["id"]])
+
+        assert broker.get_inbox(recipient["peer_id"]) == []
 
 
 class TestMeshProjectMessages:
@@ -247,6 +336,17 @@ class TestMeshProjectMessages:
         broker.send_message(r1["peer_id"], "project:/projects/qos", "qos only")
         inbox = broker.get_inbox(r2["peer_id"], project_path="/projects/slm")
         assert len(inbox) == 0  # Different project, no message
+
+    def test_project_message_marked_read_is_not_redelivered(self, broker):
+        """Project fan-out records one read receipt per recipient."""
+        sender = broker.register_peer("sender", project_path="/projects/slm")
+        recipient = broker.register_peer("recipient", project_path="/projects/slm")
+        broker.send_message(sender["peer_id"], "project:/projects/slm", "deliver once")
+
+        first_inbox = broker.get_inbox(recipient["peer_id"], project_path="/projects/slm")
+        broker.mark_read(recipient["peer_id"], [first_inbox[0]["id"]])
+
+        assert broker.get_inbox(recipient["peer_id"], project_path="/projects/slm") == []
 
 
 class TestMeshOfflineQueue:

@@ -27,11 +27,11 @@ _os.environ.setdefault('SLM_SKIP_DEP_CHECK', '1')
 import logging
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from superlocalmemory.mcp.http_transport import SLMFastMCP
 
 logger = logging.getLogger(__name__)
 
-server = FastMCP("SuperLocalMemory V3")
+server = SLMFastMCP("SuperLocalMemory V3")
 
 # Lazy engine singleton -------------------------------------------------------
 
@@ -89,6 +89,7 @@ _ESSENTIAL_TOOLS: set[str] = {
     # Core memory operations (8)
     "remember", "recall", "search", "fetch",
     "list_recent", "delete_memory", "update_memory", "get_status",
+    "switch_profile",
     # Session lifecycle (3)
     "session_init", "observe", "close_session",
     # Feedback / learning signals — reachable Dash-Core path for
@@ -175,6 +176,18 @@ _PROFILE_DEFINITIONS: dict[str, frozenset[str]] = {
     "mesh": _PROFILE_MESH,
 }  # "whole" intentionally absent — maps to raw server (D-2 LOCKED)
 
+# Compatibility aliases published by the v3.6 README.  Keep these explicit so
+# a stale client configuration has one deterministic meaning and emits a
+# migration warning.  Any other value is a configuration error (fail closed).
+_PROFILE_ALIASES: dict[str, str] = {
+    "core14": "core",
+    "code20": "code",
+    "full38": "full",
+    "power50": "power",
+    "mesh8": "mesh",
+    "whole81": "whole",
+}
+
 _profile = _os_reg.environ.get("SLM_MCP_PROFILE", "").strip().lower()
 
 
@@ -188,19 +201,26 @@ def _resolve_profile_allowed(
     Returns:
         None  — for "" (no selection) or "whole" (raw server, all tools).
         frozenset — the profile's tool set for known profiles.
-        essential — fail-open fallback for unknown non-empty profiles (+ warning).
+
+    Raises:
+        ValueError: if ``profile`` is neither canonical nor an explicitly
+            supported compatibility alias.
     """
-    if not profile or profile == "whole":
+    canonical = _PROFILE_ALIASES.get(profile, profile)
+    if canonical != profile:
+        logger.warning(
+            "SLM_MCP_PROFILE=%r is deprecated; use %r instead.",
+            profile,
+            canonical,
+        )
+    if not canonical or canonical == "whole":
         return None
-    if profile in definitions:
-        return definitions[profile]
-    logger.warning(
-        "SLM_MCP_PROFILE=%r is not a recognised profile "
-        "(valid: %s, whole); falling back to essential tools.",
-        profile,
-        ", ".join(sorted(definitions)),
+    if canonical in definitions:
+        return definitions[canonical]
+    valid = ", ".join((*sorted(definitions), "whole"))
+    raise ValueError(
+        f"SLM_MCP_PROFILE={profile!r} is not recognised; valid profiles: {valid}"
     )
-    return essential
 
 
 class _FilteredServer:
@@ -237,7 +257,14 @@ elif _user_allowlist_str:
 elif _profile == "whole":
     _target = server                                                              # NEW raw-server
 elif _profile:
-    _target = _FilteredServer(server, _resolve_profile_allowed(_profile, _PROFILE_DEFINITIONS, _ESSENTIAL_TOOLS))  # NEW
+    _profile_allowed = _resolve_profile_allowed(
+        _profile, _PROFILE_DEFINITIONS, _ESSENTIAL_TOOLS
+    )
+    _target = (
+        server
+        if _profile_allowed is None
+        else _FilteredServer(server, _profile_allowed)
+    )
 else:
     _target = _FilteredServer(server, _ESSENTIAL_TOOLS)                          # default (unchanged)
 

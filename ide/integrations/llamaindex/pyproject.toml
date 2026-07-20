@@ -5,10 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "llama-index-storage-chat-store-superlocalmemory"
 version = "0.1.0"
-description = "LlamaIndex chat store backed by SuperLocalMemory — 100% local, zero cloud"
+description = "LlamaIndex chat store backed by a local SuperLocalMemory data root"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
-requires-python = ">=3.9"
+requires-python = ">=3.11,<3.15"
 authors = [
     { name = "Varun Pratap Bhardwaj" },
 ]
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "llama-index-core>=0.13.0,<0.15",
+    "superlocalmemory>=3.6.23,<4",
 ]
 
 [project.urls]

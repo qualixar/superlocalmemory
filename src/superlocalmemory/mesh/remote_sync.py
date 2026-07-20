@@ -21,11 +21,51 @@ import logging
 import os
 import threading
 import time
+import ipaddress
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger("superlocalmemory.mesh.remote_sync")
+
+
+def _service_ip_addresses(info: Any) -> list[str]:
+    """Return validated textual IPs from current and older Zeroconf APIs."""
+    candidates: list[Any] = []
+    parsed = getattr(info, "parsed_addresses", None)
+    if callable(parsed):
+        try:
+            candidates.extend(parsed())
+        except (OSError, TypeError, ValueError):
+            pass
+    candidates.extend(getattr(info, "addresses", None) or [])
+
+    addresses: list[str] = []
+    for candidate in candidates:
+        try:
+            address = ipaddress.ip_address(candidate)
+        except (TypeError, ValueError):
+            continue
+        # An mDNS peer must name a routable endpoint, never a wildcard or
+        # multicast destination.  Authentication is still enforced by mesh.
+        if address.is_unspecified or address.is_multicast:
+            continue
+        rendered = str(address)
+        if rendered not in addresses:
+            addresses.append(rendered)
+    return addresses
+
+
+def _peer_url(host: str, port: int) -> str:
+    """Format an IP literal safely for an HTTP authority."""
+    address = ipaddress.ip_address(host)
+    rendered = str(address)
+    if address.version == 6:
+        # RFC 6874 requires a percent sign in an IPv6 zone identifier to be
+        # escaped when the literal appears inside a URI authority.
+        rendered = rendered.replace("%", "%25")
+        rendered = f"[{rendered}]"
+    return f"http://{rendered}:{int(port)}"
 
 # Optional zeroconf for mDNS discovery
 try:
@@ -236,17 +276,15 @@ class RemoteSyncClient:
             if not ZEROCONF_AVAILABLE:
                 return
             info = zeroconf.get_service_info(service_type, name)
-            if info and info.addresses:
-                # Get first IPv4 address
-                for addr in info.addresses:
-                    if isinstance(addr, str) and "." in addr:  # IPv4
-                        port = info.port or 8765
-                        peer_url = f"http://{addr}:{port}"
-                        self._update_peer_url(addr, port)
-                        logger.info(
-                            "RemoteSyncClient: discovered SLM at %s", peer_url
-                        )
-                        return
+            if info:
+                for addr in _service_ip_addresses(info):
+                    port = info.port or 8765
+                    peer_url = _peer_url(addr, port)
+                    self._update_peer_url(addr, port)
+                    logger.info(
+                        "RemoteSyncClient: discovered SLM at %s", peer_url
+                    )
+                    return
         except Exception as e:
             logger.debug("RemoteSyncClient: mDNS add_service error: %s", e)
 
@@ -260,7 +298,7 @@ class RemoteSyncClient:
 
     def _update_peer_url(self, host: str, port: int) -> None:
         """Update peer URL from discovery."""
-        new_url = f"http://{host}:{port}"
+        new_url = _peer_url(host, port)
         if self._peer_url != new_url:
             self._peer_url = new_url
             logger.info("RemoteSyncClient: updated peer URL to %s", new_url)

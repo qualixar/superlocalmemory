@@ -34,6 +34,10 @@ class PoolRecallItem:
     fact: PoolFact = field(default_factory=PoolFact)
     score: float = 0.0
     confidence: float = 0.0
+    relevance_score: float = 0.0
+    ranking_score: float | None = None
+    memory_confidence: float = 0.0
+    rank_position: int = 0
     trust_score: float = 0.0
     channel_scores: dict[str, float] = field(default_factory=dict)
     evidence_chain: list[Any] = field(default_factory=list)
@@ -46,6 +50,12 @@ class PoolRecallResponse:
     retrieval_time_ms: float = 0.0
     channel_weights: dict[str, float] = field(default_factory=dict)
     total_candidates: int = 0
+    score_contract_version: str = "2"
+    calibration_status: str = "uncalibrated"
+    calibration_id: str | None = None
+    answer_confidence: float | None = None
+    abstained: bool = False
+    abstention_reason: str | None = None
 
 
 class PoolError(RuntimeError):
@@ -107,6 +117,15 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
             ),
             score=float(item.get("score", 0.0)),
             confidence=float(item.get("confidence", 0.0)),
+            relevance_score=float(item.get("relevance_score", item.get("score", 0.0))),
+            ranking_score=(
+                float(item["ranking_score"])
+                if item.get("ranking_score") is not None else None
+            ),
+            memory_confidence=float(
+                item.get("memory_confidence", item.get("confidence", 0.0))
+            ),
+            rank_position=int(item.get("rank_position", 0)),
             trust_score=float(item.get("trust_score", 0.0)),
             channel_scores=item.get("channel_scores", {}) or {},
             evidence_chain=list(item.get("evidence_chain", []) or []),
@@ -122,6 +141,14 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
         if isinstance(raw, dict) else {},
         total_candidates=int(raw.get("total_candidates", 0))
         if isinstance(raw, dict) else 0,
+        score_contract_version=str(raw.get("score_contract_version", "2"))
+        if isinstance(raw, dict) else "2",
+        calibration_status=str(raw.get("calibration_status", "uncalibrated"))
+        if isinstance(raw, dict) else "uncalibrated",
+        calibration_id=raw.get("calibration_id") if isinstance(raw, dict) else None,
+        answer_confidence=raw.get("answer_confidence") if isinstance(raw, dict) else None,
+        abstained=bool(raw.get("abstained", False)) if isinstance(raw, dict) else False,
+        abstention_reason=raw.get("abstention_reason") if isinstance(raw, dict) else None,
     )
 
 

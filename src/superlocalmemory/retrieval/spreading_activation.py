@@ -12,7 +12,7 @@ Reads BOTH graph_edges + association_edges via UNION query (Rule 13).
 Registered as 5th channel via ChannelRegistry (needs_embedding=True).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -25,6 +25,11 @@ from typing import Any
 
 import numpy as np
 
+from superlocalmemory.retrieval.scope_policy import (
+    authorized_fact_ids,
+    filter_authorized_results,
+)
+from superlocalmemory.storage.database import _scope_where
 from superlocalmemory.storage.models import _new_id
 
 logger = logging.getLogger(__name__)
@@ -88,7 +93,7 @@ class SpreadingActivation:
     def __init__(
         self,
         db: Any,
-        vector_store: Any,
+        vector_store: Any | None,
         config: SpreadingActivationConfig | None = None,
     ) -> None:
         self._db = db
@@ -113,22 +118,80 @@ class SpreadingActivation:
         if not self._config.enabled:
             return []
 
+        include_global = bool(getattr(self, "include_global", False))
+        include_shared = bool(getattr(self, "include_shared", False))
         try:
             # Step 0: Get seed nodes from VectorStore KNN
-            seed_results = self._vector_store.search(
-                query, top_k=self._config.top_m, profile_id=profile_id,
+            seed_results = self._seed_search(
+                query,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
             )
+            # Owner-partitioned vector indexes cannot discover opted-in peers.
+            # Add visible external embeddings with the same cosine seed signal.
+            try:
+                external_facts = self._db.get_external_visible_facts(
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
+            except Exception:
+                external_facts = []
+            q_vec = np.array(query, dtype=np.float32)
+            q_norm = float(np.linalg.norm(q_vec))
+            combined = {fact_id: score for fact_id, score in seed_results}
+            for fact in external_facts:
+                embedding = getattr(fact, "embedding", None)
+                if embedding is None:
+                    continue
+                fact_vec = np.array(embedding, dtype=np.float32)
+                if fact_vec.shape != q_vec.shape:
+                    continue
+                denominator = q_norm * float(np.linalg.norm(fact_vec))
+                if denominator <= 1e-8:
+                    continue
+                score = (float(np.dot(q_vec, fact_vec) / denominator) + 1.0) / 2.0
+                combined[fact.fact_id] = max(combined.get(fact.fact_id, 0.0), score)
+            allowed_seeds = authorized_fact_ids(
+                self._db,
+                combined,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
+            seed_results = [
+                (fact_id, score)
+                for fact_id, score in combined.items()
+                if fact_id in allowed_seeds
+            ]
             if not seed_results:
                 return []
 
             # Check cache first
-            query_hash = self._compute_query_hash(query, profile_id)
+            query_hash = self._compute_query_hash(
+                query,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
             cached = self._get_cached_results(query_hash, profile_id)
             if cached:
-                return cached[:top_k]
+                return filter_authorized_results(
+                    self._db,
+                    cached,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )[:top_k]
 
             # Run 5-step spreading activation
-            activations = self._propagate(seed_results, profile_id)
+            activations = self._propagate(
+                seed_results,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )
 
             # FOK gating
             if not self._fok_check(activations):
@@ -141,7 +204,13 @@ class SpreadingActivation:
             results = sorted(
                 activations.items(), key=lambda x: x[1], reverse=True,
             )
-            return results[:top_k]
+            return filter_authorized_results(
+                self._db,
+                results,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            )[:top_k]
 
         except Exception as exc:
             logger.warning(
@@ -150,10 +219,60 @@ class SpreadingActivation:
             )
             return []
 
+    def _seed_search(
+        self,
+        query: Any,
+        profile_id: str,
+        *,
+        include_global: bool,
+        include_shared: bool,
+    ) -> list[tuple[str, float]]:
+        """Return bounded semantic graph seeds from vec0 or canonical SQLite.
+
+        sqlite-vec is an acceleration projection, not a prerequisite for the
+        graph retrieval layer.  When it is unavailable on a platform, use the
+        canonical stored embeddings and the same cosine signal as the
+        cross-profile supplement below.  This keeps spreading activation
+        present and truthful rather than silently removing a retrieval layer.
+        """
+        if self._vector_store is not None and getattr(
+            self._vector_store, "available", False,
+        ):
+            return self._vector_store.search(
+                query, top_k=self._config.top_m, profile_id=profile_id,
+            )
+
+        q_vec = np.array(query, dtype=np.float32)
+        q_norm = float(np.linalg.norm(q_vec))
+        if q_norm <= 1e-8:
+            return []
+        facts = self._db.get_all_facts(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        scored: list[tuple[str, float]] = []
+        for fact in facts:
+            embedding = getattr(fact, "embedding", None)
+            if embedding is None:
+                continue
+            fact_vec = np.array(embedding, dtype=np.float32)
+            if fact_vec.shape != q_vec.shape:
+                continue
+            denominator = q_norm * float(np.linalg.norm(fact_vec))
+            if denominator <= 1e-8:
+                continue
+            score = (float(np.dot(q_vec, fact_vec) / denominator) + 1.0) / 2.0
+            scored.append((fact.fact_id, score))
+        return sorted(scored, key=lambda item: item[1], reverse=True)[:self._config.top_m]
+
     def _propagate(
         self,
         seeds: list[tuple[str, float]],
         profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> dict[str, float]:
         """Execute the 5-step SYNAPSE algorithm.
 
@@ -186,7 +305,22 @@ class SpreadingActivation:
 
                 # Get neighbors from BOTH tables (Rule 13) — cached per node
                 if node_id not in neighbor_cache:
-                    neighbor_cache[node_id] = self._get_unified_neighbors(node_id, profile_id)
+                    raw_neighbors = self._get_unified_neighbors(
+                        node_id,
+                        profile_id,
+                        include_global=include_global,
+                        include_shared=include_shared,
+                    )
+                    allowed_neighbors = authorized_fact_ids(
+                        self._db,
+                        (neighbor_id for neighbor_id, _weight in raw_neighbors),
+                        profile_id,
+                        include_global=include_global,
+                        include_shared=include_shared,
+                    )
+                    neighbor_cache[node_id] = [
+                        item for item in raw_neighbors if item[0] in allowed_neighbors
+                    ]
                 neighbors = neighbor_cache[node_id]
 
                 # Out-degree for fan effect normalization
@@ -226,7 +360,12 @@ class SpreadingActivation:
         return activations
 
     def _get_unified_neighbors(
-        self, node_id: str, profile_id: str,
+        self,
+        node_id: str,
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> list[tuple[str, float]]:
         """Get neighbors from BOTH graph_edges and association_edges.
 
@@ -245,41 +384,56 @@ class SpreadingActivation:
             # all 2.1M edges then sorting. Each branch wrapped in SELECT * FROM (...)
             # because SQLite requires parentheses for ORDER BY+LIMIT in compound SELECTs.
             lim = self._config.max_neighbors_per_node
+            graph_where, graph_params = _scope_where(
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+                prefix="ge",
+            )
+            # association_edges has no scope/shared_with columns in the current
+            # schema, so it remains owner-profile-only. Endpoint authorization
+            # below still prevents a private candidate from entering results.
+            assoc_where = "ae.profile_id = ?"
+            assoc_params = [profile_id]
             rows = self._db.execute(
-                """
+                f"""
                 SELECT neighbor_id, weight FROM (
                     SELECT * FROM (
-                        SELECT target_id AS neighbor_id, weight FROM graph_edges
-                        WHERE source_id = ? AND profile_id = ?
+                        SELECT target_id AS neighbor_id, weight FROM graph_edges AS ge
+                        WHERE source_id = ? AND {graph_where}
                         ORDER BY weight DESC LIMIT ?
                     )
                     UNION ALL
                     SELECT * FROM (
-                        SELECT target_fact_id AS neighbor_id, weight FROM association_edges
-                        WHERE source_fact_id = ? AND profile_id = ?
+                        SELECT target_fact_id AS neighbor_id, weight
+                        FROM association_edges AS ae
+                        WHERE source_fact_id = ? AND {assoc_where}
                         ORDER BY weight DESC LIMIT ?
                     )
                     UNION ALL
                     SELECT * FROM (
-                        SELECT source_id AS neighbor_id, weight FROM graph_edges
-                        WHERE target_id = ? AND profile_id = ?
+                        SELECT source_id AS neighbor_id, weight FROM graph_edges AS ge
+                        WHERE target_id = ? AND {graph_where}
                         ORDER BY weight DESC LIMIT ?
                     )
                     UNION ALL
                     SELECT * FROM (
-                        SELECT source_fact_id AS neighbor_id, weight FROM association_edges
-                        WHERE target_fact_id = ? AND profile_id = ?
+                        SELECT source_fact_id AS neighbor_id, weight
+                        FROM association_edges AS ae
+                        WHERE target_fact_id = ? AND {assoc_where}
                         ORDER BY weight DESC LIMIT ?
                     )
                 )
                 ORDER BY weight DESC
                 LIMIT ?
                 """,
-                (node_id, profile_id, lim,
-                 node_id, profile_id, lim,
-                 node_id, profile_id, lim,
-                 node_id, profile_id, lim,
-                 lim),
+                (
+                    node_id, *graph_params, lim,
+                    node_id, *assoc_params, lim,
+                    node_id, *graph_params, lim,
+                    node_id, *assoc_params, lim,
+                    lim,
+                ),
             )
             return [
                 (dict(r)["neighbor_id"], dict(r)["weight"]) for r in rows
@@ -301,14 +455,26 @@ class SpreadingActivation:
             return False
         return max(activations.values()) >= self._config.tau_gate
 
-    def _compute_query_hash(self, query: Any, profile_id: str) -> str:
+    def _compute_query_hash(
+        self,
+        query: Any,
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
+    ) -> str:
         """Deterministic hash for cache key."""
+        scope_bytes = f"|g={int(include_global)}|s={int(include_shared)}".encode()
         if isinstance(query, np.ndarray):
-            data = query.tobytes() + profile_id.encode()
+            data = query.tobytes() + profile_id.encode() + scope_bytes
         elif isinstance(query, list):
-            data = np.array(query, dtype=np.float32).tobytes() + profile_id.encode()
+            data = (
+                np.array(query, dtype=np.float32).tobytes()
+                + profile_id.encode()
+                + scope_bytes
+            )
         else:
-            data = str(query).encode() + profile_id.encode()
+            data = str(query).encode() + profile_id.encode() + scope_bytes
         return hashlib.sha256(data).hexdigest()[:16]
 
     def _get_cached_results(

@@ -11,6 +11,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -87,22 +88,53 @@ def _get_broker(request: Request):
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "::1", "localhost"):
             import hmac
-            presented = request.headers.get("x-mesh-secret", "")
-            if not hmac.compare_digest(presented, secret):
-                raise HTTPException(401, detail="invalid or missing mesh secret")
+            from superlocalmemory.core.security_primitives import verify_install_token
+
+            # Path 1: install token — dashboard/browser callers hold this and
+            # should not need the mesh secret exposed in JS.
+            install_token = request.headers.get("x-install-token", "")
+            if install_token and verify_install_token(install_token):
+                return broker
+
+            # Path 2: mesh secret — remote agents / remote_sync.py / LAN peers.
+            # Accept X-Mesh-Secret (legacy v3.6.12 header) OR
+            # Authorization: Bearer <secret> (RFC 7617 canonical form).
+            presented = (
+                request.headers.get("x-mesh-secret")
+                or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            )
+            if not presented or not hmac.compare_digest(presented, secret):
+                raise HTTPException(401, detail="invalid or missing credential")
+            return broker
+
+    # Loopback is a transport property, not an identity.  Every mesh read and
+    # write must prove the install/API/process capability because peer inboxes,
+    # coordination state, and project paths can be sensitive.
+    from superlocalmemory.server.write_identity import require_write_actor
+
+    require_write_actor(
+        request,
+        getattr(request.app.state, "daemon_descriptor", None),
+        actor_kind="mesh-route",
+    )
     return broker
 
 
-def _validate_remote_auth(request: Request, broker) -> None:
-    """Validate bearer token for cross-machine requests."""
-    if not broker._is_remote:
-        return  # local mode — no auth needed
-    secret = broker._shared_secret
-    if not secret:
-        return
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {secret}":
-        raise HTTPException(401, detail="Unauthorized")
+_SECRET_KEY = re.compile(
+    r"(?:^|[_\-.])(api[_\-.]?key|secret|token|password|credential)(?:$|[_\-.])",
+    re.IGNORECASE,
+)
+
+
+def _reject_secret_state(key: str, value: str) -> None:
+    """Refuse secret material in the plaintext coordination store."""
+    from superlocalmemory.core.security_primitives import redact_secrets
+
+    if _SECRET_KEY.search(key) or redact_secrets(value) != value:
+        raise HTTPException(
+            422,
+            detail="Mesh state is coordination metadata; secret values are prohibited",
+        )
 
 
 # -- Routes --
@@ -130,7 +162,6 @@ async def deregister(req: DeregisterRequest, request: Request):
 @router.get("/peers")
 async def peers(request: Request):
     broker = _get_broker(request)
-    _validate_remote_auth(request, broker)
     return {"peers": broker.list_all_peers()}
 
 
@@ -196,6 +227,7 @@ async def state_set(req: StateSetRequest, request: Request):
     broker = _get_broker(request)
     if not req.key:
         raise HTTPException(400, detail="key required")
+    _reject_secret_state(req.key, req.value)
     return broker.set_state(req.key, req.value, req.set_by)
 
 

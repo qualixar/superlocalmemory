@@ -4,12 +4,20 @@
 # Cross-platform counterpart: slm-launch.bat (Windows)
 # Referenced by plugin/.mcp.json as the MCP server command.
 #
-# Resolves the correct venv binary for POSIX:
-#   ${CLAUDE_PLUGIN_DATA}/venv/bin/slm mcp
+# Resolves the correct venv binary for POSIX and joins the namespace daemon
+# before opening the MCP stdio transport. This preserves one writer for all
+# parallel Claude sessions that share CLAUDE_PLUGIN_DATA.
 #
 # On Windows, Claude Code invokes slm-launch.bat instead (same-stem, .bat extension).
 #
 # Environment:
 #   CLAUDE_PLUGIN_DATA — persistent data dir where venv lives
 
-exec "${CLAUDE_PLUGIN_DATA}/venv/bin/slm" mcp
+SLM_BIN="${CLAUDE_PLUGIN_DATA}/venv/bin/slm"
+
+if ! "${SLM_BIN}" serve start >&2; then
+    echo "SLM plugin: unable to start the owned daemon; refusing a direct MCP writer." >&2
+    exit 1
+fi
+
+exec "${SLM_BIN}" mcp

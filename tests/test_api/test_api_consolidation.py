@@ -27,6 +27,13 @@ def _make_app():
     from superlocalmemory.server.routes.v3_api import router
     from fastapi import FastAPI
     app = FastAPI()
+    app.state.engine = MagicMock(profile_id="default")
+
+    @app.middleware("http")
+    async def _authenticated_test_request(request, call_next):
+        request.state.authenticated_actor = "test:verified"
+        return await call_next(request)
+
     app.include_router(router)
     return app
 

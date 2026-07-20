@@ -154,3 +154,10 @@ def test_archival_removes_edges_and_sets_retention_zone(consolidator_db) -> None
     assert dict(edges[0])["c"] == 0, "archived fact's association edges not removed"
     zone = mgr.execute("SELECT lifecycle_zone AS z FROM fact_retention WHERE fact_id='a0'")
     assert dict(zone[0])["z"] == "archive", "retention zone not set to archive"
+    archived = mgr.execute(
+        "SELECT COUNT(*) AS c FROM atomic_facts af "
+        "JOIN fact_retention fr ON fr.fact_id = af.fact_id "
+        "WHERE af.fact_id IN ('a0','a1','a2') "
+        "AND af.lifecycle = 'archived' AND fr.lifecycle_zone = 'archive'"
+    )
+    assert dict(archived[0])["c"] == 3, "every archived source needs a retention row"

@@ -105,7 +105,9 @@ venv/
 .venv/
 env/
 ENV/
-uv.lock
+# Optional integration fixtures resolve their own ephemeral environments in
+# focused tests; the release SBOM is bound only to the committed root lock.
+ide/integrations/*/uv.lock
 
 # ==== SECRETS & TOKENS (Never commit) ====
 .mcpregistry_github_token

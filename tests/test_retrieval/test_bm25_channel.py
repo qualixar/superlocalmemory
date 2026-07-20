@@ -183,6 +183,26 @@ class TestBM25ChannelMocked:
         if len(results) >= 2:
             assert results[0][1] >= results[1][1]
 
+    def test_legacy_index_rebuilds_when_warmed_scope_changes(self) -> None:
+        db = self._mock_db()
+
+        def visible_tokens(
+            _profile_id, include_global=False, include_shared=False,
+        ):
+            tokens = {"mine": ["quasar"]}
+            if include_global:
+                tokens["global"] = ["quasar", "global"]
+            return tokens
+
+        db.get_all_bm25_tokens.side_effect = visible_tokens
+        channel = BM25Channel(db)
+        assert {fid for fid, _ in channel.search("quasar", "requester")} == {"mine"}
+
+        channel.include_global = True
+        assert {fid for fid, _ in channel.search("quasar", "requester")} == {
+            "mine", "global",
+        }
+
     def test_clear_resets(self) -> None:
         db = self._mock_db(tokens_map={"f1": ["hello"]})
         ch = BM25Channel(db)
@@ -217,6 +237,50 @@ class TestBM25ChannelRealDB:
         assert len(results) == 1
         assert results[0][0] == "f1"
         assert results[0][1] > 0.0
+
+    def test_fts_scope_opt_in_includes_only_authorized_cross_profile_facts(
+        self, db: DatabaseManager,
+    ) -> None:
+        for profile_id in ("requester", "publisher"):
+            db.execute(
+                "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
+                "VALUES (?, ?, '')",
+                (profile_id, profile_id),
+            )
+
+        facts = (
+            ("mine", "requester", "personal", None),
+            ("global", "publisher", "global", None),
+            ("private", "publisher", "personal", None),
+            ("project", "publisher", "project", None),
+            ("shared_ok", "publisher", "shared", ["requester"]),
+            ("shared_denied", "publisher", "shared", ["someone-else"]),
+        )
+        for fact_id, profile_id, scope, shared_with in facts:
+            memory = MemoryRecord(
+                memory_id=f"m-{fact_id}",
+                profile_id=profile_id,
+                scope=scope,
+                shared_with=shared_with,
+                content=f"quasar {fact_id}",
+            )
+            db.store_memory(memory)
+            db.store_fact(AtomicFact(
+                fact_id=fact_id,
+                memory_id=memory.memory_id,
+                profile_id=profile_id,
+                scope=scope,
+                shared_with=shared_with,
+                content=f"quasar {fact_id}",
+            ))
+
+        channel = BM25Channel(db)
+        assert {fid for fid, _ in channel.search("quasar", "requester")} == {"mine"}
+
+        channel.include_global = True
+        channel.include_shared = True
+        visible = {fid for fid, _ in channel.search("quasar", "requester")}
+        assert visible == {"mine", "global", "shared_ok"}
 
 
 class TestBM25FTS5Path:

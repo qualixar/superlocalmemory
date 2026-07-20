@@ -4,9 +4,10 @@
 async function loadTimeline() {
     showLoading('timeline-chart', 'Loading timeline...');
     try {
-        var response = await fetch('/api/timeline?days=30');
+        var response = await fetch('/api/v3/timeline/?range=30d&group_by=date&limit=1000');
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         var data = await response.json();
-        renderTimeline(data.timeline);
+        renderTimeline(data.events || data.timeline);
     } catch (error) {
         console.error('Error loading timeline:', error);
         showEmpty('timeline-chart', 'clock-history', 'Failed to load timeline');

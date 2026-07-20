@@ -42,7 +42,7 @@ References:
         cases, bounds and applications. Entropy 22(4):404.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

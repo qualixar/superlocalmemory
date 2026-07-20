@@ -173,7 +173,7 @@ ffmpeg -i recording.mov -r 10 -vf scale=1280:-1 output.gif
 
 ## Legal & Licensing
 
-- All screenshots are derived from SuperLocalMemory V2 (Elastic License 2.0)
+- All screenshots are derived from SuperLocalMemory V2 (GNU Affero General Public License v3.0 or later)
 - Original artwork or third-party images require explicit licensing
 - Include copyright/attribution in the filename or metadata if applicable
 - Do not commit proprietary screenshots (customer data, API keys, etc.)

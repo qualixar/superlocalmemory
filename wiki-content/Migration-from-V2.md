@@ -5,7 +5,7 @@ Upgrading from SuperLocalMemory V2 to V3 is a one-command process. No data is lo
 ## What's New in V3
 
 - **Three operating modes** (A/B/C) — choose your privacy/accuracy trade-off
-- **4-channel retrieval** — semantic, keyword (BM25), entity graph, and temporal search working together
+- **Multi-producer retrieval** — five candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) fused via RRF, with an entity-graph post-fusion score enhancement
 - **Mathematical foundations** — information-geometric similarity, consistency checking, self-organizing lifecycle
 - **Scene and bridge discovery** — connects related memories across conversations
 - **Cross-encoder reranking** (Mode C) — precision ordering of results
@@ -43,7 +43,7 @@ The migration will:
 1. Create a backup of your V2 database
 2. Add V3 tables (entity graph, scenes, temporal events, math state)
 3. Add V3 columns to existing tables
-4. Re-index memories for 4-channel retrieval
+4. Re-index memories for multi-producer retrieval
 5. Build the entity graph from existing memories
 6. Move the database to `~/.superlocalmemory/` (with symlink from `~/.claude-memory/`)
 7. Update IDE configurations
@@ -68,7 +68,7 @@ Everything from V2 carries over:
 |------|----|----|
 | Database location | `~/.claude-memory/` | `~/.superlocalmemory/` (symlink for compat) |
 | Default mode | Single mode | Mode A (zero cloud) |
-| Retrieval | Semantic + FTS5 | 4-channel (semantic + BM25 + graph + temporal) |
+| Retrieval | Semantic + FTS5 | Five producers (semantic + BM25 + temporal + spreading-activation + Hopfield) -> RRF + entity-graph enhancement |
 | Lifecycle | Manual | Self-organizing (Langevin dynamics) |
 | Consistency | None | Automatic contradiction detection |
 
@@ -99,7 +99,7 @@ This restores your V2 database from the automatic backup and reverts IDE configu
 No. The migration updates IDE configs automatically. The `~/.claude-memory/` path is symlinked to `~/.superlocalmemory/`, so old paths still work.
 
 **Do I need to re-store my memories?**
-No. All existing memories are preserved and re-indexed for V3's 4-channel retrieval.
+No. All existing memories are preserved and re-indexed for V3's multi-producer retrieval.
 
 **Can I go back to V2?**
 Yes, use `slm migrate --rollback` within 30 days. After 30 days, the backup is automatically removed.

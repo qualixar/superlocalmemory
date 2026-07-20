@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.evolution.types import (
     EvolutionCandidate,
     EvolutionRecord,
@@ -128,7 +129,7 @@ class SkillEvolver:
         # at ~/.superlocalmemory so production callers pick it up
         # automatically. Tests inject their own.
         if budget is None:
-            slm_home = Path.home() / ".superlocalmemory"
+            slm_home = canonical_data_root()
             budget = EvolutionBudget(
                 profile_id=profile_id,
                 learning_db=Path(self._db_path),

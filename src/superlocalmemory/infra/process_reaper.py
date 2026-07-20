@@ -79,6 +79,29 @@ class SlmProcessInfo:
     age_hours: float
 
 
+def is_mcp_server_process(process: SlmProcessInfo) -> bool:
+    """Return whether *process* is an MCP stdio server, not an SLM daemon.
+
+    The startup reaper is deliberately aggressive (zero age threshold), but
+    only an orphaned MCP process is safe to reap from ``slm mcp``.  A unified
+    daemon is intentionally detached from the shell that launched it, so on
+    some hosts it has PPID 1 and looks like an orphan.  Reaping that daemon at
+    MCP startup drops in-flight CLI and dashboard requests.
+
+    Keep this predicate narrow and based on the command line recorded by the
+    OS: every supported MCP entry point includes the standalone ``mcp``
+    argument or imports the MCP server module.  The daemon's command does
+    neither.
+    """
+    command = process.command.lower()
+    return (
+        "/slm mcp" in command
+        or " slm mcp" in command
+        or "superlocalmemory.cli.main mcp" in command
+        or "superlocalmemory.mcp.server" in command
+    )
+
+
 # ---------------------------------------------------------------------------
 # Windows no-op stubs (AUDIT FIX H0-HIGH-02)
 # ---------------------------------------------------------------------------

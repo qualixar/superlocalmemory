@@ -9,9 +9,10 @@ SLM Optimize Proxy intercepts every LLM API call and applies three cost-reductio
 ## Prerequisites
 
 ```bash
-pip install -U superlocalmemory  # Python
-# or
-npm i -g superlocalmemory         # Node.js / npm global
+npm i -g superlocalmemory         # Primary npm global CLI
+
+# Python alternative: activate a virtual environment first, then:
+# python -m pip install --upgrade superlocalmemory
 
 slm optimize on        # Enable the Optimize module
 slm proxy              # Start the proxy on port 8765

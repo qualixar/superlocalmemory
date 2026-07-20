@@ -130,7 +130,12 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._txn_conn: sqlite3.Connection | None = None
+        # Transaction connections are thread-affine in sqlite3. A manager is
+        # shared across HTTP, materializer, and worker threads, so a process-
+        # global connection slot lets another thread accidentally execute on
+        # an uncommitted foreign connection. Keep the active connection local
+        # to the thread that owns the transaction.
+        self._txn_state = threading.local()
         self._enable_wal()
 
     def _enable_wal(self) -> None:
@@ -174,7 +179,7 @@ class DatabaseManager:
         """Atomic transaction. All writes commit or rollback together."""
         with self._lock:
             conn = self._connect()
-            self._txn_conn = conn
+            self._txn_state.conn = conn
             try:
                 yield
                 conn.commit()
@@ -182,7 +187,7 @@ class DatabaseManager:
                 conn.rollback()
                 raise
             finally:
-                self._txn_conn = None
+                self._txn_state.conn = None
                 conn.close()
 
     @contextmanager
@@ -196,7 +201,7 @@ class DatabaseManager:
         """
         with self._lock:
             conn = self._connect()
-            self._txn_conn = conn
+            self._txn_state.conn = conn
             try:
                 yield conn
                 conn.commit()
@@ -204,7 +209,7 @@ class DatabaseManager:
                 conn.rollback()
                 raise
             finally:
-                self._txn_conn = None
+                self._txn_state.conn = None
                 conn.close()
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
@@ -212,8 +217,9 @@ class DatabaseManager:
 
         Uses shared conn inside transaction, else per-call with retry.
         """
-        if self._txn_conn is not None:
-            return self._txn_conn.execute(sql, params).fetchall()
+        transaction_conn = getattr(self._txn_state, "conn", None)
+        if transaction_conn is not None:
+            return transaction_conn.execute(sql, params).fetchall()
 
         last_error: Exception | None = None
         for attempt in range(_MAX_RETRIES):
@@ -436,6 +442,35 @@ class DatabaseManager:
                 f"SELECT * FROM atomic_facts WHERE {where} ORDER BY created_at DESC",
                 (*params,),
             )
+        return [self._row_to_fact(r) for r in rows]
+
+    def get_external_visible_facts(
+        self,
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
+    ) -> list[AtomicFact]:
+        """Cross-profile facts visible to ``profile_id`` under scope policy.
+
+        This is the bounded supplement used by profile-partitioned candidate
+        indexes.  It deliberately excludes the requester's own partition so a
+        fast local index can merge only the global/authorized-shared rows it
+        cannot discover itself.  The canonical scope predicate remains the
+        sole authorization rule.
+        """
+        if not include_global and not include_shared:
+            return []
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+        rows = self.execute(
+            f"SELECT * FROM atomic_facts WHERE {where} AND profile_id != ? "
+            "ORDER BY created_at DESC",
+            (*params, profile_id),
+        )
         return [self._row_to_fact(r) for r in rows]
 
     _MAX_FACTS_PER_ENTITY_LOOKUP: int = 100
@@ -755,11 +790,35 @@ class DatabaseManager:
             (fact_id, profile_id, json.dumps(tokens)),
         )
 
-    def get_all_bm25_tokens(self, profile_id: str) -> dict[str, list[str]]:
-        """Load full BM25 index: fact_id -> token list."""
+    def get_all_bm25_tokens(
+        self,
+        profile_id: str,
+        include_global: bool = False,
+        include_shared: bool = False,
+    ) -> dict[str, list[str]]:
+        """Load the visible legacy BM25 index: fact_id -> token list."""
+        if not include_global and not include_shared:
+            # Preserve the historical token-store contract, including repair
+            # tooling that can inspect orphaned token rows before facts exist.
+            rows = self.execute(
+                "SELECT fact_id, tokens FROM bm25_tokens WHERE profile_id = ?",
+                (profile_id,),
+            )
+            return {
+                dict(row)["fact_id"]: json.loads(dict(row)["tokens"])
+                for row in rows
+            }
+        where, params = _scope_where(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+            prefix="af",
+        )
         rows = self.execute(
-            "SELECT fact_id, tokens FROM bm25_tokens WHERE profile_id = ?",
-            (profile_id,),
+            "SELECT bt.fact_id, bt.tokens FROM bm25_tokens AS bt "
+            "JOIN atomic_facts AS af ON af.fact_id = bt.fact_id "
+            f"WHERE {where}",
+            (*params,),
         )
         return {dict(r)["fact_id"]: json.loads(dict(r)["tokens"]) for r in rows}
 
@@ -1383,6 +1442,36 @@ class DatabaseManager:
         Retries 3x on SQLITE_BUSY (handled by execute()).
         All SQL parameterized (HR-05).
         """
+        from superlocalmemory.core.lifecycle_state import atomic_lifecycle_for
+
+        with self.transaction():
+            self._upsert_retention_in_transaction(
+                fact_id=fact_id,
+                profile_id=profile_id,
+                retention_score=retention_score,
+                memory_strength=memory_strength,
+                access_count=access_count,
+                last_accessed_at=last_accessed_at,
+                lifecycle_zone=lifecycle_zone,
+            )
+            self.execute(
+                "UPDATE atomic_facts SET lifecycle = ? "
+                "WHERE fact_id = ? AND profile_id = ?",
+                (atomic_lifecycle_for(lifecycle_zone), fact_id, profile_id),
+            )
+
+    def _upsert_retention_in_transaction(
+        self,
+        *,
+        fact_id: str,
+        profile_id: str,
+        retention_score: float,
+        memory_strength: float,
+        access_count: int,
+        last_accessed_at: str,
+        lifecycle_zone: str,
+    ) -> None:
+        """Write one retention row using the caller's active transaction."""
         self.execute(
             "INSERT INTO fact_retention "
             "(fact_id, profile_id, retention_score, memory_strength, "
@@ -1409,9 +1498,11 @@ class DatabaseManager:
         Returns count of successfully upserted rows.
         """
         count = 0
+        from superlocalmemory.core.lifecycle_state import atomic_lifecycle_for
+
         with self.transaction():
             for f in facts:
-                self.upsert_retention(
+                self._upsert_retention_in_transaction(
                     fact_id=f["fact_id"],
                     profile_id=profile_id,
                     retention_score=f["retention"],
@@ -1419,6 +1510,11 @@ class DatabaseManager:
                     access_count=f["access_count"],
                     last_accessed_at=f["last_accessed_at"],
                     lifecycle_zone=f["zone"],
+                )
+                self.execute(
+                    "UPDATE atomic_facts SET lifecycle = ? "
+                    "WHERE fact_id = ? AND profile_id = ?",
+                    (atomic_lifecycle_for(f["zone"]), f["fact_id"], profile_id),
                 )
                 count += 1
         return count
@@ -1464,20 +1560,17 @@ class DatabaseManager:
             )
             return
 
-        # Update fact_retention
-        self.execute(
-            "UPDATE fact_retention SET lifecycle_zone = 'forgotten', "
-            "  retention_score = 0.0 "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
-        )
+        from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
 
-        # Mark in atomic_facts as archived (valid enum value per A-CRIT-01)
-        self.execute(
-            "UPDATE atomic_facts SET lifecycle = 'archived' "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
-        )
+        with self.transaction():
+            set_fact_lifecycle_zone(
+                self, [fact_id], "forgotten", profile_id=profile_id,
+            )
+            self.execute(
+                "UPDATE fact_retention SET retention_score = 0.0 "
+                "WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
 
     # ------------------------------------------------------------------
     # Phase E: CCQ Consolidated Blocks & Audit CRUD

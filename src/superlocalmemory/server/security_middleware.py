@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: Elastic-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Part of Qualixar | Author: Varun Pratap Bhardwaj (qualixar.com | varunpratap.com)
 """Security headers middleware for FastAPI servers.

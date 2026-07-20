@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,26 +66,22 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                     "success": False,
                     "error": f"Invalid mode '{mode}'. Use 'a', 'b', or 'c'.",
                 }
+            engine = get_engine()
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-set-mode",
+                profile_id=engine.profile_id,
+                content_preview=mode_lower,
+            )
             from superlocalmemory.core.config import SLMConfig
-            from superlocalmemory.storage.models import Mode
             from superlocalmemory.mcp.server import reset_engine
 
-            mode_enum = Mode(mode_lower)
+            # Use switch_mode() — the correct load-then-patch path that preserves
+            # all user-tuned config blocks (forgetting, injection, retrieval, scope,
+            # math, channel_weights, …). for_mode() resets them to hardcoded defaults.
             old_config = SLMConfig.load()
-            config = SLMConfig.for_mode(
-                mode_enum,
-                llm_provider=old_config.llm.provider,
-                llm_model=old_config.llm.model,
-                llm_api_key=old_config.llm.api_key,
-                llm_api_base=old_config.llm.api_base,
-                embedding_provider=old_config.embedding.provider,
-                embedding_endpoint=old_config.embedding.api_endpoint,
-                embedding_key=old_config.embedding.api_key,
-                embedding_model_name=old_config.embedding.model_name,
-                embedding_dimension=old_config.embedding.dimension,
-            )
-            config.active_profile = old_config.active_profile
-            config.save(mode_change=True)
+            config = SLMConfig.switch_mode(mode_lower)
 
             # V3.3: Check if embedding model changed — flag for re-indexing
             needs_reindex = (
@@ -92,6 +90,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             )
 
             reset_engine()
+            authorization.complete()
 
             return {
                 "success": True,
@@ -302,8 +301,16 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                 results.append({
                     "fact_id": item.get("fact_id", ""),
                     "content": item.get("content", ""),
-                    "final_score": round(float(item.get("score", 0.0)), 4),
+                    "score": round(float(item.get("score", 0.0)), 4),
+                    "relevance_score": round(
+                        float(item.get("relevance_score", item.get("score", 0.0))), 4
+                    ),
+                    "ranking_score": item.get("ranking_score"),
                     "confidence": round(float(item.get("confidence", 0.0)), 3),
+                    "memory_confidence": round(
+                        float(item.get("memory_confidence", item.get("confidence", 0.0))), 3
+                    ),
+                    "rank_position": int(item.get("rank_position", 0)),
                     "trust_score": round(float(item.get("trust_score", 0.0)), 3),
                     "channel_scores": item.get("channel_scores", {}) or {},
                     "evidence_chain": item.get("evidence_chain", []) or [],
@@ -319,6 +326,12 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                 "channel_weights": raw.get("channel_weights", {}) if isinstance(raw, dict) else {},
                 "total_candidates": raw.get("total_candidates", 0) if isinstance(raw, dict) else 0,
                 "retrieval_time_ms": round(float(raw.get("retrieval_time_ms", 0.0)) if isinstance(raw, dict) else 0.0, 1),
+                "score_contract_version": raw.get("score_contract_version", "2") if isinstance(raw, dict) else "2",
+                "calibration_status": raw.get("calibration_status", "uncalibrated") if isinstance(raw, dict) else "uncalibrated",
+                "calibration_id": raw.get("calibration_id") if isinstance(raw, dict) else None,
+                "answer_confidence": raw.get("answer_confidence") if isinstance(raw, dict) else None,
+                "abstained": bool(raw.get("abstained", False)) if isinstance(raw, dict) else False,
+                "abstention_reason": raw.get("abstention_reason") if isinstance(raw, dict) else None,
             }
         except Exception as exc:
             logger.exception("recall_trace failed")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -171,38 +172,38 @@ class TestAdapterManager:
 
 class TestCredentials:
 
-    def test_store_and_load_file_fallback(self, tmp_path):
+    def test_store_and_load_file_fallback(self, tmp_path, monkeypatch):
         """Credential storage uses file fallback when keyring unavailable."""
+        import superlocalmemory.ingestion.credentials as credentials
+
         cred_dir = tmp_path / "credentials"
-        with patch("superlocalmemory.ingestion.credentials._CRED_DIR", cred_dir):
-            from superlocalmemory.ingestion.credentials import store_credential, load_credential
-            # keyring may or may not be installed — the function handles ImportError
-            # internally. Either way, file fallback should work.
-            result = store_credential("test-service", "api_key", "secret123")
-            assert result is True
+        monkeypatch.setitem(sys.modules, "keyring", None)
+        monkeypatch.setattr(credentials, "_CRED_DIR", cred_dir)
 
-            value = load_credential("test-service", "api_key")
-            assert value == "secret123"
+        result = credentials.store_credential("test-service", "api_key", "secret123")
+        assert result is True
 
-    def test_load_nonexistent(self, tmp_path):
+        value = credentials.load_credential("test-service", "api_key")
+        assert value == "secret123"
+
+    def test_load_nonexistent(self, tmp_path, monkeypatch):
+        import superlocalmemory.ingestion.credentials as credentials
+
         cred_dir = tmp_path / "credentials"
-        with patch("superlocalmemory.ingestion.credentials._CRED_DIR", cred_dir):
-            from superlocalmemory.ingestion.credentials import load_credential
-            assert load_credential("nope", "nope") is None
+        monkeypatch.setitem(sys.modules, "keyring", None)
+        monkeypatch.setattr(credentials, "_CRED_DIR", cred_dir)
+        assert credentials.load_credential("nope", "nope") is None
 
-    def test_file_fallback_creates_directory(self, tmp_path):
+    def test_file_fallback_creates_directory(self, tmp_path, monkeypatch):
         """When keyring raises, file fallback creates the cred directory."""
+        import superlocalmemory.ingestion.credentials as credentials
+
         cred_dir = tmp_path / "new_creds_dir"
         assert not cred_dir.exists()
-        with patch("superlocalmemory.ingestion.credentials._CRED_DIR", cred_dir):
-            # Patch keyring.set_password to raise, forcing file fallback
-            with patch.dict("sys.modules", {"keyring": None}):
-                # Re-import to pick up the patched module
-                import importlib
-                import superlocalmemory.ingestion.credentials as cmod
-                importlib.reload(cmod)
-                cmod._CRED_DIR = cred_dir
-                cmod.store_credential("svc", "key", "val")
-                assert cred_dir.exists()
-                val = cmod.load_credential("svc", "key")
-                assert val == "val"
+        monkeypatch.setitem(sys.modules, "keyring", None)
+        monkeypatch.setattr(credentials, "_CRED_DIR", cred_dir)
+
+        credentials.store_credential("svc", "key", "val")
+        assert cred_dir.exists()
+        val = credentials.load_credential("svc", "key")
+        assert val == "val"

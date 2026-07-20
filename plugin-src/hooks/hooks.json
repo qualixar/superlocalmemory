@@ -5,6 +5,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "slm hook mandate 2>/dev/null || true",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-venv.sh\""
           }
         ]

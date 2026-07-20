@@ -1,6 +1,8 @@
 # CLI Reference
 
-All `slm` commands — V3 has 18 commands grouped by function. All data-returning commands support `--json` for agent-native structured output.
+The installed CLI is the command source of truth. Use `slm --help` and
+`slm <command> --help`; commands that advertise `--json` provide structured
+output.
 
 ## Setup & Status
 
@@ -23,13 +25,22 @@ All `slm` commands — V3 has 18 commands grouped by function. All data-returnin
 slm remember "Fixed the auth bug — JWT expiry was set to 1 hour instead of 24"
 slm remember "API rate limit is 100/min" --tags "api,config"
 slm remember "Important fact" --json    # Agent-native JSON output
+slm remember "Shared decision" --scope shared --shared-with team-a
+slm remember "Wait for enrichment" --sync --json
 ```
 
-Store a memory. The system automatically extracts entities, facts, emotional signals, temporal markers, and builds graph connections.
+Store a memory. The default daemon path commits raw evidence plus a queryable SQLite relational/FTS projection, then enriches the same durable operation in the background.
 
 Options:
 - `--tags "tag1,tag2"` — Add tags
 - `--json` — Output structured JSON (for agents, scripts, CI/CD)
+- `--sync` — Wait for all declared derivation and projector stages
+- `--scope personal|shared|global` — Set visibility
+- `--shared-with "profile-a,profile-b"` — Name readers for shared scope
+
+JSON output includes `operation_id`, `materialization_state`, and fact IDs. If
+the daemon cannot start, raw evidence enters the legacy offline spool; replay
+submits it through M018 before marking that spool row done.
 
 ### Recall
 
@@ -38,7 +49,9 @@ slm recall "JWT token configuration"
 slm recall "auth setup" --limit 5 --json
 ```
 
-Retrieve memories relevant to a query. Uses 4-channel retrieval (semantic, keyword, entity graph, temporal) with RRF fusion and cross-encoder reranking.
+Retrieve memories using the candidate producers healthy in the configured
+mode, followed by fusion, optional reranking, and graph-based score
+enhancement. Results follow [Score Contract v2](Retrieval-Score-Contract).
 
 Options:
 - `--limit N` — Number of results (default: 10)
@@ -64,7 +77,10 @@ slm trace "JWT token configuration"
 slm trace "database port" --json
 ```
 
-Same as recall, but shows per-channel score breakdown — which retrieval channel (semantic, BM25, entity, temporal) contributed to each result. Useful for debugging retrieval quality.
+Same as recall, but shows per-channel score breakdown. Current candidate
+producers are dense semantic, BM25 lexical, temporal, Hopfield associative, and
+spreading activation. Entity-graph information can enhance a post-fusion score
+but is not a separate candidate producer.
 
 Options:
 - `--json` — Output structured JSON with channel_scores per result
@@ -139,7 +155,9 @@ slm profile create <name>     # Create a new profile
 slm profile switch <name>     # Switch active profile
 ```
 
-Profiles provide complete memory isolation. Work, personal, and client memories never mix.
+Personal facts are profile-isolated by default. Shared and global recall are
+opt-in and remain subject to the configured scope policy; do not use profiles
+as a substitute for operating-system or tenant isolation.
 
 ## Migration
 
@@ -181,19 +199,29 @@ slm dashboard
 
 ## Agent-Native JSON Output
 
-All data-returning commands support `--json` for structured output. The response follows a consistent envelope:
+Commands that advertise `--json` provide structured output. Recall fields keep
+ranking relevance separate from stored-memory confidence:
 
 ```json
 {
   "success": true,
   "command": "recall",
-  "version": "3.0.22",
+  "version": "<installed-version>",
   "data": {
     "results": [
-      {"fact_id": "abc123", "score": 0.87, "content": "Database uses PostgreSQL 16"}
+      {
+        "fact_id": "abc123",
+        "content": "Database uses PostgreSQL 16",
+        "relevance_score": 0.87,
+        "ranking_score": 0.0132,
+        "memory_confidence": 0.7,
+        "rank_position": 1
+      }
     ],
     "count": 1,
-    "query_type": "semantic"
+    "score_contract_version": "2",
+    "calibration_status": "uncalibrated",
+    "answer_confidence": null
   },
   "next_actions": [
     {"command": "slm list --json", "description": "List recent memories"}
@@ -201,7 +229,8 @@ All data-returning commands support `--json` for structured output. The response
 }
 ```
 
-**Supported commands:** `recall`, `remember`, `list`, `status`, `health`, `trace`, `forget`, `delete`, `update`, `mode`, `profile`, `connect`
+Structured-output support is explicit per command and can expand between
+releases.
 
 **Usage with jq:**
 
@@ -223,17 +252,20 @@ slm status --json | jq '.data.mode'
 
 ## Dual Interface: MCP + CLI
 
-SuperLocalMemory is the only AI memory system with both MCP and agent-native CLI:
+SuperLocalMemory exposes both MCP and CLI surfaces:
 
 | Need | Use | Example |
 |------|-----|---------|
-| IDE integration | MCP | Auto-configured for 17+ IDEs via `slm connect` |
+| IDE integration | MCP | Run `slm connect --list`, then configure a listed client |
 | Shell scripts | CLI + `--json` | `slm recall "auth" --json \| jq '.data.results'` |
 | CI/CD pipelines | CLI + `--json` | `slm remember "deployed v2.1" --json` |
 | Agent frameworks | CLI + `--json` | OpenClaw, Codex, Goose, nanobot |
 | Human use | CLI | `slm recall "auth"` (readable output) |
 
-## Complete Command List
+## Common Command List
+
+This is an orientation list, not the complete installed surface. Run `slm
+--help` for the installed release.
 
 | # | Command | --json | What It Does |
 |:-:|---------|:------:|-------------|

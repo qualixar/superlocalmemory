@@ -10,7 +10,9 @@ Complete reference for the `slm` command-line interface.
 
 ### `slm setup`
 
-Run the interactive setup wizard. Guides you through mode selection, IDE connection, and verification.
+Run the interactive setup wizard. Package installation itself is
+non-interactive and does not install hooks, edit IDE configuration, start a
+daemon, or download a model. `slm setup` is the explicit activation boundary.
 
 ```bash
 slm setup
@@ -47,7 +49,9 @@ slm connect cursor    # Configure Cursor specifically
 slm connect claude    # Configure Claude Code specifically
 ```
 
-Supported IDEs: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `jetbrains`, `continue`, `zed`
+Run `slm connect --list` for the client names supported by the installed
+release. A documented configuration is not a claim that every client has
+passed the frozen V3.7 cross-client matrix.
 
 ## Memory Operations
 
@@ -58,17 +62,28 @@ Store a memory.
 ```bash
 slm remember "API rate limit is 100 req/min on staging"
 slm remember "Use camelCase for JS, snake_case for Python" --tags "style,convention"
-slm remember "Maria owns the auth service" --tags "team,ownership"
+slm remember "Maria owns the auth service" --scope shared --shared-with team-a
+slm remember "Wait for all enrichment" --sync --json
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--tags "a,b"` | Comma-separated tags for categorization |
-| `--profile name` | Store in a specific profile (overrides active profile) |
+| `--sync` | Wait until declared derivation and projector stages complete |
+| `--scope` | `personal`, `shared`, or `global` visibility |
+| `--shared-with` | Comma-separated profile IDs for shared scope |
+| `--json` | Emit the operation receipt and materialization state |
+
+Without `--sync`, the daemon returns after the memory is `queryable`; canonical
+enrichment continues in the background. If the daemon cannot start, the CLI
+stores raw evidence in the legacy offline spool. That spool is a compatibility
+input: replay submits the same source/idempotency identity through M018 before
+marking it done.
 
 ### `slm recall "query" [options]`
 
-Search your memories. Returns the most relevant results.
+Search your memories. Returns ranked evidence under [Score Contract
+v2](retrieval-score-contract.md).
 
 ```bash
 slm recall "rate limit"
@@ -79,7 +94,8 @@ slm recall "database config" --profile work
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--limit N` | 10 | Maximum results to return |
-| `--profile name` | active | Search in a specific profile |
+| `--include-global` | off | Include global-scope facts when authorized |
+| `--include-shared` | off | Include facts shared with the active profile |
 
 ### `slm search "query" [options]`
 
@@ -90,16 +106,18 @@ Alias for `slm recall`. Same behavior, same options.
 Delete memories matching a query.
 
 ```bash
-slm forget "old staging credentials"
-slm forget --id 42                    # Delete by memory ID
-slm forget --before "2026-01-01"      # Delete memories before a date
+slm forget "old staging credentials"             # Confirm before deletion
+slm forget "old staging credentials" --dry-run   # Preview only
+slm forget "old staging credentials" --yes       # Skip confirmation
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--id N` | Delete a specific memory by ID |
-| `--before "date"` | Delete all memories before this date |
-| `--confirm` | Skip the confirmation prompt |
+| `--dry-run` | Preview matches without deleting |
+| `--yes`, `-y` | Skip the confirmation prompt |
+| `--json` | Emit structured preview or mutation output |
+
+Use `slm delete <fact_id>` for precise deletion by ID.
 
 ### `slm list [options]`
 
@@ -120,11 +138,10 @@ Recall with a channel-by-channel breakdown. Shows how each retrieval channel con
 slm trace "database port"
 ```
 
-Output shows scores from each channel:
-- Semantic (vector similarity)
-- BM25 (keyword matching)
-- Entity Graph (relationship traversal)
-- Temporal (time-based relevance)
+Output exposes the channels that contributed to each result. The current
+candidate producers are dense semantic, BM25 lexical, temporal, Hopfield
+associative, and spreading activation. Entity-graph information can enhance a
+post-fusion score but is not a separate candidate producer.
 
 ### `slm health`
 
@@ -141,14 +158,6 @@ Reports status of:
 - Embedding model status
 - Database integrity
 
-### `slm consistency`
-
-Run a consistency check across your memories. Detects contradictions and outdated information.
-
-```bash
-slm consistency
-```
-
 ## Migration
 
 ### `slm migrate [options]`
@@ -157,14 +166,14 @@ Migrate a V2 database to V3 format.
 
 ```bash
 slm migrate                # Run migration
-slm migrate --dry-run      # Preview what will change
-slm migrate --rollback     # Undo migration (within 30 days)
+slm migrate --rollback     # Roll back when a valid migration backup exists
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--dry-run` | Show what would change without modifying anything |
 | `--rollback` | Revert to V2 format (backup must exist) |
+
+Use `slm db migrate --dry-run` to inspect additive database migrations.
 
 ## Profile Management
 
@@ -176,8 +185,7 @@ Manage memory profiles (isolated memory contexts).
 slm profile list                  # List all profiles
 slm profile switch work           # Switch to "work" profile
 slm profile create client-acme    # Create a new profile
-slm profile delete old-project    # Delete a profile
-slm profile export work > backup.json  # Export a profile
+slm profile list --json           # Structured profile inventory
 ```
 
 ## System & Maintenance
@@ -190,71 +198,42 @@ Show system status: mode, profile, memory count, database location, health.
 slm status
 ```
 
-### `slm compact`
-
-Compress and optimize the memory database. Merges redundant memories and reclaims space.
-
-```bash
-slm compact
-```
-
-### `slm backup`
-
-Check backup status or create a manual backup.
-
-```bash
-slm backup              # Show backup status
-slm backup create       # Create a backup now
-```
-
-### `slm audit [options]`
-
-View the audit trail. Shows all memory operations with timestamps and hash-chain verification.
-
-```bash
-slm audit               # Recent audit entries
-slm audit --limit 100   # Last 100 entries
-slm audit --verify      # Verify hash-chain integrity
-```
-
-### `slm retention [policy]`
-
-Manage retention policies.
-
-```bash
-slm retention                          # Show current policy
-slm retention set gdpr-30d            # Apply GDPR 30-day policy
-slm retention set hipaa-7y            # Apply HIPAA 7-year policy
-slm retention set custom --days 90    # Custom retention period
-```
-
 ## Global Options
 
-These options work with any command:
+Global metadata options are activation-free. Command-specific options appear in
+`slm <command> --help`; do not assume that an option accepted by one command is
+global.
 
 | Option | Description |
 |--------|-------------|
 | `--help` | Show help for a command |
 | `--version` | Show SLM version |
-| `--verbose` | Show detailed output |
-| `--json` | Output structured JSON with agent-native envelope (for AI agents, scripts, CI/CD) |
-| `--profile name` | Override the active profile for this command |
 
 ## Agent-Native JSON Output
 
-All data-returning commands support `--json` for structured output. The envelope follows the 2026 agent-native CLI standard:
+Commands that advertise `--json` emit structured output. Recall results use
+Score Contract v2:
 
 ```json
 {
   "success": true,
   "command": "recall",
-  "version": "3.0.22",
+  "version": "<installed-version>",
   "data": {
     "results": [
-      {"fact_id": "abc123", "score": 0.87, "content": "Database uses PostgreSQL 16"}
+      {
+        "fact_id": "abc123",
+        "content": "Database uses PostgreSQL 16",
+        "relevance_score": 0.87,
+        "ranking_score": 0.0132,
+        "memory_confidence": 0.7,
+        "rank_position": 1
+      }
     ],
     "count": 1,
-    "query_type": "semantic"
+    "score_contract_version": "2",
+    "calibration_status": "uncalibrated",
+    "answer_confidence": null
   },
   "next_actions": [
     {"command": "slm list --json", "description": "List recent memories"}
@@ -262,9 +241,8 @@ All data-returning commands support `--json` for structured output. The envelope
 }
 ```
 
-### Supported Commands
-
-`recall`, `remember`, `list`, `status`, `health`, `trace`, `forget`, `delete`, `update`, `mode`, `profile`, `connect`
+Check `slm <command> --help` before scripting a surface; structured-output
+support is explicit per command and may expand between releases.
 
 ### Usage with jq
 
@@ -344,7 +322,9 @@ slm optimize savings --json
 
 ### `slm cache status|clear|invalidate|ttl|semantic`
 
-Cache sub-control — exact and semantic tiers.
+Cache sub-control. Exact cache is the stable path. Semantic cache remains
+experimental and must not be treated as enabled production behavior without a
+release-linked precision, invalidation, and tenant-isolation report.
 
 ```bash
 slm cache status                   # Entry count, DB size, TTLs, hit rate

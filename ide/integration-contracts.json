@@ -1,0 +1,72 @@
+{
+  "schema": "superlocalmemory.integration-contract-manifest/v1",
+  "contract_templates": {
+    "portable": {
+      "config_generation_parse": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "start_command_shape": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "memory_surface": {"status": "proven_local", "checker": "mcp_surface", "evidence": ["src/superlocalmemory/mcp/server.py", "src/superlocalmemory/mcp/tools_core.py", "src/superlocalmemory/mcp/tools_v33.py"]},
+      "reconnect": {"status": "not_proven", "evidence": ["Local config idempotency does not prove an external client reconnect."]},
+      "context_injection": {"status": "static_only", "evidence": ["src/superlocalmemory/hooks/portable_kit.py"]},
+      "uninstall_ownership": {"status": "not_proven", "evidence": ["Portable MCP config merge has no host-independent uninstall contract."]}
+    },
+    "portable_adapter": {
+      "config_generation_parse": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "start_command_shape": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "memory_surface": {"status": "proven_local", "checker": "mcp_surface", "evidence": ["src/superlocalmemory/mcp/server.py", "src/superlocalmemory/mcp/tools_core.py", "src/superlocalmemory/mcp/tools_v33.py"]},
+      "reconnect": {"status": "proven_local", "checker": "active_adapter", "evidence": ["tests/test_adapters/test_cursor_adapter.py", "tests/test_adapters/test_antigravity_adapter.py", "tests/test_adapters/test_copilot_adapter.py"]},
+      "context_injection": {"status": "proven_local", "checker": "active_adapter", "evidence": ["src/superlocalmemory/hooks/memory_protocol.py", "tests/test_adapters/test_static_protocol_security.py"]},
+      "uninstall_ownership": {"status": "proven_local", "checker": "active_adapter", "evidence": ["tests/test_adapters/test_cursor_adapter.py", "tests/test_adapters/test_antigravity_adapter.py", "tests/test_adapters/test_copilot_adapter_nondestructive.py"]}
+    },
+    "portable_no_context": {
+      "config_generation_parse": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "start_command_shape": {"status": "proven_local", "checker": "portable_config", "evidence": ["tests/test_cli_subparsers/test_portable_kit.py"]},
+      "memory_surface": {"status": "proven_local", "checker": "mcp_surface", "evidence": ["src/superlocalmemory/mcp/server.py", "src/superlocalmemory/mcp/tools_core.py", "src/superlocalmemory/mcp/tools_v33.py"]},
+      "reconnect": {"status": "not_proven", "evidence": ["No external client reconnect was executed locally."]},
+      "context_injection": {"status": "not_applicable", "evidence": ["This integration only configures MCP; it has no owned instruction-file surface."]},
+      "uninstall_ownership": {"status": "not_proven", "evidence": ["Portable MCP config merge has no host-independent uninstall contract."]}
+    },
+    "claude_plugin": {
+      "config_generation_parse": {"status": "proven_local", "checker": "plugin_package", "evidence": ["scripts/__tests__/build-plugin.test.mjs", "plugin/.mcp.json"]},
+      "start_command_shape": {"status": "proven_local", "checker": "plugin_package", "evidence": ["plugin/.mcp.json", "plugin/scripts/slm-launch"]},
+      "memory_surface": {"status": "proven_local", "checker": "mcp_surface", "evidence": ["plugin/.mcp.json", "src/superlocalmemory/mcp/server.py"]},
+      "reconnect": {"status": "static_only", "evidence": ["plugin/hooks/hooks.json", "External Claude Code reconnect was not executed by this gate."]},
+      "context_injection": {"status": "static_only", "evidence": ["plugin/hooks/hooks.json", "tests/test_hook_handlers.py"]},
+      "uninstall_ownership": {"status": "manual_only", "evidence": ["Uninstall is owned by the Claude plugin manager, not SLM's portable connector."]}
+    },
+    "static_mcp": {
+      "config_generation_parse": {"status": "static_only", "evidence": ["Config fixture syntax is validated; the host does not execute locally."]},
+      "start_command_shape": {"status": "static_only", "evidence": ["The checked fixture names slm mcp, but the external host was not launched."]},
+      "memory_surface": {"status": "static_only", "evidence": ["The shared MCP server exposes remember, recall, update_memory, and forget; host discovery was not executed."]},
+      "reconnect": {"status": "not_proven", "evidence": ["No external client reconnect was executed locally."]},
+      "context_injection": {"status": "not_applicable", "evidence": ["No owned context-injection surface is shipped for this client."]},
+      "uninstall_ownership": {"status": "manual_only", "evidence": ["The user owns removal of this manually copied config block."]}
+    },
+    "framework_source": {
+      "config_generation_parse": {"status": "not_applicable", "evidence": ["This is a Python chat-store package, not an IDE config generator."]},
+      "start_command_shape": {"status": "not_applicable", "evidence": ["This package is imported by the framework and starts no MCP process."]},
+      "memory_surface": {"status": "not_proven", "evidence": ["The chat-store API proves add/read/delete semantics, not the full remember/semantic-recall/update/forget surface."]},
+      "reconnect": {"status": "static_only", "evidence": ["An isolated adapter test exists, but its dependencies are not part of the top-level release gate."]},
+      "context_injection": {"status": "not_applicable", "evidence": ["The adapter persists chat history; the framework owns prompt/context injection."]},
+      "uninstall_ownership": {"status": "not_applicable", "evidence": ["Package uninstall is owned by the Python package manager."]}
+    }
+  },
+  "clients": [
+    {"id": "cursor", "display": "Cursor", "category": "ide", "template": "portable_adapter", "test_level": "local_generated_config_and_adapter", "external_host_runtime_proven": false, "artifacts": ["ide/configs/cursor-mcp.json"]},
+    {"id": "antigravity", "display": "Antigravity", "category": "ide", "template": "portable_adapter", "test_level": "local_generated_config_and_adapter", "external_host_runtime_proven": false, "artifacts": ["ide/configs/antigravity-mcp.json"]},
+    {"id": "windsurf", "display": "Windsurf", "category": "ide", "template": "portable", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/windsurf-mcp.json"]},
+    {"id": "gemini-cli", "display": "Gemini CLI", "category": "agent_cli", "template": "portable", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/gemini-cli-mcp.json"]},
+    {"id": "vscode-copilot", "display": "VS Code / GitHub Copilot", "category": "ide", "template": "portable_adapter", "test_level": "local_generated_config_and_adapter", "external_host_runtime_proven": false, "artifacts": ["ide/configs/vscode-copilot-mcp.json"]},
+    {"id": "zed", "display": "Zed", "category": "ide", "template": "portable_no_context", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/zed-mcp.json"]},
+    {"id": "jetbrains", "display": "JetBrains IDEs", "category": "ide_family", "template": "portable_no_context", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/jetbrains-mcp.json"]},
+    {"id": "opencode", "display": "OpenCode", "category": "agent_cli", "template": "portable_no_context", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/opencode-mcp.json"]},
+    {"id": "claude-desktop", "display": "Claude Desktop", "category": "desktop", "template": "portable_no_context", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/claude-desktop-mcp.json"]},
+    {"id": "codex", "display": "Codex CLI", "category": "agent_cli", "template": "portable", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/codex-mcp.toml"]},
+    {"id": "continue", "display": "Continue.dev", "category": "ide_extension", "template": "portable_no_context", "test_level": "local_generated_config", "external_host_runtime_proven": false, "artifacts": ["ide/configs/continue-mcp.yaml", "ide/configs/continue-skills.yaml"]},
+    {"id": "claude-code", "display": "Claude Code", "category": "agent_cli_plugin", "template": "claude_plugin", "test_level": "local_packaged_contract", "external_host_runtime_proven": false, "artifacts": ["plugin/.mcp.json", "plugin/hooks/hooks.json", "plugin/scripts/slm-launch"]},
+    {"id": "perplexity", "display": "Perplexity Desktop", "category": "desktop", "template": "static_mcp", "test_level": "static_fixture_only", "external_host_runtime_proven": false, "artifacts": ["ide/configs/perplexity-mcp.json"]},
+    {"id": "chatgpt-desktop", "display": "ChatGPT Connector", "category": "remote_connector_instructions", "template": "static_mcp", "test_level": "instructions_only", "external_host_runtime_proven": false, "artifacts": ["ide/configs/chatgpt-desktop-mcp.json"], "contract_overrides": {"start_command_shape": {"status": "manual_only", "evidence": ["The file documents a user-started HTTP server and tunnel; no start command is installed into ChatGPT."]}, "memory_surface": {"status": "not_proven", "evidence": ["The documented connector contract exposes search and fetch only, not remember/update/forget."]}}},
+    {"id": "cody", "display": "Sourcegraph Cody", "category": "prompt_templates", "template": "static_mcp", "test_level": "prompt_template_only", "external_host_runtime_proven": false, "artifacts": ["ide/configs/cody-commands.json"], "contract_overrides": {"start_command_shape": {"status": "not_applicable", "evidence": ["The artifact contains prompt templates and starts no SLM process."]}, "memory_surface": {"status": "manual_only", "evidence": ["The prompts mention remember/recall intents but contain no executable SLM transport binding."]}, "reconnect": {"status": "not_applicable", "evidence": ["Prompt templates own no connection."]}, "context_injection": {"status": "not_applicable", "evidence": ["Prompt templates do not inject retrieved SLM context."]}}},
+    {"id": "langchain", "display": "LangChain", "category": "framework_adapter", "template": "framework_source", "test_level": "isolated_adapter_tests_not_release_gated", "external_host_runtime_proven": false, "artifacts": ["ide/integrations/langchain/pyproject.toml", "ide/integrations/langchain/tests/test_chat_message_history.py"]},
+    {"id": "llamaindex", "display": "LlamaIndex", "category": "framework_adapter", "template": "framework_source", "test_level": "isolated_adapter_tests_not_release_gated", "external_host_runtime_proven": false, "artifacts": ["ide/integrations/llamaindex/pyproject.toml", "ide/integrations/llamaindex/tests/test_chat_store.py"]}
+  ]
+}

@@ -73,6 +73,8 @@ def foresight_to_temporal_events(
     for eid in entity_ids:
         event = TemporalEvent(
             profile_id=profile_id,
+            scope=fact.scope,
+            shared_with=fact.shared_with,
             entity_id=eid,
             fact_id=fact.fact_id,
             observation_date=fact.observation_date,

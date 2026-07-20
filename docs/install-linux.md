@@ -1,101 +1,59 @@
-# Installing SLM on Linux (Ubuntu 22.04 / Debian)
-> SuperLocalMemory V3.6.9+ | https://superlocalmemory.com
+# Installing SuperLocalMemory on Linux
 
-SLM requires Python **3.11 or later**. Ubuntu 22.04 ships Python 3.10 by default — use the deadsnakes PPA or a version manager.
+SuperLocalMemory requires Python 3.11–3.14. Installation code and durable memory
+data have separate ownership: installers manage the executable environment;
+`SLM_DATA_DIR` selects memory data. No supported installer moves or deletes data.
 
----
+## Primary path 1: npm global CLI
 
-## Option A — Virtual environment (recommended)
-
-```bash
-# 1. Add deadsnakes PPA and install Python 3.11
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-distutils -y
-
-# 2. Create a venv
-python3.11 -m venv ~/.slm-venv
-source ~/.slm-venv/bin/activate
-
-# 3. Install SLM
-pip install superlocalmemory
-
-# 4. Tell SLM which Python to use (add to ~/.bashrc or ~/.zshrc)
-export SLM_PYTHON=~/.slm-venv/bin/python
-
-# 5. Install the CLI globally
-npm install -g superlocalmemory
-
-# 6. Run setup
-slm setup
-```
-
-The venv keeps SLM isolated from the system Python. `slm doctor` will verify the wiring.
-
----
-
-## Option B — pipx (zero venv management)
+Use this when you want the guided profile setup and the `slm` command without
+managing a Python environment yourself.
 
 ```bash
-sudo apt install pipx
-pipx install superlocalmemory --python python3.11
 npm install -g superlocalmemory
 slm setup
-```
-
----
-
-## Option C — pyenv
-
-```bash
-curl https://pyenv.run | bash   # or: brew install pyenv on Linuxbrew
-pyenv install 3.11.9
-pyenv global 3.11.9
-pip install superlocalmemory
-npm install -g superlocalmemory
-slm setup
-```
-
----
-
-## Systemd service (optional)
-
-To start the daemon automatically at boot:
-
-```ini
-# /etc/systemd/system/slm-http.service
-[Unit]
-Description=SuperLocalMemory daemon
-After=network.target
-
-[Service]
-Type=simple
-User=<your-user>
-Environment=SLM_DAEMON_HOST=127.0.0.1
-Environment=SLM_DAEMON_PORT=8765
-ExecStart=/home/<your-user>/.slm-venv/bin/python -m superlocalmemory.server.unified_daemon --start
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now slm-http
-```
-
-For LAN access set `SLM_DAEMON_HOST=0.0.0.0` and see the [distributed deployment guide](distributed-deployment.md).
-
----
-
-## Verify
-
-```bash
 slm doctor
-slm remember "test memory"
-slm recall "test"
 ```
 
-`slm doctor` prints a green checkmark for each gate. If Python version fails, re-check `SLM_PYTHON` and that you activated the venv.
+Node 18+ is required. npm creates a package-owned Python virtual environment.
+It does not install into the operating system's Python and does not run setup,
+install hooks, start a daemon, or download models during `npm install`.
+
+## Primary path 2: Python CLI + SDK in an activated virtual environment
+
+Use a dedicated virtual environment for both the `slm` command and Python API:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install superlocalmemory
+```
+
+Do not use `sudo pip`, do not override an externally managed Python, and do not
+install the same `slm` command through multiple tool managers.
+
+## Repository clone
+
+Researchers and contributors can install the checked-out source through the
+scoped repository lifecycle installer (which delegates to an existing uv or
+pipx installation):
+
+```bash
+git clone https://github.com/qualixar/superlocalmemory.git
+cd superlocalmemory
+./scripts/install.sh install
+```
+
+Preview the exact command with `--dry-run`. Use `upgrade` or `uninstall` with
+the same script and tool manager. Uninstall removes code only; memory data is
+preserved.
+
+## Optional systemd service
+
+First verify the isolated installation with `slm doctor`. Generate or install a
+service definition only after choosing the final data root; the service must
+persist `SLM_DATA_DIR` and the executable path from the owning tool environment.
+
+For LAN access and authentication requirements, see
+[distributed deployment](distributed-deployment.md).

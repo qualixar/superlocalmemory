@@ -1,9 +1,9 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later — see LICENSE file
-"""WP-05 lint test — verifies plugin-src agents + commands frontmatter + allowlists.
+"""WP-05 lint test — verifies plugin-src agents + rules frontmatter + allowlists.
 
-Tests are parametrized over the 8 deliverable md files. Run RED (missing files)
-before authoring, GREEN after. Uses stdlib + PyYAML only.
+Tests are parametrized over agent + rules md files. plugin-src/commands/ was
+removed in v3.6.18 (superseded by the skills system). Uses stdlib + PyYAML only.
 """
 
 from __future__ import annotations
@@ -93,18 +93,11 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
 BANNED_MCP_TOOLS: frozenset[str] = frozenset({"get_status", "observe"})
 
 # ---------------------------------------------------------------------------
-# Deliverables (8 md files)
+# Deliverables — agents + rules only (commands/ removed in v3.6.18)
 # ---------------------------------------------------------------------------
 AGENT_FILES = [
     SRC / "agents" / "slm-memory-advisor.md",
     SRC / "agents" / "slm-optimize-advisor.md",
-]
-
-COMMAND_FILES = [
-    SRC / "commands" / "slm-recall.md",
-    SRC / "commands" / "slm-remember.md",
-    SRC / "commands" / "slm-optimize.md",
-    SRC / "commands" / "slm-status.md",
 ]
 
 RULE_FILES = [
@@ -112,7 +105,7 @@ RULE_FILES = [
     SRC / "rules" / "CLAUDE.md.fragment",
 ]
 
-ALL_MD_FILES = AGENT_FILES + COMMAND_FILES + RULE_FILES
+ALL_MD_FILES = AGENT_FILES + RULE_FILES
 
 
 # ---------------------------------------------------------------------------
@@ -178,18 +171,6 @@ def test_agent_frontmatter(md_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T1-C: command frontmatter (description is non-empty string)
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("md_path", COMMAND_FILES, ids=lambda p: p.name)
-def test_command_frontmatter(md_path: Path) -> None:
-    fm = _parse_frontmatter(md_path)
-    assert "description" in fm, f"{md_path.name}: missing 'description' in frontmatter"
-    assert isinstance(fm["description"], str) and fm["description"].strip(), (
-        f"{md_path.name}: 'description' must be a non-empty string"
-    )
-
-
-# ---------------------------------------------------------------------------
 # T1-D: agent tools ⊆ CORE_TOOLS ∪ BUILTINS
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("md_path", AGENT_FILES, ids=lambda p: p.name)
@@ -204,25 +185,11 @@ def test_agent_tools_are_real(md_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T1-E: command allowed-tools ⊆ CORE_TOOLS ∪ BUILTINS
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("md_path", COMMAND_FILES, ids=lambda p: p.name)
-def test_command_allowed_tools_are_real(md_path: Path) -> None:
-    fm = _parse_frontmatter(md_path)
-    tools = _parse_tools_field(fm.get("allowed-tools"))
-    unknown = [t for t in tools if t not in ALLOWED_TOOLS]
-    assert not unknown, (
-        f"{md_path.name}: 'allowed-tools' contains unknown items: {unknown}. "
-        f"Allowed: CORE_TOOLS ∪ BUILTINS"
-    )
-
-
-# ---------------------------------------------------------------------------
 # T1-F: no invented MCP tool in body prose
 # Backticked tokens that are slm_-prefixed OR in BANNED_MCP_TOOLS must be in CORE_TOOLS.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "md_path", AGENT_FILES + COMMAND_FILES, ids=lambda p: p.name
+    "md_path", AGENT_FILES, ids=lambda p: p.name
 )
 def test_no_invented_mcp_tool(md_path: Path) -> None:
     body = _body_text(md_path)
@@ -245,7 +212,7 @@ def test_no_invented_mcp_tool(md_path: Path) -> None:
 # T1-G: CLI verbs are real — `slm <verb>` mentions ⊆ CLI_FIRST_VERBS
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "md_path", AGENT_FILES + COMMAND_FILES + RULE_FILES, ids=lambda p: p.name
+    "md_path", AGENT_FILES + RULE_FILES, ids=lambda p: p.name
 )
 def test_cli_verbs_are_real(md_path: Path) -> None:
     body = md_path.read_text(encoding="utf-8")
@@ -265,7 +232,7 @@ def test_cli_verbs_are_real(md_path: Path) -> None:
 # T1-H: skill refs in body prose ∈ REAL_SKILLS ∪ ADVISOR_NAMES
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "md_path", AGENT_FILES + COMMAND_FILES + RULE_FILES, ids=lambda p: p.name
+    "md_path", AGENT_FILES + RULE_FILES, ids=lambda p: p.name
 )
 def test_skill_refs_are_real(md_path: Path) -> None:
     body = md_path.read_text(encoding="utf-8")
@@ -287,6 +254,6 @@ def test_skill_refs_are_real(md_path: Path) -> None:
 @pytest.mark.parametrize("md_path", ALL_MD_FILES, ids=lambda p: p.name)
 def test_attribution_line(md_path: Path) -> None:
     text = md_path.read_text(encoding="utf-8")
-    assert "SuperLocalMemory v3.6.17" in text and "Qualixar" in text, (
-        f"{md_path.name}: missing attribution line 'SuperLocalMemory v3.6.17 · Qualixar'"
+    assert "SuperLocalMemory v3.6.18" in text and "Qualixar" in text, (
+        f"{md_path.name}: missing attribution line 'SuperLocalMemory v3.6.18 · Qualixar'"
     )

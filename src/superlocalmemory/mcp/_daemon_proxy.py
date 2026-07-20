@@ -17,10 +17,8 @@ engine state exists in exactly one process: the daemon.
 """
 from __future__ import annotations
 
-import json
 import logging
 import urllib.parse
-import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,9 +37,6 @@ class DaemonPoolProxy:
     def __init__(self, port: int, *, timeout_s: float = 30.0) -> None:  # v3.4.59: 8s→30s — observed recall takes 13.4s on dense graph (2.1M edges); 8s always timed out → degraded mode
         self._port = port
         self._timeout = timeout_s
-
-    def _url(self, path: str) -> str:
-        return f"http://127.0.0.1:{self._port}{path}"
 
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
@@ -64,40 +59,44 @@ class DaemonPoolProxy:
             _params["include_shared"] = "true" if include_shared else "false"
         params = urllib.parse.urlencode(_params)
         try:
-            with urllib.request.urlopen(
-                self._url(f"/recall?{params}"), timeout=self._timeout,
-            ) as resp:
-                data = json.loads(resp.read().decode() or "{}")
+            from superlocalmemory.cli.daemon import daemon_request
+
+            data = daemon_request(
+                "GET",
+                f"/recall?{params}",
+                timeout_seconds=self._timeout,
+            )
         except Exception as exc:
             logger.warning("daemon /recall failed: %s", exc)
             return {"ok": False, "error": str(exc)}
         if not isinstance(data, dict):
-            return {"ok": False, "error": "non-dict response"}
+            return {"ok": False, "error": "owned daemon unavailable"}
         data.setdefault("ok", True)
         return data
 
     def store(
         self, content: str, metadata: dict | None = None,
     ) -> dict[str, Any]:
-        body = json.dumps({
+        body = {
             "content": content,
             "tags": (metadata or {}).get("tags", ""),
             "metadata": metadata or {},
-        }).encode()
-        req = urllib.request.Request(
-            self._url("/remember"),
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+            "session_id": (metadata or {}).get("session_id", ""),
+            "idempotency_key": (metadata or {}).get("idempotency_key") or None,
+        }
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                data = json.loads(resp.read().decode() or "{}")
+            # One identity-aware daemon client owns descriptor validation,
+            # capability delivery, and exact-instance targeting.  A raw urllib
+            # POST here previously became unauthenticated when /remember was
+            # hardened and could also attach to a stale/foreign port.
+            from superlocalmemory.cli.daemon import daemon_request
+
+            data = daemon_request("POST", "/remember", body)
         except Exception as exc:
             logger.warning("daemon /remember failed: %s", exc)
             return {"ok": False, "error": str(exc)}
         if not isinstance(data, dict):
-            return {"ok": False, "error": "non-dict response"}
+            return {"ok": False, "error": "owned daemon unavailable"}
         data.setdefault("ok", True)
         return data
 

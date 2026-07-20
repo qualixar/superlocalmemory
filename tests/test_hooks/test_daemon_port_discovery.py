@@ -22,6 +22,7 @@ from superlocalmemory.hooks import hook_handlers, post_tool_async_hook
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     slm_home = tmp_path / ".superlocalmemory"
     slm_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SLM_DATA_DIR", str(slm_home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr("os.path.expanduser", lambda p: p.replace("~", str(tmp_path), 1))
     return slm_home
@@ -43,6 +44,39 @@ def test_hook_handlers_defaults_when_no_port_file(home: Path) -> None:
 def test_hook_handlers_defaults_on_garbage_port_file(home: Path) -> None:
     (home / "daemon.port").write_text("not-a-number")
     assert hook_handlers._daemon_url() == "http://127.0.0.1:8765"
+
+
+def test_hook_daemon_post_uses_owned_identity_client(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def _owned_request(method, path, body=None):
+        captured.update(method=method, path=path, body=body)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "superlocalmemory.cli.daemon.daemon_request",
+        _owned_request,
+    )
+    monkeypatch.setattr(
+        hook_handlers.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hook bypassed owned daemon identity")
+        ),
+    )
+
+    assert hook_handlers._daemon_post(
+        "/remember",
+        {"content": "checkpoint"},
+    ) is True
+    assert captured == {
+        "method": "POST",
+        "path": "/remember",
+        "body": {"content": "checkpoint"},
+    }
 
 
 # ---------------------------------------------------------------------------

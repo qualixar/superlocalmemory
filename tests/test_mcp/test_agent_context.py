@@ -339,8 +339,9 @@ class TestToolsCoreAgentIdResolution:
 
         token = _current_agent_id.set("test-agent")
         try:
-            # Use the pending store path (daemon offline) — simplest mock
-            with patch("superlocalmemory.cli.pending_store.store_pending", return_value="pend-001"):
+            pool = MagicMock()
+            pool.store.return_value = {"ok": True, "fact_ids": ["fact-1"], "count": 1}
+            with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
                 with patch("superlocalmemory.cli.daemon.is_daemon_running", return_value=False):
                     result = await remember(content="test memory")
         finally:
@@ -357,8 +358,10 @@ class TestToolsCoreAgentIdResolution:
 
         token = _current_agent_id.set("url-agent")
         try:
+            pool = MagicMock()
+            pool.store.return_value = {"ok": True, "fact_ids": ["fact-1"], "count": 1}
             with patch("superlocalmemory.cli.daemon.is_daemon_running", return_value=False), \
-                 patch("superlocalmemory.cli.pending_store.store_pending", return_value="pend-001"):
+                 patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
                 result = await remember(content="test", agent_id="explicit-agent")
         finally:
             _current_agent_id.reset(token)
@@ -401,7 +404,8 @@ class TestToolsCoreAgentIdResolution:
 
         assert result.get("success") is True
         call_args = mock_pool._send.call_args[0][0]
-        assert call_args["agent_id"] == "delete-agent"
+        assert call_args["source_agent_id"] == "delete-agent"
+        assert "agent_id" not in call_args
 
     @pytest.mark.asyncio
     async def test_update_memory_resolves_agent_id_from_contextvar(self) -> None:
@@ -421,7 +425,8 @@ class TestToolsCoreAgentIdResolution:
 
         assert result.get("success") is True
         call_args = mock_pool._send.call_args[0][0]
-        assert call_args["agent_id"] == "update-agent"
+        assert call_args["source_agent_id"] == "update-agent"
+        assert "agent_id" not in call_args
 
     @pytest.mark.asyncio
     async def test_delete_memory_with_mcp_client_default_uses_env(
@@ -444,7 +449,8 @@ class TestToolsCoreAgentIdResolution:
 
         assert result.get("success") is True
         call_args = mock_pool._send.call_args[0][0]
-        assert call_args["agent_id"] == "stdio-claude"
+        assert call_args["source_agent_id"] == "stdio-claude"
+        assert "agent_id" not in call_args
 
 
 # ---------------------------------------------------------------------------

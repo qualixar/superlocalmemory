@@ -27,7 +27,7 @@ Mathematical formulation:
 Adapted: uses Langevin position radius for lifecycle zone classification.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

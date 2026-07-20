@@ -29,6 +29,11 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
 
+from superlocalmemory.core.lifecycle_state import (
+    reconcile_profile_lifecycle,
+    set_fact_lifecycle_zone,
+)
+
 if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
 
@@ -76,6 +81,10 @@ def evaluate_tiers(
         "pinned_protected": 0,
         "total_evaluated": 0,
     }
+
+    # Repair any rows written by pre-V3.7 split lifecycle paths before making
+    # new transition decisions.
+    reconcile_profile_lifecycle(db, profile_id)
 
     now = datetime.now(UTC)
     pinned_ids = _get_pinned_fact_ids(db, profile_id)
@@ -126,13 +135,12 @@ def promote_on_access_batch(db: DatabaseManager, fact_ids: list[str]) -> int:
     """
     if not fact_ids:
         return 0
-    placeholders = ",".join("?" * len(fact_ids))
-    db.execute(
-        f"UPDATE atomic_facts SET lifecycle = 'active' "
-        f"WHERE fact_id IN ({placeholders}) AND lifecycle IN ('warm', 'cold')",
-        tuple(fact_ids),
+    return set_fact_lifecycle_zone(
+        db,
+        fact_ids,
+        "active",
+        from_atomic=("warm", "cold"),
     )
-    return len(fact_ids)
 
 
 def promote_on_access(db: DatabaseManager, fact_id: str) -> None:
@@ -140,10 +148,11 @@ def promote_on_access(db: DatabaseManager, fact_id: str) -> None:
 
     Kept for backward compatibility. Prefer promote_on_access_batch.
     """
-    db.execute(
-        "UPDATE atomic_facts SET lifecycle = 'active' "
-        "WHERE fact_id = ? AND lifecycle IN ('warm', 'cold')",
-        (fact_id,),
+    set_fact_lifecycle_zone(
+        db,
+        [fact_id],
+        "active",
+        from_atomic=("warm", "cold"),
     )
 
 
@@ -164,10 +173,8 @@ def pin_fact(
             "(fact_id, profile_id, pinned_at, reason) VALUES (?, ?, ?, ?)",
             (fact_id, profile_id, now, reason),
         )
-        db.execute(
-            "UPDATE atomic_facts SET lifecycle = 'active' "
-            "WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, profile_id),
+        set_fact_lifecycle_zone(
+            db, [fact_id], "active", profile_id=profile_id,
         )
         return True
     except Exception as exc:
@@ -315,11 +322,12 @@ def _demote_tier(
         # Batch UPDATE in chunks of 500
         for i in range(0, len(demoted_ids), 500):
             batch = demoted_ids[i:i + 500]
-            placeholders = ",".join("?" * len(batch))
-            db.execute(
-                f"UPDATE atomic_facts SET lifecycle = ? "
-                f"WHERE fact_id IN ({placeholders}) AND lifecycle = ?",
-                (to_tier, *batch, from_tier),
+            set_fact_lifecycle_zone(
+                db,
+                batch,
+                to_tier,
+                profile_id=profile_id,
+                from_atomic=(from_tier,),
             )
 
     return len(demoted_ids)
@@ -444,6 +452,10 @@ def _sync_tiers_to_backends(
 
     if _lancedb_backend and hasattr(_lancedb_backend, "bulk_update_tiers_from_sqlite"):
         try:
-            _lancedb_backend.bulk_update_tiers_from_sqlite(db.conn)
+            # DatabaseManager intentionally has no public `.conn`; use its
+            # transaction boundary so tier synchronization cannot silently
+            # fail after a scale projection has been promoted.
+            with db.raw_connection() as conn:
+                _lancedb_backend.bulk_update_tiers_from_sqlite(conn)
         except Exception as exc:
             logger.warning("LanceDB tier sync failed: %s", exc)

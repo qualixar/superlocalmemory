@@ -501,10 +501,14 @@ def test_wrap_agent_unknown_mechanism(tmp_path: Path) -> None:
 # ---- _vscode_user_dir ----
 
 def test_vscode_user_dir_darwin() -> None:
-    """_vscode_user_dir returns Code/User path on darwin."""
+    """_vscode_user_dir returns Code/User path on darwin when VS Code is installed."""
     from superlocalmemory.optimize.adapters.wrap import _vscode_user_dir
     import sys
+    from pathlib import Path
     if sys.platform == "darwin":
+        vscode_parent = Path.home() / "Library" / "Application Support" / "Code"
+        if not vscode_parent.exists():
+            pytest.skip("VS Code not installed on this machine")
         p = _vscode_user_dir()
         assert p is not None
         assert "Code" in str(p)

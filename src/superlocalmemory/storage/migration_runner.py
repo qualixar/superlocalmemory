@@ -34,24 +34,63 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 from superlocalmemory.storage.migrations import (
     M001_add_signal_features_columns as _M001,
+)
+from superlocalmemory.storage.migrations import (
     M002_model_state_history as _M002,
+)
+from superlocalmemory.storage.migrations import (
     M003_migration_log as _M003,
+)
+from superlocalmemory.storage.migrations import (
     M004_cross_platform_sync_log as _M004,
+)
+from superlocalmemory.storage.migrations import (
     M005_bandit_tables as _M005,
+)
+from superlocalmemory.storage.migrations import (
     M006_action_outcomes_reward as _M006,
+)
+from superlocalmemory.storage.migrations import (
     M007_pending_outcomes as _M007,
+)
+from superlocalmemory.storage.migrations import (
     M009_model_lineage as _M009,
+)
+from superlocalmemory.storage.migrations import (
     M010_evolution_config as _M010,
+)
+from superlocalmemory.storage.migrations import (
     M011_archive_and_merge as _M011,
+)
+from superlocalmemory.storage.migrations import (
     M012_shadow_observations as _M012,
+)
+from superlocalmemory.storage.migrations import (
     M013_bi_temporal_columns as _M013,
+)
+from superlocalmemory.storage.migrations import (
     M014_v345_scale_ready as _M014,
+)
+from superlocalmemory.storage.migrations import (
     M015_add_pinned_column as _M015,
+)
+from superlocalmemory.storage.migrations import (
     M016_add_scope_support as _M016,
+)
+from superlocalmemory.storage.migrations import (
+    M017_ccq_scope_column as _M017,
+)
+from superlocalmemory.storage.migrations import (
+    M018_ingestion_operations as _M018,
+)
+from superlocalmemory.storage.migrations import (
+    M019_derivation_lineage as _M019,
+)
+from superlocalmemory.storage.migrations import (
+    M020_model_state_integrity as _M020,
 )
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
@@ -73,9 +112,24 @@ _MODULES = {
     _M014.NAME: _M014,
     _M015.NAME: _M015,
     _M016.NAME: _M016,
+    _M017.NAME: _M017,
+    _M018.NAME: _M018,
+    _M019.NAME: _M019,
+    _M020.NAME: _M020,
 }
 
 logger = logging.getLogger(__name__)
+
+# Exact historical DDL fingerprints whose resulting schema is intentionally
+# accepted by the current migration. Unknown hashes are never reconciled.
+_KNOWN_EQUIVALENT_DDL_HASHES: dict[str, frozenset[str]] = {
+    _M002.NAME: frozenset({
+        # v3.4.21 hardened copy-forward variant.
+        "347eeb2ec8aac89f7cbf373da49ac9446be9ed150e6105c382c656cd22426d4b",
+        # v3.4.22 model_version-default variant shipped through 3.6.x.
+        "d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7",
+    }),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +155,10 @@ MIGRATIONS: list[Migration] = [
     # M009 extends learning_model_state (created by M002).
     Migration(name=_M009.NAME, db_target="learning", ddl=_M009.DDL,
               dependencies=(_M002.NAME,)),
+    # M020 owns post-release integrity repair. M002 remains byte-for-byte
+    # compatible with databases that recorded its historical DDL hash.
+    Migration(name=_M020.NAME, db_target="learning", ddl=_M020.DDL,
+              dependencies=(_M002.NAME,)),
     # M010 creates evolution_config + evolution_llm_cost_log (learning.db).
     Migration(name=_M010.NAME, db_target="learning", ddl=_M010.DDL,
               dependencies=(_M003.NAME,)),
@@ -111,6 +169,10 @@ MIGRATIONS: list[Migration] = [
     Migration(name=_M004.NAME, db_target="memory", ddl=_M004.DDL),
     # M007 creates pending_outcomes (memory.db, LLD-00 §1.2).
     Migration(name=_M007.NAME, db_target="memory", ddl=_M007.DDL),
+    # M018 is additive and independent of runtime-bootstrapped tables.
+    Migration(name=_M018.NAME, db_target="memory", ddl=_M018.DDL),
+    Migration(name=_M019.NAME, db_target="memory", ddl=_M019.DDL,
+              dependencies=(_M018.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 
@@ -139,6 +201,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M016 adds scope and shared_with columns to 5 core tables for
     # multi-scope memory support (personal/global/shared).
     Migration(name=_M016.NAME, db_target="memory", ddl=_M016.DDL),
+    # M017 adds scope to the engine-bootstrapped CCQ consolidation table.
+    Migration(name=_M017.NAME, db_target="memory", ddl=_M017.DDL),
 ]
 
 
@@ -245,6 +309,39 @@ def _apply_single(
         _, _, logged_hash, _, status = existing
         if status == "complete":
             if logged_hash != ddl_hash:
+                # v3.7.6 (#70): a complete migration whose logged DDL hash no
+                # longer matches the current text is only a real failure if the
+                # schema it guarantees is actually absent. Historically-benign
+                # DDL edits (e.g. M002's V3.4.21 <-> S9-W1 variants that build the
+                # identical end-state) would otherwise brick readiness forever on
+                # upgrade. Consult the migration's own verify(); if the schema is
+                # in place, reconcile the log to the current hash and treat as
+                # already-applied instead of failing the daemon into permanent
+                # not_ready. Absent/failing verify keeps the hard failure.
+                allowed_hashes = _KNOWN_EQUIVALENT_DDL_HASHES.get(
+                    migration.name, frozenset(),
+                )
+                mod = _MODULES.get(migration.name)
+                verify_fn = (
+                    getattr(mod, "verify", None) if mod is not None else None
+                )
+                if logged_hash in allowed_hashes and verify_fn is not None:
+                    try:
+                        if verify_fn(conn):
+                            if not dry_run:
+                                try:
+                                    _upsert_log(
+                                        conn, migration.name, ddl_hash, "complete"
+                                    )
+                                except sqlite3.Error:  # pragma: no cover
+                                    pass
+                            return (
+                                "skipped",
+                                "allowlisted historical DDL reconciled after "
+                                "full schema verification",
+                            )
+                    except sqlite3.Error:  # pragma: no cover
+                        pass
                 detail = (
                     f"DDL drift detected for {migration.name}: "
                     f"logged={logged_hash[:8]}... current={ddl_hash[:8]}..."
@@ -395,6 +492,25 @@ def _bootstrap_both_migration_logs(
     return failed, details
 
 
+def _bootstrap_learning_schema(learning_db: Path, *, dry_run: bool) -> str | None:
+    """Create the base learning tables before forward migrations extend them.
+
+    ``apply_all`` is called by the daemon before ``MemoryEngine`` exists.  A
+    blank first-install therefore has no ``learning_signals`` or
+    ``learning_model_state`` tables for M001/M002/M009 to alter.  The runner
+    owns this prerequisite so every caller has the same first-boot contract.
+    """
+    if dry_run:
+        return None
+    try:
+        from superlocalmemory.learning.database import LearningDatabase
+
+        LearningDatabase(learning_db)
+    except Exception as exc:  # noqa: BLE001 - retain runner's non-fatal API
+        return f"learning schema bootstrap failed: {type(exc).__name__}: {exc}"
+    return None
+
+
 def apply_all(
     learning_db: Path,
     memory_db: Path,
@@ -410,6 +526,17 @@ def apply_all(
     skipped: list[str] = []
     failed: list[str] = []
     details: dict[str, str] = {}
+
+    schema_error = _bootstrap_learning_schema(learning_db, dry_run=dry_run)
+    if schema_error is not None:
+        failed.append("learning_schema_bootstrap")
+        details["learning_schema_bootstrap"] = schema_error
+        return {
+            "applied": applied,
+            "skipped": skipped,
+            "failed": failed,
+            "details": details,
+        }
 
     # S9-W1 C3: unify the migration_log bootstrap across both DBs up-front.
     bs_failed, bs_details = _bootstrap_both_migration_logs(

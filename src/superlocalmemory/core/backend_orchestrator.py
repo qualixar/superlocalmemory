@@ -79,11 +79,11 @@ class BackendOrchestrator:
         # 1. Apply schema (if not already applied)
         self._apply_schema_v345()
 
-        # 2. Initialize TierManager (always)
+        # 2. Initialize TierManager (always). Backends are refreshed after
+        # optional projections have been opened below.
         try:
-            from superlocalmemory.core.tier_manager import evaluate_tiers, set_backends
+            from superlocalmemory.core.tier_manager import evaluate_tiers
             self._tiers = evaluate_tiers
-            set_backends(cozo=self._cozo, lancedb=self._lancedb)
             logger.info("BackendOrchestrator: TierManager initialized")
         except Exception as exc:
             logger.warning("TierManager init failed (non-fatal): %s", exc)
@@ -97,6 +97,18 @@ class BackendOrchestrator:
         except Exception as exc:
             logger.warning("Initial rebalance failed (non-fatal): %s", exc)
 
+        self._recover_interrupted_scale_promotion()
+
+        # Backends may be installed with the product, but installing a wheel
+        # is not authorization to mutate an existing data root.  Only a
+        # verified, explicit promotion may initialize and migrate projections.
+        if getattr(self._config, "scale_engine_state", "local_core") != "promoted":
+            logger.info(
+                "Scale Engine remains on Local Core (state=%s)",
+                getattr(self._config, "scale_engine_state", "local_core"),
+            )
+            return
+
         # 4. Initialize CozoDB if available
         cozo_available = self._detect_cozo()
         if cozo_available:
@@ -107,24 +119,35 @@ class BackendOrchestrator:
         if lancedb_available:
             self._init_lancedb()
 
-        # 6. Auto-migrate
+        # A promoted stage is already parity-verified.  Never rebuild it at
+        # startup: automatic migration would bypass the staged lifecycle and
+        # could make the active projection diverge from canonical SQLite.
         if self._cozo:
-            status = self._cozo_status()
-            if status in ("not_initialized", "migrating"):
-                if status == "migrating":
-                    logger.warning("CozoDB migration interrupted — rebuilding")
-                self._migrate_cozo()
-
+            self._update_status("cozo", "active", self._cozo.health_check().get("edges", 0))
         if self._lancedb:
-            status = self._lancedb_status()
-            if status in ("not_initialized", "migrating"):
-                if status == "migrating":
-                    logger.warning("LanceDB migration interrupted — rebuilding")
-                self._migrate_lancedb()
+            self._update_status("lancedb", "active", self._lancedb.health_check().get("vectors", 0))
+        try:
+            from superlocalmemory.core.tier_manager import set_backends
+            set_backends(cozo=self._cozo, lancedb=self._lancedb)
+        except Exception as exc:
+            logger.warning("TierManager backend registration failed (non-fatal): %s", exc)
 
         logger.info("BackendOrchestrator: daemon ready (cozo=%s, lancedb=%s)",
                      "active" if self._cozo and self._cozo_status() == "active" else "off",
                      "active" if self._lancedb and self._lancedb_status() == "active" else "off")
+
+    def _recover_interrupted_scale_promotion(self) -> None:
+        """Repair an interrupted promotion; never auto-mutate a legacy root."""
+        try:
+            from superlocalmemory.core.scale_engine import ScaleEngineManager
+
+            result = ScaleEngineManager(self._config, profile_id="default").recover_interrupted_promotion()
+            if result:
+                logger.warning("Scale Engine promotion recovery: %s", result)
+        except Exception as exc:
+            # A scale projection is derived data. Startup must keep serving
+            # canonical SQLite even if optional recovery itself is unhealthy.
+            logger.error("Scale Engine recovery requires repair; Local Core remains active: %s", exc)
 
     # ------------------------------------------------------------------
     # Incremental Sync (F-04: called from store_pipeline)
@@ -149,15 +172,38 @@ class BackendOrchestrator:
                 self._sync_fact_embedding(fact)
 
     def _sync_fact_entities(self, fact: Any) -> None:
-        """Sync fact's entities and edges to CozoDB."""
+        """Synchronize one fact's canonical entity bridge and fact edges."""
         try:
+            # Retrying ingestion must not retain stale fact/entity links.
+            self._cozo.remove_fact(fact.fact_id)
             entities = getattr(fact, "canonical_entities", []) or []
+            profile_id = getattr(fact, "profile_id", "default") or "default"
             for eid in entities:
-                self._cozo.add_entity(eid, eid, "concept", {})
-                # Add edges from this entity to existing ones
-                for other in entities:
-                    if other != eid:
-                        self._cozo.add_edge(eid, other, "co_occurs", 1.0)
+                rows = self._db.execute(
+                    "SELECT canonical_name, entity_type, fact_count FROM canonical_entities "
+                    "WHERE entity_id = ? AND profile_id = ?",
+                    (eid, profile_id),
+                )
+                if rows:
+                    entity = dict(rows[0])
+                    self._cozo.add_entity(
+                        eid,
+                        entity.get("canonical_name") or eid,
+                        entity.get("entity_type") or "concept",
+                        {"fact_count": int(entity.get("fact_count") or 0)},
+                        profile_id,
+                    )
+            self._cozo.add_fact_entities(fact.fact_id, entities, profile_id)
+            for row in self._db.execute(
+                "SELECT source_id, target_id, edge_type, weight FROM graph_edges "
+                "WHERE profile_id = ? AND (source_id = ? OR target_id = ?)",
+                (profile_id, fact.fact_id, fact.fact_id),
+            ):
+                edge = dict(row)
+                self._cozo.add_edge(
+                    edge["source_id"], edge["target_id"], edge.get("edge_type") or "related",
+                    float(edge.get("weight") or 1.0), profile_id=profile_id,
+                )
         except Exception as exc:
             logger.debug("CozoDB incremental sync skipped: %s", exc)
 
@@ -169,9 +215,29 @@ class BackendOrchestrator:
                 tier = getattr(fact, "lifecycle", "active")
                 self._lancedb.add_vectors(
                     [fact.fact_id], [embedding], [tier],
+                    getattr(fact, "profile_id", "default") or "default",
                 )
         except Exception as exc:
             logger.debug("LanceDB incremental sync skipped: %s", exc)
+
+    def sync_deleted_fact(self, fact_id: str) -> None:
+        """Remove a fact from derived projections after canonical deletion."""
+        if self._cozo and self._cozo_status() == "active":
+            try:
+                self._cozo.remove_fact(fact_id)
+            except Exception as exc:
+                logger.warning("Cozo deletion sync failed for %s: %s", fact_id[:16], exc)
+        if self._lancedb and self._lancedb_status() == "active":
+            try:
+                self._lancedb.remove_vector(fact_id)
+            except Exception as exc:
+                logger.warning("Lance deletion sync failed for %s: %s", fact_id[:16], exc)
+
+    def sync_changed_fact(self, fact_id: str) -> None:
+        """Refresh projections after an authorized canonical fact update."""
+        fact = self._db.get_fact(fact_id)
+        if fact is not None:
+            self.sync_new_fact(fact)
 
     # ------------------------------------------------------------------
     # Backend Access
@@ -188,6 +254,15 @@ class BackendOrchestrator:
         if self._lancedb and self._lancedb_status() == "active":
             return self._lancedb
         return None
+
+    def graph_retrieval_ready(self) -> bool:
+        """Whether Cozo can be injected into entity recall.
+
+        Cozo carries both canonical entity mappings and fact graph edges.  The
+        entity channel still shadows every projected result against SQLite and
+        fails closed on any mismatch, so availability never weakens recall.
+        """
+        return bool(self._cozo and self._cozo_status() == "active")
 
     # ------------------------------------------------------------------
     # Health Check
@@ -279,7 +354,12 @@ class BackendOrchestrator:
         try:
             from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
             lance_path = self._data_dir / "lance"
-            self._lancedb = LanceDBVectorBackend(str(lance_path))
+            # v3.7.6 (#72): honor the configured embedding width instead of the
+            # hardcoded 768d, so custom endpoints (e.g. 1024d Qwen3-Embedding) work.
+            dimension = getattr(
+                getattr(self._config, "embedding", None), "dimension", None
+            )
+            self._lancedb = LanceDBVectorBackend(str(lance_path), dimension=dimension)
             self._update_status("lancedb", "not_initialized")
             logger.info("LanceDB initialized at %s", lance_path)
         except Exception as exc:

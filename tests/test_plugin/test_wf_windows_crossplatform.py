@@ -108,14 +108,14 @@ class TestEnsureVenvBatExists:
 # (ii) build output plugin/ contains ensure-venv.bat
 # ---------------------------------------------------------------------------
 class TestBuiltPluginContainsWindowsArtifacts:
-    """Defect #6: build-plugin.js copies scripts verbatim — ensure-venv.bat
+    """Defect #6: build-plugin.mjs copies scripts verbatim — ensure-venv.bat
     must be copied to plugin/scripts/ by the build step."""
 
     def test_ensure_venv_bat_in_built_plugin(self) -> None:
         p = PLUGIN_SCRIPTS / "ensure-venv.bat"
         assert p.exists(), (
             f"plugin/scripts/ensure-venv.bat not found at {p}. "
-            "Run `node scripts/build-plugin.js` to regenerate plugin/. "
+            "Run `node scripts/build-plugin.mjs` to regenerate plugin/. "
             "The build script must copy ensure-venv.bat from plugin-src/scripts/."
         )
 

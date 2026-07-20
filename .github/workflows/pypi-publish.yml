@@ -1,43 +1,76 @@
-name: Publish to PyPI
+name: Publish coordinated release
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
-permissions:
-  id-token: write
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment:
       name: pypi
       url: https://pypi.org/project/superlocalmemory/
+    permissions:
+      contents: write
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
 
-      - name: Verify version sync (tag == package.json == pyproject.toml)
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(grep -m1 '"version"' package.json | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          PY=$(grep -m1 '^version' pyproject.toml | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
-          echo "tag=$TAG package.json=$PKG pyproject.toml=$PY"
-          if [ "$TAG" != "$PKG" ] || [ "$TAG" != "$PY" ]; then
-            echo "::error::Version mismatch — tag=$TAG package.json=$PKG pyproject.toml=$PY"
-            exit 1
-          fi
-
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.2.0
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
-      - name: Run tests before publish
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "20"
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve and verify one release version
+        id: version
+        shell: bash
         run: |
-          uv run --with pytest --with pytest-asyncio python -m pytest tests/ -q --tb=short -x \
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::Release ref must be a v-prefixed tag, got $GITHUB_REF_NAME"
+            exit 1
+          fi
+          python3 - "$VERSION" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          expected = sys.argv[1]
+          package = json.loads(pathlib.Path("package.json").read_text())["version"]
+          pyproject = pathlib.Path("pyproject.toml").read_text()
+          match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+          actual = {"tag": expected, "package.json": package,
+                    "pyproject.toml": match.group(1) if match else None}
+          if len(set(actual.values())) != 1:
+              raise SystemExit(f"release version mismatch: {actual}")
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install build and test dependencies
+        run: |
+          uv lock --check
+          npm ci --ignore-scripts
+          uv sync --extra dev
+
+      - name: Run release gates
+        run: |
+          uv run python -m pytest tests/ -q --tb=short -x \
             --ignore=tests/test_integration/test_mode_b_ollama.py \
             --ignore=tests/test_integration/test_e2e.py \
             --ignore=tests/test_integration/test_e2e_v32.py \
@@ -45,9 +78,138 @@ jobs:
             --ignore=tests/test_benchmarks/ \
             --ignore=tests/graph/test_cozo_backend.py \
             --ignore=tests/vector/test_lancedb_backend.py
+          npm test
+          npm run check:plugin
 
-      - name: Build package
-        run: uv build
+      - name: Build both release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/python dist/npm
+          uv build --out-dir dist/python
+          npm pack --pack-destination dist/npm
+          NPM_TARBALL=$(find dist/npm -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          test -n "$NPM_TARBALL"
+          echo "npm_tarball=$NPM_TARBALL" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to PyPI (Trusted Publisher)
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Inspect candidate artifacts
+        run: |
+          uvx --from twine==6.2.0 twine check dist/python/*
+          npm pack --ignore-scripts --dry-run --json >/tmp/npm-pack.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          artifact = json.loads(Path("/tmp/npm-pack.json").read_text())[0]
+          paths = {item["path"] for item in artifact["files"]}
+          forbidden = sorted(path for path in paths if path.endswith((".pyc", ".pyo")))
+          forbidden += sorted(path for path in paths if "/__pycache__/" in f"/{path}")
+          if forbidden:
+              raise SystemExit(f"compiled cache files in npm artifact: {forbidden[:10]}")
+          PY
+          python3 scripts/release_evidence.py verify-npm \
+            --tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --version "${{ steps.version.outputs.version }}"
+
+      - name: Test exact candidate artifacts
+        env:
+          SLM_RELEASE_PYTHON_DIST: ${{ github.workspace }}/dist/python
+        run: |
+          uv run python -m pytest -q -o "addopts=" -m slow \
+            tests/release/test_artifact_contract.py \
+            tests/release/test_installed_artifacts.py \
+            tests/release/test_daemon_namespace_blackbox.py
+
+      - name: Generate immutable release evidence
+        run: |
+          SBOM="dist/superlocalmemory-${{ steps.version.outputs.version }}.cdx.json"
+          python3 scripts/release_evidence.py sbom \
+            --version "${{ steps.version.outputs.version }}" \
+            --commit "$GITHUB_SHA" \
+            --uv-lock uv.lock \
+            --package-lock package-lock.json \
+            --output "$SBOM"
+          python3 scripts/release_evidence.py create \
+            --version "${{ steps.version.outputs.version }}" \
+            --commit "$GITHUB_SHA" \
+            --artifact-root dist \
+            --workflow-run "$GITHUB_RUN_ID" \
+            dist/python/* "${{ steps.artifacts.outputs.npm_tarball }}" "$SBOM"
+          python3 scripts/release_evidence.py verify \
+            --manifest dist/release-evidence.json \
+            --artifact-root dist
+          test -s dist/SHA256SUMS
+
+      - name: Retain candidate artifacts and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: superlocalmemory-${{ steps.version.outputs.version }}-candidates
+          path: |
+            dist/python/*
+            dist/npm/*
+            dist/release-evidence.json
+            dist/SHA256SUMS
+            dist/*.cdx.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Check release registry state
+        id: registry
+        run: |
+          python3 scripts/release_registry_guard.py check-release-registries \
+            "${{ steps.version.outputs.version }}" \
+            --python-dist dist/python \
+            --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish to PyPI
+        if: steps.registry.outputs.pypi_exists != 'true'
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: dist/python/
+
+      - name: Publish to npm
+        if: steps.registry.outputs.npm_exists != 'true'
+        run: npm publish "${{ steps.artifacts.outputs.npm_tarball }}" --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify registry parity
+        run: |
+          python3 scripts/release_registry_guard.py verify-release-registries \
+            "${{ steps.version.outputs.version }}" \
+            --python-dist dist/python \
+            --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
+            --attempts 6 --interval 10
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            EXISTING="$RUNNER_TEMP/existing-release"
+            mkdir -p "$EXISTING"
+            gh release download "$GITHUB_REF_NAME" --dir "$EXISTING"
+            for candidate in \
+              dist/python/* \
+              "${{ steps.artifacts.outputs.npm_tarball }}" \
+              dist/release-evidence.json \
+              dist/SHA256SUMS \
+              dist/*.cdx.json; do
+              published="$EXISTING/$(basename "$candidate")"
+              test -f "$published"
+              cmp -- "$candidate" "$published"
+            done
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/python/* \
+              "${{ steps.artifacts.outputs.npm_tarball }}" \
+              dist/release-evidence.json \
+              dist/SHA256SUMS \
+              dist/*.cdx.json \
+              --verify-tag \
+              --generate-notes \
+              --title "SuperLocalMemory $GITHUB_REF_NAME"
+          fi

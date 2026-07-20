@@ -17,16 +17,16 @@ import json
 import logging
 import os
 import threading
-import time
 from pathlib import Path
 from typing import Any, Callable
 
-from superlocalmemory.optimize.config.schema import OptimizeConfig
+from superlocalmemory.infra.data_root import DynamicStatePath
 from superlocalmemory.optimize.config.defaults import DEFAULT_OPTIMIZE_CONFIG
+from superlocalmemory.optimize.config.schema import OptimizeConfig
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CONFIG_PATH: Path = Path.home() / ".superlocalmemory" / "optimize.json"
+_DEFAULT_CONFIG_PATH = DynamicStatePath("optimize.json")
 _POLL_INTERVAL_SECONDS: float = 2.0
 
 
@@ -38,7 +38,9 @@ class ConfigStore:
         config_path: Path | None = None,
         poll_interval: float = _POLL_INTERVAL_SECONDS,
     ) -> None:
-        self._config_path = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
+        self._config_path = Path(
+            config_path if config_path is not None else _DEFAULT_CONFIG_PATH
+        )
         self._poll_interval_seconds = float(poll_interval)
         self._lock = threading.RLock()
         self._change_callbacks: list[Callable[[OptimizeConfig], None]] = []

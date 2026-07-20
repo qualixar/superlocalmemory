@@ -62,6 +62,11 @@ def test_ensure_initialized_creates_dirs_on_fresh_home(tmp_path, monkeypatch):
     # Validate it is parseable JSON and has a mode key
     data = json.loads(config.read_text())
     assert "mode" in data, "config.json must contain a 'mode' key"
+    from superlocalmemory import __version__
+
+    assert data["version"] == __version__, (
+        "first-run config must identify the installed runtime, not a stale release"
+    )
 
 
 # ---------------------------------------------------------------------------

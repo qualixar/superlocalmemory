@@ -160,10 +160,9 @@ class ConsolidationEngine:
                             def mine(self, *a, **kw): return []
                     from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
                     from superlocalmemory.core.config import ParameterizationConfig
-                    from pathlib import Path as _Path
-
                     p_config = getattr(self._slm_config, "parameterization", ParameterizationConfig())
-                    learning_db = str(_Path.home() / ".superlocalmemory" / "learning.db")
+                    from superlocalmemory.infra.data_root import state_path
+                    learning_db = str(state_path("learning.db"))
                     beh_store = BehavioralPatternStore(learning_db)
                     cross_proj = CrossProjectAggregator(self._db)
                     wf_miner = WorkflowMiner(self._db)
@@ -483,10 +482,13 @@ class ConsolidationEngine:
                 continue
 
             # Promote: active -> warm (lifecycle transition)
-            self._db.execute(
-                "UPDATE atomic_facts SET lifecycle = 'warm' "
-                "WHERE fact_id = ? AND lifecycle = 'active'",
-                (fact_id,),
+            from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+            set_fact_lifecycle_zone(
+                self._db,
+                [fact_id],
+                "warm",
+                profile_id=profile_id,
+                from_atomic=("active",),
             )
             promoted += 1
 

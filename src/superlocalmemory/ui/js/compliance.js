@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Elastic-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
 // Compliance tab — audit trail, retention policies, ABAC (v2.8)
 // NOTE: All dynamic values use textContent or escapeHtml() from core.js before DOM insertion.
@@ -13,6 +13,7 @@ async function loadCompliance() {
         var url = '/api/compliance/status';
         if (filterValue) url += '?event_type=' + encodeURIComponent(filterValue);
         var response = await fetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         var data = await response.json();
         _complianceData = data;
 

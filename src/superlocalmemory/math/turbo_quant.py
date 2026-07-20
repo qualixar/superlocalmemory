@@ -9,7 +9,7 @@ D_mse <= sqrt(3*pi/2) / 4^b. No scipy (HR-SCIPY-01). 2-byte "TQ" prefix on
 all BLOBs (HR-MIG-02). Bit-widths: 2, 4, 8 only (HR-3BIT-01).
 
 References: TurboQuant (arXiv 2504.19874), PolarQuant (arXiv 2502.02617).
-Part of Qualixar | Author: Varun Pratap Bhardwaj | License: Elastic-2.0
+Part of Qualixar | Author: Varun Pratap Bhardwaj | License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from superlocalmemory.core.config import PolarQuantConfig
+from superlocalmemory.infra.data_root import canonical_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ class TurboQuantEncoder:
     def _load_or_create_rotation_matrix(self) -> NDArray:
         """Load/create rotation matrix with copy-on-detect (AUDIT C4-MED-01)."""
         d = self._d
-        slm_dir = Path.home() / ".superlocalmemory"
+        slm_dir = canonical_data_root()
 
         turbo_path_str = self._config.rotation_matrix_path
         if not turbo_path_str:

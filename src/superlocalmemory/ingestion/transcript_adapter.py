@@ -11,7 +11,7 @@ to the daemon's /ingest endpoint.
 OPT-IN only. Enabled via: slm adapters enable transcript
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -23,10 +23,15 @@ import time
 from pathlib import Path
 
 from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger("superlocalmemory.ingestion.transcript")
 
 _WATCH_EXTENSIONS = {".srt", ".vtt", ".txt"}
+
+
+def _adapters_config_path() -> Path:
+    return state_path("adapters.json")
 
 
 class TranscriptAdapter(BaseAdapter):
@@ -142,7 +147,7 @@ if __name__ == "__main__":
 
     # Load config
     watch_dir = ""
-    adapters_path = Path.home() / ".superlocalmemory" / "adapters.json"
+    adapters_path = _adapters_config_path()
     if adapters_path.exists():
         cfg = json.loads(adapters_path.read_text())
         watch_dir = cfg.get("transcript", {}).get("watch_dir", "")

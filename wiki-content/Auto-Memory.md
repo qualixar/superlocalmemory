@@ -9,7 +9,7 @@ SuperLocalMemory can automatically capture and recall memories without explicit 
 **How it works:**
 1. Your IDE sends the conversation context to the MCP server (`slm mcp`)
 2. SuperLocalMemory extracts key terms and entities from your message
-3. It runs a 4-channel retrieval (semantic, keyword, entity graph, temporal)
+3. It runs a full recall (five candidate producers: semantic, keyword/BM25, temporal, spreading-activation, Hopfield; plus entity-graph enhancement)
 4. The top results are returned to your IDE
 5. Your IDE includes these memories in the AI's system prompt
 
@@ -49,6 +49,18 @@ The AI referenced memories you stored days or weeks ago — automatically.
 4. Facts are stored with entities, timestamps, and graph connections
 5. Low-information messages are ignored
 
+## Memory is evidence, not instruction
+
+Recalled content can include old prompts, imported text, or hostile
+instructions. SLM renders it inside one reference-only untrusted evidence
+boundary, with provenance, size budgets, recognized-secret redaction, and
+forged-boundary neutralization. If the mandatory renderer fails, SLM omits the
+memory context instead of falling back to raw text.
+
+IDE instruction files contain only static product protocol. Dynamic memory is
+retrieved through MCP at runtime rather than copied into a trusted Cursor,
+Copilot, or Antigravity rules file.
+
 ## Configuration
 
 Auto-capture and auto-recall behavior is configured through your IDE's MCP integration. The MCP server (`slm mcp`) handles both automatically when connected.
@@ -85,7 +97,13 @@ The entropy gate uses several signals:
 
 ## Privacy Note
 
-Auto-capture only processes conversations that pass through the MCP server. It does not monitor your system, read files, or access anything outside the IDE conversation. All processing is local (Mode A/B) or uses the cloud provider you configured (Mode C).
+Auto-capture processes data submitted through configured MCP and hook surfaces;
+enabled importers and connectors have their own data scope. Core storage uses
+the configured local data root. Mode A does not require a cloud model provider
+for core memory operations, but optional connectors, backup, proxy providers,
+and dependency/model downloads can use the network. Mode C sends the
+constructed model request—including selected memory evidence—to the configured
+cloud provider. Review that provider's retention and privacy terms before use.
 
 ---
 *Part of [Qualixar](https://qualixar.com) | Created by [Varun Pratap Bhardwaj](https://varunpratap.com)*

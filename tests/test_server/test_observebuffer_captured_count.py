@@ -1,66 +1,59 @@
-"""Stage-9 regression: ObserveBuffer must report what was actually WRITTEN to
-memory (captured), not count skipped (capture=False) items as successes. The
-WP-E fix introduced a 'processed N' counter that incremented on every
-non-exception item regardless of whether anything was stored.
-"""
-import logging
-import time
-import unittest.mock as mock
+"""Observation admission counts only a durable M018 submission as captured."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from superlocalmemory.server.unified_daemon import ObserveBuffer
 
 
-def _flush_with_capture_decision(capture_value, caplog_handler):
-    buf = ObserveBuffer(debounce_sec=0.01)
-    with mock.patch("superlocalmemory.hooks.auto_capture.AutoCapture") as M:
-        decision = mock.MagicMock()
-        decision.capture = capture_value
-        decision.category = "note"
-        M.return_value.evaluate.return_value = decision
-        buf.set_engine(object())
-        buf.enqueue("content 1")
-        buf.enqueue("content 2")
-        time.sleep(0.1)
-    return [r.getMessage() for r in caplog_handler.records]
+def _engine():
+    return SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default")
 
 
-class _Capture(logging.Handler):
-    def __init__(self):
-        super().__init__()
-        self.records = []
+def test_rejected_item_is_not_reported_as_captured():
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(_engine())
+    decision = SimpleNamespace(
+        capture=False, category="none", confidence=0.0, reason="no patterns matched"
+    )
 
-    def emit(self, r):
-        self.records.append(r)
+    with patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto:
+        auto.return_value.evaluate.return_value = decision
+        result = buf.enqueue("ordinary content that is not capture worthy")
 
-
-def _logger():
-    lg = logging.getLogger("superlocalmemory.unified_daemon")
-    h = _Capture()
-    lg.addHandler(h)
-    lg.setLevel(logging.INFO)
-    return lg, h
+    assert result["captured"] is False
+    assert result["durable"] is False
 
 
-def test_skipped_items_not_counted_as_captured():
-    lg, h = _logger()
-    try:
-        msgs = _flush_with_capture_decision(False, h)
-    finally:
-        lg.removeHandler(h)
-    summary = [m for m in msgs if "Observe debounce" in m]
-    assert summary, f"no summary line: {msgs}"
-    # capture=False on all items -> captured=0, evaluated=2
-    assert "captured=0" in summary[0]
-    assert "evaluated=2" in summary[0]
+def test_accepted_item_requires_submit_receipt():
+    buf = ObserveBuffer(debounce_sec=60)
+    buf.set_engine(_engine())
+    decision = SimpleNamespace(
+        capture=True, category="bug", confidence=0.75, reason="bug pattern detected"
+    )
+    receipt = SimpleNamespace(
+        operation_id="op-1",
+        fact_ids=("fact-1",),
+        state=SimpleNamespace(value="queryable"),
+    )
 
+    with (
+        patch("superlocalmemory.hooks.auto_capture.AutoCapture") as auto,
+        patch(
+            "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+        ) as build,
+    ):
+        auto.return_value.evaluate.return_value = decision
+        build.return_value.submit.return_value = receipt
+        result = buf.enqueue(
+            "we fixed the durable ingestion bug in the daemon",
+            trusted_actor_id="authenticated:http-observe",
+        )
 
-def test_captured_items_counted():
-    lg, h = _logger()
-    try:
-        msgs = _flush_with_capture_decision(True, h)
-    finally:
-        lg.removeHandler(h)
-    summary = [m for m in msgs if "Observe debounce" in m]
-    assert summary
-    assert "captured=2" in summary[0]
-    assert "failed=0" in summary[0]
+    assert result["captured"] is True
+    assert result["durable"] is True
+    build.return_value.submit.assert_called_once()
+    submitted = build.return_value.submit.call_args.args[0]
+    assert submitted.trusted_actor_id == "authenticated:http-observe"

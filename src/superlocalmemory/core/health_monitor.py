@@ -11,7 +11,7 @@ Monitors:
   - Extensible health check registry (Phase C/D/E add checks)
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+
+from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger("superlocalmemory.health_monitor")
 
@@ -78,7 +80,7 @@ def setup_structured_logging(log_dir: Path | None = None) -> None:
     """
     global _json_logger
 
-    log_dir = log_dir or (Path.home() / ".superlocalmemory" / "logs")
+    log_dir = log_dir or state_path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     json_log_path = log_dir / "daemon.json.log"
 

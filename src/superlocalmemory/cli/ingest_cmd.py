@@ -24,10 +24,14 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import DynamicStatePath
+
 logger = logging.getLogger(__name__)
 
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-MEMORY_DB = MEMORY_DIR / "memory.db"
+# Backward-compatible public paths that resolve at call time instead of
+# freezing Path.home() during module import.
+MEMORY_DIR = DynamicStatePath()
+MEMORY_DB = DynamicStatePath("memory.db")
 
 
 def cmd_ingest(args: Namespace) -> None:
@@ -278,7 +282,7 @@ def _write_tool_events(events: list[dict]) -> int:
     v3.4.10: Preserves input_summary, output_summary, and project_path
     from enriched sources (ECC observations, enriched hook).
     """
-    db_path = MEMORY_DB
+    db_path = Path(MEMORY_DB)
     if not db_path.exists():
         return 0
 

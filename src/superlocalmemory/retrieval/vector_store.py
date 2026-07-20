@@ -9,7 +9,7 @@ Falls back to ANNIndex if sqlite-vec is unavailable (Rule 03).
 Implements ANNSearchable protocol for GraphBuilder compatibility (Rule 07).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

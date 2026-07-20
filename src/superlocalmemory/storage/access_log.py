@@ -2,14 +2,15 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3
 
-"""Access log for fact retrieval events.
+"""Exposure log for fact retrieval events.
 
 Tracks when facts are accessed (recall, auto_invoke, search).
-Used by Phase 2 auto-invoke for recency scoring (H1 fix).
+The historical table name is retained for compatibility.  A ``recall`` row is
+exposure telemetry only and must never be interpreted as positive feedback.
 All SQL parameterized (Rule 11). Silent errors (Rule 19).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

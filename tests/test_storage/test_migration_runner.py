@@ -136,8 +136,7 @@ def test_apply_all_on_fresh_db_applies_all(fresh_dbs: tuple[Path, Path]) -> None
     stats = mr.apply_all(learning_db, memory_db)
     assert stats["applied"]
     assert stats["failed"] == [] or stats["failed"] == 0 or not stats["failed"]
-    # 8 migrations in MIGRATIONS: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(stats["applied"]) == 9
+    assert len(stats["applied"]) == len(mr.MIGRATIONS)
     # migration_log should contain each as complete.
     log_learning = _log_rows(learning_db)
     log_memory = _log_rows(memory_db)
@@ -153,6 +152,24 @@ def test_apply_all_on_fresh_db_applies_all(fresh_dbs: tuple[Path, Path]) -> None
     assert "M007_pending_outcomes" in names_memory
 
 
+def test_apply_all_bootstraps_a_blank_learning_database(tmp_path: Path) -> None:
+    """A first daemon boot must not record false migration failures.
+
+    The daemon invokes ``apply_all`` before the engine exists, so the runner
+    itself owns creation of the learning tables that M001/M002/M009 extend.
+    """
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+
+    stats = mr.apply_all(learning_db, memory_db)
+
+    assert stats["failed"] == []
+    assert {"M001_add_signal_features_columns", "M002_model_state_history",
+            "M009_model_lineage"} <= set(stats["applied"])
+    assert "query_id" in _table_cols(learning_db, "learning_signals")
+    assert "is_candidate" in _table_cols(learning_db, "learning_model_state")
+
+
 def test_apply_all_creates_all_new_columns(fresh_dbs: tuple[Path, Path]) -> None:
     learning_db, memory_db = fresh_dbs
     mr.apply_all(learning_db, memory_db)
@@ -165,6 +182,40 @@ def test_apply_all_creates_all_new_columns(fresh_dbs: tuple[Path, Path]) -> None
     model_cols = set(_table_cols(learning_db, "learning_model_state"))
     assert {"model_version", "bytes_sha256", "is_active", "trained_at",
             "metrics_json", "feature_names", "trained_on_count"} <= model_cols
+
+
+def test_historical_m002_hash_upgrades_without_drift_and_backfills_integrity(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A V3.4.21 M002 record must remain valid after the forward repair."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+
+    with sqlite3.connect(learning_db) as conn:
+        # This is the DDL fingerprint written by the original M002 release.
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ?, status = 'complete' "
+            "WHERE name = 'M002_model_state_history'",
+            ("fab7082925462d44407f9496551ec488d95b7411f6480f067ec192338e077eba",),
+        )
+        conn.execute(
+            "INSERT INTO learning_model_state "
+            "(profile_id, state_bytes, bytes_sha256, trained_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("upgrade", b"preserve-model-bytes", "", "2026-01-01", "2026-01-01"),
+        )
+        conn.execute("DELETE FROM migration_log WHERE name = 'M020_model_state_integrity'")
+
+    upgraded = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" not in upgraded["failed"]
+    assert "M020_model_state_integrity" in upgraded["applied"]
+    with sqlite3.connect(learning_db) as conn:
+        state_bytes, digest = conn.execute(
+            "SELECT state_bytes, bytes_sha256 FROM learning_model_state "
+            "WHERE profile_id = 'upgrade'"
+        ).fetchone()
+    assert state_bytes == b"preserve-model-bytes"
+    assert digest == hashlib.sha256(state_bytes).hexdigest()
 
 
 def test_apply_all_creates_bandit_tables(fresh_dbs: tuple[Path, Path]) -> None:
@@ -199,11 +250,10 @@ def test_apply_all_idempotent(fresh_dbs: tuple[Path, Path]) -> None:
     learning_db, memory_db = fresh_dbs
     first = mr.apply_all(learning_db, memory_db)
     second = mr.apply_all(learning_db, memory_db)
-    # 8 migrations: M003, M001, M002, M005, M009, M010, M004, M007.
-    assert len(first["applied"]) == 9
+    assert len(first["applied"]) == len(mr.MIGRATIONS)
     # Second pass: everything skipped.
     assert len(second["applied"]) == 0
-    assert len(second["skipped"]) == 9
+    assert len(second["skipped"]) == len(mr.MIGRATIONS)
 
 
 def test_apply_all_preserves_model_state_rows(
@@ -260,23 +310,117 @@ def test_apply_all_recovers_from_failed_status(
     assert "M001_add_signal_features_columns" in stats["applied"]
 
 
-def test_apply_all_ddl_drift_detected(
+def test_apply_all_allowlisted_ddl_drift_reconciles_when_schema_present(
     fresh_dbs: tuple[Path, Path],
 ) -> None:
+    """v3.7.6 (#70): drift on a complete migration whose schema is actually in
+    place is reconciled via verify() — the log is re-hashed to the current DDL
+    and the run stays healthy — instead of failing readiness forever."""
     learning_db, memory_db = fresh_dbs
     mr.apply_all(learning_db, memory_db)
-    # Tamper: set a bogus ddl_sha256 for an applied migration.
+    # A known historical M002 hash may reconcile only after full verification.
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ? "
+            "WHERE name = 'M002_model_state_history'",
+            ("347eeb2ec8aac89f7cbf373da49ac9446be9ed150e6105c382c656cd22426d4b",),
+        )
+        conn.commit()
+    stats = mr.apply_all(learning_db, memory_db)
+    # Not a failure — reconciled, not bricked.
+    assert "M002_model_state_history" not in stats["failed"]
+    detail = stats.get("details", {}).get("M002_model_state_history", "")
+    assert "reconcile" in detail.lower()
+    # Log re-hashed to the current DDL so the next start is clean.
+    current_hash = hashlib.sha256(mr._M002.DDL.encode("utf-8")).hexdigest()
+    with sqlite3.connect(learning_db) as conn:
+        logged = conn.execute(
+            "SELECT ddl_sha256 FROM migration_log "
+            "WHERE name = 'M002_model_state_history'"
+        ).fetchone()[0]
+    assert logged == current_hash
+
+
+def test_m002_36x_hash_reconciles_on_upgrade_not_bricked(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """v3.7.6 (#70): the reporter's exact repro — an install that applied M002
+    under 3.6.x logs d28666fa; 3.7.2's M002 text hashes differently. That drift
+    used to leave the daemon permanently not_ready. It must now reconcile."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    with sqlite3.connect(learning_db) as conn:
+        # The 3.6.x-era logged fingerprint for M002 (the value that drifted).
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ?, status = 'complete' "
+            "WHERE name = 'M002_model_state_history'",
+            ("d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7",),
+        )
+        conn.commit()
+    upgraded = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" not in upgraded["failed"]
+
+
+def test_unknown_migration_hash_never_reconciles(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A fabricated hash remains a hard integrity failure."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = 'deadbeef' "
+            "WHERE name = 'M002_model_state_history'"
+        )
+    result = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" in result["failed"]
+
+
+def test_allowlisted_hash_does_not_hide_missing_required_index(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """Known DDL history cannot re-hash a semantically damaged schema."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    historical = "d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7"
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute("DROP INDEX idx_model_active")
+        conn.execute(
+            "UPDATE migration_log SET ddl_sha256 = ? "
+            "WHERE name = 'M002_model_state_history'",
+            (historical,),
+        )
+    result = mr.apply_all(learning_db, memory_db)
+    assert "M002_model_state_history" in result["failed"]
+    with sqlite3.connect(learning_db) as conn:
+        logged = conn.execute(
+            "SELECT ddl_sha256 FROM migration_log "
+            "WHERE name = 'M002_model_state_history'"
+        ).fetchone()[0]
+    assert logged == historical
+
+
+def test_apply_all_drift_with_absent_schema_still_fails(
+    fresh_dbs: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v3.7.6 (#70): reconciliation is gated on verify() — when the migration's
+    end-state is NOT actually present, real drift is still surfaced as a failure
+    (integrity guard intact, not a blanket accept-all)."""
+    learning_db, memory_db = fresh_dbs
+    mr.apply_all(learning_db, memory_db)
     with sqlite3.connect(learning_db) as conn:
         conn.execute(
             "UPDATE migration_log SET ddl_sha256 = 'deadbeef' "
             "WHERE name = 'M001_add_signal_features_columns'"
         )
         conn.commit()
+    # Force verify() to report the schema as absent/broken.
+    monkeypatch.setattr(mr._M001, "verify", lambda conn: False)
     stats = mr.apply_all(learning_db, memory_db)
-    # Drift must be surfaced (not silently skipped).
-    details = stats.get("details", {})
-    m1_detail = details.get("M001_add_signal_features_columns", "")
-    assert "drift" in m1_detail.lower()
+    detail = stats.get("details", {}).get("M001_add_signal_features_columns", "")
+    assert "drift" in detail.lower()
+    assert "M001_add_signal_features_columns" in stats["failed"]
 
 
 def test_apply_all_non_fatal_on_broken_migration(
@@ -731,3 +875,74 @@ def test_all_migrations_idempotent_on_second_run(
         assert name in stats2["skipped"]
     for name in ("M006_action_outcomes_reward", "M011_archive_and_merge"):
         assert name in stats2d["skipped"]
+
+
+# ---------------------------------------------------------------------------
+# V3.7 P0-014 — M017 CCQ scope migration runner registration
+# ---------------------------------------------------------------------------
+
+
+def _create_runtime_schema(memory_db: Path) -> None:
+    """Create the post-engine-bootstrap tables required by deferred migrations."""
+    from superlocalmemory.storage import schema
+
+    with sqlite3.connect(memory_db) as conn:
+        schema.create_all_tables(conn)
+
+
+def test_apply_deferred_registers_m017() -> None:
+    """The shipped M017 module must be scheduled, not left as dead code."""
+    from superlocalmemory.storage.migrations import M017_ccq_scope_column as m017
+
+    names = [migration.name for migration in mr.DEFERRED_MIGRATIONS]
+
+    assert "M017_ccq_scope_column" in names
+    assert mr._MODULES["M017_ccq_scope_column"] is m017
+
+
+def test_apply_deferred_applies_m017_to_fresh_runtime_schema(
+    tmp_path: Path,
+) -> None:
+    """A fresh engine schema gains the CCQ scope column and both indexes."""
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    _create_runtime_schema(memory_db)
+
+    mr.apply_all(learning_db, memory_db)
+    stats = mr.apply_deferred(learning_db, memory_db)
+
+    assert "M017_ccq_scope_column" in stats["applied"]
+    assert "scope" in _table_cols(memory_db, "ccq_consolidated_blocks")
+    indexes = _index_names(memory_db)
+    assert "idx_ccq_consolidated_blocks_scope" in indexes
+    assert "idx_ccq_consolidated_blocks_profile_scope" in indexes
+    assert mr.status(learning_db, memory_db)["M017_ccq_scope_column"] == "complete"
+
+
+def test_apply_deferred_m017_upgrade_preserves_rows_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    """An existing pre-M017 CCQ row survives upgrade; repeat apply is a no-op."""
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    _create_runtime_schema(memory_db)
+    with sqlite3.connect(memory_db) as conn:
+        conn.execute(
+            "INSERT INTO ccq_consolidated_blocks "
+            "(block_id, profile_id, content, cluster_id) VALUES (?, ?, ?, ?)",
+            ("ccq_legacy", "default", "legacy consolidated memory", "cluster_1"),
+        )
+
+    mr.apply_all(learning_db, memory_db)
+    first = mr.apply_deferred(learning_db, memory_db)
+    second = mr.apply_deferred(learning_db, memory_db)
+
+    assert "M017_ccq_scope_column" in first["applied"]
+    assert "M017_ccq_scope_column" in second["skipped"]
+    assert "M017_ccq_scope_column" not in second["failed"]
+    with sqlite3.connect(memory_db) as conn:
+        row = conn.execute(
+            "SELECT content, scope FROM ccq_consolidated_blocks "
+            "WHERE block_id = 'ccq_legacy'"
+        ).fetchone()
+    assert row == ("legacy consolidated memory", "personal")

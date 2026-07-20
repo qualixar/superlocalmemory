@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
+
+from superlocalmemory.infra.data_root import canonical_data_root, state_path
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +38,13 @@ def get_python_path() -> str:
 
 
 def get_log_path() -> Path:
-    log_dir = Path.home() / ".superlocalmemory" / "logs"
+    log_dir = state_path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "daemon.log"
 
 
 def get_error_log_path() -> Path:
-    log_dir = Path.home() / ".superlocalmemory" / "logs"
+    log_dir = state_path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "daemon-error.log"
 
@@ -57,44 +59,29 @@ def _macos_plist_content() -> str:
     python = get_python_path()
     log = get_log_path()
     err_log = get_error_log_path()
-
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{_SERVICE_NAME}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{python}</string>
-        <string>-m</string>
-        <string>superlocalmemory.server.unified_daemon</string>
-        <string>--start</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>ThrottleInterval</key>
-    <integer>30</integer>
-    <key>StandardOutPath</key>
-    <string>{log}</string>
-    <key>StandardErrorPath</key>
-    <string>{err_log}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:{Path(python).parent}</string>
-        <key>HOME</key>
-        <string>{Path.home()}</string>
-    </dict>
-</dict>
-</plist>
-"""
+    port = str(_configured_daemon_port())
+    payload = {
+        "Label": _SERVICE_NAME,
+        "ProgramArguments": [
+            python,
+            "-m",
+            "superlocalmemory.server.unified_daemon",
+            "--start",
+            f"--port={port}",
+        ],
+        "RunAtLoad": True,
+        "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": 30,
+        "StandardOutPath": str(log),
+        "StandardErrorPath": str(err_log),
+        "EnvironmentVariables": {
+            "PATH": f"/usr/local/bin:/usr/bin:/bin:{Path(python).parent}",
+            "HOME": str(Path.home()),
+            "SLM_DATA_DIR": str(canonical_data_root()),
+            "SLM_DAEMON_PORT": port,
+        },
+    }
+    return plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=False).decode()
 
 
 def install_macos() -> bool:
@@ -163,6 +150,8 @@ def _linux_service_path() -> Path:
 def _linux_service_content() -> str:
     python = get_python_path()
     log = get_log_path()
+    root = canonical_data_root()
+    port = _configured_daemon_port()
 
     return f"""[Unit]
 Description={_DISPLAY_NAME}
@@ -170,13 +159,15 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart={python} -m superlocalmemory.server.unified_daemon --start
+ExecStart={python} -m superlocalmemory.server.unified_daemon --start --port={port}
 Restart=on-failure
 RestartSec=30
 StandardOutput=append:{log}
 StandardError=append:{get_error_log_path()}
 Environment=HOME={Path.home()}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:{Path(python).parent}
+Environment="SLM_DATA_DIR={root}"
+Environment="SLM_DAEMON_PORT={port}"
 
 [Install]
 WantedBy=default.target
@@ -247,18 +238,32 @@ def status_linux() -> dict:
 _WINDOWS_TASK_NAME = "SuperLocalMemory"
 
 
-def install_windows() -> bool:
-    python = get_python_path()
-    log = get_log_path()
+def _configured_daemon_port() -> int:
+    try:
+        port = int(os.environ.get("SLM_DAEMON_PORT", "") or 8765)
+    except ValueError:
+        port = 8765
+    return port if 1 <= port <= 65535 else 8765
 
-    # Create a VBS wrapper to run Python without console window
-    vbs_path = Path.home() / ".superlocalmemory" / "start-daemon.vbs"
-    vbs_path.parent.mkdir(parents=True, exist_ok=True)
-    vbs_content = (
-        f'Set WshShell = CreateObject("WScript.Shell")\n'
-        f'WshShell.Run """{python}"" -m superlocalmemory.server.unified_daemon --start", 0, False\n'
+
+def _windows_vbs_content() -> str:
+    python = str(get_python_path()).replace('"', '""')
+    root = str(canonical_data_root()).replace('"', '""')
+    port = str(_configured_daemon_port())
+    return (
+        'Set WshShell = CreateObject("WScript.Shell")\n'
+        f'WshShell.Environment("Process")("SLM_DATA_DIR") = "{root}"\n'
+        f'WshShell.Environment("Process")("SLM_DAEMON_PORT") = "{port}"\n'
+        f'WshShell.Run """{python}"" -m superlocalmemory.server.unified_daemon '
+        f'--start --port={port}", 0, False\n'
     )
-    vbs_path.write_text(vbs_content)
+
+
+def install_windows() -> bool:
+    # Create a VBS wrapper to run Python without console window
+    vbs_path = state_path("start-daemon.vbs")
+    vbs_path.parent.mkdir(parents=True, exist_ok=True)
+    vbs_path.write_text(_windows_vbs_content())
 
     # Use schtasks to create a logon trigger task
     try:
@@ -303,7 +308,7 @@ def uninstall_windows() -> bool:
     except Exception:
         pass
 
-    vbs_path = Path.home() / ".superlocalmemory" / "start-daemon.vbs"
+    vbs_path = state_path("start-daemon.vbs")
     if vbs_path.exists():
         vbs_path.unlink()
 

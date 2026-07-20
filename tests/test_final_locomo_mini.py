@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
@@ -537,24 +538,44 @@ class TestMathLayers:
             "Fisher variance is nearly uniform — content-derived variance not working"
         )
 
-    def test_fisher_ramp_activates_after_accesses(
+    def test_recall_exposure_is_logged_without_fisher_reinforcement(
         self, loaded_engine: MemoryEngine,
     ) -> None:
-        """After 5+ recalls, Fisher ramp should activate (access_count >= 3
-        triggers Bayesian variance narrowing in engine.recall)."""
-        # Recall the same query 6 times to trigger access updates
+        """Recall records exposure without feeding it back into ranking state."""
+        baseline = {
+            str(row["fact_id"]): (int(row["access_count"]), row["fisher_variance"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,access_count,fisher_variance FROM atomic_facts "
+                "WHERE profile_id='default'"
+            )
+        }
+        expected_exposures: Counter[str] = Counter()
         for _ in range(6):
-            loaded_engine.recall("What is Alice's job?")
+            response = loaded_engine.recall("What is Alice's job?")
+            expected_exposures.update(result.fact.fact_id for result in response.results)
 
-        # Check that at least one fact's access_count >= 3
-        rows = loaded_engine._db.execute(
-            "SELECT access_count FROM atomic_facts "
-            "WHERE profile_id = 'default' AND access_count >= 3 "
-            "LIMIT 1"
+        logged = {
+            str(row["fact_id"]): int(row["count"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,COUNT(*) AS count FROM fact_access_log "
+                "WHERE profile_id='default' AND access_type='recall' "
+                "GROUP BY fact_id"
+            )
+        }
+        assert expected_exposures
+        assert all(
+            logged.get(fact_id, 0) >= count
+            for fact_id, count in expected_exposures.items()
         )
-        assert len(rows) > 0, (
-            "Fisher ramp not active: no facts reached access_count >= 3 after 6 recalls"
-        )
+
+        after = {
+            str(row["fact_id"]): (int(row["access_count"]), row["fisher_variance"])
+            for row in loaded_engine._db.execute(
+                "SELECT fact_id,access_count,fisher_variance FROM atomic_facts "
+                "WHERE profile_id='default'"
+            )
+        }
+        assert after == baseline
 
     def test_sheaf_checker_was_initialized(
         self, loaded_engine: MemoryEngine,
@@ -647,12 +668,22 @@ class TestTrustSystem:
         Default prior is Beta(1,1) = 0.5. Each store_success adds
         alpha += 1.0. After 10 stores: alpha=11, beta=1 -> trust ~0.917.
         """
-        # The engine hooks record trust for agent_id="unknown" by default
+        rows = loaded_engine._db.execute(
+            "SELECT DISTINCT trusted_actor_id FROM ingestion_operations "
+            "WHERE profile_id = 'default' AND source_type = 'python-api'"
+        )
+        actor_ids = {str(dict(row)["trusted_actor_id"]) for row in rows}
+        assert len(actor_ids) == 1 and "" not in actor_ids, (
+            "DO NOT SHIP: canonical Python ingestion did not persist exactly "
+            "one trusted local actor"
+        )
+        trusted_actor_id = actor_ids.pop()
         trust_score = loaded_engine._trust_scorer.get_agent_trust(
-            "unknown", "default",
+            trusted_actor_id, "default",
         )
         assert trust_score > 0.5, (
-            f"DO NOT SHIP: Agent trust {trust_score:.3f} <= 0.5 after 10 stores"
+            f"DO NOT SHIP: Trusted local actor score {trust_score:.3f} "
+            "<= 0.5 after 10 stores"
         )
 
     def test_trust_scorer_is_wired(self, loaded_engine: MemoryEngine) -> None:
@@ -694,17 +725,24 @@ class TestProvenance:
             )
 
     def test_provenance_has_source_type(self, loaded_engine: MemoryEngine) -> None:
-        """Provenance entries should have source_type = 'store'."""
+        """Provenance should exactly identify its canonical operation."""
         rows = loaded_engine._db.execute(
-            "SELECT source_type FROM provenance "
-            "WHERE profile_id = 'default' LIMIT 1"
+            "SELECT p.fact_id, p.source_type, p.source_id, p.created_by, "
+            "o.source_type AS operation_source_type, "
+            "o.trusted_actor_id AS operation_actor "
+            "FROM provenance p LEFT JOIN ingestion_operations o "
+            "ON o.operation_id = p.source_id AND o.profile_id = p.profile_id "
+            "WHERE p.profile_id = 'default'"
         )
-        if rows:
-            assert dict(rows[0])["source_type"] == "store", (
-                "Provenance source_type should be 'store'"
+        assert rows, "DO NOT SHIP: No provenance entries"
+        for row in rows:
+            provenance = dict(row)
+            assert provenance["operation_source_type"] is not None, (
+                "DO NOT SHIP: Provenance source_id does not resolve to its "
+                f"canonical operation for fact {provenance['fact_id']}"
             )
-        else:
-            pytest.fail("DO NOT SHIP: No provenance entries")
+            assert provenance["source_type"] == provenance["operation_source_type"]
+            assert provenance["created_by"] == provenance["operation_actor"]
 
 
 # ---------------------------------------------------------------------------

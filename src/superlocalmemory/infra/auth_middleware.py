@@ -1,27 +1,38 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
-"""Opt-in API-key authentication middleware.
+"""API-key primitives used by the unified identity boundary.
 
-When ``~/.superlocalmemory/api_key`` exists, write endpoints require the
-``X-SLM-API-Key`` header.  Read endpoints remain open for backward
-compatibility.  If the key file is absent auth is completely disabled --
-all requests pass.
+A configured key authorizes remote callers that present ``X-SLM-API-Key``.
+The unified daemon separately trusts exact-process capabilities, the
+same-origin dashboard install token, and uncredentialed loopback peers as the
+local OS-user boundary. Read endpoints remain open for backward compatibility.
 
 V3 change: base directory moved from ``~/.claude-memory/`` to
 ``~/.superlocalmemory/``.
 """
 
 import hashlib
+import hmac
 import logging
+import os
 from pathlib import Path
 from typing import Optional
+
+from superlocalmemory.infra.data_root import DynamicStatePath
 
 logger = logging.getLogger("superlocalmemory.auth")
 
 # V3 base directory
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-API_KEY_FILE = MEMORY_DIR / "api_key"
+MEMORY_DIR = DynamicStatePath()
+API_KEY_FILE = DynamicStatePath("api_key")
+
+# v3.7.8 (F1): opt-in env flag that restores the pre-v3.7.6 shared-host
+# posture -- when set AND an api_key file is configured, uncredentialed
+# loopback writes must also present a matching X-SLM-API-Key. Default OFF
+# preserves the v3.7.6 local-first fix (#71/#73/#74): loopback callers are
+# trusted as the local OS-user boundary without needing any credential.
+SLM_REQUIRE_API_KEY_LOOPBACK_ENV = "SLM_REQUIRE_API_KEY_LOOPBACK"
 
 
 def _load_api_key_hash(key_file: Optional[Path] = None) -> Optional[str]:
@@ -34,7 +45,7 @@ def _load_api_key_hash(key_file: Optional[Path] = None) -> Optional[str]:
         SHA-256 hex digest of the stored key, or ``None`` when auth is
         not configured.
     """
-    path = key_file or API_KEY_FILE
+    path = Path(key_file if key_file is not None else API_KEY_FILE)
     if not path.exists():
         return None
     try:
@@ -76,7 +87,57 @@ def check_api_key(
 
     # Writes require a matching key
     provided = request_headers.get("x-slm-api-key", "")
-    if not provided:
-        return False
+    return verify_api_key(provided, key_file=key_file)
 
-    return hashlib.sha256(provided.encode()).hexdigest() == key_hash
+
+def verify_api_key(
+    presented: str,
+    key_file: Optional[Path] = None,
+) -> bool:
+    """Verify a configured API key; unconfigured auth is never identity."""
+    if not isinstance(presented, str) or not presented:
+        return False
+    expected = _load_api_key_hash(key_file)
+    if expected is None:
+        return False
+    actual = hashlib.sha256(presented.encode()).hexdigest()
+    return hmac.compare_digest(actual, expected)
+
+
+def loopback_strict_mode_enabled(key_file: Optional[Path] = None) -> bool:
+    """Whether uncredentialed loopback writes must present the API key.
+
+    v3.7.8 (F1/F2): opt-in via ``SLM_REQUIRE_API_KEY_LOOPBACK`` (any of
+    "1"/"true"/"yes"/"on", case-insensitive). This is the sole enforcement
+    point for the strict shared-host posture -- it is checked ONLY for the
+    uncredentialed-loopback case (a caller presenting none of
+    X-SLM-Daemon-Capability / X-Install-Token / X-SLM-API-Key). Callers who
+    already present a valid capability or install token are unaffected: those
+    are stronger, explicit credentials and this flag never re-litigates them.
+
+    Returns ``False`` (no-op) when the flag is unset/false, OR when no
+    api_key file is configured -- there is nothing to require in that case.
+    """
+    raw = os.environ.get(SLM_REQUIRE_API_KEY_LOOPBACK_ENV, "")
+    if raw.strip().lower() not in ("1", "true", "yes", "on"):
+        return False
+    return _load_api_key_hash(key_file) is not None
+
+
+def authorize_http_mcp_request(
+    request_headers: dict,
+    *,
+    client_host: str,
+    key_file: Optional[Path] = None,
+) -> bool:
+    """Authorize the Streamable-HTTP MCP transport boundary.
+
+    An MCP session identifier is routing state, not authentication.  Loopback
+    keeps the local-first compatibility contract, while every non-loopback
+    peer must present the configured SLM API key.  The LAN allowlist limits
+    reachability but deliberately does not grant a write identity.
+    """
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    provided = request_headers.get("x-slm-api-key", "")
+    return verify_api_key(provided, key_file=key_file)

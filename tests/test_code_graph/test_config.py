@@ -62,10 +62,12 @@ class TestCodeGraphConfig:
         result = cfg.get_db_path(slm_base_dir=tmp_path)
         assert result == tmp_path / "code_graph.db"
 
-    def test_db_path_fallback(self):
+    def test_db_path_fallback(self, monkeypatch, tmp_path):
+        selected = tmp_path / "selected"
+        monkeypatch.setenv("SLM_DATA_DIR", str(selected))
         cfg = CodeGraphConfig()
         result = cfg.get_db_path()
-        assert result == Path.home() / ".superlocalmemory" / "code_graph.db"
+        assert result == selected.resolve() / "code_graph.db"
 
     def test_custom_config(self, tmp_path: Path):
         cfg = CodeGraphConfig(

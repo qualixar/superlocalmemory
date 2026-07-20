@@ -53,16 +53,20 @@ def _current_latest_outcome_id(session_id: str) -> str | None:
     fixtures, future connection pooling). Positional access works for
     both ``Row`` and the default tuple factory — future-proof, no cost.
     """
+    conn = None
     try:
-        with open_memory_db() as conn:
-            row = conn.execute(
-                "SELECT outcome_id FROM pending_outcomes "
-                "WHERE session_id = ? AND status = 'pending' "
-                "ORDER BY created_at_ms DESC LIMIT 1",
-                (session_id,),
-            ).fetchone()
+        conn = open_memory_db()
+        row = conn.execute(
+            "SELECT outcome_id FROM pending_outcomes "
+            "WHERE session_id = ? AND status = 'pending' "
+            "ORDER BY created_at_ms DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
     except Exception:
         return None
+    finally:
+        if conn is not None:
+            conn.close()
     return row[0] if row else None
 
 
@@ -126,13 +130,17 @@ def _inner_main() -> str:
     # below, so the total connects-per-hook drops from 3 → 2 on the
     # UserPromptSubmit hot path (the flagship I1 path).
     new_oid = prior_oid
+    conn = None
     try:
-        with open_memory_db() as conn:
-            fresh_oid = _current_latest_outcome_id_on(conn, session_id)
-            if fresh_oid:
-                new_oid = fresh_oid
+        conn = open_memory_db()
+        fresh_oid = _current_latest_outcome_id_on(conn, session_id)
+        if fresh_oid:
+            new_oid = fresh_oid
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Update state first so even an early-return leaves fresh context.
     save_session_state(session_id, {

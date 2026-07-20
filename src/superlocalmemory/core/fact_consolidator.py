@@ -289,11 +289,11 @@ def _consolidate_cluster(
         """, (consolidation_id, profile_id, new_fact_id,
               json.dumps(fact_ids), now))
 
-        # Archive the original facts (NEVER delete) — scoped to profile_id
-        c.execute(
-            f"UPDATE atomic_facts SET lifecycle = 'archived' "
-            f"WHERE fact_id IN ({placeholders}) AND profile_id = ?",
-            (*fact_ids, profile_id),
+        # Archive the original facts (NEVER delete) through the canonical
+        # lifecycle writer so missing retention rows are created too.
+        from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+        set_fact_lifecycle_zone(
+            conn, fact_ids, "archive", profile_id=profile_id,
         )
 
         # P1-4 (graph-integrity-01): archived facts must stop influencing
@@ -309,12 +309,6 @@ def _consolidate_cluster(
             f"     OR target_fact_id IN ({placeholders}))",
             (profile_id, *fact_ids, *fact_ids),
         )
-        c.execute(
-            f"UPDATE fact_retention SET lifecycle_zone = 'archive' "
-            f"WHERE profile_id = ? AND fact_id IN ({placeholders})",
-            (profile_id, *fact_ids),
-        )
-
         c.execute(f"RELEASE SAVEPOINT {savepoint_name}")
 
     except Exception:

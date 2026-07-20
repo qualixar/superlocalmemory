@@ -32,6 +32,27 @@ def _mode(p: Path) -> int:
     return stat.S_IMODE(p.stat().st_mode)
 
 
+@pytest.fixture()
+def isolated_perf_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Own and close the cached perf-log stream around each writer test."""
+    monkeypatch.setenv("SLM_HOME", str(tmp_path / "slm"))
+    from superlocalmemory.hooks import _outcome_common as oc
+
+    oc.close_perf_log()
+    oc._PERF_LOG_PATH = None  # noqa: SLF001
+    oc._PERF_LOG_WRITE_COUNT = 0  # noqa: SLF001
+    oc._PERF_LOG_ROTATION_PENDING = False  # noqa: SLF001
+    try:
+        yield oc
+    finally:
+        oc.close_perf_log()
+        oc._PERF_LOG_PATH = None  # noqa: SLF001
+        oc._PERF_LOG_WRITE_COUNT = 0  # noqa: SLF001
+        oc._PERF_LOG_ROTATION_PENDING = False  # noqa: SLF001
+
+
 def test_sec_m6_slm_home_is_0700(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,15 +85,9 @@ def test_sec_m4_logs_dir_is_0700(
 
 
 def test_sec_m4_perf_log_rotates_over_cap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_perf_log, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLM_HOME", str(tmp_path / "slm"))
-    from superlocalmemory.hooks import _outcome_common as oc
-
-    # Reset module cached fd/path so this test doesn't bleed into others.
-    oc._PERF_LOG_FD = None  # noqa: SLF001
-    oc._PERF_LOG_PATH = None  # noqa: SLF001
-    oc._PERF_LOG_WRITE_COUNT = 0  # noqa: SLF001
+    oc = isolated_perf_log
 
     # Tiny cap so we can exercise the rotate path without 10 MB of IO.
     monkeypatch.setattr(oc, "PERF_LOG_MAX_BYTES", 1024, raising=True)
@@ -90,14 +105,9 @@ def test_sec_m4_perf_log_rotates_over_cap(
 
 
 def test_sec_m4_perf_log_entry_is_valid_ndjson(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_perf_log,
 ) -> None:
-    monkeypatch.setenv("SLM_HOME", str(tmp_path / "slm"))
-    from superlocalmemory.hooks import _outcome_common as oc
-
-    oc._PERF_LOG_FD = None  # noqa: SLF001
-    oc._PERF_LOG_PATH = None  # noqa: SLF001
-    oc._PERF_LOG_WRITE_COUNT = 0  # noqa: SLF001
+    oc = isolated_perf_log
 
     oc.log_perf("stage8_nd", 0.5, "ok")
     # Flush the cached fd so the disk copy is complete for the assertion.
@@ -108,3 +118,18 @@ def test_sec_m4_perf_log_entry_is_valid_ndjson(
     rec = json.loads(line)
     assert rec["hook"] == "stage8_nd"
     assert rec["outcome"] == "ok"
+
+
+def test_perf_log_close_releases_stream_and_is_idempotent(
+    isolated_perf_log,
+) -> None:
+    oc = isolated_perf_log
+    oc.log_perf("stage8_close", 0.25, "ok")
+    stream = oc._PERF_LOG_FD  # noqa: SLF001
+    assert stream is not None
+
+    oc.close_perf_log()
+    oc.close_perf_log()
+
+    assert stream.closed
+    assert oc._PERF_LOG_FD is None  # noqa: SLF001

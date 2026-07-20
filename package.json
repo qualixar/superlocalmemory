@@ -1,7 +1,7 @@
 {
   "name": "superlocalmemory",
-  "version": "3.6.17",
-  "description": "Information-geometric agent memory with mathematical guarantees. 4-channel retrieval, Fisher-Rao similarity, zero-LLM mode, EU AI Act compliant. Works with Claude, Cursor, Windsurf, and 17+ AI tools.",
+  "version": "3.7.8",
+  "description": "Local-first agent memory with MCP and an agent-native CLI. Documented clients include Claude Code, Cursor, and Windsurf.",
   "keywords": [
     "ai-memory",
     "claude-ai",
@@ -46,12 +46,12 @@
     "superlocalmemory": "./bin/slm-npm"
   },
   "scripts": {
-    "build:plugin": "node scripts/build-plugin.js",
-    "check:plugin": "node scripts/build-plugin.js --check",
-    "prepack": "node scripts/build-plugin.js && node scripts/prepack.js",
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "check:plugin": "node scripts/build-plugin.mjs --check",
+    "prepack": "node scripts/build-plugin.mjs && node scripts/prepack.js",
     "postinstall": "node scripts/postinstall.js",
     "preuninstall": "node scripts/preuninstall.js",
-    "test": "node --test 'tests/ui/*.mjs'"
+    "test": "node scripts/run-ui-tests.mjs"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -63,13 +63,22 @@
     "win32"
   ],
   "files": [
-    "bin/",
-    "src/",
-    "ide/",
-    "scripts/",
+    "bin/slm-npm",
+    "src/superlocalmemory/",
+    "!src/**/__pycache__/",
+    "!src/**/*.pyc",
+    "!src/**/*.pyo",
+    "ide/completions/",
+    "ide/configs/",
+    "ide/hooks/",
+    "scripts/postinstall.js",
+    "scripts/postinstall-interactive.js",
+    "scripts/postinstall/validation.js",
+    "scripts/preuninstall.js",
     ".claude-plugin/",
     "plugin/",
     "plugin-src/",
+    "docs/pi-dev-integration.md",
     "pyproject.toml",
     "README.md",
     "LICENSE",

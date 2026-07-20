@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 from typing import Any, AsyncIterator, Callable
+from weakref import WeakKeyDictionary
 
 import httpx
 from fastapi.requests import Request
@@ -24,8 +25,10 @@ _get_running_loop = asyncio.get_running_loop
 logger = logging.getLogger("slm.optimize.proxy.helpers")
 
 # Per-callable cache of "does this hook method accept a tenant_id kwarg?".
-# Keyed by id() of the bound method's __func__ so it is stable per hook class.
-_HOOK_TENANT_SUPPORT: dict[int, bool] = {}
+# Keep the callable itself as the key. Integer id() values can be reused after
+# a hook class is collected, which can apply a stale legacy signature result
+# to a new tenant-aware hook and silently drop tenant isolation.
+_HOOK_TENANT_SUPPORT: WeakKeyDictionary[object, bool] = WeakKeyDictionary()
 
 
 def _accepts_tenant_id(fn: Callable) -> bool:
@@ -42,8 +45,12 @@ def _accepts_tenant_id(fn: Callable) -> bool:
     raises fails open to a cache MISS, never the shared namespace.
     """
     target = getattr(fn, "__func__", fn)
-    key = id(target)
-    cached = _HOOK_TENANT_SUPPORT.get(key)
+    try:
+        cached = _HOOK_TENANT_SUPPORT.get(target)
+    except TypeError:
+        # Some extension callables cannot be weak-referenced. Inspect them on
+        # every use instead of falling back to an unsafe integer identity.
+        cached = None
     if cached is None:
         try:
             params = inspect.signature(fn).parameters
@@ -53,7 +60,10 @@ def _accepts_tenant_id(fn: Callable) -> bool:
         except (ValueError, TypeError):
             # Builtins / C callables without a signature — assume legacy.
             cached = False
-        _HOOK_TENANT_SUPPORT[key] = cached
+        try:
+            _HOOK_TENANT_SUPPORT[target] = cached
+        except TypeError:
+            pass
     return cached
 
 # SEC-M-02 (CWE-400): reject oversized bodies to prevent compression-bomb DoS.

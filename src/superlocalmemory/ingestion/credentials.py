@@ -8,7 +8,7 @@ Uses OS keychain via keyring library (macOS Keychain, Windows Credential Locker,
 Linux SecretService). Falls back to file-based storage with restricted permissions.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -19,10 +19,16 @@ import os
 import sys
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import state_path
+
 logger = logging.getLogger("superlocalmemory.ingestion.credentials")
 
-_CRED_DIR = Path.home() / ".superlocalmemory" / "credentials"
+_CRED_DIR = None  # test-only compatibility override
 _SERVICE_PREFIX = "slm"
+
+
+def _credential_dir() -> Path:
+    return Path(_CRED_DIR) if _CRED_DIR is not None else state_path("credentials")
 
 
 def store_credential(service: str, key: str, value: str) -> bool:
@@ -38,8 +44,9 @@ def store_credential(service: str, key: str, value: str) -> bool:
 
     # Fallback: encrypted file with restricted permissions
     try:
-        _CRED_DIR.mkdir(parents=True, exist_ok=True)
-        cred_file = _CRED_DIR / f"{service}.json"
+        cred_dir = _credential_dir()
+        cred_dir.mkdir(parents=True, exist_ok=True)
+        cred_file = cred_dir / f"{service}.json"
 
         existing = {}
         if cred_file.exists():
@@ -54,7 +61,7 @@ def store_credential(service: str, key: str, value: str) -> bool:
         # Restrict permissions (Unix only — Windows skipped)
         if sys.platform != "win32":
             os.chmod(cred_file, 0o600)
-            os.chmod(_CRED_DIR, 0o700)
+            os.chmod(cred_dir, 0o700)
 
         logger.debug("Stored %s/%s in file (keychain unavailable)", service, key)
         return True
@@ -76,7 +83,7 @@ def load_credential(service: str, key: str) -> str | None:
 
     # Fallback: file
     try:
-        cred_file = _CRED_DIR / f"{service}.json"
+        cred_file = _credential_dir() / f"{service}.json"
         if cred_file.exists():
             data = json.loads(cred_file.read_text())
             return data.get(key)
@@ -100,7 +107,7 @@ def delete_credential(service: str, key: str) -> bool:
 
     # Also remove from file
     try:
-        cred_file = _CRED_DIR / f"{service}.json"
+        cred_file = _credential_dir() / f"{service}.json"
         if cred_file.exists():
             data = json.loads(cred_file.read_text())
             if key in data:

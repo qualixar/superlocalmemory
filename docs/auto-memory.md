@@ -14,28 +14,26 @@ When you work with an AI assistant that has SLM connected, certain types of info
 |-------------------|---------|
 | **Decisions** | "Let's use WebSocket instead of SSE" |
 | **Bug fixes** | "The crash was caused by a null pointer in the auth middleware" |
-| **Architecture choices** | "We're going with a microservices approach for the payment system" |
 | **Preferences** | "I prefer functional components over class components" |
-| **Project context** | "The staging server is at 10.0.1.50, port 8080" |
-| **People and roles** | "Sarah is the lead on the mobile team" |
-| **Corrections** | "Actually, the deadline is March 20, not March 15" |
 
 ### What does NOT get captured
 
 - Raw code blocks (too noisy, changes too fast)
 - Casual conversation ("thanks", "sounds good")
-- Repeated information already in memory
-- Content filtered by the entropy gate (redundant or low-value)
+- Repeated content within the configured observation debounce window
+- Content that does not match the enabled decision, bug-fix, or preference admission rules
 
 ### How the system decides what to capture
 
-The ingestion pipeline scores each candidate memory on:
+Auto-capture admission is a lightweight rules step. It matches configured
+decision, bug-fix, and preference patterns and returns a category, reason, and
+confidence. Rejected observations are not acknowledged as stored.
 
-1. **Information value** — Does this add new knowledge not already stored?
-2. **Specificity** — Is this a concrete fact or a vague statement?
-3. **Reusability** — Is this likely to be useful in a future session?
-
-Memories that score below the threshold are discarded. This keeps your database focused and retrieval quality high.
+Accepted observations are submitted durably to M018 before the caller receives
+`captured: true`. This is separate from materialization: the operation first
+becomes `queryable`, then enrichment advances it to `complete` or records a
+retryable `failed` state. Entropy, consolidation, graph, temporal, provenance,
+and projector work belong to materialization, not admission.
 
 ## How Auto-Recall Works
 
@@ -67,6 +65,18 @@ The AI responds with awareness of your past decisions, preferences, and project 
 > AI: "Based on your previous decision to standardize on PostgreSQL 16 (stored March 5), and your preference for managed services on AWS (stored February 20), I'd recommend Amazon RDS for PostgreSQL. Your auth service and payment service already use PostgreSQL, so this keeps the stack consistent."
 
 The AI did not "remember" this on its own. SLM injected the relevant memories before the AI generated its response.
+
+### Memory is evidence, not instruction
+
+Recalled content can include old prompts, imported text, or hostile
+instructions. SLM therefore renders it inside one reference-only untrusted
+evidence boundary, with provenance, size budgets, recognized-secret redaction,
+and forged-boundary neutralization. If the mandatory renderer fails, SLM omits
+the memory context instead of falling back to raw text.
+
+IDE instruction files contain only static product protocol. SLM retrieves
+dynamic memory through MCP at runtime rather than copying recalled text into a
+trusted Cursor, Copilot, or Antigravity rules file.
 
 ## Configuration
 
@@ -143,7 +153,12 @@ slm patterns correct 5  # Correct pattern #5 if it's wrong
 
 ## Privacy
 
-Auto-capture and auto-recall happen entirely within SLM on your machine. In Mode A, no data leaves your device at any point. In Mode C, recall queries are sent to your configured LLM provider, but the memories themselves remain local.
+Core auto-capture and recall storage use the configured local data root. Mode A
+does not require a cloud model provider for core memory operations, but optional
+connectors, cloud backup, proxy providers, dependency/model downloads, and
+other explicitly enabled integrations can use the network. Mode C sends the
+constructed model request—including selected memory evidence—to the configured
+cloud provider. Review that provider's retention and privacy terms before use.
 
 ---
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from superlocalmemory.core.injection import InjectableMemory, render_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,12 +74,18 @@ class AutoRecall:
             if not relevant:
                 return ""
 
-            # Format for injection
-            lines = ["# Relevant Memory Context", ""]
-            for r in relevant[:self._max_memories]:
-                lines.append(f"- {r.fact.content[:200]}")
-
-            return "\n".join(lines)
+            memories = [
+                InjectableMemory(
+                    content=r.fact.content,
+                    score=float(r.score),
+                    fact_id=str(r.fact.fact_id),
+                    importance=float(getattr(r.fact, "importance", 0.0) or 0.0),
+                    access_count=int(getattr(r.fact, "access_count", 0) or 0),
+                    source_type="recall",
+                )
+                for r in relevant[:self._max_memories]
+            ]
+            return render_context(memories, mode="B", cfg=None, wrap=True)
         except Exception as exc:
             logger.warning("Auto-recall failed: %s", exc)
             return ""
@@ -103,6 +111,23 @@ class AutoRecall:
                         "fact_id": r.fact.fact_id,
                         "content": r.fact.content[:300],
                         "score": round(r.score, 3),
+                        "relevance_score": round(
+                            getattr(r, "relevance_score", r.score) or 0.0, 3
+                        ),
+                        "ranking_score": getattr(r, "ranking_score", None),
+                        "confidence": round(
+                            getattr(
+                                r, "memory_confidence",
+                                getattr(r, "confidence", 0.0),
+                            ) or 0.0, 3
+                        ),
+                        "memory_confidence": round(
+                            getattr(
+                                r, "memory_confidence",
+                                getattr(r, "confidence", 0.0),
+                            ) or 0.0, 3
+                        ),
+                        "rank_position": int(getattr(r, "rank_position", 0) or 0),
                     })
             return results
         except Exception as exc:

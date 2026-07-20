@@ -4,7 +4,7 @@
 
 """WP-07 — Lazy first-run initialisation (pip cross-install).
 
-stdlib-only — zero heavy imports, STDOUT-SILENT.
+Lightweight import only — zero heavy imports, STDOUT-SILENT.
 
 Public API
 ----------
@@ -25,6 +25,8 @@ import json
 import os
 from pathlib import Path
 
+from superlocalmemory import __version__ as _RUNTIME_VERSION
+
 
 # ---------------------------------------------------------------------------
 # Public: home resolution
@@ -42,11 +44,9 @@ def slm_home() -> Path:
 
     Pure: no mkdir, no side effects.
     """
-    for var in ("SLM_DATA_DIR", "SL_MEMORY_PATH", "SLM_HOME"):
-        val = os.environ.get(var, "").strip()
-        if val:
-            return Path(val)
-    return Path.home() / ".superlocalmemory"
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return canonical_data_root()
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def slm_home() -> Path:
 # Only mode + base_dir; everything else uses SLMConfig defaults.
 _MINIMAL_CONFIG: dict = {
     "mode": "a",
-    "version": "3.6.14",
+    "version": _RUNTIME_VERSION,
 }
 
 

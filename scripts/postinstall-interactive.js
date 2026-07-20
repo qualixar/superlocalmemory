@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * SuperLocalMemory v3.4.21 — Interactive Postinstall
+ * SuperLocalMemory — Interactive Profile Configurator
  *
- * Per MASTER-PLAN-v3.4.21-FINAL.md §5 and IMPLEMENTATION-MANIFEST §D.3.
+ * Invoked explicitly by `slm reconfigure`; it is not an npm lifecycle hook.
  *
  * Responsibilities:
  *   1. Detect TTY; non-TTY (CI, piped stdin) → apply Balanced defaults
@@ -489,13 +489,11 @@ async function runInteractiveFlow(rl, recommendedProfile) {
 // under 60 LOC per Stage-8 G2 scope.
 function printLivingBrainDelta() {
   console.log('');
-  console.log('What\'s new in v3.4.21 FINAL:');
-  console.log('  + Engagement reward model (action_outcomes populated)');
-  console.log('  + Online LightGBM retrain (shadow-tested, auto-rollback)');
-  console.log('  + Real consolidation (hnswlib, reversible merges)');
-  console.log('  + Inline entity detection (<2 ms trigram lookup)');
-  console.log('  + Opt-in skill evolution (Haiku 4.5 default)');
-  console.log('  + Evo-Memory public benchmark');
+  console.log('Current setup guarantees:');
+  console.log('  + session_init mandate hook — Claude calls ToolSearch→session_init first, every session');
+  console.log('  + External IDE integrations are installed only after explicit consent in `slm setup`');
+  console.log('  + M017 migration — ccq_consolidated_blocks gets scope column (no more silent CCQ scope drop)');
+  console.log('  + GC-safe test flags baked into pyproject.toml + Makefile (no more macOS ARM SIGSEGV)');
   console.log('What\'s unchanged:');
   console.log('  * Your memory.db — zero deletes, zero rewrites');
   console.log('  * Your profile settings');
@@ -516,6 +514,14 @@ function printFirstRunChecklist(config) {
   console.log('  slm doctor                 — run health checks (DB, models, ports)');
   console.log('  slm health --watch         — live health ladder readout');
   console.log('  slm dashboard              — open the dashboard in your browser');
+  console.log('');
+  console.log('Available capability map (nothing external is enabled silently):');
+  console.log('  Memory + graph: dated episodic facts, entity graph, and local SQLite retrieval are ready.');
+  console.log('  Scale Engine: stage and verify CozoDB graph + LanceDB vector projections with `slm db scale prepare`.');
+  console.log('  Cache + compression: use the MCP optimize tools or `slm optimize on`; aggressive prose is opt-in.');
+  console.log('  Mesh: local coordination is available; configure a shared secret before exposing it to a LAN.');
+  console.log('  Adapters: Gmail, Calendar, and Transcript are OFF until `slm adapters enable <name>`.');
+  console.log('  IDE add-ons: install only SLM-owned integration with `slm hooks install --agent codex` or `--agent claude`.');
   if (config.skill_evolution_enabled) {
     // UX-L3: make the failure mode explicit to users who opted into
     // evolution. If three LLM calls fail, the circuit breaker trips — and
@@ -541,8 +547,11 @@ async function main() {
       return 2;
     }
   }
-  const homeDir = args.home || os.homedir();
-  const slmDir = path.join(homeDir, '.superlocalmemory');
+  const configuredRoot = process.env.SLM_DATA_DIR
+    || process.env.SL_MEMORY_PATH
+    || process.env.SLM_HOME
+    || path.join(os.homedir(), '.superlocalmemory');
+  const slmDir = args.home ? path.join(args.home, '.superlocalmemory') : configuredRoot;
   const cfgPath = path.join(slmDir, 'config.toml');
   const bakPath = path.join(slmDir, 'config.toml.bak');
 
@@ -692,6 +701,7 @@ async function main() {
 
   // UX-G2: show the one-screen delta banner so upgraders see what shipped.
   printLivingBrainDelta();
+
   printFirstRunChecklist(config);
   return 0;
 }

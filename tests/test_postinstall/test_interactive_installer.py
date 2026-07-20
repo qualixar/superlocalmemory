@@ -261,6 +261,26 @@ def test_skill_evolution_prompt_defaults_no(tmp_path: Path) -> None:
     )
 
 
+def test_first_run_checklist_discloses_opt_in_capabilities(tmp_path: Path) -> None:
+    """The npm configurator must explain powerful but opt-in surfaces.
+
+    First-time users should not infer that adapters, LAN mesh exposure, or
+    lossy compression were silently enabled by choosing a runtime profile.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    result = _run(
+        ["--dry-run", f"--home={home}", "--home-outside-home"],
+        env={"CI": "true"},
+    )
+    assert result.returncode == 0, result.stderr
+    output = result.stdout
+    assert "Available capability map" in output
+    assert "slm db scale prepare" in output
+    assert "Gmail, Calendar, and Transcript are OFF" in output
+    assert "shared secret before exposing it to a LAN" in output
+
+
 def test_no_opus_in_model_choices() -> None:
     """Hard gate: the LLM model choice list offered to the user must contain
     only Claude Haiku 4.5, Claude Sonnet 4.6, Ollama, and Skip. Opus must

@@ -58,7 +58,8 @@ esac
 
 # Get daemon port
 PORT=8765
-PORT_FILE="$HOME/.superlocalmemory/daemon.port"
+DATA_ROOT="${SLM_DATA_DIR:-${SL_MEMORY_PATH:-${SLM_HOME:-$HOME/.superlocalmemory}}}"
+PORT_FILE="$DATA_ROOT/daemon.port"
 [ -f "$PORT_FILE" ] && PORT=$(cat "$PORT_FILE" 2>/dev/null || echo 8765)
 
 # If no python, send basic event (backward compatible)

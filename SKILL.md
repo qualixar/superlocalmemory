@@ -3,7 +3,7 @@ name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally with zero cloud dependency."
 version: "3.4.22"
 author: "Varun Pratap Bhardwaj"
-license: Elastic-2.0
+license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
 repository: https://github.com/qualixar/superlocalmemory
 triggers:
@@ -19,7 +19,7 @@ triggers:
 
 # SuperLocalMemory
 
-AI agent memory that runs 100% locally. Four-channel retrieval (semantic, graph, BM25, temporal) with mathematical similarity scoring. No cloud, no API keys, EU AI Act compliant.
+AI agent memory that runs 100% locally. Five candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) fuse via RRF, with an entity-graph post-fusion score enhancement — all with mathematical similarity scoring. No cloud, no API keys, EU AI Act compliant.
 
 ## Installation
 

@@ -109,12 +109,10 @@ source .venv/bin/activate
 ### Step 3: Install Development Dependencies
 
 ```bash
-# Install project (no external dependencies for core)
-# For development/testing:
-pip install pytest pytest-cov black flake8
-
-# Optional: Install optional dependencies
-pip install scikit-learn leidenalg
+# Install the project in an isolated development environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
 ```
 
 ### Step 4: Verify Setup
@@ -127,13 +125,11 @@ pytest tests/
 flake8 src/
 black --check src/
 
-# Run installation
-# On macOS/Linux:
-./install.sh
-# Activate virtual environment
+# Verify the repository-clone installer without changing the tool environment
+./scripts/install.sh install --dry-run
 
 # On Windows:
-./install.ps1
+.\scripts\install.ps1 -Action Install -DryRun
 
 # Test basic functionality
 slm status
@@ -423,9 +419,9 @@ flake8 src/ --max-line-length=100
 # Test
 pytest tests/
 
-# Verify installation
-./install.sh
-memory-status
+# Verify installer command generation
+./scripts/install.sh install --dry-run
+slm status
 ```
 
 ### Step 3: Commit Changes

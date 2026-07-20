@@ -24,6 +24,8 @@ from . import (
     M004_cross_platform_sync_log,
     M005_bandit_tables,
     M015_add_pinned_column,
+    M019_derivation_lineage,
+    M020_model_state_integrity,
 )
 
 # ---------------------------------------------------------------------------
@@ -72,6 +74,9 @@ __all__ = (
     "M003_migration_log",
     "M004_cross_platform_sync_log",
     "M005_bandit_tables",
+    "M015_add_pinned_column",
+    "M019_derivation_lineage",
+    "M020_model_state_integrity",
     # Legacy re-exports (backward compat):
     "CURRENT_SCHEMA_VERSION",
     "get_schema_version",

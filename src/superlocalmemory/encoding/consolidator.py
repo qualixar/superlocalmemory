@@ -13,7 +13,7 @@ Mode A: keyword-based contradiction detection (zero LLM).
 Mode B/C: LLM-assisted contradiction detection when available.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -100,13 +100,26 @@ class MemoryConsolidator:
     # -- Public API ---------------------------------------------------------
 
     def consolidate(
-        self, new_fact: AtomicFact, profile_id: str,
+        self,
+        new_fact: AtomicFact,
+        profile_id: str,
+        *,
+        exclude_fact_ids: set[str] | frozenset[str] | None = None,
     ) -> ConsolidationAction:
         """Consolidate *new_fact* against existing knowledge.
 
         Returns a ``ConsolidationAction`` describing what was done.
+
+        ``exclude_fact_ids`` is reserved for an ingestion operation's own
+        queryable projection.  That projection is evidence being promoted,
+        not pre-existing knowledge, and must not suppress its derived facts as
+        near-duplicates.
         """
-        candidates = self._find_candidates(new_fact, profile_id)
+        candidates = self._find_candidates(
+            new_fact,
+            profile_id,
+            exclude_fact_ids=exclude_fact_ids,
+        )
 
         if not candidates:
             return self._execute_add(new_fact, profile_id, reason="no matching facts")
@@ -168,7 +181,11 @@ class MemoryConsolidator:
     # -- Candidate search ---------------------------------------------------
 
     def _find_candidates(
-        self, new_fact: AtomicFact, profile_id: str,
+        self,
+        new_fact: AtomicFact,
+        profile_id: str,
+        *,
+        exclude_fact_ids: set[str] | frozenset[str] | None = None,
     ) -> list[tuple[AtomicFact, float]]:
         """Find and score candidate matches from existing facts.
 
@@ -178,7 +195,7 @@ class MemoryConsolidator:
 
         Returns sorted list of (fact, combined_score), descending.
         """
-        seen_ids: set[str] = set()
+        seen_ids: set[str] = set(exclude_fact_ids or ())
         candidate_facts: list[AtomicFact] = []
 
         # --- entity-based candidates ---

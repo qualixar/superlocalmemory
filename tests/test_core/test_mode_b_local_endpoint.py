@@ -22,7 +22,6 @@ import pytest
 
 from tests.fixtures.stub_llm_server import StubLLMServer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -42,6 +41,114 @@ def _make_backbone(provider: str, api_base: str, api_key: str = "", model: str =
         max_tokens=64,
     )
     return LLMBackbone(config)
+
+
+# ---------------------------------------------------------------------------
+# Stub server lifecycle ownership
+# ---------------------------------------------------------------------------
+
+class TestStubLLMServerLifecycle:
+    def test_stop_closes_socket_joins_thread_and_is_idempotent(self) -> None:
+        stub = StubLLMServer()
+        stub._start()
+        server = stub._server
+        thread = stub._thread
+        assert server is not None
+        assert thread is not None
+
+        stub._stop()
+        stub._stop()
+
+        assert server.socket.fileno() == -1
+        assert not thread.is_alive()
+        assert stub._server is None
+        assert stub._thread is None
+
+    def test_start_failure_closes_partially_created_server(
+        self, monkeypatch,
+    ) -> None:
+        def fail_start(_thread) -> None:
+            raise RuntimeError("thread start failed")
+
+        monkeypatch.setattr(
+            "tests.fixtures.stub_llm_server.threading.Thread.start", fail_start,
+        )
+        stub = StubLLMServer()
+
+        try:
+            with pytest.raises(RuntimeError, match="thread start failed"):
+                stub._start()
+            assert stub._server is None
+            assert stub._thread is None
+        finally:
+            # RED-path protection for the pre-fix implementation.
+            if stub._server is not None:
+                stub._server.server_close()
+                stub._server = None
+                stub._thread = None
+
+    def test_thread_construction_failure_closes_bound_server(
+        self, monkeypatch,
+    ) -> None:
+        events: list[str] = []
+
+        class BoundServer:
+            def __init__(self, *_args) -> None:
+                pass
+
+            def serve_forever(self) -> None:
+                pass
+
+            def server_close(self) -> None:
+                events.append("server_close")
+
+        def fail_thread(*_args, **_kwargs):
+            raise RuntimeError("thread construction failed")
+
+        monkeypatch.setattr(
+            "tests.fixtures.stub_llm_server.HTTPServer", BoundServer,
+        )
+        monkeypatch.setattr(
+            "tests.fixtures.stub_llm_server.threading.Thread", fail_thread,
+        )
+        stub = StubLLMServer()
+
+        with pytest.raises(RuntimeError, match="thread construction failed"):
+            stub._start()
+
+        assert events == ["server_close"]
+        assert stub._server is None
+        assert stub._thread is None
+
+    def test_stop_closes_server_even_when_shutdown_raises(self) -> None:
+        events: list[str] = []
+
+        class FailingServer:
+            def shutdown(self) -> None:
+                events.append("shutdown")
+                raise RuntimeError("shutdown failed")
+
+            def server_close(self) -> None:
+                events.append("server_close")
+
+        class Worker:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float) -> None:
+                assert timeout == 3
+                events.append("join")
+
+        stub = StubLLMServer()
+        stub._server = FailingServer()  # type: ignore[assignment]
+        stub._thread = Worker()  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError, match="shutdown failed"):
+            stub._stop()
+
+        assert events == ["shutdown", "join", "server_close"]
+        assert stub._server is None
+        assert stub._thread is None
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +180,13 @@ class TestKeylessOpenAI:
                 f"Request path should contain 'chat/completions', got: {last_req.path}"
             )
 
-    def test_no_authorization_header_when_keyless(self) -> None:
+    def test_no_authorization_header_when_keyless(self, monkeypatch) -> None:
         """Keyless OpenAI-compatible request must NOT send Authorization header.
 
         backbone.py V3.5.9: Authorization is omitted when api_key is empty so
         unauthenticated local endpoints don't reject with HTTP 401.
         """
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-env-should-not-leak")
         with StubLLMServer(reply_text="EXTRACTED") as stub:
             backbone = _make_backbone("openai", api_base=f"{stub.url}/v1", api_key="")
             backbone.generate("test prompt")

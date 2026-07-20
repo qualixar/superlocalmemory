@@ -22,7 +22,8 @@ HOT-PATH CONTRACT
 - Latency budget: <10 ms (regex + set ops on bounded input). Verified
   by the algorithm itself; subprocess startup adds ~30-40 ms but that's
   outside the budget for the Python logic.
-- State file per session: /tmp/slm-topicstate-{sha256(session_id)[:16]}.json
+- State file per root and session:
+  /tmp/slm-topicstate-{root_hash}-{sha256(session_id)[:16]}.json
   Schema: {"window": [[word, ...], ...], "version": 1}.
 
 DESIGN NOTES (NASA-grade — defensible thresholds, e2e-tuned)
@@ -109,10 +110,11 @@ _SHIFT_REMINDER = (
     "memories before responding."
 )
 
-# Observability — under ~/.superlocalmemory/logs/ so it survives /tmp purges
-# and is discoverable by users grepping for log files.
-_LOG_DIR = os.path.expanduser("~/.superlocalmemory/logs")
-_LOG_PATH = os.path.join(_LOG_DIR, "topic-shift.log")
+# Optional test/embedder overrides. Runtime defaults are resolved dynamically
+# through the canonical data-root authority so environment switches in a
+# long-lived process do not continue logging to the first observed namespace.
+_LOG_DIR: str | None = None
+_LOG_PATH: str | None = None
 _LOG_ENABLED = os.environ.get("SLM_TOPIC_SHIFT_LOG", "1") != "0"
 _LOG_PROMPT_PREVIEW_CHARS = 80
 
@@ -162,9 +164,19 @@ def detect_shift(
 # --------------------------------------------------------------------------
 
 def state_path(session_id: str) -> str:
-    """Hash session_id for safe filename."""
-    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
-    return os.path.join(_TMP, f"slm-topicstate-{digest}.json")
+    """Hash canonical root and session ID for an isolated safe filename."""
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    root_digest = hashlib.sha256(
+        str(canonical_data_root()).encode("utf-8")
+    ).hexdigest()[:16]
+    session_digest = hashlib.sha256(
+        session_id.encode("utf-8")
+    ).hexdigest()[:16]
+    return os.path.join(
+        _TMP,
+        f"slm-topicstate-{root_digest}-{session_digest}.json",
+    )
 
 
 def load_state(path: str) -> list[list[str]]:
@@ -193,13 +205,30 @@ def load_state(path: str) -> list[list[str]]:
 
 def save_state(path: str, window: list[list[str]]) -> None:
     """Persist window. Silent on any IO failure."""
+    tmp = f"{path}.{os.getpid()}.{time.time_ns()}.tmp"
     try:
-        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"version": 1, "window": window[-_WINDOW_SIZE:]}, f)
         os.replace(tmp, path)
     except OSError:
-        pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _topic_log_paths() -> tuple[str, str]:
+    """Return ``(directory, file)`` while retaining explicit test overrides."""
+    if _LOG_PATH is not None:
+        directory = _LOG_DIR or os.path.dirname(_LOG_PATH)
+        return directory, _LOG_PATH
+    if _LOG_DIR is not None:
+        return _LOG_DIR, os.path.join(_LOG_DIR, "topic-shift.log")
+
+    from superlocalmemory.infra.data_root import state_path as runtime_state_path
+
+    path = str(runtime_state_path("logs", "topic-shift.log"))
+    return os.path.dirname(path), path
 
 
 def _read_input() -> tuple[str, str]:
@@ -232,14 +261,15 @@ def _log_decision(
     if not _LOG_ENABLED:
         return
     try:
-        os.makedirs(_LOG_DIR, exist_ok=True)
+        log_dir, log_path = _topic_log_paths()
+        os.makedirs(log_dir, exist_ok=True)
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         sh = hashlib.sha256(session_id.encode()).hexdigest()[:8]
         preview = (prompt[:_LOG_PROMPT_PREVIEW_CHARS]
                    .replace("\t", " ").replace("\n", " "))
         line = (f"{ts}\t{sh}\t{len(current_words)}\t{len(window)}"
                 f"\t{max_overlap}\t{int(fired)}\t{preview}\n")
-        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(line)
     except OSError:
         pass

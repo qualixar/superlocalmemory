@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 import sqlite3
 from datetime import datetime, timedelta, UTC
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from superlocalmemory.core.tier_manager import (
     evaluate_tiers,
@@ -72,7 +72,13 @@ def db():
     conn.execute("""
         CREATE TABLE fact_retention (
             fact_id TEXT PRIMARY KEY,
-            last_accessed_at TEXT
+            profile_id TEXT NOT NULL DEFAULT 'default',
+            retention_score REAL NOT NULL DEFAULT 1.0,
+            memory_strength REAL NOT NULL DEFAULT 1.0,
+            access_count INTEGER NOT NULL DEFAULT 0,
+            last_accessed_at TEXT,
+            last_computed_at TEXT,
+            lifecycle_zone TEXT NOT NULL DEFAULT 'active'
         )
     """)
     conn.execute("""
@@ -238,6 +244,61 @@ class TestTierEvaluation:
         )[0]
         assert row["lifecycle"] == "active"
         assert stats["pinned_protected"] >= 1
+
+    def test_demotion_updates_authoritative_retention_zone(self, db):
+        db.execute(
+            "INSERT INTO atomic_facts "
+            "(fact_id, content, profile_id, created_at, lifecycle) "
+            "VALUES ('split-brain', 'old', 'default', "
+            "datetime('now', '-40 days'), 'active')"
+        )
+
+        evaluate_tiers(db, "default")
+
+        atomic = db.execute(
+            "SELECT lifecycle FROM atomic_facts WHERE fact_id = 'split-brain'"
+        )[0]["lifecycle"]
+        retention = db.execute(
+            "SELECT lifecycle_zone FROM fact_retention "
+            "WHERE fact_id = 'split-brain'"
+        )[0]["lifecycle_zone"]
+        assert (atomic, retention) == ("warm", "warm")
+
+
+def test_maintenance_scheduler_evaluates_every_profile() -> None:
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
+    from superlocalmemory.storage.models import Mode
+
+    db = MagicMock()
+    db.db_path = "/tmp/test.db"
+    db.execute.return_value = [
+        {"profile_id": "default"},
+        {"profile_id": "research"},
+    ]
+    scheduler = MaintenanceScheduler(db, SLMConfig.for_mode(Mode.A), "default")
+    scheduler._running = True
+
+    with (
+        patch("superlocalmemory.core.maintenance.run_maintenance", return_value={}),
+        patch("superlocalmemory.core.graph_pruner.prune_graph", return_value={
+            "total_before": 0, "total_after": 0,
+        }),
+        patch("superlocalmemory.core.tier_manager.evaluate_tiers", return_value={
+            "demoted_to_warm": 0,
+            "demoted_to_cold": 0,
+            "demoted_to_archive": 0,
+        }) as evaluate,
+        patch("superlocalmemory.infra.backup.BackupManager.check_and_backup", return_value=None),
+        patch("superlocalmemory.cli.pending_store.cleanup_stale", return_value={"total": 0}),
+        patch("superlocalmemory.core.block_hygiene._recompile_core_blocks"),
+        patch.object(scheduler, "_schedule_next"),
+    ):
+        scheduler._run()
+
+    assert {call.args[1] for call in evaluate.call_args_list} == {
+        "default", "research",
+    }
 
 
 class TestTierStats:

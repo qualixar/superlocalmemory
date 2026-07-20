@@ -9,7 +9,7 @@ by the system carries a verifiable proof of origin.  Verification
 detects any modification to the content after signing.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -17,33 +17,46 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import sys
 from datetime import datetime, timezone
 from typing import Dict
+
+from superlocalmemory.infra.data_root import state_path
+
 
 def _get_or_create_key() -> str:
     """Load key from env or generate a persistent random one."""
     env_key = os.environ.get("SLM_SIGNER_KEY")
     if env_key:
         return env_key
-    key_path = os.path.expanduser("~/.superlocalmemory/.signer_key")
+
+    key_path = state_path(".signer_key")
     try:
-        with open(key_path) as f:
-            return f.read().strip()
+        key = key_path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        import secrets
-        key = secrets.token_hex(32)
-        os.makedirs(os.path.dirname(key_path), exist_ok=True)
-        with open(key_path, "w") as f:
-            f.write(key)
-        # On POSIX, restrict the key file to owner-only read/write.
-        # On Windows, os.chmod only supports setting the read-only flag
-        # and cannot enforce Unix-style permissions, so we skip it.
-        if sys.platform != "win32":
-            os.chmod(key_path, 0o600)
+        key = ""
+    if key:
         return key
 
-_DEFAULT_KEY: str = _get_or_create_key()
+    import secrets
+
+    key = secrets.token_hex(32)
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(str(key_path), flags, 0o600)
+        try:
+            os.write(fd, key.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        key = key_path.read_text(encoding="utf-8").strip()
+        if not key:
+            raise RuntimeError(f"signer key is empty: {key_path}")
+    if os.name != "nt":
+        os.chmod(key_path, 0o600)
+    return key
 
 
 class QualixarSigner:
@@ -63,9 +76,11 @@ class QualixarSigner:
     _PLATFORM: str = "Qualixar"
     _AUTHOR: str = "Varun Pratap Bhardwaj"
     _AUTHOR_URL: str = "https://varunpratap.com"
-    _LICENSE: str = "MIT"
+    _LICENSE: str = "AGPL-3.0-or-later"
 
-    def __init__(self, secret_key: str = _DEFAULT_KEY) -> None:
+    def __init__(self, secret_key: str | None = None) -> None:
+        if secret_key is None:
+            secret_key = _get_or_create_key()
         if not secret_key:
             raise ValueError("secret_key must be a non-empty string")
         self._secret_key: bytes = secret_key.encode("utf-8")
@@ -85,7 +100,7 @@ class QualixarSigner:
 
             - ``platform``     – always ``"Qualixar"``
             - ``author``       – always ``"Varun Pratap Bhardwaj"``
-            - ``license``      – always ``"MIT"``
+            - ``license``      – always ``"AGPL-3.0-or-later"``
             - ``content_hash`` – SHA-256 hex digest of *content*
             - ``signature``    – HMAC-SHA256 hex digest (key-dependent)
             - ``timestamp``    – ISO 8601 UTC timestamp

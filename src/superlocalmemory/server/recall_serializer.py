@@ -201,7 +201,19 @@ def serialize_recall_response(
             "content": fact.content or "",
             "source_content": memory_map.get(fact.memory_id, "") or "",
             "score": round(r.score, 4),
+            "relevance_score": round(
+                getattr(r, "relevance_score", r.score) or 0.0, 4
+            ),
             "confidence": round(getattr(r, "confidence", 0.0), 4),
+            "memory_confidence": round(
+                getattr(r, "memory_confidence", r.confidence) or 0.0, 4
+            ),
+            "ranking_score": (
+                round(r.ranking_score, 6)
+                if getattr(r, "ranking_score", None) is not None
+                else None
+            ),
+            "rank_position": int(getattr(r, "rank_position", 0) or 0),
             "trust_score": round(getattr(r, "trust_score", 0.0), 4),
             "channel_scores": {
                 k: round(v, 4) for k, v in (getattr(r, "channel_scores", None) or {}).items()
@@ -225,3 +237,15 @@ def serialize_recall_response(
     )
     no_confident_match = bool(getattr(response, "no_confident_match", False))
     return budgeted, no_confident_match
+
+
+def recall_response_metadata(response: Any) -> dict:
+    """Return Score Contract v2 response metadata for transport envelopes."""
+    return {
+        "score_contract_version": getattr(response, "score_contract_version", "2"),
+        "calibration_status": getattr(response, "calibration_status", "uncalibrated"),
+        "calibration_id": getattr(response, "calibration_id", None),
+        "answer_confidence": getattr(response, "answer_confidence", None),
+        "abstained": bool(getattr(response, "abstained", False)),
+        "abstention_reason": getattr(response, "abstention_reason", None),
+    }

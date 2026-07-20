@@ -20,6 +20,8 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.storage.sqlite_vectors import iter_canonical_vectors
+
 logger = logging.getLogger(__name__)
 
 # Optional import
@@ -53,7 +55,11 @@ class LanceDBVectorBackend:
     # Valid tier values (F-27: validated before interpolation)
     VALID_TIERS: frozenset[str] = frozenset({"active", "warm", "cold", "archived"})
 
-    def __init__(self, db_path: str) -> None:
+    # Fallback embedding width when neither the caller nor an existing table
+    # specifies one. Matches the bundled nomic-embed-text-v1.5 model (768d).
+    DEFAULT_DIMENSION: int = 768
+
+    def __init__(self, db_path: str, dimension: int | None = None) -> None:
         if not _LANCEDB_AVAILABLE:
             raise LanceDBNotAvailable(
                 "LanceDB not installed. Run: pip install superlocalmemory[lancedb]"
@@ -61,25 +67,66 @@ class LanceDBVectorBackend:
         path = Path(db_path)
         path.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
+        # v3.7.6 (#72): the vector width is configurable so custom embedding
+        # endpoints (e.g. Qwen3-Embedding at 1024d) no longer collide with a
+        # hardcoded 768d schema/decode. An existing table's on-disk width always
+        # wins over the requested value to keep already-materialized stores
+        # readable after a config change.
+        self._dimension = int(dimension) if dimension else self.DEFAULT_DIMENSION
         self._db = lancedb.connect(self._db_path)  # type: ignore[union-attr]
         self._table = self._open_or_create_table()
 
+    @property
+    def dimension(self) -> int:
+        """Effective vector width used for this backend's schema and decode."""
+        return self._dimension
+
     def _open_or_create_table(self):
-        """Open existing table or create empty one."""
+        """Open existing table (adopting its width) or create one at self._dimension."""
         try:
-            return self._db.open_table("embeddings")
+            table = self._db.open_table("embeddings")
         except Exception:
             import pyarrow as pa
             schema = pa.schema([
                 pa.field("fact_id", pa.string(), nullable=False),
-                pa.field("vector", pa.list_(pa.float32(), list_size=768), nullable=False),
+                pa.field(
+                    "vector",
+                    pa.list_(pa.float32(), list_size=self._dimension),
+                    nullable=False,
+                ),
                 pa.field("tier", pa.string(), nullable=False),
                 pa.field("profile_id", pa.string(), nullable=False),
             ])
             return self._db.create_table("embeddings", schema=schema)
+        # Adopt the persisted width so decode/validation matches what is stored.
+        existing = self._table_vector_width(table)
+        if existing:
+            self._dimension = existing
+        return table
+
+    @staticmethod
+    def _table_vector_width(table) -> int | None:
+        """Best-effort read of the persisted vector list width, or None."""
+        try:
+            field = table.schema.field("vector")
+            list_size = getattr(field.type, "list_size", None)
+            if isinstance(list_size, int) and list_size > 0:
+                return list_size
+        except Exception:  # pragma: no cover — schema introspection is best-effort
+            logger.debug("Could not read persisted vector width", exc_info=True)
+        return None
 
     def close(self) -> None:
-        """LanceDB is file-based — no explicit close needed."""
+        """Release this backend's native table and connection references."""
+        for resource in (self._table, self._db):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.debug("LanceDB resource close failed", exc_info=True)
+        self._table = None
+        self._db = None
 
     # ------------------------------------------------------------------
     # Write Path
@@ -92,15 +139,32 @@ class LanceDBVectorBackend:
         tiers: list[str],
         profile_id: str = "default",
     ) -> int:
-        """Batch insert vectors."""
+        """Idempotently insert or replace vectors by canonical fact ID."""
         if not fact_ids:
             return 0
         data = [
             {"fact_id": fid, "vector": emb, "tier": tier, "profile_id": profile_id}
             for fid, emb, tier in zip(fact_ids, embeddings, tiers)
         ]
-        self._table.add(data)
+        # `add()` permits duplicate fact IDs on retries.  Store/retry paths are
+        # at-least-once by design, so use LanceDB's merge operation to keep the
+        # projection one-row-per-fact and safe to replay after a restart.
+        (
+            self._table.merge_insert("fact_id")
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute(data)
+        )
         return len(data)
+
+    @staticmethod
+    def _fact_predicate(fact_id: str) -> str:
+        """Build a Lance SQL literal without allowing predicate injection."""
+        return "fact_id = '" + fact_id.replace("'", "''") + "'"
+
+    def remove_vector(self, fact_id: str) -> None:
+        """Delete one derived vector after its canonical fact is deleted."""
+        self._table.delete(self._fact_predicate(fact_id))
 
     # ------------------------------------------------------------------
     # Read Path
@@ -111,6 +175,7 @@ class LanceDBVectorBackend:
         query_vector: list[float],
         top_k: int = 50,
         tier_filter: list[str] | None = None,
+        profile_id: str = "default",
     ) -> list[tuple[str, float]]:
         """ANN search with optional tier filter.
 
@@ -131,7 +196,10 @@ class LanceDBVectorBackend:
 
             # Build tier filter string for LanceDB SQL-like where clause
             tier_str = ", ".join(f"'{t}'" for t in tier_filter)
-            results = search.where(f"tier IN ({tier_str})").to_list()
+            profile_literal = profile_id.replace("'", "''")
+            results = search.where(
+                f"tier IN ({tier_str}) AND profile_id = '{profile_literal}'"
+            ).to_list()
 
             # Convert distance → similarity (F-08)
             return [(r["fact_id"], 1.0 - r["_distance"]) for r in results]
@@ -143,67 +211,54 @@ class LanceDBVectorBackend:
     # Bulk Import (sqlite-vec → LanceDB)
     # ------------------------------------------------------------------
 
-    def bulk_import_from_sqlite(self, conn: sqlite3.Connection) -> int:
+    def bulk_import_from_sqlite(
+        self, conn: sqlite3.Connection, profile_id: str = "default",
+    ) -> int:
         """Export embeddings from sqlite-vec → LanceDB.
 
-        sqlite-vec stores vectors as raw float32 little-endian blobs
-        in fact_embeddings_vector_chunks00, with rowid mapping in
-        fact_embeddings_rowids.
+        Reads the supported vec0 virtual table and joins row IDs through
+        ``embedding_metadata``. Shadow-table layouts are sqlite-vec internals
+        and must not be treated as a stable migration API.
 
         Returns number of vectors imported.
         """
-        # Get rowid → fact_id mapping
-        row_map: dict[int, str] = {}
-        try:
-            for row in conn.execute("SELECT rowid, fact_id FROM fact_embeddings_rowids"):
-                row_map[row[0]] = row[1]
-        except sqlite3.OperationalError:
-            logger.warning("fact_embeddings_rowids not found — no vectors to import")
-            return 0
-
-        # Get tiers
-        tier_map: dict[str, str] = {}
-        try:
-            for row in conn.execute(
-                "SELECT fact_id, COALESCE(lifecycle, 'active') FROM atomic_facts"
-            ):
-                tier_map[row[0]] = row[1]
-        except sqlite3.OperationalError:
-            pass
-
-        # Read vectors from sqlite-vec
-        try:
-            rows = conn.execute(
-                "SELECT rowid, vector FROM fact_embeddings_vector_chunks00"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            logger.warning("fact_embeddings_vector_chunks00 not found")
-            return 0
-
-        # Reconstruct and batch import
-        data = []
-        for rowid, blob in rows:
-            fact_id = row_map.get(rowid)
-            if fact_id is None:
-                continue
+        imported = 0
+        batch: list[tuple[str, list[float], str, str]] = []
+        for rowid, fact_id, tier, row_profile_id, blob in iter_canonical_vectors(
+            conn, profile_id
+        ):
             try:
                 vector = self._decode_vector_blob(blob)
             except Exception as exc:
-                logger.warning("Failed to decode vector for rowid %d: %s", rowid, exc)
-                continue
-            tier = tier_map.get(fact_id, "active")
-            data.append({
-                "fact_id": fact_id,
-                "vector": vector,
-                "tier": tier,
-                "profile_id": "default",
-            })
+                raise LanceDBError(
+                    f"Invalid canonical vector for rowid {rowid}: {exc}"
+                ) from exc
+            batch.append((fact_id, vector, tier, row_profile_id))
+            if len(batch) >= 256:
+                imported += self._flush_import_batch(batch)
+                batch.clear()
+        if batch:
+            imported += self._flush_import_batch(batch)
 
-        if data:
-            self._table.add(data)
+        logger.info("LanceDB: imported %d vectors from sqlite-vec", imported)
+        return imported
 
-        logger.info("LanceDB: imported %d vectors from sqlite-vec", len(data))
-        return len(data)
+    def _flush_import_batch(
+        self, batch: list[tuple[str, list[float], str, str]]
+    ) -> int:
+        """Write one bounded-memory, single-profile canonical vector batch."""
+        by_profile: dict[str, list[tuple[str, list[float], str]]] = {}
+        for fact_id, vector, tier, profile_id in batch:
+            by_profile.setdefault(profile_id, []).append((fact_id, vector, tier))
+        imported = 0
+        for profile_id, records in by_profile.items():
+            imported += self.add_vectors(
+                [item[0] for item in records],
+                [item[1] for item in records],
+                [item[2] for item in records],
+                profile_id,
+            )
+        return imported
 
     def _decode_vector_blob(self, blob: bytes) -> list[float]:
         """Decode sqlite-vec BLOB to list of floats.
@@ -211,13 +266,13 @@ class LanceDBVectorBackend:
         F-33: Validates dimension and L2 norm.
         sqlite-vec stores vectors as raw float32 little-endian bytes.
         """
-        expected_bytes = 768 * 4  # 3072
+        expected_bytes = self._dimension * 4
         if len(blob) != expected_bytes:
             raise ValueError(
                 f"Unexpected vector blob size: {len(blob)} (expected {expected_bytes})"
             )
 
-        vec = list(struct.unpack(f"{768}f", blob))
+        vec = list(struct.unpack(f"{self._dimension}f", blob))
 
         # F-33: Validate non-zero
         norm = sum(v * v for v in vec) ** 0.5

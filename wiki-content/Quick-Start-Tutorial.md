@@ -10,7 +10,14 @@ Get SuperLocalMemory working in under 5 minutes — whether you're a new user or
 
 ```bash
 npm install -g superlocalmemory
-# or: pip install superlocalmemory
+```
+
+Python alternative: create and activate a virtual environment, then install:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 ```
 
 ### 2. Setup
@@ -20,7 +27,7 @@ slm setup
 ```
 
 The wizard asks you to pick a mode:
-- **A (Local Guardian)** — Zero cloud. Your data never leaves your machine. Default.
+- **A (Local Guardian)** — Core memory operations use the local data root without a cloud model provider. Optional integrations have separate network behavior. Default.
 - **B (Smart Local)** — Local LLM via Ollama for answer synthesis.
 - **C (Full Power)** — Cloud LLM for maximum accuracy. Requires API key.
 
@@ -37,10 +44,12 @@ Downloads the nomic-embed-text-v1.5 model (~500MB). If you skip this, it downloa
 ### 4. Store your first memory
 
 ```bash
-slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days."
+slm remember "Our API uses JWT tokens with 24-hour expiry. Refresh tokens last 30 days." --json
 ```
 
-Output: `Stored 1 facts.`
+Output includes `operation_id`, fact IDs, and `materialization_state:
+queryable`. This means the SQLite relational/FTS projection is recallable and
+enrichment is pending. Use `--sync` to wait for `complete`.
 
 ### 5. Recall it
 
@@ -159,15 +168,15 @@ slm recall "something you stored in V2"   # Verify old memories are accessible
 
 | Feature | V2 | V3 |
 |:--------|:---|:---|
-| Retrieval | Cosine similarity only | 4-channel (Semantic + BM25 + Entity Graph + Temporal) |
-| Similarity | Cosine distance | Fisher-Rao geodesic distance |
+| Retrieval | Cosine similarity only | Five candidate producers plus fusion and optional score enhancements |
+| Similarity | Cosine distance | Dense cosine relevance with optional Fisher-informed later scoring |
 | Consistency | None | Sheaf cohomology (algebraic topology) |
 | Lifecycle | Hardcoded thresholds | Self-organizing Langevin dynamics |
 | Modes | Single mode | A (zero-cloud), B (local LLM), C (cloud LLM) |
-| EU AI Act | Not addressed | Mode A/B compliant by design |
+| Privacy and compliance controls | Not addressed | Deployment-specific controls and assessment |
 | Dashboard | 5 tabs | 17 tabs |
-| MCP Tools | 6 | 24 |
-| Tests | ~200 | 1400+ |
+| MCP Tools | 6 | Profile-selected V3 tool surfaces |
+| Tests | Historical V2 suite | V3 unit, contract, artifact, and integration suites |
 
 ### Rollback if needed
 
@@ -204,7 +213,7 @@ Full reference: [CLI Reference](CLI-Reference)
 ## Next Steps
 
 - [Modes Explained](Modes-Explained) — Understand A vs B vs C
-- [MCP Tools](MCP-Tools) — All 24 tools available in your IDE
+- [MCP Tools](MCP-Tools) — Profile-selected tool and resource contracts
 - [IDE Setup](IDE-Setup) — Per-IDE configuration guides
 - [Auto-Memory](Auto-Memory) — How auto-capture and auto-recall work
 - [Architecture Overview](V3-Architecture) — How the system works under the hood

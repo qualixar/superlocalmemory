@@ -14,7 +14,7 @@ retrieval pool with high scores.
 Competitor reference: EverMemOS profile synthesis (~+15-20% SH).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 

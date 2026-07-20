@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import os
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,11 @@ def _readme_text() -> str:
 
 def _readme_lines() -> list[str]:
     return _readme_text().splitlines()
+
+
+def _project_version() -> str:
+    with open(REPO_ROOT / "pyproject.toml", "rb") as f:
+        return tomllib.load(f)["project"]["version"]
 
 
 # GitHub slugger: lower-case, strip everything except alphanum + dash, spaces→dash.
@@ -113,25 +119,35 @@ def test_single_quick_start():
 
 
 # ---------------------------------------------------------------------------
-# AC3: current hero version is 3.6.17
+# AC3: current hero version matches pyproject.toml
 # ---------------------------------------------------------------------------
 
 
-def test_version_3616_only():
-    """AC3: no pre-current stragglers (3.6.10-13) in hero; at least one 3.6.17;
-    h1 contains V3.6.17. The release-history table may still list older versions
-    (e.g. the v3.6.14 row) as legitimate history."""
+def test_current_version_in_hero():
+    """AC3: no stale 3.6.10-13 stragglers; h1/hero tracks project version.
+
+    The release-history table may still list older versions as legitimate
+    history, but the current hero must follow pyproject.toml instead of a
+    hard-coded past release.
+    """
     text = _readme_text()
+    current_version = _project_version()
     stale = re.findall(r"3\.6\.1[0-3]", text)
     assert not stale, (
-        f"Found stale version strings: {stale}. Hero version refs must be 3.6.17 (LLD AC3)."
+        f"Found stale version strings: {stale}. Hero version refs must not "
+        "point at pre-3.6.14 releases (LLD AC3)."
     )
-    assert "3.6.17" in text, "README must contain at least one '3.6.17' (LLD AC3)."
+    assert current_version in text, (
+        f"README must contain current project version {current_version!r} (LLD AC3)."
+    )
     # h1 check — first heading
     lines = _readme_lines()
     h1_lines = [l for l in lines if l.startswith("# ") or l.startswith("<h1")]
-    assert any("3.6.17" in l or "V3.6.17" in l for l in h1_lines[:5]), (
-        "h1 / hero must reference V3.6.17 (LLD AC3)."
+    assert any(
+        current_version in l or f"V{current_version}" in l
+        for l in h1_lines[:5]
+    ), (
+        f"h1 / hero must reference V{current_version} (LLD AC3)."
     )
 
 
@@ -217,22 +233,31 @@ def test_without_a_proxy_present():
 
 
 # ---------------------------------------------------------------------------
-# AC7: moat in hero (first 30 lines)
+# AC7: evidence-safe positioning near the hero
 # ---------------------------------------------------------------------------
 
 
-def test_moat_in_hero():
-    """AC7: First 30 lines must contain zero-cloud, Mem0, and 'best of our knowledge' signals."""
+def test_evidence_safe_positioning_near_hero():
+    """AC7: Opening copy must state the local contract without a competitor scoreboard."""
     lines = _readme_lines()
-    hero = "\n".join(lines[:30]).lower()
-    assert "zero" in hero or "zero-cloud" in hero or "zero-llm" in hero, (
-        "Hero (first 30 lines) must mention zero-cloud/zero-LLM moat (LLD AC7)."
+    opening = "\n".join(lines[:50]).lower()
+    assert "local runtime" in opening, (
+        "Opening copy must describe the local runtime contract (LLD AC7)."
     )
-    assert "mem0" in hero, (
-        "Hero (first 30 lines) must reference Mem0 comparison (LLD AC7)."
+    assert "explicit choices" in opening, (
+        "Opening copy must disclose optional provider/network choices (LLD AC7)."
     )
-    assert "best of our knowledge" in hero or "best-of-knowledge" in hero or "knowledge" in hero, (
-        "Hero (first 30 lines) must include a hedged 'best of our knowledge' claim (LLD AC7)."
+    assert "published benchmark evidence carried into v3.7" in opening, (
+        "Opening copy must identify the evidence as the published V3 research "
+        "carried into the release (LLD AC7)."
+    )
+    assert "not a claim of a newly rerun 3.7 package benchmark" in opening, (
+        "Opening copy must preserve the protocol boundary of the published evidence "
+        "(LLD AC7)."
+    )
+    assert "different products solve different boundaries" in opening, (
+        "Opening copy must frame the comparison by product boundary, not an "
+        "unsupported performance scoreboard."
     )
 
 

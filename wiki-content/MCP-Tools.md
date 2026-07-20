@@ -1,8 +1,14 @@
 # MCP Tools
 
-SuperLocalMemory exposes 32 tools and 7 resources via the Model Context Protocol (MCP). These are what your IDE uses to interact with the memory system.
+SuperLocalMemory exposes profile-selected tools and resources through the Model
+Context Protocol (MCP). The installed profile registry is the source of truth
+for names and counts. An MCP-compatible client still decides when to call a
+tool.
 
-> **v3.6.11 New:** 5 Optimize tools — `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`. Proxy-free compression + routed-result caching. Full 1M context window preserved.
+> **Optimize tools:** `slm_compress`, `slm_retrieve`, `slm_cache_set`,
+> `slm_cache_get`, and `slm_optimize_stats` provide explicit compression and
+> routed-result caching. They do not intercept the primary conversation turn
+> without a proxy.
 
 > **V3.1 New:** 3 Active Memory tools (`session_init`, `observe`, `report_feedback`) and 1 resource (`slm://context`) for automatic learning and context injection.
 
@@ -29,7 +35,7 @@ Your IDE config should look like:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `remember` | `content`, `tags?` | Store a new memory |
+| `remember` | `content`, `tags?`, `project?`, `importance?`, `session_id?`, `agent_id?`, `scope?`, `shared_with?`, `idempotency_key?` | Submit durable evidence and return an operation receipt |
 | `recall` | `query`, `limit?` | Retrieve relevant memories |
 | `search` | `query`, `limit?` | Search across all memories |
 | `forget` | `query` | Delete matching memories |
@@ -43,6 +49,17 @@ Your IDE config should look like:
 | `memory_used` | — | Storage usage statistics |
 | `backup_status` | — | Backup and database health |
 | `audit_trail` | `limit?` | Recent operations log |
+
+`remember` returns `operation_id`, `fact_ids`, `materialization_state`, and
+`pending`. The default daemon path returns after SQLite relational/FTS is
+`queryable`; enrichment continues on the same durable operation. Offline replay
+preserves the original source and idempotency identity.
+
+`recall`, `search`, `recall_trace`, and session context follow [Score Contract
+v2](Retrieval-Score-Contract). `relevance_score` is query relevance,
+`ranking_score` is diagnostic ranking utility, and `memory_confidence` belongs
+to the stored assertion. V3.7 declares `calibration_status: "uncalibrated"`
+and `answer_confidence: null`.
 
 ## Active Memory Tools (V3.1)
 
@@ -73,7 +90,7 @@ Your IDE config should look like:
 | `set_mode` | `mode` | Switch operating mode (a/b/c) |
 | `get_mode` | — | Current operating mode |
 
-## Resources (6)
+## Resources
 
 MCP resources provide read-only data streams that IDEs can subscribe to.
 
@@ -88,7 +105,10 @@ MCP resources provide read-only data streams that IDEs can subscribe to.
 
 ## Optimize Tools (v3.6.11)
 
-Proxy-free compression and routed-result caching. All five are **fail-open** — any internal error returns `ok:False` with the original content unchanged; the agent always continues.
+Proxy-free compression and routed-result caching. The tools are designed to
+return `ok:False` with the original content on handled optimization failures;
+verify the frozen artifact before relying on that as a fault-containment
+boundary.
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
@@ -104,11 +124,14 @@ Proxy-free compression and routed-result caching. All five are **fail-open** —
 
 1. Your IDE connects to the SuperLocalMemory MCP server via `slm mcp`
 2. When you chat with your AI, the IDE calls `recall` with relevant context
-3. SuperLocalMemory runs 4-channel retrieval and returns matching memories
+3. SuperLocalMemory runs the healthy subset of dense semantic, BM25 lexical,
+   temporal, Hopfield associative, and spreading-activation candidate
+   producers, then applies fusion and optional score enhancements
 4. The IDE injects those memories into the AI's context
 5. Your AI responds with knowledge of your past work
 
-This happens automatically — you do not need to manually call tools.
+Whether this happens automatically depends on the client and its configured
+instructions or hooks. SLM does not control an IDE's tool-selection policy.
 
 See [IDE Setup](IDE-Setup) for per-IDE configuration paths.
 

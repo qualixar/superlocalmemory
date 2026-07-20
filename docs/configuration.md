@@ -8,13 +8,17 @@ Control how SuperLocalMemory stores, retrieves, and processes your memories.
 
 ## Three Operating Modes
 
+For the published LoCoMo result scopes behind Modes A and C, see
+[Benchmark Evidence](benchmarks.md). Mode B has no separately published LoCoMo
+run.
+
 SuperLocalMemory runs in one of three modes. You pick the trade-off between privacy and power.
 
 | Mode | What it does | Needs API key? | Data leaves your machine? |
 |------|-------------|:--------------:|:-------------------------:|
-| **A: Zero-Cloud** | Math-based retrieval. No LLM calls. | No | Never |
-| **B: Local LLM** | Mode A + a local LLM via Ollama. | No | Never |
-| **C: Cloud LLM** | Mode B + a cloud LLM for maximum recall quality. | Yes | Yes (queries only) |
+| **A: Local** | Retrieval without a model-provider call in the core path. | No | Optional integrations may transmit data |
+| **B: Local LLM** | Mode A + a local LLM via Ollama. | No | Depends on the Ollama endpoint and optional integrations |
+| **C: Cloud LLM** | Mode B + configured cloud-provider enrichment and/or answer construction. | Yes | Configured query, ingestion, or enrichment content may be sent |
 
 ### Check your current mode
 
@@ -34,9 +38,9 @@ Switching modes takes effect immediately. No data is lost.
 
 ### Mode A: Zero-Cloud (Default)
 
-All operations run locally. Retrieval uses four channels (semantic similarity, keyword search, entity graph, and temporal context) combined with mathematical scoring. No network calls.
+Core memory operations run against the local data root. Optional model and dependency downloads, connectors, backup, and other enabled integrations can use the network.
 
-Best for: privacy-sensitive work, air-gapped environments, EU AI Act compliance.
+Best for: deployments that want a local core path and can govern optional integrations explicitly. Regulatory compliance still requires deployment-specific assessment.
 
 ### Mode B: Local LLM
 
@@ -45,9 +49,9 @@ Everything from Mode A, plus a local LLM (via Ollama) that improves recall by un
 **Setup:**
 
 ```bash
-# Install Ollama (if not already installed)
-brew install ollama          # macOS
-curl -fsSL https://ollama.com/install.sh | sh  # Linux
+# Install Ollama using its reviewed package/instructions for your platform.
+# macOS example:
+brew install ollama
 
 # Pull a model
 ollama pull llama3.2
@@ -56,7 +60,8 @@ ollama pull llama3.2
 slm mode b
 ```
 
-Best for: developers who want better recall without sending data to the cloud.
+Best for: developers who can operate the selected local model and separately
+govern optional networked integrations.
 
 ### Mode C: Cloud LLM
 
@@ -71,7 +76,7 @@ slm provider set openai
 
 You will be prompted for your API key (stored locally in your config file, never transmitted except to the provider you choose).
 
-Best for: maximum recall quality when privacy constraints allow cloud calls.
+Best for: deployments that have approved the configured provider data path.
 
 ## Provider Configuration
 

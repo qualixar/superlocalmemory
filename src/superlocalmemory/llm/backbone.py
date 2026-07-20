@@ -14,7 +14,7 @@ Providers:
 - ``"azure"``: Azure OpenAI (via AI Foundry deployment).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -103,7 +103,9 @@ class LLMBackbone:
         self._default_temperature = config.temperature
         self._default_max_tokens = config.max_tokens
 
-        # Resolve API key: config > environment variable.
+        # Resolve API key: config > environment variable. A custom api_base
+        # with an empty api_key is treated as intentionally keyless so local
+        # OpenAI-compatible endpoints do not inherit ambient cloud keys.
         if self._provider == "ollama":
             self._api_key = ""
             host = config.api_base or os.environ.get(
@@ -111,18 +113,21 @@ class LLMBackbone:
             )
             self._base_url = f"{host.rstrip('/')}/api/chat"
         elif self._provider == "openrouter":
-            self._api_key = config.api_key or os.environ.get(
-                _ENV_KEYS.get(self._provider, ""), "",
-            )
+            self._api_key = self._resolve_api_key(config)
             self._base_url = config.api_base or _OPENROUTER_URL
         elif self._provider:
-            self._api_key = config.api_key or os.environ.get(
-                _ENV_KEYS.get(self._provider, ""), "",
-            )
+            self._api_key = self._resolve_api_key(config)
             self._base_url = config.api_base
         else:
             self._api_key = ""
             self._base_url = ""
+
+    def _resolve_api_key(self, config: LLMConfig) -> str:
+        if config.api_key:
+            return config.api_key
+        if config.api_base:
+            return ""
+        return os.environ.get(_ENV_KEYS.get(self._provider, ""), "")
 
     # -- Properties ---------------------------------------------------------
 
@@ -190,7 +195,7 @@ class LLMBackbone:
                     logger.warning("Content filter or bad request (400). Returning empty.")
                     return ""
                 last_error = exc
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            except (httpx.TimeoutException, httpx.ConnectError, ValueError) as exc:
                 last_error = exc
 
             if attempt < _MAX_RETRIES - 1:
@@ -217,7 +222,14 @@ class LLMBackbone:
             with httpx.Client(timeout=timeout) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                try:
+                    return resp.json()
+                except Exception as exc:
+                    raise ValueError(
+                        f"LLM endpoint returned HTTP {resp.status_code} with "
+                        f"non-JSON body (Content-Length="
+                        f"{resp.headers.get('content-length', '?')}): {exc}"
+                    ) from exc
         finally:
             socket.setdefaulttimeout(old_default)
 

@@ -34,7 +34,7 @@ References:
         Long-Term Memory. AAAI 2024.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations

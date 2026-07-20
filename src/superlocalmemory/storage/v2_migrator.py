@@ -17,10 +17,12 @@ import sys
 from datetime import datetime, UTC
 from pathlib import Path
 
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
+
 logger = logging.getLogger(__name__)
 
 V2_BASE = Path.home() / ".claude-memory"
-V3_BASE = Path.home() / ".superlocalmemory"
+V3_BASE = DynamicStatePath()
 V2_DB_NAME = "memory.db"
 BACKUP_NAME = "memory-v2-backup.db"
 
@@ -143,10 +145,10 @@ V3_INDEXES_SQL = [
 class V2Migrator:
     """Migrate V2 database to V3 schema."""
 
-    def __init__(self, home: Path | None = None):
+    def __init__(self, home: Path | None = None, v3_base: Path | None = None):
         self._home = home or Path.home()
         self._v2_base = self._home / ".claude-memory"
-        self._v3_base = self._home / ".superlocalmemory"
+        self._v3_base = Path(v3_base) if v3_base is not None else canonical_data_root()
         self._v2_db = self._v2_base / V2_DB_NAME
         self._v3_db = self._v3_base / V2_DB_NAME
         self._backup_db = self._v3_base / BACKUP_NAME

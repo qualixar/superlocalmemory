@@ -2,17 +2,21 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — Retrieval Engine (6-Channel Orchestrator).
+"""SuperLocalMemory V3 — retrieval orchestration.
 
-6 channels -> single RRF fusion -> optional cross-encoder rerank.
-Channels: semantic, BM25, entity_graph, temporal, spreading_activation, hopfield.
+Five parallel candidate producers (semantic, BM25, temporal, spreading
+activation, and Hopfield) feed single-pass RRF fusion; optional profile hits
+can join that fusion input. The entity graph may then score and boost fused
+candidates when enabled and within the recall time budget. It is not a sixth
+parallel candidate producer. Optional cross-encoder reranking follows fusion.
 Replaces V1's broken 10-channel triple-re-fusion pipeline.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import math
 import re
@@ -24,7 +28,10 @@ from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.storage.models import (
-    AtomicFact, Mode, RecallResponse, RetrievalResult,
+    AtomicFact,
+    Mode,
+    RecallResponse,
+    RetrievalResult,
 )
 
 if TYPE_CHECKING:
@@ -50,7 +57,12 @@ class EmbeddingProvider(Protocol):
 
 
 class RetrievalEngine:
-    """6-channel retrieval: semantic + BM25 + entity_graph + temporal + spreading_activation + hopfield.
+    """Retrieval orchestrator: five candidate producers -> RRF fusion.
+
+    Five parallel candidate producers (semantic, BM25, temporal,
+    spreading_activation, hopfield) feed single-pass RRF fusion, followed by
+    optional cross-encoder rerank and an optional entity-graph post-fusion
+    score enhancement. Entity graph is not a sixth parallel candidate producer.
 
     Usage::
         engine = RetrievalEngine(db, config, channels, embedder)
@@ -91,6 +103,17 @@ class RetrievalEngine:
         # recall A's mid-flight on the shared channels. Uncontended for a single
         # recall (~0 cost); only the channel phase of concurrent recalls serialises.
         self._scope_lock = threading.Lock()
+        # One executor belongs to one retrieval engine. Creating/destroying six
+        # worker threads on every recall caused allocator/thread-stack RSS churn
+        # under sustained sessions. The scope lock already serializes channel
+        # execution, so one six-worker pool preserves the existing concurrency
+        # semantics while making ownership and shutdown deterministic.
+        self._channel_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=6,
+            thread_name_prefix="slm-recall-channel",
+        )
+        self._close_lock = threading.Lock()
+        self._closed = False
 
         # V3.3.4: LRU cache for query embeddings (avoids redundant Ollama API calls)
         # V3.4.40 (2026-05-09): bumped 64 -> 512. Each cached embedding is ~3KB
@@ -124,14 +147,14 @@ class RetrievalEngine:
         mode: Mode = Mode.A, limit: int = 20,
         *,
         extra_disabled_channels: set[str] | None = None,
-        include_global: bool = True,
-        include_shared: bool = True,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
-        scopes participate in retrieval. Both default to True for backward
-        compatibility (existing data has scope='personal' — no effect).
+        scopes participate in retrieval. Both default to False so direct
+        retrieval-engine callers are private unless they explicitly opt in.
 
         V3.4.40 (2026-05-09): ``extra_disabled_channels`` allows callers to
         skip specific channels for a single recall (e.g. SpreadingActivation
@@ -139,12 +162,6 @@ class RetrievalEngine:
         """
         t0 = time.monotonic()
         self._extra_disabled = set(extra_disabled_channels or ())
-
-        # Multi-scope: scope flags are set on the (shared) channel instances +
-        # the channels executed atomically under self._scope_lock — see the
-        # `# 3. Run channels` block below. (profile_channel does not read scope.)
-        self._include_global = include_global
-        self._include_shared = include_shared
 
         # v3.5.0 diagnostic: stage timing inside retrieval (SLM_RECALL_TIMING=1).
         import os as _os_e
@@ -218,10 +235,17 @@ class RetrievalEngine:
         fused_ids = {fr.fact_id for fr in fused}
         fused_scores = {fr.fact_id: fr.fused_score for fr in fused}
 
-        if self._bridge is not None and strat.query_type in ("multi_hop", "entity", "factual", "general"):
+        bridge_query_types = ("multi_hop", "entity", "factual", "general")
+        if self._bridge is not None and strat.query_type in bridge_query_types:
             try:
                 seed_ids = [fr.fact_id for fr in fused[:10]]
-                bridges = self._bridge.discover(seed_ids, profile_id, max_bridges=10)
+                bridges = self._bridge.discover(
+                    seed_ids,
+                    profile_id,
+                    max_bridges=10,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
                 for fid, score in bridges:
                     if fid not in fused_ids:
                         new_score = score * 0.8
@@ -268,7 +292,11 @@ class RetrievalEngine:
             try:
                 candidate_ids = [fr.fact_id for fr in fused[:100]]
                 eg_scores = self._entity.score_candidates(
-                    query, candidate_ids, profile_id,
+                    query,
+                    candidate_ids,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
                 )
                 if eg_scores:
                     boosted = []
@@ -293,7 +321,12 @@ class RetrievalEngine:
         # 4. Load facts for rerank pool
         pool = min(len(fused), max(effective_limit * 3, 30))
         top = fused[:pool]
-        facts = self._load_facts(top, profile_id)
+        facts = self._load_facts(
+            top,
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
         _em("load_facts")
 
         # V3.3.21: Session diversity for aggregation queries.
@@ -309,20 +342,19 @@ class RetrievalEngine:
             self._reranker is not None
             and getattr(self._reranker, '_worker_ready', False)
         )
+        reranker_applied = False
+        reranker_status = (
+            "fallback_not_ready" if self._reranker is not None
+            else "not_configured"
+        )
         if reranker_ready and facts:
             ce_alpha = 0.5 if strat.query_type in ("multi_hop", "temporal") else 0.75
-            top = self._apply_reranker(query, top, facts, alpha=ce_alpha)
+            top, reranker_applied, reranker_status = self._apply_reranker(
+                query, top, facts, alpha=ce_alpha,
+            )
+        elif reranker_ready:
+            reranker_status = "no_candidates"
         _em(f"rerank(ready={reranker_ready})")
-
-        # V3.4.11: Channel diversity — guarantee entity_graph results appear in
-        # the final output. Applied AFTER reranker so results can't be pushed out.
-        final_top = top[:effective_limit]
-        final_top = self._enforce_channel_diversity(
-            final_top, fused, ch_results, effective_limit,
-        )
-        # Reload facts for any newly injected results
-        if len(final_top) > len(top[:effective_limit]):
-            facts = self._load_facts(final_top, profile_id)
 
         # v3.6.6: Evidence floor — gate on per-channel scores (NOT fused/RRF score).
         # Nonsense queries fuse at 0.75-0.78 because RRF is rank-derived and
@@ -339,10 +371,34 @@ class RetrievalEngine:
         )
         if floor_enabled:
             min_sem = getattr(self._config, "min_semantic_evidence", 0.60)
-            final_top = self._apply_evidence_floor(final_top, facts, min_sem)
-            # Trim facts dict to match filtered final_top
-            filtered_ids = {fr.fact_id for fr in final_top}
-            facts = {fid: f for fid, f in facts.items() if fid in filtered_ids}
+            # Qualify the rerank pool BEFORE applying the caller's limit.  RRF
+            # can rank associative-only hits above an exact BM25 match; slicing
+            # first allowed those hits to occupy every output slot and then be
+            # removed by the floor, producing a false abstention even though a
+            # qualified candidate was immediately below the slice.
+            top = self._apply_evidence_floor(top, facts, min_sem)
+
+        # V3.4.11: Channel diversity — guarantee entity_graph results appear in
+        # the final output. Applied AFTER reranking and evidence qualification
+        # so an associative-only candidate cannot be reintroduced after the gate.
+        final_top = top[:effective_limit]
+        final_top = self._enforce_channel_diversity(
+            final_top, fused, ch_results, effective_limit,
+        )
+
+        # A channel-diversity promotion may come from outside the rerank pool.
+        # Load only when that happens; ordinary recalls reuse the existing map.
+        if any(fr.fact_id not in facts for fr in final_top):
+            facts.update(self._load_facts(
+                final_top,
+                profile_id,
+                include_global=include_global,
+                include_shared=include_shared,
+            ))
+
+        # Trim facts to the selected, qualified result set.
+        selected_ids = {fr.fact_id for fr in final_top}
+        facts = {fid: f for fid, f in facts.items() if fid in selected_ids}
 
         # 6. Build response
         results = self._build_results(final_top, facts, strat)
@@ -353,6 +409,8 @@ class RetrievalEngine:
             query_type=strat.query_type, channel_weights=strat.weights,
             total_candidates=total, retrieval_time_ms=ms,
             no_confident_match=no_match,
+            reranker_applied=reranker_applied,
+            reranker_status=reranker_status,
         )
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
@@ -577,12 +635,11 @@ class RetrievalEngine:
         v3.4.53: channels run in PARALLEL via ThreadPoolExecutor. Industry
         standard (EverMemOS, szl-recall, ContentPilot 2026): all channels
         are independent after embedding; running them serially wastes time
-        equal to the sum of all channel latencies. Parallel execution brings
-        total channel time from sum(semantic+bm25+entity+temporal+hopfield+sa)
-        down to max(semantic,bm25,entity,temporal,hopfield,sa) — roughly a
-        3-5x speedup for the channel phase.
+        equal to the sum of all producer latencies. When multiple producers are
+        enabled and healthy, parallel dispatch generally bounds the producer
+        phase by the slowest submitted producer, plus serial embedding and
+        result-collection overhead.
         """
-        import concurrent.futures
         import os as _os_e
         import time as _time_e
         _et = bool(_os_e.environ.get("SLM_RECALL_TIMING"))
@@ -627,41 +684,45 @@ class RetrievalEngine:
                 logger.warning("%s channel: %s", name, exc)
                 return (name, None)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
-                futures["semantic"] = executor.submit(
-                    _safe_channel, "semantic",
-                    self._semantic.search, q_emb, profile_id, self._config.semantic_top_k,
-                )
-            if self._bm25 is not None and "bm25" not in disabled:
-                futures["bm25"] = executor.submit(
-                    _safe_channel, "bm25",
-                    self._bm25.search, query, profile_id, self._config.bm25_top_k,
-                )
-            if self._temporal is not None and "temporal" not in disabled:
-                futures["temporal"] = executor.submit(
-                    _safe_channel, "temporal",
-                    self._temporal.search, query, profile_id, self._config.bm25_top_k,
-                )
-            if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
-                futures["hopfield"] = executor.submit(
-                    _safe_channel, "hopfield",
-                    self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
-                )
-            if self._spreading_activation is not None and q_emb is not None and "spreading_activation" not in disabled:
-                futures["spreading_activation"] = executor.submit(
-                    _safe_channel, "spreading_activation",
-                    self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
-                )
+        executor = self._channel_executor
+        if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
+            futures["semantic"] = executor.submit(
+                _safe_channel, "semantic",
+                self._semantic.search, q_emb, profile_id, self._config.semantic_top_k,
+            )
+        if self._bm25 is not None and "bm25" not in disabled:
+            futures["bm25"] = executor.submit(
+                _safe_channel, "bm25",
+                self._bm25.search, query, profile_id, self._config.bm25_top_k,
+            )
+        if self._temporal is not None and "temporal" not in disabled:
+            futures["temporal"] = executor.submit(
+                _safe_channel, "temporal",
+                self._temporal.search, query, profile_id, self._config.bm25_top_k,
+            )
+        if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
+            futures["hopfield"] = executor.submit(
+                _safe_channel, "hopfield",
+                self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
+            )
+        if (
+            self._spreading_activation is not None
+            and q_emb is not None
+            and "spreading_activation" not in disabled
+        ):
+            futures["spreading_activation"] = executor.submit(
+                _safe_channel, "spreading_activation",
+                self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
+            )
 
-            # Collect results as channels complete
-            for name, fut in futures.items():
-                try:
-                    ch_name, result = fut.result(timeout=30)
-                    if result:
-                        out[ch_name] = result
-                except Exception as exc:
-                    logger.warning("Channel %s timed out or failed: %s", name, exc)
+        # Collect results as channels complete.
+        for name, fut in futures.items():
+            try:
+                ch_name, result = fut.result(timeout=30)
+                if result:
+                    out[ch_name] = result
+            except Exception as exc:
+                logger.warning("Channel %s timed out or failed: %s", name, exc)
 
         # Apply registered post-retrieval filters (forgetting filter, etc.)
         if hasattr(self, '_registry') and self._registry._filters:
@@ -673,10 +734,23 @@ class RetrievalEngine:
 
         return out
 
+    def close(self) -> None:
+        """Release the channel workers owned by this retrieval engine."""
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._channel_executor.shutdown(wait=True, cancel_futures=True)
+
     # -- Fact loading -------------------------------------------------------
 
     def _load_facts(
-        self, fused: list[FusionResult], profile_id: str,
+        self,
+        fused: list[FusionResult],
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> dict[str, AtomicFact]:
         """Load facts by ID — targeted query, not full-table scan.
 
@@ -688,8 +762,8 @@ class RetrievalEngine:
             return {}
         facts = self._db.get_facts_by_ids(
             needed, profile_id,
-            include_global=getattr(self, '_include_global', True),
-            include_shared=getattr(self, '_include_shared', True),
+            include_global=include_global,
+            include_shared=include_shared,
         )
         return {f.fact_id: f for f in facts}
 
@@ -705,7 +779,7 @@ class RetrievalEngine:
         self, query: str, fused: list[FusionResult],
         fact_map: dict[str, AtomicFact],
         alpha: float = 0.75,
-    ) -> list[FusionResult]:
+    ) -> tuple[list[FusionResult], bool, str]:
         """Rerank with blended CE + RRF scores (Bug 1 fix).
 
         Blended: alpha * sigmoid(CE_score) + (1 - alpha) * rrf_score.
@@ -717,7 +791,7 @@ class RetrievalEngine:
             for fr in fused if fr.fact_id in fact_map
         ]
         if not candidates:
-            return fused
+            return fused, False, "no_candidates"
 
         # V3.3.16: Strip speaker tags WITHOUT copying full AtomicFact objects.
         # Previously created full copies including 768-dim embeddings (~6KB each),
@@ -730,16 +804,32 @@ class RetrievalEngine:
             originals.append((fact, orig))
 
         try:
-            scored = self._reranker.rerank(  # type: ignore[union-attr]
-                query, candidates, top_k=len(candidates),
+            rerank_with_status = getattr(
+                self._reranker, "rerank_with_status", None,
             )
+            # MagicMock fabricates arbitrary attributes; only use the richer
+            # contract when it is defined by the reranker type itself.
+            if callable(rerank_with_status) and hasattr(
+                type(self._reranker), "rerank_with_status",
+            ):
+                scored, applied, status = rerank_with_status(
+                    query, candidates, top_k=len(candidates),
+                )
+            else:
+                scored = self._reranker.rerank(  # type: ignore[union-attr]
+                    query, candidates, top_k=len(candidates),
+                )
+                applied, status = True, "applied"
         except Exception as exc:
             logger.warning("Cross-encoder rerank failed: %s", exc)
-            return fused
+            return fused, False, "error"
         finally:
             # Restore original content (with speaker tags)
             for fact, orig_content in originals:
                 fact.content = orig_content
+
+        if not applied:
+            return fused, False, status
 
         score_map = {fact.fact_id: score for fact, score in scored}
 
@@ -768,7 +858,7 @@ class RetrievalEngine:
             for fr in fused
         ]
         updated.sort(key=lambda r: r.fused_score, reverse=True)
-        return updated
+        return updated, True, "applied"
 
     # -- Agentic adapter -----------------------------------
 
@@ -871,11 +961,14 @@ class RetrievalEngine:
             # boosts push raw scores well above 1 (observed: 27.97). A sigmoid
             # preserves rank (monotonic) while giving users a readable 0-1 range.
             normalized_score = 1.0 / (1.0 + math.exp(-boosted_score * 0.5))
-            confidence = min(1.0, normalized_score * 10.0) * fact.confidence
             results.append(RetrievalResult(
                 fact=fact, score=round(normalized_score, 4),
                 channel_scores=fr.channel_scores,
-                confidence=confidence, evidence_chain=evidence,
+                confidence=fact.confidence,
+                relevance_score=round(normalized_score, 4),
+                ranking_score=boosted_score,
+                memory_confidence=fact.confidence,
+                evidence_chain=evidence,
                 trust_score=raw_trust,
             ))
         return results
@@ -924,10 +1017,15 @@ def apply_channel_weights(
         new_score = (base if base > 0.0 else float(c.score)) * ce_bias
         out.append(RetrievalResult(
             fact=c.fact,
-            score=new_score,
+            score=c.score,
             channel_scores=new_cs,
             confidence=c.confidence,
+            relevance_score=c.relevance_score,
+            ranking_score=new_score,
+            memory_confidence=c.memory_confidence,
+            rank_position=c.rank_position,
             evidence_chain=c.evidence_chain,
             trust_score=c.trust_score,
+            marker=c.marker,
         ))
     return out

@@ -185,12 +185,12 @@ class TestToolsActiveUsesPool:
         result = asyncio.run(registered["session_init"](project_path="/tmp/p"))
 
         assert result["success"] is True
-        # v3.4.52: full 6-channel recall (fast=False). Ollama is kept warm
+        # v3.4.52: full recall (fast=False). Ollama is kept warm
         # via keep_alive=-1 + eager pre-warm at daemon boot, so no cold-start
         # penalty. FTS5 fallback only triggers when daemon is completely down.
         assert fake_pool.recall_calls == [
             ("project context /tmp/p", 10, "", False),
-        ], "session_init should use full 6-channel recall (fast=False)"
+        ], "session_init should use full recall (fast=False)"
 
     def test_observe_uses_pool_adapter_not_engine_store(self, monkeypatch):
         import asyncio

@@ -1,36 +1,88 @@
-# SuperLocalMemory V3
+# SuperLocalMemory V3.7
 
-> **Five years of daily AI use. Your system won't feel it.**
-> *Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.*
+> **Local-first agent memory, retrieval, cache, compression, and trusted-peer coordination in one operator-controlled runtime.**
 
-SuperLocalMemory gives AI assistants persistent memory across sessions. **v3.6.11 "Optimize Everywhere"** — cache, compress, and remember on any plan, no proxy required. No cloud. No APIs. No data leaves your machine.
+SuperLocalMemory turns conversations, observations, and connected-source
+evidence into durable memory that can be recalled through a CLI, MCP, hooks,
+dashboard, or documented IDE integrations. SQLite + sqlite-vec are the
+canonical local store. The product also includes an explicit Scale Engine for
+CozoDB graph and LanceDB vector projections, a cache/compression module, and
+SLM Mesh coordination controls.
 
-### v3.6.12 "Distributed-ready" — Run SLM across your LAN
-Deploy SLM on a server and reach it from other machines. **`SLM_REMOTE=1`** (default off) lets the dashboard load from a remote browser, lets MCP gateways/hubs forward tool calls, and makes custom local LLM endpoints (llama.cpp / LM Studio / Azure) configurable from the dashboard — plus a batch of stability and security fixes. LAN access stays gated by `SLM_MCP_ALLOWED_HOSTS`. See the [Distributed Deployment guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/distributed-deployment.md).
+## The product in one view
 
-### v3.6.11 "Optimize Everywhere" — Three Surfaces. No Proxy Required.
-**Cache. Compress. Remember.** SLM v3.6.11 delivers compression + caching across three surfaces: **proxy** (full-turn caching via `slm wrap claude`), **MCP tools** (5 new tools in `slm mcp`, full 1M window preserved), or **skill** (`~/.claude/skills/slm-optimize/`, zero-config auto-compress). Every setup covered — with or without a proxy. Install once with `pip install -U superlocalmemory`. [View details →](https://superlocalmemory.com/optimize-everywhere)
+```text
+Sources and clients
+CLI · MCP HTTP/stdio · hooks · dashboard · IDEs · adapters
+                              │
+                              ▼
+  admission → queryable core → enrichment → brain/lifecycle
+                              │
+                              ▼
+ semantic · BM25 · temporal · Hopfield · spreading activation
+                              │
+                              ▼
+ safe bounded context with policy, provenance and trace evidence
+                              │
+                              ▼
+ SQLite + sqlite-vec canonical ─► parity-gated graph/vector projections
+```
 
-### v3.4.5 "Scale-Ready" — 1 Million Memories. Zero Slowdown.
-**Tiered storage auto-classifies every memory as active, warm, cold, or archived.** Graph pruning removes redundant connections. Optional acceleration backends (CozoDB, LanceDB) for graph + vector operations. Tested on **1.18 million real graph edges** with under 2-second recall. Migration is automatic: `pip install -U superlocalmemory && slm restart`. [View details →](https://superlocalmemory.com/scale-ready)
+The architecture has seven logical stages: admission, queryable durability,
+enrichment, learning/lifecycle, retrieval, safe context delivery, and
+operations. A specific write or recall only reports stages that actually ran;
+optional enrichers and retrieval channels are dependency- and mode-aware.
 
-### V3.3.6: Zero-Friction Hooks — Install Once, Forget Forever
-One `npm install` and your AI memory is fully automatic:
-- **Auto-recall** at session start — your context is there before you ask
-- **Auto-observe** during coding — decisions and changes captured silently
-- **Auto-save** at session end — full summary with git context
-- **Zero setup** — hooks install themselves, no config needed
-- **Zero risk** — every hook fails silently, never blocks your workflow
+## Capability map
 
-### V3.1: Active Memory — Memory That Learns
-SLM **learns from your usage patterns** and gets smarter over time — at zero token cost. Every recall generates learning signals. After 20+ signals, the system starts optimizing retrieval for YOUR specific patterns. After 200+, a full ML model trains on your data. No other memory system learns without spending LLM tokens. [Read more →](Active-Memory)
+| Area | Available capability | Important boundary |
+|---|---|---|
+| Memory | Facts, scenes, temporal events, entities, profiles/scopes, memory lifecycle | Recalled content is untrusted evidence, never a new instruction. |
+| Ingestion | Replay-safe operation receipts; extraction, entity, graph, temporal, provenance and embedding derivations | Use `--sync` when a caller needs all declared stages, not only the immediate queryable receipt. |
+| Recall | Semantic, BM25, temporal, Hopfield and spreading-activation candidates; fusion, optional rerank and graph score enhancement | Runtime health determines the channels that participate. |
+| Brain | Behavioral patterns, feedback/outcomes, reward signals, consolidation, soft prompts and guarded skill evolution | Learning is not a guarantee that an outcome was correct or beneficial. |
+| Graph | Canonical entities, aliases, profiles, edges, scenes, timelines and an Entity Explorer | Graph evidence is inspectable and provenance-bearing. |
+| Scale Engine | CozoDB graph + LanceDB vectors with prepare → verify → promote → rollback | SQLite remains canonical; promotion is explicit and parity-gated. |
+| Optimize | Exact cache, tag invalidation, safe compression, opt-in lossy prose compression and CCR originals | Only the proxy can intercept a primary provider turn. |
+| Mesh | Authenticated peer messages, locks, inbox/outbox, queues and optional discovery | Mesh coordinates peers; it is not a replicated distributed-memory database. |
+| Governance | Provenance, audit, retention, policy, export/erasure, health and diagnostics | Deployment configuration determines compliance posture. |
+| Integrations | CLI, Python SDK, MCP, Claude plugin, Codex add-on, documented IDE configs, Gmail/Calendar/transcript adapters | Connectors and hooks are opt-in and have their own data paths. |
+
+## Operating modes
+
+| Mode | Core behavior | Model path |
+|---|---|---|
+| **A — Local Guardian** | Local core memory and math-informed retrieval | No cloud model provider is required for core operations. |
+| **B — Smart Local** | Mode A plus an operator-managed Ollama endpoint | Local LLM endpoint. |
+| **C — Provider-assisted** | Local storage with configured provider-backed enrichment/retrieval behavior | Content sent to the configured provider follows that provider path. |
+
+Mode A does not disable model downloads, adapters, backup, proxy providers, or
+other integrations that an operator explicitly enables. Review the complete
+deployment before making a privacy or compliance determination.
+
+## Dashboard workspaces
+
+The local dashboard includes Dashboard, Brain, Knowledge Graph, Memories,
+Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings,
+and Optimize workspaces. Use it with `slm health`, `slm doctor`, and `slm
+trace` for operational verification rather than treating a visual status as a
+guarantee.
 
 ## Quick Start
 
 ```bash
-npm install -g superlocalmemory    # or: pip install superlocalmemory
+npm install -g superlocalmemory    # Primary global CLI path
 slm setup                          # Choose mode A/B/C
 slm warmup                         # Pre-download embedding model (optional)
 ```
 
-That's it. Your AI now remembers you.
+The second primary path is Python in an activated virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
+slm setup
+```
+
+Then configure the client you intend to use and verify it with `slm doctor`.

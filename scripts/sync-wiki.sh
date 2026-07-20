@@ -1,19 +1,19 @@
 #!/bin/bash
 # ============================================================================
-# SuperLocalMemory V2 - Wiki Sync Script
+# SuperLocalMemory V3.7 - Wiki Sync Script
 # Automatically syncs wiki-content/ to GitHub Wiki repository
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # ============================================================================
 
 set -e
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 WIKI_CONTENT_DIR="${REPO_DIR}/wiki-content"
 WIKI_REPO_DIR="/tmp/superlocalmemory.wiki"
 WIKI_REPO_URL="https://github.com/qualixar/superlocalmemory.wiki.git"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  SuperLocalMemory V2 - Wiki Sync Tool                        ║"
+echo "║  SuperLocalMemory V3.7 - Wiki Sync Tool                      ║"
 echo "║  by Varun Pratap Bhardwaj                                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""

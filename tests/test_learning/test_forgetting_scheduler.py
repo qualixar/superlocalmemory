@@ -129,6 +129,29 @@ def test_batch_retention_update(db_with_facts, ebbinghaus: EbbinghausCurve, conf
     ), "Zone counts must sum to total"
 
 
+def test_decay_dry_run_computes_without_durable_changes(
+    db_with_facts, ebbinghaus: EbbinghausCurve, config: ForgettingConfig,
+) -> None:
+    scheduler = ForgettingScheduler(db_with_facts, ebbinghaus, config)
+    before = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM fact_retention WHERE profile_id = ?",
+        ("test_profile",),
+    )[0]["n"]
+
+    stats = scheduler.run_decay_cycle("test_profile", force=True, dry_run=True)
+
+    after = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM fact_retention WHERE profile_id = ?",
+        ("test_profile",),
+    )[0]["n"]
+    archived = db_with_facts.execute(
+        "SELECT COUNT(*) AS n FROM atomic_facts WHERE lifecycle != 'active'"
+    )[0]["n"]
+    assert stats["total"] == 10
+    assert before == after == 0
+    assert archived == 0
+
+
 # ---- Test 17: On-access strengthens ----
 
 def test_on_access_strengthens(db_with_facts, ebbinghaus: EbbinghausCurve, config: ForgettingConfig) -> None:
@@ -160,6 +183,32 @@ def test_on_access_strengthens(db_with_facts, ebbinghaus: EbbinghausCurve, confi
     assert updated_strength >= initial_strength, (
         f"Strength should increase after access: was {initial_strength}, now {updated_strength}"
     )
+
+
+def test_on_access_keeps_atomic_and_retention_lifecycle_in_sync(
+    db_with_facts, ebbinghaus: EbbinghausCurve, config: ForgettingConfig,
+) -> None:
+    scheduler = ForgettingScheduler(db_with_facts, ebbinghaus, config)
+    scheduler.run_decay_cycle("test_profile")
+    db_with_facts.execute(
+        "UPDATE atomic_facts SET lifecycle = 'cold' WHERE fact_id = 'fact_000'",
+        (),
+    )
+    db_with_facts.execute(
+        "UPDATE fact_retention SET lifecycle_zone = 'cold', memory_strength = 0.1 "
+        "WHERE fact_id = 'fact_000' AND profile_id = 'test_profile'",
+        (),
+    )
+
+    scheduler.on_access_event("fact_000", "test_profile")
+
+    row = db_with_facts.execute(
+        "SELECT af.lifecycle, fr.lifecycle_zone "
+        "FROM atomic_facts af JOIN fact_retention fr ON fr.fact_id = af.fact_id "
+        "WHERE af.fact_id = 'fact_000'",
+        (),
+    )[0]
+    assert dict(row)["lifecycle"] == dict(row)["lifecycle_zone"] == "active"
 
 
 # ---- Test 20 (A-HIGH-01): Soft-delete audit trail ----

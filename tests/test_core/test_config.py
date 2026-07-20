@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from superlocalmemory.core.config import (
-    DEFAULT_BASE_DIR,
     DEFAULT_DB_NAME,
     ChannelWeights,
     EmbeddingConfig,
@@ -146,6 +145,7 @@ class TestSLMConfigForMode:
         assert cfg.llm.provider == ""
         assert cfg.embedding.is_cloud is False
         assert cfg.embedding.dimension == 768
+        assert cfg.temporal_validator.mode == "a"
 
     def test_mode_b_ollama_llm(self) -> None:
         cfg = SLMConfig.for_mode(Mode.B)
@@ -154,6 +154,7 @@ class TestSLMConfigForMode:
         assert cfg.llm.provider == "ollama"
         assert cfg.llm.model == "llama3.2"
         assert cfg.embedding.is_cloud is False
+        assert cfg.temporal_validator.mode == "b"
 
     def test_mode_c_cloud_everything(self) -> None:
         cfg = SLMConfig.for_mode(
@@ -173,6 +174,7 @@ class TestSLMConfigForMode:
         # Mode C has boosted channel weights
         assert cfg.channel_weights.semantic == 1.5
         assert cfg.retrieval.semantic_top_k == 80
+        assert cfg.temporal_validator.mode == "c"
 
     def test_mode_b_custom_provider(self) -> None:
         cfg = SLMConfig.for_mode(
@@ -186,6 +188,12 @@ class TestSLMConfigForMode:
             Mode.C, llm_provider="anthropic", llm_model="claude-opus",
         )
         assert cfg.llm.provider == "anthropic"
+
+    def test_mode_c_without_explicit_embedding_endpoint_uses_local_dimension(self) -> None:
+        cfg = SLMConfig.for_mode(Mode.C)
+        assert cfg.embedding.is_cloud is False
+        assert cfg.embedding.dimension == 768
+        assert cfg.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +211,11 @@ class TestDbPathComputation:
         assert cfg.db_path == custom
 
     def test_default_base_dir(self) -> None:
+        from superlocalmemory.infra.data_root import canonical_data_root
+
         cfg = SLMConfig()
-        assert cfg.base_dir == DEFAULT_BASE_DIR
-        assert cfg.db_path == DEFAULT_BASE_DIR / DEFAULT_DB_NAME
+        assert cfg.base_dir == canonical_data_root()
+        assert cfg.db_path == canonical_data_root() / DEFAULT_DB_NAME
 
     def test_for_mode_uses_custom_base_dir(self, tmp_path: Path) -> None:
         cfg = SLMConfig.for_mode(Mode.A, base_dir=tmp_path)

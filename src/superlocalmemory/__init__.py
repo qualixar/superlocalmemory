@@ -1,7 +1,7 @@
 """SuperLocalMemory — information-geometric agent memory.
 
 v3.6.9: all 7 retrieval layers at full quality (Hopfield@1000, entity_graph@100,
-SA neighbor-cache fix, fast=True deprecated). See CHANGELOG.md.
+SA neighbor-cache fix and a genuine latency-bounded fast path). See CHANGELOG.md.
 """
 
 import os
@@ -32,7 +32,7 @@ if "OMP_NUM_THREADS" not in os.environ:
     os.environ["OMP_NUM_THREADS"] = "2"
 # ---------------------------------------------------------------------------
 
-__version__ = "3.6.17"
+__version__ = "3.7.8"
 
 _REQUIRED_VERSIONS = {
     "sentence_transformers": "5.3.0",

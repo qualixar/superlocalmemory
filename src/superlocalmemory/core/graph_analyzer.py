@@ -111,8 +111,8 @@ class GraphAnalyzer:
 
             # v3.4.1: Persist community labels to JSON sidecar
             try:
-                from pathlib import Path as _Path
-                labels_dir = _Path.home() / ".superlocalmemory"
+                from superlocalmemory.infra.data_root import canonical_data_root
+                labels_dir = canonical_data_root()
                 labels_dir.mkdir(parents=True, exist_ok=True)
                 labels_path = labels_dir / f"{profile_id}_community_labels.json"
                 labels_path.write_text(json.dumps(labels, indent=2))

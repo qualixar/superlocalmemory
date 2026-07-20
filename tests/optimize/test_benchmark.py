@@ -36,6 +36,7 @@ def _add_bench_to_path():
         pass
 
 
+@pytest.mark.benchmark
 def test_cache_exact_replay_all_byte_identical():
     import bench_cache
     r = bench_cache.bench_exact_replay(n=25)
@@ -44,6 +45,7 @@ def test_cache_exact_replay_all_byte_identical():
     assert r["pass"] is True
 
 
+@pytest.mark.benchmark
 def test_cache_false_hit_is_zero():
     import bench_cache
     r = bench_cache.bench_false_hit(n=25)
@@ -52,6 +54,7 @@ def test_cache_false_hit_is_zero():
     assert r["pass"] is True
 
 
+@pytest.mark.benchmark
 def test_cache_semantic_wiring():
     import bench_cache
     r = bench_cache.bench_semantic_wiring()
@@ -61,6 +64,7 @@ def test_cache_semantic_wiring():
     assert r["pass"] is True
 
 
+@pytest.mark.benchmark
 def test_compression_safe_is_lossless():
     import bench_compression
     r = bench_compression.run()
@@ -70,6 +74,7 @@ def test_compression_safe_is_lossless():
     assert r["pass"] is True
 
 
+@pytest.mark.benchmark
 def test_full_bench_orchestrator_passes(tmp_path, monkeypatch):
     """run_bench.main() returns 0 and writes RESULTS files."""
     import run_bench

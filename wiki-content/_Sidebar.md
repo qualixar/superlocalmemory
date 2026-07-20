@@ -13,11 +13,14 @@
 **Reference**
 * [CLI Commands](CLI-Reference)
 * [MCP Tools](MCP-Tools)
+* [Retrieval Score Contract](Retrieval-Score-Contract)
 * [Auto-Memory](Auto-Memory)
 * [Active Memory (V3.1)](Active-Memory)
 
 **Architecture**
 * [Architecture Overview](V3-Architecture)
+* [Capabilities and Operations](Capabilities-and-Operations)
+* [Published Benchmarks](V3-Architecture#benchmarks)
 * [Mathematical Foundations](V3-Mathematical-Foundations)
 
 **Enterprise**

@@ -38,9 +38,9 @@ import dataclasses
 import json
 import logging
 import os
+import platform
 import re
 import sqlite3
-import struct
 import time
 import uuid
 import zlib
@@ -49,12 +49,13 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
 
-from superlocalmemory.storage.database import DatabaseManager
+from superlocalmemory.infra.data_root import DynamicStatePath, state_path
 from superlocalmemory.optimize.storage import schema as _schema
+from superlocalmemory.storage.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ MID_FILENAME: str = ".llmcache_key"
 SALT_PREFIX: str = "salt:"
 
 # C-06: persisted AES key — survives machine-id changes after first run
-_KEY_FILE: Path = Path.home() / LLMCACHE_DIRNAME / "opt-key.bin"
+_KEY_FILE = DynamicStatePath("opt-key.bin")
 
 _FORBIDDEN_MEMORY_TABLES: frozenset[str] = frozenset({
     "memories", "atomic_facts", "profiles", "canonical_entities",
@@ -198,7 +199,7 @@ class CacheDB:
 
     def __init__(self, db_path: Path | None = None) -> None:
         if db_path is None:
-            db_path = Path.home() / LLMCACHE_DIRNAME / LLMCACHE_DBNAME
+            db_path = state_path(LLMCACHE_DBNAME)
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         # If the file exists but is not a valid SQLite database (e.g. user
@@ -285,11 +286,10 @@ class CacheDB:
 
     def _get_machine_id(self) -> str:
         """Return a stable machine identifier for AES key derivation."""
-        system = os.uname().sysname
+        system = platform.system()
         mid: str | None = None
         if system == "Darwin":
             try:
-                import plistlib
                 import subprocess
                 out = subprocess.run(
                     ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
@@ -310,7 +310,7 @@ class CacheDB:
             except OSError:
                 mid = None
         if not mid:
-            mid_file = Path.home() / LLMCACHE_DIRNAME / MID_FILENAME
+            mid_file = state_path(MID_FILENAME)
             if mid_file.exists():
                 try:
                     mid = mid_file.read_text(encoding="utf-8").strip()
@@ -334,9 +334,10 @@ class CacheDB:
         so changing the underlying machine-id string cannot invalidate existing
         cache entries.
         """
+        key_file = Path(_KEY_FILE)
         try:
-            if _KEY_FILE.exists():
-                key = _KEY_FILE.read_bytes()
+            if key_file.exists():
+                key = key_file.read_bytes()
                 if len(key) == 32:
                     return key
         except Exception as exc:
@@ -346,9 +347,9 @@ class CacheDB:
         machine_id = self._get_machine_id()
         key = self._derive_aes_key(machine_id, salt)
         try:
-            _KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _KEY_FILE.write_bytes(key)
-            os.chmod(_KEY_FILE, 0o600)
+            key_file.parent.mkdir(parents=True, exist_ok=True)
+            key_file.write_bytes(key)
+            os.chmod(key_file, 0o600)
         except Exception as exc:
             logger.warning("CacheDB: could not persist AES key (fail-open): %s", exc)
         return key

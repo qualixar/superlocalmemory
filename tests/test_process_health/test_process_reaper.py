@@ -202,10 +202,18 @@ class TestKillOrphan:
         proc = subprocess.Popen([sys.executable, str(script)])
         time.sleep(0.5)  # Let it start and register handler
 
-        result = kill_orphan(proc.pid, graceful_timeout_seconds=1.0)
+        try:
+            result = kill_orphan(proc.pid, graceful_timeout_seconds=1.0)
+        finally:
+            # This test created the child, so it must reap it. kill_orphan only
+            # owns a PID and production targets are normally unrelated orphans.
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
 
         assert result["killed"] is True
         assert result["method"] == "sigkill"
+        assert proc.returncode == -signal.SIGKILL
 
     def test_kill_already_dead_process(self) -> None:
         """Killing a dead process returns already_dead."""

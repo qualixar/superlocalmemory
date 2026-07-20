@@ -22,7 +22,7 @@ HR-03: Original float32 NEVER deleted unless keep_float32_backup=False
 HR-04: Quantization ONLY via EAP scheduler (not ad-hoc).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ class EAPScheduler:
         self._quantized_store = quantized_store
         self._config = config
 
-    def run_eap_cycle(self, profile_id: str) -> dict:
+    def run_eap_cycle(self, profile_id: str, *, dry_run: bool = False) -> dict:
         """Execute one EAP cycle for a profile.
 
         Steps:
@@ -153,12 +153,16 @@ class EAPScheduler:
 
             if target_bw == 0:
                 # Forgotten -- mark as deleted
-                self._handle_deletion(fact_id, profile_id)
+                if not dry_run:
+                    self._handle_deletion(fact_id, profile_id)
                 stats["deleted"] += 1
                 continue
 
             if target_bw < current_bw:
                 # Downgrade -- compress to lower precision
+                if dry_run:
+                    stats["downgrades"] += 1
+                    continue
                 success = self._handle_downgrade(
                     fact_id, profile_id, target_bw,
                 )
@@ -168,6 +172,9 @@ class EAPScheduler:
                     stats["errors"] += 1
             else:
                 # Upgrade -- restore to higher precision (only if float32 exists)
+                if dry_run:
+                    stats["upgrades"] += 1
+                    continue
                 success = self._handle_upgrade(
                     fact_id, profile_id, target_bw,
                 )

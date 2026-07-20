@@ -200,6 +200,31 @@ def test_search_returns_results(
     assert "f1" in fact_ids
 
 
+def test_search_filters_persisted_precision_tiers(
+    store: QuantizedEmbeddingStore,
+    test_db: MagicMock,
+) -> None:
+    """Int8 and polar retrieval must query distinct persisted rows."""
+    for fact_id in ("f-int8", "f-polar"):
+        test_db._test_conn.execute(
+            "INSERT INTO fact_retention "
+            "(fact_id, profile_id, retention_score, lifecycle_zone) "
+            "VALUES (?, 'p1', 1.0, 'active')",
+            (fact_id,),
+        )
+    test_db._test_conn.commit()
+
+    query = _random_vec(768, seed=12)
+    assert store.compress_fact("f-int8", "p1", query, 8)
+    assert store.compress_fact("f-polar", "p1", query, 4)
+
+    int8 = store.search(query, "p1", top_k=10, bit_widths=(8,))
+    polar = store.search(query, "p1", top_k=10, bit_widths=(2, 4))
+
+    assert [fact_id for fact_id, _ in int8] == ["f-int8"]
+    assert [fact_id for fact_id, _ in polar] == ["f-polar"]
+
+
 # ---------------------------------------------------------------------------
 # 13. compress_fact reduces size
 # ---------------------------------------------------------------------------

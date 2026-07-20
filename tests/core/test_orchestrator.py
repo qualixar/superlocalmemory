@@ -50,6 +50,20 @@ class MockDB:
                 error_message TEXT DEFAULT ''
             )
         """)
+        self._conn.executescript("""
+            CREATE TABLE canonical_entities (
+                entity_id TEXT, profile_id TEXT, canonical_name TEXT,
+                entity_type TEXT, fact_count INTEGER
+            );
+            CREATE TABLE graph_edges (
+                source_id TEXT, target_id TEXT, edge_type TEXT, weight REAL,
+                profile_id TEXT
+            );
+        """)
+        self._conn.executemany(
+            "INSERT INTO canonical_entities VALUES (?, 'default', ?, 'concept', 1)",
+            [("e1", "Entity one"), ("e2", "Entity two")],
+        )
         self._conn.commit()
 
     def execute(self, sql, params=()):
@@ -91,6 +105,14 @@ class TestLifecycle:
                 orch.on_daemon_start()
                 assert orch.get_graph_backend() is None
                 assert orch.get_vector_backend() is None
+
+    def test_daemon_start_recovers_interrupted_promotion_without_auto_adoption(self, orch):
+        """Startup recovers a journal but never mutates a legacy root by itself."""
+        with patch.object(orch, "_recover_interrupted_scale_promotion") as recovery:
+            with patch.object(orch, "_detect_cozo", return_value=False):
+                with patch.object(orch, "_detect_lancedb", return_value=False):
+                    orch.on_daemon_start()
+        recovery.assert_called_once_with()
 
     def test_health_check_always_works(self, orch):
         """Health check returns valid structure even without backends."""
@@ -134,10 +156,12 @@ class TestIncrementalSync:
         fact.lifecycle = "active"
         fact.canonical_entities = ["e1", "e2"]
         fact.embedding = [0.1] * 768
+        fact.profile_id = "default"
 
         orch.sync_new_fact(fact)
-        # CozoDB add_entity called for both entities
+        # CozoDB receives canonical entity records plus the fact bridge.
         assert orch._cozo.add_entity.call_count == 2
+        orch._cozo.add_fact_entities.assert_called_once_with("test-2", ["e1", "e2"], "default")
 
 
 class TestBackendRouting:
@@ -148,6 +172,11 @@ class TestBackendRouting:
         orch._cozo = MagicMock()
         orch._update_status("cozo", "active")
         assert orch.get_graph_backend() is orch._cozo
+
+    def test_graph_retrieval_is_available_only_for_canonical_projection(self, orch):
+        orch._cozo = MagicMock()
+        orch._update_status("cozo", "active")
+        assert orch.graph_retrieval_ready() is True
 
     def test_graph_backend_not_active_during_migration(self, orch):
         orch._cozo = MagicMock()

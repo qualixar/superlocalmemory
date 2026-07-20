@@ -10,15 +10,15 @@ SuperLocalMemory is a persistent memory system for AI assistants. It stores your
 
 ### Is it really free?
 
-Yes. SuperLocalMemory is open-source (Elastic License 2.0) and completely free. No usage limits, no credit system, no subscription. Forever.
+Yes. SuperLocalMemory is open-source (GNU Affero General Public License v3.0 or later) and completely free. No usage limits, no credit system, no subscription. Forever.
 
 ### Where is my data stored?
 
-All data is stored locally in a SQLite database at `~/.superlocalmemory/memory.db`. In Mode A and Mode B, your data never leaves your machine. In Mode C, query data is sent to your configured cloud LLM provider.
+Core memory is SQLite-backed inside the configured SLM data root. That root also contains configuration, logs, queues, models, and derived state. Mode C sends configured query or enrichment content to its provider; optional connectors, backup, and downloads have their own network behavior in every mode.
 
 ### Which IDEs are supported?
 
-17+ IDEs including Claude Code, Cursor, VS Code (with MCP extension), Windsurf, Gemini CLI, JetBrains IDEs (IntelliJ, PyCharm, WebStorm), Continue.dev, Zed, and any IDE that supports the Model Context Protocol.
+Run `slm connect --list` for the release's documented client names. MCP-compatible clients can also be configured manually, but a client is considered verified only when it passes the release integration matrix.
 
 ### Does it work offline?
 
@@ -42,8 +42,10 @@ npm install -g superlocalmemory
 slm setup
 slm warmup    # Optional — pre-download embedding model
 
-# or pip
-pip install superlocalmemory
+# or inside an activated Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install superlocalmemory
 slm setup
 ```
 
@@ -51,7 +53,8 @@ slm setup
 
 ```bash
 npm install -g superlocalmemory@latest
-# or: pip install --upgrade superlocalmemory
+# or, while the SLM virtual environment is active:
+python -m pip install --upgrade superlocalmemory
 ```
 
 ### I am upgrading from V2. Will I lose my data?
@@ -69,6 +72,13 @@ When you start a conversation in your IDE, SuperLocalMemory automatically retrie
 ```bash
 slm remember "The deploy script needs AWS_REGION set to us-east-1"
 ```
+
+### What do queryable, enriching, complete, and failed mean?
+
+- `queryable` means raw evidence and the SQLite relational/FTS projection are durable and recallable.
+- `enriching` means a lease-owning worker is running configured derivation stages.
+- `complete` means every declared derivation and configured projector succeeded.
+- `failed` retains the raw evidence, error, attempt count, and retry timing; it is not silent data loss.
 
 ### How do I search memories?
 
@@ -104,10 +114,13 @@ Yes: `slm mode a`, `slm mode b`, or `slm mode c`. Your memories are shared acros
 
 ### What are the accuracy differences?
 
-On the LoCoMo benchmark:
-- **Mode A:** 74.8% retrieval accuracy (zero cloud, highest local-first score reported)
-- **Mode C:** 87.7% (cloud LLM, competitive with funded systems)
-- Mathematical layers contribute +12.7pp average improvement
+The V3 paper provides published LoCoMo evidence carried into V3.7 architecture:
+
+- **60.4%** Mode A Raw across 10 conversations / 1,276 questions with zero-LLM answer construction.
+- **74.8%** Mode A Retrieval across the same scope with local retrieval and GPT-4.1-mini answer synthesis.
+- **87.7%** Mode C on Conv-30 / 81 questions with cloud embeddings and GPT-4.1-mini answer generation and judge.
+
+The figures retain their original protocol scope; they are not a newly rerun 3.7 package benchmark. See the linked preprint for category results, ablations, and limitations.
 
 ## Privacy and Security
 
@@ -115,9 +128,9 @@ On the LoCoMo benchmark:
 
 No. Your database is a local file on your machine. It is not synced, uploaded, or shared with anyone — including us.
 
-### Is it EU AI Act compliant?
+### Does it guarantee regulatory compliance?
 
-Mode A and Mode B are compliant by architecture — data never leaves your device during any memory operation. Mode C requires a Data Processing Agreement with your cloud provider.
+No software package certifies the complete deployment. SLM supplies local storage, erasure, provenance, retention, access-policy, and audit controls; applicability and sufficiency depend on the operator, use case, configuration, providers, and surrounding systems.
 
 ### Can I export my data?
 

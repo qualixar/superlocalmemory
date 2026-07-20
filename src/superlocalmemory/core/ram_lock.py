@@ -15,12 +15,13 @@ Design notes:
   available before we even try — better to defer than thrash.
 - Lock file lives at ``~/.superlocalmemory/ram_lock.sem`` by default,
   tests may monkeypatch ``RAM_LOCK_PATH``.
-- POSIX only; Windows build is deferred per LLD-00 §7 and MASTER-PLAN H-01.
+- Uses a standard-library advisory lock on POSIX and Windows.  The lock is
+  deliberately file-backed so independent daemon, CLI, and worker processes
+  share the same RAM reservation.
 """
 
 from __future__ import annotations
 
-import fcntl
 import os
 import time
 from contextlib import contextmanager
@@ -29,9 +30,56 @@ from typing import Iterator
 
 import psutil
 
+try:  # POSIX advisory locks (macOS/Linux)
+    import fcntl as _fcntl
+except ImportError:  # Windows uses the stdlib byte-range equivalent below.
+    _fcntl = None
 
-RAM_LOCK_PATH: Path = Path.home() / ".superlocalmemory" / "ram_lock.sem"
+# Public override retained for tests and embedders. ``None`` means resolve the
+# lock dynamically so a long-lived process can switch canonical namespaces
+# without retaining the first root it observed.
+RAM_LOCK_PATH: Path | None = None
 MIN_FREE_MB: int = 400
+
+
+def _ram_lock_path() -> Path:
+    if RAM_LOCK_PATH is not None:
+        return RAM_LOCK_PATH
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path("ram_lock.sem")
+
+
+def _acquire_lock(fd: int) -> None:
+    """Acquire one non-blocking cross-process lock for the semaphore."""
+    if _fcntl is not None:
+        _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        return
+
+    import msvcrt
+
+    # ``msvcrt.locking`` cannot reserve an empty file.  The marker byte is
+    # purely structural; the human-readable audit marker is written after the
+    # reservation is acquired.
+    if os.fstat(fd).st_size == 0:
+        os.write(fd, b"\0")
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except OSError as exc:
+        raise BlockingIOError("RAM reservation is already held") from exc
+
+
+def _release_lock(fd: int) -> None:
+    """Release a reservation acquired by :func:`_acquire_lock`."""
+    if _fcntl is not None:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        return
+
+    import msvcrt
+
+    os.lseek(fd, 0, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 
 @contextmanager
@@ -72,20 +120,21 @@ def ram_reservation(
             f"{floor_mb}MB"
         )
 
-    RAM_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _ram_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     # SEC-M6 — tighten the parent dir so the audit marker (``{pid}:{name}``)
     # is not readable by other UIDs on shared hosts. Idempotent; POSIX-only.
     try:
         if os.name == "posix":
-            os.chmod(RAM_LOCK_PATH.parent, 0o700)
+            os.chmod(lock_path.parent, 0o700)
     except OSError:  # pragma: no cover — perms race
         pass
-    fd = os.open(str(RAM_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         deadline = time.time() + timeout_s
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _acquire_lock(fd)
                 break
             except BlockingIOError:
                 if time.time() >= deadline:
@@ -103,7 +152,7 @@ def ram_reservation(
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _release_lock(fd)
         finally:
             os.close(fd)
 

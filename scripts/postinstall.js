@@ -1,293 +1,220 @@
 #!/usr/bin/env node
 /**
- * SuperLocalMemory V3 - NPM Postinstall Script
+ * SuperLocalMemory V3 - safe NPM runtime installer.
  *
- * ONE COMMAND INSTALL. Everything the user needs.
- * Python deps auto-installed. Embeddings auto-downloaded.
+ * NPM owns a private Python virtual environment inside its package directory.
+ * This script never installs into system Python and never creates or modifies
+ * SLM data, hooks, IDE configuration, daemons, or model caches.
  *
  * Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
- * Licensed under Elastic License 2.0
+ * Licensed under AGPL-3.0-or-later.
  */
 
+'use strict';
+
 const { spawnSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const fs = require('fs');
 
-console.log('\n════════════════════════════════════════════════════════════');
-console.log('  SuperLocalMemory V3 — The Unified Brain');
-console.log('  by Varun Pratap Bhardwaj / Qualixar');
-console.log('  https://github.com/qualixar/superlocalmemory');
-console.log('════════════════════════════════════════════════════════════\n');
+const MIN_PYTHON = Object.freeze([3, 11]);
+const MAX_PYTHON_EXCLUSIVE = Object.freeze([3, 15]);
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
-// --- Step 1: Create data directory ---
-const SLM_HOME = path.join(os.homedir(), '.superlocalmemory');
-if (!fs.existsSync(SLM_HOME)) {
-    fs.mkdirSync(SLM_HOME, { recursive: true });
-    console.log('✓ Created data directory: ' + SLM_HOME);
-} else {
-    console.log('✓ Data directory exists: ' + SLM_HOME);
+function parsePythonVersion(output) {
+  const match = String(output || '').match(/Python\s+(\d+)\.(\d+)(?:\.(\d+))?/i);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3] || 0)];
 }
 
-// --- Step 2: Find Python 3 ---
-function findPython() {
-    const candidates = [
-        'python3', 'python',
-        '/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3',
+function isSupportedPython(version) {
+  if (!version) return false;
+  const [major, minor] = version;
+  const atLeastMinimum = major > MIN_PYTHON[0]
+    || (major === MIN_PYTHON[0] && minor >= MIN_PYTHON[1]);
+  const belowMaximum = major < MAX_PYTHON_EXCLUSIVE[0]
+    || (major === MAX_PYTHON_EXCLUSIVE[0] && minor < MAX_PYTHON_EXCLUSIVE[1]);
+  return atLeastMinimum && belowMaximum;
+}
+
+function pythonCandidates(platform = os.platform()) {
+  if (platform === 'win32') {
+    return [
+      ['py', '-3.14'],
+      ['py', '-3.13'],
+      ['py', '-3.12'],
+      ['py', '-3.11'],
+      ['python3'],
+      ['python'],
     ];
-    if (os.platform() === 'win32') candidates.push('py -3');
-    for (const cmd of candidates) {
-        try {
-            const parts = cmd.split(' ');
-            const r = spawnSync(parts[0], [...parts.slice(1), '--version'], {
-                stdio: 'pipe', timeout: 5000,
-                env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') },
-            });
-            if (r.status === 0 && (r.stdout || '').toString().includes('3.')) return parts;
-        } catch (e) { /* next */ }
+  }
+  return [
+    ['python3'],
+    ['python'],
+    ['/opt/homebrew/bin/python3'],
+    ['/usr/local/bin/python3'],
+    ['/usr/bin/python3'],
+  ];
+}
+
+function findSupportedPython() {
+  for (const candidate of pythonCandidates()) {
+    try {
+      const result = spawnSync(candidate[0], [...candidate.slice(1), '--version'], {
+        stdio: 'pipe',
+        timeout: 5000,
+        env: process.env,
+      });
+      const output = `${(result.stdout || '').toString()} ${(result.stderr || '').toString()}`;
+      const version = parsePythonVersion(output);
+      if (result.status === 0 && isSupportedPython(version)) {
+        return { command: candidate[0], prefixArgs: candidate.slice(1), version };
+      }
+    } catch (_error) {
+      // Try the next interpreter without mutating PATH or the machine.
     }
-    return null;
+  }
+  return null;
 }
 
-const pythonParts = findPython();
-if (!pythonParts) {
-    console.log('');
-    console.log('╔══════════════════════════════════════════════════════════╗');
-    console.log('║  ⚠  Python 3.11+ Required                              ║');
-    console.log('╚══════════════════════════════════════════════════════════╝');
-    console.log('');
-    console.log('  SuperLocalMemory V3 requires Python 3.11+');
-    console.log('  Install from: https://python.org/downloads/');
-    console.log('  After installing Python, run: slm setup');
-    console.log('');
-    process.exit(0); // Don't fail npm install
+function runtimePythonPath(packageRoot, platform = os.platform()) {
+  return platform === 'win32'
+    ? path.join(packageRoot, '.slm-venv', 'Scripts', 'python.exe')
+    : path.join(packageRoot, '.slm-venv', 'bin', 'python');
 }
-console.log('✓ Found Python: ' + pythonParts.join(' '));
 
-// --- Step 3: Install ALL Python dependencies ---
-console.log('\nInstalling Python dependencies (this may take 1-2 minutes)...\n');
-
-// Detect if --user or --break-system-packages is needed
-function pipInstall(packages, label) {
-    // Try normal install first
-    let result = spawnSync(pythonParts[0], [
-        ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-        ...packages,
-    ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-
-    if (result.status === 0) return true;
-
-    // If PEP 668 blocks it, try --user
-    const stderr = (result.stderr || '').toString();
-    if (stderr.includes('externally-managed') || stderr.includes('PEP 668')) {
-        result = spawnSync(pythonParts[0], [
-            ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-            '--user', ...packages,
-        ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-        if (result.status === 0) return true;
-
-        // Last resort: --break-system-packages
-        result = spawnSync(pythonParts[0], [
-            ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-            '--break-system-packages', ...packages,
-        ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-        return result.status === 0;
+function validateRuntimeLocation(venvRoot) {
+  if (!fs.existsSync(venvRoot)) return { ok: true };
+  try {
+    const stat = fs.lstatSync(venvRoot);
+    if (stat.isSymbolicLink()) {
+      return { ok: false, error: `${venvRoot} is a symbolic link` };
     }
-
-    return false;
+    if (!stat.isDirectory()) {
+      return { ok: false, error: `${venvRoot} is not a directory` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `cannot inspect ${venvRoot}: ${error.message}` };
+  }
 }
 
-// Install the superlocalmemory package and all its pinned dependencies
-// in one shot. pyproject.toml is the single source of truth for versions,
-// so users via npm get exactly the same dep set as users via pip.
-console.log('\nInstalling SuperLocalMemory and all dependencies...');
-console.log('  (Single pip install — versions pinned in pyproject.toml)');
-console.log('  This may take 1-3 minutes (downloads ~500MB of models on first use).');
-console.log('');
-console.log('  Includes: numpy, scipy, fastapi, sentence-transformers, onnxruntime,');
-console.log('           torch, transformers, sqlite-vec, lightgbm, mcp, and more.');
+function printPythonGuidance() {
+  console.error('');
+  console.error('SuperLocalMemory requires Python 3.11, 3.12, 3.13, or 3.14.');
+  console.error('Install Python from https://www.python.org/downloads/ and rerun:');
+  console.error('  npm rebuild superlocalmemory');
+  console.error('The npm installer will create a private virtual environment;');
+  console.error('it will not install packages into your system Python.');
+}
 
-// --- Step 3b: Install the superlocalmemory package itself ---
-// This ensures `python -m superlocalmemory.cli.main` always resolves the
-// correct version, even when invoked outside the Node.js wrapper (e.g.,
-// via slm.bat on Windows or direct Python invocation).
-console.log('\nInstalling superlocalmemory Python package...');
-const pkgRoot = path.join(__dirname, '..');
-const pipInstallPkg = spawnSync(pythonParts[0], [
-    ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-    pkgRoot,
-], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
+function failureDetail(result) {
+  if (result && result.error) return result.error.message || String(result.error);
+  if (result && Number.isInteger(result.status)) return `exit code ${result.status}`;
+  return 'process did not complete';
+}
 
-if (pipInstallPkg.status === 0) {
-    console.log('✓ SuperLocalMemory Python package installed');
-} else {
-    // Try with --user if PEP 668
-    const stderr = (pipInstallPkg.stderr || '').toString();
-    if (stderr.includes('externally-managed') || stderr.includes('PEP 668')) {
-        const retryResult = spawnSync(pythonParts[0], [
-            ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-            '--user', pkgRoot,
-        ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-        if (retryResult.status === 0) {
-            console.log('✓ SuperLocalMemory Python package installed (--user)');
-        } else {
-            // WP-07: --user also failed — try --break-system-packages last-resort,
-            // then surface the pipx hint (PEP 668 advisory).
-            const retryBsp = spawnSync(pythonParts[0], [
-                ...pythonParts.slice(1), '-m', 'pip', 'install', '--quiet',
-                '--disable-pip-version-check', '--break-system-packages', pkgRoot,
-            ], { stdio: 'pipe', timeout: 300000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-            if (retryBsp.status === 0) {
-                console.log('✓ SuperLocalMemory Python package installed (--break-system-packages)');
-            } else {
-                console.log('⚠ pip install failed (PEP 668 — externally managed Python).');
-                console.log('  The Node.js wrapper (slm-npm) sets PYTHONPATH automatically,');
-                console.log('  so the CLI will still work via npm.');
-                console.log('');
-                console.log('  To install into an isolated environment (recommended):');
-                console.log('    pipx install superlocalmemory');
-                console.log('  Last resort (may break OS packages):');
-                console.log('    pip install --break-system-packages superlocalmemory');
-            }
-        }
+function main(argv = process.argv.slice(2)) {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log('Usage: node scripts/postinstall.js');
+    console.log('Creates or repairs the package-owned .slm-venv runtime.');
+    console.log('This command never configures SLM or writes durable memory.');
+    return 0;
+  }
+
+  const packageRoot = path.resolve(__dirname, '..');
+  const venvRoot = path.join(packageRoot, '.slm-venv');
+  const packageVersion = require(path.join(packageRoot, 'package.json')).version;
+  const python = findSupportedPython();
+
+  console.log('');
+  console.log('SuperLocalMemory: creating an isolated npm-owned Python runtime.');
+
+  if (!python) {
+    printPythonGuidance();
+    return 1;
+  }
+
+  const locationCheck = validateRuntimeLocation(venvRoot);
+  if (!locationCheck.ok) {
+    console.error(`SuperLocalMemory: refusing unsafe runtime location: ${locationCheck.error}.`);
+    console.error('Move that path aside manually, verify it contains no needed files, then run:');
+    console.error('  npm rebuild superlocalmemory');
+    return 1;
+  }
+
+  console.log(`  Python ${python.version.join('.')} (${[python.command, ...python.prefixArgs].join(' ')})`);
+
+  const createVenv = spawnSync(
+    python.command,
+    [...python.prefixArgs, '-m', 'venv', venvRoot],
+    { stdio: 'inherit', timeout: 120000, env: process.env },
+  );
+  if (createVenv.status !== 0) {
+    console.error(`SuperLocalMemory: could not create ${venvRoot} (${failureDetail(createVenv)}).`);
+    if (os.platform() === 'linux') {
+      console.error('Install your distribution\'s Python venv package (for example python3-venv), then run:');
     } else {
-        console.log('⚠ Could not pip install the package. The Node.js wrapper (slm-npm)');
-        console.log('  sets PYTHONPATH automatically, so CLI will still work.');
-        console.log('');
-        console.log('  If you see a PEP 668 error in future, install via:');
-        console.log('    pipx install superlocalmemory');
+      console.error('Repair the selected Python installation so the stdlib venv module is available, then run:');
     }
+    console.error('  npm rebuild superlocalmemory');
+    return 1;
+  }
+
+  const runtimePython = runtimePythonPath(packageRoot);
+  const installPackage = spawnSync(
+    runtimePython,
+    [
+      '-m', 'pip', 'install',
+      '--disable-pip-version-check',
+      '--no-input',
+      '--upgrade',
+      packageRoot,
+    ],
+    { stdio: 'inherit', timeout: INSTALL_TIMEOUT_MS, env: process.env },
+  );
+  if (installPackage.status !== 0) {
+    console.error(`SuperLocalMemory: private-runtime installation failed (${failureDetail(installPackage)}).`);
+    console.error('Check network access, available disk space, and Python build prerequisites, then run:');
+    console.error('  npm rebuild superlocalmemory');
+    console.error('No system Python packages or SLM durable data were modified.');
+    return 1;
+  }
+
+  const verify = spawnSync(
+    runtimePython,
+    [
+      '-c',
+      "import importlib.metadata as m; print(m.version('superlocalmemory'))",
+    ],
+    { stdio: 'pipe', timeout: 15000, env: process.env },
+  );
+  const installedVersion = (verify.stdout || '').toString().trim();
+  if (verify.status !== 0 || installedVersion !== packageVersion) {
+    console.error(
+      `SuperLocalMemory: runtime identity check failed (npm=${packageVersion}, python=${installedVersion || 'unavailable'}).`,
+    );
+    console.error('Run `npm rebuild superlocalmemory` to repair the package-owned runtime.');
+    return 1;
+  }
+
+  console.log(`SuperLocalMemory ${packageVersion}: isolated runtime verified.`);
+  console.log('No memory database, IDE hooks, daemon, configuration, or models were changed.');
+  console.log('Run `slm setup` explicitly when you are ready to configure SLM.');
+  console.log('');
+  return 0;
 }
 
-// --- Step 3c: Verify critical dependency versions ---
-// sentence-transformers and onnxruntime MUST be exact versions to avoid
-// memory blow-up on Apple Silicon. pip resolver can override pins via
-// transitive deps — this step catches and fixes that.
-console.log('\nVerifying critical dependency versions...');
-const criticalDeps = { 'sentence_transformers': '5.3.0', 'onnxruntime': '1.24.4' };
-for (const [mod, expected] of Object.entries(criticalDeps)) {
-    const check = spawnSync(pythonParts[0], [
-        ...pythonParts.slice(1), '-c',
-        `import ${mod}; v=getattr(${mod},'__version__',''); print(v)`,
-    ], { stdio: 'pipe', timeout: 10000, env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || '') } });
-    const actual = (check.stdout || '').toString().trim();
-    if (actual && actual !== expected) {
-        const pipName = mod.replace('_', '-');
-        console.log(`⚠ ${pipName} is ${actual}, expected ${expected}. Fixing...`);
-        pipInstall([`${pipName}==${expected}`], pipName);
-        console.log(`✓ ${pipName}==${expected} installed`);
-    } else if (actual === expected) {
-        console.log(`✓ ${mod}==${expected}`);
-    }
+if (require.main === module) {
+  process.exit(main());
 }
 
-// --- Step 4: Detect V2 installation ---
-const V2_HOME = path.join(os.homedir(), '.claude-memory');
-if (fs.existsSync(V2_HOME) && fs.existsSync(path.join(V2_HOME, 'memory.db'))) {
-    console.log('');
-    console.log('╔══════════════════════════════════════════════════════════╗');
-    console.log('║  V2 Installation Detected                                ║');
-    console.log('╚══════════════════════════════════════════════════════════╝');
-    console.log('');
-    console.log('  Found V2 data at: ' + V2_HOME);
-    console.log('  Your memories are safe and will NOT be deleted.');
-    console.log('');
-    console.log('  To migrate V2 data to V3, run:');
-    console.log('    slm migrate');
-    console.log('');
-}
-
-// --- Step 5: Auto-install Claude Code hooks ---
-// "Install once, forget forever" — hooks enable automatic memory lifecycle
-const hooksDisabledFile = path.join(SLM_HOME, 'hooks', '.hooks-disabled');
-if (fs.existsSync(hooksDisabledFile)) {
-    console.log('⊘ Claude Code hooks: skipped (user opted out via slm hooks remove)');
-} else {
-    console.log('\nInstalling Claude Code hooks (auto-memory lifecycle)...');
-    const hookResult = spawnSync(pythonParts[0], [
-        ...pythonParts.slice(1), '-m', 'superlocalmemory.cli.main', 'hooks', 'install',
-    ], {
-        stdio: 'pipe', timeout: 15000,
-        env: {
-            ...process.env,
-            PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || ''),
-            PYTHONPATH: path.join(__dirname, '..', 'src') + ':' + (process.env.PYTHONPATH || ''),
-        },
-    });
-
-    if (hookResult.status === 0) {
-        console.log('✓ Claude Code hooks installed (auto-recall, auto-observe, auto-save)');
-        console.log('  SLM: Hooks installed into Claude Code (slm hooks remove to undo)');
-    } else {
-        console.log('⚠ Claude Code hooks not installed (run: slm hooks install)');
-        // Non-fatal — don't block npm install
-    }
-}
-
-// --- Step 6: Run interactive setup wizard ---
-// Downloads embedding + reranker models, configures mode, verifies installation.
-// If TTY is available (interactive terminal), runs the full wizard.
-// If not (CI, piped), uses defaults (Mode A, skip model download).
-console.log('\n════════════════════════════════════════════════════════════');
-console.log('  Running setup wizard (model download + verification)...');
-console.log('════════════════════════════════════════════════════════════\n');
-
-const isTTY = process.stdin.isTTY && process.stdout.isTTY;
-const setupArgs = isTTY ? ['setup'] : ['setup'];
-const setupEnv = {
-    ...process.env,
-    PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:' + (process.env.PATH || ''),
-    PYTHONPATH: path.join(__dirname, '..', 'src') + ':' + (process.env.PYTHONPATH || ''),
-    CUDA_VISIBLE_DEVICES: '',
-    TOKENIZERS_PARALLELISM: 'false',
-    TORCH_DEVICE: 'cpu',
+module.exports = {
+  findSupportedPython,
+  isSupportedPython,
+  main,
+  parsePythonVersion,
+  pythonCandidates,
+  runtimePythonPath,
+  validateRuntimeLocation,
 };
-
-// Non-interactive: set env flag so wizard uses defaults
-if (!isTTY) {
-    setupEnv.SLM_NON_INTERACTIVE = '1';
-}
-
-const setupResult = spawnSync(pythonParts[0], [
-    ...pythonParts.slice(1), '-m', 'superlocalmemory.cli.main', ...setupArgs,
-], {
-    stdio: 'inherit',  // Show all output including download progress
-    timeout: 900000,    // 15 min (model downloads can be slow)
-    env: setupEnv,
-});
-
-if (setupResult.status === 0) {
-    console.log('✓ Setup wizard completed successfully');
-} else {
-    console.log('⚠ Setup wizard had issues (run: slm setup)');
-    console.log('  SuperLocalMemory will still work — models download on first use.');
-}
-
-// --- Done ---
-console.log('\n════════════════════════════════════════════════════════════');
-console.log('  ✓ SuperLocalMemory V3 — The Unified Brain installed!');
-console.log('');
-console.log('  Quick start:');
-console.log('    slm remember "..."        # Store a memory');
-console.log('    slm recall "..."          # Search memories');
-console.log('    slm dashboard             # Open web dashboard');
-console.log('    slm serve                 # Start 24/7 daemon');
-console.log('    slm adapters enable gmail # Enable Gmail ingestion');
-console.log('    slm setup                 # Re-run 9-step wizard');
-console.log('');
-console.log('  New in v3.4.3:');
-console.log('    • Unified daemon (one process, 24/7, < 700MB)');
-console.log('    • SLM Mesh (agent-to-agent P2P built in)');
-console.log('    • Entity compilation (auto knowledge summaries)');
-console.log('    • Ingestion adapters (Gmail, Calendar, Transcripts)');
-console.log('');
-console.log('  Docs: https://github.com/qualixar/superlocalmemory');
-console.log('════════════════════════════════════════════════════════════\n');
-
-console.log('────────────────────────────────────────────────────────────');
-console.log('  ⭐ Help us grow!');
-console.log('  If this saves you time, please star the repo:');
-console.log('    https://github.com/qualixar/superlocalmemory');
-console.log('  Part of the Qualixar AI Agent Reliability Platform:');
-console.log('    https://qualixar.com  (7 OSS products, 19K+ monthly downloads)');
-console.log('────────────────────────────────────────────────────────────\n');

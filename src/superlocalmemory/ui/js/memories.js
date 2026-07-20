@@ -41,6 +41,7 @@ async function loadMemories(page) {
     showLoading('memories-list', 'Loading memories...');
     try {
         var response = await fetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         var data = await response.json();
         lastSearchResults = null;
         var exportBtn = document.getElementById('export-search-btn');

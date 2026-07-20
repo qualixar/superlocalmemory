@@ -13,7 +13,6 @@ import json as _json
 import os
 from argparse import Namespace
 from pathlib import Path
-from typing import Callable
 
 from superlocalmemory.hooks.antigravity_adapter import AntigravityAdapter
 from superlocalmemory.hooks.copilot_adapter import CopilotAdapter
@@ -53,9 +52,11 @@ def _get_recall_fn() -> RecallFn:
 
 
 def _default_sync_log_db() -> Path:
-    return Path(os.environ.get("SLM_MEMORY_DB",
-                               str(Path.home() / ".superlocalmemory"
-                                   / "memory.db")))
+    explicit = os.environ.get("SLM_MEMORY_DB", "").strip()
+    if explicit:
+        return Path(explicit)
+    from superlocalmemory.infra.data_root import state_path
+    return state_path("memory.db")
 
 
 def build_default_adapters(

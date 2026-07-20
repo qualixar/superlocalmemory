@@ -2,7 +2,7 @@
 /**
  * SuperLocalMemory V3 - Session Start Context Hook
  * Copyright (c) 2026 Varun Pratap Bhardwaj
- * Licensed under Elastic License 2.0
+ * Licensed under GNU Affero General Public License v3.0 or later
  *
  * Loads recent memories and learned patterns on Claude Code session start.
  * Outputs context to stderr (Claude Code reads hook stderr as context).
@@ -13,10 +13,14 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const execFileAsync = promisify(execFile);
 
-const MEMORY_DIR = path.join(process.env.HOME, '.superlocalmemory');
+const MEMORY_DIR = process.env.SLM_DATA_DIR
+  || process.env.SL_MEMORY_PATH
+  || process.env.SLM_HOME
+  || path.join(os.homedir(), '.superlocalmemory');
 const DB_PATH = path.join(MEMORY_DIR, 'memory.db');
 
 async function loadSessionContext() {

@@ -188,27 +188,29 @@ class TestMaterializerFailureRetryContract:
         )
         assert rows[0]["retry_count"] == 1
 
-    def test_retries_eventually_permanently_fail(self, tmp_path: Path) -> None:
-        """After _MAX_RETRIES failures, the row is removed from pending
-        (status='failed'). This is intentional — runaway retries would
-        block the queue."""
+    def test_retries_never_delete_unprocessed_evidence(self, tmp_path: Path) -> None:
+        """Repeated failure retains the row for bounded-backoff retry."""
         from superlocalmemory.cli.pending_store import (
-            _MAX_RETRIES, get_pending, store_pending,
+            _MAX_RETRIES, mark_failed, store_pending,
         )
 
-        store_pending(content="permanent failure", base_dir=tmp_path)
-
-        engine = MagicMock()
-        engine.store.side_effect = RuntimeError("always fails")
+        row_id = store_pending(content="permanent failure", base_dir=tmp_path)
 
         for _ in range(_MAX_RETRIES):
-            _drain_one_pass(engine, tmp_path)
+            mark_failed(row_id, "always fails", base_dir=tmp_path)
 
-        rows = get_pending(limit=10, base_dir=tmp_path)
-        assert rows == [], (
-            f"After {_MAX_RETRIES} retries the row should be marked 'failed' "
-            "(out of pending). If it's still pending, retry count math is wrong."
-        )
+        import sqlite3
+
+        conn = sqlite3.connect(tmp_path / "pending.db")
+        try:
+            row = conn.execute(
+                "SELECT status, retry_count FROM pending_memories"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == ("pending", _MAX_RETRIES)
+        # Backoff may temporarily hide it from get_pending, but the raw
+        # evidence remains durable and eligible after next_retry_at.
 
     def test_transient_failure_then_success(self, tmp_path: Path) -> None:
         """The realistic case: first attempt fails, second succeeds, no loss."""

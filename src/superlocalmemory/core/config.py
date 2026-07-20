@@ -13,12 +13,13 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
+from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 from superlocalmemory.storage.models import Mode
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -35,12 +36,17 @@ CANONICAL_RECALL_LIMIT: int = 20
 # Default Paths
 # ---------------------------------------------------------------------------
 
-DEFAULT_BASE_DIR = Path.home() / ".superlocalmemory"
+DEFAULT_BASE_DIR = DynamicStatePath()
 DEFAULT_DB_NAME = "memory.db"
 DEFAULT_PROFILES_FILE = "profiles.json"
 CURRENT_MODE_FILE = "current_mode"
 # Populated lazily in _get_mode_config_path() to avoid circular imports
 _MODE_CONFIG_NAMES: dict | None = None
+
+
+def _runtime_base_dir() -> Path:
+    """Resolve the process namespace when a config root is not explicit."""
+    return canonical_data_root()
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +258,7 @@ class RetrievalConfig:
     # Reranking (V3.3.2: ONNX backend enabled for all modes)
     # V3.4.2: Tested gte-reranker-modernbert-base (8K context) — REGRESSED
     # LoCoMo from 68.4% to 64.1%. Reverted to MiniLM-L-12-v2. The 512-token
-    # limit is acceptable because SLM's 6-channel retrieval pre-filters
+    # limit is acceptable because SLM's multi-producer retrieval pre-filters
     # relevant facts before reranking. See bench-v342-locomo.md.
     use_cross_encoder: bool = True
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
@@ -768,7 +774,7 @@ class SLMConfig:
     """
 
     mode: Mode = Mode.A
-    base_dir: Path = DEFAULT_BASE_DIR
+    base_dir: Path = field(default_factory=_runtime_base_dir)
     db_path: Path | None = None    # Computed from base_dir if None
     active_profile: str = "default"
 
@@ -801,6 +807,9 @@ class SLMConfig:
     # v3.5.0: scaling backends — "sqlite" / "cozo" / "auto" / "lancedb" / "sqlite-vec" / "auto".
     graph_backend: str = "auto"       # "auto" = cozo if pycozo installed, else sqlite
     vector_backend: str = "auto"      # "auto" = lancedb if installed, else sqlite-vec
+    # Scale Engine is installed separately from activation.  Existing roots
+    # stay on SQLite until a staged parity check promotes these projections.
+    scale_engine_state: str = "local_core"  # local_core | prepared | verified | promoted
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     health: HealthConfig = field(default_factory=HealthConfig)
 
@@ -824,16 +833,22 @@ class SLMConfig:
     @classmethod
     def load(cls, config_path: Path | None = None) -> SLMConfig:
         """Load config from JSON file. Returns default Mode A if file doesn't exist."""
-        # WP-07: resolve base dir through slm_home() at call time so all 3 env
-        # aliases (SLM_DATA_DIR → SL_MEMORY_PATH → SLM_HOME) are honoured.
+        # V3.7: process namespace selection is authoritative. A persisted
+        # base_dir may bootstrap a legacy custom root only when no environment
+        # alias selected the process namespace.
         try:
-            from superlocalmemory.cli._lazy_init import slm_home as _slm_home
-            _runtime_base = _slm_home()
+            from superlocalmemory.infra.data_root import (
+                canonical_data_root,
+                environment_data_root,
+            )
+            _environment_base = environment_data_root()
+            _runtime_base = canonical_data_root()
         except Exception:
+            _environment_base = None
             _runtime_base = DEFAULT_BASE_DIR
         path = config_path or (_runtime_base / "config.json")
         if not path.exists():
-            return cls.for_mode(Mode.A)
+            return cls.for_mode(Mode.A, base_dir=_runtime_base)
         import json
         try:
             data = json.loads(path.read_text())
@@ -843,13 +858,21 @@ class SLMConfig:
             logger.warning(
                 "config.json unreadable/corrupt (%s) — using Mode A default", exc
             )
-            return cls.for_mode(Mode.A)
+            return cls.for_mode(Mode.A, base_dir=_runtime_base)
         mode = Mode(data.get("mode", "a"))
         llm_data = data.get("llm", {})
         emb_data = data.get("embedding", {})
         # V3.5.9: read base_dir before constructing config so for_mode() builds
         # db_path from the user's directory, not DEFAULT_BASE_DIR.
-        raw_base_dir = Path(data.get("base_dir", str(_runtime_base)))
+        if _environment_base is not None:
+            raw_base_dir = _environment_base
+        else:
+            try:
+                raw_base_dir = canonical_data_root(
+                    configured_base_dir=data.get("base_dir", _runtime_base),
+                )
+            except Exception:
+                raw_base_dir = _runtime_base
         config = cls.for_mode(
             mode,
             llm_provider=llm_data.get("provider", ""),
@@ -865,6 +888,13 @@ class SLMConfig:
             base_dir=raw_base_dir,
         )
         config.active_profile = data.get("active_profile", "default")
+        config.graph_backend = data.get("graph_backend", "auto")
+        config.vector_backend = data.get("vector_backend", "auto")
+        state = data.get("scale_engine_state", "local_core")
+        config.scale_engine_state = (
+            state if state in {"local_core", "prepared", "verified", "promoted"}
+            else "local_core"
+        )
 
         # V3.3 config fields (additive — defaults work if missing from JSON)
         fg = data.get("forgetting", {})
@@ -1011,6 +1041,9 @@ class SLMConfig:
         data = {
             "mode": effective_mode,
             "active_profile": self.active_profile,
+            "graph_backend": self.graph_backend,
+            "vector_backend": self.vector_backend,
+            "scale_engine_state": self.scale_engine_state,
             "base_dir": str(self.base_dir),  # V3.5.9: persist so load() can restore custom paths
             "llm": {
                 "provider": self.llm.provider,
@@ -1026,11 +1059,10 @@ class SLMConfig:
                 "api_key": self.embedding.api_key,
                 "deployment_name": self.embedding.deployment_name,
             },
-            "retrieval": {
-                "use_cross_encoder": self.retrieval.use_cross_encoder,
-                "cross_encoder_model": self.retrieval.cross_encoder_model,
-                "cross_encoder_backend": self.retrieval.cross_encoder_backend,
-            },
+            # Persist the complete retrieval contract.  Saving only the
+            # cross-encoder subset silently reset channel limits, evidence
+            # floors, and agentic settings on the next mode/provider change.
+            "retrieval": asdict(self.retrieval),
         }
 
         # V3.4.11: Persist evolution config (C-CONFIGSAVE fix)
@@ -1165,6 +1197,7 @@ class SLMConfig:
                 base_dir=_base,
                 embedding=_a_emb,
                 llm=LLMConfig(),  # No LLM
+                temporal_validator=TemporalValidatorConfig(mode="a"),
                 retrieval=RetrievalConfig(
                     # V3.3.2: ONNX cross-encoder enabled for all modes (~200MB)
                     use_cross_encoder=True,
@@ -1206,6 +1239,7 @@ class SLMConfig:
                     api_base=llm_api_base or "http://localhost:11434",
                     api_key=llm_api_key or "",
                 ),
+                temporal_validator=TemporalValidatorConfig(mode="b"),
                 retrieval=RetrievalConfig(
                     # V3.3.2: ONNX cross-encoder enabled for all modes (~200MB)
                     use_cross_encoder=True,
@@ -1226,19 +1260,24 @@ class SLMConfig:
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
             )
-        else:
-            # Honour the user's configured embedding model when present on disk.
-            # Default to the local nomic model — Mode C cannot assume the user
-            # has access to an external embeddings endpoint, and the prior
-            # default ("text-embedding-3-large") was an OpenAI cloud model name
-            # that the local sentence-transformers worker cannot resolve.
+        elif embedding_endpoint:
             _c_emb = EmbeddingConfig(
-                model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
-                dimension=embedding_dimension or 768,
+                model_name=embedding_model_name or "text-embedding-3-large",
+                dimension=embedding_dimension or 3072,
                 provider=_c_emb_provider,
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
                 deployment_name=embedding_deployment,
+            )
+        else:
+            # Mode C upgrades LLM capability; it must not silently require a
+            # second paid embedding provider.  A 3072-dim cloud embedding
+            # contract without an endpoint/key was auto-routed to the local
+            # 768-dim Ollama embedder, which made ingestion fail at vector
+            # materialization. Cloud embeddings remain an explicit opt-in.
+            _c_emb = EmbeddingConfig(
+                model_name="nomic-ai/nomic-embed-text-v1.5",
+                dimension=768,
             )
         return cls(
             mode=mode,
@@ -1250,6 +1289,7 @@ class SLMConfig:
                 api_key=llm_api_key,
                 api_base=llm_api_base,
             ),
+            temporal_validator=TemporalValidatorConfig(mode="c"),
             channel_weights=ChannelWeights(
                 semantic=1.5,
                 bm25=1.2,

@@ -208,7 +208,10 @@ class AdaptiveRanker:
             return self._rerank_heuristic(results, query_context)
 
         order = np.argsort(-scores, kind="stable")
-        return [results[int(i)] for i in order]
+        return [
+            {**results[int(i)], "_adaptive_score": float(scores[int(i)])}
+            for i in order
+        ]
 
     # --- legacy load path (back-compat) --------------------------------
 

@@ -39,7 +39,12 @@ def _create_v2_db(path: Path, n_memories: int = 10):
 
 @pytest.fixture
 def migrator(tmp_path):
-    return V2Migrator(home=tmp_path)
+    # ``home`` selects the legacy V2 source only.  Pin the V3 destination
+    # explicitly so migration tests are isolated from the process data root.
+    return V2Migrator(
+        home=tmp_path,
+        v3_base=tmp_path / ".superlocalmemory",
+    )
 
 
 def test_detect_v2_when_exists(tmp_path, migrator):

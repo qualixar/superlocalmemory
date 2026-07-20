@@ -64,6 +64,20 @@ def _sse_body_to_dict(body: str) -> dict:
     return {}
 
 
+def _terminate_mcp_session(client, path: str, session_id: str) -> None:
+    """Orderly MCP session shutdown required by the stateful HTTP protocol."""
+    response = client.delete(
+        path,
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "mcp-session-id": session_id,
+        },
+    )
+    assert response.status_code == 200, (
+        f"session termination failed: {response.status_code} {response.text[:300]}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # (a) /mcp route is mounted on application
 # ---------------------------------------------------------------------------
@@ -94,33 +108,41 @@ def test_mcp_route_mounted_on_application(tmp_path, monkeypatch):
 
 def test_mcp_initialize_returns_server_info():
     """POST /mcp with initialize method returns 200 + serverInfo in SSE body."""
-    from mcp.server.fastmcp import FastMCP
     from starlette.testclient import TestClient
 
-    s = FastMCP("slm-test")
+    from superlocalmemory.mcp.http_transport import SLMFastMCP
+
+    s = SLMFastMCP("slm-test")
     mcp_app = s.streamable_http_app()
 
+    session_id = None
     with TestClient(mcp_app, base_url="http://localhost:8765") as client:
-        resp = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "probe", "version": "1"},
+        try:
+            resp = client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "probe", "version": "1"},
+                    },
                 },
-            },
-            headers={"Accept": "application/json, text/event-stream"},
-        )
+                headers={"Accept": "application/json, text/event-stream"},
+            )
+            session_id = resp.headers.get("mcp-session-id")
+        finally:
+            if session_id:
+                _terminate_mcp_session(client, "/mcp", session_id)
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
-    assert resp.headers.get("mcp-session-id"), "mcp-session-id header missing"
+    assert session_id, "mcp-session-id header missing"
 
     body = _sse_body_to_dict(resp.text)
     server_info = body.get("result", {}).get("serverInfo", {})
     assert server_info.get("name"), f"serverInfo.name missing in: {body}"
+    assert server_info.get("version") == "3.7.7", server_info
 
 
 # ---------------------------------------------------------------------------
@@ -137,35 +159,40 @@ def test_mcp_tools_list_returns_core_tools():
 
     mcp_app = slm_server.streamable_http_app()
 
+    session_id = None
     with TestClient(mcp_app, base_url="http://localhost:8765") as client:
-        # Step 1: initialize
-        r1 = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "probe", "version": "1"},
+        try:
+            # Step 1: initialize
+            r1 = client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "probe", "version": "1"},
+                    },
                 },
-            },
-            headers={"Accept": "application/json, text/event-stream"},
-        )
-        assert r1.status_code == 200
-        session_id = r1.headers.get("mcp-session-id")
-        assert session_id
+                headers={"Accept": "application/json, text/event-stream"},
+            )
+            assert r1.status_code == 200
+            session_id = r1.headers.get("mcp-session-id")
+            assert session_id
 
-        # Step 2: tools/list
-        r2 = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-            headers={
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": session_id,
-            },
-        )
+            # Step 2: tools/list
+            r2 = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "mcp-session-id": session_id,
+                },
+            )
+        finally:
+            if session_id:
+                _terminate_mcp_session(client, "/mcp", session_id)
     assert r2.status_code == 200
     body = _sse_body_to_dict(r2.text)
     tools = body.get("result", {}).get("tools", [])
@@ -203,40 +230,46 @@ def test_mcp_tools_call_recall_does_not_deadlock(monkeypatch):
     from superlocalmemory.mcp.server import server as slm_server
     mcp_app = slm_server.streamable_http_app()
 
+    session_id = None
     with TestClient(mcp_app, base_url="http://localhost:8765") as client:
-        r1 = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "probe", "version": "1"},
+        try:
+            r1 = client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "probe", "version": "1"},
+                    },
                 },
-            },
-            headers={"Accept": "application/json, text/event-stream"},
-        )
-        assert r1.status_code == 200
-        session_id = r1.headers.get("mcp-session-id")
+                headers={"Accept": "application/json, text/event-stream"},
+            )
+            assert r1.status_code == 200
+            session_id = r1.headers.get("mcp-session-id")
+            assert session_id
 
-        r2 = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "recall",
-                    "arguments": {"query": "test", "limit": 5},
+            r2 = client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "recall",
+                        "arguments": {"query": "test", "limit": 5},
+                    },
                 },
-            },
-            headers={
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": session_id,
-            },
-        )
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "mcp-session-id": session_id,
+                },
+            )
+        finally:
+            if session_id:
+                _terminate_mcp_session(client, "/mcp", session_id)
 
     assert r2.status_code == 200, f"Expected 200, got {r2.status_code}: {r2.text[:300]}"
     body = _sse_body_to_dict(r2.text)
@@ -280,6 +313,72 @@ def test_mcp_requests_fail_before_lifespan_start():
         asyncio.run(_probe())
 
 
+def test_mcp_delete_closes_stateful_transport_streams():
+    """Explicit session termination closes every AnyIO transport endpoint."""
+    from starlette.testclient import TestClient
+
+    from superlocalmemory.mcp.http_transport import SLMFastMCP
+
+    s = SLMFastMCP("session-close-test")
+    mcp_app = s.streamable_http_app()
+
+    with TestClient(mcp_app, base_url="http://localhost:8765") as client:
+        init = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "probe", "version": "1"},
+                },
+            },
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        session_id = init.headers.get("mcp-session-id")
+        assert session_id
+        transport = s.session_manager._server_instances[session_id]
+
+        _terminate_mcp_session(client, "/mcp", session_id)
+
+        assert transport.is_terminated
+        for stream_name in (
+            "_read_stream_writer", "_read_stream",
+            "_write_stream_reader", "_write_stream",
+        ):
+            stream = getattr(transport, stream_name)
+            assert stream is not None
+            assert stream._closed, f"{stream_name} remained open after DELETE"
+
+
+def test_sse_response_closes_owned_body_iterator():
+    """The product SSE response closes its per-request receive iterator."""
+    import anyio
+
+    from superlocalmemory.mcp.http_transport import ClosingEventSourceResponse
+
+    send_stream, receive_stream = anyio.create_memory_object_stream[dict](1)
+
+    async def _probe() -> None:
+        await send_stream.send({"data": "complete"})
+        await send_stream.aclose()
+        response = ClosingEventSourceResponse(receive_stream, ping=60)
+
+        async def _receive():
+            await anyio.sleep_forever()
+
+        async def _send(_message):
+            return None
+
+        await response(
+            {"type": "http", "method": "GET", "path": "/mcp"},
+            _receive,
+            _send,
+        )
+
+    anyio.run(_probe)
+    assert receive_stream._closed
+
+
 # ---------------------------------------------------------------------------
 # (f) v3.6.10 per-agent-ID routing: real FastMCP via /mcp/{agent_id}
 # ---------------------------------------------------------------------------
@@ -292,17 +391,17 @@ def test_mcp_per_agent_url_initialize_real_fastmcp():
     FastAPI mount → AgentIDExtractorASGI (root_path-aware) → FastMCP route '/'.
     """
     from fastapi import FastAPI
-    from mcp.server.fastmcp import FastMCP
     from starlette.testclient import TestClient
 
     from superlocalmemory.mcp.agent_context import (
         AgentIDExtractorASGI,
         get_current_agent_id,
     )
+    from superlocalmemory.mcp.http_transport import SLMFastMCP
 
     seen_agent: list[str] = []
 
-    s = FastMCP("slm-peragent-test")
+    s = SLMFastMCP("slm-peragent-test")
 
     @s.tool()
     async def whoami() -> dict:
@@ -327,42 +426,49 @@ def test_mcp_per_agent_url_initialize_real_fastmcp():
     app = FastAPI(lifespan=_lifespan)
     app.mount("/mcp", AgentIDExtractorASGI(mcp_app))
 
+    session_id = None
     with TestClient(app, base_url="http://localhost:8765") as client:
-        init = client.post(
-            "/mcp/claude",
-            json={
-                "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18", "capabilities": {},
-                    "clientInfo": {"name": "probe", "version": "1"},
+        try:
+            init = client.post(
+                "/mcp/claude",
+                json={
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "probe", "version": "1"},
+                    },
                 },
-            },
-            headers={"Accept": "application/json, text/event-stream"},
-        )
-        assert init.status_code == 200, f"init failed: {init.status_code} {init.text[:300]}"
-        session_id = init.headers.get("mcp-session-id")
-        assert session_id, "no session id from /mcp/claude initialize"
+                headers={"Accept": "application/json, text/event-stream"},
+            )
+            assert init.status_code == 200, (
+                f"init failed: {init.status_code} {init.text[:300]}"
+            )
+            session_id = init.headers.get("mcp-session-id")
+            assert session_id, "no session id from /mcp/claude initialize"
 
-        # Notifications/initialized then the tool call.
-        client.post(
-            "/mcp/claude",
-            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-            headers={
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": session_id,
-            },
-        )
-        call = client.post(
-            "/mcp/claude",
-            json={
-                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": "whoami", "arguments": {}},
-            },
-            headers={
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": session_id,
-            },
-        )
+            # Notifications/initialized then the tool call.
+            client.post(
+                "/mcp/claude",
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "mcp-session-id": session_id,
+                },
+            )
+            call = client.post(
+                "/mcp/claude",
+                json={
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "whoami", "arguments": {}},
+                },
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "mcp-session-id": session_id,
+                },
+            )
+        finally:
+            if session_id:
+                _terminate_mcp_session(client, "/mcp/claude", session_id)
 
     assert call.status_code == 200, f"tools/call failed: {call.status_code} {call.text[:300]}"
     # The tool ran with agent_id resolved from the URL path, not 'mcp_client'.

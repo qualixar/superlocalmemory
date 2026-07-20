@@ -66,6 +66,16 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_plugin_generated() -> None:
+    """Regenerate ignored plugin outputs before checking the plugin layout."""
+    subprocess.run(
+        ["node", "scripts/build-plugin.mjs", "--quiet"],
+        cwd=REPO,
+        check=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # T1 — plugin.json: at plugin/.claude-plugin/plugin.json
 # ---------------------------------------------------------------------------
@@ -83,8 +93,9 @@ class TestPluginJson:
 
     def test_plugin_json_has_version(self) -> None:
         data = _load_json(PLUGIN_CLAUDE_DIR / "plugin.json")
+        manifest = _load_json(PLUGIN_SRC / "manifest.json")
         assert "version" in data, "plugin.json missing 'version'"
-        assert data["version"] == "3.6.17"
+        assert data["version"] == manifest["version"]
 
     def test_plugin_json_has_description(self) -> None:
         data = _load_json(PLUGIN_CLAUDE_DIR / "plugin.json")
@@ -474,3 +485,19 @@ class TestGeneratorRoundTrip:
         assert src.read_text(encoding="utf-8") == out.read_text(encoding="utf-8"), (
             "plugin/requirements.txt must match plugin-src/requirements.txt byte-for-byte"
         )
+
+
+class TestPluginDaemonOwnership:
+    """Every plugin MCP process must join its namespace daemon first."""
+
+    def test_posix_launcher_starts_daemon_before_mcp(self) -> None:
+        launcher = PLUGIN_SRC / "scripts" / "slm-launch"
+        source = launcher.read_text(encoding="utf-8")
+        assert "serve start" in source
+        assert source.index("serve start") < source.rindex(" mcp")
+
+    def test_windows_launcher_starts_daemon_before_mcp(self) -> None:
+        launcher = PLUGIN_SRC / "scripts" / "slm-launch.bat"
+        source = launcher.read_text(encoding="utf-8")
+        assert "serve start" in source
+        assert source.index("serve start") < source.rindex(" mcp")

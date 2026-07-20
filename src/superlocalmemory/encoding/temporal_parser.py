@@ -306,6 +306,8 @@ class TemporalParser:
 
         return TemporalEvent(
             profile_id=fact.profile_id,
+            scope=fact.scope,
+            shared_with=fact.shared_with,
             entity_id=entity_id,
             fact_id=fact.fact_id,
             observation_date=obs_date,

@@ -19,16 +19,17 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-import os
 import sqlite3
 import uuid
-from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+from superlocalmemory.infra.data_root import canonical_data_root, state_path
+from superlocalmemory.mcp.shared import authorize_mcp_mutation
+
+if TYPE_CHECKING:
+    from superlocalmemory.mcp._pool_adapter import PoolRecallResponse
 
 logger = logging.getLogger(__name__)
-
-MEMORY_DIR = Path.home() / ".superlocalmemory"
-DB_PATH = MEMORY_DIR / "memory.db"
 
 
 def _sqlite_emergency_recall(
@@ -41,15 +42,17 @@ def _sqlite_emergency_recall(
     native BM25 ranking via ``ORDER BY fts.rank``. This is the Mem0 / Letta
     industry pattern — multi-process safe via SQLite WAL mode.
 
-    Quality degraded vs full 6-channel (no semantic, no entity graph, no
+    Quality degraded vs the full recall path (no semantic, no entity graph, no
     temporal/spreading-activation/Hopfield) but still provides real BM25
     math + age gate. Returns ``degraded_mode=True`` via the caller's flag.
 
     Used ONLY when Tier-1 (full daemon recall) fails completely. Normal
-    path is full 6-channel; this is the fire-alarm.
+    path is the full five-producer fusion + entity-graph enhancement;
+    this is the fire-alarm.
     """
-    from superlocalmemory.mcp._pool_adapter import PoolFact, PoolRecallItem, PoolRecallResponse
     import re
+
+    from superlocalmemory.mcp._pool_adapter import PoolFact, PoolRecallItem, PoolRecallResponse
     try:
         # FTS5 MATCH syntax: tokenize the query, drop special characters
         # that confuse the parser (/, :, ., etc), and join with OR for
@@ -64,7 +67,7 @@ def _sqlite_emergency_recall(
             f"AND f.created_at >= datetime('now', '-{int(max_age_days)} days') "
             if max_age_days > 0 else ""
         )
-        conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
+        conn = sqlite3.connect(str(state_path("memory.db")), timeout=5.0)
         try:
             rows = conn.execute(
                 f"""SELECT f.fact_id, f.content, f.memory_id, f.created_at,
@@ -129,24 +132,26 @@ def _emit_event(event_type: str, payload: dict | None = None,
     resolved_agent = source_agent if source_agent is not None else _get_agent_id()
     try:
         from superlocalmemory.infra.event_bus import EventBus
-        bus = EventBus.get_instance(str(DB_PATH))
+        bus = EventBus.get_instance(str(state_path("memory.db")))
         bus.emit(event_type, payload=payload, source_agent=resolved_agent,
                  source_protocol="mcp")
     except Exception as exc:
         logger.warning("event emit failed: type=%s err=%s", event_type, exc)
 
 
-def _register_agent(agent_id: str, profile_id: str) -> None:
+def _register_agent(agent_id: str, profile_id: str) -> bool:
     """Register an agent in the AgentRegistry (best-effort)."""
     try:
         from superlocalmemory.core.registry import AgentRegistry
-        registry_path = MEMORY_DIR / "agents.json"
+        registry_path = canonical_data_root() / "agents.json"
         registry = AgentRegistry(persist_path=registry_path)
         registry.register_agent(agent_id, profile_id)
+        return True
     except Exception as exc:
         logger.warning(
             "agent registry write failed: agent=%s err=%s", agent_id, exc,
         )
+        return False
 
 
 def register_active_tools(server, get_engine: Callable) -> None:
@@ -182,9 +187,11 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 permanently relevant still surface). Default: 30.
                 Set to 0 to disable the age gate entirely.
 
-        Scoring: Uses 6-channel fusion (semantic + BM25 + entity_graph + temporal +
-        spreading_activation + hopfield) with Ebbinghaus exponential recency decay
-        and FSRS stability strengthening by access frequency.
+        Scoring: five candidate producers (semantic + BM25 + temporal +
+        spreading_activation + hopfield) feed RRF fusion; the entity graph then
+        applies an optional post-fusion score enhancement. Combined with
+        Ebbinghaus exponential recency decay and FSRS stability strengthening by
+        access frequency.
         """
         try:
             from superlocalmemory.hooks.rules_engine import RulesEngine
@@ -194,7 +201,12 @@ def register_active_tools(server, get_engine: Callable) -> None:
             rules = RulesEngine()
 
             if not rules.should_recall("session_start"):
-                return {"success": True, "context": "", "memories": [], "message": "Auto-recall disabled"}
+                return {
+                    "success": True,
+                    "context": "",
+                    "memories": [],
+                    "message": "Auto-recall disabled",
+                }
 
             recall_config = rules.get_recall_config()
             relevance_threshold = recall_config.get("relevance_threshold", 0.3)
@@ -206,8 +218,9 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 search_query = "recent important decisions"
 
             # 2-tier recall (industry pattern: Hindsight / Zep / Supermemory):
-            # PRIMARY: full 6-channel via daemon (semantic + BM25 + entity + temporal
-            #          + Hopfield + spreading-activation, Fisher-Rao fusion, FSRS decay).
+            # PRIMARY: full recall via daemon — five candidate producers (semantic
+            #          + BM25 + temporal + Hopfield + spreading-activation) into RRF
+            #          fusion, then entity-graph post-fusion enhancement, FSRS decay.
             #          Fast because Ollama embed model is kept warm (keep_alive=-1
             #          + eager pre-warm at daemon boot).
             # EMERGENCY: direct FTS5 BM25 (Mem0 / Letta pattern). Used ONLY when
@@ -239,7 +252,8 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # Memories older than max_age_days are excluded unless their score
             # exceeds 0.7 (high-relevance architectural decisions always surface).
             # max_age_days=0 disables the gate entirely.
-            from datetime import UTC, datetime as _dt
+            from datetime import UTC
+            from datetime import datetime as _dt
             _now = _dt.now(UTC)
 
             def _age_days(created_at_str: str) -> float:
@@ -272,6 +286,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 clamp_content,
                 is_low_quality,
                 render_context,
+                sanitize_untrusted_content,
             )
 
             pid = engine.profile_id
@@ -282,7 +297,6 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 pinned_facts = engine.db.get_pinned(pid)
             except Exception:
                 pinned_facts = []
-            pinned_ids = {f.fact_id for f in pinned_facts}
             pinned_seen = set()
 
             cfg_inj = getattr(getattr(engine, "config", None), "injection", None)
@@ -304,6 +318,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     importance=getattr(pf, "importance", 0.0) or 0.0,
                     access_count=getattr(pf, "access_count", 0) or 0,
                     pinned=True,
+                    source_type="pinned-fact",
                 ))
                 pinned_seen.add(pf.fact_id)
 
@@ -317,17 +332,18 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     fact_id=r.fact.fact_id,
                     importance=getattr(r.fact, "importance", 0.0) or 0.0,
                     access_count=getattr(r.fact, "access_count", 0) or 0,
+                    source_type="recall",
                 ))
 
             mode_str = str(getattr(engine, "mode", "B")).upper()
             try:
-                context = render_context(inj_mems, mode=mode_str, cfg=cfg_inj, wrap=False)
+                context = render_context(
+                    inj_mems, mode=mode_str, cfg=cfg_inj, wrap=True,
+                )
             except Exception:
-                # Fall back to legacy content building on any formatter failure
-                lines = ["# Relevant Memory Context", ""]
-                for m in inj_mems[:max_results]:
-                    lines.append(f"- {m.content[:200]}")
-                context = "\n".join(lines)
+                # Fail closed: never serialize retrieved content through a
+                # weaker ad-hoc path when the mandatory renderer fails.
+                context = ""
 
             # GAP-FIX (v3.4.65 delivery-lead): the memories[] array is part of
             # the MCP response Claude Code ingests — it MUST be bounded too, not
@@ -335,16 +351,43 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # content shipped here (one fact was 131K chars → ~124K-token
             # response, defeating the whole token budget). Clamp each content
             # to per_memory_max_tokens, drop junk, and honour max_results.
-            memories = [
-                {
+            contract_by_id = {
+                r.fact.fact_id: r for r in relevant[:max_results]
+            }
+            memories = []
+            for position, m in enumerate(inj_mems[:max_results], start=1):
+                if is_low_quality(m.content):
+                    continue
+                result_contract = contract_by_id.get(m.fact_id)
+                relevance = (
+                    getattr(result_contract, "relevance_score", m.score)
+                    if result_contract is not None else m.score
+                )
+                memory_confidence = (
+                    getattr(result_contract, "memory_confidence", None)
+                    if result_contract is not None else None
+                )
+                memories.append({
                     "fact_id": m.fact_id,
-                    "content": clamp_content(m.content, cfg_inj),
+                    "content": clamp_content(
+                        sanitize_untrusted_content(m.content), cfg_inj,
+                    ),
                     "score": m.score,
+                    "relevance_score": relevance,
+                    "ranking_score": (
+                        getattr(result_contract, "ranking_score", None)
+                        if result_contract is not None else None
+                    ),
+                    "confidence": memory_confidence,
+                    "memory_confidence": memory_confidence,
+                    "rank_position": (
+                        getattr(result_contract, "rank_position", position)
+                        if result_contract is not None else position
+                    ),
                     "is_core": m.is_core,
-                }
-                for m in inj_mems[:max_results]
-                if not is_low_quality(m.content)
-            ]
+                    "untrusted": True,
+                    "source_type": m.source_type,
+                })
 
             # Get learning status
             feedback_count = 0
@@ -366,7 +409,21 @@ def register_active_tools(server, get_engine: Callable) -> None:
 
             # Register agent + emit event (v3.4.39: SLM_AGENT_ID env support)
             agent_id = _get_agent_id()
-            _register_agent(agent_id, pid)
+            if hasattr(engine, "_hooks"):
+                registration_auth = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-agent-registration",
+                    profile_id=pid,
+                )
+                if _register_agent(agent_id, pid):
+                    registration_auth.complete()
+            else:
+                # A LIGHT client without the policy registry is read-capable,
+                # but must not fall back to an unauthorised registry write.
+                logger.info(
+                    "agent registration skipped: policy hooks unavailable"
+                )
             _emit_event("agent.connected", {
                 "agent_id": agent_id,
                 "project_path": project_path,
@@ -381,11 +438,29 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 "memory_count": len(memories),
                 "core_memory": [m["content"] for m in memories if m.get("is_core")],
                 "degraded_mode": degraded_mode,
-                "retrieval_mode": "emergency_fts5_bm25" if degraded_mode else "full_6_channel",
+                "retrieval_mode": (
+                    "emergency_fts5_bm25"
+                    if degraded_mode
+                    else "hybrid_candidate_fusion"
+                ),
+                "score_contract_version": getattr(
+                    response, "score_contract_version", "2"
+                ),
+                "calibration_status": getattr(
+                    response, "calibration_status", "uncalibrated"
+                ),
+                "calibration_id": getattr(response, "calibration_id", None),
+                "answer_confidence": getattr(response, "answer_confidence", None),
+                "abstained": getattr(response, "abstained", not bool(relevant)),
+                "abstention_reason": getattr(response, "abstention_reason", None),
                 "learning": {
                     "feedback_signals": feedback_count,
                     "phase": 1 if feedback_count < 50 else (2 if feedback_count < 200 else 3),
-                    "status": "collecting" if feedback_count < 50 else ("learning" if feedback_count < 200 else "trained"),
+                    "status": (
+                        "collecting"
+                        if feedback_count < 50
+                        else "learning" if feedback_count < 200 else "trained"
+                    ),
                 },
             }
         except Exception as exc:
@@ -496,8 +571,22 @@ def register_active_tools(server, get_engine: Callable) -> None:
             pid = engine.profile_id
 
             if feedback not in ("relevant", "irrelevant", "partial"):
-                return {"success": False, "error": f"Invalid feedback: {feedback}. Use relevant/irrelevant/partial"}
+                return {
+                    "success": False,
+                    "error": (
+                        f"Invalid feedback: {feedback}. "
+                        "Use relevant/irrelevant/partial"
+                    ),
+                }
 
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-recall-feedback",
+                profile_id=pid,
+                fact_id=fact_id,
+                content_preview=feedback,
+            )
             record = engine._adaptive_learner.record_feedback(
                 query=query,
                 fact_id=fact_id,
@@ -506,6 +595,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
             )
 
             count = engine._adaptive_learner.get_feedback_count(pid)
+            authorization.complete()
 
             _emit_event("pattern.learned", {
                 "fact_id": fact_id,
@@ -562,7 +652,15 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     pass
             if not sid:
                 return {"success": False, "error": "No session_id provided or found"}
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-session-close",
+                profile_id=engine.profile_id,
+                content_preview=sid,
+            )
             count = engine.close_session(sid)
+            authorization.complete()
             return {
                 "success": True,
                 "session_id": sid,
@@ -596,13 +694,29 @@ def register_active_tools(server, get_engine: Callable) -> None:
             if action == "pin":
                 if not fact_id:
                     return {"success": False, "error": "fact_id required for pin"}
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-core-memory-pin",
+                    profile_id=pid,
+                    fact_id=fact_id,
+                )
                 db.set_pinned(fact_id, True)
+                authorization.complete()
                 return {"success": True, "action": "pin", "fact_id": fact_id}
 
             if action == "unpin":
                 if not fact_id:
                     return {"success": False, "error": "fact_id required for unpin"}
+                authorization = authorize_mcp_mutation(
+                    engine,
+                    "update",
+                    mutation_source="mcp-core-memory-unpin",
+                    profile_id=pid,
+                    fact_id=fact_id,
+                )
                 db.set_pinned(fact_id, False)
+                authorization.complete()
                 return {"success": True, "action": "unpin", "fact_id": fact_id}
 
             if action == "list":

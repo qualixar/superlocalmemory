@@ -11,7 +11,7 @@ Configurable interval via ForgettingConfig.scheduler_interval_minutes.
 Defaults to 30 min. Disabled during benchmarks (no config.forgetting.enabled).
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
-License: Elastic-2.0
+License: AGPL-3.0-or-later
 """
 
 from __future__ import annotations
@@ -78,32 +78,41 @@ class MaintenanceScheduler:
         """Execute maintenance + auto-backup check, then schedule next run."""
         if not self._running:
             return
-        try:
-            from superlocalmemory.core.maintenance import run_maintenance
-            counts = run_maintenance(self._db, self._config, self._profile_id)
-            logger.info("Scheduled maintenance complete: %s", counts)
-        except Exception as exc:
-            logger.warning("Scheduled maintenance failed: %s", exc)
+        for profile_id in self._profile_ids():
+            try:
+                from superlocalmemory.core.maintenance import run_maintenance
+                counts = run_maintenance(self._db, self._config, profile_id)
+                logger.info("Scheduled maintenance complete for %s: %s", profile_id, counts)
+            except Exception as exc:
+                logger.warning("Scheduled maintenance failed for %s: %s", profile_id, exc)
 
-        # V3.4.11: Graph pruning (remove orphan edges)
-        try:
-            from superlocalmemory.core.graph_pruner import prune_graph
-            prune_stats = prune_graph(self._db.db_path, self._profile_id)
-            removed = prune_stats["total_before"] - prune_stats["total_after"]
-            if removed > 0:
-                logger.info("Graph pruning: %d edges removed", removed)
-        except Exception as exc:
-            logger.debug("Graph pruning skipped: %s", exc)
+            # V3.4.11: Graph pruning (remove orphan edges)
+            try:
+                from superlocalmemory.core.graph_pruner import prune_graph
+                prune_stats = prune_graph(self._db.db_path, profile_id)
+                removed = prune_stats["total_before"] - prune_stats["total_after"]
+                if removed > 0:
+                    logger.info("Graph pruning for %s: %d edges removed", profile_id, removed)
+            except Exception as exc:
+                logger.debug("Graph pruning skipped for %s: %s", profile_id, exc)
 
-        # V3.4.11: Run tier evaluation (demote old facts)
-        try:
-            from superlocalmemory.core.tier_manager import evaluate_tiers
-            stats = evaluate_tiers(self._db, self._profile_id)
-            demoted = stats["demoted_to_warm"] + stats["demoted_to_cold"] + stats["demoted_to_archive"]
-            if demoted > 0:
-                logger.info("Tier evaluation: %d facts demoted", demoted)
-        except Exception as exc:
-            logger.debug("Tier evaluation skipped: %s", exc)
+            # Lifecycle evaluation must cover every stored profile, not only
+            # whichever profile was active when the engine started.
+            try:
+                from superlocalmemory.core.tier_manager import evaluate_tiers
+                stats = evaluate_tiers(self._db, profile_id)
+                demoted = stats["demoted_to_warm"] + stats["demoted_to_cold"] + stats["demoted_to_archive"]
+                if demoted > 0:
+                    logger.info("Tier evaluation for %s: %d facts demoted", profile_id, demoted)
+            except Exception as exc:
+                logger.debug("Tier evaluation skipped for %s: %s", profile_id, exc)
+
+            # v3.6.6 F-5: Daily core-block recompile with hygiene.
+            try:
+                from superlocalmemory.core.block_hygiene import _recompile_core_blocks
+                _recompile_core_blocks(self._db, self._config, profile_id)
+            except Exception as exc:
+                logger.debug("Core-block recompile skipped for %s: %s", profile_id, exc)
 
         # V3.4.10: Check if auto-backup is due
         try:
@@ -124,16 +133,23 @@ class MaintenanceScheduler:
         except Exception as exc:
             logger.debug("Pending cleanup skipped: %s", exc)
 
-        # v3.6.6 F-5: Daily core-block recompile with hygiene (dedup + char cap).
-        # Ensures blocks stay clean even when purge or new facts arrive between
-        # session-init recompiles.
-        try:
-            from superlocalmemory.core.block_hygiene import _recompile_core_blocks
-            _recompile_core_blocks(self._db, self._config, self._profile_id)
-        except Exception as exc:
-            logger.debug("Core-block recompile skipped: %s", exc)
-
         self._schedule_next()
+
+    def _profile_ids(self) -> tuple[str, ...]:
+        """Return every persisted profile with a deterministic fallback."""
+        try:
+            rows = self._db.execute(
+                "SELECT profile_id FROM profiles ORDER BY profile_id",
+                (),
+            )
+            profiles = tuple(
+                dict.fromkeys(str(row["profile_id"]) for row in rows if row["profile_id"])
+            )
+            if profiles:
+                return profiles
+        except Exception as exc:
+            logger.debug("Profile enumeration failed: %s", exc)
+        return (self._profile_id,)
 
     def _sync_cloud_destinations(self, manager: object) -> None:
         """Push latest backup to configured cloud destinations."""

@@ -14,6 +14,23 @@
 // ============================================================================
 
 window.SLM_FETCH_TIMEOUT_MS = 15000;
+window.SLM_INSTALL_TOKEN_KEY = 'slm_install_token';
+
+window.slmInstallToken = async function (forceRefresh) {
+    if (!forceRefresh) {
+        var cached = sessionStorage.getItem(window.SLM_INSTALL_TOKEN_KEY);
+        if (cached) return cached;
+    }
+    var response = await window.__slmOriginalFetch(
+        '/internal/token',
+        {credentials: 'same-origin'}
+    );
+    if (!response.ok) return '';
+    var payload = await response.json();
+    var token = payload && payload.token ? payload.token : '';
+    if (token) sessionStorage.setItem(window.SLM_INSTALL_TOKEN_KEY, token);
+    return token;
+};
 
 // Global fetch patch: apply the abort timeout to every relative-URL request
 // automatically. 17 UI modules call bare fetch() — patching here avoids
@@ -26,18 +43,42 @@ window.SLM_FETCH_TIMEOUT_MS = 15000;
     if (window.__slmFetchPatched) return;
     window.__slmFetchPatched = true;
     var _origFetch = window.fetch.bind(window);
+    window.__slmOriginalFetch = _origFetch;
     window.fetch = function (input, init) {
-        init = init || {};
+        init = Object.assign({}, init || {});
         var urlStr = typeof input === 'string' ? input : (input && input.url) || '';
         var isRelative = !(/^https?:\/\//i.test(urlStr));
-        if (!isRelative || init.signal) {
-            return _origFetch(input, init);
+        var method = String(
+            init.method || (input && input.method) || 'GET'
+        ).toUpperCase();
+        var mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1;
+
+        function send() {
+            if (!isRelative || init.signal) {
+                return _origFetch(input, init);
+            }
+            var controller = new AbortController();
+            var timeoutMs = init.timeoutMs || window.SLM_FETCH_TIMEOUT_MS;
+            var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+            init.signal = controller.signal;
+            return _origFetch(input, init).finally(function () { clearTimeout(timer); });
         }
-        var controller = new AbortController();
-        var timeoutMs = init.timeoutMs || window.SLM_FETCH_TIMEOUT_MS;
-        var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
-        init.signal = controller.signal;
-        return _origFetch(input, init).finally(function () { clearTimeout(timer); });
+
+        if (isRelative && mutating && urlStr !== '/internal/token') {
+            return window.slmInstallToken(false).then(function (token) {
+                if (!token) throw new Error('local write credential unavailable');
+                var headers = new Headers(
+                    init.headers || (input && input.headers) || {}
+                );
+                if (!headers.has('X-Install-Token')) {
+                    headers.set('X-Install-Token', token);
+                }
+                init.headers = headers;
+                init.credentials = init.credentials || 'same-origin';
+                return send();
+            });
+        }
+        return send();
     };
 })();
 
@@ -416,6 +457,9 @@ function refreshDashboard() {
 function populateFilters(categories, projects) {
     var categorySelect = document.getElementById('filter-category');
     var projectSelect = document.getElementById('filter-project');
+    // Clear existing options beyond the first placeholder to prevent duplicates on refresh
+    if (categorySelect) while (categorySelect.options.length > 1) categorySelect.remove(1);
+    if (projectSelect) while (projectSelect.options.length > 1) projectSelect.remove(1);
     categories.forEach(function(cat) {
         if (cat.category) {
             var option = document.createElement('option');

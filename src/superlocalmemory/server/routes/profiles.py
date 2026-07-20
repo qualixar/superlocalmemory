@@ -10,17 +10,24 @@ Routes: /api/profiles, /api/profiles/{name}/switch,
 SQLite is the single source of truth for profiles. profiles.json
 is kept in sync as a cache for backward compatibility.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 from .helpers import (
     get_db_connection, validate_profile_name,
     ProfileSwitch, DB_PATH,
     sync_profiles, ensure_profile_in_db, ensure_profile_in_json,
-    set_active_profile_everywhere, delete_profile_from_db,
+    delete_profile_from_db,
     _load_profiles_json, _save_profiles_json,
+)
+from superlocalmemory.server.profile_runtime import (
+    commit_daemon_profile_switch,
+    get_profile_runtime,
 )
 
 logger = logging.getLogger("superlocalmemory.routes.profiles")
@@ -52,12 +59,11 @@ def _get_memory_count(profile: str) -> int:
 
 
 @router.get("/api/profiles")
-async def list_profiles():
+async def list_profiles(request: Request):
     """List available memory profiles (synced from SQLite + profiles.json)."""
     try:
         merged = sync_profiles()
-        json_config = _load_profiles_json()
-        active = json_config.get('active_profile', 'default')
+        active = get_profile_runtime(request.app.state).snapshot.profile_id
 
         profiles = []
         for p in merged:
@@ -84,7 +90,7 @@ async def list_profiles():
 
 
 @router.post("/api/profiles/{name}/switch")
-async def switch_profile(name: str):
+async def switch_profile(name: str, request: Request):
     """Switch active memory profile (persists to both config stores)."""
     try:
         if not validate_profile_name(name):
@@ -100,14 +106,23 @@ async def switch_profile(name: str):
                 detail=f"Profile '{name}' not found. Available: {available}",
             )
 
-        previous = _load_profiles_json().get('active_profile', 'default')
-        set_active_profile_everywhere(name)
-
-        # Update last_used in profiles.json
-        json_config = _load_profiles_json()
-        if name in json_config.get('profiles', {}):
-            json_config['profiles'][name]['last_used'] = datetime.now(timezone.utc).isoformat()
-            _save_profiles_json(json_config)
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-profile-switch",
+            profile_id=name,
+        )
+        runtime = get_profile_runtime(request.app.state)
+        previous = runtime.snapshot.profile_id
+        snapshot = await asyncio.to_thread(
+            runtime.transition,
+            name,
+            lambda prior, target: commit_daemon_profile_switch(
+                request.app.state,
+                prior,
+                target,
+            ),
+        )
 
         count = _get_memory_count(name)
 
@@ -118,9 +133,11 @@ async def switch_profile(name: str):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
+        authorization.complete()
         return {
             "success": True, "active_profile": name,
             "previous_profile": previous, "memory_count": count,
+            "generation": snapshot.generation,
             "message": f"Switched to profile '{name}' ({count} memories).",
         }
 
@@ -131,7 +148,7 @@ async def switch_profile(name: str):
 
 
 @router.post("/api/profiles/create")
-async def create_profile(body: ProfileSwitch):
+async def create_profile(body: ProfileSwitch, request: Request):
     """Create a new memory profile (writes to BOTH SQLite and profiles.json)."""
     try:
         name = body.profile_name
@@ -144,11 +161,17 @@ async def create_profile(body: ProfileSwitch):
         if name in merged_ids:
             raise HTTPException(status_code=409, detail=f"Profile '{name}' already exists")
 
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-profile-create",
+        )
         # Write to BOTH stores atomically
         desc = f'Memory profile: {name}'
         ensure_profile_in_db(name, desc)
         ensure_profile_in_json(name, desc)
 
+        authorization.complete()
         return {"success": True, "profile": name, "message": f"Profile '{name}' created"}
 
     except HTTPException:
@@ -158,7 +181,7 @@ async def create_profile(body: ProfileSwitch):
 
 
 @router.delete("/api/profiles/{name}")
-async def delete_profile(name: str):
+async def delete_profile(name: str, request: Request):
     """Delete a profile. Moves its memories to 'default'."""
     try:
         if name == 'default':
@@ -169,10 +192,18 @@ async def delete_profile(name: str):
         if name not in merged_ids:
             raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
 
-        json_config = _load_profiles_json()
-        if json_config.get('active_profile') == name:
+        runtime = get_profile_runtime(request.app.state)
+        if runtime.snapshot.profile_id == name:
             raise HTTPException(status_code=400, detail="Cannot delete active profile.")
 
+        json_config = _load_profiles_json()
+
+        authorization = authorize_route_mutation(
+            request,
+            operation="delete",
+            source_agent_id="http-profile-delete",
+            profile_id=name,
+        )
         # Move data to default before deleting (bypasses CASCADE)
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -204,6 +235,7 @@ async def delete_profile(name: str):
         json_config['profiles'] = profiles
         _save_profiles_json(json_config)
 
+        authorization.complete()
         return {
             "success": True,
             "message": f"Profile '{name}' deleted. {moved} memories moved to 'default'.",

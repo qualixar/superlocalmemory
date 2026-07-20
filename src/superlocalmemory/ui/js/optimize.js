@@ -130,13 +130,18 @@
 
   async function _putConfig(body) {
     try {
-      await fetch('/api/optimize/config', {
+      var resp = await fetch('/api/optimize/config', {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
       });
+      if (!resp.ok) {
+        console.warn('Config update failed: HTTP ' + resp.status);
+        _loadOptimizeConfig(); // revert toggles to server state
+      }
     } catch (e) {
       console.log('Config update error:', e);
+      _loadOptimizeConfig(); // revert toggles to server state
     }
   }
 
