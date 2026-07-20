@@ -41,7 +41,8 @@ MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
 _T = TypeVar("_T")
 _WRITE_RETRY_ATTEMPTS = 6
 _WRITE_RETRY_BASE_SECONDS = 0.025
-_WRITE_BUSY_TIMEOUT_MS = 250
+# DatabaseManager uses 10 000 ms on the same memory.db; was 250 ms (40× smaller).
+_WRITE_BUSY_TIMEOUT_MS = 5_000
 
 
 class MeshBroker:

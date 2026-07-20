@@ -401,3 +401,10 @@ class TestMeshGuards:
         peers = broker.list_peers()
         assert peers[0]["project_path"] == "/projects/qos"
         assert peers[0]["agent_type"] == "claude_code"
+
+
+class TestMeshWriteTimeout:
+    def test_broker_write_timeout_is_sufficient_for_daemon_writes(self):
+        from superlocalmemory.mesh.broker import _WRITE_BUSY_TIMEOUT_MS
+        # 250 ms caused all 6 retries to exhaust before daemon writes released RESERVED lock.
+        assert _WRITE_BUSY_TIMEOUT_MS >= 2_000
