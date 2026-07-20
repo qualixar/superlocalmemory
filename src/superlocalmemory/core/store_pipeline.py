@@ -208,21 +208,33 @@ def run_store(
     if not pre_authorized:
         hooks.run_pre("store", hook_ctx)
 
-    if entropy_gate and not entropy_gate.should_pass(content):
+    # Admission gates apply to FRESH submissions only. A materialization pass
+    # re-runs this pipeline for content whose queryable projection was already
+    # committed at submit (``queryable_fact_ids`` is set). Re-applying admission
+    # here — the entropy near-duplicate gate especially — would discard that
+    # already-committed fact (return []) and wedge the operation in an endless
+    # materialize retry loop ("materialization produced no final facts"). The
+    # near-duplicate verdict is expected at materialize: the submitted
+    # projection itself is in the gate's window. Admission was already decided
+    # at submit (store_fast enforces the same gates), so skip it here.
+    is_materialization = bool(queryable_fact_ids)
+
+    if entropy_gate and not is_materialization and not entropy_gate.should_pass(content):
         return []
 
     # v3.5.0: store-side quality gate (H3). Reject prompt-template leakage,
     # empty placeholders, and other non-memory content BEFORE it enters the
     # DB. Uses the shared is_low_quality from core/injection so both store
     # AND injection filter by identical rules. Saves DB IO + recall pollution.
-    try:
-        from superlocalmemory.core.injection import is_low_quality
-        if is_low_quality(content):
-            logger.debug("Store rejected (low-quality content): %s...",
-                         content[:80].replace("\n", " "))
-            return []
-    except Exception:
-        pass  # Best-effort gate; store succeeds if import fails
+    if not is_materialization:
+        try:
+            from superlocalmemory.core.injection import is_low_quality
+            if is_low_quality(content):
+                logger.debug("Store rejected (low-quality content): %s...",
+                             content[:80].replace("\n", " "))
+                return []
+        except Exception:
+            pass  # Best-effort gate; store succeeds if import fails
 
     from superlocalmemory.encoding.temporal_parser import TemporalParser
     parser = temporal_parser or TemporalParser()

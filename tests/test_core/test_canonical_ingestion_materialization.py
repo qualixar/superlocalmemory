@@ -31,6 +31,47 @@ def _install_m018(engine) -> None:
         M018_ingestion_operations.apply(conn)
 
 
+def test_materialization_ignores_admission_gate_for_submitted_operation(
+    engine_with_mock_deps,
+) -> None:
+    """An already-submitted operation must materialize even if the admission
+    gate now rejects its content.
+
+    Regression: ``run_store`` applied the entropy / low-quality *admission* gate
+    at the materialize step. Content whose queryable projection was already
+    committed at submit (e.g. near-identical session-close summaries, which the
+    entropy gate scores as >0.95 near-duplicates once the window is warm) was
+    re-rejected — ``run_store`` returned ``[]`` — so materialization raised
+    "materialization produced no final facts", the operation was marked FAILED,
+    and the background worker retried it forever. Admission belongs to submit,
+    not to materialization.
+    """
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Alice owns the incident review process and records every approved "
+            "corrective action for the platform team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="admission-gate-at-materialize",
+        trusted_actor_id="daemon-capability:owned-instance",
+    ))
+    assert receipt.state is IngestionState.QUERYABLE
+    queryable_id = receipt.queryable_fact_ids[0]
+
+    # The gate now treats the content as a near-duplicate (its rolling window
+    # already holds the committed projection). Pre-fix this discarded the fact.
+    with patch.object(engine._entropy_gate, "should_pass", return_value=False):
+        completed = command.materialize(receipt.operation_id)
+
+    assert completed.state is IngestionState.COMPLETE
+    assert completed.last_error == ""
+    assert queryable_id in completed.final_fact_ids
+
+
 def test_materialization_promotes_queryable_fact_without_duplicate_memory(
     engine_with_mock_deps,
 ) -> None:
