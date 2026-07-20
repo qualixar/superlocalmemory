@@ -4,20 +4,33 @@
 # Cross-platform counterpart: slm-launch.bat (Windows)
 # Referenced by plugin/.mcp.json as the MCP server command.
 #
-# Resolves the correct venv binary for POSIX and joins the namespace daemon
-# before opening the MCP stdio transport. This preserves one writer for all
-# parallel Claude sessions that share CLAUDE_PLUGIN_DATA.
+# Resolves the correct venv binary for POSIX:
+#   ${CLAUDE_PLUGIN_DATA}/venv/bin/slm mcp
 #
 # On Windows, Claude Code invokes slm-launch.bat instead (same-stem, .bat extension).
 #
 # Environment:
 #   CLAUDE_PLUGIN_DATA — persistent data dir where venv lives
+#   SLM_LAUNCHER       — optional; controls which slm binary is used:
+#                          plugin (default) — ${CLAUDE_PLUGIN_DATA}/venv/bin/slm
+#                          system           — first slm on PATH
+#                          /path or $VAR    — explicit path, shell-expanded
 
-SLM_BIN="${CLAUDE_PLUGIN_DATA}/venv/bin/slm"
-
-if ! "${SLM_BIN}" serve start >&2; then
-    echo "SLM plugin: unable to start the owned daemon; refusing a direct MCP writer." >&2
-    exit 1
-fi
-
-exec "${SLM_BIN}" mcp
+case "${SLM_LAUNCHER:-plugin}" in
+    plugin)
+        exec "${CLAUDE_PLUGIN_DATA}/venv/bin/slm" mcp
+        ;;
+    system)
+        exec slm mcp
+        ;;
+    /*|\$*)
+        # ponytail: eval expands $VAR / ${VAR} / ~ before the existence check
+        _SLM_BIN=$(eval echo "$SLM_LAUNCHER")
+        [ -x "$_SLM_BIN" ] || { echo "SLM_LAUNCHER not executable: $_SLM_BIN" >&2; exit 1; }
+        exec "$_SLM_BIN" mcp
+        ;;
+    *)
+        echo "Unknown SLM_LAUNCHER value: ${SLM_LAUNCHER}" >&2
+        exit 1
+        ;;
+esac
