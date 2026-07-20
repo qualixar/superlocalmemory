@@ -265,7 +265,11 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                     # the git-state snapshot written by `slm hook stop`.
                     {
                         "type": "command",
-                        "command": "slm session close 2>/dev/null || true",
+                        "command": (
+                            'cmd /c "slm session close 2>NUL || exit /b 0"'
+                            if sys.platform == "win32"
+                            else "slm session close 2>/dev/null || true"
+                        ),
                         "timeout": 15000,
                     },
                 ]
