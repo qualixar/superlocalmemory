@@ -1,5 +1,5 @@
 // SuperLocalMemory V3 — Math Health
-// Displays status of Fisher-Rao, sheaf cohomology, and Langevin dynamics layers.
+// Displays status of the mathematical scoring, consistency, and lifecycle layers.
 
 async function loadMathHealth() {
     var CID = 'math-health-cards';

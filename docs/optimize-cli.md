@@ -123,7 +123,7 @@ Delete entries whose tag array contains the specified tag.
 
 ```bash
 slm cache invalidate --tag "project:slm"
-slm cache invalidate --tag "user:varun" --json
+slm cache invalidate --tag "user:alice" --json
 ```
 
 ### `slm cache ttl`
