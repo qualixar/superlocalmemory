@@ -93,6 +93,35 @@ def memory_protocol_markdown() -> str:
         "learned>\", \"tags\": \"<comma-separated kebab-case keywords>\"}`.\n"
         "- A \"substantial task\" is anything you would write a commit "
         "message or handoff note about — not every tool call.\n"
+        "\n"
+        + optimize_protocol_markdown()
+    )
+
+
+def optimize_protocol_markdown() -> str:
+    """Return the agent-facing token-optimization protocol block (cache/compress).
+
+    Proxy-free: these MCP tools let the agent losslessly shrink large tool output
+    and reuse repeated reads through the same surface, so an agent on any
+    front-end (not just Claude Code) can save tokens without a proxy. Fail-open —
+    a non-ok result means "use the original and continue".
+    """
+    return (
+        "## Runtime token-optimization protocol (fail-open)\n"
+        "SLM can losslessly compress large tool output and cache repeated reads "
+        "through the same MCP surface — no proxy required. These calls only save "
+        "tokens; if one returns `ok: false`, use the original and continue.\n\n"
+        "- **Large tool output (>2000 chars)** → `hub__call_tool` with "
+        "`tool=\"slm__slm_compress\"` and `arguments={\"content\": \"<text>\", "
+        "\"mode\": \"auto\", \"reversible\": true}`; keep the returned `ccr_id` "
+        "and call `tool=\"slm__slm_retrieve\"` if you later need the full "
+        "original.\n"
+        "- **Repeated reads/searches** → `hub__call_tool` with "
+        "`tool=\"slm__slm_cache_get\"` and `arguments={\"key\": \"file:<path>\"}` "
+        "first; on a miss, store the result with `tool=\"slm__slm_cache_set\"` "
+        "(ttl ~1800).\n"
+        "- **Never compress or cache**: code you will edit, JSON you will parse, "
+        "secrets, ccr_ids, or anything under ~500 chars.\n"
     )
 
 
@@ -101,4 +130,5 @@ __all__ = (
     "SLM_MARKER_END",
     "strip_slm_block",
     "memory_protocol_markdown",
+    "optimize_protocol_markdown",
 )
