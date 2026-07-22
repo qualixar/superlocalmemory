@@ -113,7 +113,8 @@ async def get_agent_memory_activity(
                     "COUNT(*) AS cnt, MAX(created_at) AS last_active, "
                     "GROUP_CONCAT(DISTINCT source_type) AS sources "
                     "FROM ingestion_operations WHERE profile_id=? "
-                    "GROUP BY agent_id ORDER BY cnt DESC, agent_id ASC",
+                    "GROUP BY agent_id ORDER BY cnt DESC, agent_id ASC "
+                    "LIMIT 500",
                     (pid,),
                 ).fetchall()
                 for r in rows:
@@ -190,38 +191,39 @@ async def get_trust_stats(request: Request):
             conn = sqlite3.connect(str(DB_PATH))
             conn.row_factory = sqlite3.Row
             try:
-                # Count trust signals
-                row = conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM trust_signals "
-                    "WHERE profile_id = ?", (pid,),
-                ).fetchone()
-                total_signals = row["cnt"] if row else 0
-            except sqlite3.OperationalError:
-                pass
+                try:
+                    # Count trust signals
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS cnt FROM trust_signals "
+                        "WHERE profile_id = ?", (pid,),
+                    ).fetchone()
+                    total_signals = row["cnt"] if row else 0
+                except sqlite3.OperationalError:
+                    pass
 
-            try:
-                # Average trust score
-                row = conn.execute(
-                    "SELECT AVG(trust_score) AS avg_ts FROM trust_scores "
-                    "WHERE profile_id = ?", (pid,),
-                ).fetchone()
-                if row and row["avg_ts"] is not None:
-                    avg_trust_score = round(float(row["avg_ts"]), 3)
-            except sqlite3.OperationalError:
-                pass
+                try:
+                    # Average trust score
+                    row = conn.execute(
+                        "SELECT AVG(trust_score) AS avg_ts FROM trust_scores "
+                        "WHERE profile_id = ?", (pid,),
+                    ).fetchone()
+                    if row and row["avg_ts"] is not None:
+                        avg_trust_score = round(float(row["avg_ts"]), 3)
+                except sqlite3.OperationalError:
+                    pass
 
-            try:
-                # Signal breakdown by type
-                rows = conn.execute(
-                    "SELECT signal_type, COUNT(*) AS cnt "
-                    "FROM trust_signals WHERE profile_id = ? "
-                    "GROUP BY signal_type", (pid,),
-                ).fetchall()
-                by_signal_type = {r["signal_type"]: r["cnt"] for r in rows}
-            except sqlite3.OperationalError:
-                pass
-
-            conn.close()
+                try:
+                    # Signal breakdown by type
+                    rows = conn.execute(
+                        "SELECT signal_type, COUNT(*) AS cnt "
+                        "FROM trust_signals WHERE profile_id = ? "
+                        "GROUP BY signal_type", (pid,),
+                    ).fetchall()
+                    by_signal_type = {r["signal_type"]: r["cnt"] for r in rows}
+                except sqlite3.OperationalError:
+                    pass
+            finally:
+                conn.close()
 
         # Enforcement status: SLM uses "Silent Collection" by default
         enforcement = "Silent Collection"

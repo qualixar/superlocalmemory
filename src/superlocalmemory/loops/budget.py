@@ -40,7 +40,9 @@ class BudgetMeter:
         """
         if lap > bounds.max_iterations:
             return True, "max-iterations"
-        if bounds.max_tokens is not None and self._tokens > bounds.max_tokens:
+        # >= so a budget of N never permits an (N+1)-th lap's worth of spend:
+        # once cumulative tokens reach the ceiling, the next lap is refused.
+        if bounds.max_tokens is not None and self._tokens >= bounds.max_tokens:
             return True, "token-budget"
         if bounds.max_wallclock_s is not None:
             elapsed = self._now() - self._start

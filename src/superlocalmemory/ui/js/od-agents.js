@@ -209,7 +209,7 @@
       var rawId  = String(a.agent_id || 'unknown');
       var id     = escapeHtml(rawId);
       var count  = Number(a.count || 0);
-      var letter = rawId.charAt(0).toUpperCase();
+      var letter = escapeHtml(rawId.charAt(0).toUpperCase());  // SEC: escape before innerHTML
       var bg     = avatarColor(rawId);
       var ago    = escapeHtml(timeAgo(a.last_active));
 
@@ -282,7 +282,7 @@
       var sessFull    = escapeHtml(rawSess);
 
       var avatarBg = avatarColor(rawId);
-      var letter   = rawId.charAt(0).toUpperCase();
+      var letter   = escapeHtml(rawId.charAt(0).toUpperCase());  // SEC: escape before innerHTML
 
       return (
         '<tr>' +

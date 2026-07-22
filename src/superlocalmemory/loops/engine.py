@@ -94,7 +94,7 @@ def run_bounded_loop(
     lap_changes: list[bool] = []
     lap = 0
 
-    def emit(decision: str, verdict: Verdict) -> None:
+    def emit(decision: str, verdict: Verdict, result: LapResult | None = None) -> None:
         ledger.record(
             LedgerEntry(
                 run_id=run_id,
@@ -104,6 +104,11 @@ def run_bounded_loop(
                 decision=decision,
                 passed=verdict.passed,
                 detail=verdict.detail,
+                # The agent's own claim is recorded for audit only — never used
+                # to terminate (see the loop invariant). Log is capped so a
+                # verbose runner can't bloat the ledger row.
+                agent_claimed_done=bool(result.agent_claimed_done) if result else False,
+                runner_log=(result.log or "")[:2000] if result else "",
                 budget=budget.snapshot(),
             )
         )
@@ -139,7 +144,7 @@ def run_bounded_loop(
             verdict = gate(lap)
         except Exception as exc:
             detail = f"gate error: {type(exc).__name__}: {exc}"
-            emit("error", Verdict(False, detail))
+            emit("error", Verdict(False, detail), result)
             return Outcome(Status.ERROR, detail, lap, run_id)
 
         # 6. Decide.
@@ -147,13 +152,13 @@ def run_bounded_loop(
             if rung_requires_approval(rung, bounds):
                 granted = bool(approver(verdict)) if approver is not None else False
                 if not granted:
-                    emit("pause", verdict)
+                    emit("pause", verdict, result)
                     return Outcome(Status.PAUSE, "awaiting-approval", lap, run_id)
-            emit("done", verdict)
+            emit("done", verdict, result)
             return Outcome(Status.DONE, "gate-passed", lap, run_id)
 
         if no_progress(lap_changes, bounds.no_progress_window):
-            emit("halt", Verdict(False, "no-progress"))
+            emit("halt", Verdict(False, "no-progress"), result)
             return Outcome(Status.HALT, "no-progress", lap, run_id)
 
-        emit("continue", verdict)
+        emit("continue", verdict, result)

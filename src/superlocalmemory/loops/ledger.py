@@ -41,6 +41,9 @@ class LedgerEntry:
     decision: str  # continue | done | halt | pause | killed | error
     passed: bool
     detail: str
+    # The runner's own claim (audit-only; never terminates the loop) + its log.
+    agent_claimed_done: bool = False
+    runner_log: str = ""
     budget: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
@@ -62,6 +65,8 @@ class LedgerEntry:
             decision=str(data.get("decision", "")),
             passed=bool(data.get("passed", False)),
             detail=str(data.get("detail", "")),
+            agent_claimed_done=bool(data.get("agent_claimed_done", False)),
+            runner_log=str(data.get("runner_log", "")),
             budget=data.get("budget") if isinstance(data.get("budget"), dict) else {},
         )
 
@@ -168,10 +173,12 @@ class _EngineLedgerStore:
 
     def list_prefix(self, prefix: str) -> list[dict]:
         escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        # Cap the scan so a long-lived, high-volume ledger can't force an
+        # unbounded read on `slm loop history`.
         rows = self._engine.db.execute(
             "SELECT content, created_at FROM memories "
             "WHERE profile_id=? AND session_id LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at ASC, rowid ASC",
+            "ORDER BY created_at DESC, rowid DESC LIMIT 5000",
             (self._engine.profile_id, escaped + "%"),
         )
         return [dict(row) for row in rows]

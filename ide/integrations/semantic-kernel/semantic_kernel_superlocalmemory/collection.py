@@ -141,6 +141,14 @@ class SuperLocalMemoryCollection(
         # is delegated to SLM's native recall (documented follow-up), so scores
         # are reported as None here.
         records = self._store.list_records(self.collection_name)
+        # Apply an equality filter when SK passes one as a plain dict. (Lambda /
+        # clause filters are a documented follow-up pending live-SK verification.)
+        flt = getattr(options, "filter", None)
+        if isinstance(flt, dict) and flt:
+            records = [
+                r for r in records
+                if isinstance(r, dict) and all(r.get(k) == v for k, v in flt.items())
+            ]
         top = getattr(options, "top", None) or 10
         skip = getattr(options, "skip", None) or 0
         page = records[skip : skip + top]

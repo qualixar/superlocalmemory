@@ -97,3 +97,23 @@ def test_delete_is_scoped_to_key(kv_store):
     kv_store.delete(("k",), "one")
     assert kv_store.get(("k",), "one") is None
     assert kv_store.get(("k",), "two") is not None
+
+
+def test_reserved_separator_rejected(kv_store):
+    import pytest
+    # F4: a namespace element or key with the reserved separators must not be
+    # allowed to collide onto another (namespace, key)'s session id.
+    for ns, key in [(("a\x1fb",), "c"), (("a",), "c\x1ed"), (("x\x1e",), "y")]:
+        with pytest.raises(ValueError, match="reserved separator"):
+            kv_store.put(ns, key, {"v": 1})
+    # The legitimate deeper namespace is unaffected.
+    kv_store.put(("a", "b"), "c", {"v": 99})
+    assert kv_store.get(("a", "b"), "c")["value"] == {"v": 99}
+
+
+def test_empty_suffix_matches_all(kv_store):
+    # F5: list_namespaces(suffix=()) must match every namespace, not filter all.
+    kv_store.put(("users", "1"), "a", {})
+    kv_store.put(("orgs",), "b", {})
+    ns = kv_store.list_namespaces(suffix=())
+    assert ("users", "1") in ns and ("orgs",) in ns

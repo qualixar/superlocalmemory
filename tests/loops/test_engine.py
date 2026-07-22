@@ -136,6 +136,24 @@ def test_token_budget_halts():
     assert out.reason == "token-budget"
 
 
+def test_token_budget_no_overshoot_on_exact_boundary():
+    # F2 regression: a budget of 20 with 10 tokens/lap must run exactly 2 laps
+    # (spend 20), not a 3rd. Cumulative == ceiling refuses the next lap.
+    led = InMemoryLedger()
+    out = run_bounded_loop(
+        "tok-exact",
+        bounds=Bounds(max_iterations=100, max_tokens=20),
+        runner=_runner(tokens=10),
+        gate=lambda lap: Verdict(False, "never"),
+        ledger=led,
+        run_id="r",
+    )
+    assert out.status is Status.HALT
+    assert out.reason == "token-budget"
+    # laps 1 and 2 spend 10/20; budget checked before lap 3 (20 >= 20) → halt.
+    assert out.laps == 2
+
+
 def test_wallclock_budget_halts():
     ticks = iter([0.0, 0.0, 5.0, 10.0, 20.0, 30.0, 40.0])
 
@@ -152,6 +170,27 @@ def test_wallclock_budget_halts():
     )
     assert out.status is Status.HALT
     assert out.reason == "wallclock"
+
+
+def test_ledger_records_agent_claim_and_log():
+    # F1 regression: agent_claimed_done + runner_log are recorded for audit
+    # (the claim is still never used to terminate — see the invariant tests).
+    led = InMemoryLedger()
+
+    def runner(lap):
+        return LapResult(changed=True, agent_claimed_done=True, tokens=1, log="lap %d log" % lap)
+
+    run_bounded_loop(
+        "audit", bounds=Bounds(max_iterations=2),
+        runner=runner, gate=lambda lap: Verdict(False, "no"), ledger=led, run_id="r",
+    )
+    laps = led.laps("r")
+    assert laps[0].decision == "continue"
+    assert laps[0].agent_claimed_done is True
+    assert laps[0].runner_log == "lap 1 log"
+    # The pre-run halt entry has no runner result → audit fields default.
+    assert laps[-1].decision == "halt"
+    assert laps[-1].agent_claimed_done is False and laps[-1].runner_log == ""
 
 
 def test_deterministic_clock_stamps_ledger():

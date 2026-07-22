@@ -30,9 +30,20 @@ from pathlib import Path
 from typing import Any
 
 MAX_CONTENT_BYTES = 1_000_000
+_MAX_SCAN = 10_000  # cap rows pulled by a prefix scan (unbounded-query guard)
 _SID_PREFIX = "lg:"
 _NS_SEP = "\x1f"   # unit separator between namespace elements
 _KEY_SEP = "\x1e"  # record separator between the namespace path and the key
+
+
+def _validate(namespace: tuple[str, ...], key: str) -> None:
+    """Reject reserved separators so distinct (namespace, key) pairs cannot
+    collide onto the same session_id (e.g. ``("a\\x1fb",)`` vs ``("a","b")``)."""
+    for element in namespace:
+        if _NS_SEP in element or _KEY_SEP in element:
+            raise ValueError("namespace elements must not contain reserved separator characters")
+    if _NS_SEP in key or _KEY_SEP in key:
+        raise ValueError("key must not contain reserved separator characters")
 
 
 def _load_v3_types():
@@ -81,6 +92,7 @@ class V3KVStore:
     # -- writes ------------------------------------------------------------
 
     def put(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+        _validate(namespace, key)
         now = _now_iso()
         existing = self.get(namespace, key)
         created = existing["created_at"] if existing else now
@@ -111,11 +123,13 @@ class V3KVStore:
         )
 
     def delete(self, namespace: tuple[str, ...], key: str) -> None:
+        _validate(namespace, key)
         self._delete_session(_session_id(namespace, key))
 
     # -- reads -------------------------------------------------------------
 
     def get(self, namespace: tuple[str, ...], key: str) -> dict | None:
+        _validate(namespace, key)
         rows = self._engine.db.execute(
             "SELECT content FROM memories WHERE profile_id=? AND session_id=? "
             "ORDER BY created_at DESC, rowid DESC LIMIT 1",
@@ -133,6 +147,7 @@ class V3KVStore:
         limit: int = 10,
         offset: int = 0,
     ) -> list[dict]:
+        limit = min(int(limit), _MAX_SCAN)
         matched = [
             env
             for env in self._all_envelopes()
@@ -151,12 +166,15 @@ class V3KVStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[tuple[str, ...]]:
+        limit = min(int(limit), _MAX_SCAN)
         seen: list[tuple[str, ...]] = []
         for env in self._all_envelopes():
             ns = tuple(env["namespace"])
             if prefix is not None and not _is_prefix(prefix, ns):
                 continue
-            if suffix is not None and ns[-len(suffix):] != suffix:
+            # len(suffix) > 0 guard: ns[-0:] is the whole tuple, not (), so an
+            # empty suffix must match everything rather than filter all out.
+            if suffix is not None and len(suffix) > 0 and ns[-len(suffix):] != suffix:
                 continue
             if max_depth is not None:
                 ns = ns[:max_depth]
@@ -174,8 +192,8 @@ class V3KVStore:
         escaped = _SID_PREFIX.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self._engine.db.execute(
             "SELECT content FROM memories WHERE profile_id=? AND session_id LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at ASC, rowid ASC",
-            (self._engine.profile_id, escaped + "%"),
+            "ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            (self._engine.profile_id, escaped + "%", _MAX_SCAN),
         )
         out = []
         for row in rows:

@@ -190,10 +190,12 @@ class V3RecordStore:
 
     def _prefix_rows(self, prefix: str) -> list[dict]:
         escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        # Cap the scan so list_records()/list_keys() on a huge collection can't
+        # force an unbounded read.
         rows = self._engine.db.execute(
             "SELECT session_id, content FROM memories "
             "WHERE profile_id=? AND session_id LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at ASC, rowid ASC",
+            "ORDER BY created_at ASC, rowid ASC LIMIT 10000",
             (self._engine.profile_id, escaped + "%"),
         )
         return [dict(r) for r in rows]
