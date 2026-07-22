@@ -852,6 +852,58 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
+     GROUP 12b — Rate Limits (task #47)
+     GET/PUT /api/v3/ratelimit  {write, read, window} → applied at runtime
+  ═══════════════════════════════════════════════════════════ */
+  function buildRateLimit() {
+    var wInp = makeTin('rl-write', '100', 'number');
+    wInp.style.minWidth = '90px'; wInp.style.maxWidth = '120px';
+    var rInp = makeTin('rl-read', '300', 'number');
+    rInp.style.minWidth = '90px'; rInp.style.maxWidth = '120px';
+    var winInp = makeTin('rl-window', '60', 'number');
+    winInp.style.minWidth = '90px'; winInp.style.maxWidth = '120px';
+    var lbInfo = el('span', { text: '—' }, { color:'var(--fg-2)', fontSize:'12px' });
+    lbInfo.id = P + '-rl-lb';
+    var saveBtn = makeBtn('rl-save', 'Save Limits', true);
+    var st = makeSt('rl');
+    saveBtn.addEventListener('click', saveRateLimit);
+    return makeGrp('Rate Limits', 'lock', [
+      makeRow('Write limit (per window)', 'Max write requests per client per window — raise this for heavy multi-system load', 'ratelimit.write', wInp),
+      makeRow('Read limit (per window)', 'Max read requests per client per window', 'ratelimit.read', rInp),
+      makeRow('Window (seconds)', 'Length of the sliding rate-limit window', 'ratelimit.window', winInp),
+      makeRow('Loopback (derived)', 'The local dashboard gets a generous multiple of these limits — updates automatically', 'ratelimit.loopback', lbInfo),
+      makeRow('Actions', 'Applied immediately — no restart needed', '', bRow(saveBtn, st))
+    ]);
+  }
+  function _rlSetLb(d) {
+    var lb = q('rl-lb');
+    if (lb && d) {
+      lb.textContent = 'write ' + (d.loopback_write != null ? d.loopback_write : '—') +
+        ' · read ' + (d.loopback_read != null ? d.loopback_read : '—');
+    }
+  }
+  function loadRateLimit() {
+    fetch('/api/v3/ratelimit').then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var w = q('rl-write');   if (w) w.value = d.write != null ? d.write : 100;
+        var r = q('rl-read');    if (r) r.value = d.read != null ? d.read : 300;
+        var win = q('rl-window'); if (win) win.value = d.window != null ? d.window : 60;
+        _rlSetLb(d);
+      }).catch(function () {});
+  }
+  function saveRateLimit() {
+    setSt('rl', 'Saving…', null);
+    authPut('/api/v3/ratelimit', {
+      write:  parseInt(q('rl-write')  ? q('rl-write').value  : '100') || 100,
+      read:   parseInt(q('rl-read')   ? q('rl-read').value   : '300') || 300,
+      window: parseInt(q('rl-window') ? q('rl-window').value : '60')  || 60
+    }).then(function (r) { return r.json(); })
+      .then(function (d) { setSt('rl', 'Saved', true); _rlSetLb(d); })
+      .catch(function () { setSt('rl', 'Error', false); toast('Rate limit save failed', true); });
+  }
+
+  /* ═══════════════════════════════════════════════════════════
      GROUP 13 — Daemon
      GET/PUT /api/v3/daemon/config  {idle_timeout, port, legacy_port, enable_legacy_port}
      PUT returns restart_required
@@ -921,7 +973,7 @@
   function loadAll() {
     loadMode(); loadEmb(); loadStorage(); loadScope(); loadCapture();
     loadRecall(); loadInvoke(); loadForgetting(); loadEvolution();
-    loadBackup(); loadMesh(); loadTrust(); loadDaemon();
+    loadBackup(); loadMesh(); loadTrust(); loadRateLimit(); loadDaemon();
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -957,7 +1009,8 @@
     var frag = document.createDocumentFragment();
     [buildMode(), buildEmb(), buildStorage(), buildScope(),
      buildCapture(), buildRecall(), buildInvoke(), buildForgetting(),
-     buildEvolution(), buildBackup(), buildMesh(), buildTrust(), buildDaemon()
+     buildEvolution(), buildBackup(), buildMesh(), buildTrust(),
+     buildRateLimit(), buildDaemon()
     ].forEach(function (g) { frag.appendChild(g); });
     hub.appendChild(frag);
 
@@ -972,7 +1025,7 @@
     syncBadge.className = 'badge ok';
     syncBadge.innerHTML = '<span class="dot"></span> All synced';
     saveAllBtn.addEventListener('click', function () {
-      ['mode-save','emb-save','stor-save','forg-save','trust-save','evo-save','bk-save','dmn-save']
+      ['mode-save','emb-save','stor-save','forg-save','trust-save','rl-save','evo-save','bk-save','dmn-save']
         .forEach(function (i) { var b = q(i); if (b) b.click(); });
       saveBackupConfig();
       syncBadge.className = 'badge ok';
