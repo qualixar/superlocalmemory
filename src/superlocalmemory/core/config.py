@@ -302,6 +302,11 @@ class RetrievalConfig:
     recall_per_fact_max_chars: int = 2400  # ~600 tokens; head 70% + tail 30%
     recall_total_max_chars: int = 12000    # ~3K tokens; stubs beyond this
 
+    # Wave Q2b: attach a precomputed community summary as thematic context when
+    # the top results cluster in one community. Read-only lookup, gated, and
+    # fail-open — never a per-query LLM call. Kill-switch for tuning.
+    enable_community_context: bool = True
+
 
 # ---------------------------------------------------------------------------
 # Math Config

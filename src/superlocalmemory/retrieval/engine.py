@@ -443,7 +443,84 @@ class RetrievalEngine:
             no_confident_match=no_match,
             reranker_applied=reranker_applied,
             reranker_status=reranker_status,
+            # Q2b: thematic context when the top results cluster in one
+            # community. Precomputed summary lookup only — no per-query LLM.
+            community_context=self._community_context(results, profile_id),
         )
+
+    # -- Community context (Wave Q2b) --------------------------------------
+
+    def _community_context(
+        self, results: list[Any], profile_id: str, top_k: int = 8,
+    ) -> dict | None:
+        """Attach the precomputed community summary the top results fall into.
+
+        On-device-safe (market CRIT-1): a single read of the ≤N precomputed
+        community_summaries rows + a membership tally — never a per-query LLM
+        fan-out. Gated: fires only when >=2 of the top results AND >=40% of
+        them belong to one community, so precise factual queries are untouched.
+        Fail-open: any error returns None (recall is never affected).
+        """
+        if not results or not getattr(
+            self._config, "enable_community_context", True,
+        ):
+            return None
+        try:
+            import json
+            from collections import Counter
+
+            rows = [
+                dict(r) for r in self._db.execute(
+                    "SELECT community_id, summary, keywords, fact_ids_json, "
+                    "fact_count FROM community_summaries WHERE profile_id = ?",
+                    (profile_id,),
+                )
+            ]
+            if not rows:
+                return None
+
+            fact_to_cid: dict[str, int] = {}
+            summ_by_cid: dict[int, dict] = {}
+            for r in rows:
+                cid = int(r["community_id"])
+                summ_by_cid[cid] = r
+                try:
+                    for fid in json.loads(r.get("fact_ids_json") or "[]"):
+                        fact_to_cid[str(fid)] = cid
+                except (ValueError, TypeError):
+                    continue
+
+            top_ids = [
+                res.fact.fact_id
+                for res in results[:top_k]
+                if getattr(res, "fact", None) is not None
+            ]
+            tally = Counter(
+                fact_to_cid[fid] for fid in top_ids if fid in fact_to_cid
+            )
+            if not tally:
+                return None
+            best_cid, count = tally.most_common(1)[0]
+            coverage = count / len(top_ids) if top_ids else 0.0
+            if count < 2 or coverage < 0.4:
+                return None
+
+            row = summ_by_cid[best_cid]
+            try:
+                members = json.loads(row.get("fact_ids_json") or "[]")
+            except (ValueError, TypeError):
+                members = []
+            return {
+                "community_id": best_cid,
+                "summary": row.get("summary", ""),
+                "keywords": row.get("keywords", ""),
+                "member_fact_ids": members,
+                "coverage": round(coverage, 3),
+                "matched_results": count,
+            }
+        except Exception as exc:
+            logger.debug("community context skipped (fail-open): %s", exc)
+            return None
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
 

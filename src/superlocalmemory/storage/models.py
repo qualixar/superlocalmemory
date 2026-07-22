@@ -440,3 +440,7 @@ class RecallResponse:
     # be mistaken for a reranked response.
     reranker_applied: bool = False
     reranker_status: str = "not_configured"
+    # Wave Q2b: precomputed community summary for the cluster the top results
+    # fall into (thematic context). None unless results cluster into one
+    # community above threshold. Additive — backward compatible.
+    community_context: dict | None = None

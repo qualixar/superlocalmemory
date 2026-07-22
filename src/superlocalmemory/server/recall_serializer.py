@@ -263,4 +263,7 @@ def recall_response_metadata(response: Any) -> dict:
         "abstained": bool(getattr(response, "abstained", False)),
         "abstention_reason": getattr(response, "abstention_reason", None),
         "temporal_frame": temporal_frame(_timestamps),
+        # Q2b: thematic community summary (pure pass-through; computed upstream
+        # in the engine where DB access is available). None on most recalls.
+        "thematic_context": getattr(response, "community_context", None),
     }
