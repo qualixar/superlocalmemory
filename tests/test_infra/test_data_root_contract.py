@@ -135,13 +135,51 @@ def test_state_path_cannot_escape_the_selected_root(
         state_path("/absolute")
 
 
-def test_two_populated_roots_fail_closed_without_merging(
+def test_implicit_relocation_two_populated_roots_fail_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
+    """Legacy config.json relocation + a populated default = genuine ambiguity.
+
+    With no explicit environment selection, a default-root ``config.json:base_dir``
+    that points at a *separately populated* root leaves it unclear which namespace
+    is live. That case still fails closed without merging.
+    """
     from superlocalmemory.infra.data_root import (
         DataRootConflictError,
         assert_no_durable_root_conflict,
     )
+
+    for alias in _ALIASES:
+        monkeypatch.delenv(alias, raising=False)
+
+    default_root = tmp_path / "home" / ".superlocalmemory"
+    selected = tmp_path / "selected"
+    default_root.mkdir(parents=True)
+    selected.mkdir()
+    (default_root / "memory.db").write_bytes(b"legacy")
+    (default_root / "config.json").write_text(
+        json.dumps({"base_dir": str(selected)}), encoding="utf-8",
+    )
+    (selected / "learning.db").write_bytes(b"selected")
+
+    with pytest.raises(DataRootConflictError) as caught:
+        assert_no_durable_root_conflict(home=tmp_path / "home")
+
+    message = str(caught.value)
+    assert str(default_root.resolve()) in message
+    assert str(selected.resolve()) in message
+    assert "will not merge or move" in message
+
+
+def test_explicit_env_root_wins_over_populated_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """An explicit SLM_DATA_DIR is an unambiguous operator choice.
+
+    A separately-populated default root is then a deliberate multi-root /
+    per-team / second-instance layout, not a conflict — startup must proceed.
+    """
+    from superlocalmemory.infra.data_root import assert_no_durable_root_conflict
 
     default_root = tmp_path / "home" / ".superlocalmemory"
     selected = tmp_path / "selected"
@@ -151,13 +189,31 @@ def test_two_populated_roots_fail_closed_without_merging(
     (selected / "learning.db").write_bytes(b"selected")
     monkeypatch.setenv("SLM_DATA_DIR", str(selected))
 
-    with pytest.raises(DataRootConflictError) as caught:
+    # Must NOT raise: both roots populated, but the operator explicitly chose one.
+    assert_no_durable_root_conflict(home=tmp_path / "home")
+
+
+def test_explicit_env_empty_root_warns_but_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A likely-mistyped SLM_DATA_DIR (empty new root, populated old default)
+    starts as explicitly requested but logs a visible warning, never blocks.
+    """
+    import logging as _logging
+
+    from superlocalmemory.infra.data_root import assert_no_durable_root_conflict
+
+    default_root = tmp_path / "home" / ".superlocalmemory"
+    selected = tmp_path / "selected"
+    default_root.mkdir(parents=True)
+    selected.mkdir()
+    (default_root / "memory.db").write_bytes(b"legacy")
+    monkeypatch.setenv("SLM_DATA_DIR", str(selected))
+
+    with caplog.at_level(_logging.WARNING):
         assert_no_durable_root_conflict(home=tmp_path / "home")
 
-    message = str(caught.value)
-    assert str(default_root.resolve()) in message
-    assert str(selected.resolve()) in message
-    assert "will not merge or move" in message
+    assert any("empty state root" in rec.getMessage() for rec in caplog.records)
 
 
 @pytest.mark.parametrize("default_marker", [None, "config.json"])
@@ -180,9 +236,11 @@ def test_empty_or_config_only_default_root_does_not_block_custom_namespace(
     assert_no_durable_root_conflict(home=tmp_path / "home")
 
 
-def test_unreadable_existing_root_fails_closed(
+def test_unreadable_selected_root_fails_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
+    """The root actually in use must be inspectable; if it cannot be read,
+    startup fails closed regardless of how it was selected."""
     from superlocalmemory.infra.data_root import (
         DataRootConflictError,
         assert_no_durable_root_conflict,
@@ -198,7 +256,7 @@ def test_unreadable_existing_root_fails_closed(
     original_iterdir = Path.iterdir
 
     def guarded_iterdir(path: Path):
-        if path.resolve() == default_root:
+        if path.resolve() == selected:
             raise PermissionError("denied for test")
         return original_iterdir(path)
 
