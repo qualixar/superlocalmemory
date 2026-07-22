@@ -19,6 +19,15 @@ from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
+# Friendly export keys → canonical table names (stable Art.20 export contract).
+_EXPORT_ALIASES = {
+    "facts": "atomic_facts",
+    "entities": "canonical_entities",
+    "edges": "graph_edges",
+    "feedback": "feedback_records",
+    "scenes": "memory_scenes",
+}
+
 
 class GDPRCompliance:
     """GDPR compliance operations for memory data.
@@ -30,122 +39,77 @@ class GDPRCompliance:
     - Audit Trail: Log all data operations
     """
 
+    # Tables that carry a profile_id column but are NOT tenant memory to be
+    # erased/exported wholesale. `profiles` is the tenant record (handled
+    # separately, deleted last).
+    _NON_MEMORY_SCOPED = frozenset({"profiles"})
+
     def __init__(self, db) -> None:
         self._db = db
+
+    def _profile_scoped_tables(self) -> list[str]:
+        """Every table carrying a ``profile_id`` column — discovered live from
+        the schema so a newly-added table can never be silently missed by
+        export or erasure (the class of bug that breaks GDPR completeness)."""
+        try:
+            names = [
+                dict(r)["name"]
+                for r in self._db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            ]
+        except Exception:
+            return []
+        out: list[str] = []
+        for t in names:
+            if t.startswith("sqlite_") or t in self._NON_MEMORY_SCOPED:
+                continue
+            try:
+                cols = {dict(c)["name"] for c in self._db.execute(f"PRAGMA table_info({t})")}
+            except Exception:
+                continue
+            if "profile_id" in cols:
+                out.append(t)
+        return out
 
     # -- Right to Access (Art. 15) -----------------------------------------
 
     def export_profile_data(self, profile_id: str) -> dict:
-        """Export ALL data for a profile in machine-readable format.
-
-        Returns a dict containing all memories, facts, entities,
-        edges, trust scores, feedback, and behavioral patterns.
-        """
+        """Export ALL data for a profile in machine-readable format (Art. 15 /
+        Art. 20). Covers every profile-scoped table discovered from the schema,
+        plus the profile record itself."""
         self._audit("export", "profile", profile_id, "Full data export")
 
         data: dict = {"profile_id": profile_id, "exported_at": _now()}
+        for table in self._profile_scoped_tables():
+            try:
+                rows = self._db.execute(
+                    f"SELECT * FROM {table} WHERE profile_id = ?", (profile_id,)
+                )
+                data[table] = [dict(r) for r in rows]
+            except Exception as exc:  # pragma: no cover — defensive per-table
+                logger.warning("export: table %s skipped: %s", table, exc)
 
-        # Memories
-        rows = self._db.execute(
-            "SELECT * FROM memories WHERE profile_id = ?", (profile_id,)
-        )
-        data["memories"] = [dict(r) for r in rows]
+        # Profile record itself (the tenant metadata).
+        try:
+            rows = self._db.execute(
+                "SELECT * FROM profiles WHERE profile_id = ?", (profile_id,)
+            )
+            data["profile_record"] = [dict(r) for r in rows]
+        except Exception:
+            data["profile_record"] = []
 
-        # Facts
-        rows = self._db.execute(
-            "SELECT * FROM atomic_facts WHERE profile_id = ?", (profile_id,)
-        )
-        data["facts"] = [dict(r) for r in rows]
-
-        # Entities
-        rows = self._db.execute(
-            "SELECT * FROM canonical_entities WHERE profile_id = ?", (profile_id,)
-        )
-        data["entities"] = [dict(r) for r in rows]
-
-        # Graph edges
-        rows = self._db.execute(
-            "SELECT * FROM graph_edges WHERE profile_id = ?", (profile_id,)
-        )
-        data["edges"] = [dict(r) for r in rows]
-
-        # Trust scores
-        rows = self._db.execute(
-            "SELECT * FROM trust_scores WHERE profile_id = ?", (profile_id,)
-        )
-        data["trust_scores"] = [dict(r) for r in rows]
-
-        # Feedback
-        rows = self._db.execute(
-            "SELECT * FROM feedback_records WHERE profile_id = ?", (profile_id,)
-        )
-        data["feedback"] = [dict(r) for r in rows]
-
-        # Entity profiles
-        rows = self._db.execute(
-            "SELECT * FROM entity_profiles WHERE profile_id = ?", (profile_id,)
-        )
-        data["entity_profiles"] = [dict(r) for r in rows]
-
-        # Memory scenes
-        rows = self._db.execute(
-            "SELECT * FROM memory_scenes WHERE profile_id = ?", (profile_id,)
-        )
-        data["scenes"] = [dict(r) for r in rows]
-
-        # Temporal events
-        rows = self._db.execute(
-            "SELECT * FROM temporal_events WHERE profile_id = ?", (profile_id,)
-        )
-        data["temporal_events"] = [dict(r) for r in rows]
-
-        # Consolidation log
-        rows = self._db.execute(
-            "SELECT * FROM consolidation_log WHERE profile_id = ?", (profile_id,)
-        )
-        data["consolidation_log"] = [dict(r) for r in rows]
-
-        # Behavioral patterns
-        rows = self._db.execute(
-            "SELECT * FROM behavioral_patterns WHERE profile_id = ?", (profile_id,)
-        )
-        data["behavioral_patterns"] = [dict(r) for r in rows]
-
-        # Action outcomes
-        rows = self._db.execute(
-            "SELECT * FROM action_outcomes WHERE profile_id = ?", (profile_id,)
-        )
-        data["action_outcomes"] = [dict(r) for r in rows]
-
-        # Compliance audit trail
-        rows = self._db.execute(
-            "SELECT * FROM compliance_audit WHERE profile_id = ?", (profile_id,)
-        )
-        data["compliance_audit"] = [dict(r) for r in rows]
-
-        # Provenance (data lineage — EU AI Act Art. 10)
-        rows = self._db.execute(
-            "SELECT * FROM provenance WHERE profile_id = ?", (profile_id,)
-        )
-        data["provenance"] = [dict(r) for r in rows]
-
-        # Entity aliases (indirect PII via entity relationships)
-        rows = self._db.execute(
-            "SELECT ea.* FROM entity_aliases ea "
-            "JOIN canonical_entities ce ON ea.entity_id = ce.entity_id "
-            "WHERE ce.profile_id = ?", (profile_id,)
-        )
-        data["entity_aliases"] = [dict(r) for r in rows]
-
-        # Profile record itself
-        rows = self._db.execute(
-            "SELECT * FROM profiles WHERE profile_id = ?", (profile_id,)
-        )
-        data["profile_record"] = [dict(r) for r in rows]
-
+        # total_items counts the canonical (table-name) keys only, before
+        # friendly aliases are added, so it is not double-counted.
         data["total_items"] = sum(
             len(v) for v in data.values() if isinstance(v, list)
         )
+
+        # Backward-compatible friendly aliases for the well-known keys (stable
+        # export contract) — they reference the same lists, not copies.
+        for friendly, table in _EXPORT_ALIASES.items():
+            if table in data:
+                data[friendly] = data[table]
 
         logger.info("Exported %d items for profile '%s'", data["total_items"], profile_id)
         return data
@@ -153,47 +117,68 @@ class GDPRCompliance:
     # -- Right to Erasure (Art. 17) ----------------------------------------
 
     def forget_profile(self, profile_id: str) -> dict:
-        """Delete ALL data for a profile (right to be forgotten).
+        """Delete ALL data for a profile (right to be forgotten, Art. 17).
 
-        CASCADE deletes handle most cleanup via foreign keys.
-        Returns counts of deleted items.
+        Erases every profile-scoped table discovered from the live schema, so a
+        newly-added table is covered automatically. The erasure is recorded in
+        the tamper-proof audit chain BEFORE any deletion (Art. 5(2)
+        accountability) — the in-DB compliance_audit row is itself erased, so
+        the chain in a separate DB is the durable evidence.
         """
         if profile_id == "default":
             raise ValueError("Cannot delete the default profile via GDPR erasure. "
                              "Use profile deletion instead.")
 
+        # 1) Durable, tamper-evident record FIRST — survives the erasure.
+        try:
+            from superlocalmemory.compliance.audit import AuditChain
+            from superlocalmemory.infra.data_root import state_path
+            AuditChain(str(state_path("audit_chain.db"))).log(
+                "gdpr_erase", agent_id="gdpr", profile_id=profile_id,
+                metadata={"basis": "GDPR Art.17 right-to-erasure"},
+            )
+        except Exception as exc:
+            logger.warning("GDPR erase: audit-chain log failed: %s", exc)
         self._audit("delete", "profile", profile_id, "GDPR erasure request")
 
         counts: dict[str, int] = {}
-        tables = [
-            "compliance_audit", "action_outcomes", "behavioral_patterns",
-            "feedback_records", "trust_scores", "provenance",
-            "consolidation_log", "graph_edges", "temporal_events",
-            "memory_scenes", "entity_profiles", "bm25_tokens",
-            "atomic_facts", "memories", "canonical_entities",
-        ]
+        tables = self._profile_scoped_tables()
+        # Pass 1 — count every table BEFORE any deletion, so a CASCADE that
+        # removes a child (e.g. atomic_facts via memories) does not zero the
+        # attribution. Completeness is independent of this.
         for table in tables:
-            rows = self._db.execute(
-                f"SELECT COUNT(*) AS c FROM {table} WHERE profile_id = ?",
-                (profile_id,),
-            )
-            counts[table] = int(dict(rows[0])["c"]) if rows else 0
-            self._db.execute(
-                f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,)
-            )
-
-        # Delete entity aliases (orphan PII via entity relationships)
-        self._db.execute(
-            "DELETE FROM entity_aliases WHERE entity_id IN "
-            "(SELECT entity_id FROM canonical_entities WHERE profile_id = ?)",
-            (profile_id,),
-        )
-
-        # Delete profile itself
-        self._db.execute(
-            "DELETE FROM profiles WHERE profile_id = ?", (profile_id,)
-        )
-        counts["profiles"] = 1
+            try:
+                rows = self._db.execute(
+                    f"SELECT COUNT(*) AS c FROM {table} WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                counts[table] = int(dict(rows[0])["c"]) if rows else 0
+            except Exception as exc:  # pragma: no cover
+                logger.warning("GDPR erase: count %s failed: %s", table, exc)
+                counts[table] = 0
+        # Pass 2 — full-tenant wipe with FK enforcement OFF so table order is
+        # irrelevant (every profile row in every table goes). FTS shadow rows
+        # are still removed by the base-table delete triggers.
+        try:
+            self._db.execute("PRAGMA foreign_keys=OFF")
+        except Exception:
+            pass
+        try:
+            for table in tables:
+                try:
+                    self._db.execute(
+                        f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,)
+                    )
+                except Exception as exc:  # pragma: no cover — defensive per-table
+                    logger.warning("GDPR erase: delete %s failed: %s", table, exc)
+            # Delete the profile record itself.
+            self._db.execute("DELETE FROM profiles WHERE profile_id = ?", (profile_id,))
+            counts["profiles"] = 1
+        finally:
+            try:
+                self._db.execute("PRAGMA foreign_keys=ON")
+            except Exception:
+                pass
 
         # Erase learning database (separate DB file)
         try:
@@ -211,7 +196,7 @@ class GDPRCompliance:
         except Exception:
             pass
 
-        logger.info("GDPR erasure for '%s': %s", profile_id, counts)
+        logger.info("GDPR erasure for '%s': %d tables, %s", profile_id, len(tables), counts)
         return counts
 
     def forget_entity(self, entity_name: str, profile_id: str) -> dict:
@@ -254,9 +239,14 @@ class GDPRCompliance:
             (eid, profile_id),
         )
 
-        # Delete aliases + entity
-        self._db.execute("DELETE FROM entity_aliases WHERE entity_id = ?", (eid,))
-        self._db.execute("DELETE FROM canonical_entities WHERE entity_id = ?", (eid,))
+        # Delete aliases + entity (profile-scoped — entity_id is UUID-global but
+        # keep the tenant predicate for consistent Art.17 isolation).
+        self._db.execute(
+            "DELETE FROM entity_aliases WHERE entity_id = ? AND profile_id = ?",
+            (eid, profile_id))
+        self._db.execute(
+            "DELETE FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
+            (eid, profile_id))
         counts["entity"] = 1
 
         logger.info("Entity erasure '%s' in '%s': %s", entity_name, profile_id, counts)

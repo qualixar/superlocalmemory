@@ -689,7 +689,10 @@ def register_active_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             db = engine.db
-            pid = profile_id or engine.profile_id
+            # Isolation: the tenant is ALWAYS the engine's active profile. The
+            # caller-supplied profile_id is ignored — honoring it let any MCP
+            # client read/pin another profile's facts by passing profile_id.
+            pid = engine.profile_id
 
             if action == "pin":
                 if not fact_id:

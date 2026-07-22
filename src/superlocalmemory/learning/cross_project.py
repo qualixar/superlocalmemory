@@ -65,6 +65,7 @@ TECH_CATEGORIES: dict[str, list[str]] = {
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS transferable_patterns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id TEXT NOT NULL DEFAULT 'default',
     pattern_type TEXT NOT NULL DEFAULT 'preference',
     key TEXT NOT NULL,
     value TEXT NOT NULL,
@@ -75,7 +76,7 @@ CREATE TABLE IF NOT EXISTS transferable_patterns (
     contradictions TEXT DEFAULT '[]',
     first_seen TEXT,
     last_seen TEXT,
-    UNIQUE(pattern_type, key)
+    UNIQUE(profile_id, pattern_type, key)
 );
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -115,25 +116,29 @@ class CrossProjectAggregator:
         # Step 2: Merge with temporal decay
         merged = self._merge_with_decay(profile_patterns)
 
-        # Step 3: Detect contradictions
+        # Step 3: Detect contradictions (scoped to the target profile)
         for key, pattern_data in merged.items():
             pattern_data["contradictions"] = self._detect_contradictions(
-                key, pattern_data
+                key, pattern_data, target_profile
             )
 
-        # Step 4: Store and return
-        self._store_patterns(merged)
+        # Step 4: Store and return (scoped to the target profile)
+        self._store_patterns(merged, target_profile)
         return [{"key": k, **v} for k, v in merged.items()]
 
-    def get_preferences(self, min_confidence: float = 0.6) -> dict[str, dict]:
-        """Retrieve stored transferable preferences above *min_confidence*."""
+    def get_preferences(
+        self,
+        profile_id: str = "default",
+        min_confidence: float = 0.6,
+    ) -> dict[str, dict]:
+        """Retrieve stored transferable preferences for *profile_id* above *min_confidence*."""
         conn = sqlite3.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row
         try:
             cur = conn.execute(
                 "SELECT * FROM transferable_patterns "
-                "WHERE confidence >= ? ORDER BY confidence DESC",
-                (min_confidence,),
+                "WHERE profile_id = ? AND confidence >= ? ORDER BY confidence DESC",
+                (profile_id, min_confidence),
             )
             result: dict[str, dict] = {}
             for row in cur.fetchall():
@@ -277,18 +282,18 @@ class CrossProjectAggregator:
         }
 
     def _detect_contradictions(
-        self, pattern_key: str, pattern_data: dict
+        self, pattern_key: str, pattern_data: dict, profile_id: str = "default"
     ) -> list[str]:
         contradictions: list[str] = []
 
-        # Check stored value vs new value
+        # Check stored value vs new value, scoped to this profile.
         conn = sqlite3.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row
         try:
             cur = conn.execute(
                 "SELECT value, last_seen FROM transferable_patterns "
-                "WHERE key = ? AND pattern_type = 'preference'",
-                (pattern_key,),
+                "WHERE profile_id = ? AND key = ? AND pattern_type = 'preference'",
+                (profile_id, pattern_key),
             )
             row = cur.fetchone()
             if row:
@@ -316,18 +321,21 @@ class CrossProjectAggregator:
         finally:
             conn.close()
 
-    def _store_patterns(self, merged: dict[str, dict]) -> None:
+    def _store_patterns(
+        self, merged: dict[str, dict], profile_id: str = "default"
+    ) -> None:
+        """Persist merged patterns for *profile_id*. Each profile has isolated rows."""
         conn = sqlite3.connect(str(self._db_path))
         now = datetime.now(UTC).isoformat()
         try:
             for key, data in merged.items():
                 conn.execute(
                     """INSERT INTO transferable_patterns
-                       (pattern_type, key, value, confidence, evidence_count,
-                        profiles_seen, decay_factor, contradictions,
-                        first_seen, last_seen)
-                       VALUES ('preference', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT(pattern_type, key) DO UPDATE SET
+                       (profile_id, pattern_type, key, value, confidence,
+                        evidence_count, profiles_seen, decay_factor,
+                        contradictions, first_seen, last_seen)
+                       VALUES (?, 'preference', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(profile_id, pattern_type, key) DO UPDATE SET
                            value = excluded.value,
                            confidence = excluded.confidence,
                            evidence_count = excluded.evidence_count,
@@ -337,6 +345,7 @@ class CrossProjectAggregator:
                            last_seen = excluded.last_seen
                     """,
                     (
+                        profile_id,
                         key,
                         data["value"],
                         data["confidence"],

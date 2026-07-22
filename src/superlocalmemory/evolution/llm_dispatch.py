@@ -162,7 +162,18 @@ ALLOWED_LLM_MODELS: frozenset[str] = frozenset({
 
 FORBIDDEN_MODEL_SUBSTRINGS: tuple[str, ...] = ("opus", "gpt-4-turbo")
 
-MAX_TOKENS_CAP: int = 500
+# Hard ceiling on ``max_tokens`` for any single evolution LLM call
+# (LLD-11). This is a CEILING, not a per-call default: each caller passes
+# its own budget (confirm=100, blind-verify=500, mutation=4000). The value
+# MUST stay >= the largest legitimate caller request — otherwise that call
+# trips the guard in ``_dispatch_llm`` and silently fails-closed. The
+# mutation step (``SkillEvolver._generate_mutation``) generates a full
+# SKILL.md and requests 4000; a stale 500 here made mutation return "" on
+# every cycle, killing evolution invisibly. 8000 accommodates 4000 with
+# retry/large-skill headroom. Do NOT lower below 4096 without first
+# shrinking that caller's request. Per-call spend is still bounded by
+# EvolutionBudget (10 LLM calls/cycle x 3 cycles/day).
+MAX_TOKENS_CAP: int = 8000
 
 
 # ---------------------------------------------------------------------------

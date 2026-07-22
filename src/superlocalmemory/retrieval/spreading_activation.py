@@ -110,16 +110,25 @@ class SpreadingActivation:
         query: Any,
         profile_id: str = "",
         top_k: int = 7,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Channel-compatible interface: (query, top_k) -> [(fact_id, score)].
 
         Matches ANNSearchable protocol (Rule 07).
+
+        Args:
+            include_global: Include global-scope facts. Falls back to the
+                instance attribute when not supplied.
+            include_shared: Include shared-scope facts. Same fallback.
         """
         if not self._config.enabled:
             return []
 
-        include_global = bool(getattr(self, "include_global", False))
-        include_shared = bool(getattr(self, "include_shared", False))
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         try:
             # Step 0: Get seed nodes from VectorStore KNN
             seed_results = self._seed_search(

@@ -44,6 +44,8 @@ function validateReplyFileSchema(obj) {
     consolidation_cadence: { type: 'string' },
     inline_entity_detection: { type: 'boolean' },
     telemetry: { type: 'string' },
+    // v3.8.0 — deployment mode (personal|enterprise)
+    deployment: { type: 'string', enum: ['personal', 'enterprise'] },
   };
   for (const key of Object.keys(obj)) {
     if (!Object.prototype.hasOwnProperty.call(schema, key)) {

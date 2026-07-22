@@ -17,8 +17,6 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-import sqlite3
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -366,47 +364,11 @@ class BackendOrchestrator:
             logger.warning("LanceDB init failed: %s", exc)
             self._lancedb = None
 
-    # ------------------------------------------------------------------
-    # Internal: Migration
-    # ------------------------------------------------------------------
-
-    def _migrate_cozo(self) -> None:
-        self._update_status("cozo", "migrating")
-
-        def _run():
-            conn = sqlite3.connect(str(self._data_dir / "memory.db"))
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA query_only=ON")  # F-07: read-only in migration thread
-            try:
-                count = self._cozo.bulk_import_from_sqlite(conn)
-                self._update_status("cozo", "active", count)
-                logger.info("CozoDB migration complete: %d edges", count)
-            except Exception as exc:
-                logger.error("CozoDB migration failed: %s", exc)
-                self._update_status("cozo", "failed", error=str(exc))
-            finally:
-                conn.close()
-
-        threading.Thread(target=_run, daemon=True).start()
-
-    def _migrate_lancedb(self) -> None:
-        self._update_status("lancedb", "migrating")
-
-        def _run():
-            conn = sqlite3.connect(str(self._data_dir / "memory.db"))
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA query_only=ON")
-            try:
-                count = self._lancedb.bulk_import_from_sqlite(conn)
-                self._update_status("lancedb", "active", count)
-                logger.info("LanceDB migration complete: %d vectors", count)
-            except Exception as exc:
-                logger.error("LanceDB migration failed: %s", exc)
-                self._update_status("lancedb", "failed", error=str(exc))
-            finally:
-                conn.close()
-
-        threading.Thread(target=_run, daemon=True).start()
+    # v3.7.9 (scale MEDIUM-2): _migrate_cozo/_migrate_lancedb were dead code —
+    # never called anywhere — and bypassed the staged prepare→verify→promote
+    # safety envelope (no fingerprint, no parity, no backup). Removed so a future
+    # caller cannot re-import outside the lifecycle. Emergency re-imports must go
+    # through the Scale Engine lifecycle.
 
     # ------------------------------------------------------------------
     # Internal: Status

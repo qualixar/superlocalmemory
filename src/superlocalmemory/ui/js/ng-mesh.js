@@ -12,17 +12,12 @@
   // Dashboard callers authenticate with the install token so we never
   // embed the mesh secret in JS. Token is fetched from /internal/token
   // (loopback-only endpoint) and cached in sessionStorage for the tab session.
-  var TOKEN_STORAGE_KEY = 'slm_install_token';
+  // B2 (3.7.9): keep the token in a private closure var, never sessionStorage.
+  var _tokenCache = null;
 
-  function readToken() {
-    try { return window.sessionStorage ? window.sessionStorage.getItem(TOKEN_STORAGE_KEY) : null; }
-    catch (e) { return null; }
-  }
+  function readToken() { return _tokenCache; }
 
-  function writeToken(value) {
-    try { if (window.sessionStorage) window.sessionStorage.setItem(TOKEN_STORAGE_KEY, value); }
-    catch (e) { /* storage disabled */ }
-  }
+  function writeToken(value) { _tokenCache = value; }
 
   function fetchTokenFromServer() {
     return fetch('/internal/token', { credentials: 'same-origin' })

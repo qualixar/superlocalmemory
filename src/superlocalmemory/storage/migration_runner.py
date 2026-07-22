@@ -92,6 +92,27 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M020_model_state_integrity as _M020,
 )
+from superlocalmemory.storage.migrations import (
+    M021_ingestion_log_profile as _M021,
+)
+from superlocalmemory.storage.migrations import (
+    M022_entity_aliases_profile as _M022,
+)
+from superlocalmemory.storage.migrations import (
+    M023_mesh_profile_isolation as _M023,
+)
+from superlocalmemory.storage.migrations import (
+    M024_rbac_users_roles as _M024,
+)
+from superlocalmemory.storage.migrations import (
+    M025_perf_indexes as _M025,
+)
+from superlocalmemory.storage.migrations import (
+    M026_rbac_memberships_fk as _M026,
+)
+from superlocalmemory.storage.migrations import (
+    M027_transferable_patterns_profile as _M027,
+)
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
 # that lets the runner detect "already applied" state when an idempotent
@@ -116,6 +137,13 @@ _MODULES = {
     _M018.NAME: _M018,
     _M019.NAME: _M019,
     _M020.NAME: _M020,
+    _M021.NAME: _M021,
+    _M022.NAME: _M022,
+    _M023.NAME: _M023,
+    _M024.NAME: _M024,
+    _M025.NAME: _M025,
+    _M026.NAME: _M026,
+    _M027.NAME: _M027,
 }
 
 logger = logging.getLogger(__name__)
@@ -171,6 +199,9 @@ MIGRATIONS: list[Migration] = [
     Migration(name=_M007.NAME, db_target="memory", ddl=_M007.DDL),
     # M018 is additive and independent of runtime-bootstrapped tables.
     Migration(name=_M018.NAME, db_target="memory", ddl=_M018.DDL),
+    # M024 creates RBAC tables (users / memberships / sessions). Independent
+    # brand-new tables, so it runs pre-engine-init.
+    Migration(name=_M024.NAME, db_target="memory", ddl=_M024.DDL),
     Migration(name=_M019.NAME, db_target="memory", ddl=_M019.DDL,
               dependencies=(_M018.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
@@ -203,6 +234,28 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     Migration(name=_M016.NAME, db_target="memory", ddl=_M016.DDL),
     # M017 adds scope to the engine-bootstrapped CCQ consolidation table.
     Migration(name=_M017.NAME, db_target="memory", ddl=_M017.DDL),
+    # M021 rebuilds ingestion_log with a profile-scoped dedup constraint.
+    # Deferred: ingestion_log is created at engine init (apply_v343_schema).
+    Migration(name=_M021.NAME, db_target="memory", ddl=_M021.DDL),
+    # M022 adds profile_id to entity_aliases, backfilled from the parent entity.
+    # Deferred: entity_aliases is created at engine init (create_all_tables).
+    Migration(name=_M022.NAME, db_target="memory", ddl=_M022.DDL),
+    # M023 profile-scopes every mesh coordination table (peers/messages/state/
+    # locks/events). Deferred: mesh tables are created at engine init
+    # (apply_v343_schema), same as M021.
+    Migration(name=_M023.NAME, db_target="memory", ddl=_M023.DDL),
+    # M025 adds hot-path perf indexes (atomic_facts dedup, mesh cleanup/list).
+    Migration(name=_M025.NAME, db_target="memory", ddl=_M025.DDL),
+    # M026 rebuilds rbac_memberships with a profiles FK (ON DELETE CASCADE) so
+    # deleting a profile cascade-purges its role grants (SEC-H-01 defense-in-
+    # depth). Deferred: the FK target `profiles` is created at engine init.
+    Migration(name=_M026.NAME, db_target="memory", ddl=_M026.DDL),
+    # M027 rebuilds transferable_patterns with profile_id + UNIQUE(profile_id,
+    # pattern_type, key) to prevent cross-profile preference contamination (H-01,
+    # cycle-3 audit). Deferred: CrossProjectAggregator creates the table on first
+    # consolidation run, not during engine init or apply_all. apply() is a no-op
+    # when the table is absent (first install after the schema change).
+    Migration(name=_M027.NAME, db_target="learning", ddl=_M027.DDL),
 ]
 
 

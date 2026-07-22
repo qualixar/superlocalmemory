@@ -72,8 +72,8 @@ class CCRStore:
                 if ttl_seconds is not None
                 else None
             )
-            db.ccr_put(ccr_id, original, ttl_expires=ttl_expires)
-            logger.debug("CCR stored ccr_id=%s orig_bytes=%d", ccr_id, len(original))
+            db.ccr_put(ccr_id, original, ttl_expires=ttl_expires, tenant_id=tenant_id)
+            logger.debug("CCR stored ccr_id=%s orig_bytes=%d tenant=%s", ccr_id, len(original), tenant_id)
             return ccr_id
         except Exception as exc:
             logger.warning("CCRStore.store failed (fail-open): %s", exc)
@@ -88,24 +88,29 @@ class CCRStore:
         except Exception as exc:
             logger.debug("CCRStore.update_compressed failed (non-fatal): %s", exc)
 
-    def retrieve(self, ccr_id: str) -> bytes | None:
-        """Retrieve a CCR original by ccr_id. Returns None if not found or TTL expired."""
+    def retrieve(self, ccr_id: str, *, tenant_id: str = "default") -> bytes | None:
+        """Retrieve a CCR original by ccr_id scoped to tenant. Returns None if not found or TTL expired.
+
+        H-02: tenant_id enforces row-level isolation — a caller cannot retrieve
+        content stored under a different tenant's scope.
+        """
         try:
             db = self._get_db()
-            return db.ccr_get(ccr_id)
+            return db.ccr_get(ccr_id, tenant_id=tenant_id)
         except Exception as exc:
             logger.warning("CCRStore.retrieve failed (ccr_id=%s): %s", ccr_id, exc)
             return None
 
-    def delete(self, ccr_id: str) -> None:
-        """Delete a CCR row by ccr_id. Idempotent — never raises.
+    def delete(self, ccr_id: str, *, tenant_id: str = "default") -> None:
+        """Delete a CCR row by ccr_id scoped to tenant. Idempotent — never raises.
 
         WP-10 D6: defensive infra. Deleting a non-existent ccr_id is a no-op.
+        H-02: tenant_id guard prevents cross-tenant deletion.
         """
         try:
             db = self._get_db()
-            db.ccr_delete(ccr_id)
-            logger.debug("CCR deleted ccr_id=%s", ccr_id)
+            db.ccr_delete(ccr_id, tenant_id=tenant_id)
+            logger.debug("CCR deleted ccr_id=%s tenant=%s", ccr_id, tenant_id)
         except Exception as exc:
             logger.warning("CCRStore.delete failed (non-fatal): %s", exc)
 
@@ -129,7 +134,15 @@ class CCRStore:
             },
         }
 
-    async def handle_mcp_call(self, arguments: dict) -> dict:
+    async def handle_mcp_call(
+        self, arguments: dict, tenant_id: str = "default",
+    ) -> dict:
+        """Handle the headroom_retrieve MCP tool call.
+
+        H-02: tenant_id must match the value used during store() to enforce
+        row-level isolation. Pass the current session tenant here; the default
+        'default' preserves backward compatibility for single-tenant deployments.
+        """
         ccr_id = arguments.get("ccr_id", "")
         if not ccr_id:
             return {
@@ -144,7 +157,7 @@ class CCRStore:
                     "text": f"ccr_id must be a UUID4, got {ccr_id!r}",
                 }],
             }
-        original = self.retrieve(ccr_id)
+        original = self.retrieve(ccr_id, tenant_id=tenant_id)
         if original is None:
             return {
                 "isError": True,

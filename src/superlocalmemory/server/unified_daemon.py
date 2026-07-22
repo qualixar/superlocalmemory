@@ -73,6 +73,38 @@ _LEGACY_PORT = 8767
 _ACTIVE_DAEMON_DESCRIPTOR: DaemonDescriptor | None = None
 
 
+def _rbac_read_gate(request, app_state):
+    """RBAC gate for sensitive content reads. Returns a JSONResponse to reject,
+    or None to allow. No-op unless RBAC is active (>=1 user)."""
+    from fastapi.responses import JSONResponse
+    rbac = getattr(app_state, "rbac", None)
+    if rbac is None:
+        return None
+    try:
+        active = rbac.user_count() > 0
+    except Exception:
+        # Fail CLOSED: if we cannot determine RBAC state we must not silently
+        # allow reads (a DB error would otherwise open the whole read surface).
+        return JSONResponse(status_code=503,
+                            content={"error": "authorization temporarily unavailable"})
+    if not active:
+        return None  # single-operator install — reads are open
+    token = (request.headers.get("x-slm-user-session", "")
+             or (request.cookies.get("slm_session", "") if request.cookies else ""))
+    user = rbac.resolve_session(token) if token else None
+    if user is None:
+        if rbac.require_login():
+            return JSONResponse(status_code=401,
+                                content={"error": "Login required to read memory."})
+        return None  # owner/operator, personal mode
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import get_active_profile
+    if rbac.has_permission(user["user_id"], get_active_profile(), Permission.READ):
+        return None
+    return JSONResponse(status_code=403,
+                        content={"error": "Your role cannot read this workspace."})
+
+
 def _configured_daemon_port() -> int:
     """Return the configured bind port, falling back safely to the default."""
     try:
@@ -210,7 +242,10 @@ class EngineRecallAdapter:
             if r.fact.memory_id
         })
         memory_map = (
-            self._engine._db.get_memory_content_batch(memory_ids)
+            self._engine._db.get_memory_content_batch(
+                memory_ids, self._engine.profile_id,
+                include_global=True, include_shared=True,
+            )
             if memory_ids else {}
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
@@ -534,7 +569,7 @@ class ObserveBuffer:
                 "captured": False,
                 "durable": False,
                 "reason": "durable admission failed",
-                "error": str(exc),
+                "error": "internal error",
             }
 
     def _clear_seen(self) -> None:
@@ -765,14 +800,10 @@ async def lifespan(application: FastAPI):
         engine = MemoryEngine(config)
         engine.initialize()
 
-        # Enforce WAL mode for concurrent reads
-        db = getattr(engine, '_db', None) or getattr(engine, '_storage', None)
-        if db and hasattr(db, 'execute'):
-            try:
-                db.execute("PRAGMA journal_mode=WAL")
-                db.execute("PRAGMA synchronous=NORMAL")
-            except Exception:
-                pass
+        # WAL is already established at DB creation (DatabaseManager._enable_wal
+        # / schema init). Re-asserting PRAGMA journal_mode=WAL here is a
+        # schema-level write on the shared connection that raced in-flight
+        # startup requests for the writer lock — removed (H-CONC-3).
 
         from superlocalmemory.server.profile_runtime import bind_profile_runtime
 
@@ -909,6 +940,11 @@ async def lifespan(application: FastAPI):
 
             Runs after embedding warm (embed first so recall can use it).
             Named 'recall-warmup' so it appears clearly in thread dumps.
+
+            v3.x: each warmup query holds its own operation_nowait() lease
+            (previously one lease across both queries held for up to 20s,
+            blocking any profile switch issued at daemon start).  A pending
+            transition preempts remaining queries; they complete on next boot.
             """
             import time as _t
             for _ in range(60):
@@ -920,9 +956,17 @@ async def lifespan(application: FastAPI):
                 # Fire 2 warmup queries: one to load the graph page cache,
                 # second to warm the reranker subprocess + all producers.
                 # Without this, dashboard POST /api/search hits 11s cold.
-                with profile_runtime.operation():
-                    for wq in ("memory recall performance", "context injection retrieval"):
-                        engine.recall(wq, limit=5)
+                # Each query holds its own brief operation_nowait() lease so a
+                # concurrent profile switch is not blocked by both recalls.
+                for wq in ("memory recall performance", "context injection retrieval"):
+                    with profile_runtime.operation_nowait() as _snap:
+                        if _snap is None:
+                            logger.debug(
+                                "Recall warmup preempted by profile transition "
+                                "— skipping remaining warmup queries"
+                            )
+                            break
+                        engine.recall(wq, limit=5, fast=True)  # short lease so a profile switch can drain within 5s
                 elapsed = round((_t.monotonic() - t0) * 1000)
                 logger.info(
                     "Recall engine pre-warmed in %dms", elapsed,
@@ -1079,8 +1123,49 @@ async def lifespan(application: FastAPI):
         else:
             application.state.mesh_broker = None
     except Exception as exc:
-        logger.debug("Mesh broker init: %s", exc)
+        logger.warning("Mesh broker init failed: %s", exc)
         application.state.mesh_broker = None
+
+    # RBAC / teams (C3): user identity + role enforcement over memory.db.
+    # Additive — with zero users the daemon stays single-operator (owner).
+    try:
+        from superlocalmemory.access.rbac import RbacEngine
+        rbac_db = config.db_path if config else state_path("memory.db")
+        rbac_engine = RbacEngine(str(rbac_db))
+        rbac_engine.purge_expired_sessions()
+        application.state.rbac = rbac_engine
+        logger.info("RBAC engine ready (users=%d)", rbac_engine.user_count())
+    except Exception as exc:
+        logger.warning("RBAC engine init failed: %s", exc)
+        application.state.rbac = None
+
+    # Deployment config (v3.8.0) — read [deployment] from config.toml and wire.
+    # Additive / fail-open: personal defaults are a no-op so existing installs
+    # with no [deployment] section behave EXACTLY as before.
+    # ENFORCE rule: only UPGRADE a setting, NEVER downgrade an already-stronger
+    # runtime setting (e.g. RBAC require_login already True → leave it alone).
+    try:
+        from superlocalmemory.core.config import load_deployment_config
+        deployment = load_deployment_config()
+        application.state.deployment = deployment
+        if deployment.require_login:
+            _dep_rbac = getattr(application.state, "rbac", None)
+            if _dep_rbac is not None and not _dep_rbac.require_login():
+                _dep_rbac.set_require_login(True)
+                logger.info(
+                    "Deployment: require_login enforced via enterprise deployment config"
+                )
+        # TODO: Wire deployment.pii_redaction → PII redaction subsystem (WP-10)
+        # TODO: Wire deployment.retention_enabled → retention scheduler (WP-11)
+        logger.info(
+            "Deployment config loaded: mode=%s require_login=%s "
+            "pii=%s retention=%s audit=%s",
+            deployment.mode, deployment.require_login,
+            deployment.pii_redaction, deployment.retention_enabled, deployment.audit,
+        )
+    except Exception as _dep_exc:
+        logger.warning("Deployment config wire failed (non-fatal): %s", _dep_exc)
+        application.state.deployment = None
 
     # Start idle watchdog if configured
     idle_timeout = int(os.environ.get("SLM_DAEMON_IDLE_TIMEOUT", "0"))
@@ -1114,7 +1199,9 @@ async def lifespan(application: FastAPI):
         try:
             from superlocalmemory.cli.context_commands import build_default_adapters
             from superlocalmemory.hooks.sync_loop import schedule as _schedule_sync
-            _schedule_sync(build_default_adapters())
+            # Keep the task handle so it can be cancelled at shutdown (H-CONC-2)
+            # — otherwise adapter file I/O outlives the daemon.
+            application.state._sync_task = _schedule_sync(build_default_adapters())
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("cross-platform sync loop failed to start: %s", exc)
 
@@ -1220,6 +1307,19 @@ async def lifespan(application: FastAPI):
             _configured_daemon_port(), SLM_VERSION, "ready",
         )
         yield
+
+    # Cancel the cross-platform sync loop (H-CONC-2) so adapter file I/O does
+    # not outlive the daemon.
+    try:
+        _sync_task = getattr(application.state, "_sync_task", None)
+        if _sync_task is not None and not _sync_task.done():
+            _sync_task.cancel()
+            try:
+                await _sync_task
+            except asyncio.CancelledError:
+                pass
+    except Exception:  # pragma: no cover — defensive
+        pass
 
     # Cancel optimize metrics flush loop + run final flush before shutdown
     try:
@@ -1463,7 +1563,9 @@ def create_app() -> FastAPI:
         allow_origins=[
             "http://localhost:8765", "http://127.0.0.1:8765",
             "http://localhost:8767", "http://127.0.0.1:8767",  # legacy compat
-            "http://localhost:8417", "http://127.0.0.1:8417",
+            # M-04 (3.7.9): removed the undocumented port 8417 origin — it had
+            # no known consumer and let any local service on 8417 make
+            # credentialed cross-origin requests to the API.
         ],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -1568,13 +1670,19 @@ def create_app() -> FastAPI:
             # toggled INDEPENDENTLY from the UI with no restart. UI save fires the
             # callback immediately; external edits are caught by the 2s watchdog.
             _opt_store.register_change_callback(_proxy.reload_from_config)
-            _opt_store.start_watchdog()
             logger.info(
                 "optimize.proxy mounted on /v1/*, /v1beta/*  port=8765 "
                 "(runtime cache/compress hot-reload enabled)"
             )
         else:
             application.state.optimize_proxy = None
+        # H1 fix: the config watchdog must run REGARDLESS of proxy state so
+        # optimize.json edits (cache/compress toggles, and a future
+        # proxy_enabled flip) are picked up at runtime. Previously it only
+        # started when the proxy was already on, so a daemon that booted with
+        # the proxy off never saw any optimize.json change. start_watchdog()
+        # is idempotent.
+        _opt_store.start_watchdog()
     except ImportError:
         application.state.optimize_proxy = None
         logger.debug("optimize.proxy not installed — skipping")
@@ -1610,6 +1718,14 @@ def create_app() -> FastAPI:
         if _mcp_allowed:
             from mcp.server.transport_security import TransportSecuritySettings
             if _mcp_allowed == "*":
+                # M-05 (3.7.9): "*" fully disables DNS-rebinding protection.
+                # Never silent — a convenience setting in a CI/Docker env must
+                # not quietly expose the instance.
+                logger.warning(
+                    "SLM_MCP_ALLOWED_HOSTS=* disables MCP DNS-rebinding "
+                    "protection entirely. Prefer an explicit host list; only "
+                    "use '*' on a trusted private network."
+                )
                 _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
                     enable_dns_rebinding_protection=False,
                 )
@@ -1688,22 +1804,28 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         _write_limiter = RateLimiter(max_requests=_rl_write, window_seconds=_rl_window)
         _read_limiter = RateLimiter(max_requests=_rl_read, window_seconds=_rl_window)
 
-        # S9-DASH-09: loopback (127.0.0.1 / ::1) is always the dashboard
-        # itself — it legitimately makes many rapid reads (Brain + tabs +
-        # polling). Rate-limiting our own UI produces 429s that cascade
-        # into blank panels. CORS already restricts origins to localhost,
-        # so we don't lose the anti-abuse posture for external callers.
-        # v3.6.12 (issue #40): in SLM_REMOTE mode an allowlisted LAN browser is
-        # the user's own dashboard doing the same rapid polling, so it is exempt
-        # too (is_rate_limit_exempt) — otherwise normal polling trips 429.
+        # S9-DASH-09: loopback (127.0.0.1 / ::1) is the local dashboard and
+        # makes many rapid reads (Brain + tabs + polling). L-03 (3.7.9): rather
+        # than exempt loopback entirely, give it a *generous* limit — far above
+        # normal UI polling — so a runaway local agent's write flood is still
+        # eventually throttled. A LAN browser allowlisted in SLM_REMOTE mode
+        # (is_rate_limit_exempt, non-loopback) stays fully exempt.
+        _lb_write = max(300, _rl_write * 10)
+        _lb_read = max(2000, _rl_read * 20)
+        _lb_write_limiter = RateLimiter(max_requests=_lb_write, window_seconds=_rl_window)
+        _lb_read_limiter = RateLimiter(max_requests=_lb_read, window_seconds=_rl_window)
 
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"
-            if is_rate_limit_exempt(client_ip):
-                return await call_next(request)
             is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
-            limiter = _write_limiter if is_write else _read_limiter
+            loopback = client_ip in ("127.0.0.1", "::1")
+            if not loopback and is_rate_limit_exempt(client_ip):
+                return await call_next(request)
+            if loopback:
+                limiter = _lb_write_limiter if is_write else _lb_read_limiter
+            else:
+                limiter = _write_limiter if is_write else _read_limiter
             allowed, remaining = limiter.is_allowed(client_ip)
             if not allowed:
                 from fastapi.responses import JSONResponse
@@ -1848,6 +1970,38 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                                 )
                             },
                         )
+            # RBAC read gate (C3/audit SEC-C-01): sensitive content reads must
+            # also respect roles. Engages ONLY when RBAC is active (>=1 user) —
+            # single-operator installs are unaffected. Owner (no session) reads
+            # freely unless company mode (require_login) is on; a logged-in user
+            # must hold READ on the active workspace.
+            _p = request.url.path
+            _is_sensitive_read = (
+                (request.method == "GET" and _p.startswith((
+                    "/api/memories", "/api/facts", "/api/clusters", "/api/graph",
+                    "/api/v3/associations", "/api/v3/core-memory",
+                    "/api/v3/soft-prompts",
+                    # Config metadata GETs expose the install path (base_dir) and
+                    # LLM stack (provider/model/endpoint). Harmless to the loopback
+                    # owner (personal mode: gate is a no-op), but in company mode an
+                    # unauthenticated caller must not read them — same login gate as
+                    # content reads.
+                    "/api/v3/dashboard", "/api/v3/mode", "/api/v3/embedding/config",
+                    # SEC-M-02: the remaining config GETs also expose base_dir,
+                    # daemon port, and backend topology — gate them in company mode.
+                    "/api/v3/scope/config", "/api/v3/storage/config",
+                    "/api/v3/daemon/config", "/api/v3/mesh/config",
+                    "/api/v3/trust/config", "/api/v3/forgetting/config",
+                    # MCP profile metadata — reveals which tools agent clients
+                    # can invoke; consistent with other config GETs.
+                    "/api/v3/mcp/profiles")))
+                or _p in ("/api/search", "/api/v3/recall/trace")
+                or _p.startswith("/api/v3/recall")
+            )
+            if _is_sensitive_read:
+                _resp = _rbac_read_gate(request, application.state)
+                if _resp is not None:
+                    return _resp
             return await call_next(request)
     except Exception as _auth_exc:
         # v3.6.12 (failopen-1): security middleware must NEVER fail open silently.
@@ -1919,6 +2073,17 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     application.include_router(ws_router)
     application.include_router(v3_router)
     application.include_router(adapters_router)
+
+    # RBAC / teams (C3) — user & role administration + login.
+    try:
+        from superlocalmemory.server.routes.rbac import router as rbac_router
+        application.include_router(rbac_router)
+    except ImportError:
+        logger.debug("rbac_router not available")
+
+    # Config endpoints (storage, daemon, mesh, trust, forgetting)
+    from superlocalmemory.server.routes.config_api import router as config_api_router
+    application.include_router(config_api_router)
 
     # v3.4.1 chat SSE
     for _mod_name in ("chat",):
@@ -2056,7 +2221,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         )
 
     @application.get("/health")
-    async def health():
+    async def health(request: Request = None):
         _update_activity()
         # Non-blocking peek: report status without forcing a re-init.
         engine = getattr(application.state, "engine", None)
@@ -2090,6 +2255,27 @@ def _register_daemon_routes(application: FastAPI) -> None:
         from superlocalmemory.server.profile_runtime import get_profile_runtime
 
         profile_snapshot = get_profile_runtime(application.state).snapshot
+        # H-05 (3.7.9): operational metadata (pid, daemon identity including
+        # capability_fingerprint/instance_id, active profile, readiness detail)
+        # is returned only to loopback callers. A remote or unauthenticated
+        # probe receives liveness fields only, so it cannot harvest targeting
+        # intel (version stays, since clients legitimately gate on it).
+        public = {
+            "status": "ok",
+            "ready": fully_ready,
+            # Runtime readiness is more precise than descriptor lifecycle.
+            # A process can be alive and identity-valid while retrieval warms.
+            "state": runtime_state,
+            "version": getattr(application, 'version', 'unknown'),
+        }
+        # request is None only for direct internal/test calls (no HTTP client),
+        # which are trusted; over HTTP FastAPI always injects the real Request.
+        client_host = request.client.host if (request and request.client) else ""
+        _trusted = request is None or client_host in (
+            "127.0.0.1", "::1", "localhost", "testclient",
+        )
+        if not _trusted:
+            return public
         return {
             "status": "ok",
             "ready": fully_ready,
@@ -2104,8 +2290,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # health probe; includes self-heal counters.
             "recall_health": _recall_health,
             **(identity.public_health_fields() if identity is not None else {}),
-            # Runtime readiness is more precise than descriptor lifecycle.
-            # A process can be alive and identity-valid while retrieval warms.
+            # runtime_state must come AFTER the identity spread so the live
+            # readiness state wins over the descriptor's last-known lifecycle
+            # value (which can be "starting").
             "state": runtime_state,
             "active_profile": profile_snapshot.profile_id,
             "profile_generation": profile_snapshot.generation,
@@ -2179,7 +2366,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 if r.fact.memory_id
             })
             memory_map = (
-                engine._db.get_memory_content_batch(memory_ids)
+                engine._db.get_memory_content_batch(
+                    memory_ids, engine.profile_id,
+                    include_global=True, include_shared=True,
+                )
                 if memory_ids else {}
             )
             # v3.6.6: single shared serialization chokepoint — budget + source
@@ -2404,7 +2594,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 maint_result = _run_maint(engine._db, engine._config, pid)
                 results["langevin"] = {"updated": maint_result.get("updated", 0)}
             except Exception as exc:
-                results["langevin"] = {"error": str(exc)}
+                logger.exception("maintenance langevin step failed")
+                results["langevin"] = {"error": "internal error"}
             try:
                 from superlocalmemory.math.ebbinghaus import EbbinghausCurve
                 from superlocalmemory.learning.forgetting_scheduler import (
@@ -2416,7 +2607,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 )
                 results["forgetting"] = sched.run_decay_cycle(pid, force=False)
             except Exception as exc:
-                results["forgetting"] = {"error": str(exc)}
+                logger.exception("maintenance forgetting step failed")
+                results["forgetting"] = {"error": "internal error"}
             try:
                 from superlocalmemory.learning.consolidation_worker import (
                     ConsolidationWorker,
@@ -2428,7 +2620,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 count = cw._generate_patterns(pid, False)
                 results["behavioral"] = {"patterns_mined": count}
             except Exception as exc:
-                results["behavioral"] = {"error": str(exc)}
+                logger.exception("maintenance behavioral step failed")
+                results["behavioral"] = {"error": "internal error"}
             authorization.complete()
             return {"ok": True, "profile": pid, **results}
         except HTTPException:
@@ -2519,6 +2712,42 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # Signal uvicorn to shut down gracefully
         os.kill(os.getpid(), signal.SIGTERM)
         return {"status": "stopping"}
+
+    @application.post("/api/daemon/restart")
+    async def restart_daemon(request: Request):
+        """Restart the daemon from the dashboard (non-technical end users).
+
+        Spawns a DETACHED ``slm restart`` process (its own session) so it
+        survives this daemon being stopped, then returns immediately. The child
+        stops this daemon and starts a fresh one via the standard 5-step
+        pipeline (namespace lock → stop → start → warmup → verify).
+        """
+        # Dashboard-callable: accept the install-token principal (same auth as
+        # /remember and other dashboard mutations), not just the private CLI
+        # capability — a non-technical user restarts from their own dashboard.
+        _require_write_actor(request)
+        import subprocess
+        import sys as _sys
+
+        logger.info("Daemon restart requested via API")
+        _observe_buffer.flush_sync()
+        try:
+            subprocess.Popen(
+                [_sys.executable, "-m", "superlocalmemory.cli.main", "restart",
+                 "--json"],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except Exception:
+            logger.exception("Failed to spawn restart process")
+            return {"success": False, "error": "Could not initiate restart"}
+        return {
+            "success": True,
+            "status": "restarting",
+            "message": "Daemon restart initiated — it will be back in a few seconds.",
+        }
 
     @application.post("/session/open")
     async def session_open(req: SessionOpenRequest, request: Request):
@@ -2675,7 +2904,17 @@ def _materializer_actor_id() -> str:
 
 
 def _run_materializer_operation(runtime, engine_supplier, operation):
-    """Run one bounded background unit against an admitted engine snapshot."""
+    """Run one bounded background unit against an admitted engine snapshot.
+
+    Cooperative preemption: if a profile transition is already in progress,
+    skip this materialization cycle entirely and return None.  The caller's
+    loop retries on the next iteration, by which time the switch has committed
+    and a clean admission is available.  This prevents the materializer from
+    holding the operation lease during the transition drain window.
+    """
+    # Writer-priority: don't acquire a new lease when a transition is draining.
+    if runtime is not None and runtime.transitioning:
+        return None
     with runtime.operation():
         # Resolve the engine only after admission. A concurrent mode/provider
         # reconfiguration may have replaced the module-level engine while this
@@ -2831,7 +3070,11 @@ def _start_pending_materializer() -> None:
                     ),
                 )
                 durable_complete, durable_failed = cycle_result or (0, 0)
-                pending = get_pending(limit=50)
+                # Only backfill legacy pending items enqueued under the active
+                # profile — never materialize another profile's queued memory
+                # under whichever profile happens to be active now.
+                _active_profile = runtime.snapshot.profile_id
+                pending = get_pending(limit=50, profile_id=_active_profile)
                 if not pending and not durable_complete and not durable_failed:
                     time.sleep(1.0)
                     continue
@@ -2915,6 +3158,18 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         or os.environ.get("SLM_HOST")
         or "127.0.0.1"
     )
+    # M-01 / L-02 (3.7.9): binding beyond loopback exposes the write API to the
+    # network, where the loopback trusted-actor bypass no longer protects it.
+    # Warn loudly unless the operator has opted into credential enforcement.
+    if bind_host not in ("127.0.0.1", "::1", "localhost") and \
+            os.environ.get("SLM_REQUIRE_CREDENTIALS") != "1":
+        logger.warning(
+            "SLM daemon binding to %s (non-loopback): the write API is "
+            "reachable from the network but SLM_REQUIRE_CREDENTIALS is not set "
+            "and API-key auth may be off. A remote caller could write without "
+            "credentials. Set SLM_REQUIRE_CREDENTIALS=1 and configure an API "
+            "key before exposing this instance.", bind_host,
+        )
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # This handles a just-closed connection in TIME_WAIT.  It is safe only
     # with the active-listener probe immediately below; without that guard,

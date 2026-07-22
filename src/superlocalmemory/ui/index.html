@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en" data-bs-theme="dark" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,12 +23,42 @@
 
     <!-- Legacy dashboard styles (v3.4.21 — extracted to external file, no rule changes) -->
     <link rel="stylesheet" href="static/css/legacy-dashboard.css?v=34422">
+    <!-- Open Design System v1.0 (app chrome, KPI strip, cards, sidebar, theme tokens) -->
+    <link rel="stylesheet" href="static/css/design-system.css">
+    <!-- OD-Bootstrap bridge: tab-pane visibility, mobile sidebar, responsive shims -->
+    <link rel="stylesheet" href="static/css/od-bridge.css">
 </head>
-<body style="background: #0a0e1a;">
-    <!-- Pre-mount: elements ng-shell.js relocates into the sidebar + footer.
-         Hidden on initial paint so there's no flash of the old Bootstrap
-         navbar. ng-shell moves these into their final homes on mount. -->
-    <div id="ng-premount" style="display: none;">
+<body>
+
+<!-- OD chrome v1.0 — CSP-safe, single-page tab model -->
+<div class="scrim" id="scrim"></div>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn icon ghost menu-btn" id="menuBtn" aria-label="Open menu">
+        <i class="bi bi-list" aria-hidden="true"></i>
+      </button>
+      <div>
+        <div class="crumb" id="topbar-crumb">Overview</div>
+        <h1 id="topbar-heading">Dashboard</h1>
+      </div>
+      <div class="spacer"></div>
+      <label class="search" for="q" style="display:none">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input id="q" placeholder="Search memories…">
+        <span class="kbd">⌘K</span>
+      </label>
+      <span class="badge-local" title="All data stays on this machine. Nothing leaves your device.">
+        <i class="bi bi-lock-fill" aria-hidden="true"></i> LOCAL ONLY
+      </span>
+      <button class="btn icon ghost" data-theme-icon aria-label="Toggle theme"></button>
+    </header>
+    <main class="content" id="main-content">
+
+    <!-- Hidden ng-premount: profile-select + mode-badge moved here;
+         od-shell.js will relocate them into #od-profile-container in the sidebar. -->
+    <div id="ng-premount" style="display: none;" aria-hidden="true">
         <select class="form-select form-select-sm profile-select" id="profile-select" title="Switch profile">
             <option value="default">default</option>
         </select>
@@ -36,15 +66,13 @@
             <i class="bi bi-plus-lg"></i>
         </button>
         <span id="mode-badge" class="badge">...</span>
-        <button class="btn btn-sm theme-toggle" id="refresh-dashboard-btn" onclick="refreshDashboard()" title="Refresh Dashboard" style="padding:4px 8px;">
+        <button class="btn btn-sm theme-toggle" id="refresh-dashboard-btn" data-act-click="refresh-dashboard" title="Refresh Dashboard" style="padding:4px 8px;">
             <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
         </button>
-        <button class="theme-toggle" id="theme-toggle" onclick="toggleDarkMode()" aria-label="Toggle dark mode">
+        <button class="theme-toggle" id="theme-toggle" data-act-click="toggle-dark-mode" aria-label="Toggle dark mode">
             <i class="bi bi-sun-fill" id="theme-icon" aria-hidden="true"></i>
         </button>
     </div>
-
-    <div class="container-fluid">
         <!-- Stats Overview — hidden until ng-shell.js relocates this block
              into the Dashboard pane. Prevents the flash of pre-glass stat
              cards at the top of the page on initial load (v3.4.21 FOUC fix). -->
@@ -109,102 +137,189 @@
             <li class="nav-item"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button"></button></li>
         </ul>
 
-        <!-- Privacy Notice & Feedback Progress (v2.7.4) -->
-        <div id="privacy-notice"></div>
-        <div id="feedback-progress" class="mb-3"></div>
+        <!-- Legacy privacy/learning banner removed in 3.7.9 OD redesign:
+             the Brain screen now shows learning progress in-context, and this
+             persistent strip leaked onto every pane. feedback.js null-guards
+             these ids, so removing the containers is a safe no-op there. -->
 
         <div class="tab-content">
             <!-- Graph Visualization -->
             <!-- V3 Dashboard -->
+            <!-- Dashboard — OD design v1.0 wired to real API endpoints.
+                 KPI values come from GET /api/stats (loadDashboardStats in dashboard.js).
+                 System card comes from GET /api/v3/dashboard (loadDashboard in dashboard.js).
+                 Activity feed comes from GET /api/memories?limit=6 (loadDashboardFeed).
+                 No hardcoded numbers — honest loading/empty states only. -->
             <div class="tab-pane fade show active" id="dashboard-pane">
-                <div class="row g-3 mb-4">
-                    <!-- Mode Card -->
-                    <div class="col-md-4">
-                        <div class="card stat-card h-100">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="card-subtitle text-muted">Operating Mode</h6>
-                                    <i class="bi bi-shield-check stat-icon text-primary"></i>
-                                </div>
-                                <h3 id="dashboard-mode" class="stat-value">Loading...</h3>
-                                <p id="dashboard-mode-desc" class="text-muted small mb-2">Connecting...</p>
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <button class="btn btn-outline-primary mode-btn" data-mode="a">A</button>
-                                    <button class="btn btn-outline-primary mode-btn" data-mode="b">B</button>
-                                    <button class="btn btn-outline-primary mode-btn" data-mode="c">C</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Stats Card -->
-                    <div class="col-md-4">
-                        <div class="card stat-card h-100">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="card-subtitle text-muted">Memories</h6>
-                                    <i class="bi bi-database stat-icon text-success"></i>
-                                </div>
-                                <h3 id="dashboard-memory-count" class="stat-value">0</h3>
-                                <p class="text-muted small mb-0">facts stored</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Provider Card -->
-                    <div class="col-md-4">
-                        <div class="card stat-card h-100">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="card-subtitle text-muted">LLM Provider</h6>
-                                    <i class="bi bi-cloud stat-icon text-info"></i>
-                                </div>
-                                <h3 id="dashboard-provider" class="stat-value">Loading...</h3>
-                                <p id="dashboard-model" class="text-muted small mb-0"></p>
-                            </div>
-                        </div>
-                    </div>
+
+              <div class="page-head">
+                <h2>Your memory, at a glance</h2>
+                <p id="od-dash-subtitle" class="muted">Connecting to daemon...</p>
+              </div>
+
+              <!-- KPI strip — 4 cards, values populated by loadDashboardStats() -->
+              <section class="kpi-strip" style="margin-bottom:16px">
+                <div class="card kpi">
+                  <div class="label"><i class="bi bi-journal-text" aria-hidden="true"></i> Total Memories</div>
+                  <div class="value num" id="k-mem">—</div>
+                  <div class="delta" id="k-mem-delta">&nbsp;</div>
+                  <div class="spark" id="sp-mem"></div>
                 </div>
-                <!-- Quick Actions -->
-                <div class="row g-3 mb-4">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6><i class="bi bi-plus-circle"></i> Quick Store</h6>
-                                <div class="input-group">
-                                    <input type="text" id="quick-store-input" class="form-control" placeholder="Type something to remember...">
-                                    <button class="btn btn-primary" id="quick-store-btn">Store</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6><i class="bi bi-search"></i> Quick Recall</h6>
-                                <div class="input-group">
-                                    <input type="text" id="quick-recall-input" class="form-control" placeholder="Search your memories...">
-                                    <button class="btn btn-success" id="quick-recall-btn">Recall</button>
-                                </div>
-                                <div id="quick-recall-results" class="mt-2 small"></div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="card kpi">
+                  <div class="label"><i class="bi bi-diagram-2" aria-hidden="true"></i> Graph Nodes</div>
+                  <div class="value num" id="k-nodes">—</div>
+                  <div class="delta" id="k-nodes-delta">&nbsp;</div>
+                  <div class="spark" id="sp-nodes"></div>
                 </div>
-                <!-- System Info -->
-                <div class="row g-3">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6><i class="bi bi-info-circle"></i> System</h6>
-                                <div class="row text-muted small">
-                                    <div class="col-md-3">Version: <strong id="dashboard-version">...</strong></div>
-                                    <div class="col-md-3">Profile: <strong id="dashboard-profile">default</strong></div>
-                                    <div class="col-md-3">Base: <strong id="dashboard-basedir">~/.superlocalmemory</strong></div>
-                                    <div class="col-md-3">Math Layers: <strong class="text-success">Active</strong></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="card kpi">
+                  <div class="label"><i class="bi bi-arrows-angle-expand" aria-hidden="true"></i> Connections</div>
+                  <div class="value num" id="k-edges">—</div>
+                  <div class="delta" id="k-edges-delta">&nbsp;</div>
+                  <div class="spark" id="sp-edges"></div>
                 </div>
+                <div class="card kpi">
+                  <div class="label"><i class="bi bi-lightning-charge" aria-hidden="true"></i> Clusters</div>
+                  <div class="value num" id="k-clu">—</div>
+                  <div class="delta" id="k-clu-delta">&nbsp;</div>
+                  <div class="spark" id="sp-clu"></div>
+                  <!-- TODO: endpoint /api/v3/clusters/count does not exist yet -->
+                </div>
+              </section>
+
+              <!-- main grid: memory-growth card + system card -->
+              <div class="grid" style="grid-template-columns:1.6fr 1fr;align-items:start">
+
+                <!-- memory growth + quick actions -->
+                <div class="card">
+                  <div class="card-head">
+                    <h3>Memory growth</h3>
+                    <span class="sub">facts stored over time</span>
+                    <div class="spacer"></div>
+                  </div>
+                  <div class="card-pad">
+                    <div id="sp-big"></div>
+                    <div style="display:flex;gap:26px;margin-top:16px;flex-wrap:wrap">
+                      <div>
+                        <div class="muted" style="font-size:12px">Avg / day</div>
+                        <div class="num" id="k-avg-day" style="font-size:19px;font-weight:650">—</div>
+                      </div>
+                      <div>
+                        <div class="muted" style="font-size:12px">Total facts</div>
+                        <div class="num" id="k-facts" style="font-size:19px;font-weight:650">—</div>
+                      </div>
+                    </div>
+                    <!-- Quick store / recall -->
+                    <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+                      <div>
+                        <div class="muted" style="font-size:12px;margin-bottom:4px">Quick store</div>
+                        <div class="input-group input-group-sm" style="max-width:320px">
+                          <input type="text" id="quick-store-input" class="form-control" placeholder="Type something to remember...">
+                          <button class="btn btn-primary btn-sm" id="quick-store-btn">Store</button>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="muted" style="font-size:12px;margin-bottom:4px">Quick recall</div>
+                        <div class="input-group input-group-sm" style="max-width:320px">
+                          <input type="text" id="quick-recall-input" class="form-control" placeholder="Search your memories...">
+                          <button class="btn btn-success btn-sm" id="quick-recall-btn">Recall</button>
+                        </div>
+                        <div id="quick-recall-results" class="mt-1 small"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- system health snapshot — wired to GET /api/v3/dashboard -->
+                <div class="card">
+                  <div class="card-head">
+                    <h3>System</h3>
+                    <div class="spacer"></div>
+                    <span class="badge ok" id="od-sys-badge"><span class="dot"></span> Healthy</span>
+                  </div>
+                  <div class="card-pad" style="display:flex;flex-direction:column;gap:2px">
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Mode</span>
+                      <b id="dashboard-mode">...</b>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Description</span>
+                      <span class="mono" id="dashboard-mode-desc">...</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">LLM Provider</span>
+                      <span class="mono" id="dashboard-provider">...</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Model</span>
+                      <span class="mono" id="dashboard-model">...</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Math Layers</span>
+                      <span class="badge cyan">Scoring · Consistency · Lifecycle</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Base dir</span>
+                      <span class="mono" id="dashboard-basedir">~/.superlocalmemory</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Profile</span>
+                      <span class="mono" id="dashboard-profile">default</span>
+                    </div>
+                    <div class="list-row">
+                      <span class="muted" style="width:120px">Version</span>
+                      <span class="mono" id="dashboard-version">...</span>
+                    </div>
+                    <div class="list-row" style="margin-top:8px">
+                      <span class="muted" style="width:120px">Switch mode</span>
+                      <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-primary mode-btn btn-sm" data-mode="a">A</button>
+                        <button class="btn btn-outline-primary mode-btn btn-sm" data-mode="b">B</button>
+                        <button class="btn btn-outline-primary mode-btn btn-sm" data-mode="c">C</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- recent activity + capture sources -->
+              <div class="grid" style="grid-template-columns:1.6fr 1fr;align-items:start;margin-top:16px">
+                <div class="card">
+                  <div class="card-head">
+                    <h3>Recent activity</h3>
+                    <span class="sub">live memory stream</span>
+                    <div class="spacer"></div>
+                    <span class="badge neutral" style="border-radius:99px">
+                      <span class="dot" style="background:var(--ok)"></span> live
+                    </span>
+                  </div>
+                  <!-- populated by loadDashboardFeed() in dashboard.js via GET /api/memories?limit=6 -->
+                  <div class="card-pad" id="feed">
+                    <div class="muted" style="padding:16px;text-align:center;font-size:13px">Loading activity...</div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head"><h3>Where memories come from</h3></div>
+                  <div class="card-pad">
+                    <!-- populated by loadDashboardSources() in dashboard.js -->
+                    <!-- TODO: endpoint /api/v3/ingestion/sources does not exist yet;
+                         showing static breakdown from /api/stats for now -->
+                    <div id="src">
+                      <div class="muted" style="padding:16px;text-align:center;font-size:13px">Loading...</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hidden compat IDs: dashboard-memory-count is referenced by loadDashboard().
+                   stat-memories, stat-facts, stat-nodes, stat-edges are NOT here —
+                   they live in #stats-container (above tab-content) to avoid duplicate IDs.
+                   core.js loadStats() writes to those IDs in stats-container.
+                   loadDashboardStats() calls /api/stats independently and writes to #k-mem etc. -->
+              <div style="display:none" aria-hidden="true" id="legacy-compat-ids">
+                <!-- dashboard-memory-count: unique ID (old dashboard pane was replaced) -->
+                <span id="dashboard-memory-count">0</span>
+              </div>
+
             </div>
 
             <!-- Graph Visualization -->
@@ -217,10 +332,10 @@
                             <div id="graph-stats" class="mt-2"></div>
                         </div>
                         <div class="col-md-4 text-end">
-                            <button class="btn btn-sm btn-outline-primary" onclick="loadGraph()" aria-label="Refresh graph data">
+                            <button class="btn btn-sm btn-outline-primary" data-act-click="load-graph" aria-label="Refresh graph data">
                                 <i class="bi bi-arrow-clockwise"></i> Refresh
                             </button>
-                            <select class="form-select form-select-sm d-inline-block w-auto" id="graph-max-nodes" onchange="loadGraph()" aria-label="Select maximum number of nodes to display">
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="graph-max-nodes" data-act-change="load-graph" aria-label="Select maximum number of nodes to display">
                                 <option value="50">50 nodes</option>
                                 <option value="100">100 nodes</option>
                                 <option value="200" selected>200 nodes</option>
@@ -245,16 +360,16 @@
                                 <span class="input-group-text"><i class="bi bi-search"></i></span>
                                 <input type="text" class="form-control" id="sigma-search-input"
                                        placeholder="Search memories in graph..." aria-label="Search graph nodes"
-                                       oninput="sigmaSearch(this.value)">
+                                       data-act-input="sigma-search">
                                 <button class="btn btn-outline-secondary" type="button"
-                                        onclick="sigmaClearSearch(); document.getElementById('sigma-search-input').value='';">
+                                        data-act-click="sigma-clear-search">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
                             </div>
                             <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-secondary" onclick="sigmaZoomIn()" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
-                                <button class="btn btn-outline-secondary" onclick="sigmaZoomOut()" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
-                                <button class="btn btn-outline-secondary" onclick="sigmaResetView()" title="Reset View"><i class="bi bi-arrows-angle-expand"></i></button>
+                                <button class="btn btn-outline-secondary" data-act-click="sigma-zoom-in" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
+                                <button class="btn btn-outline-secondary" data-act-click="sigma-zoom-out" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
+                                <button class="btn btn-outline-secondary" data-act-click="sigma-reset-view" title="Reset View"><i class="bi bi-arrows-angle-expand"></i></button>
                             </div>
                         </div>
                     </div>
@@ -273,20 +388,20 @@
                             <h6 class="mb-2 d-flex justify-content-between align-items-center">
                                 <span><i class="bi bi-collection"></i> Communities</span>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="Community source">
-                                    <input type="radio" class="btn-check" name="community-source" id="community-live" checked onchange="handleCommunitySourceToggle('live')">
+                                    <input type="radio" class="btn-check" name="community-source" id="community-live" checked data-act-change="community-source" data-source="live">
                                     <label class="btn btn-outline-secondary py-0 px-1" style="font-size:0.65rem;" for="community-live">Live</label>
-                                    <input type="radio" class="btn-check" name="community-source" id="community-backend" onchange="handleCommunitySourceToggle('backend')">
+                                    <input type="radio" class="btn-check" name="community-source" id="community-backend" data-act-change="community-source" data-source="backend">
                                     <label class="btn btn-outline-secondary py-0 px-1" style="font-size:0.65rem;" for="community-backend">Backend</label>
                                 </div>
                             </h6>
                             <div class="mb-1" id="community-resolution-container">
                                 <label class="form-label small mb-0">Resolution <span id="community-resolution-value" class="text-muted">1.0</span></label>
                                 <input type="range" class="form-range" id="community-resolution" min="0.1" max="3.0" step="0.1" value="1.0"
-                                       oninput="handleResolutionChange(this.value)">
+                                       data-act-input="handle-resolution-change">
                             </div>
                             <div id="community-list-panel">
                                 <div class="text-muted small">No communities detected yet.</div>
-                                <button class="btn btn-sm btn-outline-primary w-100 mt-1" onclick="runCommunityDetection()">
+                                <button class="btn btn-sm btn-outline-primary w-100 mt-1" data-act-click="run-community-detection">
                                     <i class="bi bi-cpu"></i> Detect
                                 </button>
                             </div>
@@ -298,7 +413,7 @@
                             <hr class="my-2">
                             <h6 class="mb-2"><i class="bi bi-funnel"></i> Filter</h6>
                             <select class="form-select form-select-sm mb-1" id="sigma-category-filter"
-                                    onchange="sigmaFilterByCategory(this.value)">
+                                    data-act-change="sigma-filter-by-category">
                                 <option value="">All types</option>
                                 <option value="semantic">Semantic</option>
                                 <option value="episodic">Episodic</option>
@@ -387,7 +502,7 @@
                 <div class="card p-3 mt-3">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="mb-0"><i class="bi bi-collection"></i> Knowledge Clusters</h5>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadClusters()" title="Refresh clusters">
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="load-clusters" title="Refresh clusters">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
                     </div>
@@ -427,17 +542,14 @@
                 </div>
             </div>
 
-            <!-- Entity Explorer — standalone pane (v3.4.21c).
-                 Broken out of Graph per Varun's taxonomy: entities stand
-                 independently as a first-class concern. Same DOM IDs as the
-                 previous embedded version so ng-entities.js keeps working. -->
+            <!-- Entity Explorer — standalone pane (v3.4.21). -->
             <div class="tab-pane fade" id="entities-pane">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <div>
                         <h3 class="mb-0"><i class="bi bi-person-badge"></i> Entity Explorer</h3>
                         <small class="text-muted">Compiled truth per entity &mdash; PageRank + Louvain communities</small>
                     </div>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="loadEntityExplorer()" title="Refresh entities">
+                    <button class="btn btn-sm btn-outline-secondary" data-act-click="load-entity-explorer" title="Refresh entities">
                         <i class="bi bi-arrow-clockwise"></i> Refresh
                     </button>
                 </div>
@@ -493,17 +605,17 @@
                                     <i class="bi bi-download"></i> Export
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><a class="dropdown-item" href="#" onclick="exportAll('json'); return false;">
+                                    <li><a class="dropdown-item" href="#" data-act-click="export-all" data-format="json">
                                         <i class="bi bi-filetype-json"></i> Export All (JSON)
                                     </a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="exportAll('jsonl'); return false;">
+                                    <li><a class="dropdown-item" href="#" data-act-click="export-all" data-format="jsonl">
                                         <i class="bi bi-file-text"></i> Export All (JSONL)
                                     </a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="exportAll('csv'); return false;">
+                                    <li><a class="dropdown-item" href="#" data-act-click="export-all" data-format="csv">
                                         <i class="bi bi-filetype-csv"></i> Export All (CSV)
                                     </a></li>
                                     <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item" href="#" id="export-search-btn" onclick="exportSearchResults(); return false;" style="display:none;">
+                                    <li><a class="dropdown-item" href="#" id="export-search-btn" data-act-click="export-search-results" style="display:none;">
                                         <i class="bi bi-funnel"></i> Export Search Results
                                     </a></li>
                                 </ul>
@@ -512,17 +624,17 @@
                     </div>
                     <div class="row g-2 mb-3">
                         <div class="col-md-5">
-                            <select class="form-select" id="filter-category" onchange="searchMemories()">
+                            <select class="form-select" id="filter-category" data-act-change="search-memories">
                                 <option value="">All categories</option>
                             </select>
                         </div>
                         <div class="col-md-5">
-                            <select class="form-select" id="filter-project" onchange="searchMemories()">
+                            <select class="form-select" id="filter-project" data-act-change="search-memories">
                                 <option value="">All projects</option>
                             </select>
                         </div>
                         <div class="col-md-2">
-                            <button class="btn btn-outline-secondary w-100" onclick="searchMemories()" title="Refresh list">
+                            <button class="btn btn-outline-secondary w-100" data-act-click="search-memories" title="Refresh list">
                                 <i class="bi bi-arrow-clockwise"></i> Refresh
                             </button>
                         </div>
@@ -534,14 +646,14 @@
                             <button type="button"
                                     class="btn btn-sm btn-outline-success mem-filter-pill"
                                     data-filter="high_reward"
-                                    onclick="setMemoryFilter('high_reward')"
+                                    data-act-click="set-memory-filter" data-filter="high_reward"
                                     title="Facts with reward ≥ 0.7 in last 30 days">
                                 ⭐ High-reward (30d)
                             </button>
                             <button type="button"
                                     class="btn btn-sm btn-outline-warning mem-filter-pill ms-2"
                                     data-filter="being_forgotten"
-                                    onclick="setMemoryFilter('being_forgotten')"
+                                    data-act-click="set-memory-filter" data-filter="being_forgotten"
                                     title="Archived or cold with no positive reward in 60 days">
                                 🕯️ Being forgotten
                             </button>
@@ -599,11 +711,11 @@
                      Operations pane. -->
                 <div class="card p-2 mb-3" id="health-subnav">
                     <div class="d-flex flex-wrap gap-1 small">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('health-section-daemon').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-heart-pulse"></i> Daemon</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('health-section-events').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-broadcast"></i> Events</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('health-section-agents').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-robot"></i> Agents</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('health-section-ides').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-plug"></i> IDEs</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('health-section-math').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-calculator"></i> Math</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="health-section-daemon"><i class="bi bi-heart-pulse"></i> Daemon</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="health-section-events"><i class="bi bi-broadcast"></i> Events</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="health-section-agents"><i class="bi bi-robot"></i> Agents</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="health-section-ides"><i class="bi bi-plug"></i> IDEs</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="health-section-math"><i class="bi bi-calculator"></i> Math</button>
                     </div>
                 </div>
 
@@ -611,7 +723,7 @@
                 <section id="health-section-daemon" class="card p-3 mb-3" style="scroll-margin-top: 80px;">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="mb-0"><i class="bi bi-heart-pulse"></i> Daemon health</h5>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadHealthMonitor()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="load-health-monitor"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </div>
                     <div id="health-overview"></div>
                     <div class="row g-3">
@@ -642,7 +754,7 @@
                         </div>
                         <div>
                             <span id="event-connection-status" class="badge bg-secondary me-2">Connecting...</span>
-                            <select class="form-select form-select-sm d-inline-block w-auto" id="event-type-filter" onchange="filterEvents()">
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="event-type-filter" data-act-change="filter-events">
                                 <option value="">All events</option>
                                 <option value="memory.created">Memory created</option>
                                 <option value="memory.updated">Memory updated</option>
@@ -650,7 +762,7 @@
                                 <option value="memory.recalled">Memory recalled</option>
                                 <option value="agent.connected">Agent connected</option>
                             </select>
-                            <button class="btn btn-sm btn-outline-secondary ms-1" onclick="clearEventStream()">
+                            <button class="btn btn-sm btn-outline-secondary ms-1" data-act-click="clear-event-stream">
                                 <i class="bi bi-trash"></i> Clear
                             </button>
                         </div>
@@ -677,7 +789,7 @@
                             <h5 class="mb-0"><i class="bi bi-robot"></i> Connected agents</h5>
                             <small class="text-muted">AI tools that interact with your memory</small>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAgents()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="load-agents"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </div>
                     <div class="row g-2 mb-3" id="agent-stats-row">
                         <div class="col-md-3"><div class="border rounded p-2 text-center"><div class="fw-bold" id="agent-stat-total">0</div><small class="text-muted">Total agents</small></div></div>
@@ -713,7 +825,7 @@
                 <!-- ===== SECTION: Math Health ===== -->
                 <section id="health-section-math" class="card p-3 mb-3" style="scroll-margin-top: 80px;">
                     <h5 class="mb-2"><i class="bi bi-calculator"></i> Mathematical layer health</h5>
-                    <p class="text-muted small mb-3">Status of Fisher-Rao, sheaf cohomology, and Langevin dynamics.</p>
+                    <p class="text-muted small mb-3">Status of mathematical scoring layers.</p>
                     <div class="row g-3" id="math-health-cards"></div>
                 </section>
             </div>
@@ -732,10 +844,10 @@
                 </div>
                 <div class="card p-2 mb-3" id="operations-subnav">
                     <div class="d-flex flex-wrap gap-1 small">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('ops-section-ingestion').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-cloud-download"></i> Ingestion</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('ops-section-lifecycle').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-hourglass-split"></i> Lifecycle</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('ops-section-trust').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-shield-check"></i> Trust</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('ops-section-compliance').scrollIntoView({behavior:'smooth',block:'start'})"><i class="bi bi-shield-lock"></i> Compliance</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="ops-section-ingestion"><i class="bi bi-cloud-download"></i> Ingestion</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="ops-section-lifecycle"><i class="bi bi-hourglass-split"></i> Lifecycle</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="ops-section-trust"><i class="bi bi-shield-check"></i> Trust</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-act-click="scroll-into" data-target="ops-section-compliance"><i class="bi bi-shield-lock"></i> Compliance</button>
                     </div>
                 </div>
 
@@ -746,7 +858,7 @@
                             <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Ingestion status</h5>
                             <small class="text-muted">Gmail, Calendar, Transcript adapters &mdash; all opt-in</small>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadIngestionStatus()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="load-ingestion-status"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </div>
                     <div id="ingestion-overview"></div>
                     <div id="ingestion-adapters" class="mb-3"></div>
@@ -762,9 +874,9 @@
                         <h5 class="mb-0"><i class="bi bi-hourglass-split text-warning"></i> Memory lifecycle</h5>
                         <div>
                             <span class="badge bg-secondary me-2" id="lifecycle-profile-badge">default</span>
-                            <button class="btn btn-sm btn-outline-success" onclick="evaluateTiersNow()"><i class="bi bi-arrow-repeat"></i> Evaluate tiers</button>
-                            <button class="btn btn-sm btn-outline-info ms-1" onclick="compactDryRun()"><i class="bi bi-funnel"></i> Preview compaction</button>
-                            <button class="btn btn-sm btn-outline-warning ms-1" onclick="compactExecute()"><i class="bi bi-lightning"></i> Compact now</button>
+                            <button class="btn btn-sm btn-outline-success" data-act-click="evaluate-tiers-now"><i class="bi bi-arrow-repeat"></i> Evaluate tiers</button>
+                            <button class="btn btn-sm btn-outline-info ms-1" data-act-click="compact-dry-run"><i class="bi bi-funnel"></i> Preview compaction</button>
+                            <button class="btn btn-sm btn-outline-warning ms-1" data-act-click="compact-execute"><i class="bi bi-lightning"></i> Compact now</button>
                         </div>
                     </div>
                     <div class="row g-3 mb-3" id="lifecycle-states-row">
@@ -856,13 +968,13 @@
                         <div class="col-md-2"><input type="number" class="form-control form-control-sm" id="cp-retention-days" placeholder="Days" value="90"></div>
                         <div class="col-md-2"><input type="text" class="form-control form-control-sm" id="cp-category" placeholder="Category (optional)"></div>
                         <div class="col-md-2"><select class="form-select form-select-sm" id="cp-action"><option value="archive">Archive</option><option value="tombstone">Tombstone</option><option value="notify">Notify only</option></select></div>
-                        <div class="col-md-3"><button class="btn btn-sm btn-success w-100" onclick="createRetentionPolicy()"><i class="bi bi-shield-plus"></i> Create policy</button></div>
+                        <div class="col-md-3"><button class="btn btn-sm btn-success w-100" data-act-click="create-retention-policy"><i class="bi bi-shield-plus"></i> Create policy</button></div>
                     </div>
                     <h6 class="mb-2">Active retention policies</h6>
                     <div class="mb-3" id="compliance-policies-content"><span class="text-muted">Loading...</span></div>
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <h6 class="mb-0">Audit trail</h6>
-                        <select class="form-select form-select-sm" id="cp-audit-filter" style="width: auto;" onchange="loadCompliance()">
+                        <select class="form-select form-select-sm" id="cp-audit-filter" style="width: auto;" data-act-change="load-compliance">
                             <option value="">All events</option>
                             <option value="recall">Recall</option>
                             <option value="remember">Remember</option>
@@ -883,7 +995,7 @@
                         <div class="ng-content-title"><i class="bi bi-lightning-charge"></i> Skill Evolution</div>
                         <div class="ng-content-subtitle">Track skill performance, evolution history, and health status</div>
                     </div>
-                    <button class="ng-btn" onclick="loadSkillEvolution()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    <button class="ng-btn" data-act-click="load-skill-evolution"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                 </div>
                 <div id="skills-overview-cards"></div>
                 <div id="skills-list" style="margin-top:24px">
@@ -903,7 +1015,7 @@
                         <div class="ng-content-title"><i class="bi bi-share"></i> Mesh Peers</div>
                         <div class="ng-content-subtitle">P2P agent communication network — real-time status</div>
                     </div>
-                    <button class="ng-btn" onclick="loadMeshPeers()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    <button class="ng-btn" data-act-click="load-mesh-peers"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                 </div>
                 <div id="mesh-status-cards"></div>
                 <div style="margin-top:24px">
@@ -1154,7 +1266,7 @@
                             <input type="text" class="form-control" id="new-profile-name" placeholder="e.g. work, personal, project-x" maxlength="32">
                         </div>
                         <div class="col-md-3">
-                            <button class="btn btn-primary w-100" onclick="createProfile()">
+                            <button class="btn btn-primary w-100" data-act-click="create-profile">
                                 <i class="bi bi-plus-circle"></i> Create Profile
                             </button>
                         </div>
@@ -1200,10 +1312,10 @@
                                 <label class="form-check-label" for="backup-enabled">Auto-backup enabled</label>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-primary" onclick="saveBackupConfig()">
+                                <button class="btn btn-primary" data-act-click="save-backup-config">
                                     <i class="bi bi-save"></i> Save Settings
                                 </button>
-                                <button class="btn btn-outline-success" onclick="createBackupNow()">
+                                <button class="btn btn-outline-success" data-act-click="create-backup-now">
                                     <i class="bi bi-download"></i> Backup Now
                                 </button>
                             </div>
@@ -1220,16 +1332,16 @@
                         <div class="text-muted small">Loading cloud destinations...</div>
                     </div>
                     <div class="d-flex gap-2 flex-wrap">
-                        <button class="btn btn-outline-primary btn-sm" onclick="connectGoogleDrive()">
+                        <button class="btn btn-outline-primary btn-sm" data-act-click="connect-google-drive">
                             <i class="bi bi-google"></i> Connect Google Drive
                         </button>
-                        <button class="btn btn-outline-dark btn-sm" onclick="connectGitHub()">
+                        <button class="btn btn-outline-dark btn-sm" data-act-click="connect-git-hub">
                             <i class="bi bi-github"></i> Connect GitHub
                         </button>
-                        <button class="btn btn-outline-success btn-sm" onclick="syncCloudNow()">
+                        <button class="btn btn-outline-success btn-sm" data-act-click="sync-cloud-now">
                             <i class="bi bi-cloud-upload"></i> Sync Now
                         </button>
-                        <button class="btn btn-outline-info btn-sm" onclick="exportBackup()">
+                        <button class="btn btn-outline-info btn-sm" data-act-click="export-backup">
                             <i class="bi bi-file-earmark-zip"></i> Export Backup
                         </button>
                     </div>
@@ -1244,10 +1356,10 @@
                     </p>
                     <div id="learning-data-stats" class="mb-3"></div>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-outline-danger" onclick="resetLearningData()">
+                        <button class="btn btn-outline-danger" data-act-click="reset-learning-data">
                             <i class="bi bi-arrow-counterclockwise"></i> Reset Learning Data
                         </button>
-                        <button class="btn btn-outline-info" onclick="backupLearningDb()">
+                        <button class="btn btn-outline-info" data-act-click="backup-learning-db">
                             <i class="bi bi-download"></i> Backup Learning DB
                         </button>
                     </div>
@@ -1340,8 +1452,12 @@
                     </div>
                 </div>
             </div>
+            <div class="tab-pane fade" id="mcp-pane"></div>
+            <div class="tab-pane fade" id="backup-pane"></div>
         </div>
-    </div>
+      </main><!-- /.content -->
+    </div><!-- /.main -->
+  </div><!-- /.app -->
 
     <!-- Memory Detail Modal -->
     <div class="modal fade" id="memoryDetailModal" tabindex="-1" aria-labelledby="memoryDetailModalLabel" aria-hidden="true">
@@ -1363,10 +1479,10 @@
                 </div>
                 <div class="modal-footer justify-content-between">
                     <div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="copyMemoryToClipboard()" title="Copy to clipboard">
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="copy-memory-to-clipboard" title="Copy to clipboard">
                             <i class="bi bi-clipboard"></i> Copy
                         </button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="exportMemoryAsMarkdown()" title="Download as Markdown">
+                        <button class="btn btn-sm btn-outline-secondary" data-act-click="export-memory-as-markdown" title="Download as Markdown">
                             <i class="bi bi-markdown"></i> Export .md
                         </button>
                     </div>
@@ -1390,6 +1506,12 @@
 
     <!-- Modular JS (v2.5 — split from monolith app.js) -->
     <script src="static/js/core.js"></script>
+
+    <!-- Product-wide login gate (v3.8.0): personal mode = no gate; company mode
+         = first-run create-admin / sign-in over the HttpOnly session cookie.
+         Loads right after core.js so it can paint its overlay before any
+         dashboard content renders to an unauthenticated operator. -->
+    <script src="static/js/od-auth-gate.js?v=380"></script>
 
     <!-- v3.4.1: Event bus (must load before graph + chat) -->
     <script src="static/js/graph-event-bus.js"></script>
@@ -1416,14 +1538,14 @@
     <script src="static/js/events.js"></script>
     <script src="static/js/agents.js"></script>
     <!-- Brain tab (v3.4.21 — XSS-safe DOM, token-gated, strict CSP on /api/v3/brain) -->
-    <script src="static/js/brain.js?v=34421" defer></script>
+    <script src="static/js/brain.js?v=380" defer></script>
     <script src="static/js/feedback.js"></script>
     <script src="static/js/lifecycle.js"></script>
     <script src="static/js/compliance.js"></script>
     <script src="static/js/init.js?v=34421fix"></script>
     <script src="static/js/dashboard.js"></script>
     <script src="static/js/recall-lab.js"></script>
-    <script src="static/js/trust-dashboard.js?v=34421"></script>
+    <script src="static/js/trust-dashboard.js?v=380"></script>
     <script src="static/js/math-health.js"></script>
     <script src="static/js/auto-settings.js"></script>
     <script src="static/js/ide-status.js"></script>
@@ -1435,9 +1557,28 @@
     <script src="static/js/ng-entities.js?v=3410"></script>
     <script src="static/js/ng-skills.js?v=3411"></script>
     <script src="static/js/ng-mesh.js?v=345"></script>
-    <script src="static/js/ng-shell.js?v=34421g"></script>
+    <!-- OD Shell v1.0 — replaces ng-shell.js; CSP-safe single-page tab switching -->
+    <script src="static/js/od-shell.js?v=380"></script>
     <!-- Optimize tab (v3.6.0) — runtime config for cache + compress + proxy -->
     <script src="static/js/optimize.js?v=360"></script>
+    <!-- B2 (v3.7.9): CSP-safe event delegation — replaces inline on*= handlers -->
+    <script src="static/js/event-delegation.js?v=379"></script>
+    <!-- OD screen modules (v3.7.9): approved-design panes wired to live data.
+         Load LAST so their window.load<Screen> overrides win over the legacy loaders. -->
+    <script src="static/js/od-brain.js?v=379"></script>
+    <script src="static/js/od-health.js?v=380"></script>
+    <script src="static/js/od-operations.js?v=380"></script>
+    <script src="static/js/od-team.js?v=379"></script>
+    <script src="static/js/od-graph.js?v=379"></script>
+    <script src="static/js/od-memories.js?v=379"></script>
+    <script src="static/js/od-entities.js?v=379"></script>
+    <script src="static/js/od-skills.js?v=379"></script>
+    <script src="static/js/od-mesh.js?v=379"></script>
+    <script src="static/js/od-optimize.js?v=379"></script>
+    <script src="static/js/od-settings.js?v=380"></script>
+    <script src="static/js/od-backup.js?v=379"></script>
+    <!-- MCP & Integrations pane (v3.8.0): shows exposed MCP tool profile + counts -->
+    <script src="static/js/od-mcp.js?v=380"></script>
 
     <!-- Aggressive compression warning modal (v3.6.0 M-03) -->
     <div class="modal fade" id="optimizeAggressiveModal" tabindex="-1" aria-labelledby="optimizeAggressiveModalLabel" aria-hidden="true">
@@ -1464,19 +1605,6 @@
         </div>
     </div>
 
-    <footer style="text-align:center; padding:24px; border-top:1px solid var(--bs-border-color); font-size:0.8125rem;">
-        <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:8px;">
-            <span style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:0.7rem;">&#x2B26;</span>
-            <strong>SuperLocalMemory</strong> by <a href="https://qualixar.com" style="font-weight:600;">Qualixar</a>
-        </div>
-        <p style="margin:4px 0;">Built by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a> · <a href="https://qualixar.com">qualixar.com</a></p>
-        <p style="margin:4px 0;">
-            <a href="https://github.com/qualixar/superlocalmemory"><i class="bi bi-github"></i> GitHub</a> ·
-            <a href="https://www.npmjs.com/package/superlocalmemory"><i class="bi bi-box-seam"></i> npm</a> ·
-            <a href="https://pypi.org/project/superlocalmemory/"><i class="bi bi-box"></i> PyPI</a> ·
-            AGPL-3.0-or-later ·
-            <a href="https://github.com/qualixar/superlocalmemory/stargazers">⭐ Star us on GitHub</a>
-        </p>
-    </footer>
+    <!-- Footer injected into #main-content by od-shell.js slmShell() -->
 </body>
 </html>

@@ -124,15 +124,36 @@ def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
 
     Mutates and returns ``state``. Never raises — a timed-out / failing recall
     marks the path unhealthy instead of propagating.
+
+    Uses ``operation_nowait()`` when a runtime is supplied so that a pending
+    profile switch is not blocked by the health-probe recall.  If a transition
+    is in progress the tick is skipped entirely — the next scheduled tick will
+    re-warm once the switch has committed.
     """
     state.checks += 1
 
     # Tier 1: re-warm. A real full-fusion recall keeps the graph page cache hot
     # and the embedder resident.
+    # Cooperative preemption: use operation_nowait() so a pending profile switch
+    # is not held hostage by a slow full-fusion recall (2–10s with fast=False).
     try:
-        lease = runtime.operation() if runtime is not None else nullcontext()
-        with lease:
-            resp = engine.recall(probe, limit=3, fast=False)
+        if runtime is not None:
+            lease = runtime.operation_nowait()
+        else:
+            lease = nullcontext()
+        with lease as _snap:
+            if runtime is not None and _snap is None:
+                # A profile transition is in progress — skip this tick so we
+                # do not hold the drain window.  Health state is unchanged;
+                # the next tick fires after the switch commits.
+                log.debug(
+                    "recall-health: tick skipped — profile transition in progress"
+                )
+                return state
+            # fast=True: a health probe must release its operation lease well
+            # within the 5s profile-switch drain window (fast=False is 2-10s and
+            # would make every profile switch time out while a tick is in flight).
+            resp = engine.recall(probe, limit=3, fast=True)
     except Exception as exc:
         state.healthy = False
         state.consecutive_failures += 1

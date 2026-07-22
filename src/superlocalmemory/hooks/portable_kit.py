@@ -347,6 +347,54 @@ def connect_ide(
     return result
 
 
+def connect_many(
+    ide_ids: list[str],
+    *,
+    home: Path | None = None,
+    project: Path | None = None,
+    here: bool = False,
+    profile: str | None = None,
+    agents_md_source: Callable[[], str] | None = None,
+) -> list[dict[str, Any]]:
+    """Wire SLM into multiple IDE configs via non-destructive merge.
+
+    Iterates over ``ide_ids`` and calls :func:`connect_ide` for each entry.
+    Each IDE is processed independently — a failure on one IDE does NOT abort
+    the remaining targets.
+
+    The underlying :func:`connect_ide` is MERGE-NOT-CLOBBER:
+    - Only the ``superlocalmemory`` server key is touched.
+    - All other MCP servers + top-level keys are preserved byte-for-byte.
+    - Writes are atomic (.tmp + os.replace).
+
+    Args:
+        ide_ids: IDE ids to wire (from :data:`IDE_MATRIX`).  Pass an empty
+            list to no-op.  Unknown ids produce error entries in the output.
+        home: Override ``$HOME`` (test hook).
+        project: Project root for ``here=True`` installs.
+        here: When True, write to project-relative path instead of global.
+        profile: Inject ``SLM_MCP_PROFILE`` env-var into every server block.
+        agents_md_source: Callable returning AGENTS.md content to append.
+
+    Returns:
+        List of per-IDE result dicts, one per input id.  Each dict has the
+        same shape as :func:`connect_ide`'s return value::
+
+            {ide, mcp_config, mcp_path, agents_md, servers_preserved, error}
+    """
+    return [
+        connect_ide(
+            ide_id,
+            home=home,
+            project=project,
+            here=here,
+            profile=profile,
+            agents_md_source=agents_md_source,
+        )
+        for ide_id in ide_ids
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -504,3 +552,68 @@ def _handle_agents_md(
     _tmp.write_text(existing + section, encoding="utf-8")
     os.replace(_tmp, agents_path)
     return "wrote"
+
+
+# ---------------------------------------------------------------------------
+# __main__ — `python -m superlocalmemory.hooks.portable_kit [ids...]`
+#
+# Used by the npm installer to execute non-destructive IDE connects when
+# Python is available at postinstall time. If Python / the package is not
+# importable the installer records a pending_ide_connections.json instead.
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import argparse as _argparse
+
+    _parser = _argparse.ArgumentParser(
+        description="SLM IDE connector — non-destructive merge-not-clobber."
+    )
+    _parser.add_argument(
+        "ide_ids",
+        nargs="*",
+        metavar="IDE",
+        help=(
+            "IDE ids to connect.  Pass 'all' to connect every supported IDE "
+            "(excluding claude-code which uses the WP-06 plugin)."
+        ),
+    )
+    _parser.add_argument("--home", help="Override home directory (test hook).")
+    _parser.add_argument("--profile", help="SLM_MCP_PROFILE to inject.")
+    _parser.add_argument(
+        "--list", action="store_true",
+        help="Print supported IDE ids with display names and exit.",
+    )
+    _args = _parser.parse_args()
+
+    if _args.list:
+        for _id, _desc in IDE_MATRIX.items():
+            _flag = "[OUT]" if not _desc.fmt else ""
+            print(f"  {_id:22s} {_desc.display} {_flag}".rstrip())
+        sys.exit(0)
+
+    _home = Path(_args.home) if _args.home else None
+
+    # Resolve targets: "all" → every MCP-capable IDE (fmt != ""), else explicit list.
+    if "all" in _args.ide_ids:
+        _targets = [k for k, d in IDE_MATRIX.items() if d.fmt]
+    else:
+        _targets = [t for t in _args.ide_ids if t]
+
+    if not _targets:
+        print("No IDE ids given. Pass ide ids or 'all'. Use --list to see options.")
+        sys.exit(0)
+
+    _results = connect_many(_targets, home=_home, profile=_args.profile)
+    _ok = 0
+    _fail = 0
+    for _r in _results:
+        _err = _r.get("error")
+        _status = _r.get("mcp_config", "error")
+        if _err:
+            print(f"  ERROR     {_r['ide']}: {_err}", file=sys.stderr)
+            _fail += 1
+        else:
+            print(f"  {_status.upper():9s} {_r['ide']} → {_r.get('mcp_path', '')}")
+            _ok += 1
+    print(f"\n{_ok} connected, {_fail} errors.")
+    sys.exit(0 if _fail == 0 else 1)

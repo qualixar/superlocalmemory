@@ -34,8 +34,8 @@ function initMemoryChat() {
         + '<div class="card" style="height:550px; display:flex; flex-direction:column;">'
         + '  <div class="card-header py-2 d-flex align-items-center justify-content-between">'
         + '    <div>'
-        + '      <button class="btn btn-sm btn-outline-primary active me-1" id="chat-tab-btn" onclick="showChatPanel()"><i class="bi bi-chat-dots"></i> Ask Memory</button>'
-        + '      <button class="btn btn-sm btn-outline-secondary" id="detail-tab-btn" onclick="showDetailPanel()"><i class="bi bi-info-circle"></i> Detail</button>'
+        + '      <button class="btn btn-sm btn-outline-primary active me-1" id="chat-tab-btn" data-act-click="show-chat-panel"><i class="bi bi-chat-dots"></i> Ask Memory</button>'
+        + '      <button class="btn btn-sm btn-outline-secondary" id="detail-tab-btn" data-act-click="show-detail-panel"><i class="bi bi-info-circle"></i> Detail</button>'
         + '    </div>'
         + '    <span class="badge bg-secondary" id="chat-mode-badge" style="font-size:0.7rem;">Mode A</span>'
         + '  </div>'
@@ -47,7 +47,7 @@ function initMemoryChat() {
         // Quick actions
         + '    <div id="chat-quick-actions" class="px-2 py-1 border-top" style="font-size:0.75rem;">'
         + '      ' + QUICK_ACTIONS.map(function(a) {
-            return '<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="sendChatQuery(\'' + a.query.replace(/'/g, "\\'") + '\')">' + a.label + '</button>';
+            return '<button class="btn btn-sm btn-outline-secondary me-1 mb-1" data-act-click="send-chat-query" data-query="' + escapeHtml(a.query).replace(/"/g, '&quot;') + '">' + a.label + '</button>';
         }).join('')
         + '    </div>'
 
@@ -55,11 +55,11 @@ function initMemoryChat() {
         + '    <div class="p-2 border-top">'
         + '      <div class="input-group input-group-sm">'
         + '        <input type="text" class="form-control" id="chat-input" placeholder="Ask your memory..."'
-        + '               onkeydown="if(event.key===\'Enter\')sendChatFromInput()">'
-        + '        <button class="btn btn-primary" onclick="sendChatFromInput()" id="chat-send-btn">'
+        + '               data-act-keydown="chat-submit-on-enter">'
+        + '        <button class="btn btn-primary" data-act-click="send-chat-from-input" id="chat-send-btn">'
         + '          <i class="bi bi-send"></i>'
         + '        </button>'
-        + '        <button class="btn btn-outline-danger d-none" onclick="cancelChat()" id="chat-cancel-btn">'
+        + '        <button class="btn btn-outline-danger d-none" data-act-click="cancel-chat" id="chat-cancel-btn">'
         + '          <i class="bi bi-stop-circle"></i>'
         + '        </button>'
         + '      </div>'
@@ -241,7 +241,7 @@ function _renderMessages() {
             var citation = msg.citations[idx];
             if (citation) {
                 return '<a href="#" class="badge bg-primary text-decoration-none" '
-                    + 'onclick="event.preventDefault(); _onCitationClick(\'' + citation.fact_id + '\')" '
+                    + 'data-act-click="citation-click" data-fact-id="' + citation.fact_id + '" '
                     + 'title="' + (citation.content_preview || '').replace(/"/g, '&quot;') + '">'
                     + match + '</a>';
             }

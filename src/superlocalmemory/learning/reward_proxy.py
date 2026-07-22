@@ -114,8 +114,14 @@ def _tool_event_hit(
     memory_conn: sqlite3.Connection,
     played_at: datetime,
     fact_ids: list[str],
+    profile_id: str | None = None,
 ) -> bool:
-    """True iff any tool_events row references any fact_id within +30 s."""
+    """True iff any tool_events row references any fact_id within +30 s.
+
+    Tenant-scoped: without a profile predicate, one tenant's reward signal
+    would be reinforced by another tenant's tool events firing in the same
+    30 s window — cross-contaminated behavioral learning.
+    """
     if not fact_ids:
         return False
     start = played_at.isoformat(timespec="seconds")
@@ -139,12 +145,24 @@ def _tool_event_hit(
     # in Python — typically 0-few rows in a 30 s window, far cheaper than
     # N LIKE passes against a growing table. Still O(rows_in_window * len(fact_ids))
     # worst case but the constant factor is tiny (a substring check).
+    # Add the profile predicate only when tool_events actually has the column
+    # (schema varies by install).
+    scope_sql, scope_params = "", ()
+    if profile_id is not None:
+        try:
+            cols = {r[1] for r in memory_conn.execute(
+                "PRAGMA table_info(tool_events)").fetchall()}
+            if "profile_id" in cols:
+                scope_sql = " AND profile_id = ?"
+                scope_params = (profile_id,)
+        except sqlite3.Error:
+            pass
     try:
         candidate_rows = memory_conn.execute(
             "SELECT payload_json FROM tool_events "
             "WHERE occurred_at BETWEEN ? AND ? "
-            "  AND payload_json IS NOT NULL",
-            (start, end),
+            "  AND payload_json IS NOT NULL" + scope_sql,
+            (start, end, *scope_params),
         ).fetchall()
     except sqlite3.Error:
         return False
@@ -165,6 +183,7 @@ def _requery_detected(
     memory_conn: sqlite3.Connection,
     played_at: datetime,
     query_id: str,
+    profile_id: str | None = None,
 ) -> bool:
     """True iff a follow-up query within 30 s has matching NFC topic sig.
 
@@ -193,14 +212,28 @@ def _requery_detected(
     if tbl is None:
         return False
 
+    # Tenant scope (guarded — tool_events schema varies): without it, another
+    # profile's recall events in the same window count as this profile's
+    # requeries, corrupting reward attribution.
+    scope_sql, scope_params = "", ()
+    if profile_id is not None:
+        try:
+            cols = {r[1] for r in memory_conn.execute(
+                "PRAGMA table_info(tool_events)").fetchall()}
+            if "profile_id" in cols:
+                scope_sql = " AND profile_id = ?"
+                scope_params = (profile_id,)
+        except sqlite3.Error:
+            pass
+
     # Read *query* text from tool_events payload for within-window events;
     # compute topic sig on each, compare against the original query's sig.
     try:
         rows = memory_conn.execute(
             "SELECT payload_json FROM tool_events "
             "WHERE occurred_at > ? AND occurred_at <= ? "
-            "  AND tool_name = 'recall' LIMIT 20",
-            (start, end),
+            "  AND tool_name = 'recall'" + scope_sql + " LIMIT 20",
+            (start, end, *scope_params),
         ).fetchall()
     except sqlite3.Error:
         return False
@@ -212,9 +245,9 @@ def _requery_detected(
     try:
         seed_row = memory_conn.execute(
             "SELECT payload_json FROM tool_events "
-            "WHERE occurred_at <= ? AND tool_name = 'recall' "
+            "WHERE occurred_at <= ? AND tool_name = 'recall'" + scope_sql + " "
             "ORDER BY occurred_at DESC LIMIT 1",
-            (played_at.isoformat(timespec="seconds"),),
+            (played_at.isoformat(timespec="seconds"), *scope_params),
         ).fetchone()
     except sqlite3.Error:
         seed_row = None
@@ -288,12 +321,12 @@ def settle_stale_plays(
             reward: float | None = None
             kind = "default"
             if memory_conn is not None and _tool_event_hit(
-                memory_conn, played, top3,
+                memory_conn, played, top3, profile_id=str(profile_id),
             ):
                 reward = 1.0
                 kind = "proxy_position"
             elif memory_conn is not None and _requery_detected(
-                memory_conn, played, row["query_id"],
+                memory_conn, played, row["query_id"], profile_id=str(profile_id),
             ):
                 reward = 0.0
                 kind = "proxy_requery"

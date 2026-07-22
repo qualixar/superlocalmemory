@@ -71,6 +71,36 @@ async def put_config(body: ConfigUpdateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/status")
+async def get_status() -> dict[str, Any]:
+    """Concise enabled/disabled summary of each optimize sub-feature (M3).
+
+    REST-convention companion to `slm optimize status` (which reads config
+    locally). Returns a per-feature on/off view, the compression mode, and a
+    top-level `healthy` flag so external pollers have a stable endpoint.
+    """
+    try:
+        from superlocalmemory.optimize.config import get_shared_store
+        cfg = get_shared_store().get()
+        return {
+            "healthy": True,
+            "enabled": cfg.enabled,
+            "features": {
+                "proxy": cfg.proxy_enabled,
+                "cache": cfg.cache_enabled,
+                "compression": cfg.compress_enabled,
+                "semantic_cache": cfg.semantic_enabled,
+            },
+            "compress_mode": cfg.compress_mode,
+            "config_version": cfg.config_version,
+        }
+    except Exception as exc:
+        logger.warning("GET /api/optimize/status failed: %s", exc)
+        # Fail-open: report unhealthy rather than 500 so a poller can
+        # distinguish "daemon up but optimize degraded" from "daemon down".
+        return {"healthy": False, "error": "internal error"}
+
+
 @router.get("/savings")
 async def get_savings() -> dict[str, Any]:
     """Return savings estimates from live metrics + CacheDB.
@@ -91,7 +121,9 @@ async def get_savings() -> dict[str, Any]:
         )
 
         # F-03 fix: use module-level singleton instead of per-request instantiation
-        active_model = getattr(cfg, "active_model", "anthropic")
+        # DASH-V6 fix: attribute may EXIST but be None; getattr default only
+        # covers the missing case, so coerce None -> default to avoid .lower() crash.
+        active_model = getattr(cfg, "active_model", None) or "anthropic"
         # Determine provider from model
         provider = "anthropic"
         for key in ("anthropic", "openai", "gemini"):

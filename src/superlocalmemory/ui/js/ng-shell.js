@@ -115,7 +115,7 @@
 
     footer.innerHTML =
       // v3.4.10: Cloud Backup Account Widget
-      '<div id="ng-account-widget" style="margin-bottom:10px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);cursor:pointer;" onclick="document.querySelector(\'[data-target=settings]\')?.click()">' +
+      '<div id="ng-account-widget" style="margin-bottom:10px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);cursor:pointer;" data-act-click="open-settings-tab">' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
           '<span id="ng-account-avatar" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;overflow:hidden;">' +
             '<i class="bi bi-cloud-slash" style="font-size:13px;opacity:0.4;"></i>' +
@@ -128,16 +128,16 @@
         '</div>' +
         '<div id="ng-account-actions" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);">' +
           '<div style="display:flex;gap:4px;">' +
-            '<button class="ng-btn" onclick="event.stopPropagation();connectGoogleDrive()" title="Connect Google Drive" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+            '<button class="ng-btn" data-act-click="connect-google-drive" title="Connect Google Drive" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
               '<i class="bi bi-google" style="color:#4285f4;"></i>' +
             '</button>' +
-            '<button class="ng-btn" onclick="event.stopPropagation();connectGitHub()" title="Connect GitHub" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+            '<button class="ng-btn" data-act-click="connect-git-hub" title="Connect GitHub" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
               '<i class="bi bi-github"></i>' +
             '</button>' +
-            '<button class="ng-btn" onclick="event.stopPropagation();syncCloudNow()" title="Sync Now" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+            '<button class="ng-btn" data-act-click="sync-cloud-now" title="Sync Now" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
               '<i class="bi bi-cloud-upload" style="color:#00D4AA;"></i>' +
             '</button>' +
-            '<button class="ng-btn" onclick="event.stopPropagation();exportBackup()" title="Export Backup" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+            '<button class="ng-btn" data-act-click="export-backup" title="Export Backup" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
               '<i class="bi bi-download" style="color:#f39c12;"></i>' +
             '</button>' +
           '</div>' +
@@ -151,10 +151,10 @@
         '<button class="ng-btn" id="ng-refresh-btn" title="Refresh" style="flex:1;justify-content:center">' +
           '<i class="bi bi-arrow-clockwise"></i>' +
         '</button>' +
-        '<button class="ng-btn" id="ng-theme-toggle" title="Toggle theme" onclick="toggleDarkMode()" style="flex:1;justify-content:center">' +
+        '<button class="ng-btn" id="ng-theme-toggle" title="Toggle theme" data-act-click="toggle-dark-mode" style="flex:1;justify-content:center">' +
           '<i class="bi bi-sun-fill" id="ng-theme-icon"></i>' +
         '</button>' +
-        '<button class="ng-btn" id="ng-privacy-btn" title="Privacy blur (for screen recording)" onclick="togglePrivacyBlur()" style="flex:1;justify-content:center">' +
+        '<button class="ng-btn" id="ng-privacy-btn" title="Privacy blur (for screen recording)" data-act-click="toggle-privacy-blur" style="flex:1;justify-content:center">' +
           '<i class="bi bi-eye-slash" id="ng-privacy-icon"></i>' +
         '</button>' +
         '<a href="https://github.com/qualixar/superlocalmemory" target="_blank" class="ng-btn" title="Star on GitHub" style="flex:1;justify-content:center">' +
@@ -364,7 +364,7 @@
       case 'health-pane':
         // v3.4.21 / v3.4.21 (taxonomy): Health = runtime health ONLY
         // (Daemon, Events, Agents, IDEs, Math). Governance concerns live
-        // in operations-pane. IDEs folded in v3.4.21 per Varun — they're
+        // in operations-pane. IDEs folded in v3.4.21 — they're
         // connected-client state, same category as Agents.
         if (typeof loadHealthMonitor === 'function') loadHealthMonitor();
         if (typeof initEventStream === 'function') initEventStream();

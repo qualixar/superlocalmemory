@@ -13,12 +13,33 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from superlocalmemory.trust.scorer import TrustScorer
 
 logger = logging.getLogger(__name__)
+
+
+def _env_threshold(name: str, default: float) -> float:
+    """Read a [0,1] threshold from the environment, falling back on parse/range error."""
+    try:
+        value = float(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return value if 0.0 <= value <= 1.0 else default
+
+
+# M-02/M-03 (3.7.9): thresholds are operator-tunable so multi-agent deployments
+# can tighten the write gate and opt into a read gate. Defaults are unchanged —
+# the audit's "raise write_threshold to 0.7" would block every new agent (a new
+# agent scores 0.5, Beta(1,1)); loopback callers bypass the gate entirely, so
+# this only affects remote credentialed agents. Read gate is OFF by default.
+_DEFAULT_WRITE_THRESHOLD = _env_threshold("SLM_TRUST_WRITE_THRESHOLD", 0.3)
+_DEFAULT_DELETE_THRESHOLD = _env_threshold("SLM_TRUST_DELETE_THRESHOLD", 0.5)
+_DEFAULT_READ_THRESHOLD = _env_threshold("SLM_TRUST_READ_THRESHOLD", 0.1)
+_READ_GATE_ENABLED = os.environ.get("SLM_TRUST_READ_GATE") == "1"
 
 
 class TrustError(PermissionError):
@@ -62,17 +83,23 @@ class TrustGate:
     def __init__(
         self,
         scorer: TrustScorer,
-        write_threshold: float = 0.3,
-        delete_threshold: float = 0.5,
+        write_threshold: float = _DEFAULT_WRITE_THRESHOLD,
+        delete_threshold: float = _DEFAULT_DELETE_THRESHOLD,
+        read_threshold: float = _DEFAULT_READ_THRESHOLD,
+        read_gate_enabled: bool = _READ_GATE_ENABLED,
     ) -> None:
         if write_threshold < 0 or write_threshold > 1:
             raise ValueError("write_threshold must be in [0, 1]")
         if delete_threshold < 0 or delete_threshold > 1:
             raise ValueError("delete_threshold must be in [0, 1]")
+        if read_threshold < 0 or read_threshold > 1:
+            raise ValueError("read_threshold must be in [0, 1]")
 
         self._scorer = scorer
         self._write_threshold = write_threshold
         self._delete_threshold = delete_threshold
+        self._read_threshold = read_threshold
+        self._read_gate_enabled = read_gate_enabled
 
     @property
     def write_threshold(self) -> float:
@@ -116,15 +143,29 @@ class TrustGate:
                 agent_id, score, self._delete_threshold, "delete"
             )
 
-    def check_read(self, agent_id: str, profile_id: str) -> None:
-        """Read check — always passes. Logged for audit trail.
+    @property
+    def read_threshold(self) -> float:
+        return self._read_threshold
 
-        Reads are never blocked because denying read access could break
-        agent functionality. However, logging read access enables
-        anomaly detection and compliance auditing.
+    @property
+    def read_gate_enabled(self) -> bool:
+        return self._read_gate_enabled
+
+    def check_read(self, agent_id: str, profile_id: str) -> None:
+        """Read check. Passes by default; logged for the audit trail.
+
+        M-03 (3.7.9): reads are unblocked by default because denying read access
+        could break agent functionality. Operators who need to stop a
+        compromised agent from exfiltrating the store can set
+        ``SLM_TRUST_READ_GATE=1`` (optionally with ``SLM_TRUST_READ_THRESHOLD``)
+        to enforce a minimum trust for reads too.
         """
         score = self._scorer.get_agent_trust(agent_id, profile_id)
         logger.debug(
-            "trust gate read (always pass): agent=%s trust=%.3f",
-            agent_id, score,
+            "trust gate read: agent=%s trust=%.3f gate=%s",
+            agent_id, score, self._read_gate_enabled,
         )
+        if self._read_gate_enabled and score < self._read_threshold:
+            raise TrustError(
+                agent_id, score, self._read_threshold, "read"
+            )

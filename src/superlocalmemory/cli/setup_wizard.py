@@ -114,17 +114,19 @@ def _download_model(model_name: str, label: str) -> bool:
     print(f"\n  Downloading {label}: {model_name}")
     print(f"  (this may take a few minutes on first run)\n")
 
+    # H-03: pass the model name as argv, never interpolated into executed
+    # source, so a crafted model_name cannot become arbitrary Python.
     script = (
-        f"import sys; "
-        f"from sentence_transformers import SentenceTransformer; "
-        f"m = SentenceTransformer('{model_name}', trust_remote_code=True); "
-        f"d = m.get_sentence_embedding_dimension(); "
-        f"print(f'OK dim={{d}}'); "
+        "import sys; "
+        "from sentence_transformers import SentenceTransformer; "
+        "m = SentenceTransformer(sys.argv[1], trust_remote_code=True); "
+        "d = m.get_sentence_embedding_dimension(); "
+        "print(f'OK dim={d}'); "
     )
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", script, model_name],
             timeout=600,  # 10 min for large model downloads
             capture_output=False,  # Show download progress
             text=True,
@@ -156,15 +158,16 @@ def _download_reranker(model_name: str) -> bool:
     print(f"\n  Downloading reranker: {model_name}")
     print(f"  (cross-encoder for result re-ranking)\n")
 
+    # H-03: model name via argv, never interpolated into executed source.
     script = (
-        f"from sentence_transformers import CrossEncoder; "
-        f"m = CrossEncoder('{model_name}', trust_remote_code=True); "
-        f"print('OK'); "
+        "import sys; from sentence_transformers import CrossEncoder; "
+        "m = CrossEncoder(sys.argv[1], trust_remote_code=True); "
+        "print('OK'); "
     )
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", script, model_name],
             timeout=300,
             capture_output=False,
             text=True,
@@ -195,16 +198,17 @@ def _download_compressor(model_name: str) -> bool:
     print(f"\n  Downloading compression model: {model_name}")
     print(f"  (LLMLingua-2 prose compressor, ~560MB — aggressive mode only)\n")
 
+    # H-03: model name via argv, never interpolated into executed source.
     script = (
-        "from llmlingua import PromptCompressor; "
-        f"PromptCompressor(model_name='{model_name}', use_llmlingua2=True, "
+        "import sys; from llmlingua import PromptCompressor; "
+        "PromptCompressor(model_name=sys.argv[1], use_llmlingua2=True, "
         "device_map='cpu'); "
         "print('OK')"
     )
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", script, model_name],
             timeout=900,  # 560MB on a slow link can exceed 5 min
             capture_output=False,
             text=True,
@@ -494,6 +498,11 @@ def run_wizard(auto: bool = False) -> None:
 
     # -- Step 4: Download models --
     print()
+    # H-06 (CVE-2025-14926): a malicious HuggingFace checkpoint can execute code
+    # at load time. SLM only downloads its pinned defaults, but warn users who
+    # point config at a custom model.
+    print("  ⚠ Only install models from sources you trust — a malicious model")
+    print("    checkpoint can run code on your machine at load time. See SECURITY.md.")
     print("─── Step 4/10: Download Embedding Model ───")
 
     if _embedding_is_remote(config):

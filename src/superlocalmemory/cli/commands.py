@@ -40,6 +40,14 @@ def _cmd_db_dispatch(args: Namespace) -> None:
     sys.exit(2)
 
 
+def _cmd_mesh_dispatch(args: Namespace) -> None:
+    """Route ``slm mesh ...`` inspection subcommands (M-03)."""
+    from superlocalmemory.cli.mesh_cmd import cmd_mesh
+    rc = cmd_mesh(args)
+    if rc:
+        sys.exit(rc)
+
+
 def _cmd_escape_disable(args: Namespace) -> None:
     from superlocalmemory.cli.escape_hatch import cmd_disable
     cmd_disable(args)
@@ -201,6 +209,8 @@ def dispatch(args: Namespace) -> None:
         "context": _cmd_context_dispatch,
         # V3.4.22 LLD-06 additive schema migrations
         "db": _cmd_db_dispatch,
+        # V3.7.9 M-03 — terminal mesh inspection
+        "mesh": _cmd_mesh_dispatch,
         # V3.4.22 Stage 8 SB-5 — MASTER-PLAN §8 escape hatches.
         "disable": _cmd_escape_disable,
         "enable": _cmd_escape_enable,
@@ -345,6 +355,11 @@ def cmd_serve(args: Namespace) -> None:
     else:
         from superlocalmemory.infra.data_root import state_path
         print(f"Failed to start daemon. Check {state_path('logs', 'daemon.log')}")
+        # INT-H-02: exit non-zero so callers can detect the failure. The plugin
+        # launcher (plugin/scripts/slm-launch) guards on this exit code and
+        # refuses to open a direct MCP writer against a broken daemon; without
+        # the non-zero exit that guard was a dead no-op.
+        sys.exit(1)
 
 
 # -- Ingestion Adapters (V3.4.3) ------------------------------------------
@@ -610,6 +625,8 @@ def cmd_config(args: Namespace) -> None:
     elif action == "set":
         _ALLOWED_CONFIG_KEYS = {
             "evolution.enabled", "evolution.backend", "evolution.max_evolutions_per_cycle",
+            "evolution.mutation_model", "evolution.verify_model",
+            "evolution.confirm_model",
             "mesh_enabled", "daemon_idle_timeout", "entity_compilation_enabled",
             "graph_backend", "vector_backend", "scale_engine_state",
             "scope.default_scope", "scope.recall_include_global",
@@ -677,6 +694,31 @@ def cmd_config(args: Namespace) -> None:
                 print(f"Error: {message}")
             sys.exit(1)
 
+        _MODEL_KEYS = {
+            "evolution.mutation_model", "evolution.verify_model",
+            "evolution.confirm_model",
+        }
+        if key in _MODEL_KEYS:
+            from superlocalmemory.evolution.model_selection import _MODEL_ALIASES
+
+            accepted = set(_MODEL_ALIASES) | {"", "auto"}
+            sval = str(parsed_value)
+            if sval not in accepted:
+                allowed = ", ".join(["auto", *sorted(_MODEL_ALIASES)])
+                message = f"{key} must be one of: {allowed}"
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("config", error={
+                        "code": "INVALID_VALUE", "message": message,
+                    })
+                else:
+                    print(f"Error: {message}")
+                sys.exit(1)
+            # Normalise the "auto" sentinel to the empty string the
+            # resolver treats as "pick the cheapest for the backend".
+            if sval == "auto":
+                parsed_value = ""
+
         if key.startswith("scope."):
             from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
 
@@ -727,6 +769,18 @@ def cmd_config(args: Namespace) -> None:
             })
         else:
             print(f"{key}: {old_value} -> {parsed_value}")
+            if key == "evolution.enabled" and parsed_value is True:
+                print(
+                    "\n⚠  Skill evolution is now ON. It makes background "
+                    "LLM calls during consolidation\n"
+                    "   (capped at 10 calls/cycle, 3 cycles/day). It defaults "
+                    "to the lowest-cost model\n"
+                    "   for your backend (Claude → Haiku, Ollama → "
+                    "local/free).\n"
+                    "   Pick models: slm config set evolution.mutation_model "
+                    "<auto|haiku|sonnet|ollama>\n"
+                    "   Turn off:    slm config set evolution.enabled false"
+                )
 
     else:
         if use_json:
@@ -1294,8 +1348,10 @@ def cmd_recall(args: Namespace) -> None:
                 for i, r in enumerate(result["results"], 1):
                     print(f"  {i}. [{r['score']:.2f}] {r['content']}")
                 return
-    except Exception:
-        pass  # Fall through to direct engine
+    except Exception as _exc:  # noqa: BLE001
+        logger.warning(
+            "Daemon recall failed, falling back to direct engine: %s", _exc
+        )
 
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
@@ -1835,8 +1891,8 @@ def cmd_health(args: Namespace) -> None:
 
     print("Math Layer Health:")
     print(f"  Total facts: {len(facts)}")
-    print(f"  Fisher-Rao indexed: {fisher_count}/{len(facts)}")
-    print(f"  Langevin positioned: {langevin_count}/{len(facts)}")
+    print(f"  Math layer indexed: {fisher_count}/{len(facts)}")
+    print(f"  Lifecycle positioned: {langevin_count}/{len(facts)}")
     print(f"  Mode: {config.mode.value.upper()}")
 
 

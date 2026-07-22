@@ -89,6 +89,17 @@ def parse_mutation_output(output: str) -> Optional[str]:
     return None
 
 
+# An evolved SKILL.md is auto-loaded into future sessions, so a mutation that
+# hallucinated (or was prompt-injected into producing) code-execution or
+# secret-exfiltration instructions must never be persisted. Structure checks
+# alone are insufficient — reject dangerous content outright.
+_SKILL_DENY_PATTERNS: tuple[str, ...] = (
+    "os.environ", "subprocess", "exec(", "eval(", "__import__", "import os",
+    "import subprocess", "pickle.loads", "curl ", "wget ", "rm -rf",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_SECRET", "/.ssh/", ".install_token",
+)
+
+
 def validate_skill_content(content: str) -> Optional[str]:
     """Validate evolved skill content. Returns error message or None if valid."""
     if not content or len(content) < 50:
@@ -97,6 +108,11 @@ def validate_skill_content(content: str) -> Optional[str]:
         return "Missing YAML frontmatter (no --- found)"
     if content.count("---") >= 2 and "name:" not in content.split("---")[1]:
         return "Missing 'name:' in frontmatter"
+    lowered = content.lower()
+    for pat in _SKILL_DENY_PATTERNS:
+        if pat.lower() in lowered:
+            return (f"Rejected: evolved skill contains a disallowed pattern "
+                    f"({pat!r}) — skills must not execute code or access secrets")
     return None
 
 

@@ -80,13 +80,26 @@ class BM25Channel:
     def document_count(self) -> int:
         return len(self._corpus)
 
-    def ensure_loaded(self, profile_id: str) -> None:
+    def ensure_loaded(
+        self,
+        profile_id: str,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
+    ) -> None:
         """Cold-load BM25 tokens from DB for a profile (once).
 
-        Idempotent: subsequent calls for the same profile are no-ops.
+        Idempotent: subsequent calls for the same profile/scope are no-ops.
+
+        Args:
+            profile_id: Profile to load.
+            include_global: Include global-scope facts. Falls back to the
+                instance attribute when not supplied.
+            include_shared: Include shared-scope facts. Same fallback.
         """
-        include_global = bool(getattr(self, "include_global", False))
-        include_shared = bool(getattr(self, "include_shared", False))
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         scope_key = (profile_id, include_global, include_shared)
         if scope_key == self._loaded_scope_key:
             return
@@ -174,7 +187,12 @@ class BM25Channel:
         self._db.store_bm25_tokens(fact_id, profile_id, tokens)
 
     def _fts5_search(
-        self, query: str, profile_id: str, top_k: int = 30,
+        self,
+        query: str,
+        profile_id: str,
+        top_k: int = 30,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """v3.5.0: SQLite FTS5 keyword search (C-level indexed, scales to millions).
 
@@ -187,6 +205,10 @@ class BM25Channel:
         Raises (OperationalError) if the FTS5 table is absent — the caller
         then falls back to the legacy in-memory rank_bm25 path.
         """
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         tokens = tokenize(query)
         if not tokens:
             return []
@@ -195,8 +217,8 @@ class BM25Channel:
         match_expr = " OR ".join('"' + t.replace('"', "") + '"' for t in tokens)
         where, params = _scope_where(
             profile_id,
-            include_global=bool(getattr(self, "include_global", False)),
-            include_shared=bool(getattr(self, "include_shared", False)),
+            include_global=include_global,
+            include_shared=include_shared,
             prefix="af",
         )
         sql = (
@@ -221,6 +243,8 @@ class BM25Channel:
         query: str,
         profile_id: str,
         top_k: int = 30,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Search BM25 index for matching facts.
 
@@ -230,10 +254,17 @@ class BM25Channel:
             query: Search query text.
             profile_id: Scope to this profile.
             top_k: Maximum results.
+            include_global: Include global-scope facts. Falls back to the
+                instance attribute when not supplied.
+            include_shared: Include shared-scope facts. Same fallback.
 
         Returns:
             List of (fact_id, bm25_score) sorted by score descending.
         """
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         # v3.5.0: FTS5 fast path — C-level indexed, ~ms, scales to millions.
         # The legacy in-memory rank_bm25 path rebuilt the whole index over the
         # entire corpus on every corpus change (11s+ at 17.5k facts, does not
@@ -241,13 +272,16 @@ class BM25Channel:
         # Falls back to rank_bm25 ONLY if the FTS5 table is genuinely
         # unavailable (raises) — e.g. a pre-FTS legacy DB.
         try:
-            return self._fts5_search(query, profile_id, top_k)
+            return self._fts5_search(
+                query, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
+            )
         except Exception as exc:  # pragma: no cover — legacy/missing FTS table
             logger.debug(
                 "BM25 FTS5 path unavailable, using rank_bm25 fallback: %s", exc,
             )
 
-        self.ensure_loaded(profile_id)
+        self.ensure_loaded(profile_id, include_global=include_global, include_shared=include_shared)
 
         if not self._corpus:
             return []

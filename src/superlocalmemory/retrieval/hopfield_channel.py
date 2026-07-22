@@ -88,6 +88,8 @@ class HopfieldChannel:
         query: Any,
         profile_id: str,
         top_k: int = 50,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Search for facts using Hopfield associative retrieval.
 
@@ -95,6 +97,9 @@ class HopfieldChannel:
             query: Query embedding (list[float] or np.ndarray).
             profile_id: Scope search to this profile.
             top_k: Maximum results to return.
+            include_global: Include global-scope facts. Falls back to the
+                instance attribute when not supplied.
+            include_shared: Include shared-scope facts. Same fallback.
 
         Returns:
             List of (fact_id, score) sorted by score descending.
@@ -104,8 +109,10 @@ class HopfieldChannel:
         if not self._config.enabled:
             return []
 
-        include_global = bool(getattr(self, "include_global", False))
-        include_shared = bool(getattr(self, "include_shared", False))
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         try:
             with self._cache_lock:
                 return self._search_inner(

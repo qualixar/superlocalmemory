@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from superlocalmemory.server.route_mutations import authorize_route_mutation
 
-from .helpers import DB_PATH
+from .helpers import DB_PATH, get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.tiers")
 router = APIRouter()
@@ -55,9 +55,11 @@ def _validate_profile(profile_id: str) -> str:
 
 
 @router.get("/api/tiers/stats")
-async def tier_stats(profile_id: str = "default"):
+async def tier_stats(profile_id: str | None = None):
     """Get tier distribution stats."""
-    profile_id = _validate_profile(profile_id)
+    # Default to the ACTIVE profile, never the literal "default" — otherwise
+    # tier counts reflect the default profile regardless of which is active.
+    profile_id = _validate_profile(profile_id or get_active_profile())
 
     with _db() as conn:
         try:
@@ -98,13 +100,13 @@ async def tier_stats(profile_id: str = "default"):
 
 
 @router.post("/api/tiers/evaluate")
-async def evaluate_tiers_route(request: Request, profile_id: str = "default"):
+async def evaluate_tiers_route(request: Request, profile_id: str | None = None):
     """Manually trigger tier evaluation.
 
     Uses the shared engine (via lazy import) instead of re-initializing
     DatabaseManager on every request.
     """
-    profile_id = _validate_profile(profile_id)
+    profile_id = _validate_profile(profile_id or get_active_profile())
 
     try:
         authorization = authorize_route_mutation(
@@ -137,13 +139,13 @@ async def evaluate_tiers_route(request: Request, profile_id: str = "default"):
 async def pin_fact_route(
     body: PinRequest,
     request: Request,
-    profile_id: str = "default",
+    profile_id: str | None = None,
 ):
     """Pin a fact to stay in active tier forever.
 
     Validates fact exists in the specified profile before pinning.
     """
-    profile_id = _validate_profile(profile_id)
+    profile_id = _validate_profile(profile_id or get_active_profile())
     authorization = authorize_route_mutation(
         request,
         operation="update",
@@ -194,7 +196,7 @@ async def pin_fact_route(
 async def unpin_fact_route(
     body: PinRequest,
     request: Request,
-    profile_id: str = "default",
+    profile_id: str | None = None,
 ):
     """Unpin a fact, allowing normal tier demotion.
 
@@ -202,7 +204,7 @@ async def unpin_fact_route(
     based on access patterns. This is intentional — immediate demotion would
     surprise the user.
     """
-    profile_id = _validate_profile(profile_id)
+    profile_id = _validate_profile(profile_id or get_active_profile())
     authorization = authorize_route_mutation(
         request,
         operation="update",

@@ -186,18 +186,27 @@ class TestConcurrentRecallScopeIsolation:
         obs_lock = threading.Lock()
         orig = re._run_channels
 
-        def _spy(query, profile_id, strat):
-            # Capture the scope flag visible on a shared channel AT execution
-            # time, with a tiny stall to widen the interleaving window. Under
-            # the scope-lock this must always equal the calling recall's flag.
-            ch = re._semantic
-            seen_g = getattr(ch, "include_global", None)
+        def _spy(
+            query, profile_id, strat,
+            *,
+            extra_disabled_channels=None,
+            include_global=False,
+            include_shared=False,
+        ):
+            # v3.7.9: flags now travel as explicit kwargs rather than being set
+            # as attributes on shared channel instances. Capture the kwargs
+            # directly; no need to inspect channel attributes.
+            # v3.4.64: extra_disabled_channels also travels as an explicit kwarg —
+            # accept it so the spy does not break when fast=True callers pass it.
             import time as _t
-            _t.sleep(0.002)
-            seen_s = getattr(ch, "include_shared", None)
+            _t.sleep(0.002)  # widen the interleaving window
             with obs_lock:
-                observations.append((seen_g, seen_s))
-            return orig(query, profile_id, strat)
+                observations.append((include_global, include_shared))
+            return orig(
+                query, profile_id, strat,
+                extra_disabled_channels=extra_disabled_channels,
+                include_global=include_global, include_shared=include_shared,
+            )
 
         re._run_channels = _spy
         try:
@@ -212,10 +221,10 @@ class TestConcurrentRecallScopeIsolation:
         finally:
             re._run_channels = orig
 
-        # Every observation must be internally consistent: a recall that set
-        # include_global also set include_shared to the same value, and the two
-        # flags were never a torn (True, False) / (False, True) mix from an
-        # interleaved concurrent recall.
+        # Every observation must be internally consistent: a recall that passed
+        # include_global=True also passed include_shared=True (and vice versa),
+        # so the two flags must always be equal — never a torn (True, False) /
+        # (False, True) mix leaking from a concurrent recall.
         assert observations
         assert all(g == s for g, s in observations), observations
 

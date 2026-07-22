@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import threading
+import time as _time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -19,6 +20,20 @@ _RUNTIME_BIND_LOCK = threading.Lock()
 _REQUEST_PROFILE: ContextVar[str | None] = ContextVar(
     "slm_request_profile", default=None,
 )
+
+# Maximum seconds to wait for in-flight operations to drain before a
+# profile switch or engine reconfigure is aborted with HTTP 503.
+# Tests can monkeypatch this module-level value to keep runs fast.
+_DRAIN_TIMEOUT_SECS: float = 5.0
+
+
+class TransitionDrainTimeout(Exception):
+    """Raised when in-flight operations do not drain within _DRAIN_TIMEOUT_SECS.
+
+    The caller (HTTP switch route) maps this to HTTP 503 so the client
+    receives a clear error instead of a silent hang.  After the timeout,
+    `_transitioning` is always reset to False so the daemon stays responsive.
+    """
 
 
 def current_request_profile() -> str | None:
@@ -61,6 +76,18 @@ class ProfileRuntime:
             self._active_operations += 1
             return self._snapshot
 
+    def _try_acquire_operation_nowait(self) -> ProfileSnapshot | None:
+        """Non-blocking acquire: returns None immediately when a transition is pending.
+
+        Used by cooperative background maintenance tasks so they never block the
+        drain window of a pending profile switch.
+        """
+        with self._condition:
+            if self._transitioning:
+                return None
+            self._active_operations += 1
+            return self._snapshot
+
     def release_operation(self) -> None:
         with self._condition:
             if self._active_operations <= 0:
@@ -77,20 +104,64 @@ class ProfileRuntime:
         finally:
             self.release_operation()
 
+    @contextmanager
+    def operation_nowait(self) -> Iterator[ProfileSnapshot | None]:
+        """Cooperatively skip when a profile transition is pending.
+
+        Background maintenance tasks that do NOT mutate profile-scoped engine
+        state (cache warmup, health probes) MUST use this instead of
+        ``operation()`` so they never hold the drain window hostage.
+
+        Yields ``None`` (preempted — skip this work cycle) when a switch is
+        already in progress.  Yields a :class:`ProfileSnapshot` and holds the
+        lease normally when no transition is pending.
+
+        The caller is responsible for checking ``if snap is None: return``.
+
+        Unlike ``operation()``, this context manager never blocks — it either
+        admits immediately or preempts immediately.
+        """
+        snapshot = self._try_acquire_operation_nowait()
+        acquired = snapshot is not None
+        try:
+            yield snapshot
+        finally:
+            if acquired:
+                self.release_operation()
+
     def transition(
         self,
         target_profile: str,
         commit: Callable[[ProfileSnapshot, str], None],
     ) -> ProfileSnapshot:
-        """Drain admitted operations, commit, then publish a new generation."""
+        """Drain admitted operations, commit, then publish a new generation.
+
+        Raises TransitionDrainTimeout if in-flight operations do not drain
+        within _DRAIN_TIMEOUT_SECS.  The flag is always reset on timeout so
+        the daemon remains responsive (no permanent _transitioning=True wedge).
+        """
+        deadline = _time.monotonic() + _DRAIN_TIMEOUT_SECS
         with self._condition:
             while self._transitioning:
                 self._condition.wait()
             if target_profile == self._snapshot.profile_id:
                 return self._snapshot
             self._transitioning = True
-            while self._active_operations:
-                self._condition.wait()
+            while self._active_operations > 0:
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    # Reset before raising — never leave the daemon wedged.
+                    self._transitioning = False
+                    self._condition.notify_all()
+                    raise TransitionDrainTimeout(
+                        f"Profile switch to '{target_profile}' timed out after "
+                        f"{_DRAIN_TIMEOUT_SECS:.0f}s: {self._active_operations} "
+                        "in-flight operation(s) did not drain. "
+                        "Try again when no active requests are in progress."
+                    )
+                # Use short sleep slices so we react quickly to notifications
+                # and to timeout expiry without busy-spinning.
+                self._condition.wait(timeout=min(remaining, 0.25))
             previous = self._snapshot
 
         try:
@@ -111,13 +182,26 @@ class ProfileRuntime:
             return self._snapshot
 
     def reconfigure(self, commit: Callable[[ProfileSnapshot], None]) -> ProfileSnapshot:
-        """Run a same-profile engine transition behind the operation barrier."""
+        """Run a same-profile engine transition behind the operation barrier.
+
+        Raises TransitionDrainTimeout if in-flight operations do not drain
+        within _DRAIN_TIMEOUT_SECS (same semantics as transition()).
+        """
+        deadline = _time.monotonic() + _DRAIN_TIMEOUT_SECS
         with self._condition:
             while self._transitioning:
                 self._condition.wait()
             self._transitioning = True
-            while self._active_operations:
-                self._condition.wait()
+            while self._active_operations > 0:
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    self._transitioning = False
+                    self._condition.notify_all()
+                    raise TransitionDrainTimeout(
+                        f"Engine reconfigure timed out after {_DRAIN_TIMEOUT_SECS:.0f}s: "
+                        f"{self._active_operations} in-flight operation(s) did not drain."
+                    )
+                self._condition.wait(timeout=min(remaining, 0.25))
             snapshot = self._snapshot
 
         try:
@@ -362,12 +446,44 @@ class ProfileRuntimeMiddleware:
             raise
         scope.setdefault("state", {})["profile_snapshot"] = snapshot
         token = _REQUEST_PROFILE.set(snapshot.profile_id)
+
+        # The operation lease guards the SYNCHRONOUS route work that produces
+        # the response — not the streaming of its body. A long-lived SSE body
+        # would otherwise hold the lease for its whole lifetime and make every
+        # profile switch time out during drain (HTTP 503):
+        #   * /events/stream runs `while True: await sleep(1)` FOREVER while a
+        #     dashboard tab is open;
+        #   * /api/v3/chat/stream streams LLM tokens for up to 120s.
+        # Release the lease the instant the response starts. By then the route
+        # handler has finished its engine work and returned its Response
+        # (FastAPI buffers normal responses before sending response.start).
+        # Streaming generators that still need the engine (chat recall) already
+        # re-acquire their own short-lived lease internally, and /events/stream
+        # only reads the EventBus DB — neither depends on this outer lease.
+        released = False
+
+        def _release_lease_once() -> None:
+            # Single-task coroutine chain — a plain flag is sufficient; the
+            # underlying release_operation() is lock-guarded and idempotent-safe
+            # only via this guard, so never call it twice.
+            nonlocal released
+            if not released:
+                released = True
+                runtime.release_operation()
+
+        async def _send(message) -> None:
+            if message.get("type") == "http.response.start":
+                _release_lease_once()
+            await send(message)
+
         try:
-            await self._app(scope, receive, send)
+            await self._app(scope, receive, _send)
         finally:
             _REQUEST_PROFILE.reset(token)
+            # Safety net: a request that errors before emitting response.start
+            # (or an ASGI app that never sends one) must still release its lease.
             # Release is lock-only and must not itself be cancellation-prone.
-            runtime.release_operation()
+            _release_lease_once()
 
 
 __all__ = [
@@ -375,6 +491,7 @@ __all__ = [
     "ProfileRuntime",
     "ProfileRuntimeMiddleware",
     "ProfileSnapshot",
+    "TransitionDrainTimeout",
     "bind_profile_runtime",
     "commit_daemon_profile_switch",
     "current_request_profile",

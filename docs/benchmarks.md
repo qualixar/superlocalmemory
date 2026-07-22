@@ -1,4 +1,4 @@
-# Published V3 LoCoMo Evidence Carried into V3.7
+# Published V3 LoCoMo Evidence (Architecture Carried into V3.8.0)
 
 This page is the canonical public reference for SuperLocalMemory benchmark
 figures. It reports the published V3 architecture experiments that remain the

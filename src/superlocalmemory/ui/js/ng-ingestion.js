@@ -127,14 +127,14 @@
         '<div style="display:flex;gap:8px">' +
           (isEnabled ?
             (isRunning ?
-              '<button class="ng-btn" onclick="adapterAction(\'' + adapter.name + '\',\'stop\')">' +
+              '<button class="ng-btn" data-act-click="adapter-action" data-adapter="' + adapter.name + '" data-adapter-action="stop">' +
                 '<i class="bi bi-stop-circle"></i> Stop</button>' :
-              '<button class="ng-btn ng-btn-accent" onclick="adapterAction(\'' + adapter.name + '\',\'start\')">' +
+              '<button class="ng-btn ng-btn-accent" data-act-click="adapter-action" data-adapter="' + adapter.name + '" data-adapter-action="start">' +
                 '<i class="bi bi-play-circle"></i> Start</button>'
             ) +
-            '<button class="ng-btn" onclick="adapterAction(\'' + adapter.name + '\',\'disable\')" style="color:var(--ng-status-error)">' +
+            '<button class="ng-btn" data-act-click="adapter-action" data-adapter="' + adapter.name + '" data-adapter-action="disable" style="color:var(--ng-status-error)">' +
               '<i class="bi bi-x-circle"></i> Disable</button>' :
-            '<button class="ng-btn ng-btn-accent" onclick="adapterAction(\'' + adapter.name + '\',\'enable\')">' +
+            '<button class="ng-btn ng-btn-accent" data-act-click="adapter-action" data-adapter="' + adapter.name + '" data-adapter-action="enable">' +
               '<i class="bi bi-power"></i> Enable</button>'
           ) +
         '</div>' +

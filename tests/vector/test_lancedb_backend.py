@@ -117,7 +117,9 @@ class TestSimilaritySearch:
         assert len(results) == 10
 
     def test_invalid_tier_raises(self, populated):
-        with pytest.raises(AssertionError):
+        # LOW-1 (3.7.9): validation is a real ValueError now, not an assert
+        # (asserts are stripped under `python -O`).
+        with pytest.raises(ValueError):
             populated.similarity_search(
                 _make_vec(), tier_filter=["hot", "warm"]  # "hot" not valid
             )

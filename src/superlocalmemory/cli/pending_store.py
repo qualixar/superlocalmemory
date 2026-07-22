@@ -43,6 +43,7 @@ _MAX_RETRY_DELAY_SECONDS = 3600
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id TEXT NOT NULL DEFAULT 'default',
     content TEXT NOT NULL,
     tags TEXT DEFAULT '',
     metadata TEXT DEFAULT '{}',
@@ -62,6 +63,12 @@ def _get_db(base_dir: Path | None = None) -> sqlite3.Connection:
     db_path = d / _PENDING_DB
     conn = sqlite3.connect(str(db_path), timeout=5)
     conn.execute("PRAGMA journal_mode=WAL")
+    # C4: pending queue can hold not-yet-materialized memory content owner-only.
+    try:
+        from superlocalmemory.core.security_primitives import harden_db_perms
+        harden_db_perms(db_path)
+    except Exception:
+        pass
     conn.execute(_SCHEMA)
     columns = {
         row[1]
@@ -71,6 +78,15 @@ def _get_db(base_dir: Path | None = None) -> sqlite3.Connection:
         conn.execute(
             "ALTER TABLE pending_memories ADD COLUMN "
             "next_retry_at REAL DEFAULT 0"
+        )
+        conn.commit()
+    # Per-profile isolation: a queued item must materialize under the profile
+    # that was active when it was enqueued — never under whatever profile is
+    # active at drain time. Existing rows backfill to 'default'.
+    if "profile_id" not in columns:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN "
+            "profile_id TEXT NOT NULL DEFAULT 'default'"
         )
         conn.commit()
     # Pre-V3.7 rows were terminally hidden after three failures. Restore them
@@ -89,8 +105,12 @@ def store_pending(
     tags: str = "",
     metadata: dict | None = None,
     base_dir: Path | None = None,
+    profile_id: str = "default",
 ) -> int:
-    """Store content in pending table. Returns the row ID.
+    """Store content in pending table under a profile. Returns the row ID.
+
+    ``profile_id`` captures the profile active at ENQUEUE time so a later
+    profile switch can never redirect this memory to a different profile.
 
     This is intentionally FAST — no engine init, no embedding, no model loading.
     Just a raw SQLite INSERT (~0.1s).
@@ -98,9 +118,11 @@ def store_pending(
     conn = _get_db(base_dir)
     try:
         cur = conn.execute(
-            "INSERT INTO pending_memories (content, tags, metadata, created_at, status) "
-            "VALUES (?, ?, ?, ?, 'pending')",
-            (content, tags, json.dumps(metadata or {}), time.strftime("%Y-%m-%dT%H:%M:%S")),
+            "INSERT INTO pending_memories "
+            "(profile_id, content, tags, metadata, created_at, status) "
+            "VALUES (?, ?, ?, ?, ?, 'pending')",
+            (profile_id, content, tags, json.dumps(metadata or {}),
+             time.strftime("%Y-%m-%dT%H:%M:%S")),
         )
         conn.commit()
         return cur.lastrowid or 0
@@ -108,20 +130,34 @@ def store_pending(
         conn.close()
 
 
-def get_pending(base_dir: Path | None = None, limit: int = 50) -> list[dict]:
-    """Get unprocessed pending memories."""
+def get_pending(
+    base_dir: Path | None = None,
+    limit: int = 50,
+    profile_id: str | None = None,
+) -> list[dict]:
+    """Get unprocessed pending memories, optionally scoped to one profile.
+
+    The drain passes ``profile_id`` = its engine's active profile so it only
+    ever claims items enqueued under that profile. Items for other profiles
+    wait until their profile is active — never materialized under the wrong one.
+    """
     conn = _get_db(base_dir)
     try:
-        rows = conn.execute(
-            "SELECT id, content, tags, metadata, created_at, retry_count "
+        query = (
+            "SELECT id, content, tags, metadata, created_at, retry_count, profile_id "
             "FROM pending_memories WHERE status = 'pending' "
-            "AND COALESCE(next_retry_at, 0) <= ? "
-            "ORDER BY id ASC LIMIT ?",
-            (time.time(), limit),
-        ).fetchall()
+            "AND COALESCE(next_retry_at, 0) <= ?"
+        )
+        params: list = [time.time()]
+        if profile_id is not None:
+            query += " AND profile_id = ?"
+            params.append(profile_id)
+        query += " ORDER BY id ASC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
         return [
             {"id": r[0], "content": r[1], "tags": r[2], "metadata": r[3],
-             "created_at": r[4], "retry_count": r[5]}
+             "created_at": r[4], "retry_count": r[5], "profile_id": r[6]}
             for r in rows
         ]
     finally:

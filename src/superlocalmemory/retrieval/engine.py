@@ -17,6 +17,7 @@ License: AGPL-3.0-or-later
 from __future__ import annotations
 
 import concurrent.futures
+import functools
 import logging
 import math
 import re
@@ -97,12 +98,11 @@ class RetrievalEngine:
         self._profile_channel = profile_channel
         self._bridge = bridge_discovery
         self._trust_scorer = trust_scorer
-        # v3.6.15: serialise the per-recall scope-flag set + channel execution.
-        # Channel instances are SHARED across concurrent recalls (the daemon runs
-        # several in parallel); without this, recall B's flags could overwrite
-        # recall A's mid-flight on the shared channels. Uncontended for a single
-        # recall (~0 cost); only the channel phase of concurrent recalls serialises.
-        self._scope_lock = threading.Lock()
+        # v3.7.9: scope flags (include_global / include_shared) are now threaded
+        # as explicit call parameters into every channel's search() method, so
+        # concurrent recalls each carry their own flags — no shared mutable state,
+        # no lock needed. The _scope_lock and per-recall attribute-set loop have
+        # been removed. See defect S01 in the fix/3.7.9 branch notes.
         # One executor belongs to one retrieval engine. Creating/destroying six
         # worker threads on every recall caused allocator/thread-stack RSS churn
         # under sustained sessions. The scope lock already serializes channel
@@ -161,7 +161,11 @@ class RetrievalEngine:
         for the ``--fast`` CLI flag) without mutating shared config.
         """
         t0 = time.monotonic()
-        self._extra_disabled = set(extra_disabled_channels or ())
+        # NOTE: extra_disabled_channels is passed as an explicit local argument
+        # to _run_channels() — it is NOT stored on self.  Storing it as a shared
+        # mutable instance attribute (the old self._extra_disabled = ...) caused
+        # a race condition where two concurrent recalls could overwrite each
+        # other's channel-disable set (v3.4.64 fix).
 
         # v3.5.0 diagnostic: stage timing inside retrieval (SLM_RECALL_TIMING=1).
         import os as _os_e
@@ -195,18 +199,14 @@ class RetrievalEngine:
         # Dynamic top-k for aggregation queries
         effective_limit = 100 if strat.query_type == "aggregation" else limit
 
-        # 3. Run channels. Set the scope flags on the shared channel instances
-        # and execute them under self._scope_lock so a concurrent recall can't
-        # interleave its scope visibility onto these channels mid-flight. The
-        # worker threads spawned inside _run_channels are joined before the lock
-        # releases, so every channel read sees THIS recall's flags.
-        with self._scope_lock:
-            for ch in (self._semantic, self._bm25, self._entity, self._temporal,
-                       self._hopfield, self._spreading_activation):
-                if ch is not None:
-                    ch.include_global = include_global
-                    ch.include_shared = include_shared
-            ch_results = self._run_channels(query, profile_id, strat)
+        # 3. Run channels. Both scope flags AND extra_disabled_channels travel as
+        # explicit call parameters so concurrent recalls with different flags
+        # cannot corrupt each other.  No lock needed — no shared mutable state.
+        ch_results = self._run_channels(
+            query, profile_id, strat,
+            extra_disabled_channels=extra_disabled_channels,
+            include_global=include_global, include_shared=include_shared,
+        )
         _em("run_channels")
         if profile_hits:
             ch_results["profile"] = profile_hits
@@ -628,7 +628,14 @@ class RetrievalEngine:
         return emb
 
     def _run_channels(
-        self, query: str, profile_id: str, strat: QueryStrategy,
+        self,
+        query: str,
+        profile_id: str,
+        strat: QueryStrategy,
+        *,
+        extra_disabled_channels: set[str] | None = None,
+        include_global: bool = False,
+        include_shared: bool = False,
     ) -> dict[str, list[tuple[str, float]]]:
         """Run active retrieval channels.
 
@@ -646,7 +653,9 @@ class RetrievalEngine:
         out: dict[str, list[tuple[str, float]]] = {}
         # Skip channels listed in disabled_channels (ablation support)
         # V3.4.40: union with per-recall extra_disabled set (e.g. --fast skip)
-        disabled = set(self._config.disabled_channels) | getattr(self, "_extra_disabled", set())
+        # V3.4.64: extra_disabled is now a local parameter, not a shared instance
+        # attribute — eliminates the concurrent-recall race condition.
+        disabled = set(self._config.disabled_channels) | set(extra_disabled_channels or ())
 
         # V3.3.4: Embed query ONCE, reuse for semantic + hopfield channels
         q_emb: list[float] | None = None
@@ -688,22 +697,38 @@ class RetrievalEngine:
         if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
             futures["semantic"] = executor.submit(
                 _safe_channel, "semantic",
-                self._semantic.search, q_emb, profile_id, self._config.semantic_top_k,
+                functools.partial(
+                    self._semantic.search,
+                    include_global=include_global, include_shared=include_shared,
+                ),
+                q_emb, profile_id, self._config.semantic_top_k,
             )
         if self._bm25 is not None and "bm25" not in disabled:
             futures["bm25"] = executor.submit(
                 _safe_channel, "bm25",
-                self._bm25.search, query, profile_id, self._config.bm25_top_k,
+                functools.partial(
+                    self._bm25.search,
+                    include_global=include_global, include_shared=include_shared,
+                ),
+                query, profile_id, self._config.bm25_top_k,
             )
         if self._temporal is not None and "temporal" not in disabled:
             futures["temporal"] = executor.submit(
                 _safe_channel, "temporal",
-                self._temporal.search, query, profile_id, self._config.bm25_top_k,
+                functools.partial(
+                    self._temporal.search,
+                    include_global=include_global, include_shared=include_shared,
+                ),
+                query, profile_id, self._config.bm25_top_k,
             )
         if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
             futures["hopfield"] = executor.submit(
                 _safe_channel, "hopfield",
-                self._hopfield.search, q_emb, profile_id, self._config.hopfield_top_k,
+                functools.partial(
+                    self._hopfield.search,
+                    include_global=include_global, include_shared=include_shared,
+                ),
+                q_emb, profile_id, self._config.hopfield_top_k,
             )
         if (
             self._spreading_activation is not None
@@ -712,7 +737,11 @@ class RetrievalEngine:
         ):
             futures["spreading_activation"] = executor.submit(
                 _safe_channel, "spreading_activation",
-                self._spreading_activation.search, q_emb, profile_id, self._config.bm25_top_k,
+                functools.partial(
+                    self._spreading_activation.search,
+                    include_global=include_global, include_shared=include_shared,
+                ),
+                q_emb, profile_id, self._config.bm25_top_k,
             )
 
         # Collect results as channels complete.
@@ -981,6 +1010,10 @@ class RetrievalEngine:
 
 _CHANNEL_KEYS: tuple[str, ...] = (
     "semantic", "bm25", "entity_graph", "temporal",
+    # hopfield + spreading_activation are real retrieval channels (score
+    # contract v2) with bandit-chosen weights; omitting them here silently
+    # discarded adaptive reranking for multi-hop relational recall.
+    "spreading_activation", "hopfield",
 )
 
 

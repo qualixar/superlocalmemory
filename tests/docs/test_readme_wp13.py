@@ -247,11 +247,11 @@ def test_evidence_safe_positioning_near_hero():
     assert "explicit choices" in opening, (
         "Opening copy must disclose optional provider/network choices (LLD AC7)."
     )
-    assert "published benchmark evidence carried into v3.7" in opening, (
+    assert "published benchmark evidence carried into v3.8.0" in opening, (
         "Opening copy must identify the evidence as the published V3 research "
         "carried into the release (LLD AC7)."
     )
-    assert "not a claim of a newly rerun 3.7 package benchmark" in opening, (
+    assert "not a claim of a newly rerun v3.8.0 package benchmark" in opening, (
         "Opening copy must preserve the protocol boundary of the published evidence "
         "(LLD AC7)."
     )

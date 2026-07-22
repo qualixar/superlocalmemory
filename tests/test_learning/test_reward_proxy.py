@@ -311,3 +311,116 @@ def test_settle_stale_plays_on_missing_learning_db(tmp_path: Path):
     bad = tmp_path  # a directory, not a file
     n = settle_stale_plays(PROFILE, bad, memory, now=datetime.now(timezone.utc))
     assert n == 0
+
+
+# ---------------------------------------------------------------------------
+# Tenant scope: one profile's recall events must not settle another's play
+# ---------------------------------------------------------------------------
+
+
+def _bootstrap_memory_db_with_profile(tmp_path: Path) -> Path:
+    """memory.db whose tool_events carries a profile_id column.
+
+    Real installs (v3.7.x) scope tool_events per profile; the fixture above
+    omits the column, so it cannot exercise the guarded ``AND profile_id = ?``
+    predicate. This variant can.
+    """
+    memory_db = tmp_path / "mem_iso.db"
+    conn = sqlite3.connect(str(memory_db), isolation_level=None)
+    try:
+        conn.execute(
+            "CREATE TABLE tool_events ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " occurred_at TEXT NOT NULL,"
+            " tool_name TEXT NOT NULL,"
+            " profile_id TEXT,"
+            " payload_json TEXT)"
+        )
+    finally:
+        conn.close()
+    return memory_db
+
+
+def _seed_play_for(
+    db: Path, profile_id: str, query_id: str, played_at: datetime,
+) -> int:
+    conn = sqlite3.connect(str(db), isolation_level=None)
+    try:
+        cur = conn.execute(
+            "INSERT INTO bandit_plays "
+            "(profile_id, query_id, stratum, arm_id, played_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (profile_id, query_id, "single_hop|0|morning",
+             "fallback_default", played_at.isoformat(timespec="seconds")),
+        )
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def _seed_tool_event_for(
+    db: Path, profile_id: str, occurred_at: datetime, tool_name: str,
+    payload: dict,
+) -> None:
+    conn = sqlite3.connect(str(db), isolation_level=None)
+    try:
+        conn.execute(
+            "INSERT INTO tool_events "
+            "(occurred_at, tool_name, profile_id, payload_json) "
+            "VALUES (?, ?, ?, ?)",
+            (occurred_at.isoformat(timespec="seconds"), tool_name,
+             profile_id, json.dumps(payload)),
+        )
+    finally:
+        conn.close()
+
+
+def test_requery_detected_profile_isolation(tmp_path: Path):
+    """Profile A's recall events must NOT trigger requery settlement for B.
+
+    Regression guard for the tenant-scoping in ``_requery_detected``: two
+    profiles share one memory.db. Profile A has a seed recall plus a
+    same-topic follow-up within 30 s (which on its own looks exactly like a
+    requery). Profile B has one unsettled play in the 60–120 s wait window
+    with no recall activity of its own.
+
+    Without the ``AND profile_id = ?`` predicate, A's events leak into B's
+    requery detection and settle B's play with reward=0.0 (proxy_requery).
+    With the fix, A's events are filtered out, so B's play stays unsettled
+    (still inside the window → wait). This test fails if the scope is ever
+    reverted.
+    """
+    learning = _bootstrap_learning_db(tmp_path)
+    memory = _bootstrap_memory_db_with_profile(tmp_path)
+
+    now = datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc)
+    played = now - timedelta(seconds=90)  # inside the 60–120 s wait window
+
+    # Profile B: one unsettled play, no signals, no recall events.
+    play_b = _seed_play_for(learning, "B", "q-b", played)
+
+    # Profile A: seed recall before played_at + matching follow-up within 30 s.
+    topic = "quarterly revenue forecast"
+    _seed_tool_event_for(
+        memory, "A", played - timedelta(seconds=1), "recall", {"query": topic},
+    )
+    _seed_tool_event_for(
+        memory, "A", played + timedelta(seconds=10), "recall", {"query": topic},
+    )
+    # Sanity: the two A queries share a topic signature, so they WOULD read as
+    # a requery if scope leaked across profiles.
+    assert compute_topic_signature(topic) == compute_topic_signature(topic)
+
+    cache = _BanditCache(max_entries=16)
+    bandit_b = ContextualBandit(learning, profile_id="B", cache=cache)
+
+    settled = settle_stale_plays(
+        "B", learning, memory, now=now, bandit=bandit_b,
+    )
+
+    # B has no evidence of its own; A's events are scoped out → nothing to
+    # settle for B (still inside the 60–120 s window → wait).
+    assert settled == 0
+    reward, kind = _read_play(learning, play_b)
+    assert reward is None
+    assert kind is None

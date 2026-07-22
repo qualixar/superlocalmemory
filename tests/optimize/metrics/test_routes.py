@@ -93,3 +93,16 @@ def test_delete_cache_clear(_client):
     assert resp.status_code == 200
     data = resp.json()
     assert "deleted" in data
+
+
+def test_get_status(_client):
+    """M3: /api/optimize/status returns a per-feature on/off summary."""
+    resp = _client.get("/api/optimize/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["healthy"] is True
+    assert "features" in data
+    for feature in ("proxy", "cache", "compression", "semantic_cache"):
+        assert feature in data["features"]
+        assert isinstance(data["features"][feature], bool)
+    assert data["compress_mode"] in ("safe", "aggressive")

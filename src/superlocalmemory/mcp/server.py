@@ -138,55 +138,21 @@ _user_allowlist_str = _os_reg.environ.get("SLM_MCP_TOOLS", "").strip()
 
 # ---------------------------------------------------------------------------
 # v3.6.14 WP-01: Named profile definitions
+# Extracted to mcp/profiles.py (v3.8.0) — pure data, no side effects.
+# All names re-exported here for backward compatibility with existing tests
+# and any code that imports them from this module.
 # ---------------------------------------------------------------------------
 
-_PROFILE_CORE = frozenset({  # 14
-    "remember", "recall", "search", "fetch", "list_recent", "update_memory", "forget",
-    "session_init", "close_session",
-    "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
-})
-_PROFILE_CODE = _PROFILE_CORE | frozenset({  # 20
-    "build_code_graph", "get_blast_radius", "query_graph",
-    "semantic_search_code", "get_review_context", "detect_changes",
-})
-_PROFILE_FULL_MESH = frozenset({  # 8
-    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
-    "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
-})
-_PROFILE_FULL = frozenset({  # 30 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
-    "remember", "recall", "search", "fetch", "list_recent", "delete_memory", "update_memory",
-    "get_status", "session_init", "observe", "close_session", "report_feedback", "forget",
-    "run_maintenance", "consolidate_cognitive", "get_soft_prompts", "set_mode", "report_outcome",
-    "log_tool_event", "get_assertions", "reinforce_assertion", "contradict_assertion",
-    "evolve_skill", "skill_health", "skill_lineage",
-    "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
-}) | _PROFILE_FULL_MESH  # 38
-_PROFILE_POWER = _PROFILE_FULL | frozenset({  # 50
-    "get_version", "get_mode", "health", "consistency_check", "recall_trace",
-    "get_lifecycle_status", "set_retention_policy", "compact_memories",
-    "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",
-})
-_PROFILE_MESH = _PROFILE_FULL_MESH  # 8
-
-_PROFILE_DEFINITIONS: dict[str, frozenset[str]] = {
-    "core": _PROFILE_CORE,
-    "code": _PROFILE_CODE,
-    "full": _PROFILE_FULL,
-    "power": _PROFILE_POWER,
-    "mesh": _PROFILE_MESH,
-}  # "whole" intentionally absent — maps to raw server (D-2 LOCKED)
-
-# Compatibility aliases published by the v3.6 README.  Keep these explicit so
-# a stale client configuration has one deterministic meaning and emits a
-# migration warning.  Any other value is a configuration error (fail closed).
-_PROFILE_ALIASES: dict[str, str] = {
-    "core14": "core",
-    "code20": "code",
-    "full38": "full",
-    "power50": "power",
-    "mesh8": "mesh",
-    "whole81": "whole",
-}
+from superlocalmemory.mcp.profiles import (  # noqa: E402 (after env setups above)
+    _PROFILE_CORE,
+    _PROFILE_CODE,
+    _PROFILE_FULL_MESH,
+    _PROFILE_FULL,
+    _PROFILE_POWER,
+    _PROFILE_MESH,
+    _PROFILE_DEFINITIONS,
+    _PROFILE_ALIASES,
+)
 
 _profile = _os_reg.environ.get("SLM_MCP_PROFILE", "").strip().lower()
 

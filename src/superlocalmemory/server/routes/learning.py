@@ -291,8 +291,8 @@ async def learning_status():
         result["source_scores"] = {}
 
     except Exception as e:
-        logger.error("Error getting learning status: %s", e)
-        result["error"] = str(e)
+        logger.exception("Error getting learning status")
+        result["error"] = "Internal server error"
 
     return result
 
@@ -334,8 +334,8 @@ async def record_feedback(data: dict):
             "feedback_id": row_id,
         }
     except Exception as e:
-        logger.error("Error recording feedback: %s", e)
-        return {"success": False, "error": str(e)}
+        logger.exception("Error recording feedback")
+        return {"success": False, "error": "Internal server error"}
 
 
 @router.post("/api/feedback/dwell")
@@ -379,8 +379,8 @@ async def record_dwell(data: dict):
             "feedback_id": row_id,
         }
     except Exception as e:
-        logger.error("Error recording dwell: %s", e)
-        return {"success": False, "error": str(e)}
+        logger.exception("Error recording dwell")
+        return {"success": False, "error": "Internal server error"}
 
 
 @router.get("/api/feedback/stats")
@@ -414,8 +414,8 @@ async def feedback_stats():
             "by_channel": by_channel, "by_type": by_type, "available": True,
         }
     except Exception as e:
-        logger.error("Error getting feedback stats: %s", e)
-        return {"total_signals": 0, "ranking_phase": "baseline", "progress": 0, "error": str(e)}
+        logger.exception("Error getting feedback stats")
+        return {"total_signals": 0, "ranking_phase": "baseline", "progress": 0, "error": "Internal server error"}
 
 
 # ============================================================================
@@ -455,7 +455,7 @@ async def delete_pattern(data: dict) -> dict:
         }
     except Exception as exc:  # noqa: BLE001
         logger.error("delete_pattern failed: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": "internal error"}
 
 
 @router.get("/api/patterns")
@@ -562,8 +562,8 @@ async def learning_backup():
             "message": f"Learning DB backed up to {backup_name}",
         }
     except Exception as e:
-        logger.error("Error backing up learning DB: %s", e)
-        return {"success": False, "error": str(e)}
+        logger.exception("Error backing up learning DB")
+        return {"success": False, "error": "Internal server error"}
 
 
 @router.post("/api/learning/reset")
@@ -583,7 +583,7 @@ async def learning_reset():
         }
     except Exception as exc:  # noqa: BLE001
         logger.error("learning_reset failed: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": "internal error"}
 
 
 @router.post("/api/learning/retrain")
@@ -643,7 +643,7 @@ async def learning_retrain(data: dict | None = None):
         }
     except Exception as exc:  # noqa: BLE001
         logger.error("learning_retrain failed: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": "internal error"}
 
 
 @router.post("/api/learning/migrate-legacy")
@@ -665,4 +665,4 @@ async def learning_migrate_legacy():
         return {"success": True, **stats}
     except Exception as exc:  # noqa: BLE001
         logger.error("learning_migrate_legacy failed: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": "internal error"}

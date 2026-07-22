@@ -104,7 +104,8 @@ def test_format_helpers_render(fake_recall):
 
 
 def test_version_constant():
-    assert VERSION == "3.7.7"
+    from superlocalmemory import __version__
+    assert VERSION == __version__
 
 
 def test_truncate_payload_drops_memories_first(make_payload_helper=None):

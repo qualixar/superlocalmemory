@@ -266,7 +266,18 @@ class BackupManager:
 
         A safety snapshot of the current state is taken first.
         """
-        backup_path = self.backup_dir / filename
+        # Containment: filename must be a bare .db name inside backup_dir — no
+        # path separators or traversal. Prevents restoring (and thus copying
+        # over memory.db) an arbitrary file the daemon user can read.
+        if (not filename or "/" in filename or "\\" in filename
+                or ".." in filename or not filename.endswith(".db")):
+            logger.error("Restore rejected: invalid backup filename: %r", filename)
+            return False
+        backup_dir = self.backup_dir.resolve()
+        backup_path = (self.backup_dir / filename).resolve()
+        if backup_path.parent != backup_dir:
+            logger.error("Restore rejected: path escapes backup dir: %r", filename)
+            return False
         if not backup_path.exists():
             logger.error("Backup not found: %s", filename)
             return False

@@ -24,6 +24,13 @@ from .helpers import BackupConfigRequest, DB_PATH, MEMORY_DIR
 logger = logging.getLogger("superlocalmemory.routes.backup")
 router = APIRouter()
 
+
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log full traceback server-side; return a generic message to the client."""
+    logger.exception("backup route error")
+    return HTTPException(status_code=500, detail=detail)
+
+
 # Feature flags
 BACKUP_AVAILABLE = False
 CLOUD_AVAILABLE = False
@@ -79,8 +86,8 @@ async def backup_status():
         else:
             status["cloud_destinations"] = []
         return status
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backup status error: {str(e)}")
+    except Exception:
+        raise _internal_error("Backup status error")
 
 
 @router.post("/api/backup/create")
@@ -98,8 +105,8 @@ async def backup_create():
                 "status": manager.get_status(),
             }
         return {"success": False, "message": "Backup failed"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backup create error: {str(e)}")
+    except Exception:
+        raise _internal_error("Backup create error")
 
 
 @router.post("/api/backup/configure")
@@ -115,21 +122,30 @@ async def backup_configure(request: BackupConfigRequest):
             enabled=request.enabled,
         )
         return {"success": True, "message": "Backup configuration updated", "status": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backup configure error: {str(e)}")
+    except Exception:
+        raise _internal_error("Backup configure error")
 
 
 @router.get("/api/backup/list")
-async def backup_list():
+async def backup_list(request: Request):
     """List all available backups."""
     if not BACKUP_AVAILABLE:
         return {"backups": [], "count": 0, "message": "Backup module not available"}
+    # This GET is not covered by the mutation middleware. The local machine
+    # owner (loopback) is trusted; a remote caller must present a credential;
+    # non-loopback uncredentialed callers fail closed. Using the mutation-actor
+    # boundary (not require_write_actor) so the same-origin dashboard — whose
+    # fetch wrapper only attaches the install token to mutating requests — can
+    # still read its own backup list.
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
+    require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
+                                actor_kind="backup-list")
     try:
         manager = _get_backup_manager()
         backups = manager.list_backups()
         return {"backups": backups, "count": len(backups)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backup list error: {str(e)}")
+    except Exception:
+        raise _internal_error("Backup list error")
 
 
 # ---- Cloud destination routes (v3.4.10) -----------------------------------
@@ -228,10 +244,18 @@ async def sync_cloud():
 # ---- Export / Download route (v3.4.10) ------------------------------------
 
 @router.get("/api/backup/export")
-async def export_backup():
+async def export_backup(request: Request):
     """Create and download a compressed backup archive."""
     if not BACKUP_AVAILABLE:
         raise HTTPException(status_code=501, detail="Backup module not available")
+    # Full-database download. This GET is not covered by the mutation
+    # middleware and is triggered by a top-level navigation (window.location),
+    # which cannot carry a custom credential header — so it uses the
+    # loopback-trusted mutation-actor boundary: the local owner may export,
+    # a non-loopback caller without a credential fails closed.
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
+    require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
+                                actor_kind="backup-export")
 
     manager = _get_backup_manager()
     filename = manager.create_backup(label="export")

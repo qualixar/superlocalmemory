@@ -13,6 +13,81 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Nested-group compatibility.
+#
+# The canonical serialized form (``OptimizeConfig.as_dict``) is FLAT
+# (``compress_enabled``, ``compress_mode``, ``cache_enabled``, ...). But
+# hand-authored ``optimize.json`` files — and older doc examples — group
+# settings under nested blocks (``{"compress": {"enabled": true, ...}}``).
+# ``from_dict`` accepts BOTH: be liberal in what we read, strict in what we
+# write (Postel's law). Flat keys, when present, always win over a nested
+# value for the same setting.
+# ---------------------------------------------------------------------------
+_NESTED_ALIASES: dict[str, dict[str, str]] = {
+    "compress": {
+        "enabled": "compress_enabled",
+        "mode": "compress_mode",
+        "prose": "compress_prose",
+        "protect_recent": "compress_protect_recent",
+    },
+    "cache": {
+        "enabled": "cache_enabled",
+        "ttl_seconds": "ttl_seconds",
+        "semantic": "semantic_enabled",
+        "semantic_enabled": "semantic_enabled",
+    },
+    "proxy": {
+        "enabled": "proxy_enabled",
+    },
+}
+
+# compress_mode aliases → canonical value. Any unknown mode normalizes to
+# "safe" (fail-open) rather than crashing ``validate()`` at daemon boot.
+_COMPRESS_MODE_ALIASES: dict[str, str] = {
+    "safe": "safe",
+    "aggressive": "aggressive",
+    "fast": "safe",       # legacy alias: "fast" == lightweight == safe
+    "lossless": "safe",
+    "off": "safe",
+}
+
+
+def _flatten_optimize_dict(d: dict[str, Any]) -> dict[str, Any]:
+    """Return a NEW flat dict, merging nested config groups into flat keys.
+
+    Explicit flat keys always take precedence over a nested value for the
+    same setting. The input dict is never mutated (immutable transform).
+    """
+    flat: dict[str, Any] = dict(d)
+    for group, mapping in _NESTED_ALIASES.items():
+        block = d.get(group)
+        if not isinstance(block, dict):
+            continue
+        for nested_key, flat_key in mapping.items():
+            if nested_key in block and flat_key not in d:
+                flat[flat_key] = block[nested_key]
+    return flat
+
+
+def _normalize_compress_mode(raw: Any) -> str:
+    """Map a compress_mode value (including legacy aliases) to a valid mode.
+
+    Unknown values fall back to "safe" with a warning — a single bad enum in
+    a hand-authored config must never crash the optimize subsystem at boot.
+    """
+    key = str(raw).strip().lower()
+    mode = _COMPRESS_MODE_ALIASES.get(key)
+    if mode is None:
+        logger.warning(
+            "optimize.json: unknown compress_mode %r — falling back to 'safe' "
+            "(valid: safe, aggressive)",
+            raw,
+        )
+        return "safe"
+    return mode
+
+
 @dataclass
 class TTLConfig:
     """TTL settings for each cache tier, in seconds."""
@@ -144,6 +219,10 @@ class OptimizeConfig:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "OptimizeConfig":
+        # Accept nested config groups (compress/cache/proxy) in addition to
+        # the canonical flat form. Flat keys win on conflict.
+        d = _flatten_optimize_dict(d)
+
         ttl_raw = d.get("ttl", {})
         ttl = TTLConfig.from_dict(ttl_raw) if isinstance(ttl_raw, dict) else TTLConfig()
 
@@ -182,7 +261,7 @@ class OptimizeConfig:
             semantic_max_index_entries=int(d.get("semantic_max_index_entries", 10000)),
             semantic_max_tenants=int(d.get("semantic_max_tenants", 10000)),
             compress_enabled=bool(d.get("compress_enabled", False)),
-            compress_mode=str(d.get("compress_mode", "safe")),
+            compress_mode=_normalize_compress_mode(d.get("compress_mode", "safe")),
             compress_prose=bool(d.get("compress_prose", False)),
             compress_protect_recent=int(d.get("compress_protect_recent", 4)),
             ttl_seconds=int(d.get("ttl_seconds", 86400)),

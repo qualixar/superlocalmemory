@@ -142,7 +142,8 @@ def test_mcp_initialize_returns_server_info():
     body = _sse_body_to_dict(resp.text)
     server_info = body.get("result", {}).get("serverInfo", {})
     assert server_info.get("name"), f"serverInfo.name missing in: {body}"
-    assert server_info.get("version") == "3.7.7", server_info
+    from superlocalmemory import __version__
+    assert server_info.get("version") == __version__, server_info
 
 
 # ---------------------------------------------------------------------------

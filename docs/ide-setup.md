@@ -12,7 +12,7 @@ SLM ships with **two MCP transports**. Pick the one that fits your tool.
 
 | Transport | How it works | RAM cost | Requirement |
 |-----------|-------------|----------|-------------|
-| **HTTP** (recommended) | All clients share one daemon process | ~2 GB once, flat forever | `slm start` must be running |
+| **HTTP** (recommended) | All clients share one daemon process | ~2 GB once, flat forever | `slm serve` must be running |
 | **stdio** (universal) | One `slm mcp` subprocess per connection | ~90–110 MB × connections | None — works offline |
 | **`mcp-remote` bridge** | stdio wrapper that tunnels to HTTP | ~50 MB bridge + HTTP pool | npm `@modelcontextprotocol/client-cli` |
 
@@ -572,7 +572,7 @@ export PATH="$(npm root -g)/../bin:$PATH"
 The SLM daemon is not running. Start it:
 
 ```bash
-slm start
+slm serve
 # or
 slm restart
 ```

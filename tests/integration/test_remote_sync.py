@@ -262,6 +262,74 @@ class TestRemoteSyncSendMessage:
         assert "no remote peer URL" in result["error"]
 
 
+class TestMdnsSecretLeak:
+    """M05: the shared secret must never leak to an unverified mDNS peer."""
+
+    def _post_headers(self, sync_client) -> dict:
+        with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_client:
+            mock_post = MagicMock()
+            mock_post.json.return_value = {"ok": True}
+            mock_post.raise_for_status.return_value = None
+            mock_client.return_value.__enter__.return_value.post.return_value = (
+                mock_post
+            )
+            sync_client.send_to_remote("remote-peer-1", {"content": "hi"})
+            call = mock_client.return_value.__enter__.return_value.post.call_args
+            return call.kwargs.get("headers", {})
+
+    def test_secret_withheld_from_discovered_peer_by_default(self, broker):
+        """A peer adopted purely via mDNS is UNTRUSTED — no secret is sent."""
+        from superlocalmemory.mesh.remote_sync import RemoteSyncClient
+
+        with patch.dict("os.environ", {"SLM_MESH_SHARED_SECRET": "topsecret"},
+                        clear=True):
+            client = RemoteSyncClient(broker)
+        # Simulate mDNS discovery adopting an attacker-advertised peer.
+        client._update_peer_url("10.0.0.66", 8765)
+        assert client._peer_url == "http://10.0.0.66:8765"
+        assert client._peer_url_trusted is False
+        headers = self._post_headers(client)
+        assert "Authorization" not in headers, "secret leaked to discovered peer"
+
+    def test_secret_sent_to_discovered_peer_when_operator_opts_in(self, broker):
+        from superlocalmemory.mesh.remote_sync import RemoteSyncClient
+
+        with patch.dict("os.environ",
+                        {"SLM_MESH_SHARED_SECRET": "topsecret",
+                         "SLM_MESH_TRUST_DISCOVERED": "on"}, clear=True):
+            client = RemoteSyncClient(broker)
+        client._update_peer_url("10.0.0.66", 8765)
+        assert client._peer_url_trusted is True
+        headers = self._post_headers(client)
+        assert headers.get("Authorization") == "Bearer topsecret"
+
+    def test_discovery_never_overrides_configured_peer(self, broker):
+        from superlocalmemory.mesh.remote_sync import RemoteSyncClient
+
+        with patch.dict("os.environ",
+                        {"SLM_MESH_SHARED_SECRET": "topsecret",
+                         "SLM_MESH_PEER_URL": "http://192.168.1.5:8765"},
+                        clear=True):
+            client = RemoteSyncClient(broker)
+        # Attacker mDNS advertisement must not hijack the configured peer.
+        client._update_peer_url("10.0.0.66", 8765)
+        assert client._peer_url == "http://192.168.1.5:8765"
+        assert client._peer_url_trusted is True
+        headers = self._post_headers(client)
+        assert headers.get("Authorization") == "Bearer topsecret"
+
+    def test_configured_peer_is_trusted(self, broker):
+        from superlocalmemory.mesh.remote_sync import RemoteSyncClient
+
+        with patch.dict("os.environ",
+                        {"SLM_MESH_SHARED_SECRET": "topsecret",
+                         "SLM_MESH_PEER_URL": "http://192.168.1.5:8765"},
+                        clear=True):
+            client = RemoteSyncClient(broker)
+        headers = self._post_headers(client)
+        assert headers.get("Authorization") == "Bearer topsecret"
+
+
 class TestBrokerRemoteIntegration:
     """Tests for broker + remote sync integration."""
 

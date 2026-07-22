@@ -1,0 +1,158 @@
+/* od-bridge.css — OD ↔ Bootstrap integration shims (minimal)
+ * Loaded after design-system.css in index.html.
+ *
+ * What this file does (ONLY things design-system.css does not cover):
+ *   1. Bootstrap .tab-content/.tab-pane show/hide — design-system.css does not
+ *      know about Bootstrap's tab system. Without this, ALL panes are visible.
+ *   2. .content overflow-y so the inner content area scrolls while topbar/sidebar
+ *      stay sticky (design-system.css sets padding+max-width but not overflow).
+ *   3. html { overflow-x: hidden } — horizontal scroll guard (Playwright check).
+ *   4. Scoped OD card styles for #dashboard-pane only.
+ *      Bootstrap .card in all other panes keeps neural-glass.css styles unchanged.
+ *
+ * What this file deliberately does NOT do:
+ *   - Override .topbar, .sidebar, .nav-link, .star-cta, .site-foot, .kpi, .feed-item
+ *     → design-system.css owns those; they are already correct and fully responsive.
+ *   - Change Bootstrap form/input/button primitives → neural-glass.css owns those.
+ *   - Set colours → design-system.css token layer owns all vars.
+ *
+ * Mobile sidebar mechanism: design-system.css uses transform: translateX(-100%)
+ * (not left: -260px). The od-shell.js toggles .open class; design-system.css
+ * handles the animation. Do NOT add conflicting left/position overrides here.
+ *
+ * Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar — AGPL-3.0
+ */
+
+/* ================================================================
+   1. Bootstrap .tab-content / .tab-pane visibility
+   Bootstrap normally sets this via js/bootstrap.min.css.
+   We replicate the key rules here as a safety guarantee so the
+   SPA hide/show works even if Bootstrap's CSS rule order shifts.
+================================================================ */
+.tab-content > .tab-pane {
+  display: none;
+}
+.tab-content > .active {
+  display: block;
+}
+/* Fade transition (Bootstrap .fade + .show) */
+.tab-content > .tab-pane.fade {
+  transition: opacity 0.1s linear;
+}
+.tab-content > .tab-pane.fade:not(.show) {
+  opacity: 0;
+}
+.tab-content > .tab-pane.fade.show {
+  opacity: 1;
+}
+
+/* ================================================================
+   2. Content area overflow — make inner column scroll while topbar
+   and sidebar stay sticky (design-system.css sets padding/max-width
+   but does not set overflow-y).
+================================================================ */
+.content {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ================================================================
+   3. Horizontal scroll guard
+   Prevents content wider than viewport from causing x-scroll.
+   Playwright check: document.documentElement.scrollWidth <= clientWidth + 4
+================================================================ */
+html {
+  overflow-x: hidden;
+}
+
+/* ================================================================
+   4. #dashboard-pane scoped OD card styles
+   ONLY inside the dashboard pane. All other panes keep Bootstrap
+   .card styles from neural-glass.css unmodified.
+
+   Why scoped? design-system.css defines .card globally with OD
+   tokens. Bootstrap's .card in non-OD panes uses its own bg/border.
+   Neural-glass.css has already patched those with ng-* vars.
+   Scoping to #dashboard-pane lets OD .card win there without
+   touching graph-pane, settings-pane, etc.
+================================================================ */
+
+/* Override Bootstrap's .card inside the dashboard pane only */
+#dashboard-pane .card {
+  background: var(--card, #1a1f2e);
+  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+/* Ensure .card-head flex layout works (Bootstrap overrides flex) */
+#dashboard-pane .card-head {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.07));
+  flex-wrap: wrap;
+}
+#dashboard-pane .card-head h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+#dashboard-pane .card-head .sub {
+  font-size: 0.75rem;
+  color: var(--fg-3);
+}
+#dashboard-pane .card-pad {
+  padding: 14px 18px;
+}
+/* Bootstrap overrides .spacer if it has a .flex-grow-1 sibling;
+   protect the OD spacer element */
+#dashboard-pane .card-head .spacer {
+  flex: 1 !important;
+}
+
+/* list-row: design-system.css defines it globally but Bootstrap .card-body
+   might reset font size; reinforce inside dashboard */
+#dashboard-pane .list-row {
+  font-size: 0.8125rem;
+  padding: 5px 0;
+}
+
+/* .muted inside dashboard → use the OD fg-3 token */
+#dashboard-pane .muted {
+  color: var(--fg-3);
+}
+
+/* ================================================================
+   5. Light-mode adaptation for dashboard OD tokens
+   design-system.css [data-theme="light"] overrides --page, --card
+   etc. These selectors make the dashboard system-card readable in
+   light mode without any ng-glass interference.
+================================================================ */
+[data-theme="light"] #dashboard-pane .page-head h2 {
+  color: var(--fg);
+}
+[data-theme="light"] #dashboard-pane .card {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+/* ================================================================
+   6. Bootstrap conflict fix — the OD tables use <tr class="row"> for the
+   hover style, but Bootstrap's .row { display:flex } hijacks the row and
+   makes every <td> stack vertically. Restore proper table layout.
+================================================================ */
+.tbl tr.row { display: table-row; }
+.tbl tr.row > td { display: table-cell; }
+
+/* ================================================================
+   7. Bootstrap conflict fix — .nav { display:flex; flex-wrap:wrap } turned
+   the vertical sidebar into a horizontal wrap (group labels beside items,
+   Health beside Operations). Restore the design's vertical column.
+================================================================ */
+.sidebar .nav { display: block; }
+.sidebar .nav-link { display: flex; width: 100%; }
+.sidebar .nav-group-label { display: block; width: 100%; }

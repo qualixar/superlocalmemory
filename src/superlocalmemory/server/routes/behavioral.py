@@ -90,8 +90,8 @@ async def behavioral_status():
             },
         }
     except Exception as e:
-        logger.error("behavioral_status error: %s", e)
-        return {"available": False, "error": str(e)}
+        logger.exception("behavioral_status error")
+        return {"available": False, "error": "Internal server error"}
 
 
 @router.post("/api/behavioral/report-outcome")
@@ -173,8 +173,8 @@ async def report_outcome(data: dict):
             ),
         }
     except Exception as e:
-        logger.error("report_outcome error: %s", e)
-        return {"success": False, "error": str(e)}
+        logger.exception("report_outcome error")
+        return {"success": False, "error": "Internal server error"}
 
 
 # --------------------------------------------------------------------------
@@ -214,8 +214,8 @@ async def get_assertions(min_confidence: float = 0.0, category: str = "", limit:
             "active_profile": profile,
         }
     except Exception as e:
-        logger.debug("get_assertions error: %s", e)
-        return {"assertions": [], "count": 0, "error": str(e)}
+        logger.exception("get_assertions error")
+        return {"assertions": [], "count": 0, "error": "Internal server error"}
 
 
 @router.get("/api/behavioral/tool-events")
@@ -247,8 +247,8 @@ async def get_tool_events(tool_name: str = "", limit: int = 100):
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("get_tool_events error: %s", e)
-        return {"events": [], "count": 0, "error": str(e)}
+        logger.exception("get_tool_events error")
+        return {"events": [], "count": 0, "error": "Internal server error"}
 
 
 @router.get("/api/behavioral/soft-prompts")
@@ -269,8 +269,8 @@ async def get_soft_prompts():
              "token_count", "active", "version", "created_at"], r
         )) for r in rows], "count": len(rows)}
     except Exception as e:
-        logger.debug("get_soft_prompts error: %s", e)
-        return {"prompts": [], "count": 0, "error": str(e)}
+        logger.exception("get_soft_prompts error")
+        return {"prompts": [], "count": 0, "error": "Internal server error"}
 
 
 @router.post("/api/v3/tool-event")
@@ -322,5 +322,6 @@ async def log_tool_event_api(data: dict):
         finally:
             conn.close()
         return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("behavioral route error")
+        return {"ok": False, "error": "Internal server error"}

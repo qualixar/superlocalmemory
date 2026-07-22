@@ -28,10 +28,17 @@ from .helpers import (
 from superlocalmemory.server.profile_runtime import (
     commit_daemon_profile_switch,
     get_profile_runtime,
+    TransitionDrainTimeout,
 )
 
 logger = logging.getLogger("superlocalmemory.routes.profiles")
 router = APIRouter()
+
+
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log full traceback server-side; return a generic message to the client."""
+    logger.exception("profiles route error")
+    return HTTPException(status_code=500, detail=detail)
 
 # WebSocket manager reference (set by ui_server.py at startup)
 ws_manager = None
@@ -85,8 +92,8 @@ async def list_profiles(request: Request):
             "total_profiles": len(profiles),
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Profile list error: {str(e)}")
+    except Exception:
+        raise _internal_error("Profile list error")
 
 
 @router.post("/api/profiles/{name}/switch")
@@ -112,17 +119,36 @@ async def switch_profile(name: str, request: Request):
             source_agent_id="http-profile-switch",
             profile_id=name,
         )
+        # RBAC (C4): a logged-in user may only activate a workspace they belong
+        # to — this is the read boundary. Switching sets the active tenant for
+        # subsequent reads, so a non-member must not be able to enter it. The
+        # machine owner (no user session) switches freely.
+        from superlocalmemory.server.rbac_enforce import resolve_principal
+        _principal = resolve_principal(request)
+        if _principal.get("kind") == "user":
+            _rbac = getattr(request.app.state, "rbac", None)
+            if _rbac is not None and _rbac.get_role(_principal["user_id"], name) is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not a member of this workspace.",
+                )
         runtime = get_profile_runtime(request.app.state)
         previous = runtime.snapshot.profile_id
-        snapshot = await asyncio.to_thread(
-            runtime.transition,
-            name,
-            lambda prior, target: commit_daemon_profile_switch(
-                request.app.state,
-                prior,
-                target,
-            ),
-        )
+        try:
+            snapshot = await asyncio.to_thread(
+                runtime.transition,
+                name,
+                lambda prior, target: commit_daemon_profile_switch(
+                    request.app.state,
+                    prior,
+                    target,
+                ),
+            )
+        except TransitionDrainTimeout as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=str(exc),
+            )
 
         count = _get_memory_count(name)
 
@@ -143,8 +169,8 @@ async def switch_profile(name: str, request: Request):
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Profile switch error: {str(e)}")
+    except Exception:
+        raise _internal_error("Profile switch error")
 
 
 @router.post("/api/profiles/create")
@@ -166,18 +192,34 @@ async def create_profile(body: ProfileSwitch, request: Request):
             operation="update",
             source_agent_id="http-profile-create",
         )
+        # RBAC (C3): creating a tenant is an administrative action.
+        from superlocalmemory.access.rbac import Permission as _Perm
+        from superlocalmemory.server.rbac_enforce import require_manage as _rbac_manage
+        _principal = _rbac_manage(request)
         # Write to BOTH stores atomically
         desc = f'Memory profile: {name}'
         ensure_profile_in_db(name, desc)
         ensure_profile_in_json(name, desc)
+
+        # A logged-in user who creates a workspace becomes its admin so they
+        # can manage it immediately (profile_id == name here). The machine
+        # owner needs no membership row (implicit root).
+        if _principal.get("kind") == "user":
+            rbac = getattr(request.app.state, "rbac", None)
+            if rbac is not None:
+                try:
+                    rbac.set_membership(name, _principal["user_id"], "admin",
+                                        added_by=_principal["username"])
+                except Exception:
+                    pass
 
         authorization.complete()
         return {"success": True, "profile": name, "message": f"Profile '{name}' created"}
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Profile create error: {str(e)}")
+    except Exception:
+        raise _internal_error("Profile create error")
 
 
 @router.delete("/api/profiles/{name}")
@@ -204,6 +246,10 @@ async def delete_profile(name: str, request: Request):
             source_agent_id="http-profile-delete",
             profile_id=name,
         )
+        # RBAC (C3): deleting a tenant is administrative. Check MANAGE on the
+        # profile being deleted (not the active one).
+        from superlocalmemory.server.rbac_enforce import require_manage as _rbac_manage
+        _rbac_manage(request, profile=name)
         # Move data to default before deleting (bypasses CASCADE)
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -243,5 +289,5 @@ async def delete_profile(name: str, request: Request):
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Profile delete error: {str(e)}")
+    except Exception:
+        raise _internal_error("Profile delete error")

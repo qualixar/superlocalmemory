@@ -30,6 +30,14 @@ Design notes (LLD-04 §7 hard rules):
   never spell those names anywhere in this module.
 * **U6** — install token required on ``/api/v3/brain`` and all
   deprecated shim routes. See ``require_install_token`` below.
+
+  External API consumers (L1): the dashboard auto-fetches the token from
+  ``GET /internal/token`` (loopback + same-origin only) and sends it as the
+  ``X-Install-Token`` header. Non-browser callers (scripts, IDE adapters,
+  third-party integrations) instead read the token from
+  ``~/.superlocalmemory/.install_token`` and send the same header:
+  ``curl -H "X-Install-Token: $(cat ~/.superlocalmemory/.install_token)" \
+  http://127.0.0.1:8765/api/v3/brain``.
 * **U10** — feature count surfaced from ``features.FEATURE_DIM``;
   stratum total from module constant ``_STRATA_TOTAL`` (48 = 4×3×4).
 """
@@ -52,6 +60,7 @@ from superlocalmemory.core.security_primitives import (
 from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.features import FEATURE_DIM
 from superlocalmemory.infra.data_root import canonical_data_root
+from .helpers import get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.brain")
 
@@ -900,7 +909,7 @@ def _action_outcomes_count(lrn_db: LearningDatabase,
 
 
 @router.get("/brain", dependencies=[Depends(require_install_token)])
-async def get_brain(profile_id: str = "default") -> dict:
+async def get_brain(profile_id: str | None = None) -> dict:
     """Unified Brain endpoint — LLD-04 §3.1.
 
     Fan-out: each section is a synchronous SQLite reader. Running them
@@ -915,6 +924,9 @@ async def get_brain(profile_id: str = "default") -> dict:
     """
     import asyncio
 
+    # Default to the ACTIVE profile (request runtime truth), never literal
+    # "default" — the Brain must reflect whichever profile is active.
+    profile_id = profile_id or get_active_profile()
     lrn_db = LearningDatabase(_learning_db_path())
 
     (
@@ -1176,7 +1188,7 @@ def _compute_evolution_cost_preview(profile_id: str) -> dict:
 @router.get("/brain/evolution-timeseries",
             dependencies=[Depends(require_install_token)])
 async def get_brain_evolution_timeseries(
-    profile_id: str = "default",
+    profile_id: str | None = None,
     days: int = _EVOLUTION_DEFAULT_DAYS,
 ) -> dict:
     """Daily learning-signal counts for ``profile_id`` over the last ``days``.
@@ -1186,6 +1198,7 @@ async def get_brain_evolution_timeseries(
     """
     import asyncio
 
+    profile_id = profile_id or get_active_profile()
     lrn_db = LearningDatabase(_learning_db_path())
     result = await asyncio.to_thread(
         _compute_evolution_timeseries, profile_id, lrn_db, days=days,
@@ -1201,7 +1214,8 @@ async def get_brain_evolution_timeseries(
 
 @router.get("/learning/stats",
             dependencies=[Depends(require_install_token)])
-async def learning_stats_deprecated(profile_id: str = "default") -> dict:
+async def learning_stats_deprecated(profile_id: str | None = None) -> dict:
+    profile_id = profile_id or get_active_profile()
     lrn_db = LearningDatabase(_learning_db_path())
     return {
         "deprecated": True,
@@ -1212,7 +1226,8 @@ async def learning_stats_deprecated(profile_id: str = "default") -> dict:
 
 @router.get("/patterns",
             dependencies=[Depends(require_install_token)])
-async def patterns_deprecated(profile_id: str = "default") -> dict:
+async def patterns_deprecated(profile_id: str | None = None) -> dict:
+    profile_id = profile_id or get_active_profile()
     return {
         "deprecated": True,
         "use_instead": "/api/v3/brain",
@@ -1222,7 +1237,8 @@ async def patterns_deprecated(profile_id: str = "default") -> dict:
 
 @router.get("/behavioral",
             dependencies=[Depends(require_install_token)])
-async def behavioral_deprecated(profile_id: str = "default") -> dict:
+async def behavioral_deprecated(profile_id: str | None = None) -> dict:
+    profile_id = profile_id or get_active_profile()
     return {
         "deprecated": True,
         "use_instead": "/api/v3/brain",

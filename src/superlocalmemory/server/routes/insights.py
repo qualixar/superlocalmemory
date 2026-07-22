@@ -358,10 +358,10 @@ async def insight_action(
         result = handler(conn, pid, limit=limit, days=days)
         result["profile"] = pid
         return result
-    except Exception as exc:
-        logger.warning("Insight action %s failed: %s", action_name, exc)
+    except Exception:
+        logger.exception("Insight action %s failed", action_name)
         return JSONResponse(
-            {"error": f"Query failed: {exc}"},
+            {"error": "Query failed"},
             status_code=500,
         )
     finally:

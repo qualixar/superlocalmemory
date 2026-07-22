@@ -204,4 +204,27 @@ slm doctor [--json]    # preflight check including daemon and embedding worker
 
 ---
 
-*SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later*
+## Profile context (v3.8.0+)
+
+`session_init` operates on the currently active profile. If you need to start
+a session on a different workspace, call `switch_profile` (requires `code`,
+`full`, or `power` MCP profile) before `session_init`, then call `session_init`
+for that workspace. See `slm-profile` for workspace switching.
+
+The returned `memories` array reflects facts stored in the active profile only.
+To also surface shared or global facts in the initial context, pass the query
+explicitly and call `recall` with `include_global`/`include_shared` after
+`session_init`. See `slm-scope` for the sharing model.
+
+---
+
+## Related skills
+
+- `slm-recall` — multi-channel retrieval during the session
+- `slm-remember` — store durable facts during the session
+- `slm-profile` — workspace isolation and profile switching
+- `slm-scope` — multi-scope sharing model
+
+---
+
+*SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later*

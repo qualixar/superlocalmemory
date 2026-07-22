@@ -90,19 +90,33 @@ def _portable_config(repo: Path, client_id: str, work: Path) -> str:
 
 
 def _declared_profile_tools(repo: Path) -> set[str]:
-    """Extract the core MCP profile from source without starting MCP threads."""
-    source_path = repo / "src/superlocalmemory/mcp/server.py"
+    """Extract the core MCP profile from source without starting MCP threads.
+
+    The profile frozensets live in the pure-data ``mcp/profiles.py`` module
+    (``mcp/server.py`` re-imports them), so parse that. Accept both plain and
+    annotated assignments — ``_PROFILE_CORE = frozenset({...})`` and
+    ``_PROFILE_CORE: frozenset[str] = frozenset({...})``. Fall back to the
+    pre-3.8 location (server.py) so older checkouts still resolve.
+    """
+    source_path = repo / "src/superlocalmemory/mcp/profiles.py"
+    if not source_path.exists():
+        source_path = repo / "src/superlocalmemory/mcp/server.py"
     module = ast.parse(source_path.read_text(encoding="utf-8"))
     for node in module.body:
         if isinstance(node, ast.Assign):
-            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
-            if "_PROFILE_CORE" not in names:
-                continue
-            call = node.value
-            if not isinstance(call, ast.Call) or not call.args:
-                break
-            literal = ast.literal_eval(call.args[0])
-            return set(literal)
+            names = {t.id for t in node.targets if isinstance(t, ast.Name)}
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names = {node.target.id}
+            value = node.value
+        else:
+            continue
+        if "_PROFILE_CORE" not in names:
+            continue
+        if not isinstance(value, ast.Call) or not value.args:
+            break
+        literal = ast.literal_eval(value.args[0])
+        return set(literal)
     raise ValueError("could not extract _PROFILE_CORE")
 
 

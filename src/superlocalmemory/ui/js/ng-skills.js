@@ -47,10 +47,37 @@
             '</div>' +
             '<div style="display:flex;gap:8px">' +
               (enabled
-                ? '<button class="btn btn-sm btn-outline-success" onclick="triggerEvolution()"><i class="bi bi-play-fill"></i> Run Now</button>'
-                : '<button class="btn btn-sm btn-outline-primary" onclick="enableEvolution()"><i class="bi bi-power"></i> Enable</button>') +
+                ? '<button class="btn btn-sm btn-outline-success" data-act-click="trigger-evolution"><i class="bi bi-play-fill"></i> Run Now</button>'
+                : '<button class="btn btn-sm btn-outline-primary" data-act-click="enable-evolution"><i class="bi bi-power"></i> Enable</button>') +
             '</div>' +
           '</div>';
+
+        // Per-step evolution model config (v3.7.9) — shown when enabled.
+        if (enabled) {
+          var cfg = data.config || {};
+          var modelOpts = function(sel) {
+            var cur = sel || 'auto';
+            if (cur === '') cur = 'auto';
+            return ['auto', 'haiku', 'sonnet', 'ollama'].map(function(m) {
+              return '<option value="' + m + '"' + (m === cur ? ' selected' : '') + '>' + m + '</option>';
+            }).join('');
+          };
+          html += '<div style="margin-top:12px;border-top:1px solid var(--bs-border-color);padding-top:12px">' +
+            '<div style="font-size:0.8125rem;font-weight:600;margin-bottom:8px">Evolution models ' +
+              '<span style="font-weight:400;color:var(--ng-text-tertiary,#888)">(lowest-cost by default)</span></div>' +
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">' +
+              '<label style="font-size:0.75rem">Generate<br><select id="evo-mutation-model" class="form-select form-select-sm">' + modelOpts(cfg.mutation_model) + '</select></label>' +
+              '<label style="font-size:0.75rem">Verify<br><select id="evo-verify-model" class="form-select form-select-sm">' + modelOpts(cfg.verify_model) + '</select></label>' +
+              '<label style="font-size:0.75rem">Confirm<br><select id="evo-confirm-model" class="form-select form-select-sm">' + modelOpts(cfg.confirm_model) + '</select></label>' +
+              '<label style="font-size:0.75rem">Max/cycle<br><input id="evo-max-cycle" type="number" min="1" max="50" value="' + (cfg.max_per_cycle || 3) + '" class="form-control form-control-sm" style="width:84px"></label>' +
+              '<button class="btn btn-sm btn-primary" data-act-click="save-evolution-config"><i class="bi bi-save"></i> Save</button>' +
+            '</div>' +
+            '<div style="font-size:0.7rem;color:var(--ng-text-tertiary,#888);margin-top:8px">' +
+              '⚠ Evolution makes background LLM calls during consolidation (capped 10/cycle, 3 cycles/day). ' +
+              '“auto” picks the cheapest capable model for your backend; the verifier stays independent of the generator.' +
+            '</div>' +
+          '</div>';
+        }
 
         // Evolution history (if any)
         if (data.recent && data.recent.length > 0) {
@@ -101,6 +128,31 @@
         alert('Evolution cycle: ' + (data.evolved || 0) + ' evolved, ' +
               (data.rejected || 0) + ' rejected, ' + (data.candidates || 0) + ' candidates');
         loadSkillEvolution();
+      })
+      .catch(function(err) { alert('Error: ' + err.message); });
+  };
+
+  window.saveEvolutionConfig = function() {
+    var g = function(id) { var e = document.getElementById(id); return e ? e.value : undefined; };
+    var body = {
+      mutation_model: g('evo-mutation-model'),
+      verify_model: g('evo-verify-model'),
+      confirm_model: g('evo-confirm-model'),
+    };
+    var mx = g('evo-max-cycle');
+    if (mx) body.max_evolutions_per_cycle = parseInt(mx, 10);
+    fetch('/api/evolution/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          loadSkillEvolution();
+        } else {
+          alert('Could not save evolution config: ' + (data.error || 'unknown'));
+        }
       })
       .catch(function(err) { alert('Error: ' + err.message); });
   };

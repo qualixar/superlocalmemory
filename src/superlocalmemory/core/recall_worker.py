@@ -72,9 +72,16 @@ def _handle_recall(
         include_global=include_global, include_shared=include_shared,
     )
 
-    # Batch-fetch original memory text for all results
+    # Batch-fetch original memory text for all results. Retrieval already
+    # enforced scope, so resolve content for everything it returned (own +
+    # global + shared-with-me); another tenant's PRIVATE content still can't
+    # resolve. Using the raw (possibly-None) recall flags here would drop
+    # content for legitimately-recalled global/shared memories.
     memory_ids = list({r.fact.memory_id for r in response.results[:limit] if r.fact.memory_id})
-    memory_map = engine._db.get_memory_content_batch(memory_ids) if memory_ids else {}
+    memory_map = engine._db.get_memory_content_batch(
+        memory_ids, engine.profile_id,
+        include_global=True, include_shared=True,
+    ) if memory_ids else {}
 
     # v3.6.6: same shared chokepoint as the daemon HTTP route + CLI fallback,
     # so the MCP WorkerPool subprocess path returns identical budgeted output.
@@ -172,11 +179,15 @@ def _handle_store(content: str, metadata: dict) -> dict:
 def _handle_get_memory_facts(memory_id: str) -> dict:
     engine = _get_engine()
     pid = engine.profile_id
-    # Get original memory content
-    mem_map = engine._db.get_memory_content_batch([memory_id])
+    # Get original memory content (C4: tenant-scoped; global/shared resolvable)
+    mem_map = engine._db.get_memory_content_batch(
+        [memory_id], pid, include_global=True, include_shared=True,
+    )
     original = mem_map.get(memory_id, "")
-    # Get child facts
-    facts = engine._db.get_facts_by_memory_id(memory_id, pid)
+    # Get child facts — same scope as the content fetch so a shared/global
+    # memory's facts are not silently empty.
+    facts = engine._db.get_facts_by_memory_id(
+        memory_id, pid, include_global=True, include_shared=True)
     fact_list = []
     for f in facts:
         fact_list.append({

@@ -228,7 +228,7 @@ agent id; pick a stable, lowercase name per tool.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `SLM_MESH_HOST` | Bind address for mesh WebSocket broker | `127.0.0.1` |
-| `SLM_MESH_WS_PORT` | WebSocket port for mesh broker | `8766` |
+| `SLM_MESH_WS_PORT` | WebSocket port for mesh broker | `7900` |
 | `SLM_MESH_SHARED_SECRET` | Auth secret for the mesh HTTP API. Required when `SLM_MESH_HOST` is not localhost. Send as `Authorization: Bearer <secret>` (canonical) or `X-Mesh-Secret: <secret>` (legacy). | — |
 | `SLM_MESH_PEER_URL` | Explicit peer URL to register with at startup | — |
 | `SLM_MESH_DISCOVERY` | Discovery mode: `local` / `manual` | `local` |
@@ -238,6 +238,18 @@ agent id; pick a stable, lowercase name per tool.
 > Example: `curl http://192.168.50.144:8765/mesh/status -H "Authorization: Bearer <your-secret>"`
 
 > **Note:** The variable is `SLM_MESH_WS_PORT` (not `SLM_MCP_WS_PORT`).
+
+### Inspecting the mesh
+
+Check broker health and connected peer sessions from the terminal:
+
+```bash
+slm mesh status   # broker up/down, peer count, uptime
+slm mesh peers    # active peer sessions on this machine
+```
+
+These are read-only and query the running daemon's mesh broker; agents also
+have the `mesh_*` MCP tools and the dashboard **Mesh Peers** tab.
 > `SLM_DAEMON_HOST` is canonical; `SLM_HOST` is the alias (not the other way around).
 
 ### Memory / health / workers

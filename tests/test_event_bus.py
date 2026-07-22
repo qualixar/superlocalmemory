@@ -87,3 +87,70 @@ def test_singleton_pattern(tmp_path):
     bus1 = EventBus.get_instance(db)
     bus2 = EventBus.get_instance(db)
     assert bus1 is bus2
+
+
+# ── Per-profile isolation (I-2) ──────────────────────────────────────────────
+
+def test_events_are_isolated_by_profile(bus):
+    """get_recent_events must only return the requested profile's events."""
+    bus.emit("memory.stored", {"n": 1}, profile_id="work")
+    bus.emit("memory.stored", {"n": 2}, profile_id="work")
+    bus.emit("memory.stored", {"n": 3}, profile_id="home")
+
+    work = bus.get_recent_events(profile_id="work")
+    home = bus.get_recent_events(profile_id="home")
+    empty = bus.get_recent_events(profile_id="unused")
+
+    assert len(work) == 2
+    assert len(home) == 1
+    assert empty == []
+    assert all(e["profile_id"] == "work" for e in work)
+
+
+def test_event_stats_are_isolated_by_profile(bus):
+    bus.emit("memory.stored", {}, profile_id="work")
+    bus.emit("memory.recalled", {}, profile_id="work")
+    bus.emit("memory.stored", {}, profile_id="home")
+
+    assert bus.get_event_stats(profile_id="work")["total_events"] == 2
+    assert bus.get_event_stats(profile_id="home")["total_events"] == 1
+    assert bus.get_event_stats(profile_id="none")["total_events"] == 0
+
+
+def test_wildcard_scope_returns_all_profiles(bus):
+    """The internal '*' scope bypasses filtering (maintenance only)."""
+    bus.emit("memory.stored", {}, profile_id="work")
+    bus.emit("memory.stored", {}, profile_id="home")
+    assert len(bus.get_recent_events(profile_id="*")) == 2
+
+
+def test_persisted_event_carries_profile_id(bus):
+    bus.emit("memory.stored", {"x": 1}, profile_id="alpha")
+    rows = bus.get_recent_events(profile_id="alpha")
+    assert rows and rows[0]["profile_id"] == "alpha"
+
+
+def test_legacy_events_table_self_migrates(tmp_path):
+    """A pre-isolation memory_events table gains profile_id + backfills 'default'."""
+    import sqlite3
+    db = tmp_path / "legacy_events.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        "CREATE TABLE memory_events ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL,"
+        " memory_id INTEGER, source_agent TEXT, source_protocol TEXT,"
+        " payload TEXT, importance INTEGER, tier TEXT, created_at TIMESTAMP);"
+        "INSERT INTO memory_events (event_type, payload, importance, tier, created_at) "
+        "VALUES ('memory.stored', '{}', 5, 'hot', '2026-01-01T00:00:00Z');"
+    )
+    conn.commit()
+    conn.close()
+
+    EventBus.reset_instance(db)
+    bus = EventBus.get_instance(db)
+    cols = {r[1] for r in sqlite3.connect(str(db)).execute(
+        "PRAGMA table_info(memory_events)").fetchall()}
+    assert "profile_id" in cols
+    # Legacy row backfilled to 'default'.
+    assert len(bus.get_recent_events(profile_id="default")) == 1
+    assert bus.get_recent_events(profile_id="other") == []

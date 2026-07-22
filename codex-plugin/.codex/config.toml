@@ -1,0 +1,35 @@
+# SuperLocalMemory — Codex project-scoped MCP configuration
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later — see LICENSE
+#
+# USAGE
+# -----
+# Project-scoped (recommended):
+#   cp codex-plugin/.codex/config.toml .codex/config.toml
+#   Then open Codex in your project — SLM will be available as the
+#   "superlocalmemory" MCP server.
+#
+# Global (all projects):
+#   Merge the [mcp_servers.superlocalmemory] block below into ~/.codex/config.toml
+#
+# PREREQUISITE
+# ------------
+#   pip install superlocalmemory   (or: pipx install superlocalmemory)
+#   slm --version                  (confirm `slm` is on PATH)
+#
+# ADVANCED: venv-isolated launcher
+# ---------------------------------
+# If you installed SLM into an isolated venv rather than globally, replace the
+# command below with the absolute path to codex-plugin/scripts/slm-launch, e.g.:
+#
+#   command = "/absolute/path/to/superlocalmemory/codex-plugin/scripts/slm-launch"
+#   args = []
+#   env = { SLM_MCP_PROFILE = "code", SLM_DATA_DIR = "~/.superlocalmemory" }
+#
+# The slm-launch script resolves the venv binary from SLM_DATA_DIR (default:
+# ~/.superlocalmemory) and falls back to the PATH `slm` binary automatically.
+
+[mcp_servers.superlocalmemory]
+command = "slm"
+args = ["mcp"]
+env = { SLM_MCP_PROFILE = "code", SLM_DATA_DIR = "~/.superlocalmemory" }

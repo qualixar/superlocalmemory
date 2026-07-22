@@ -146,4 +146,21 @@ Note: the `slm optimize` subcommands have known pre-existing parse-test failures
 
 ---
 
-SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later
+## Profile-aware status (v3.8.0+)
+
+`slm status --json` reports the currently active profile name in the `profile`
+field. Use this to confirm which workspace is active before starting work on a
+multi-profile setup. To switch the active profile, see `slm-profile`.
+
+---
+
+## Related skills
+
+- `slm-session` — session lifecycle (session_init/close_session)
+- `slm-profile` — workspace isolation and profile switching
+- `slm-cache` — KV cache performance metrics
+- `slm-compress` — reversible context compression
+
+---
+
+SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later

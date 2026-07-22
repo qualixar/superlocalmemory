@@ -734,6 +734,11 @@ def test_scope_config_api_preserves_personal_default_and_hot_applies(
         applied.append((candidate, mode_change))
 
     request = MagicMock()
+    # SEC-H-01: set_scope_config now calls require_manage(request). This unit
+    # test drives the handler directly with a mock request, so make app.state
+    # reflect a no-RBAC install (the machine owner is authorized) rather than a
+    # truthy auto-mock engine that would produce a malformed principal.
+    request.app.state.rbac = None
     request.json = MagicMock(
         side_effect=lambda: asyncio.sleep(0, result={
             "default_scope": "personal",

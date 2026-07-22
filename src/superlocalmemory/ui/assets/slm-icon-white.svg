@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Brain outline with nodes - WHITE VERSION -->
+  <g transform="translate(512, 512)">
+    <!-- Central node -->
+    <circle cx="0" cy="0" r="40" fill="#ffffff" opacity="1.0"/>
+
+    <!-- Knowledge graph nodes (arranged in brain-like pattern) -->
+    <!-- Top layer -->
+    <circle cx="-120" cy="-180" r="28" fill="#ffffff" opacity="0.95"/>
+    <circle cx="0" cy="-200" r="28" fill="#ffffff" opacity="0.95"/>
+    <circle cx="120" cy="-180" r="28" fill="#ffffff" opacity="0.95"/>
+
+    <!-- Upper middle layer -->
+    <circle cx="-180" cy="-80" r="32" fill="#ffffff" opacity="0.9"/>
+    <circle cx="-90" cy="-100" r="26" fill="#ffffff" opacity="0.9"/>
+    <circle cx="90" cy="-100" r="26" fill="#ffffff" opacity="0.9"/>
+    <circle cx="180" cy="-80" r="32" fill="#ffffff" opacity="0.9"/>
+
+    <!-- Middle layer -->
+    <circle cx="-220" cy="20" r="30" fill="#ffffff" opacity="0.85"/>
+    <circle cx="-140" cy="0" r="24" fill="#ffffff" opacity="0.85"/>
+    <circle cx="140" cy="0" r="24" fill="#ffffff" opacity="0.85"/>
+    <circle cx="220" cy="20" r="30" fill="#ffffff" opacity="0.85"/>
+
+    <!-- Lower middle layer -->
+    <circle cx="-180" cy="120" r="28" fill="#ffffff" opacity="0.8"/>
+    <circle cx="-90" cy="140" r="26" fill="#ffffff" opacity="0.8"/>
+    <circle cx="90" cy="140" r="26" fill="#ffffff" opacity="0.8"/>
+    <circle cx="180" cy="120" r="28" fill="#ffffff" opacity="0.8"/>
+
+    <!-- Bottom layer -->
+    <circle cx="-100" cy="220" r="24" fill="#ffffff" opacity="0.75"/>
+    <circle cx="0" cy="230" r="24" fill="#ffffff" opacity="0.75"/>
+    <circle cx="100" cy="220" r="24" fill="#ffffff" opacity="0.75"/>
+
+    <!-- Connection lines (knowledge graph edges) -->
+    <g stroke="#ffffff" stroke-width="4" fill="none" opacity="0.3">
+      <!-- From center to all major nodes -->
+      <line x1="0" y1="0" x2="-120" y2="-180"/>
+      <line x1="0" y1="0" x2="0" y2="-200"/>
+      <line x1="0" y1="0" x2="120" y2="-180"/>
+      <line x1="0" y1="0" x2="-180" y2="-80"/>
+      <line x1="0" y1="0" x2="180" y2="-80"/>
+      <line x1="0" y1="0" x2="-220" y2="20"/>
+      <line x1="0" y1="0" x2="220" y2="20"/>
+      <line x1="0" y1="0" x2="-180" y2="120"/>
+      <line x1="0" y1="0" x2="180" y2="120"/>
+      <line x1="0" y1="0" x2="0" y2="230"/>
+
+      <!-- Lateral connections -->
+      <line x1="-120" y1="-180" x2="0" y2="-200"/>
+      <line x1="0" y1="-200" x2="120" y2="-180"/>
+      <line x1="-180" y1="-80" x2="-90" y2="-100"/>
+      <line x1="90" y1="-100" x2="180" y2="-80"/>
+      <line x1="-220" y1="20" x2="-140" y2="0"/>
+      <line x1="140" y1="0" x2="220" y2="20"/>
+      <line x1="-180" y1="120" x2="-90" y2="140"/>
+      <line x1="90" y1="140" x2="180" y2="120"/>
+      <line x1="-100" y1="220" x2="0" y2="230"/>
+      <line x1="0" y1="230" x2="100" y2="220"/>
+    </g>
+  </g>
+</svg>

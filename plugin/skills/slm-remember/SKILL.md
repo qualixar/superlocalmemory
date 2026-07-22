@@ -191,4 +191,51 @@ slm remember "<content>" --scope shared --shared-with alice,bob
 
 ---
 
-*SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later*
+## Multi-scope sharing (v3.6.15+, opt-in)
+
+Every `remember` call defaults to `personal` scope — private to the active profile.
+To share a fact with other profiles on the same machine, set the `scope` parameter:
+
+```
+# Share with every profile on this machine
+remember(
+  content="API rate limit is 100 req/min per tenant",
+  tags="api,limits,shared",
+  project="platform",
+  scope="global",      # visible to all profiles
+  session_id="<sid>",
+)
+
+# Share with specific profiles only
+remember(
+  content="Staging DB migration runs Fridays 22:00 UTC",
+  tags="db,ops",
+  scope="shared",
+  shared_with="work-profile,devops-profile",
+  session_id="<sid>",
+)
+```
+
+**Only set scope when the user explicitly asks to share.** The default
+`personal` scope is identical to single-profile SLM. See `slm-scope` for the
+complete sharing model and when to use each scope.
+
+---
+
+## Profile-aware storage (v3.8.0+)
+
+`remember` always stores in the active profile's namespace. To write to a
+different workspace, use `switch_profile` first. See `slm-profile`.
+
+---
+
+## Related skills
+
+- `slm-recall` — retrieve what was remembered
+- `slm-session` — session lifecycle; session_id is required for attribution
+- `slm-scope` — complete guide to personal / shared / global scopes
+- `slm-profile` — workspace isolation and profile switching
+
+---
+
+*SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later*

@@ -835,13 +835,15 @@ class EntityGraphChannel:
             )[:top_k]
             # Shadow SQLite before accepting a projected answer.  The graph
             # channel has optional PageRank/community enrichments, so exact
-            # score equality is neither required nor useful; result ordering
-            # and membership are the correctness contract.  Any divergence is
-            # recorded and fails closed to canonical SQLite.
+            # Score equality is neither required nor useful; result *membership*
+            # is the correctness contract. Order within the same fact set is
+            # tolerated — requiring identical ordering would fail closed on
+            # every query with score ties, leaving Cozo permanently unused.
+            # Any membership divergence is recorded and fails closed to SQLite.
             sqlite_results = self._search_without_cozo(query, profile_id, top_k)
-            matches = [fact_id for fact_id, _ in cozo_results] == [
+            matches = {fact_id for fact_id, _ in cozo_results} == {
                 fact_id for fact_id, _ in sqlite_results
-            ]
+            }
             record = getattr(self._cozo, "record_shadow_comparison", None)
             if callable(record):
                 record(matches=matches, projected=cozo_results, canonical=sqlite_results)

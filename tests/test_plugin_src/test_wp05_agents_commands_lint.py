@@ -48,7 +48,7 @@ ALLOWED_TOOLS: frozenset[str] = CORE_TOOLS | BUILTINS
 
 REAL_SKILLS: frozenset[str] = frozenset(
     {
-        # v3.6.14 new skills (7)
+        # v3.6.14 skills (7)
         "slm-cache",
         "slm-compress",
         "slm-graph",
@@ -56,6 +56,11 @@ REAL_SKILLS: frozenset[str] = frozenset(
         "slm-remember",
         "slm-session",
         "slm-status",
+        # v3.8.0 new skills (4)
+        "slm-scope",
+        "slm-profile",
+        "slm-governance",
+        "slm-mesh",
         # retired skills (kept for backward-compat lint of older files)
         "slm-optimize",
         "slm-build-graph",
@@ -70,11 +75,12 @@ ADVISOR_NAMES: frozenset[str] = frozenset(
     {
         "slm-memory-advisor",
         "slm-optimize-advisor",
+        "slm-governance-advisor",
     }
 )
 
 # CLI top-level verbs (from §5.0: slm list|remember|recall|search|forget|status
-# plus optimize sub-commands and cache/compress)
+# plus optimize sub-commands, cache/compress, and delete)
 CLI_FIRST_VERBS: frozenset[str] = frozenset(
     {
         "list",
@@ -82,6 +88,7 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "recall",
         "search",
         "forget",
+        "delete",   # slm delete <fact_id> — verified in main.py
         "status",
         "optimize",
         "cache",
@@ -98,6 +105,7 @@ BANNED_MCP_TOOLS: frozenset[str] = frozenset({"get_status", "observe"})
 AGENT_FILES = [
     SRC / "agents" / "slm-memory-advisor.md",
     SRC / "agents" / "slm-optimize-advisor.md",
+    SRC / "agents" / "slm-governance-advisor.md",
 ]
 
 RULE_FILES = [
@@ -254,6 +262,9 @@ def test_skill_refs_are_real(md_path: Path) -> None:
 @pytest.mark.parametrize("md_path", ALL_MD_FILES, ids=lambda p: p.name)
 def test_attribution_line(md_path: Path) -> None:
     text = md_path.read_text(encoding="utf-8")
-    assert "SuperLocalMemory v3.6.18" in text and "Qualixar" in text, (
-        f"{md_path.name}: missing attribution line 'SuperLocalMemory v3.6.18 · Qualixar'"
+    # Version-agnostic: the build stamps the current version into the footer, so
+    # assert the attribution PATTERN (any semver) is present rather than pinning
+    # a specific version that drifts every release.
+    assert re.search(r"SuperLocalMemory v\d+\.\d+\.\d+", text) and "Qualixar" in text, (
+        f"{md_path.name}: missing attribution line 'SuperLocalMemory vX.Y.Z · Qualixar'"
     )

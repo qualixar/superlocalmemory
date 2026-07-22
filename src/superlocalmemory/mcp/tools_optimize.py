@@ -170,7 +170,7 @@ def register_optimize_tools(server) -> None:
                     "ok": False, "content": None, "size_bytes": 0,
                     "error": "ccr_id must be a UUID4",
                 }
-            original = CCRStore.get_instance().retrieve(ccr_id)
+            original = CCRStore.get_instance().retrieve(ccr_id, tenant_id=_tenant())
             if original is None:
                 return {
                     "ok": False, "content": None, "size_bytes": 0,
@@ -257,13 +257,16 @@ def register_optimize_tools(server) -> None:
             cache_key = hashlib.sha256(f"mcpkv:{tenant}:{key}".encode()).hexdigest()
             norm_tid = _normalize_tenant_id(tenant)
 
-            blob = CacheDB.get_default().get_value(cache_key, norm_tid)
+            db = CacheDB.get_default()
+            blob = db.get_value(cache_key, norm_tid)
             if blob is None:
                 with _kv_lock:
                     _kv_misses += 1
+                db.kv_counter_incr("kv_misses")  # M2: durable across restarts
                 return {"ok": True, "hit": False, "value": None, "note": None}
             with _kv_lock:
                 _kv_hits += 1
+            db.kv_counter_incr("kv_hits")  # M2: durable across restarts
             return {"ok": True, "hit": True, "value": blob.decode("utf-8"), "note": None}
 
         except Exception as exc:
@@ -277,14 +280,18 @@ def register_optimize_tools(server) -> None:
     async def slm_optimize_stats() -> dict:
         """Return compression and cache statistics.
 
-        Proxy/compress stats are daemon-persisted (accurate across restarts).
-        KV stats are in-module counters for this MCP process session only.
+        Proxy/compress AND KV stats are daemon-persisted (accurate across
+        restarts). KV counters fall back to this session's in-memory tally if
+        the persisted counters can't be read.
         """
         try:
-            snap = CacheDB.get_default().metrics_load()
+            db = CacheDB.get_default()
+            snap = db.metrics_load()
+            # M2: prefer the durable KV counters; fall back to session counters.
+            persisted = db.kv_counters_load()
             with _kv_lock:
-                kv_h = _kv_hits
-                kv_m = _kv_misses
+                kv_h = persisted.get("kv_hits", _kv_hits)
+                kv_m = persisted.get("kv_misses", _kv_misses)
             return {
                 "ok": True,
                 "compress_runs": snap.compress_runs,
@@ -297,7 +304,7 @@ def register_optimize_tools(server) -> None:
                     "CCR entry count not tracked per-session; "
                     "see daemon /api/v1/metrics"
                 ),
-                "note": "proxy stats are daemon-persisted; kv stats are this session only",
+                "note": "proxy and kv stats are daemon-persisted across restarts",
             }
         except Exception as exc:
             logger.error("slm_optimize_stats failed (fail-open): %s", exc)

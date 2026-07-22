@@ -16,21 +16,24 @@
 window.SLM_FETCH_TIMEOUT_MS = 15000;
 window.SLM_INSTALL_TOKEN_KEY = 'slm_install_token';
 
-window.slmInstallToken = async function (forceRefresh) {
-    if (!forceRefresh) {
-        var cached = sessionStorage.getItem(window.SLM_INSTALL_TOKEN_KEY);
-        if (cached) return cached;
-    }
-    var response = await window.__slmOriginalFetch(
-        '/internal/token',
-        {credentials: 'same-origin'}
-    );
-    if (!response.ok) return '';
-    var payload = await response.json();
-    var token = payload && payload.token ? payload.token : '';
-    if (token) sessionStorage.setItem(window.SLM_INSTALL_TOKEN_KEY, token);
-    return token;
-};
+// B2 (3.7.9): the install token is kept in a private closure, never in
+// sessionStorage — a stored token is trivially readable by any injected
+// script (sessionStorage.getItem), which was the theft leg of the XSS chain.
+window.slmInstallToken = (function () {
+    var _cache = null;  // in-memory only; not on window, not in storage
+    return async function (forceRefresh) {
+        if (!forceRefresh && _cache) return _cache;
+        var response = await window.__slmOriginalFetch(
+            '/internal/token',
+            {credentials: 'same-origin'}
+        );
+        if (!response.ok) return '';
+        var payload = await response.json();
+        var token = payload && payload.token ? payload.token : '';
+        if (token) _cache = token;
+        return token;
+    };
+})();
 
 // Global fetch patch: apply the abort timeout to every relative-URL request
 // automatically. 17 UI modules call bare fetch() — patching here avoids
@@ -460,22 +463,30 @@ function populateFilters(categories, projects) {
     // Clear existing options beyond the first placeholder to prevent duplicates on refresh
     if (categorySelect) while (categorySelect.options.length > 1) categorySelect.remove(1);
     if (projectSelect) while (projectSelect.options.length > 1) projectSelect.remove(1);
-    categories.forEach(function(cat) {
-        if (cat.category) {
-            var option = document.createElement('option');
-            option.value = cat.category;
-            option.textContent = cat.category + ' (' + cat.count + ')';
-            categorySelect.appendChild(option);
-        }
-    });
-    projects.forEach(function(proj) {
-        if (proj.project_name) {
-            var option = document.createElement('option');
-            option.value = proj.project_name;
-            option.textContent = proj.project_name + ' (' + proj.count + ')';
-            projectSelect.appendChild(option);
-        }
-    });
+    // Guard appendChild: in the OD dashboard #filter-category / #filter-project
+    // live in a folded pane and are frequently absent. Without these guards a
+    // null.appendChild threw, tripping the loadStats() catch and zeroing every
+    // dashboard counter after a profile create/switch.
+    if (categorySelect) {
+        categories.forEach(function(cat) {
+            if (cat.category) {
+                var option = document.createElement('option');
+                option.value = cat.category;
+                option.textContent = cat.category + ' (' + cat.count + ')';
+                categorySelect.appendChild(option);
+            }
+        });
+    }
+    if (projectSelect) {
+        projects.forEach(function(proj) {
+            if (proj.project_name) {
+                var option = document.createElement('option');
+                option.value = proj.project_name;
+                option.textContent = proj.project_name + ' (' + proj.count + ')';
+                projectSelect.appendChild(option);
+            }
+        });
+    }
 }
 
 // ============================================================================
@@ -491,6 +502,11 @@ window.addEventListener('DOMContentLoaded', function() {
     loadProfiles();
     loadStats();
     loadGraph();
+    // DASH-V1/V2/V3 fix: populate the landing-page cards (Operating Mode,
+    // LLM Provider, Memories facts, Version) on first paint. loadDashboard()
+    // was only bound to visibilitychange/focus/hashchange, none of which fire
+    // on a fresh load, so those cards were stuck on their static "Loading…".
+    if (typeof loadDashboard === 'function') loadDashboard();
 
     // v2.5 — Event Bus + Agent Registry (graceful if functions don't exist)
     if (typeof initEventStream === 'function') initEventStream();

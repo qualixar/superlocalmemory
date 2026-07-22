@@ -332,20 +332,20 @@ class TestRetentionExpiration:
     def test_expired_facts_detected(self):
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)
-        # Create atomic_facts table with old data
+        # Real atomic_facts is keyed by fact_id (TEXT) + has a lifecycle column.
         db.execute(
             "CREATE TABLE atomic_facts ("
-            "  id INTEGER PRIMARY KEY, profile_id TEXT, "
-            "  created_at TEXT)"
+            "  fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "  lifecycle TEXT DEFAULT 'active', created_at TEXT)"
         )
         db.execute(
-            "INSERT INTO atomic_facts (profile_id, created_at) "
-            "VALUES ('p1', '2020-01-01T00:00:00+00:00')"
+            "INSERT INTO atomic_facts (fact_id, profile_id, created_at) "
+            "VALUES ('f_old', 'p1', '2020-01-01T00:00:00+00:00')"
         )
         db.commit()
         engine.add_rule("p1", "GDPR-30d", 30)
         expired = engine.get_expired_facts("p1")
-        assert len(expired) == 1
+        assert expired == ["f_old"]
 
     def test_fresh_facts_not_expired(self):
         from datetime import datetime, timezone
@@ -353,13 +353,13 @@ class TestRetentionExpiration:
         engine = RetentionEngine(db)
         db.execute(
             "CREATE TABLE atomic_facts ("
-            "  id INTEGER PRIMARY KEY, profile_id TEXT, "
-            "  created_at TEXT)"
+            "  fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "  lifecycle TEXT DEFAULT 'active', created_at TEXT)"
         )
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
-            "INSERT INTO atomic_facts (profile_id, created_at) "
-            "VALUES ('p1', ?)", (now,)
+            "INSERT INTO atomic_facts (fact_id, profile_id, created_at) "
+            "VALUES ('f_new', 'p1', ?)", (now,)
         )
         db.commit()
         engine.add_rule("p1", "GDPR-30d", 30)
@@ -370,33 +370,69 @@ class TestRetentionExpiration:
 class TestRetentionEnforcement:
     """Test retention enforcement (deletion)."""
 
-    def test_enforce_deletes_expired(self):
+    def test_enforce_archives_expired_soft_state(self):
+        """Enforcement is GDPR-safe soft-state (archive), NOT a raw delete.
+
+        A rule created via add_rule defaults to action='archive', so an expired
+        fact moves to lifecycle='archived' and is retained (never deleted). This
+        replaces the old behavior that hard-deleted rows (and crashed on the
+        real fact_id-keyed schema).
+        """
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)
         db.execute(
             "CREATE TABLE atomic_facts ("
-            "  id INTEGER PRIMARY KEY, profile_id TEXT, "
-            "  created_at TEXT)"
+            "  fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "  lifecycle TEXT DEFAULT 'active', created_at TEXT)"
         )
         db.execute(
-            "INSERT INTO atomic_facts (profile_id, created_at) "
-            "VALUES ('p1', '2020-01-01T00:00:00+00:00')"
+            "INSERT INTO atomic_facts (fact_id, profile_id, created_at) "
+            "VALUES ('f_old', 'p1', '2020-01-01T00:00:00+00:00')"
         )
         db.commit()
         engine.add_rule("p1", "GDPR-30d", 30)
         result = engine.enforce("p1")
-        assert result["deleted_count"] == 1
-        # Verify fact is gone
+        assert result["archived"] == 1
+        assert result["tombstoned"] == 0
+        # The fact is RETAINED (soft-state), moved to the archived zone.
         row = db.execute(
-            "SELECT COUNT(*) FROM atomic_facts WHERE profile_id='p1'"
+            "SELECT lifecycle FROM atomic_facts WHERE fact_id='f_old'"
         ).fetchone()
-        assert row[0] == 0
+        assert row[0] == "archived"
+
+    def test_enforce_tombstone_action(self):
+        """A tombstone rule lands expired facts in the 'archived' lifecycle zone
+        (the only valid terminal state) and flags them purgeable via
+        archive_status — the real atomic_facts CHECK forbids 'tombstoned'."""
+        db = sqlite3.connect(":memory:")
+        engine = RetentionEngine(db)
+        db.execute(
+            "CREATE TABLE atomic_facts ("
+            "  fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "  lifecycle TEXT DEFAULT 'active', archive_status TEXT, created_at TEXT)"
+        )
+        db.execute(
+            "INSERT INTO atomic_facts (fact_id, profile_id, created_at) "
+            "VALUES ('f_old', 'p1', '2020-01-01T00:00:00+00:00')"
+        )
+        db.commit()
+        engine.create_rule(name="tomb", framework="gdpr", retention_days=30,
+                           action="tombstone", applies_to=None, profile_id="p1")
+        result = engine.enforce("p1")
+        assert result["tombstoned"] == 1
+        assert result["deleted_count"] == 1  # legacy alias == tombstoned
+        row = db.execute(
+            "SELECT lifecycle, archive_status FROM atomic_facts WHERE fact_id='f_old'"
+        ).fetchone()
+        assert row[0] == "archived"
+        assert row[1] == "tombstoned"
 
     def test_enforce_no_rules_no_deletions(self):
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)
         result = engine.enforce("p1")
         assert result["deleted_count"] == 0
+        assert result["archived"] == 0
 
 
 # ==================================================================

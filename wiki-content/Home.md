@@ -1,6 +1,6 @@
-# SuperLocalMemory V3.7
+# SuperLocalMemory V3.8.0
 
-> **Local-first agent memory, retrieval, cache, compression, and trusted-peer coordination in one operator-controlled runtime.**
+> **Local-first agent memory, retrieval, cache, compression, and trusted-peer coordination in one operator-controlled runtime. V3.8.0 adds team workspaces, user roles, and GDPR-ready data governance.**
 
 SuperLocalMemory turns conversations, observations, and connected-source
 evidence into durable memory that can be recalled through a CLI, MCP, hooks,
@@ -60,13 +60,30 @@ Mode A does not disable model downloads, adapters, backup, proxy providers, or
 other integrations that an operator explicitly enables. Review the complete
 deployment before making a privacy or compliance determination.
 
+## Teams and enterprise memory (v3.8.0)
+
+V3.8.0 adds multi-user and compliance controls:
+
+- **Users and roles** — admin / member / viewer, scoped per workspace
+- **Login gate** — `require_login = true` for team and enterprise deployments
+- **GDPR export and erasure** — full profile data export; erasure removes data from 30+ scoped tables and is logged to the tamper-proof audit chain
+- **Retention rules** — `indefinite`, `gdpr-30d`, `hipaa-7y`, `custom` policies per workspace
+- **PII redaction** — configurable automatic redaction before memory content crosses trust boundaries
+
+Personal installs are unchanged — no login required by default. See [[RBAC and Teams]] and [[GDPR Compliance]].
+
 ## Dashboard workspaces
 
+V3.8.0 reorganized the dashboard navigation. The former "Operations" section is
+now **Governance**, with sub-tabs for Access & Users, Data Privacy, and Audit.
+A new **Integrations** group adds the **MCP & Tools** pane for profile management.
+
 The local dashboard includes Dashboard, Brain, Knowledge Graph, Memories,
-Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings,
-and Optimize workspaces. Use it with `slm health`, `slm doctor`, and `slm
-trace` for operational verification rather than treating a visual status as a
-guarantee.
+Health, Governance (Access & Users / Data Privacy / Audit / Lifecycle & Trust),
+Entity Explorer, Skill Evolution, Mesh Peers, MCP & Tools, Cloud Backup,
+Settings, and Optimize workspaces. Use it with `slm health`, `slm doctor`, and
+`slm trace` for operational verification rather than treating a visual status as
+a guarantee.
 
 ## Quick Start
 

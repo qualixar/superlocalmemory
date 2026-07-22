@@ -11,8 +11,12 @@ implementation of queryable projection and complete derivation.
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
 import uuid
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
@@ -28,6 +32,21 @@ if TYPE_CHECKING:
 
 
 _PREBUILT_FACT_KEY = "_slm_prebuilt_fact_v1"
+
+
+def _pii_redaction_enabled(engine: "MemoryEngine") -> bool:
+    """C4: opt-in PII redaction on ingest.
+
+    On when the engine config sets ``pii_redaction`` truthy OR the
+    ``SLM_PII_REDACTION`` env var is set (1/on/true/yes). Default OFF — personal
+    use is unchanged; team/company operators opt in.
+    """
+    cfg = getattr(engine, "_config", None)
+    if cfg is not None and getattr(cfg, "pii_redaction", False):
+        return True
+    return os.environ.get("SLM_PII_REDACTION", "").strip().lower() in (
+        "1", "on", "true", "yes",
+    )
 
 
 def content_passes_admission(content: str) -> bool:
@@ -140,6 +159,16 @@ def canonical_store(
             error=ValueError("content rejected by local admission policy"),
         )
         return []
+    # C4: opt-in PII redaction. When enabled (config.pii_redaction or
+    # SLM_PII_REDACTION), scrub personal identifiers BEFORE the content is
+    # extracted, embedded, or persisted — nothing sensitive ever reaches disk.
+    if _pii_redaction_enabled(engine):
+        from superlocalmemory.core.pii import redact_pii
+
+        scrubbed, n_pii = redact_pii(content)
+        if n_pii:
+            content = scrubbed
+            logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
     try:
         command = build_engine_ingestion_command(engine)
         receipt = command.submit(IngestionRequest(

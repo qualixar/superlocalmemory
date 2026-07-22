@@ -92,6 +92,12 @@ class AuditChain:
         conn = sqlite3.connect(path)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
+        # C4: audit chain holds a tamper-evident record — keep it owner-only.
+        try:
+            from superlocalmemory.core.security_primitives import harden_db_perms
+            harden_db_perms(path)
+        except Exception:
+            pass
         return conn
 
     def _make_conn(self) -> sqlite3.Connection:

@@ -276,6 +276,14 @@ def main() -> None:
     db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
     db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")
 
+    # -- Mesh inspection (v3.7.9, M-03) --------------------------------
+    mesh_p = sub.add_parser("mesh", help="Inspect the local agent mesh (status/peers)")
+    mesh_p.add_argument(
+        "mesh_action",
+        choices=("status", "peers"),
+        help="status: broker health + stats; peers: active peer sessions",
+    )
+
     # -- Memory Operations ---------------------------------------------
     remember_p = sub.add_parser("remember", help="Store a memory (extracts facts, builds graph)")
     remember_p.add_argument("content", help="Content to remember")
@@ -306,7 +314,7 @@ def main() -> None:
     recall_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
     recall_p.add_argument(
         "--fast", action="store_true",
-        help="Skip spreading activation and remote agentic verification for a "
+        help="Skip graph-assisted candidate expansion and remote agentic verification for a "
              "latency-bounded response. Other configured retrieval channels still run. "
              "Use when you need recall before a tool call (e.g. before WebSearch).",
     )
@@ -361,7 +369,7 @@ def main() -> None:
         help="Show extended status: migration log, daemon port, disabled marker, last version",
     )
 
-    health_p = sub.add_parser("health", help="Math layer health (Fisher-Rao, Sheaf, Langevin)")
+    health_p = sub.add_parser("health", help="Math layer health (scoring, consistency, and lifecycle layers)")
     health_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
     trace_p = sub.add_parser("trace", help="Recall with per-channel score breakdown")

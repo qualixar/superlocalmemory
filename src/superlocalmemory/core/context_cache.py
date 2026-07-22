@@ -65,6 +65,18 @@ class CacheEntry:
     provenance: str = "tool_observation"
     computed_at: int = 0
     byte_size: int = 0
+    profile_id: str = "default"
+
+
+def _active_profile_fallback(home: Path) -> str:
+    """Resolve the active profile for the cache reader hot path (stdlib only,
+    never raises). Two profiles can share a session_id, so cached context MUST
+    be keyed by profile or one tenant reads another's context."""
+    try:
+        raw = (home / "profiles.json").read_text(encoding="utf-8")
+        return json.loads(raw).get("active_profile", "default") or "default"
+    except Exception:
+        return "default"
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +211,24 @@ class ContextCache:
         return conn
 
     def _bootstrap_schema_and_meta(self) -> None:
+        # Isolation: cached context is keyed by profile so two tenants sharing a
+        # session_id cannot read each other's context. Older cache files lack
+        # the profile_id column — the cache is ephemeral (120s TTL), so drop and
+        # recreate rather than run a rebuild migration.
+        try:
+            cols = {
+                r[1] for r in self._write_conn.execute(
+                    "PRAGMA table_info(context_entries)"
+                ).fetchall()
+            }
+            if cols and "profile_id" not in cols:
+                self._write_conn.execute("DROP TABLE context_entries")
+        except sqlite3.Error:  # pragma: no cover — defensive
+            pass
         self._write_conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS context_entries (
+                profile_id  TEXT NOT NULL DEFAULT 'default',
                 session_id  TEXT NOT NULL,
                 topic_sig   TEXT NOT NULL,
                 content     TEXT NOT NULL,
@@ -209,11 +236,11 @@ class ContextCache:
                 provenance  TEXT NOT NULL DEFAULT 'tool_observation',
                 computed_at INTEGER NOT NULL,
                 byte_size   INTEGER NOT NULL,
-                PRIMARY KEY (session_id, topic_sig)
+                PRIMARY KEY (profile_id, session_id, topic_sig)
             ) WITHOUT ROWID;
 
             CREATE INDEX IF NOT EXISTS idx_ctx_session_time
-                ON context_entries(session_id, computed_at);
+                ON context_entries(profile_id, session_id, computed_at);
             CREATE INDEX IF NOT EXISTS idx_ctx_time
                 ON context_entries(computed_at);
 
@@ -263,26 +290,38 @@ class ContextCache:
         self._write_conn.execute(
             """
             INSERT OR REPLACE INTO context_entries
-                (session_id, topic_sig, content, fact_ids,
+                (profile_id, session_id, topic_sig, content, fact_ids,
                  provenance, computed_at, byte_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (entry.session_id, entry.topic_sig, content, fact_ids_json,
-             entry.provenance, computed_at, byte_size),
+            (entry.profile_id or "default", entry.session_id, entry.topic_sig,
+             content, fact_ids_json, entry.provenance, computed_at, byte_size),
         )
 
     # -- Cleanup ------------------------------------------------------------
 
     def cleanup_session(
         self, session_id: str, *, older_than: int = CLEANUP_HORIZON_SECONDS,
+        profile_id: str | None = None,
     ) -> int:
-        """Delete rows for ``session_id`` older than ``older_than`` seconds."""
+        """Delete rows for ``session_id`` older than ``older_than`` seconds.
+
+        When ``profile_id`` is given the delete is tenant-scoped so a cleanup on
+        a shared session_id cannot wipe another profile's cached context.
+        """
         cutoff = int(time.time()) - older_than
-        cur = self._write_conn.execute(
-            "DELETE FROM context_entries "
-            "WHERE session_id=? AND computed_at < ?",
-            (session_id, cutoff),
-        )
+        if profile_id is not None:
+            cur = self._write_conn.execute(
+                "DELETE FROM context_entries "
+                "WHERE profile_id=? AND session_id=? AND computed_at < ?",
+                (profile_id, session_id, cutoff),
+            )
+        else:
+            cur = self._write_conn.execute(
+                "DELETE FROM context_entries "
+                "WHERE session_id=? AND computed_at < ?",
+                (session_id, cutoff),
+            )
         return cur.rowcount
 
     def cleanup_global_lru(self) -> int:
@@ -309,17 +348,17 @@ class ContextCache:
         target = int(MAX_BYTES * 0.9)
         while total > target:
             rows = self._write_conn.execute(
-                "SELECT session_id, topic_sig, byte_size "
+                "SELECT profile_id, session_id, topic_sig, byte_size "
                 "FROM context_entries "
                 "ORDER BY computed_at ASC LIMIT 100",
             ).fetchall()
             if not rows:  # pragma: no cover — reached only if table empties mid-sweep
                 break
-            for sess, sig, size in rows:
+            for pid, sess, sig, size in rows:
                 self._write_conn.execute(
                     "DELETE FROM context_entries "
-                    "WHERE session_id=? AND topic_sig=?",
-                    (sess, sig),
+                    "WHERE profile_id=? AND session_id=? AND topic_sig=?",
+                    (pid, sess, sig),
                 )
                 deleted += 1
                 total -= size
@@ -345,6 +384,7 @@ def read_entry_fast(
     *,
     db_path: Path | None = None,
     home_dir: Path | None = None,
+    profile_id: str | None = None,
 ) -> CacheEntry | None:
     """Hot-path reader used by the UserPromptSubmit hook.
 
@@ -397,14 +437,17 @@ def read_entry_fast(
                 return None
 
             now = int(time.time())
+            # Scope to the active profile so a shared session_id cannot read
+            # another tenant's cached context.
+            pid = profile_id or _active_profile_fallback(home)
             row = conn.execute(
                 """
                 SELECT content, fact_ids, provenance, computed_at, byte_size
                 FROM context_entries
-                WHERE session_id=? AND topic_sig=?
+                WHERE profile_id=? AND session_id=? AND topic_sig=?
                   AND computed_at > ?
                 """,
-                (session_id, topic_sig, now - TTL_SECONDS),
+                (pid, session_id, topic_sig, now - TTL_SECONDS),
             ).fetchone()
         finally:
             try:

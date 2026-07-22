@@ -83,7 +83,12 @@ def test_version_increments_on_hot_reload(tmp_path: Path) -> None:
 
 
 def test_save_raises_on_invalid_config(tmp_config_store) -> None:
-    bad_cfg = OptimizeConfig.from_dict({"compress_mode": "explosive"})
+    # from_dict now fail-open normalizes unknown modes, so build a genuinely
+    # invalid config directly (frozen dataclass) to exercise save()'s guard.
+    import dataclasses
+    bad_cfg = dataclasses.replace(
+        OptimizeConfig.from_dict({}), compress_mode="explosive"
+    )
     with pytest.raises(ValueError):
         tmp_config_store.save(bad_cfg)
 

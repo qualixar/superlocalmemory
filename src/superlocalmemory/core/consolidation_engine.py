@@ -510,15 +510,21 @@ class ConsolidationEngine:
                 fact_id, profile_id,
             )
 
-        # Fallback: direct SQL check
+        # Fallback: direct SQL check. Must consider BOTH valid_until (valid-time
+        # expiry) AND system_expired_at (transaction-time expiry) — a fact that
+        # was invalidated/erased sets system_expired_at, and ignoring it would
+        # let a GDPR-erased/superseded fact be promoted back into warm lifecycle.
         rows = self._db.execute(
-            "SELECT valid_until FROM fact_temporal_validity "
+            "SELECT valid_until, system_expired_at FROM fact_temporal_validity "
             "WHERE fact_id = ? AND profile_id = ?",
             (fact_id, profile_id),
         )
         if not rows:
             return True  # No temporal record = valid
-        valid_until = dict(rows[0]).get("valid_until")
+        row = dict(rows[0])
+        if row.get("system_expired_at") is not None:
+            return False  # transaction-time expired (invalidated/erased)
+        valid_until = row.get("valid_until")
         if valid_until is None:
             return True  # Open-ended validity
         try:

@@ -29,7 +29,7 @@ Mode A and Mode B work fully offline. Mode C requires internet for the cloud LLM
 ### What are the requirements?
 
 - **Python** 3.11+ (required for V3 engine)
-- **Node.js** 14+ (if installing via npm)
+- **Node.js** 18+ (if installing via npm)
 - Any supported IDE
 - For Mode B: Ollama with a pulled model
 - For Mode C: API key for your cloud LLM provider
@@ -92,7 +92,7 @@ slm recall "deploy configuration"
 slm trace "deploy configuration"
 ```
 
-This shows per-channel scores (Semantic, BM25, Entity Graph, Temporal) for each result.
+This shows per-channel scores (Semantic, BM25, Temporal, Hopfield, Spreading Activation) for each result. Entity-graph data can enhance a post-fusion score but is not a separate recall channel.
 
 ### How do I delete a memory?
 

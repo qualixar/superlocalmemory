@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v3", tags=["v3"])
 
 
+def _internal_error() -> JSONResponse:
+    """SEC-H-02: log the full traceback server-side, return a generic message.
+
+    Returning ``str(e)`` to the client leaked DB schema (column/constraint
+    names), the data-directory filesystem path, and — for config routes — could
+    surface LLM config internals. Call this only from inside an ``except`` block
+    so ``logger.exception`` captures the active traceback.
+    """
+    logger.exception("v3_api request failed")
+    return JSONResponse({"error": "Internal server error"}, status_code=500)
+
+
 async def _apply_runtime_config(request: Request, config, *, mode_change: bool) -> None:
     """Persist and hot-swap config only after the daemon transition succeeds."""
     import asyncio
@@ -99,7 +111,7 @@ async def dashboard(request: Request):
             "version": SLM_VERSION,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Mode ─────────────────────────────────────────────────────
@@ -109,26 +121,36 @@ async def get_mode(request: Request):
     """Get current mode, provider, model — single source of truth for UI."""
     try:
         from superlocalmemory.core.config import SLMConfig
+        from urllib.parse import urlparse
         config = getattr(request.app.state, "config", None) or SLMConfig.load()
         current = config.mode.value
+        # SEC-L-01: expose only the endpoint HOST, not the full URL. A full
+        # api_base (e.g. an internal Azure OpenAI deployment path) leaks
+        # infrastructure topology to non-admin (viewer) users.
+        _api_base = config.llm.api_base or ""
+        _endpoint_host = urlparse(_api_base).netloc if _api_base else ""
         return {
             "mode": current,
             "provider": config.llm.provider or "none",
             "model": config.llm.model or "",
             "has_key": bool(config.llm.api_key),
-            "endpoint": config.llm.api_base or "",
+            "endpoint": _endpoint_host,
             "capabilities": {
                 "llm_available": bool(config.llm.provider),
                 "cross_encoder": config.retrieval.use_cross_encoder if hasattr(config, 'retrieval') else False,
             },
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.put("/mode")
 async def set_mode(request: Request):
     """Switch operating mode. Body: {"mode": "a"|"b"|"c"}"""
+    # SEC-H-01: mode switch reconfigures the whole engine — admin-only (MANAGE)
+    # on top of machine auth. Owner keeps MANAGE; personal mode unaffected.
+    from superlocalmemory.server.rbac_enforce import require_manage
+    require_manage(request)
     try:
         body = await request.json()
         new_mode = body.get("mode", "").lower()
@@ -195,7 +217,7 @@ async def set_mode(request: Request):
             "message": "Embedding re-indexing will run on next recall." if needs_reindex else "",
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.post("/mode/set")
@@ -204,6 +226,9 @@ async def set_full_config(request: Request):
 
     V3.4.24: Also accepts embedding_* fields for custom embedding endpoints.
     """
+    # SEC-H-01: sets the LLM provider + API key for the whole engine — admin-only.
+    from superlocalmemory.server.rbac_enforce import require_manage
+    require_manage(request)
     try:
         body = await request.json()
         new_mode = body.get("mode", "a").lower()
@@ -287,7 +312,7 @@ async def set_full_config(request: Request):
             "embedding_dimension": config.embedding.dimension,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── V3.4.24: Embedding Configuration ────────────────────────────────
@@ -309,12 +334,15 @@ async def get_embedding_config(request: Request):
             "mode": config.mode.value,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.put("/embedding/config")
 async def set_embedding_config(request: Request):
     """Update embedding configuration independently of mode switch."""
+    # SEC-H-01: swapping the embedding provider/key affects all recall — admin-only.
+    from superlocalmemory.server.rbac_enforce import require_manage
+    require_manage(request)
     try:
         body = await request.json()
         from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
@@ -362,7 +390,7 @@ async def set_embedding_config(request: Request):
             "needs_reindex": needs_reindex,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.get("/scope/config")
@@ -374,12 +402,15 @@ async def get_scope_config(request: Request):
         config = getattr(request.app.state, "config", None) or SLMConfig.load()
         return {"success": True, **config.scope.as_dict()}
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _internal_error()
 
 
 @router.put("/scope/config")
 async def set_scope_config(request: Request):
     """Validate, persist, and hot-apply explicit multi-scope defaults."""
+    # SEC-H-01: scope defaults govern cross-profile recall visibility — admin-only.
+    from superlocalmemory.server.rbac_enforce import require_manage
+    require_manage(request)
     try:
         body = await request.json()
         from superlocalmemory.core.config import SLMConfig, ScopeConfig
@@ -411,7 +442,7 @@ async def set_scope_config(request: Request):
         await _apply_runtime_config(request, config, mode_change=False)
         return {"success": True, **config.scope.as_dict()}
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _internal_error()
 
 
 @router.post("/embedding/test")
@@ -475,8 +506,9 @@ async def embed_ping():
         from .helpers import get_engine_lazy
         # We just need to confirm the route is alive — engine check is optional
         return {"ok": True}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+    except Exception:
+        logger.exception("embedder liveness probe failed")
+        return JSONResponse({"ok": False, "error": "Internal server error"}, status_code=503)
 
 
 @router.post("/embed")
@@ -509,7 +541,7 @@ async def embed_texts(request: Request):
         )
         return {"embeddings": embeddings}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 def _validate_provider_url(url: str, client_host: str) -> str | None:
@@ -636,7 +668,8 @@ async def test_provider(request: Request):
     except httpx.HTTPStatusError as e:
         return {"success": False, "error": f"HTTP {e.response.status_code}: Invalid key or endpoint"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.exception("verify_key failed")
+        return {"success": False, "error": "internal error"}
 
 
 @router.get("/ollama/status")
@@ -666,7 +699,8 @@ async def list_providers():
         from superlocalmemory.core.config import SLMConfig
         return {"providers": SLMConfig.provider_presets()}
     except Exception as exc:
-        return {"error": str(exc), "providers": []}
+        logger.exception("list_providers failed")
+        return {"error": "could not load provider list", "providers": []}
 
 
 @router.get("/provider")
@@ -685,12 +719,20 @@ async def get_provider():
             "has_key": bool(key),
         }
     except Exception as exc:
-        return {"error": str(exc), "provider": "unknown"}
+        logger.exception("get_provider failed")
+        return {"error": "could not load configuration", "provider": "unknown"}
 
 
 @router.put("/provider")
 async def set_provider(request: Request):
     """Set LLM provider. Body: {"provider": "openai", "api_key": "...", "model": "..."}"""
+    # Swapping the provider + API key redirects all LLM traffic (prompt/output
+    # interception risk) — admin-only, on top of mutation auth.
+    from superlocalmemory.server.route_mutations import authorize_route_mutation
+    from superlocalmemory.server.rbac_enforce import require_manage
+    _auth = authorize_route_mutation(request, operation="update",
+                                     source_agent_id="http-set-provider")
+    require_manage(request)
     try:
         body = await request.json()
         provider = body.get("provider", "")
@@ -720,7 +762,7 @@ async def set_provider(request: Request):
 
         return {"success": True, "provider": provider, "model": model}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Recall Trace ─────────────────────────────────────────────
@@ -784,7 +826,7 @@ async def recall_trace(request: Request):
             **recall_response_metadata(response),
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 def _record_learning_signals(query: str, results: list) -> None:
@@ -874,7 +916,7 @@ async def trust_dashboard(request: Request):
             "profile": pid,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Math Health ──────────────────────────────────────────────
@@ -916,7 +958,7 @@ async def math_health(request: Request):
             "note": "config-derived; not a live runtime probe",
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Auto-Capture / Auto-Recall Config ────────────────────────
@@ -930,7 +972,8 @@ async def get_auto_capture_config():
         rules = RulesEngine(config_path=DEFAULT_BASE_DIR / "config.json")
         return {"config": rules.get_capture_config()}
     except Exception as exc:
-        return {"error": str(exc), "config": {}}
+        logger.exception("get_auto_capture_config failed")
+        return {"error": "internal error", "config": {}}
 
 
 @router.put("/auto-capture/config")
@@ -947,7 +990,7 @@ async def set_auto_capture_config(request: Request):
         rules.save(config_path)
         return {"success": True, "config": rules.get_capture_config()}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.get("/auto-recall/config")
@@ -959,7 +1002,8 @@ async def get_auto_recall_config():
         rules = RulesEngine(config_path=DEFAULT_BASE_DIR / "config.json")
         return {"config": rules.get_recall_config()}
     except Exception as exc:
-        return {"error": str(exc), "config": {}}
+        logger.exception("get_auto_recall_config failed")
+        return {"error": "internal error", "config": {}}
 
 
 @router.put("/auto-recall/config")
@@ -976,7 +1020,7 @@ async def set_auto_recall_config(request: Request):
         rules.save(config_path)
         return {"success": True, "config": rules.get_recall_config()}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── IDE Status ───────────────────────────────────────────────
@@ -989,7 +1033,8 @@ async def ide_status():
         connector = IDEConnector()
         return {"ides": connector.get_status()}
     except Exception as exc:
-        return {"error": str(exc), "ides": []}
+        logger.exception("ide_status failed")
+        return {"error": "internal error", "ides": []}
 
 
 @router.post("/ide/connect")
@@ -1009,7 +1054,7 @@ async def ide_connect(request: Request):
             results = connector.connect_all()
             return {"results": results}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Active Memory (V3.1) ────────────────────────────────────
@@ -1027,7 +1072,8 @@ async def learning_signals():
         pid = config.active_profile
         return {"success": True, **signals.get_signal_stats(pid)}
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        logger.exception("learning_signals failed")
+        return {"success": False, "error": "internal error"}
 
 
 @router.post("/learning/consolidate")
@@ -1078,7 +1124,8 @@ async def run_consolidation(request: Request):
     except HTTPException:
         raise
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        logger.exception("run_consolidation failed")
+        return {"success": False, "error": "internal error"}
 
 
 @router.get("/hooks/status")
@@ -1088,7 +1135,8 @@ async def hooks_status():
         from superlocalmemory.hooks.claude_code_hooks import check_status
         return {"success": True, **check_status()}
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        logger.exception("hooks_status failed")
+        return {"success": False, "error": "internal error"}
 
 
 # ── Phase 6: V3.2 API Endpoints ──────────────────────────────
@@ -1153,7 +1201,7 @@ async def get_auto_invoke_config(request: Request):
             "last_invocation": persisted.get("last_invocation", None),
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 2. PUT /api/v3/auto-invoke/config ─────────────────────────
@@ -1192,7 +1240,7 @@ async def set_auto_invoke_config(request: Request):
 
         return updated
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 3. GET /api/v3/associations ───────────────────────────────
@@ -1264,7 +1312,7 @@ async def get_associations(
 
         return {"edges": edges, "total": total}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 4. GET /api/v3/associations/stats ─────────────────────────
@@ -1365,7 +1413,7 @@ async def get_association_stats(request: Request, profile: str = ""):
             "top_connected_facts": top_facts,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 5. GET /api/v3/consolidation/status ───────────────────────
@@ -1452,7 +1500,7 @@ async def get_consolidation_status(request: Request, profile: str = ""):
         conn.close()
         return result
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 6. POST /api/v3/consolidation/trigger ─────────────────────
@@ -1486,42 +1534,54 @@ async def trigger_consolidation(request: Request):
         # path unconditionally. That dead branch is removed; consolidation
         # always runs directly against a lease-protected DB connection so a
         # concurrent profile switch cannot commit mid-consolidation.
+        #
+        # v3.4.64: ConsolidationEngine.consolidate() is CPU/IO bound (seconds
+        # to minutes). Calling it directly in an async route blocks the ASGI
+        # event loop.  Moved into asyncio.to_thread() so the event loop stays
+        # live.  The runtime.operation() lease is acquired INSIDE the thread —
+        # blocking a thread is fine; blocking the event loop is not.
+        import asyncio as _asyncio
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage import schema as _schema
         from superlocalmemory.core.consolidation_engine import ConsolidationEngine
         from superlocalmemory.server.profile_runtime import get_profile_runtime
 
-        runtime = get_profile_runtime(request.app.state)
-        with runtime.operation():
-            config = SLMConfig.load()
-            db = DatabaseManager(config.db_path)
-            db.initialize(_schema)
+        _app_state = request.app.state
 
-            engine = ConsolidationEngine(
-                db=db, config=config.consolidation, slm_config=config,
-            )
-            result = engine.consolidate(profile_id=pid, lightweight=lightweight)
-
-            # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
-            try:
-                from superlocalmemory.learning.consolidation_worker import (
-                    ConsolidationWorker,
+        def _run_consolidation() -> dict:
+            runtime = get_profile_runtime(_app_state)
+            with runtime.operation():
+                config = SLMConfig.load()
+                db = DatabaseManager(config.db_path)
+                db.initialize(_schema)
+                engine = ConsolidationEngine(
+                    db=db, config=config.consolidation, slm_config=config,
                 )
-                learning_db = config.base_dir / "learning.db"
-                cw = ConsolidationWorker(str(config.db_path), str(learning_db))
-                pattern_count = cw._generate_patterns(pid, False)
-                result["patterns_mined"] = pattern_count
-                logger.info("Auto-mined %d patterns after consolidation", pattern_count)
-            except Exception as exc:
-                logger.debug("Pattern mining after consolidation failed: %s", exc)
+                res = engine.consolidate(profile_id=pid, lightweight=lightweight)
+                # v3.4.1: Auto-trigger behavioral pattern mining after consolidation
+                try:
+                    from superlocalmemory.learning.consolidation_worker import (
+                        ConsolidationWorker,
+                    )
+                    learning_db = config.base_dir / "learning.db"
+                    cw = ConsolidationWorker(str(config.db_path), str(learning_db))
+                    pattern_count = cw._generate_patterns(pid, False)
+                    res["patterns_mined"] = pattern_count
+                    logger.info(
+                        "Auto-mined %d patterns after consolidation", pattern_count
+                    )
+                except Exception as exc:
+                    logger.debug("Pattern mining after consolidation failed: %s", exc)
+            return res
 
+        result = await _asyncio.to_thread(_run_consolidation)
         authorization.complete()
         return {"success": True, **result}
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 7. GET /api/v3/core-memory ────────────────────────────────
@@ -1567,7 +1627,7 @@ async def get_core_memory(request: Request, profile: str = ""):
 
         return {"blocks": blocks, "total_chars": total_chars, "char_limit": 2000}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 8. PUT /api/v3/core-memory/{block_id} ─────────────────────
@@ -1650,7 +1710,7 @@ async def update_core_memory_block(block_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 9. GET /api/v3/vector-store/status ────────────────────────
@@ -1697,7 +1757,7 @@ async def get_vector_store_status(request: Request, profile: str = ""):
 
         return result
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── Phase 10: V3.3 API Endpoints ────────────────────────────
@@ -1752,7 +1812,7 @@ async def forgetting_stats(request: Request, profile: str = ""):
         conn.close()
         return {"total": total, "zones": zones}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1b. POST /api/v3/forgetting/run ─────────────────────────
@@ -1828,8 +1888,9 @@ async def run_forgetting(request: Request):
 
             conn.commit()
         except Exception as exc:
+            logger.exception("run_forgetting decay failed")
             conn.close()
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": "internal error"}
 
         conn.close()
         authorization.complete()
@@ -1837,7 +1898,7 @@ async def run_forgetting(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1c. GET /api/v3/quantization/stats ──────────────────────
@@ -1900,7 +1961,7 @@ async def quantization_stats(request: Request, profile: str = ""):
         conn.close()
         return {"total": total, "tiers": tiers, "compression_ratio": compression_ratio}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1d. GET /api/v3/ccq/blocks ──────────────────────────────
@@ -1960,7 +2021,7 @@ async def ccq_blocks(request: Request, profile: str = "", limit: int = 50):
         conn.close()
         return {"blocks": blocks, "total": total}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1e. GET /api/v3/soft-prompts ─────────────────────────────
@@ -2013,7 +2074,7 @@ async def get_soft_prompts(request: Request, profile: str = ""):
         conn.close()
         return {"prompts": prompts, "total": len(prompts), "total_tokens": total_tokens}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1f. GET /api/v3/health/processes ─────────────────────────
@@ -2060,7 +2121,7 @@ async def process_health(request: Request):
             "healthy": processes["parent"]["status"] != "dead",
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 # ── 1g. GET /api/v3/v33/overview ─────────────────────────────
@@ -2192,7 +2253,7 @@ async def get_graph_communities(request: Request, profile: str = ""):
         return {"communities": communities, "total": len(communities)}
 
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.post("/graph/run-communities")
@@ -2221,7 +2282,7 @@ async def run_community_detection(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
 
 
 @router.get("/v33/overview")
@@ -2354,4 +2415,56 @@ async def v33_overview(request: Request, profile: str = ""):
         conn.close()
         return overview
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _internal_error()
+
+
+# ── MCP Profiles ─────────────────────────────────────────────
+
+@router.get("/mcp/profiles")
+async def get_mcp_profiles(request: Request):
+    """MCP profile summary: current profile, all profiles with tool counts and names.
+
+    Reads only the env var SLM_MCP_PROFILE and the pure-data profiles module.
+    No engine required — safe to call at any point in the daemon lifecycle.
+
+    Note on 'current': when SLM_MCP_PROFILE is unset the MCP server falls
+    back to the legacy _ESSENTIAL_TOOLS set.  The UI reports 'core' for that
+    state because 'core' is the recommended named-profile equivalent for new
+    installs and is the closest documented starting point for users.
+    """
+    try:
+        from superlocalmemory.mcp.profiles import (
+            _PROFILE_DEFINITIONS,
+            _PROFILE_ALIASES,
+            PROFILE_DESCRIPTIONS,
+        )
+
+        raw_profile = os.environ.get("SLM_MCP_PROFILE", "").strip().lower()
+        canonical = _PROFILE_ALIASES.get(raw_profile, raw_profile)
+        # Blank env var, "whole", or an unknown value all resolve to "core"
+        # for UI display purposes (safe, conservative default).
+        if not canonical or canonical == "whole" or canonical not in _PROFILE_DEFINITIONS:
+            current = "core"
+        else:
+            current = canonical
+
+        profiles_out: dict = {}
+        for name, tool_set in _PROFILE_DEFINITIONS.items():
+            profiles_out[name] = {
+                "count": len(tool_set),
+                "tools": sorted(tool_set),
+                "description": PROFILE_DESCRIPTIONS.get(name, ""),
+            }
+
+        all_tools: set = set()
+        for tool_set in _PROFILE_DEFINITIONS.values():
+            all_tools.update(tool_set)
+
+        return {
+            "current": current,
+            "profiles": profiles_out,
+            "aliases": dict(_PROFILE_ALIASES),
+            "total_tools": len(all_tools),
+        }
+    except Exception:
+        return _internal_error()

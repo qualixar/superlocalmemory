@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.7.8</h1>
+<h1 align="center">SuperLocalMemory V3.8.0</h1>
 <p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
 <em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.7.8</code> — <strong>Profile-isolation leak fix, opt-in loopback write auth, and fresh-install acceptance verification.</strong><br/>
+<p align="center"><code>v3.8.0</code> — <strong>Team &amp; company memory: users, roles, and per-workspace isolation, with GDPR export and erasure built in.</strong><br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -31,12 +31,9 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
 
 Agent-memory systems make different storage, model-provider, and deployment trade-offs. SuperLocalMemory starts with a local runtime and makes provider-backed enrichment, cloud backup, connectors, and proxy use explicit choices.
 
-SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and Fisher-informed scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
+SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
-**Published benchmark evidence carried into V3.7:** the architecture evaluated
-in the V3 paper remains the foundation of this release. The figures below keep
-their original LoCoMo protocol, answer-construction, model, and sample scope;
-they are not a claim of a newly rerun 3.7 package benchmark.
+**Published benchmark evidence carried into V3.8.0:** the architecture evaluated in the V3 paper remains the foundation of this release. The figures below keep their original LoCoMo protocol, answer-construction, model, and sample scope; they are not a claim of a newly rerun V3.8.0 package benchmark.
 
 ### How SLM fits beside other memory systems
 
@@ -61,7 +58,7 @@ for current primary sources and protocol-scoped benchmark evidence. A LoCoMo
 percentage is comparable only when the dataset scope, answer model, judge,
 retrieval stack, and release artifact match.
 
-### The V3.7 capability architecture
+### The V3.8.0 capability architecture
 
 SuperLocalMemory is one local control plane for persistent agent context. It is
 not just a vector store: the same runtime can accept evidence, build and govern
@@ -141,9 +138,9 @@ deployment.
 
 **[Watch the SuperLocalMemory demo on YouTube](https://www.youtube.com/watch?v=PMWW_ypsL60)** — a five-minute walkthrough of installation, setup, recall, cache, and compression. The video shows a product walkthrough; use the commands and release notes in this README as the current release contract.
 
-### Published LoCoMo evidence carried into V3.7
+### Published LoCoMo evidence (V3 architecture, carried into V3.8.0)
 
-The V3 paper evaluates the architecture carried into V3.7. Every figure below
+The V3 paper evaluates the architecture carried into V3.8.0. Every figure below
 is protocol-scoped, so a reader can distinguish local retrieval, answer
 construction, and cloud-assisted evaluation rather than treating unlike runs as
 one score.
@@ -164,8 +161,7 @@ information-geometric layers versus **58.9%** without them: **+12.7pp**.
 See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) and the [official
 LoCoMo paper](https://arxiv.org/abs/2402.17753) for the full protocol,
 ablation table, and limitations. These are published V3 architecture results
-carried into V3.7—not a substitute for a newly rerun release-artifact
-benchmark.
+carried into V3.8.0—not a substitute for a newly rerun release-artifact benchmark.
 
 ---
 
@@ -255,7 +251,7 @@ retrieved at runtime rather than copied into those files.
 **Score Contract v2:** `relevance_score` is query-relative relevance;
 `ranking_score` is internal ranking utility; `memory_confidence` belongs to the
 stored assertion; and `trust_score` is an evidence-policy signal. Legacy
-`score` and `confidence` remain aliases for one compatibility release. V3.7 is
+`score` and `confidence` remain aliases for one compatibility release. V3.8.0 is
 explicitly uncalibrated: `calibration_status` is `uncalibrated` and
 `answer_confidence` is `null`. See
 [the retrieval score contract](docs/retrieval-score-contract.md).
@@ -269,8 +265,7 @@ can run without a cloud LLM:
 
 Auto-capture hooks are installed explicitly with `slm hooks install` (Claude
 Code) or `slm hooks install --agent codex` (Codex). Hook latency and capture
-quality must be evaluated for the target client and workload; V3.7 publishes
-no universal p99 claim.
+quality must be evaluated for the target client and workload; V3.8.0 publishes no universal p99 claim.
 
 **Multi-scope memory (v3.6.15, opt-in):** keep memories `personal` (default), `shared` with named profiles, or `global` across the machine. Off by default — recall only ever returns your own facts until you turn sharing on, per call or in config. See **[docs/shared-memory.md](docs/shared-memory.md)**.
 
@@ -325,7 +320,7 @@ export SLM_MESH_SHARED_SECRET=my-secret-key
 slm init
 ```
 
-8 mesh MCP tools: `mesh_peers`, `mesh_send`, `mesh_broadcast`, `mesh_project`, `mesh_inbox`, `mesh_pending`, `mesh_state`, `mesh_lock`.
+8 mesh MCP tools: `mesh_summary`, `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`.
 
 Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-deployment.md](docs/distributed-deployment.md)
 
@@ -377,10 +372,10 @@ Control tool surface via `SLM_MCP_PROFILE`:
 | Profile | Tools | Use case |
 |:--------|:-----:|:---------|
 | `core` | 14 | Memory, session, and optimize core |
-| `code` | 20 | Core + code-graph tools |
+| `code` | 21 | Core + code-graph tools + profile switching |
 | `mesh` | 8 | Mesh-only — multi-machine coordination |
-| `full` | 38 | Memory + optimize + evolution + mesh |
-| `power` | 50 | Full + administration, lifecycle, and diagnostics |
+| `full` | 39 | Memory + optimize + evolution + mesh |
+| `power` | 51 | Full + administration, lifecycle, and diagnostics |
 | `whole` | all registered | Every registered MCP tool |
 
 **Precedence:** `ALL` > `TOOLS` > `PROFILE` > `default`
@@ -392,10 +387,7 @@ slm mcp
 
 For a predictable small surface, set `core` explicitly. Leaving the variable
 unset retains the compatibility default, whose mesh tools follow the local
-mesh setting. The former count-suffixed names (`core14`, `code20`, `mesh8`,
-`full38`, `power50`, `whole81`) remain temporary aliases and emit a migration
-warning. Unknown names stop startup instead of silently selecting another tool
-set.
+mesh setting. Count-suffixed aliases remain for backward compatibility and emit a migration warning: `core14`, `code20`, `code21`, `mesh8`, `full38`, `full39`, `power50`, `power51`, `whole81`. Unknown names stop startup instead of silently selecting another tool set.
 
 Per-IDE configs available for Claude Code, Cursor, Windsurf, VS Code Copilot, Continue, Gemini CLI, JetBrains, Zed, and more (15 configs in `ide/configs/`). See [docs/ide-setup.md](docs/ide-setup.md).
 
@@ -481,6 +473,77 @@ Available controls include local export and erasure commands, hash-chained audit
 
 ---
 
+## Teams and Enterprise Memory (v3.8.0)
+
+V3.8.0 adds multi-user, multi-workspace controls for teams and organizations. These are opt-in — personal single-user installs work exactly as before with no required login.
+
+### Users and roles
+
+SLM supports three role tiers within a workspace: **admin**, **member**, and **viewer**.
+
+| Role | Can read memory | Can write memory | Can manage users/config |
+|------|:---------------:|:----------------:|:-----------------------:|
+| admin | yes | yes | yes |
+| member | yes | yes | no |
+| viewer | yes | no | no |
+
+Roles are scoped per workspace (profile). A user may have different roles in different workspaces.
+
+### Workspace isolation
+
+Each workspace (profile) is a fully isolated memory namespace. One workspace cannot read another's personal memories. Shared and global scopes are opt-in and still profile-bounded at the authorization layer.
+
+### Login gate
+
+Enterprise deployments set `require_login = true` in configuration. With login enabled:
+- Every dashboard and API request requires an authenticated session.
+- First-run creates an admin account with a user-chosen password (no default credentials are shipped).
+- Session cookies use `HttpOnly` with optional `Secure` enforcement.
+- Personal installs run with `require_login = false` (loopback owner is trusted).
+
+```bash
+slm config set security.require_login true   # Enable for team/enterprise use
+```
+
+### Memory scopes
+
+| Scope | Who can recall | Set with |
+|-------|---------------|----------|
+| `personal` | Owner profile only (default) | `slm remember "..." --scope personal` |
+| `shared` | Named profiles the owner grants | `slm remember "..." --scope shared --shared-with profile-a,profile-b` |
+| `global` | Any authorized user on this machine | `slm remember "..." --scope global` |
+
+Recall is default-deny: shared and global facts are never returned unless the caller explicitly opts in (`--include-shared`, `--include-global`) or the scope policy allows it. See [docs/shared-memory.md](docs/shared-memory.md).
+
+### GDPR and data governance
+
+SLM ships built-in controls that support GDPR compliance programs:
+
+- **Export** — full profile data export as a structured JSONL bundle
+- **Erasure** — profile deletion removes data from 30+ scoped tables; erasure is logged to the tamper-proof audit chain before any data is deleted
+- **Retention rules** — time-based policies (`indefinite`, `gdpr-30d`, `hipaa-7y`, `custom`) applied per profile
+- **Audit trail** — every store, recall, mutation, and erasure produces a hash-chained audit record
+- **PII redaction** — configurable automatic redaction before memory content crosses trust boundaries
+
+These are engineering controls. Compliance depends on deployment configuration, use case, and operator responsibility. See [docs/compliance.md](docs/compliance.md).
+
+### Deployment tiers
+
+SLM ships one binary and is configured for the appropriate tier at install or post-install time.
+
+| Tier | Login gate | PII redaction | Retention | Audit |
+|------|:---------:|:-------------:|:---------:|:-----:|
+| **Personal** | off | off | off | on |
+| **Enterprise** | on | on | on | on |
+
+The installer or `slm reconfigure` sets the tier. Each setting is independently overridable at runtime. Full tier documentation: [docs/deployment-tiers.md](docs/deployment-tiers.md).
+
+### RBAC and teams docs
+
+Full reference: [docs/rbac-teams.md](docs/rbac-teams.md) · [docs/deployment-tiers.md](docs/deployment-tiers.md)
+
+---
+
 ## Advanced
 
 | Topic | Link |
@@ -495,6 +558,8 @@ Available controls include local export and erasure commands, hash-chained audit
 | MCP tools reference | [docs/mcp-tools.md](docs/mcp-tools.md) |
 | Getting started | [docs/getting-started.md](docs/getting-started.md) |
 | IDE setup (15 configs) | [docs/ide-setup.md](docs/ide-setup.md) |
+| Teams, users, and RBAC | [docs/rbac-teams.md](docs/rbac-teams.md) |
+| Deployment tiers | [docs/deployment-tiers.md](docs/deployment-tiers.md) |
 | pi.dev integration | [docs/pi-dev-integration.md](docs/pi-dev-integration.md) |
 | Skill evolution | [docs/skill-evolution.md](docs/skill-evolution.md) |
 | V2 migration | [docs/migration-from-v2.md](docs/migration-from-v2.md) |
@@ -518,7 +583,7 @@ runtime capability is enabled and healthy.
 | **v3.6.23** | Cross-platform Patch | Windows doctor/cache stats fixes (#65), neutral SLM hook guidance (#64), pi.dev MCP docs (#31), contributor fixes for dashboard profile path resolution (#63) and tz-naive Langevin maintenance backfill (#66) |
 | **v3.6.22** | Stability | backbone.py JSONDecodeError on empty HTTP 200 body (issue #62) — retries 3× then returns "" gracefully; remaining dashboard UI audit: clusters/compliance/entities r.ok guards, math-health status badge colors |
 | **v3.6.21** | Dashboard Audit | Full UI audit across all 7 dashboard tabs — auth fix for mesh panel (issue #60 frontend), Quick Store endpoint, timeline endpoint, r.ok guards, SSE \r fix, event delegation for lazy tabs, optimize toggle revert |
-| **v3.6.20** | Mesh Auth | Remote mesh auth fix (issue #60) — `_get_broker` now accepts Bearer + X-Mesh-Secret from non-loopback callers; config settings preservation (AIDEV-86) |
+| **v3.6.20** | Mesh Auth | Remote mesh auth fix (issue #60) — `_get_broker` now accepts Bearer + X-Mesh-Secret from non-loopback callers; config settings preservation on hot reload |
 | **v3.6.17** | Community | 8 contributor PRs (observability events, marker-bounded adapter writes, daemon port discovery, anthropic `api_base`, OpenMP workers, atomic-write rehash, `_jl` sentinel, LFS pointer); dashboard-feedback fix (#53/#59); env-tunable SQLite knobs + idle backoff; remote LLM test-probe (#40) |
 | **v3.6.16** | Docs | Corrected Claude Code plugin install — adds the required `/plugin marketplace add` step; clarifies plugin vs pip/npm delivery |
 | **v3.6.15** | Multi-scope | **Opt-in [shared memory](docs/shared-memory.md)** (personal/shared/global, off by default), default-deny scope at every read path, recall scope-race fix, contributor PRs #42/#43/#44, fixes #46–#49 |

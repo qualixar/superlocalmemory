@@ -38,7 +38,7 @@ Example output:
 ```
 Optimize: ON
   Cache:     enabled  (exact: 86400s TTL, semantic: OFF)
-  Compress:  enabled  (mode: safe, code: ON, prose: OFF, CCR: OFF)
+  Compress:  enabled  (Mode: safe, Prose (Layer 2): OFF)
   Proxy:     not running
   Config:    ~/.superlocalmemory/optimize.json  (version 61)
 ```
@@ -192,24 +192,6 @@ Enable/disable LLMLingua-2 prose compression (takes effect in aggressive mode).
 ```bash
 slm compress prose on
 slm compress prose off
-```
-
-### `slm compress ccr on|off`
-
-Enable/disable Compressed Context Retrieval — stores pre-compression originals in `llmcache.db` for byte-exact reversal.
-
-```bash
-slm compress ccr on
-slm compress ccr off
-```
-
-### `slm compress align on|off`
-
-Enable/disable CacheAligner — detects volatile tokens (UUIDs, timestamps) in system prompts for prefix-stabilization analysis.
-
-```bash
-slm compress align on
-slm compress align off
 ```
 
 ---

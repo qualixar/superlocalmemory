@@ -18,7 +18,7 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["ingestion"])
 
@@ -28,7 +28,9 @@ _active_lock = threading.Lock()
 
 
 class IngestRequest(BaseModel):
-    content: str
+    # Cap ingest content (~1 MB) so a single call cannot exhaust memory through
+    # the embedding/tokenizer pipeline.
+    content: str = Field(..., max_length=1_000_000)
     source_type: str
     dedup_key: str
     metadata: dict = {}
@@ -99,9 +101,10 @@ async def ingest(req: IngestRequest, request: Request):
         # truth; retries repair this row without repeating the canonical write.
         engine._db.execute(
             "INSERT OR IGNORE INTO ingestion_log "
-            "(source_type, dedup_key, fact_ids, metadata, status, ingested_at) "
-            "VALUES (?, ?, ?, ?, 'ingested', ?)",
+            "(profile_id, source_type, dedup_key, fact_ids, metadata, status, ingested_at) "
+            "VALUES (?, ?, ?, ?, ?, 'ingested', ?)",
             (
+                engine._profile_id,
                 req.source_type,
                 req.dedup_key,
                 json.dumps(fact_ids),

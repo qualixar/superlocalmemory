@@ -9,8 +9,10 @@ Routes: /api/evolution/status, /api/evolution/enable, /api/evolution/run
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from .helpers import get_active_profile, MEMORY_DIR
 
@@ -38,9 +40,10 @@ async def evolution_status():
         backend = detect_backend() if enabled else "none"
         db_path = str(MEMORY_DIR / "memory.db")
 
+        profile_id = get_active_profile()
         store = EvolutionStore(db_path)
-        stats = store.get_stats()
-        recent = store.get_recent(limit=10)
+        stats = store.get_stats(profile_id)
+        recent = store.get_recent(profile_id, limit=10)
 
         return {
             "enabled": enabled,
@@ -48,6 +51,9 @@ async def evolution_status():
             "config": {
                 "backend_setting": evo_cfg.get("backend", "auto"),
                 "max_per_cycle": evo_cfg.get("max_evolutions_per_cycle", 3),
+                "mutation_model": evo_cfg.get("mutation_model", ""),
+                "verify_model": evo_cfg.get("verify_model", ""),
+                "confirm_model": evo_cfg.get("confirm_model", ""),
             },
             "stats": {
                 "total": stats.get("total", 0),
@@ -70,9 +76,9 @@ async def evolution_status():
                 for r in recent
             ],
         }
-    except Exception as e:
-        logger.debug("evolution_status error: %s", e)
-        return {"enabled": False, "backend": "none", "error": str(e)}
+    except Exception:
+        logger.exception("evolution_status error")
+        return {"enabled": False, "backend": "none", "error": "Internal server error"}
 
 
 @router.post("/api/evolution/enable")
@@ -96,9 +102,38 @@ async def evolution_enable():
             _json.dump(cfg, f, indent=2)
 
         return {"ok": True, "message": "Evolution enabled. Will use auto-detected backend."}
-    except Exception as e:
-        logger.error("evolution_enable error: %s", e)
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("evolution_enable error")
+        return {"ok": False, "error": "Internal server error"}
+
+
+@router.post("/api/evolution/disable")
+async def evolution_disable():
+    """Disable skill evolution engine.  Mirrors /api/evolution/enable."""
+    try:
+        import json as _json
+        import os as _os
+
+        config_path = MEMORY_DIR / "config.json"
+        cfg: dict = {}
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = _json.load(f)
+
+        if "evolution" not in cfg:
+            cfg["evolution"] = {}
+        cfg["evolution"]["enabled"] = False
+
+        # Atomic write — protect against truncated config.json on crash.
+        tmp = config_path.with_suffix(".json.evo_disable_tmp")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
+        _os.replace(tmp, config_path)
+
+        return {"ok": True, "message": "Evolution disabled."}
+    except Exception:
+        logger.exception("evolution_disable error")
+        return {"ok": False, "error": "Internal server error"}
 
 
 @router.post("/api/evolution/run")
@@ -120,11 +155,17 @@ async def evolution_run():
         profile = get_active_profile()
         db_path = str(MEMORY_DIR / "memory.db")
 
-        # Build a minimal config object for the evolver
+        # Build a minimal config object for the evolver. Must carry the
+        # per-step model fields (v3.7.9) or a dashboard-triggered run would
+        # silently ignore the user's configured models and fall back to the
+        # cheapest defaults.
         class _EvoCfg:
             enabled = True
             backend = evo_cfg.get("backend", "auto")
             max_evolutions_per_cycle = evo_cfg.get("max_evolutions_per_cycle", 3)
+            mutation_model = evo_cfg.get("mutation_model", "")
+            verify_model = evo_cfg.get("verify_model", "")
+            confirm_model = evo_cfg.get("confirm_model", "")
         class _Cfg:
             evolution = _EvoCfg()
 
@@ -132,9 +173,83 @@ async def evolution_run():
         result = evolver.run_consolidation_cycle(profile)
 
         return {"ok": True, **result}
-    except Exception as e:
-        logger.error("evolution_run error: %s", e)
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("evolution_run error")
+        return {"ok": False, "error": "Internal server error"}
+
+
+class EvolutionConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    backend: Optional[str] = None
+    max_evolutions_per_cycle: Optional[int] = None
+    mutation_model: Optional[str] = None
+    verify_model: Optional[str] = None
+    confirm_model: Optional[str] = None
+
+
+@router.post("/api/evolution/config")
+async def evolution_config(body: EvolutionConfigUpdate):
+    """Update evolution config from the dashboard (v3.7.9).
+
+    Validates model + backend values against the same allow-list the CLI uses
+    (``slm config set evolution.*``) and persists to config.json atomically.
+    Only fields provided in the body are changed.
+    """
+    try:
+        import json as _json
+        import os as _os
+        from superlocalmemory.evolution.model_selection import _MODEL_ALIASES
+
+        accepted_models = set(_MODEL_ALIASES) | {"", "auto"}
+        accepted_backends = {"auto", "claude", "ollama", "anthropic", "openai"}
+
+        for field in ("mutation_model", "verify_model", "confirm_model"):
+            val = getattr(body, field)
+            if val is not None and val not in accepted_models:
+                allowed = ", ".join(["auto", *sorted(_MODEL_ALIASES)])
+                return {"ok": False, "error": f"{field} must be one of: {allowed}"}
+        if body.backend is not None and body.backend not in accepted_backends:
+            return {
+                "ok": False,
+                "error": f"backend must be one of: {', '.join(sorted(accepted_backends))}",
+            }
+        if (body.max_evolutions_per_cycle is not None
+                and not 0 < body.max_evolutions_per_cycle <= 50):
+            return {"ok": False, "error": "max_evolutions_per_cycle must be 1..50"}
+
+        config_path = MEMORY_DIR / "config.json"
+        cfg = {}
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = _json.load(f)
+        evo = cfg.setdefault("evolution", {})
+
+        for field in ("enabled", "backend", "max_evolutions_per_cycle",
+                      "mutation_model", "verify_model", "confirm_model"):
+            val = getattr(body, field)
+            if val is None:
+                continue
+            # "auto" is the UI label for the resolver's "" (pick cheapest model).
+            if field.endswith("_model") and val == "auto":
+                val = ""
+            evo[field] = val
+
+        # Atomic write — a truncated config.json would brick every slm call.
+        tmp = config_path.with_suffix(".json.evo_tmp")
+        tmp.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
+        _os.replace(tmp, config_path)
+
+        return {"ok": True, "config": {
+            "enabled": evo.get("enabled", False),
+            "backend": evo.get("backend", "auto"),
+            "max_evolutions_per_cycle": evo.get("max_evolutions_per_cycle", 3),
+            "mutation_model": evo.get("mutation_model", ""),
+            "verify_model": evo.get("verify_model", ""),
+            "confirm_model": evo.get("confirm_model", ""),
+        }}
+    except Exception:
+        logger.exception("evolution_config error")
+        return {"ok": False, "error": "Internal server error"}
 
 
 @router.get("/api/evolution/lineage")
@@ -147,6 +262,7 @@ async def evolution_lineage(skill_name: str = ""):
         import sqlite3 as _sqlite3
 
         db_path = str(MEMORY_DIR / "memory.db")
+        profile_id = get_active_profile()
         conn = _sqlite3.connect(db_path, timeout=10)
         conn.row_factory = _sqlite3.Row
 
@@ -156,9 +272,9 @@ async def evolution_lineage(skill_name: str = ""):
                 "trigger_type, generation, status, mutation_summary, "
                 "blind_verified, created_at, completed_at "
                 "FROM skill_evolution_log "
-                "WHERE skill_name = ? OR parent_skill_id = ? "
+                "WHERE profile_id = ? AND (skill_name = ? OR parent_skill_id = ?) "
                 "ORDER BY created_at ASC",
-                (skill_name, skill_name),
+                (profile_id, skill_name, skill_name),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -166,7 +282,9 @@ async def evolution_lineage(skill_name: str = ""):
                 "trigger_type, generation, status, mutation_summary, "
                 "blind_verified, created_at, completed_at "
                 "FROM skill_evolution_log "
+                "WHERE profile_id = ? "
                 "ORDER BY created_at DESC LIMIT 100",
+                (profile_id,),
             ).fetchall()
 
         conn.close()
@@ -208,6 +326,6 @@ async def evolution_lineage(skill_name: str = ""):
             "lineage_count": len(lineage),
             "tree": tree,
         }
-    except Exception as e:
-        logger.debug("evolution_lineage error: %s", e)
-        return {"lineage": [], "lineage_count": 0, "tree": {}, "error": str(e)}
+    except Exception:
+        logger.exception("evolution_lineage error")
+        return {"lineage": [], "lineage_count": 0, "tree": {}, "error": "Internal server error"}

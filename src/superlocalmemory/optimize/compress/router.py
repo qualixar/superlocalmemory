@@ -447,6 +447,13 @@ class CompressTextResult:
     In the default install (LLMLingua optional dep not installed), lossy is
     always False — install `llmlingua>=0.2.0` and set compress_prose=True +
     compress_mode="aggressive" to activate lossy compression.
+
+    L2 note: this result is produced by the NON-proxy compress_text() path,
+    where Layer 2 (lossy) can apply. The LIVE proxy path
+    (_compress_messages(is_proxy=True)) DISABLES Layer 2 by design (D5-B) so
+    real LLM traffic is never lossily rewritten — so proxy-path compression
+    will never report strategy="llmlingua2_prose"/lossy=True regardless of
+    compress_prose/compress_mode.
     """
     compressed_text: str
     strategy: str  # "normalize" | "llmlingua2_prose" | "none"

@@ -342,12 +342,23 @@ def set_active_profile_everywhere(name: str) -> None:
 
 
 def delete_profile_from_db(name: str) -> None:
-    """Delete a profile row from SQLite. ON DELETE CASCADE handles child rows."""
+    """Delete a profile row from SQLite.
+
+    rbac_memberships has no FK to profiles, so CASCADE does not remove role
+    grants — they would otherwise survive deletion and silently re-activate if
+    a profile of the same name is later recreated. Remove them explicitly.
+    """
     if not DB_PATH.exists():
         return
     conn = sqlite3.connect(str(DB_PATH))
     try:
         conn.execute("PRAGMA foreign_keys=ON")
+        # Purge role grants for this workspace (no FK CASCADE covers these).
+        for tbl in ("rbac_memberships",):
+            try:
+                conn.execute(f"DELETE FROM {tbl} WHERE profile_id = ?", (name,))
+            except sqlite3.OperationalError:
+                pass  # table may not exist on older installs
         conn.execute("DELETE FROM profiles WHERE profile_id = ?", (name,))
         conn.commit()
     finally:

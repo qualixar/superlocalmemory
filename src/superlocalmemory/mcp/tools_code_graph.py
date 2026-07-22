@@ -14,9 +14,15 @@ All tools return {"success": bool, ...} envelope. Never raise.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
+
+from superlocalmemory.core.security_primitives import (
+    PathTraversalError,
+    safe_resolve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +124,14 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
             exclude_patterns: Comma-separated glob patterns to exclude.
         """
         try:
-            repo = Path(repo_path)
+            # SEC: contain the untrusted repo_path under $HOME (same guard as
+            # update_code_graph) so repo_path="/" cannot ingest the whole
+            # filesystem into the code-graph DB.
+            from superlocalmemory.core.security_primitives import PathTraversalError
+            try:
+                repo = safe_resolve(Path.home(), repo_path)
+            except (PathTraversalError, OSError, ValueError) as exc:
+                return _error_response(f"Invalid repo_path: {exc}")
             if not repo.exists():
                 return _error_response(
                     f"Repository path does not exist: {repo_path}"
@@ -250,6 +263,22 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
             svc = _get_service()
             db = svc.db
 
+            # SEC 3.7.9 (B1): contain untrusted repo_path under $HOME and confirm
+            # it is a real git repo BEFORE any git subprocess runs with it as cwd.
+            # Blocks RCE via attacker-controlled .git config/hooks (core.fsmonitor,
+            # core.hooksPath) that git would otherwise execute in a hostile repo.
+            if repo_path:
+                try:
+                    repo = safe_resolve(Path.home(), repo_path)
+                except PathTraversalError as exc:
+                    return _error_response(f"Invalid repo_path: {exc}")
+                if not (repo / ".git").exists():
+                    return _error_response(
+                        f"Not a git repository (no .git dir): {repo_path}"
+                    )
+            else:
+                repo = svc.config.repo_root
+
             files_list = [
                 f.strip() for f in changed_files.split(",") if f.strip()
             ] if changed_files else []
@@ -258,11 +287,22 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 # Auto-detect via git
                 try:
                     import subprocess
-                    repo = Path(repo_path) if repo_path else svc.config.repo_root
+                    # repo is the safe_resolve-contained path computed above.
+                    # Harden git: disable hooks + fsmonitor + system config so a
+                    # hostile repo cannot execute code via the git invocation (B1).
                     result = subprocess.run(
-                        ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+                        [
+                            "git", "-c", "core.hooksPath=/dev/null",
+                            "-c", "core.fsmonitor=",
+                            "diff", "--name-only", "HEAD~1", "HEAD",
+                        ],
                         capture_output=True, text=True, timeout=30,
                         cwd=str(repo),
+                        env={
+                            **os.environ,
+                            "GIT_CONFIG_NOSYSTEM": "1",
+                            "GIT_TERMINAL_PROMPT": "0",
+                        },
                     )
                     files_list = [
                         f.strip() for f in result.stdout.strip().split("\n")
@@ -289,13 +329,19 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
             config = svc.config
             parser = CodeParser(config)
             store = GraphStore(db)
-            repo = Path(repo_path) if repo_path else config.repo_root
+            # repo already contained via safe_resolve above (B1).
 
             nodes_before = db.get_node_count()
             edges_before = db.get_edge_count()
 
             for fp in files_list:
-                full = repo / fp
+                # fp comes from caller-supplied changed_files; contain it under
+                # the (already safe-resolved) repo so "../../.ssh/id_rsa" cannot
+                # be read into the graph.
+                try:
+                    full = safe_resolve(repo, fp)
+                except Exception:
+                    continue
                 if not full.exists():
                     store.remove_file(fp)
                     continue

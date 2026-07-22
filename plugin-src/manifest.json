@@ -1,5 +1,5 @@
 {
-  "version": "3.7.8",
+  "version": "3.8.0",
   "pluginName": "superlocalmemory",
   "displayName": "SuperLocalMemory",
   "repository": "https://github.com/qualixar/superlocalmemory",
@@ -7,9 +7,13 @@
   "skills": [
     { "name": "slm-cache", "hasReadme": false },
     { "name": "slm-compress", "hasReadme": false },
+    { "name": "slm-governance", "hasReadme": false },
     { "name": "slm-graph", "hasReadme": false },
+    { "name": "slm-mesh", "hasReadme": false },
+    { "name": "slm-profile", "hasReadme": false },
     { "name": "slm-recall", "hasReadme": false },
     { "name": "slm-remember", "hasReadme": false },
+    { "name": "slm-scope", "hasReadme": false },
     { "name": "slm-session", "hasReadme": false },
     { "name": "slm-status", "hasReadme": false }
   ],
@@ -20,6 +24,6 @@
     "owner": "qualixar",
     "ownerEmail": "varun.pratap.bhardwaj@gmail.com",
     "repo": "superlocalmemory",
-    "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server. 20-tool code profile with graph intelligence."
+    "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server. 21-tool code profile with graph intelligence."
   }
 }

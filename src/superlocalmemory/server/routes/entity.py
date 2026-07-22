@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
-from .helpers import require_engine
+from .helpers import require_engine, get_active_profile
 
 router = APIRouter(prefix="/api/entity", tags=["entity"])
 
@@ -16,12 +16,15 @@ router = APIRouter(prefix="/api/entity", tags=["entity"])
 @router.get("/list")
 async def list_entities(
     request: Request,
-    profile: str = Query(default="default"),
+    profile: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
     """List all entities with basic info (canonical name, type, fact count)."""
     engine = require_engine(request)
+    # Default to the ACTIVE profile (request runtime truth), never the literal
+    # "default" — otherwise every profile sees the default profile's entities.
+    profile = profile or get_active_profile()
 
     import sqlite3
     import json
@@ -71,11 +74,12 @@ async def list_entities(
 async def get_entity(
     entity_name: str,
     request: Request,
-    profile: str = Query(default="default"),
+    profile: str | None = Query(default=None),
     project: str = Query(default=""),
 ):
     """Get compiled truth + timeline for an entity."""
     engine = require_engine(request)
+    profile = profile or get_active_profile()
 
     import sqlite3
     import json
@@ -115,11 +119,12 @@ async def get_entity(
 async def recompile_entity(
     entity_name: str,
     request: Request,
-    profile: str = Query(default="default"),
+    profile: str | None = Query(default=None),
     project: str = Query(default=""),
 ):
     """Force immediate recompilation of an entity."""
     engine = require_engine(request)
+    profile = profile or get_active_profile()
 
     import sqlite3
     conn = sqlite3.connect(str(engine._config.db_path))

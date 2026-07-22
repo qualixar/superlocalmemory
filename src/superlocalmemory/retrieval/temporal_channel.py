@@ -62,7 +62,14 @@ class TemporalChannel:
     def __init__(self, db: DatabaseManager) -> None:
         self._db = db
 
-    def search(self, query: str, profile_id: str, top_k: int = 30) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        profile_id: str,
+        top_k: int = 30,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
+    ) -> list[tuple[str, float]]:
         """Search for temporally relevant facts.
 
         Two strategies:
@@ -72,7 +79,17 @@ class TemporalChannel:
 
         Returns empty only when query has no temporal signal AND no
         entity-temporal matches.
+
+        Args:
+            include_global: Include global-scope facts. Falls back to the
+                instance attribute when not supplied.
+            include_shared: Include shared-scope facts. Same fallback.
         """
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
+
         parser = TemporalParser()
         dates = parser.extract_dates_from_text(query)
         query_dt = _parse_iso(dates.get("referenced_date"))
@@ -81,13 +98,18 @@ class TemporalChannel:
 
         # Strategy 1: Entity-temporal metadata search
         # "When did Alice...?" → find all temporal events for Alice
-        entity_results = self._entity_temporal_search(query, profile_id)
+        entity_results = self._entity_temporal_search(
+            query, profile_id,
+            include_global=include_global, include_shared=include_shared,
+        )
 
         # Strategy 2: Date proximity search
         if query_dt is None and not entity_results:
             return []
 
-        events = self._load_events(profile_id)
+        events = self._load_events(
+            profile_id, include_global=include_global, include_shared=include_shared,
+        )
         scored: dict[str, float] = {}
 
         # Include entity-temporal results with high base score
@@ -124,13 +146,21 @@ class TemporalChannel:
         return results[:top_k]
 
     def _entity_temporal_search(
-        self, query: str, profile_id: str,
+        self,
+        query: str,
+        profile_id: str,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Metadata-first: find temporal events for entities mentioned in query.
 
         "When did Alice do X?" → SQL filter by entity_id for Alice → return
         all temporal facts about Alice. High precision for entity+time queries.
         """
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         import re
         _PROPER_RE = re.compile(r"\b([A-Z][a-z]+)\b")
         names = [m.group(1) for m in _PROPER_RE.finditer(query)]
@@ -151,8 +181,8 @@ class TemporalChannel:
         seen: set[str] = set()
         where, params = _scope_where(
             profile_id,
-            include_global=bool(getattr(self, "include_global", False)),
-            include_shared=bool(getattr(self, "include_shared", False)),
+            include_global=include_global,
+            include_shared=include_shared,
             prefix="af",
         )
 
@@ -179,11 +209,20 @@ class TemporalChannel:
 
         return results
 
-    def _load_events(self, profile_id: str) -> list[dict]:
+    def _load_events(
+        self,
+        profile_id: str,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
+    ) -> list[dict]:
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         where, params = _scope_where(
             profile_id,
-            include_global=bool(getattr(self, "include_global", False)),
-            include_shared=bool(getattr(self, "include_shared", False)),
+            include_global=include_global,
+            include_shared=include_shared,
             prefix="af",
         )
         rows = self._db.execute(

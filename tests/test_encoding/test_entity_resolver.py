@@ -145,7 +145,7 @@ class TestResolve:
         ))
         db.store_alias(EntityAlias(
             alias_id="a1", entity_id="e_bob", alias="Bob", source="test",
-        ))
+        ), "default")
         result = resolver.resolve(["Bob"], "default")
         assert result["Bob"] == "e_bob"
 
@@ -244,7 +244,7 @@ class TestGetCanonicalName:
         ))
         db.store_alias(EntityAlias(
             alias_id="a1", entity_id="e1", alias="Bob", source="test",
-        ))
+        ), "default")
         assert resolver.get_canonical_name("Bob", "default") == "Robert Smith"
 
     def test_unknown_returns_original(self, resolver: EntityResolver) -> None:
@@ -270,7 +270,7 @@ class TestMergeEntities:
         ))
         db.store_alias(EntityAlias(
             alias_id="a_old", entity_id="merge", alias="A. Smith", source="test",
-        ))
+        ), "default")
         resolver.merge_entities("keep", "merge", "default")
         # Merged entity should be deleted
         rows = db.execute(
@@ -278,7 +278,7 @@ class TestMergeEntities:
         )
         assert len(rows) == 0
         # Alias should be moved to keep
-        aliases = db.get_aliases_for_entity("keep")
+        aliases = db.get_aliases_for_entity("keep", "default")
         alias_names = {a.alias for a in aliases}
         assert "A. Smith" in alias_names
 

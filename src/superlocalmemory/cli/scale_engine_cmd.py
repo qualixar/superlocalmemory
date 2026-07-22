@@ -37,10 +37,16 @@ def cmd_db_scale(args: Namespace) -> int:
             if not args.stage_id:
                 raise ScaleEngineError("promote requires --stage-id (see `slm db scale status`)")
             result = manager.promote(args.stage_id)
+            # The running daemon reads scale_engine_state once at startup; the
+            # promoted Cozo/Lance backends are only wired in on the next start.
+            # Without this flag users see a clean promote and keep hitting
+            # SQLite-only silently (no error, no speedup).
+            result = {**result, "restart_required": True}
         elif action == "rollback":
             if not args.backup_id:
                 raise ScaleEngineError("rollback requires --backup-id (see `slm db scale status`)")
             result = manager.rollback(args.backup_id)
+            result = {**result, "restart_required": True}
         else:
             raise ScaleEngineError(f"unknown Scale Engine action: {action}")
     except (ScaleEngineError, CanonicalVectorError) as exc:

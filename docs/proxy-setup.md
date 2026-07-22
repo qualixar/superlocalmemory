@@ -1,5 +1,5 @@
 # Proxy Setup — All CLIs & Editors
-> SuperLocalMemory V3.6 Documentation
+> SuperLocalMemory V3.8.0 Documentation
 > https://superlocalmemory.com | Part of Qualixar — AI Reliability Engineering
 
 SLM Optimize Proxy intercepts every LLM API call and applies three cost-reduction levers — cache, compress, and align — before the call reaches the provider. This page shows exactly how to wire it into every supported CLI and editor.
@@ -56,7 +56,7 @@ Cache fires for **all requests** — including those with tools. As of v3.6.3, t
 
 > **How tool-use caching works:** The proxy accumulates the full SSE stream (including all `tool_use` blocks), assembles the complete JSON message, and stores it under the request hash. On a cache hit, it replays the stored JSON as a properly formed SSE stream — emitting `content_block_start` (type `tool_use`), `input_json_delta` chunks, and `message_stop` — exactly as the real API would. The client sees no difference.
 
-> **Turning cache / compression on or off (v3.6.10).** Caching and compression are **independent runtime switches** in the dashboard **Optimize** tab — enable caching only, compression only, both, or neither, applied **live with no restart**. (Starting the proxy itself — `proxy_enabled` — is still a one-time setup that needs a daemon restart.) Equivalent CLI: `slm cache on|off`, `slm compress mode safe|aggressive`, `slm compress prose on|off`.
+> **Turning cache / compression on or off (v3.6.10).** Caching and compression are **independent runtime switches** in the dashboard **Optimize** tab — enable caching only, compression only, both, or neither, applied **live with no restart**. (Starting the proxy itself — `proxy_enabled` — is still a one-time setup that needs a daemon restart.) Equivalent CLI: `slm optimize on|off` (enables/disables cache + compress together); use `slm cache status` to inspect cache state; `slm compress mode safe|aggressive` and `slm compress prose on|off` for compression tuning.
 
 ---
 
@@ -169,9 +169,7 @@ OPENAI_BASE_URL=http://127.0.0.1:8765/v1 agy -p "your prompt"
 Only works for AGY integrations that explicitly read `OPENAI_BASE_URL` — not the default Gemini
 or Claude paths.
 
-> **Roadmap:** Full AGY proxy support is the primary v3.7 target. Google is deprecating Gemini CLI
-> on June 19, 2026 — AGY is the successor and we are prioritising native proxy integration for it.
-> Watch [GitHub releases](https://github.com/qualixar/superlocalmemory/releases) for updates.
+> **Note:** Full AGY proxy support targets OpenAI-compatible base URL paths. Watch [GitHub releases](https://github.com/qualixar/superlocalmemory/releases) for updates on native AGY integration.
 
 ---
 
@@ -356,7 +354,7 @@ slm optimize savings --since 1          # savings in the last 1 hour
 curl -s http://127.0.0.1:8765/api/optimize/stats | python3 -m json.tool
 ```
 
-Or open the dashboard: `slm serve` → http://localhost:8700 → **Optimize** tab.
+Or open the dashboard: `slm serve` → http://localhost:8765 → **Optimize** tab.
 
 Expected after one cache hit:
 ```json
@@ -413,7 +411,7 @@ Cache was cleared or the daemon was restarted — normal. Make a fresh call to p
 | Claude Desktop | Anthropic | `launchctl setenv ANTHROPIC_BASE_URL http://127.0.0.1:8765` |
 | Cursor | OpenAI compat | Cursor settings → Custom Base URL |
 | Windsurf | OpenAI compat | `slm wrap windsurf` |
-| AGY / Antigravity | Anthropic / OpenAI | Partial — see AGY section. Full support in v3.7. |
+| AGY / Antigravity | Anthropic / OpenAI | Partial — see AGY section. |
 | Gemini CLI (deprecated Jun 19) | Gemini native | `GOOGLE_GENAI_BASE_URL=http://127.0.0.1:8765 gemini ...` |
 | Codex CLI | OpenAI compat | `slm wrap codex` |
 | Python anthropic SDK | Anthropic | `base_url="http://127.0.0.1:8765"` |

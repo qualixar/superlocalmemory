@@ -6,9 +6,9 @@
 
 | Version | Supported |
 |:--------|:---------:|
-| 3.0.x | Yes |
-| 2.8.x | Security fixes only |
-| < 2.8 | No |
+| 3.7.x | Yes |
+| 3.6.x | Security fixes only |
+| < 3.6 | No |
 
 ### Reporting Vulnerabilities
 
@@ -43,6 +43,24 @@ We will respond within 48 hours and provide a fix timeline within 7 days.
 - CSRF protection via token-based auth (no cookies)
 - Security headers: X-Frame-Options, CSP, X-Content-Type-Options
 - CORS whitelist with credential control
+
+#### Model Supply Chain (Untrusted Checkpoints)
+
+SuperLocalMemory loads local embedding, reranker, and compression models via
+Hugging Face. Two risks apply:
+
+- **`trust_remote_code`**: since v3.7.9, `trust_remote_code=True` is passed only
+  for an internal allowlist of pinned models (the nomic-embed family, which
+  requires custom modeling code). Any other model — including one swapped into
+  config through a write path — loads with `trust_remote_code=False` and cannot
+  execute repository code at load time.
+- **CVE-2025-14926** (`transformers`, SEW tokenizer): arbitrary code execution
+  when loading a crafted SEW tokenizer config. No upstream patch exists as of
+  2026-07-20. SLM never loads checkpoints automatically; it will be upgraded as
+  soon as a patch ships.
+
+Only install models from sources you trust. A malicious checkpoint can execute
+code under your user account at load time regardless of these mitigations.
 
 #### Compliance
 - GDPR Article 15 (right to access): full data export

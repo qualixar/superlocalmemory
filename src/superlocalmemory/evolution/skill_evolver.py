@@ -46,27 +46,34 @@ from superlocalmemory.evolution.budget import (
     EvolutionBudget,
 )
 from superlocalmemory.evolution.llm_dispatch import _dispatch_llm
+from superlocalmemory.evolution.model_selection import (
+    _MODEL_ALIASES,
+    _resolve_model_alias,
+    resolve_evolution_models,
+)
 
 logger = logging.getLogger(__name__)
 
 EVOLVED_SKILLS_DIR = Path.home() / ".claude" / "skills" / "evolved"
 
-# Short-name → allow-listed model id. Kept narrow so an unknown alias
-# falls through to haiku rather than silently dispatching sonnet.
-_MODEL_ALIASES: dict[str, str] = {
-    "haiku": "claude-haiku-4-5",
-    "sonnet": "claude-sonnet-4-6",
-    "ollama": "ollama:llama3",
-    "ollama:llama3": "ollama:llama3",
-    "ollama:qwen2.5": "ollama:qwen2.5",
-    "claude-haiku-4-5": "claude-haiku-4-5",
-    "claude-sonnet-4-6": "claude-sonnet-4-6",
-}
+# Model aliasing + per-step selection live in ``model_selection`` — a single
+# source of truth shared with the config layer. ``_MODEL_ALIASES`` and
+# ``_resolve_model_alias`` are imported above and re-exported here for
+# callers/tests that still reference them via ``skill_evolver``.
+__all__ = ["SkillEvolver", "detect_backend", "_resolve_model_alias"]
 
 
-def _resolve_model_alias(alias: str) -> str:
-    """Translate a short alias (``haiku``/``sonnet``) to an allow-listed id."""
-    return _MODEL_ALIASES.get(alias, "claude-haiku-4-5")
+def _ollama_running() -> bool:
+    """Return True if a local Ollama daemon answers on the default port."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/tags", method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=2):  # noqa: S310
+            return True
+    except Exception:
+        return False
 
 
 def detect_backend() -> str:
@@ -81,13 +88,8 @@ def detect_backend() -> str:
         return "claude"
 
     # 2. Ollama running?
-    try:
-        import urllib.request
-        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=2):
-            return "ollama"
-    except Exception:
-        pass
+    if _ollama_running():
+        return "ollama"
 
     # 3. API key set?
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -119,9 +121,11 @@ class SkillEvolver:
         self._db_path = str(db_path)
         self._store = EvolutionStore(db_path)
         self._degradation = DegradationTrigger(db_path)
-        self._health = HealthCheckTrigger(db_path)
+        self._health = HealthCheckTrigger(db_path, profile_id=profile_id)
         self._config = config
         self._backend: str | None = None
+        # ResolvedModels, resolved lazily & cached via _get_models().
+        self._models = None
         self._profile_id = profile_id
         self._current_cycle_id: str | None = None
 
@@ -159,6 +163,26 @@ class SkillEvolver:
 
         logger.info("Evolution backend: %s", self._backend)
         return self._backend
+
+    def _get_models(self):
+        """Resolve per-step evolution models (cached).
+
+        Defaults to the lowest-cost model for the active backend and keeps
+        the blind verifier independent of the generator where possible
+        (see ``model_selection.resolve_evolution_models``). Falls back to
+        stock ``EvolutionConfig`` defaults when no config is attached.
+        """
+        if self._models is not None:
+            return self._models
+        backend = self._get_backend()
+        evo_cfg = getattr(self._config, "evolution", None)
+        if evo_cfg is None:
+            from superlocalmemory.core.config import EvolutionConfig
+            evo_cfg = EvolutionConfig()
+        self._models = resolve_evolution_models(
+            evo_cfg, backend, ollama_available=_ollama_running(),
+        )
+        return self._models
 
     def run_consolidation_cycle(self, profile_id: str = "default") -> dict:
         """Run during consolidation. Checks triggers 2 and 3.
@@ -200,7 +224,7 @@ class SkillEvolver:
         self, profile_id: str, backend: str,
     ) -> dict:
         """Inner consolidation loop — runs under an open budget cycle."""
-        self._store.reset_cycle()
+        self._store.reset_cycle(profile_id)
         results = {"candidates": 0, "evolved": 0, "rejected": 0, "skipped": 0, "backend": backend}
 
         # Prune recovered skills from anti-loop tracking
@@ -215,7 +239,7 @@ class SkillEvolver:
         results["candidates"] = len(candidates)
 
         for candidate in candidates:
-            if not self._store.can_evolve():
+            if not self._store.can_evolve(profile_id):
                 results["skipped"] += len(candidates) - results["evolved"] - results["rejected"]
                 break
 
@@ -271,7 +295,7 @@ class SkillEvolver:
         results["candidates"] = len(candidates)
 
         for candidate in candidates:
-            if not self._store.can_evolve():
+            if not self._store.can_evolve(profile_id):
                 break
             outcome = self._process_candidate(candidate, profile_id)
             if outcome == "evolved":
@@ -280,6 +304,30 @@ class SkillEvolver:
                 results["rejected"] += 1
 
         return results
+
+    def evolve_candidate(
+        self, candidate: EvolutionCandidate, profile_id: str = "default",
+    ) -> str:
+        """Evolve a single candidate under a budget cycle (audit-10 fix).
+
+        Public entry point for the ``evolve_skill`` MCP tool. Opening the
+        budget cycle HERE is what makes the per-cycle LLM-call, wall-time and
+        per-day caps apply to manual/MCP-triggered evolution, exactly as they
+        do to consolidation. The MCP tool previously called
+        ``_process_candidate`` directly, so budget charges happened outside a
+        cycle, the guard raised RuntimeError, ``_llm_call`` swallowed it, and
+        every cap was silently bypassed.
+        """
+        try:
+            with self._budget.cycle():
+                self._current_cycle_id = None
+                return self._process_candidate(candidate, profile_id)
+        except BudgetExhausted as exc:
+            logger.info(
+                "evolve_candidate skipped: budget exhausted [%s]",
+                getattr(exc, "dimension", "?"),
+            )
+            return "skipped"
 
     def _process_candidate(
         self, candidate: EvolutionCandidate, profile_id: str,
@@ -301,7 +349,7 @@ class SkillEvolver:
         if self._store.is_addressed(candidate.skill_name, context_hash):
             return "skipped"
 
-        if self._store.has_exceeded_attempts(candidate.skill_name):
+        if self._store.has_exceeded_attempts(candidate.skill_name, profile_id):
             logger.info("Skill %s exceeded max attempts, flagging for review", candidate.skill_name)
             return "skipped"
 
@@ -323,7 +371,7 @@ class SkillEvolver:
             original_content=original_content[:2000],
             created_at=now,
         )
-        self._store.save_record(record)
+        self._store.save_record(record, profile_id)
 
         # Step 2: LLM confirmation gate (uses Haiku for cost)
         confirmed = self._llm_confirm(candidate, original_content)
@@ -334,7 +382,7 @@ class SkillEvolver:
                 rejection_reason="LLM confirmation gate rejected",
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
-            self._store.save_record(record)
+            self._store.save_record(record, profile_id)
             return "rejected"
 
         # Step 3: Generate mutation (uses Sonnet for quality)
@@ -347,7 +395,7 @@ class SkillEvolver:
                 rejection_reason="Mutation generation failed",
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
-            self._store.save_record(record)
+            self._store.save_record(record, profile_id)
             return "rejected"
 
         # Step 4: Blind verification (uses Haiku — different model from generator)
@@ -365,7 +413,7 @@ class SkillEvolver:
                 blind_verified=False,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
-            self._store.save_record(record)
+            self._store.save_record(record, profile_id)
             return "rejected"
 
         # Step 5: Persist evolved skill
@@ -373,7 +421,9 @@ class SkillEvolver:
         skill_path = self._write_evolved_skill(candidate, evolved_content, record_id)
 
         # M-GENERATION: Compute generation from parent's history
-        parent_history = self._store.get_skill_history(candidate.skill_name, limit=1)
+        parent_history = self._store.get_skill_history(
+            candidate.skill_name, profile_id, limit=1,
+        )
         parent_gen = (
             parent_history[0].generation
             if parent_history and parent_history[0].status == EvolutionStatus.PROMOTED
@@ -390,8 +440,8 @@ class SkillEvolver:
             generation=parent_gen + 1,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        self._store.save_record(record)
-        self._store.record_evolution_attempt()
+        self._store.save_record(record, profile_id)
+        self._store.record_evolution_attempt(profile_id)
 
         logger.info(
             "Evolved skill: %s (%s via %s) → %s",
@@ -451,8 +501,20 @@ class SkillEvolver:
                 cycle_id=self._current_cycle_id,
             )
         except ValueError as exc:
-            # Gate rejected — treat like "no LLM available".
-            logger.warning("evolution dispatch rejected: %s", exc)
+            # A ValueError from _dispatch_llm is a CONTRACT breach, not a
+            # runtime/transport failure: forbidden or unlisted model,
+            # non-positive max_tokens, max_tokens over MAX_TOKENS_CAP, or
+            # an empty profile_id. Every one is a misconfiguration in our
+            # own wiring — e.g. a caller requesting more tokens than the
+            # ceiling, which is exactly how mutation generation died
+            # silently for releases. Log at ERROR so it surfaces in logs
+            # and CI instead of masquerading as a normal "no LLM"
+            # fail-closed. Behaviour is unchanged: we still return "" so a
+            # consolidation cycle degrades gracefully rather than crashing.
+            logger.error(
+                "evolution dispatch misconfigured — no evolution this "
+                "call (returning empty string): %s", exc,
+            )
             return ""
         except Exception as exc:  # noqa: BLE001 — fail-closed
             logger.debug("evolution dispatch failed: %s", exc)
@@ -467,16 +529,25 @@ class SkillEvolver:
             f"Should this skill be evolved ({candidate.evolution_type.value})? "
             f"Reply YES or NO with brief reason."
         )
-        response = self._llm_call(prompt, max_tokens=100)
+        response = self._llm_call(
+            prompt, max_tokens=100, model=self._get_models().confirm,
+        )
         if not response:
             logger.warning("LLM confirmation gate: empty response, skipping evolution for %s", candidate.skill_name)
             return False  # Fail-closed: no LLM = no evolution
         return "yes" in response.lower()
 
     def _generate_mutation(self, prompt: str) -> Optional[str]:
-        """Generate evolved SKILL.md (uses sonnet for quality)."""
+        """Generate evolved SKILL.md via the configured mutation model.
+
+        Defaults to the lowest-cost model for the backend (v3.7.9);
+        users can opt up (e.g. to sonnet) via ``evolution.mutation_model``.
+        """
+        mutation_model = self._get_models().mutation
         for attempt in range(mutgen.MAX_APPLY_RETRIES):
-            response = self._llm_call(prompt, max_tokens=4000, model="sonnet")
+            response = self._llm_call(
+                prompt, max_tokens=4000, model=mutation_model,
+            )
             if not response:
                 return None
             content = mutgen.parse_mutation_output(response)
@@ -492,8 +563,15 @@ class SkillEvolver:
         return None
 
     def _blind_verify(self, prompt: str) -> verifier.VerificationResult:
-        """Blind verification."""
-        response = self._llm_call(prompt, max_tokens=500)
+        """Blind verification — runs on a model independent of the generator.
+
+        See ``model_selection.resolve_evolution_models``: the verify model
+        is kept different from the mutation model where possible so the
+        generator can't grade its own homework.
+        """
+        response = self._llm_call(
+            prompt, max_tokens=500, model=self._get_models().verify,
+        )
         if not response:
             return verifier.VerificationResult(
                 passed=False, confidence=0.0, reasoning="No LLM response",
@@ -545,8 +623,11 @@ class SkillEvolver:
         """Write evolved SKILL.md to ~/.claude/skills/evolved/."""
         EVOLVED_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Build directory name
-        base_name = candidate.skill_name.replace(":", "-")
+        # Build directory name. skill_name derives from a behavioral-assertion
+        # trigger (any non-whitespace), so sanitize for ALL evolution types —
+        # "../../.claude/settings" must not escape EVOLVED_SKILLS_DIR.
+        base_name = re.sub(r"[^a-zA-Z0-9_-]", "-",
+                           candidate.skill_name).lower()[:50] or "skill"
         if candidate.evolution_type == EvolutionType.FIX:
             dir_name = f"{base_name}-v{record_id[:6]}"
         elif candidate.evolution_type == EvolutionType.DERIVED:
@@ -556,8 +637,12 @@ class SkillEvolver:
             dir_name = re.sub(r"[^a-zA-Z0-9_-]", "-", dir_name).lower()[:50]
         else:
             dir_name = base_name
+        dir_name = dir_name or "skill"
 
         skill_dir = EVOLVED_SKILLS_DIR / dir_name
+        # Defense in depth: never write outside the evolved-skills directory.
+        if not str(skill_dir.resolve()).startswith(str(EVOLVED_SKILLS_DIR.resolve())):
+            raise ValueError(f"evolved skill path escapes sandbox: {dir_name!r}")
         skill_dir.mkdir(parents=True, exist_ok=True)
 
         skill_path = skill_dir / "SKILL.md"

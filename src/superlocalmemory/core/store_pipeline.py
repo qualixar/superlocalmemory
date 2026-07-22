@@ -599,10 +599,10 @@ def run_store(
             for eid in fact.canonical_entities:
                 observation_builder.update_profile(eid, fact, profile_id)
 
-        # Increment fact_count for each linked canonical entity
+        # Increment fact_count for each linked canonical entity (scoped to profile).
         for eid in fact.canonical_entities:
             try:
-                db.increment_entity_fact_count(eid)
+                db.increment_entity_fact_count(eid, profile_id)
             except Exception:
                 pass  # Non-critical — entity may have been deleted
         if scene_builder:

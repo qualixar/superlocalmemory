@@ -74,6 +74,8 @@ def test_profile_core_exact():
 _CODE_EXTRA = frozenset({
     "build_code_graph", "get_blast_radius", "query_graph",
     "semantic_search_code", "get_review_context", "detect_changes",
+    # 3.8.0: plugin (code profile) can switch the active workspace over MCP.
+    "switch_profile",
 })
 
 
@@ -84,11 +86,11 @@ def test_profile_code_exact():
     assert code == expected, (
         f"code diff — extra: {code - expected}, missing: {expected - code}"
     )
-    assert len(code) == 20, f"code must be 20 names, got {len(code)}"
+    assert len(code) == 21, f"code must be 21 names, got {len(code)}"
 
 
 # ---------------------------------------------------------------------------
-# RED-4: full == 38 and ⊇ core memory names; built from explicit 30+8 literal
+# RED-4: full == 39 and ⊇ core memory names; built from explicit 31+8 literal
 # ---------------------------------------------------------------------------
 
 _EXPECTED_FULL_MESH = frozenset({
@@ -102,7 +104,7 @@ _EXPECTED_FULL_BASE = frozenset({
     "report_feedback", "forget", "run_maintenance", "consolidate_cognitive",
     "get_soft_prompts", "set_mode", "report_outcome", "log_tool_event",
     "get_assertions", "reinforce_assertion", "contradict_assertion",
-    "evolve_skill", "skill_health", "skill_lineage",
+    "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
 })
 
@@ -115,14 +117,14 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 38, f"full must be 38 names, got {len(full)}"
+    assert len(full) == 39, f"full must be 39 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
 
 
 # ---------------------------------------------------------------------------
-# RED-5: power == 50 and ⊇ full
+# RED-5: power == 51 and ⊇ full
 # ---------------------------------------------------------------------------
 
 _POWER_EXTRA = frozenset({
@@ -140,7 +142,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 50, f"power must be 50 names, got {len(power)}"
+    assert len(power) == 51, f"power must be 51 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 

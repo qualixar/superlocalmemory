@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# slm-launch (Codex edition) — SuperLocalMemory MCP launcher (POSIX)
+#
+# Cross-platform counterpart: slm-launch.bat (Windows)
+# Referenced by codex-plugin/.codex/config.toml as the advanced MCP server command.
+#
+# Resolves the correct venv binary for POSIX and joins the namespace daemon before
+# opening the MCP stdio transport. This preserves one writer for all parallel Codex
+# sessions that share SLM_DATA_DIR.
+#
+# Difference from plugin/scripts/slm-launch (Claude Code edition):
+#   - Uses SLM_DATA_DIR (default: ~/.superlocalmemory) instead of CLAUDE_PLUGIN_DATA.
+#   - Falls back to the PATH `slm` binary if the venv binary is not present.
+#     This means a global `pip install superlocalmemory` works without a venv.
+#
+# Environment:
+#   SLM_DATA_DIR — persistent data dir where venv lives
+#                  (default: ~/.superlocalmemory)
+
+_SLM_DATA_DIR="${SLM_DATA_DIR:-${HOME}/.superlocalmemory}"
+SLM_BIN="${_SLM_DATA_DIR}/venv/bin/slm"
+
+# Fall back to PATH if venv binary is not present (e.g. global install via pip/pipx).
+if [ ! -x "${SLM_BIN}" ]; then
+    SLM_BIN="slm"
+fi
+
+if ! "${SLM_BIN}" serve start >&2; then
+    echo "SLM plugin: unable to start the owned daemon; refusing a direct MCP writer." >&2
+    exit 1
+fi
+
+exec "${SLM_BIN}" mcp

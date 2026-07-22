@@ -276,6 +276,18 @@ class MemoryEngine:
                 )
                 self._llm = None
 
+        # H-03 (3.7.9): surface mode-capability degradation explicitly at
+        # startup. validate_mode_config existed but was never called, so Mode B
+        # silently using rule-based extraction after Ollama vanished (update,
+        # restart, port conflict) went unwarned. Each mode only checks its own
+        # capabilities, so passing the single llm-availability signal is safe.
+        from superlocalmemory.core.modes import validate_mode_config
+        _llm_up = getattr(self, "_llm", None) is not None
+        for _warning in validate_mode_config(
+            self._config.mode, has_ollama=_llm_up, has_cloud_llm=_llm_up,
+        ):
+            logger.warning("Mode config: %s", _warning)
+
         from superlocalmemory.trust.scorer import TrustScorer
         from superlocalmemory.trust.provenance import ProvenanceTracker
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
@@ -374,7 +386,9 @@ class MemoryEngine:
             return
 
         base_dir = self._config.base_dir
-        pending = get_pending(base_dir, limit=20)
+        # Only drain items enqueued under THIS engine's profile — a queued
+        # memory must never materialize under a profile it was not written for.
+        pending = get_pending(base_dir, limit=20, profile_id=self.profile_id)
         if not pending:
             return
 

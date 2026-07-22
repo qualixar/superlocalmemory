@@ -1,4 +1,4 @@
-**SuperLocalMemory V3**
+**SuperLocalMemory V3.8.0**
 
 * [Home](Home)
 
@@ -23,7 +23,9 @@
 * [Published Benchmarks](V3-Architecture#benchmarks)
 * [Mathematical Foundations](V3-Mathematical-Foundations)
 
-**Enterprise**
+**Enterprise and Teams**
+* [RBAC and Teams](RBAC-Teams)
+* [GDPR Compliance](GDPR-Compliance)
 * [Compliance](Compliance)
 * [FAQ](FAQ)
 

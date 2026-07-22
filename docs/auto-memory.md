@@ -97,15 +97,15 @@ Set either to `false` to disable. When disabled, you can still use `slm remember
 
 ```json
 {
-  "max_recall_results": 10,
   "recall_threshold": 0.3
 }
 ```
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `max_recall_results` | `10` | Maximum memories injected per query |
 | `recall_threshold` | `0.3` | Minimum relevance score (0.0 to 1.0). Lower = more memories, possibly less relevant. Higher = fewer but more precise. |
+
+> **Recall result count:** The default is 20 results per query (`CANONICAL_RECALL_LIMIT`). Override per-call with the `--limit N` flag (CLI) or the `limit` parameter (MCP `recall` tool). There is no config file key for this default.
 
 ### Adjust capture sensitivity
 

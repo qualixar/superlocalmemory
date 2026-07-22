@@ -140,4 +140,11 @@ Content over 1 MB (1 000 000 bytes UTF-8) is processed but `reversible` is force
 
 ---
 
-SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later
+## Related skills
+
+- `slm-cache` — for repeated reads; use cache-aside before compressing a frequently re-read result
+- `slm-status` — check `tokens_saved_compress` and `compress_runs` from `slm_optimize_stats`
+
+---
+
+SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later

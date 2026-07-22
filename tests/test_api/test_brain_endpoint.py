@@ -709,9 +709,10 @@ def test_safe_count_missing_table(tmp_path: Path) -> None:
 
 def test_meta_now_shape() -> None:
     from superlocalmemory.server.routes.brain import _meta_now
+    from superlocalmemory import __version__
     meta = _meta_now()
     assert meta["honest_labels"] is True
-    assert meta["version"] == "3.7.7"
+    assert meta["version"] == __version__
     assert meta["generated_at"].endswith("Z")
 
 

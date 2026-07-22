@@ -39,9 +39,9 @@ class _Graph:
         self.counts_path = self.path / "counts.json"
 
     def bulk_import_from_sqlite(self, conn, profile_id):
-        nodes = conn.execute(
-            "SELECT COUNT(*) FROM canonical_entities WHERE profile_id=?", (profile_id,)
-        ).fetchone()[0]
+        entity_rows = conn.execute(
+            "SELECT entity_id FROM canonical_entities WHERE profile_id=?", (profile_id,)
+        ).fetchall()
         edges = conn.execute(
             "SELECT COUNT(*) FROM ("
             "SELECT 1 FROM graph_edges WHERE profile_id=? "
@@ -49,11 +49,36 @@ class _Graph:
             ")",
             (profile_id,),
         ).fetchone()[0]
-        self.counts_path.write_text(json.dumps({"entities": nodes, "edges": edges}))
+        # Mirror the real fact_entity projection: dedup entity ids per fact.
+        fact_entity = 0
+        for (raw,) in conn.execute(
+            "SELECT canonical_entities_json FROM atomic_facts WHERE profile_id=?",
+            (profile_id,),
+        ):
+            try:
+                ids = json.loads(raw or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            fact_entity += sum(1 for e in dict.fromkeys(ids) if e)
+        self.counts_path.write_text(json.dumps({
+            "entities": len(entity_rows),
+            "edges": edges,
+            "fact_entity": fact_entity,
+            "entity_ids": [r[0] for r in entity_rows],
+        }))
 
     def health_check(self):
         counts = json.loads(self.counts_path.read_text())
-        return {"status": "active", **counts}
+        return {
+            "status": "active",
+            "entities": counts["entities"],
+            "edges": counts["edges"],
+            "fact_entity": counts.get("fact_entity", 0),
+        }
+
+    def entity_ids(self, limit=1000):
+        counts = json.loads(self.counts_path.read_text())
+        return list(counts.get("entity_ids", []))[:limit]
 
     def close(self):
         pass
@@ -183,6 +208,42 @@ def test_verify_rejects_a_stage_when_canonical_data_changed(manager):
     db.commit()
     db.close()
     with pytest.raises(ScaleEngineError, match="changed after preparation"):
+        lifecycle.verify(prepared["stage_id"])
+
+
+def test_canonical_counts_includes_fact_entity(manager):
+    # HIGH-2: fact_entity bridge rows are counted (facts a,b each link 1 entity
+    # for the default profile; 'foreign' belongs to another profile).
+    lifecycle, _ = manager
+    with sqlite3.connect(lifecycle.db_path) as db:
+        counts = lifecycle._canonical_counts(db)
+    assert counts["fact_entity"] == 2
+
+
+def test_verify_detects_fact_entity_bridge_gap(manager):
+    # HIGH-2: a silent fact_entity import failure (right entity/edge/vector
+    # counts, zero bridge rows) must fail parity, not pass silently.
+    lifecycle, _ = manager
+    prepared = lifecycle.prepare()
+    stage_dir, _m = lifecycle._load_stage(prepared["stage_id"])
+    counts_file = stage_dir / "cozo" / "counts.json"
+    data = json.loads(counts_file.read_text())
+    data["fact_entity"] = 0
+    counts_file.write_text(json.dumps(data))
+    with pytest.raises(ScaleEngineError, match="parity"):
+        lifecycle.verify(prepared["stage_id"])
+
+
+def test_verify_detects_entity_content_divergence(manager):
+    # HIGH-1: same counts but wrong entity identities must fail content parity.
+    lifecycle, _ = manager
+    prepared = lifecycle.prepare()
+    stage_dir, _m = lifecycle._load_stage(prepared["stage_id"])
+    counts_file = stage_dir / "cozo" / "counts.json"
+    data = json.loads(counts_file.read_text())
+    data["entity_ids"] = ["WRONG-1", "WRONG-2"]  # count still 2, identities wrong
+    counts_file.write_text(json.dumps(data))
+    with pytest.raises(ScaleEngineError, match="content parity"):
         lifecycle.verify(prepared["stage_id"])
 
 

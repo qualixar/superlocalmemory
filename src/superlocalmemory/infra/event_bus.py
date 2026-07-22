@@ -102,13 +102,20 @@ class EventBus:
         logger.info("EventBus initialized: db=%s", self.db_path)
 
     def _init_schema(self) -> None:
-        """Create the memory_events table if it does not exist."""
+        """Create the memory_events table if it does not exist.
+
+        Self-migrates a pre-isolation DB (memory_events without profile_id) so a
+        dashboard viewing profile A never sees profile B's events. This table is
+        store-owned (created here, not by the migration runner), so the store
+        owns its upgrade. Existing rows backfill to the 'default' profile.
+        """
         conn = sqlite3.connect(str(self.db_path))
         try:
             cur = conn.cursor()
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS memory_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id TEXT NOT NULL DEFAULT 'default',
                     event_type TEXT NOT NULL,
                     memory_id INTEGER,
                     source_agent TEXT DEFAULT 'user',
@@ -119,12 +126,41 @@ class EventBus:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            existing = {r[1] for r in cur.execute(
+                "PRAGMA table_info(memory_events)").fetchall()}
+            if "profile_id" not in existing:
+                cur.execute(
+                    "ALTER TABLE memory_events "
+                    "ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'"
+                )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON memory_events(event_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_created ON memory_events(created_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_tier ON memory_events(tier)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_profile ON memory_events(profile_id, id)")
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _resolve_profile(profile_id: Optional[str]) -> str:
+        """Resolve the active profile for an event when not passed explicitly.
+
+        Uses the request-runtime helper (ContextVar for HTTP, else the
+        profiles.json active_profile cache that every switch keeps in sync) so
+        MCP-in-daemon and CLI emits are attributed correctly too. Lazy import
+        keeps the infra layer free of a hard server dependency; any failure
+        falls back to 'default'.
+        """
+        if profile_id:
+            return profile_id
+        try:
+            from superlocalmemory.server.routes.helpers import get_active_profile
+            resolved = get_active_profile()
+            if resolved:
+                return resolved
+        except Exception:
+            pass
+        return "default"
 
     def emit(
         self,
@@ -134,8 +170,14 @@ class EventBus:
         source_agent: str = "user",
         source_protocol: str = "internal",
         importance: int = 5,
+        profile_id: Optional[str] = None,
     ) -> Optional[int]:
-        """Emit an event to all subscribers and persist to database."""
+        """Emit an event to all subscribers and persist to database.
+
+        ``profile_id`` scopes the event to a memory profile. When omitted it is
+        resolved from the active profile so a dashboard viewing one profile
+        never sees another profile's real-time or historical events.
+        """
         if event_type not in VALID_EVENT_TYPES:
             raise ValueError(
                 f"Invalid event type: {event_type}. "
@@ -143,6 +185,7 @@ class EventBus:
             )
 
         importance = max(1, min(10, importance))
+        profile_id = self._resolve_profile(profile_id)
 
         now = datetime.now(timezone.utc).isoformat()
         with self._counter_lock:
@@ -151,6 +194,7 @@ class EventBus:
 
         event: Dict[str, Any] = {
             "seq": seq,
+            "profile_id": profile_id,
             "event_type": event_type,
             "memory_id": memory_id,
             "source_agent": source_agent,
@@ -177,18 +221,24 @@ class EventBus:
             event_type, event_id, memory_id,
         )
 
-        # Auto-prune heuristic
-        self._write_count += 1
-        if (
-            self._write_count >= 100
-            or (datetime.now() - self._last_prune).total_seconds() > 86400
-        ):
+        # Auto-prune heuristic. Decide + reset the counter atomically under the
+        # lock so concurrent emit() calls cannot both cross the threshold and
+        # double-run the prune; run the prune itself OUTSIDE the lock.
+        should_prune = False
+        with self._counter_lock:
+            self._write_count += 1
+            if (
+                self._write_count >= 100
+                or (datetime.now() - self._last_prune).total_seconds() > 86400
+            ):
+                should_prune = True
+                self._write_count = 0
+                self._last_prune = datetime.now()
+        if should_prune:
             try:
                 self.prune_events()
             except Exception:
                 pass
-            self._write_count = 0
-            self._last_prune = datetime.now()
 
         return event_id
 
@@ -202,10 +252,12 @@ class EventBus:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO memory_events (event_type, memory_id, source_agent,"
-                    " source_protocol, payload, importance, tier, created_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, 'hot', ?)",
-                    (event["event_type"], event.get("memory_id"),
+                    "INSERT INTO memory_events (profile_id, event_type, memory_id,"
+                    " source_agent, source_protocol, payload, importance, tier,"
+                    " created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, 'hot', ?)",
+                    (event.get("profile_id", "default"), event["event_type"],
+                     event.get("memory_id"),
                      event["source_agent"], event["source_protocol"],
                      json.dumps(event["payload"]), event["importance"],
                      event["timestamp"]),
@@ -253,9 +305,16 @@ class EventBus:
         since_id: Optional[int] = None,
         limit: int = 50,
         event_type: Optional[str] = None,
+        profile_id: Optional[str] = None,
     ) -> List[dict]:
-        """Get recent events from the database."""
+        """Get recent events from the database, scoped to a profile.
+
+        ``profile_id`` defaults to the active profile so callers never leak
+        another profile's events. Pass ``profile_id="*"`` to bypass scoping
+        (internal maintenance/pruning only — never a client-facing path).
+        """
         limit = min(limit, 200)
+        scope = profile_id if profile_id == "*" else self._resolve_profile(profile_id)
 
         try:
             conn = sqlite3.connect(str(self.db_path))
@@ -263,9 +322,14 @@ class EventBus:
                 cur = conn.cursor()
 
                 query = ("SELECT id, event_type, memory_id, source_agent,"
-                         " source_protocol, payload, importance, tier, created_at"
+                         " source_protocol, payload, importance, tier, created_at,"
+                         " profile_id"
                          " FROM memory_events WHERE 1=1")
                 params: List[Any] = []
+
+                if scope != "*":
+                    query += " AND profile_id = ?"
+                    params.append(scope)
 
                 if since_id is not None:
                     query += " AND id > ?"
@@ -293,7 +357,7 @@ class EventBus:
                     "id": row[0], "event_type": row[1], "memory_id": row[2],
                     "source_agent": row[3], "source_protocol": row[4],
                     "payload": parsed, "importance": row[6],
-                    "tier": row[7], "timestamp": row[8],
+                    "tier": row[7], "timestamp": row[8], "profile_id": row[9],
                 })
             return events
 
@@ -306,19 +370,32 @@ class EventBus:
         with self._buffer_lock:
             return [e for e in self._buffer if e.get("seq", 0) > since_seq]
 
-    def get_event_stats(self) -> dict:
-        """Get event system statistics."""
+    def get_event_stats(self, profile_id: Optional[str] = None) -> dict:
+        """Get event system statistics, scoped to a profile.
+
+        ``profile_id`` defaults to the active profile so dashboard event
+        counts never blend across profiles.
+        """
+        scope = self._resolve_profile(profile_id)
         try:
             conn = sqlite3.connect(str(self.db_path))
             try:
                 cur = conn.cursor()
 
-                total = cur.execute("SELECT COUNT(*) FROM memory_events").fetchone()[0]
-                cur.execute("SELECT event_type, COUNT(*) FROM memory_events GROUP BY event_type")
+                total = cur.execute(
+                    "SELECT COUNT(*) FROM memory_events WHERE profile_id = ?",
+                    (scope,)).fetchone()[0]
+                cur.execute(
+                    "SELECT event_type, COUNT(*) FROM memory_events "
+                    "WHERE profile_id = ? GROUP BY event_type", (scope,))
                 by_type = dict(cur.fetchall())
-                cur.execute("SELECT tier, COUNT(*) FROM memory_events GROUP BY tier")
+                cur.execute(
+                    "SELECT tier, COUNT(*) FROM memory_events "
+                    "WHERE profile_id = ? GROUP BY tier", (scope,))
                 by_tier = dict(cur.fetchall())
-                cur.execute("SELECT COUNT(*) FROM memory_events WHERE created_at >= datetime('now', '-24 hours')")
+                cur.execute(
+                    "SELECT COUNT(*) FROM memory_events WHERE profile_id = ? "
+                    "AND created_at >= datetime('now', '-24 hours')", (scope,))
                 last_24h = cur.fetchone()[0]
             finally:
                 conn.close()
@@ -343,7 +420,13 @@ class EventBus:
         warm_hours: int = DEFAULT_WARM_HOURS,
         cold_hours: int = DEFAULT_COLD_HOURS,
     ) -> dict:
-        """Apply tiered retention policy to persisted events."""
+        """Apply tiered retention policy to persisted events.
+
+        INTENTIONALLY GLOBAL (all profiles): this is age/tier-based housekeeping
+        of the shared event log, not a per-tenant read or retention-policy
+        surface. Tenant isolation of event CONTENT is enforced on read via the
+        profile_id filter; this sweep only demotes/expires old rows by age.
+        """
         try:
             conn = sqlite3.connect(str(self.db_path))
             try:

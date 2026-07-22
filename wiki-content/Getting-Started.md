@@ -95,7 +95,7 @@ See [IDE Setup](IDE-Setup) for per-IDE instructions.
 slm dashboard    # Opens at http://localhost:8765
 ```
 
-17 tabs: memory browser, knowledge graph, recall lab, trust scores, math health, compliance, and more. Runs locally — no data leaves your machine.
+11 workspaces: Dashboard, Brain, Knowledge Graph, Memories, Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and Optimize. Runs locally — no data leaves your machine.
 
 ## Next Steps
 

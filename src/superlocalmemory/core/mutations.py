@@ -59,7 +59,7 @@ def delete_fact_authorized(
     if not rows:
         return {"ok": False, "error": f"Memory {fact_id} not found"}
     content_preview = dict(rows[0]).get("content", "")[:80]
-    engine._db.delete_fact(fact_id)
+    engine._db.delete_fact(fact_id, profile_id=profile_id)
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
         orchestrator = get_orchestrator()
@@ -120,7 +120,7 @@ def update_fact_authorized(
                 updates["fisher_variance"] = fisher_variance
         except Exception as exc:
             logger.warning("UPDATE embedding refresh failed: %s", exc)
-    engine._db.update_fact(fact_id, updates)
+    engine._db.update_fact(fact_id, updates, profile_id=profile_id)
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
         orchestrator = get_orchestrator()

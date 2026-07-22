@@ -49,7 +49,7 @@
     var html =
       '<div style="margin-bottom:16px">' +
         '<input type="text" class="form-control" id="entity-search-input" placeholder="Search ' + total + ' entities..." ' +
-          'oninput="filterEntities(this.value)" style="max-width:500px">' +
+          'data-act-input="filter-entities" style="max-width:500px">' +
       '</div>';
 
     // Stats summary
@@ -76,7 +76,7 @@
       for (var i = 0; i < Math.min(pages, 10); i++) {
         var isActive = i === currentP;
         html += '<button class="ng-btn' + (isActive ? ' ng-btn-accent' : '') + '" ' +
-          'onclick="navigateEntityPage(' + i + ')" style="min-width:36px">' + (i + 1) + '</button>';
+          'data-act-click="navigate-entity-page" data-page="' + i + '" style="min-width:36px">' + (i + 1) + '</button>';
       }
       if (pages > 10) html += '<span style="padding:8px;color:var(--ng-text-tertiary)">...</span>';
       html += '</div>';
@@ -97,10 +97,8 @@
       : '';
 
     return '<div class="col-md-6 col-lg-4">' +
-      '<div class="ng-glass" style="padding:16px;cursor:pointer;transition:border-color 0.2s;' + borderAccent + '" ' +
-        'onclick="showEntityDetail(\'' + escapeAttr(entity.name) + '\')" ' +
-        'onmouseover="this.style.borderColor=\'var(--ng-border-prominent)\'" ' +
-        'onmouseout="this.style.borderColor=\'var(--ng-border-subtle)\'">' +
+      '<div class="ng-glass ng-hover-border" style="padding:16px;cursor:pointer;transition:border-color 0.2s;' + borderAccent + '" ' +
+        'data-act-click="show-entity-detail" data-entity="' + escapeHtml(entity.name).replace(/"/g, '&quot;') + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
           '<div style="font-weight:590;font-size:0.9375rem;color:var(--ng-text-primary)">' +
             '<i class="bi ' + typeIcon + '" style="color:' + typeColor + ';margin-right:4px"></i>' +
@@ -143,9 +141,9 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
           '<h5 style="margin:0"><i class="bi bi-person-badge"></i> ' + escapeHtml(entityName) + '</h5>' +
           '<div style="display:flex;gap:8px">' +
-            '<button class="ng-btn" onclick="recompileEntity(\'' + escapeAttr(entityName) + '\')">' +
+            '<button class="ng-btn" data-act-click="recompile-entity" data-entity="' + escapeHtml(entityName).replace(/"/g, '&quot;') + '">' +
               '<i class="bi bi-arrow-repeat"></i> Recompile</button>' +
-            '<button class="ng-btn" onclick="document.getElementById(\'entity-detail-panel\').style.display=\'none\'">' +
+            '<button class="ng-btn" data-act-click="close-entity-detail">' +
               '<i class="bi bi-x-lg"></i></button>' +
           '</div>' +
         '</div>' +

@@ -134,7 +134,6 @@ All settings live in:
   "auto_capture": true,
   "auto_recall": true,
   "embedding_model": "all-MiniLM-L6-v2",
-  "max_recall_results": 10,
   "retention": {
     "default_policy": "indefinite"
   }
@@ -150,7 +149,10 @@ All settings live in:
 | `auto_capture` | `true` | Automatically store decisions and context |
 | `auto_recall` | `true` | Automatically inject relevant memories |
 | `embedding_model` | `"all-MiniLM-L6-v2"` | Sentence transformer for semantic search |
-| `max_recall_results` | `10` | Maximum memories returned per query |
+
+> **Recall result limit:** The default is 20 results per query (CLI: `slm recall --limit N`; MCP `recall` tool: `limit` parameter). There is no config file key for this — override it per-call with `--limit N`.
+
+
 
 ## Environment Variables
 

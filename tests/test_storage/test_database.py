@@ -229,11 +229,11 @@ class TestStoreAlias:
         db.store_entity(CanonicalEntity(entity_id="ea", canonical_name="Alice"))
         db.store_alias(EntityAlias(
             alias_id="a1", entity_id="ea", alias="Ali", source="test",
-        ))
+        ), "default")
         db.store_alias(EntityAlias(
             alias_id="a2", entity_id="ea", alias="A", source="test",
-        ))
-        aliases = db.get_aliases_for_entity("ea")
+        ), "default")
+        aliases = db.get_aliases_for_entity("ea", "default")
         assert len(aliases) == 2
         alias_names = {a.alias for a in aliases}
         assert alias_names == {"Ali", "A"}

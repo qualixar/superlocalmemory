@@ -285,7 +285,8 @@ If `build_code_graph` returns `files_parsed: 0`, no supported source files were 
 
 ## Profile Requirement
 
-This skill uses graph tools that are only active under the `code` MCP profile. Your plugin `.mcp.json` must include:
+This skill uses graph tools that are only active under the `code` MCP profile
+(or `full` / `power`). Your plugin `.mcp.json` must include:
 
 ```json
 "env": {
@@ -293,8 +294,21 @@ This skill uses graph tools that are only active under the `code` MCP profile. Y
 }
 ```
 
-Without this, the six graph tools are not registered and will appear as unknown tools. Run `slm status` to confirm the active profile.
+Without this, the six graph tools are not registered and will appear as unknown
+tools. Run `slm status` to confirm the active profile.
+
+**Switching profiles at runtime (v3.8.0+):** Use `switch_profile("code")` via
+MCP to activate the code profile in a session that started with a different
+profile. See `slm-profile` for the full profile switching workflow.
 
 ---
 
-SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later
+## Related skills
+
+- `slm-profile` — workspace isolation and profile switching (required for code tools)
+- `slm-recall` — retrieve architectural decisions before graph queries
+- `slm-status` — confirm the active profile and graph index health
+
+---
+
+SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later

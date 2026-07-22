@@ -43,7 +43,7 @@ V343_TABLES: Final[tuple[str, ...]] = (
 # ---------------------------------------------------------------------------
 
 _MESH_DDL = """
--- Mesh Peers
+-- Mesh Peers  (profile_id = tenant boundary; see M023)
 CREATE TABLE IF NOT EXISTS mesh_peers (
     peer_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS mesh_peers (
     host TEXT DEFAULT '127.0.0.1',
     port INTEGER DEFAULT 0,
     registered_at TEXT NOT NULL,
-    last_heartbeat TEXT NOT NULL
+    last_heartbeat TEXT NOT NULL,
+    profile_id TEXT NOT NULL DEFAULT 'default'
 );
 
 -- Mesh Messages
@@ -63,23 +64,28 @@ CREATE TABLE IF NOT EXISTS mesh_messages (
     msg_type TEXT DEFAULT 'text',
     content TEXT NOT NULL,
     read INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    profile_id TEXT NOT NULL DEFAULT 'default'
 );
 
--- Mesh State (shared key-value store)
+-- Mesh State (shared key-value store, per tenant)
 CREATE TABLE IF NOT EXISTS mesh_state (
-    key TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    key TEXT NOT NULL,
     value TEXT NOT NULL,
     set_by TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, key)
 );
 
--- Mesh Locks (file-level locks for coordination)
+-- Mesh Locks (file-level locks for coordination, per tenant)
 CREATE TABLE IF NOT EXISTS mesh_locks (
-    file_path TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    file_path TEXT NOT NULL,
     locked_by TEXT NOT NULL,
     locked_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL DEFAULT '9999-12-31T23:59:59Z'
+    expires_at TEXT NOT NULL DEFAULT '9999-12-31T23:59:59Z',
+    PRIMARY KEY (profile_id, file_path)
 );
 
 -- Mesh Events (audit log)
@@ -88,9 +94,14 @@ CREATE TABLE IF NOT EXISTS mesh_events (
     event_type TEXT NOT NULL,
     payload TEXT DEFAULT '{}',
     emitted_by TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    profile_id TEXT NOT NULL DEFAULT 'default'
 );
 
+-- NOTE: profile-leading indexes live in migration M023, never here — on an
+-- upgrade the profile_id column does not exist when this DDL runs (the old
+-- table already exists, so CREATE TABLE IF NOT EXISTS no-ops), and a
+-- CREATE INDEX on the missing column would abort engine init.
 CREATE INDEX IF NOT EXISTS idx_mesh_messages_to
     ON mesh_messages(to_peer, read);
 CREATE INDEX IF NOT EXISTS idx_mesh_events_type
@@ -123,16 +134,17 @@ CREATE INDEX IF NOT EXISTS idx_entity_profiles_project
 _INGESTION_DDL = """
 CREATE TABLE IF NOT EXISTS ingestion_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id TEXT NOT NULL DEFAULT 'default',
     source_type TEXT NOT NULL,
     dedup_key TEXT NOT NULL,
     fact_ids TEXT DEFAULT '[]',
     metadata TEXT DEFAULT '{}',
     status TEXT DEFAULT 'ingested',
     ingested_at TEXT NOT NULL,
-    UNIQUE(source_type, dedup_key)
+    UNIQUE(profile_id, source_type, dedup_key)
 );
 CREATE INDEX IF NOT EXISTS idx_ingestion_dedup
-    ON ingestion_log(source_type, dedup_key);
+    ON ingestion_log(profile_id, source_type, dedup_key);
 """
 
 # ---------------------------------------------------------------------------

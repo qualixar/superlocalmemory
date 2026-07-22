@@ -349,3 +349,28 @@ def test_c06_second_open_uses_persisted_key(tmp_path: Path) -> None:
         assert row is not None, "C-06: second open must read entries written by first open"
     finally:
         db_mod._KEY_FILE = original
+
+
+# ---- M2: durable KV counters ----
+
+def test_kv_counter_incr_and_load(tmp_cache_db) -> None:
+    tmp_cache_db.kv_counter_incr("kv_hits", 3)
+    tmp_cache_db.kv_counter_incr("kv_misses", 1)
+    tmp_cache_db.kv_counter_incr("kv_hits")  # default delta=1
+    assert tmp_cache_db.kv_counters_load() == {"kv_hits": 4, "kv_misses": 1}
+
+
+def test_kv_counters_persist_across_restart(tmp_path, monkeypatch) -> None:
+    """M2: KV hit/miss counters survive a daemon restart (new CacheDB instance)."""
+    from superlocalmemory.optimize.storage import db as _db_mod
+    from superlocalmemory.optimize.storage.db import CacheDB
+    monkeypatch.setattr(_db_mod, "_KEY_FILE", tmp_path / "opt-key.bin")
+    db_path = tmp_path / "llmcache.db"
+
+    db1 = CacheDB(db_path)
+    db1.kv_counter_incr("kv_hits", 5)
+    db1.kv_counter_incr("kv_misses", 2)
+    db1.close()
+
+    db2 = CacheDB(db_path)  # simulate restart
+    assert db2.kv_counters_load() == {"kv_hits": 5, "kv_misses": 2}

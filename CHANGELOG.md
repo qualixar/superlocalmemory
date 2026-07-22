@@ -5,6 +5,55 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-07-22 — Teams, roles, and multi-tenant memory
+
+### Added
+
+- **Team & company memory with real access control.** A workspace (profile) can
+  now have multiple users, each with a role — **admin**, **member**, or
+  **viewer**. Admins manage people and settings, members read and write, viewers
+  read only. Everything is managed from the dashboard's new **Team & access**
+  panel: add a person, set their role, sign in, or remove them — no config files
+  or command line needed.
+- **Sign-in for shared workspaces.** Turn on *"require sign-in"* (company mode)
+  and everyone must log in before reading or writing memory, so every action is
+  attributable to a person. Single-user setups are unchanged and need no login.
+- **Private, shared, and global memories across a mesh.** Memories keep their
+  personal / shared / global visibility consistently when several SuperLocalMemory
+  instances are connected, and one team's coordination never bleeds into another's.
+- **Optional personal-data scrubbing on save.** Enable PII redaction and emails,
+  phone numbers, national IDs, payment cards, and IP addresses are stripped from
+  content before it is ever stored.
+
+### Changed / Fixed
+
+- **Strict tenant isolation across the whole product.** Coordination between
+  agents (peers, messages, shared state, file locks, activity log) is now scoped
+  per workspace, so different teams or companies sharing one deployment can never
+  see each other's activity.
+- **A person can only enter a workspace they belong to.** Switching into a
+  workspace now requires membership.
+- **Tighter file permissions.** Memory, audit, and learning databases are now
+  owner-only on disk.
+
+## [3.7.9] - 2026-07-20 — Dashboard, skill-evolution, and security hardening
+
+### Fixed
+
+- **Skill evolution now produces output.** A token-limit mismatch made every evolution attempt fail silently and produce nothing; the ceiling is corrected and the underlying misconfiguration is logged instead of masked.
+- **Manual evolution respects its cost caps.** Triggering `evolve_skill` directly now runs under the same per-cycle, wall-time, and per-day LLM caps as automatic evolution (previously it could run uncapped).
+- **Dashboard landing page loads on first open.** The Operating Mode, LLM Provider, Memories, and Version cards now populate immediately instead of staying on "Loading…".
+- **Operating mode is consistent everywhere.** The active mode is read from a single source of truth, so the CLI, daemon, and dashboard always agree and the chosen mode and provider are actually used.
+- **Code-graph updates are safe against hostile repositories.** `update_code_graph` rejects paths outside your home directory and runs `git` with hook and config execution disabled.
+- **LanceDB tier updates escape identifiers**, closing a filter-injection path.
+- **Optimize savings** no longer errors when no model is configured.
+
+### Added
+
+- **Configurable, lowest-cost skill-evolution models.** Each step (generate / verify / confirm) defaults to the cheapest capable model for your backend, keeps the blind verifier independent of the generator, and is settable from the CLI or dashboard. Enabling evolution shows a cost advisory.
+- **Dashboard write endpoint** (`POST /api/evolution/config`) for evolution settings, validated against the same allow-list as the CLI.
+- **Test coverage** for the Gmail and Calendar ingestion adapters.
+
 ## [3.7.8] - 2026-07-20 — Profile-isolation leak fix, loopback auth opt-in, hardening
 
 ### Fixed

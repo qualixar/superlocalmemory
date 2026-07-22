@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS skill_evolution_log (
     id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL DEFAULT 'default',
     skill_name TEXT NOT NULL,
     parent_skill_id TEXT,
     evolution_type TEXT NOT NULL,
@@ -49,14 +50,16 @@ CREATE TABLE IF NOT EXISTS skill_evolution_log (
     completed_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_evo_skill ON skill_evolution_log(skill_name);
-CREATE INDEX IF NOT EXISTS idx_evo_status ON skill_evolution_log(status);
-CREATE INDEX IF NOT EXISTS idx_evo_created ON skill_evolution_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_evo_skill ON skill_evolution_log(profile_id, skill_name);
+CREATE INDEX IF NOT EXISTS idx_evo_status ON skill_evolution_log(profile_id, status);
+CREATE INDEX IF NOT EXISTS idx_evo_created ON skill_evolution_log(profile_id, created_at);
 
 CREATE TABLE IF NOT EXISTS evolution_cycle_state (
-    key TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    key TEXT NOT NULL,
     value INTEGER DEFAULT 0,
-    updated_at TEXT
+    updated_at TEXT,
+    PRIMARY KEY (profile_id, key)
 );
 """
 
@@ -77,6 +80,11 @@ class EvolutionStore:
     def _ensure_schema(self) -> None:
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
+            # Migrate an existing pre-isolation DB BEFORE running the schema DDL:
+            # the DDL creates indexes on profile_id, which would fail on a legacy
+            # table that still lacks the column. On a fresh DB the migration is a
+            # no-op (tables absent) and the DDL creates everything correctly.
+            self._migrate_profile_isolation(conn)
             conn.executescript(_SCHEMA_DDL)
             conn.commit()
         except sqlite3.OperationalError as exc:
@@ -84,56 +92,113 @@ class EvolutionStore:
         finally:
             conn.close()
 
-    def reset_cycle(self) -> None:
-        """Reset per-cycle counters. Call at start of each consolidation."""
+    def _migrate_profile_isolation(self, conn: sqlite3.Connection) -> None:
+        """Self-migrate pre-profile-isolation DBs to add per-profile scoping.
+
+        These tables are store-owned (created lazily here, not by the schema
+        migration runner which fires before this store exists), so the store
+        owns their upgrade too. Idempotent: only alters when the column/PK is
+        missing. Existing rows backfill to 'default' — the historical profile.
+        """
+        # skill_evolution_log: additive column (safe, preserves rows).
+        cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(skill_evolution_log)").fetchall()}
+        if cols and "profile_id" not in cols:
+            conn.execute(
+                "ALTER TABLE skill_evolution_log "
+                "ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_evo_skill "
+                "ON skill_evolution_log(profile_id, skill_name)"
+            )
+
+        # evolution_cycle_state: PK changes from (key) to (profile_id, key).
+        # SQLite cannot alter a PK in place → rebuild + copy, backfilling
+        # existing counters to the 'default' profile.
+        cyc_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(evolution_cycle_state)").fetchall()}
+        if cyc_cols and "profile_id" not in cyc_cols:
+            conn.execute(
+                "ALTER TABLE evolution_cycle_state RENAME TO _evo_cycle_old"
+            )
+            conn.execute(
+                "CREATE TABLE evolution_cycle_state ("
+                " profile_id TEXT NOT NULL DEFAULT 'default',"
+                " key TEXT NOT NULL,"
+                " value INTEGER DEFAULT 0,"
+                " updated_at TEXT,"
+                " PRIMARY KEY (profile_id, key))"
+            )
+            conn.execute(
+                "INSERT INTO evolution_cycle_state "
+                "(profile_id, key, value, updated_at) "
+                "SELECT 'default', key, value, updated_at FROM _evo_cycle_old"
+            )
+            conn.execute("DROP TABLE _evo_cycle_old")
+
+    def reset_cycle(self, profile_id: str) -> None:
+        """Reset per-cycle counters for one profile. Called at cycle start.
+
+        The evolve budget is per-profile: one profile exhausting its budget
+        must never block another profile from evolving.
+        """
         now = datetime.now(timezone.utc).isoformat()
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             conn.execute(
-                "INSERT OR REPLACE INTO evolution_cycle_state (key, value, updated_at) "
-                "VALUES ('cycle_count', 0, ?)",
-                (now,),
+                "INSERT OR REPLACE INTO evolution_cycle_state "
+                "(profile_id, key, value, updated_at) "
+                "VALUES (?, 'cycle_count', 0, ?)",
+                (profile_id, now),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def can_evolve(self) -> bool:
-        """Check if budget allows another evolution this cycle."""
+    def can_evolve(self, profile_id: str) -> bool:
+        """Check if this profile's budget allows another evolution this cycle."""
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT value FROM evolution_cycle_state WHERE key = 'cycle_count'",
+                "SELECT value FROM evolution_cycle_state "
+                "WHERE profile_id = ? AND key = 'cycle_count'",
+                (profile_id,),
             ).fetchone()
             count = row[0] if row else 0
             return count < MAX_EVOLUTIONS_PER_CYCLE
         finally:
             conn.close()
 
-    def record_evolution_attempt(self) -> None:
-        """Increment cycle counter in DB."""
+    def record_evolution_attempt(self, profile_id: str) -> None:
+        """Increment this profile's cycle counter in DB."""
         now = datetime.now(timezone.utc).isoformat()
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT value FROM evolution_cycle_state WHERE key = 'cycle_count'",
+                "SELECT value FROM evolution_cycle_state "
+                "WHERE profile_id = ? AND key = 'cycle_count'",
+                (profile_id,),
             ).fetchone()
             current = row[0] if row else 0
             conn.execute(
-                "INSERT OR REPLACE INTO evolution_cycle_state (key, value, updated_at) "
-                "VALUES ('cycle_count', ?, ?)",
-                (current + 1, now),
+                "INSERT OR REPLACE INTO evolution_cycle_state "
+                "(profile_id, key, value, updated_at) "
+                "VALUES (?, 'cycle_count', ?, ?)",
+                (profile_id, current + 1, now),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def _get_cycle_count(self) -> int:
-        """Read current cycle count from DB."""
+    def _get_cycle_count(self, profile_id: str) -> int:
+        """Read this profile's current cycle count from DB."""
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT value FROM evolution_cycle_state WHERE key = 'cycle_count'",
+                "SELECT value FROM evolution_cycle_state "
+                "WHERE profile_id = ? AND key = 'cycle_count'",
+                (profile_id,),
             ).fetchone()
             return row[0] if row else 0
         finally:
@@ -162,18 +227,19 @@ class EvolutionStore:
     # CRUD
     # ------------------------------------------------------------------
 
-    def save_record(self, record: EvolutionRecord) -> None:
+    def save_record(self, record: EvolutionRecord, profile_id: str) -> None:
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             conn.execute(
                 "INSERT OR REPLACE INTO skill_evolution_log "
-                "(id, skill_name, parent_skill_id, evolution_type, trigger_type, "
-                " generation, status, mutation_summary, evidence, "
+                "(id, profile_id, skill_name, parent_skill_id, evolution_type, "
+                " trigger_type, generation, status, mutation_summary, evidence, "
                 " original_content, evolved_content, content_diff, "
                 " blind_verified, rejection_reason, created_at, completed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.id,
+                    profile_id,
                     record.skill_name,
                     record.parent_skill_id,
                     record.evolution_type.value,
@@ -195,13 +261,14 @@ class EvolutionStore:
         finally:
             conn.close()
 
-    def get_record(self, record_id: str) -> Optional[EvolutionRecord]:
+    def get_record(self, record_id: str, profile_id: str) -> Optional[EvolutionRecord]:
         conn = sqlite3.connect(self._db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
-                "SELECT * FROM skill_evolution_log WHERE id = ?",
-                (record_id,),
+                "SELECT * FROM skill_evolution_log "
+                "WHERE id = ? AND profile_id = ?",
+                (record_id, profile_id),
             ).fetchone()
             if not row:
                 return None
@@ -209,68 +276,78 @@ class EvolutionStore:
         finally:
             conn.close()
 
-    def get_skill_history(self, skill_name: str, limit: int = 20) -> list[EvolutionRecord]:
+    def get_skill_history(
+        self, skill_name: str, profile_id: str, limit: int = 20,
+    ) -> list[EvolutionRecord]:
         conn = sqlite3.connect(self._db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
                 "SELECT * FROM skill_evolution_log "
-                "WHERE skill_name = ? ORDER BY created_at DESC LIMIT ?",
-                (skill_name, limit),
-            ).fetchall()
-            return [self._row_to_record(dict(r)) for r in rows]
-        finally:
-            conn.close()
-
-    def get_recent(self, limit: int = 10) -> list[EvolutionRecord]:
-        conn = sqlite3.connect(self._db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            rows = conn.execute(
-                "SELECT * FROM skill_evolution_log "
+                "WHERE skill_name = ? AND profile_id = ? "
                 "ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                (skill_name, profile_id, limit),
             ).fetchall()
             return [self._row_to_record(dict(r)) for r in rows]
         finally:
             conn.close()
 
-    def count_attempts(self, skill_name: str) -> int:
+    def get_recent(self, profile_id: str, limit: int = 10) -> list[EvolutionRecord]:
+        conn = sqlite3.connect(self._db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT * FROM skill_evolution_log "
+                "WHERE profile_id = ? ORDER BY created_at DESC LIMIT ?",
+                (profile_id, limit),
+            ).fetchall()
+            return [self._row_to_record(dict(r)) for r in rows]
+        finally:
+            conn.close()
+
+    def count_attempts(self, skill_name: str, profile_id: str) -> int:
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
                 "SELECT COUNT(*) FROM skill_evolution_log "
-                "WHERE skill_name = ? AND status NOT IN ('promoted')",
-                (skill_name,),
+                "WHERE skill_name = ? AND profile_id = ? "
+                "AND status NOT IN ('promoted')",
+                (skill_name, profile_id),
             ).fetchone()
             return row[0] if row else 0
         finally:
             conn.close()
 
-    def has_exceeded_attempts(self, skill_name: str) -> bool:
-        return self.count_attempts(skill_name) >= MAX_ATTEMPTS_PER_SKILL
+    def has_exceeded_attempts(self, skill_name: str, profile_id: str) -> bool:
+        return self.count_attempts(skill_name, profile_id) >= MAX_ATTEMPTS_PER_SKILL
 
-    def get_stats(self) -> dict:
+    def get_stats(self, profile_id: str) -> dict:
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             total = conn.execute(
-                "SELECT COUNT(*) FROM skill_evolution_log",
+                "SELECT COUNT(*) FROM skill_evolution_log WHERE profile_id = ?",
+                (profile_id,),
             ).fetchone()[0]
             by_status = {}
             for row in conn.execute(
-                "SELECT status, COUNT(*) FROM skill_evolution_log GROUP BY status",
+                "SELECT status, COUNT(*) FROM skill_evolution_log "
+                "WHERE profile_id = ? GROUP BY status",
+                (profile_id,),
             ).fetchall():
                 by_status[row[0]] = row[1]
             by_type = {}
             for row in conn.execute(
-                "SELECT evolution_type, COUNT(*) FROM skill_evolution_log GROUP BY evolution_type",
+                "SELECT evolution_type, COUNT(*) FROM skill_evolution_log "
+                "WHERE profile_id = ? GROUP BY evolution_type",
+                (profile_id,),
             ).fetchall():
                 by_type[row[0]] = row[1]
             return {
                 "total": total,
                 "by_status": by_status,
                 "by_type": by_type,
-                "cycle_budget_remaining": MAX_EVOLUTIONS_PER_CYCLE - self._get_cycle_count(),
+                "cycle_budget_remaining":
+                    MAX_EVOLUTIONS_PER_CYCLE - self._get_cycle_count(profile_id),
             }
         finally:
             conn.close()

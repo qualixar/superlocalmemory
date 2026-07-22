@@ -57,7 +57,7 @@ Query
   │
   ├─ Profile Lookup (direct SQL shortcut for entity queries)
   │
-  ├─ Weighted RRF Fusion (k=60, channel weights vary by query type)
+  ├─ Weighted RRF Fusion (k=15, tuned for candidate pools of 50-200; channel weights vary by query type)
   │
   ├─ Scene Expansion (pull all facts from matched scenes)
   │

@@ -50,7 +50,7 @@ recall(
   query="authentication strategy decision",
   limit=20,            # default 20; reduce to 5 for quick pre-task checks
   session_id="<sid>",  # pass the session_id returned by session_init
-  fast=False,          # default False; True skips SpreadingActivation channel
+  fast=False,          # default False; True enables faster, reduced-channel retrieval
 )
 ```
 
@@ -101,8 +101,8 @@ correctly, but feedback is not attributed to the session.
 ### 3. Fast mode
 
 Use `fast=True` for pre-tool-call checks where sub-second response matters.
-This skips the SpreadingActivation channel. The remaining channels — semantic,
-lexical, temporal, and structural — still run.
+This enables a faster, reduced-channel mode. Core semantic and keyword channels
+always run; additional graph and contextual channels are skipped.
 
 ```
 recall(query="rate limiting approach", limit=5, session_id="<sid>", fast=True)
@@ -142,12 +142,12 @@ once you have the `fact_id` for full content.
 
 ## How multi-channel retrieval works
 
-`recall` runs five candidate producers in parallel — semantic vector similarity,
-lexical BM25, temporal recency, spreading activation, and Hopfield — then fuses
-them with Reciprocal Rank Fusion (RRF), applies a reranker, and layers an
-optional entity-graph post-fusion score enhancement. The `channel_weights` field in the
-response shows how each channel contributed for that query. Weights adapt over
-time based on engagement signals attributed via `session_id`.
+`recall` runs multiple candidate producers in parallel — semantic vector similarity,
+keyword matching, temporal recency weighting, and contextual graph channels — then
+fuses and reranks the combined results, with an optional entity-graph score
+enhancement. The `channel_weights` field in the response shows how each channel
+contributed for that query. Weights adapt over time based on engagement signals
+attributed via `session_id`.
 
 To inspect per-channel scores for a real query against your own data:
 
@@ -202,4 +202,40 @@ trusts that what you surface came from the store.
 
 ---
 
-*SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later*
+## Multi-scope retrieval (v3.6.15+, opt-in)
+
+By default `recall` returns only memories in the active profile (personal scope).
+To also surface memories shared from other profiles, pass the scope flags:
+
+```
+recall(
+  query="...",
+  include_global=True,   # include global-scope memories (visible to all profiles)
+  include_shared=True,   # include shared-scope memories (shared with this profile)
+  session_id="<sid>",
+)
+```
+
+Scope flags are **off by default**. Only enable them when the user explicitly asks
+to see shared or global facts. See `slm-scope` for the full sharing model.
+
+---
+
+## Profile-aware retrieval (v3.8.0+)
+
+`recall` always queries the currently active profile. To query a different
+workspace, use `switch_profile` (requires `code`, `full`, or `power` MCP profile)
+before recalling, then switch back. See `slm-profile` for workspace switching.
+
+---
+
+## Related skills
+
+- `slm-remember` — store the decisions and facts that recall surfaces later
+- `slm-session` — session lifecycle (must call before first recall)
+- `slm-scope` — multi-scope sharing model (personal / shared / global)
+- `slm-profile` — workspace isolation and profile switching
+
+---
+
+*SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later*

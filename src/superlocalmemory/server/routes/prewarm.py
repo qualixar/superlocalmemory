@@ -154,6 +154,7 @@ def _upsert_cache(
     content: str, fact_ids: list[str],
 ) -> None:
     from superlocalmemory.core.context_cache import CacheEntry, ContextCache
+    from superlocalmemory.server.routes.helpers import get_active_profile
     cache = ContextCache()
     try:
         cache.upsert(CacheEntry(
@@ -163,6 +164,7 @@ def _upsert_cache(
             fact_ids=tuple(fact_ids),
             provenance="prewarm_post_tool",
             computed_at=int(time.time()),
+            profile_id=get_active_profile(),  # so non-default profiles hit
         ))
     finally:
         cache.close()

@@ -28,6 +28,103 @@ from mcp.types import ToolAnnotations
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# M03: Simple circuit breaker for mesh_send
+# ---------------------------------------------------------------------------
+# Prevents runaway retries (~30s stall) when the daemon is dead.
+# State machine: CLOSED → OPEN (after 3 consecutive failures)
+#               OPEN → HALF_OPEN (after 60s cooldown)
+#               HALF_OPEN → CLOSED (on one successful probe)
+#               HALF_OPEN → OPEN (on probe failure)
+
+_CB_FAILURE_THRESHOLD = 3
+_CB_COOLDOWN_SECONDS = 60
+
+# Client-side mesh message cap (mirrors the broker's MAX_MESSAGE_SIZE).
+MAX_MESSAGE_SIZE = 4096
+
+_CB_STATE_CLOSED = "closed"
+_CB_STATE_OPEN = "open"
+_CB_STATE_HALF_OPEN = "half_open"
+
+
+class _SendCircuitBreaker:
+    """Thread-safe circuit breaker scoped to mesh_send daemon calls."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state: str = _CB_STATE_CLOSED
+        self._failure_count: int = 0
+        self._opened_at: float = 0.0
+
+    def reset(self) -> None:
+        """Reset to CLOSED; used by tests for isolation."""
+        with self._lock:
+            self._state = _CB_STATE_CLOSED
+            self._failure_count = 0
+            self._opened_at = 0.0
+
+    def is_open(self) -> bool:
+        with self._lock:
+            if self._state == _CB_STATE_OPEN:
+                if time.monotonic() - self._opened_at >= _CB_COOLDOWN_SECONDS:
+                    self._state = _CB_STATE_HALF_OPEN
+                    return False  # allow one probe
+                return True
+            return False
+
+    def allow_request(self) -> bool:
+        """Return True if the call should proceed; False if circuit is OPEN.
+
+        State transitions inside the lock prevent concurrent probe races:
+        - CLOSED → allow
+        - OPEN (cooldown not elapsed) → block
+        - OPEN (cooldown elapsed) → transition to HALF_OPEN, allow one probe,
+          and immediately re-enter OPEN so any concurrent call is blocked until
+          the probe result comes in via record_success / record_failure.
+        - HALF_OPEN → block (probe already dispatched and not yet resolved)
+        """
+        with self._lock:
+            if self._state == _CB_STATE_CLOSED:
+                return True
+            if self._state == _CB_STATE_OPEN:
+                if time.monotonic() - self._opened_at >= _CB_COOLDOWN_SECONDS:
+                    # Grant exactly one probe by briefly entering HALF_OPEN then
+                    # going back to OPEN.  Subsequent callers are blocked until
+                    # record_success or record_failure resolves the probe.
+                    self._state = _CB_STATE_HALF_OPEN
+                    return True
+                return False
+            # HALF_OPEN: probe is in flight — block until resolved
+            return False
+
+    def record_success(self) -> None:
+        with self._lock:
+            self._state = _CB_STATE_CLOSED
+            self._failure_count = 0
+
+    def record_failure(self) -> None:
+        with self._lock:
+            if self._state == _CB_STATE_HALF_OPEN:
+                # Probe failed — reopen immediately
+                self._state = _CB_STATE_OPEN
+                self._opened_at = time.monotonic()
+                return
+            self._failure_count += 1
+            if self._failure_count >= _CB_FAILURE_THRESHOLD:
+                self._state = _CB_STATE_OPEN
+                self._opened_at = time.monotonic()
+                logger.warning(
+                    "mesh_send circuit breaker OPEN after %d consecutive failures; "
+                    "fast-failing for %ds",
+                    self._failure_count,
+                    _CB_COOLDOWN_SECONDS,
+                )
+
+
+_SEND_CIRCUIT = _SendCircuitBreaker()
+
 # Unique peer ID for this MCP server session
 _PEER_ID = str(uuid.uuid4())[:12]
 _SESSION_SUMMARY = ""
@@ -174,12 +271,34 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
                 - "project:/path/to/dir" (all sessions in that project directory)
             message: The message content (max 4KB — use file paths for large data)
         """
+        # Enforce the documented 4KB notification cap client-side too (the
+        # broker also caps, but fail fast without a round-trip).
+        if len(message.encode("utf-8")) > MAX_MESSAGE_SIZE:
+            return {"ok": False, "error": (
+                f"message too large (max {MAX_MESSAGE_SIZE} bytes) — "
+                "reference a file path instead")}
+        # M03: circuit breaker — fast-fail if daemon is repeatedly unreachable
+        if not _SEND_CIRCUIT.allow_request():
+            return {
+                "ok": False,
+                "error": (
+                    "mesh_send circuit open: daemon unreachable after repeated failures. "
+                    f"Retrying in {_CB_COOLDOWN_SECONDS}s."
+                ),
+            }
+
         await asyncio.to_thread(_ensure_registered)
         result = await asyncio.to_thread(
             _mesh_request, "POST", "/send",
             {"from_peer": _PEER_ID, "to_peer": to, "content": message},
         )
-        return result or {"ok": False, "error": "Failed to send message"}
+        # Circuit tracks daemon-unreachable (None) only — not valid broker errors
+        # like "recipient not found", which are application-level, not failures.
+        if result is None:
+            _SEND_CIRCUIT.record_failure()
+            return {"ok": False, "error": "Failed to send message"}
+        _SEND_CIRCUIT.record_success()
+        return result
 
     @server.tool()
     async def mesh_inbox() -> dict:
@@ -190,9 +309,11 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         Messages auto-expire after 48 hours.
         """
         await asyncio.to_thread(_ensure_registered)
+        from urllib.parse import quote
         project = _PROJECT_PATH or _detect_project_path()
         messages = await asyncio.to_thread(
-            _mesh_request, "GET", f"/inbox/{_PEER_ID}?project_path={project}",
+            _mesh_request, "GET",
+            f"/inbox/{_PEER_ID}?project_path={quote(project, safe='')}",
         )
         msg_list = (messages or {}).get("messages", [])
         # Auto-mark unread messages as read. v3.6.12 (failopen-2): use .get("id")
@@ -250,9 +371,16 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         Before editing a shared file, check if another session has it locked.
 
         Args:
-            file_path: Path to the file
+            file_path: Absolute path to the file
             action: "query" (check lock), "acquire" (lock file), "release" (unlock)
         """
+        # Require a non-empty absolute path; a relative/blank path is ambiguous
+        # and lets a caller probe arbitrary strings via the coordination store.
+        if not file_path or not (
+            file_path.startswith("/")
+            or (len(file_path) >= 3 and file_path[1] == ":")
+        ):
+            return {"ok": False, "error": "file_path must be a non-empty absolute path"}
         await asyncio.to_thread(_ensure_registered)
         result = await asyncio.to_thread(
             _mesh_request, "POST", "/lock",

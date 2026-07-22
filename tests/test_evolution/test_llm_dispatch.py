@@ -181,28 +181,55 @@ def test_dispatch_accepts_sonnet_4_6(
 # ---------------------------------------------------------------------------
 
 
-def test_dispatch_caps_max_tokens_500(
+def test_dispatch_caps_max_tokens_at_ceiling(
     learning_db: Path, record_backend: list[dict],
 ) -> None:
+    cap = llm_dispatch.MAX_TOKENS_CAP
+    # One over the ceiling is rejected before the backend is touched.
     with pytest.raises(ValueError, match="max_tokens"):
         _dispatch_llm(
             "hello",
             model="claude-haiku-4-5",
-            max_tokens=501,
+            max_tokens=cap + 1,
             learning_db=learning_db,
             profile_id="default",
         )
     assert record_backend == []
 
-    # Exactly 500 is allowed.
+    # Exactly at the ceiling is allowed.
     _dispatch_llm(
         "hello",
         model="claude-haiku-4-5",
-        max_tokens=500,
+        max_tokens=cap,
         learning_db=learning_db,
         profile_id="default",
     )
     assert len(record_backend) == 1
+
+
+def test_dispatch_allows_mutation_max_tokens_4000(
+    learning_db: Path, record_backend: list[dict],
+) -> None:
+    """Regression: SkillEvolver._generate_mutation requests 4000 tokens.
+
+    A stale MAX_TOKENS_CAP of 500 made this call trip the guard, return
+    "" from _llm_call, and silently kill every skill mutation. The
+    ceiling must stay >= 4000 so mutation dispatches for real.
+    """
+    assert llm_dispatch.MAX_TOKENS_CAP >= 4000, (
+        "MAX_TOKENS_CAP must accommodate the mutation caller's 4000-token "
+        "request; lowering it below 4000 re-breaks skill evolution"
+    )
+    result = _dispatch_llm(
+        "generate an evolved skill",
+        model="claude-sonnet-4-6",
+        max_tokens=4000,
+        learning_db=learning_db,
+        profile_id="default",
+    )
+    assert result == "OK"
+    assert len(record_backend) == 1
+    assert record_backend[0]["max_tokens"] == 4000
 
 
 def test_dispatch_calls_redact_secrets_high(

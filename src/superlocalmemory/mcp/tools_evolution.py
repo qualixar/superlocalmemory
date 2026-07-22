@@ -98,11 +98,14 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
             engine = get_engine()
             profile_id = engine.profile_id if engine else "default"
 
-            evolver._store.reset_cycle()
-            outcome = evolver._process_candidate(candidate, profile_id)
+            evolver._store.reset_cycle(profile_id)
+            # audit-10 fix: go through evolve_candidate so the manual/MCP path
+            # runs under a budget cycle and honours the LLM-call / wall-time /
+            # per-day caps (previously _process_candidate ran uncapped here).
+            outcome = evolver.evolve_candidate(candidate, profile_id)
 
             # Fetch the latest record for this skill to return details
-            recent = evolver._store.get_skill_history(skill_name, limit=1)
+            recent = evolver._store.get_skill_history(skill_name, profile_id, limit=1)
             record_info = {}
             if recent:
                 r = recent[0]

@@ -63,25 +63,13 @@ slm profile switch work
 
 All subsequent `remember`, `recall`, and auto-memory operations use this profile until you switch again.
 
-### Delete a profile
+From an MCP-connected agent (v3.8.0, `code`/`full`/`power` profiles):
 
-```bash
-slm profile delete old-project
+```json
+{ "tool": "switch_profile", "arguments": { "profile": "work" } }
 ```
 
-This permanently deletes all memories in that profile. You will be prompted for confirmation.
-
-### Export a profile
-
-```bash
-slm profile export work > work-backup.json
-```
-
-### Import a profile
-
-```bash
-slm profile import < work-backup.json
-```
+The `switch_profile` MCP tool is available in the `code` (21), `full` (39), and `power` (51) profiles. It is not included in `core` (14) or `mesh` (8). See [MCP Profiles →](../README.md#mcp--profiles).
 
 ## Use Cases
 
@@ -131,34 +119,25 @@ slm profile create experiment-graphql
 slm profile switch experiment-graphql
 # ... do your experiment ...
 
-# Done — delete it
+# Done — switch back (the profile and its memories remain; profiles have no delete command)
 slm profile switch default
-slm profile delete experiment-graphql
 ```
 
 ## Profile-Specific Settings
 
-Each profile can have its own retention policy:
+Retention policies are set globally via `slm config set` or the `set_retention_policy`
+MCP tool. To apply a policy after switching to a profile:
 
 ```bash
 slm profile switch client-acme
-slm retention set gdpr-30d        # GDPR compliance for this client
+slm config set retention.default_policy gdpr-30d   # GDPR compliance
 
 slm profile switch internal
-slm retention set indefinite       # Keep internal memories forever
+slm config set retention.default_policy indefinite  # Keep internal memories forever
 ```
 
-## Using Profiles With CLI Commands
-
-Most commands operate on the active profile. You can override this per-command:
-
-```bash
-# Recall from a specific profile without switching
-slm recall "database config" --profile client-acme
-
-# Store to a specific profile without switching
-slm remember "Acme uses Aurora PostgreSQL" --profile client-acme
-```
+All `remember` and `recall` operations run against the active profile. To work in a
+different profile, switch first with `slm profile switch <name>`, then run your commands.
 
 ## How Profiles Work Internally
 

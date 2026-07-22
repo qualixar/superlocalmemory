@@ -19,6 +19,12 @@ logger = logging.getLogger("superlocalmemory.routes.stats")
 router = APIRouter()
 
 
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log full traceback server-side; return a generic message to the client."""
+    logger.exception("stats route error")
+    return HTTPException(status_code=500, detail=detail)
+
+
 @router.get("/api/stats")
 async def get_stats():
     """Get comprehensive system statistics."""
@@ -237,8 +243,8 @@ async def get_stats():
             },
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
+    except Exception:
+        raise _internal_error("Stats error")
 
 
 @router.get("/api/timeline")
@@ -305,8 +311,8 @@ async def get_timeline(
             "parameters": {"days": days, "group_by": group_by},
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Timeline error: {str(e)}")
+    except Exception:
+        raise _internal_error("Timeline error")
 
 
 @router.get("/api/patterns")
@@ -436,5 +442,6 @@ async def get_patterns():
             "pattern_types": list(grouped.keys()), "confidence_stats": confidence_stats,
         }
 
-    except Exception as e:
-        return {"patterns": {}, "total_patterns": 0, "error": str(e)}
+    except Exception:
+        logger.exception("patterns route error")
+        return {"patterns": {}, "total_patterns": 0, "error": "Internal server error"}

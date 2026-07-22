@@ -283,22 +283,22 @@ class EntityResolver:
             entity = self._db.get_entity_by_name(name, profile_id)
             if entity is not None:
                 resolution[raw] = entity.entity_id
-                self._touch_last_seen(entity.entity_id)
+                self._touch_last_seen(entity.entity_id, profile_id)
                 continue
 
             # Tier b: alias match (case-insensitive, indexed)
             entity_id = self._alias_lookup(name, profile_id)
             if entity_id is not None:
                 resolution[raw] = entity_id
-                self._touch_last_seen(entity_id)
+                self._touch_last_seen(entity_id, profile_id)
                 continue
 
             # Tier c: fuzzy match via Jaro-Winkler
             match_id, score = self._fuzzy_match(name, profile_id)
             if match_id is not None and score >= JARO_WINKLER_AUTO_MERGE:
                 resolution[raw] = match_id
-                self._persist_alias(match_id, name, score, "jaro_winkler")
-                self._touch_last_seen(match_id)
+                self._persist_alias(match_id, name, score, "jaro_winkler", profile_id)
+                self._touch_last_seen(match_id, profile_id)
                 continue
 
             # Candidate zone (0.70–0.85): queue for LLM in Mode B/C
@@ -384,7 +384,7 @@ class EntityResolver:
         and removes the merged entity record.
         """
         # Move aliases from merge -> keep
-        aliases = self._db.get_aliases_for_entity(entity_id_merge)
+        aliases = self._db.get_aliases_for_entity(entity_id_merge, profile_id)
         for alias in aliases:
             new_alias = EntityAlias(
                 alias_id=_new_id(),
@@ -393,7 +393,7 @@ class EntityResolver:
                 confidence=alias.confidence,
                 source=f"merge_from:{entity_id_merge}",
             )
-            self._db.store_alias(new_alias)
+            self._db.store_alias(new_alias, profile_id)
 
         # Also add the merged entity's canonical name as an alias of keep
         merged = self._db.get_entity_by_name("", "")  # placeholder
@@ -403,7 +403,7 @@ class EntityResolver:
         )
         if rows:
             merged_name = str(dict(rows[0])["canonical_name"])
-            self._persist_alias(entity_id_keep, merged_name, 1.0, "merge")
+            self._persist_alias(entity_id_keep, merged_name, 1.0, "merge", profile_id)
 
         # Update atomic_facts: replace entity_id_merge with entity_id_keep
         # in canonical_entities_json column
@@ -435,14 +435,14 @@ class EntityResolver:
             except (json.JSONDecodeError, TypeError):
                 continue
 
-        # Delete the merged entity
+        # Delete the merged entity (tenant-scoped)
         self._db.execute(
-            "DELETE FROM entity_aliases WHERE entity_id = ?",
-            (entity_id_merge,),
+            "DELETE FROM entity_aliases WHERE entity_id = ? AND profile_id = ?",
+            (entity_id_merge, profile_id),
         )
         self._db.execute(
-            "DELETE FROM canonical_entities WHERE entity_id = ?",
-            (entity_id_merge,),
+            "DELETE FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
+            (entity_id_merge, profile_id),
         )
         logger.info(
             "Merged entity %s into %s (profile=%s)",
@@ -526,7 +526,7 @@ class EntityResolver:
         self._db.store_entity(entity)
 
         # Store name as its own alias for uniform lookup
-        self._persist_alias(entity.entity_id, name, 1.0, "canonical")
+        self._persist_alias(entity.entity_id, name, 1.0, "canonical", profile_id)
 
         logger.debug(
             "Created entity '%s' [%s] (type=%s, profile=%s)",
@@ -540,13 +540,16 @@ class EntityResolver:
         alias_text: str,
         confidence: float,
         source: str,
+        profile_id: str,
     ) -> None:
-        """Store an alias, skipping duplicates."""
-        # Check if alias already exists for this entity
+        """Store an alias under a profile, skipping duplicates within it."""
+        # Check if alias already exists for this entity IN THIS PROFILE. The
+        # dedup must be profile-scoped or one profile's alias suppresses
+        # another profile's identical alias for a same-id entity.
         existing = self._db.execute(
             "SELECT alias_id FROM entity_aliases "
-            "WHERE entity_id = ? AND LOWER(alias) = LOWER(?)",
-            (entity_id, alias_text),
+            "WHERE entity_id = ? AND profile_id = ? AND LOWER(alias) = LOWER(?)",
+            (entity_id, profile_id, alias_text),
         )
         if existing:
             return
@@ -557,13 +560,20 @@ class EntityResolver:
             confidence=confidence,
             source=source,
         )
-        self._db.store_alias(alias)
+        self._db.store_alias(alias, profile_id)
 
-    def _touch_last_seen(self, entity_id: str) -> None:
-        """Update last_seen timestamp on a canonical entity."""
+    def _touch_last_seen(self, entity_id: str, profile_id: str = "default") -> None:
+        """Update last_seen timestamp on a canonical entity scoped to profile.
+
+        L-01 fix: the original query had no profile_id guard. Since entity_ids are
+        UUIDs today the blast radius is theoretical, but the guard is required for
+        defense-in-depth against future import/sharing features that could introduce
+        UUID collisions across profiles.
+        """
         self._db.execute(
-            "UPDATE canonical_entities SET last_seen = ? WHERE entity_id = ?",
-            (_now(), entity_id),
+            "UPDATE canonical_entities SET last_seen = ? "
+            "WHERE entity_id = ? AND profile_id = ?",
+            (_now(), entity_id, profile_id),
         )
 
     # -- Internal: LLM disambiguation (Mode B/C) ---------------------------
@@ -621,9 +631,9 @@ class EntityResolver:
                     entity_id = known[name_str]
                     resolved[mention_str] = entity_id
                     self._persist_alias(
-                        entity_id, mention_str, 0.9, "llm",
+                        entity_id, mention_str, 0.9, "llm", profile_id,
                     )
-                    self._touch_last_seen(entity_id)
+                    self._touch_last_seen(entity_id, profile_id)
                 # If LLM says it's itself, leave for caller to create
             return resolved
 

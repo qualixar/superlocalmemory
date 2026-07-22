@@ -13,9 +13,27 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import sys
 from typing import Any
 
 from fastapi import HTTPException, Request
+
+
+# H-04 (3.7.9): the test-client auth bypass must be impossible in a real daemon
+# even if SLM_TEST_ISOLATION=1 leaks into a production environment. Anchor it to
+# pytest being present in the running interpreter — a production daemon process
+# never imports pytest — decided once at import time so it cannot be toggled per
+# request at runtime.
+_TEST_ISOLATION_ALLOWED = (
+    os.environ.get("SLM_TEST_ISOLATION") == "1" and "pytest" in sys.modules
+)
+
+# H-01 (3.7.9): by default a same-user loopback process is a trusted principal
+# and may write without a credential. Operators who want stricter isolation
+# (e.g. a shared machine, or binding beyond loopback) set
+# SLM_REQUIRE_CREDENTIALS=1 so that even loopback must present a daemon
+# capability, install token, or API key. Default OFF — unchanged behaviour.
+_REQUIRE_CREDENTIALS = os.environ.get("SLM_REQUIRE_CREDENTIALS") == "1"
 
 
 def _header(request: Request, name: str) -> str:
@@ -60,9 +78,21 @@ def require_write_actor(
     from superlocalmemory.core.security_primitives import verify_install_token
 
     if verify_install_token(_header(request, "X-Install-Token")):
-        from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+        # The install token is embedded in the dashboard JS served over HTTP, so
+        # a LAN observer can read it. Accept it ONLY from a loopback caller (the
+        # local dashboard/CLI). A non-loopback holder must use an API key — this
+        # closes LAN privilege escalation via a leaked install token. In-process
+        # tests (testclient) keep the bypass only under SLM_TEST_ISOLATION.
+        client_host = request.client.host if request.client else ""
+        is_test_client = client_host == "testclient" and _TEST_ISOLATION_ALLOWED
+        # SEC-L-02: do NOT treat an empty client_host as loopback here — a
+        # missing peer address (e.g. behind a proxy that strips it) must not be
+        # trusted just because an install token is presented. require_http_mutation_actor
+        # already excludes "" from its loopback set; keep the two paths consistent.
+        if is_test_client or client_host in ("127.0.0.1", "::1", "localhost"):
+            from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
 
-        return local_trusted_actor_id(actor_kind)
+            return local_trusted_actor_id(actor_kind)
 
     from superlocalmemory.infra.auth_middleware import verify_api_key
 
@@ -103,11 +133,11 @@ def require_http_mutation_actor(
         )
 
     client_host = request.client.host if request.client else ""
-    is_test_client = (
-        client_host == "testclient"
-        and os.environ.get("SLM_TEST_ISOLATION") == "1"
-    )
-    if client_host in ("127.0.0.1", "::1", "localhost") or is_test_client:
+    is_test_client = client_host == "testclient" and _TEST_ISOLATION_ALLOWED
+    loopback = client_host in ("127.0.0.1", "::1", "localhost")
+    # H-01: the loopback trusted-actor bypass is suppressed when the operator
+    # opts into SLM_REQUIRE_CREDENTIALS; in-process tests keep the bypass.
+    if is_test_client or (loopback and not _REQUIRE_CREDENTIALS):
         from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
 
         return local_trusted_actor_id(actor_kind)

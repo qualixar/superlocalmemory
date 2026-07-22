@@ -217,14 +217,37 @@ def test_tc4_derive_tenant_id_is_64char_hex() -> None:
     assert all(c in "0123456789abcdef" for c in tid)
 
 
-def test_tc4_derive_tenant_id_matches_manual_sha256() -> None:
-    """Output must match sha256(provider:raw_key).hexdigest()."""
+def test_tc4_derive_tenant_id_matches_manual_sha256(monkeypatch) -> None:
+    """Output must match sha256(profile:provider:raw_key).hexdigest().
+
+    I-5: the active memory profile is folded into the tenant key so two
+    profiles sharing an API key never share cache. Pin the profile so the
+    hash is deterministic.
+    """
+    from superlocalmemory.optimize.proxy import _helpers
     from superlocalmemory.optimize.proxy._helpers import _derive_tenant_id
 
+    monkeypatch.setattr(_helpers, "_active_profile_for_cache", lambda: "work")
     raw_key = "sk-ant-api01-xyzzy"
     provider = "anthropic"
-    expected = hashlib.sha256(f"{provider}:{raw_key}".encode()).hexdigest()
+    expected = hashlib.sha256(f"work:{provider}:{raw_key}".encode()).hexdigest()
     assert _derive_tenant_id(provider, raw_key) == expected
+
+
+def test_tc4_same_key_different_profiles_differ(monkeypatch) -> None:
+    """I-5 core property: same API key under two profiles → different tenants."""
+    from superlocalmemory.optimize.proxy import _helpers
+    from superlocalmemory.optimize.proxy._helpers import _derive_tenant_id
+
+    key = "sk-ant-shared"
+    monkeypatch.setattr(_helpers, "_active_profile_for_cache", lambda: "work")
+    tid_work = _derive_tenant_id("anthropic", key)
+    monkeypatch.setattr(_helpers, "_active_profile_for_cache", lambda: "home")
+    tid_home = _derive_tenant_id("anthropic", key)
+    assert tid_work != tid_home, (
+        "same key under different profiles must produce different tenant_ids "
+        "(no cross-profile cache reuse)"
+    )
 
 
 def test_tc4_different_providers_same_key_differ() -> None:
@@ -272,8 +295,11 @@ def test_tc5_store_signature_accepts_optional_tenant_id(tmp_cache_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tc6_anthropic_surface_extracts_raw_key(tmp_cache_db) -> None:
+async def test_tc6_anthropic_surface_extracts_raw_key(tmp_cache_db, monkeypatch) -> None:
     """handle_messages must derive tenant from x-api-key BEFORE redaction."""
+    from superlocalmemory.optimize.proxy import _helpers as _proxy_helpers
+    monkeypatch.setattr(
+        _proxy_helpers, "_active_profile_for_cache", lambda: "default")
     import json
 
     import httpx
@@ -348,7 +374,7 @@ async def test_tc6_anthropic_surface_extracts_raw_key(tmp_cache_db) -> None:
 
     await _run()
 
-    expected_tid = hashlib.sha256("anthropic:sk-ant-secret-key".encode()).hexdigest()
+    expected_tid = hashlib.sha256("default:anthropic:sk-ant-secret-key".encode()).hexdigest()
     assert check_tenant_ids, "check() must have been called"
     assert check_tenant_ids[0] == expected_tid, (
         f"check() received wrong tenant_id: {check_tenant_ids[0]!r}, "

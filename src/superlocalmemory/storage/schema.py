@@ -316,6 +316,7 @@ CREATE INDEX IF NOT EXISTS idx_entities_type
 _SQL_ENTITY_ALIASES: Final[str] = """
 CREATE TABLE IF NOT EXISTS entity_aliases (
     alias_id    TEXT PRIMARY KEY,
+    profile_id  TEXT NOT NULL DEFAULT 'default',
     entity_id   TEXT NOT NULL,
     alias       TEXT NOT NULL,
     confidence  REAL NOT NULL DEFAULT 1.0,
@@ -329,6 +330,10 @@ CREATE INDEX IF NOT EXISTS idx_aliases_entity
     ON entity_aliases (entity_id);
 CREATE INDEX IF NOT EXISTS idx_aliases_lookup
     ON entity_aliases (alias COLLATE NOCASE);
+-- NOTE: the (profile_id, entity_id) index is created by migration M022, NOT
+-- here. On an upgrading DB this DDL runs at engine init BEFORE the deferred
+-- M022 adds the profile_id column, so referencing it here would fail engine
+-- init with "no such column: profile_id".
 """
 
 

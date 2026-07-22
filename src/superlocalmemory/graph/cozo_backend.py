@@ -672,32 +672,34 @@ class CozoDBGraphBackend:
     # Tier Sync
     # ------------------------------------------------------------------
 
+    # Rebind the whole entity row (Cozo has no partial ``:update`` op — that
+    # token does not parse) while binding the id/tier/timestamp as query
+    # parameters so an entity id containing a quote can never become Datalog.
+    # The ``*entity{...}`` match means non-existent ids are a safe no-op rather
+    # than creating a stub row.
+    _TIER_SYNC_QUERY = (
+        "?[id, name, entity_type, tier, properties, profile_id, created_at, updated_at] := "
+        "*entity{id, name, entity_type, properties, profile_id, created_at}, "
+        "id = $id, tier = $tier, updated_at = $now "
+        ":put entity {id => name, entity_type, tier, properties, profile_id, created_at, updated_at}"
+    )
+
     def sync_tier_changes(
         self, added: list[str], removed: list[str]
     ) -> None:
-        """Sync tier changes: add promoted entities, mark demoted."""
+        """Sync tier changes: promote added entities to active, demote removed to cold."""
         now = datetime.now().isoformat()
-
-        if added:
-            # Fetch entity data from existing CozoDB entities or set defaults
-            for entity_id in added:
+        for entity_ids, tier in ((added, "active"), (removed, "cold")):
+            for entity_id in entity_ids:
                 try:
-                    self._db.run(f"""
-                        ?[id, tier] <- [['{entity_id}', 'active']]
-                        :update entity {{id => tier, updated_at: '{now}'}}
-                    """)
+                    self._db.run(
+                        self._TIER_SYNC_QUERY,
+                        {"id": entity_id, "tier": tier, "now": now},
+                    )
                 except Exception:
-                    pass
-
-        if removed:
-            for entity_id in removed:
-                try:
-                    self._db.run(f"""
-                        ?[id, tier] <- [['{entity_id}', 'cold']]
-                        :update entity {{id => tier, updated_at: '{now}'}}
-                    """)
-                except Exception:
-                    pass
+                    logger.debug(
+                        "cozo tier sync skipped for entity %s", entity_id, exc_info=True
+                    )
 
     # ------------------------------------------------------------------
     # Health Check
@@ -712,12 +714,20 @@ class CozoDBGraphBackend:
             edge_count = self._db.run(
                 "?[count(from_id)] := *edge{from_id}"
             )
+            # fact_entity bridge rows (fact_id, entity_id) — counted so parity
+            # verification can catch a silent bridge-import failure that would
+            # otherwise leave Cozo entity recall returning empty results.
+            fe_count = self._db.run(
+                "?[count(fact_id)] := *fact_entity{fact_id, entity_id}"
+            )
             ec = entity_count.values.tolist()[0][0] if len(entity_count) > 0 else 0
             edc = edge_count.values.tolist()[0][0] if len(edge_count) > 0 else 0
+            fec = fe_count.values.tolist()[0][0] if len(fe_count) > 0 else 0
             return {
                 "status": "active",
                 "entities": int(ec),
                 "edges": int(edc),
+                "fact_entity": int(fec),
                 "shadow_checks": self._shadow_checks,
                 "shadow_mismatches": self._shadow_mismatches,
                 "shadow_errors": self._shadow_errors,
@@ -729,6 +739,19 @@ class CozoDBGraphBackend:
                 "error": str(exc),
                 "db_path": self._db_path,
             }
+
+    def entity_ids(self, limit: int = 1000) -> list[str]:
+        """Return up to ``limit`` entity IDs, for scale-engine content parity.
+
+        Count parity alone cannot prove the import reproduced the right rows;
+        comparing this ID set against canonical SQLite catches an import that
+        landed the correct *number* of entities with wrong identities.
+        """
+        try:
+            res = self._db.run("?[id] := *entity{id} :limit " + str(int(limit)))
+            return [row[0] for row in res.values.tolist()]
+        except Exception:
+            return []
 
     # ------------------------------------------------------------------
     # Rebuild (from SQLite canonical)

@@ -120,6 +120,8 @@ class SemanticChannel:
         query_embedding: list[float],
         profile_id: str,
         top_k: int = 50,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Search for semantically similar facts.
 
@@ -130,11 +132,23 @@ class SemanticChannel:
             query_embedding: Dense vector for the query.
             profile_id: Scope to this profile.
             top_k: Maximum results to return.
+            include_global: Include global-scope facts. Defaults to the
+                ``include_global`` instance attribute when not supplied,
+                preserving backward compatibility for callers that still
+                set the attribute directly.
+            include_shared: Include shared-scope facts. Same fallback.
 
         Returns:
             List of (fact_id, score) sorted by score descending.
             Score is in [0, 1] range.
         """
+        # Resolve scope flags: explicit param takes priority; fall back to the
+        # legacy attribute-based path so existing callers keep working.
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
+
         if not query_embedding:
             return []
 
@@ -142,16 +156,26 @@ class SemanticChannel:
 
         # Lance is a derived projection.  It is never an authorization source
         # and it never silently replaces the canonical sqlite-vec path: every
-        # promoted query is shadowed and falls back if membership/order differs.
+        # promoted query is shadowed and falls back if the result *membership*
+        # differs. Order differences within the same fact set are tolerated —
+        # float-score ties would otherwise force a fallback on every query,
+        # leaving the promoted backend permanently unused. Once membership
+        # matches, the projected backend's own ranking is authoritative.
         if (
             self._scale_vector_backend is not None
-            and not bool(getattr(self, "include_global", False))
-            and not bool(getattr(self, "include_shared", False))
+            and not include_global
+            and not include_shared
         ):
-            projected = self._search_via_lance(query_embedding, q_vec, profile_id, top_k)
-            canonical = self._search_without_lance(query_embedding, q_vec, profile_id, top_k)
+            projected = self._search_via_lance(
+                query_embedding, q_vec, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
+            )
+            canonical = self._search_without_lance(
+                query_embedding, q_vec, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
+            )
             self._scale_shadow_checks += 1
-            if [fid for fid, _ in projected] == [fid for fid, _ in canonical]:
+            if {fid for fid, _ in projected} == {fid for fid, _ in canonical}:
                 return projected
             self._scale_shadow_mismatches += 1
             logger.warning("Lance semantic projection diverged from SQLite; using SQLite")
@@ -161,13 +185,17 @@ class SemanticChannel:
         if self._vector_store and self._vector_store.available:
             results = self._search_via_vector_store(
                 query_embedding, q_vec, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
             )
             if results:  # If vec0 returned results, use them
                 return results
             # If vec0 is empty (cold start), fall through to full scan
 
         # --- FALLBACK: full-table scan (original code, unchanged) ---
-        return self._search_full_scan(query_embedding, q_vec, profile_id, top_k)
+        return self._search_full_scan(
+            query_embedding, q_vec, profile_id, top_k,
+            include_global=include_global, include_shared=include_shared,
+        )
 
     def set_scale_vector_backend(self, backend: Any | None) -> None:
         """Attach a parity-verified Lance projection without replacing SQLite."""
@@ -180,14 +208,27 @@ class SemanticChannel:
         }
 
     def _search_via_lance(
-        self, query_embedding: list[float], q_vec: np.ndarray, profile_id: str, top_k: int,
+        self,
+        query_embedding: list[float],
+        q_vec: np.ndarray,
+        profile_id: str,
+        top_k: int,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         original_store, original_qas = self._vector_store, self._qas
         try:
             self._vector_store = _LanceCandidateSource(self._scale_vector_backend)
             # QAS indexes SQLite/quantized records and cannot represent Lance.
             self._qas = None
-            return self._search_via_vector_store(query_embedding, q_vec, profile_id, top_k)
+            return self._search_via_vector_store(
+                query_embedding, q_vec, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
+            )
         except Exception as exc:
             logger.warning("Lance semantic projection failed closed to SQLite: %s", exc)
             return []
@@ -195,15 +236,31 @@ class SemanticChannel:
             self._vector_store, self._qas = original_store, original_qas
 
     def _search_without_lance(
-        self, query_embedding: list[float], q_vec: np.ndarray, profile_id: str, top_k: int,
+        self,
+        query_embedding: list[float],
+        q_vec: np.ndarray,
+        profile_id: str,
+        top_k: int,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         backend, self._scale_vector_backend = self._scale_vector_backend, None
         try:
             if self._vector_store and self._vector_store.available:
-                results = self._search_via_vector_store(query_embedding, q_vec, profile_id, top_k)
+                results = self._search_via_vector_store(
+                    query_embedding, q_vec, profile_id, top_k,
+                    include_global=include_global, include_shared=include_shared,
+                )
                 if results:
                     return results
-            return self._search_full_scan(query_embedding, q_vec, profile_id, top_k)
+            return self._search_full_scan(
+                query_embedding, q_vec, profile_id, top_k,
+                include_global=include_global, include_shared=include_shared,
+            )
         finally:
             self._scale_vector_backend = backend
 
@@ -213,8 +270,14 @@ class SemanticChannel:
         q_vec: np.ndarray,
         profile_id: str,
         top_k: int,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """KNN via VectorStore (or QAS 3-tier), then Fisher-Rao re-scoring."""
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         # V3.3.19: Try TurboQuant 3-tier search first (float32 + int8 + polar)
         if self._qas is not None:
             try:
@@ -235,12 +298,19 @@ class SemanticChannel:
                 query_embedding, top_k=top_k * 2, profile_id=profile_id,
             )
 
+        # M-01: Normalize KNN scores to [0.5, 1.0] via (score + 1.0) / 2.0 so
+        # they are on the same scale as full-scan scores computed from
+        # (_cosine_similarity(q, f) + 1.0) / 2.0 in the external_scores path.
+        # vector_store.search() clips at 0 (max(0, cosine)), which maps [–1,1]
+        # to [0,1]; the canonical formula maps to [0.5, 1.0] for positives.
+        # Both are [0,1] but different scales — without this normalization KNN
+        # scores are systematically lower and external facts always win max().
+        knn_results = [(fid, (score + 1.0) / 2.0) for fid, score in knn_results]
+
         # The vector index is partitioned by owner profile. An opted-in global
         # or authorized shared fact owned by another profile cannot enter the
         # local KNN candidate set, so merge the bounded cross-profile visible
         # supplement using the same canonical DB scope predicate as fallback.
-        include_global = bool(getattr(self, "include_global", False))
-        include_shared = bool(getattr(self, "include_shared", False))
         external_facts = self._db.get_external_visible_facts(
             profile_id,
             include_global=include_global,
@@ -272,8 +342,8 @@ class SemanticChannel:
         knn_scores = {fid: score for fid, score in knn_results}
         facts = self._db.get_facts_by_ids(
             candidate_ids, profile_id,
-            include_global=getattr(self, 'include_global', False),
-            include_shared=getattr(self, 'include_shared', False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
 
         if not facts:
@@ -323,10 +393,16 @@ class SemanticChannel:
         q_vec: np.ndarray,
         profile_id: str,
         top_k: int,
+        include_global: bool | None = None,
+        include_shared: bool | None = None,
     ) -> list[tuple[str, float]]:
         """Original full-table-scan search. Used as fallback when VectorStore
         is unavailable or empty (cold start).
         """
+        if include_global is None:
+            include_global = bool(getattr(self, "include_global", False))
+        if include_shared is None:
+            include_shared = bool(getattr(self, "include_shared", False))
         # Compute query Fisher params for Bayesian comparison (F45 fix)
         q_mean: np.ndarray | None = None
         q_var: np.ndarray | None = None
@@ -337,8 +413,8 @@ class SemanticChannel:
 
         facts = self._db.get_all_facts(
             profile_id,
-            include_global=getattr(self, 'include_global', False),
-            include_shared=getattr(self, 'include_shared', False),
+            include_global=include_global,
+            include_shared=include_shared,
         )
 
         scored: list[tuple[str, float]] = []

@@ -206,7 +206,10 @@ class TemporalValidator:
         Both params are REQUIRED in the call site. Do NOT rename to is_valid().
         """
         try:
-            tv = self._db.get_temporal_validity(fact_id)
+            # profile_id or None: an empty-string default must NOT become a
+            # `profile_id = ''` filter (which never matches → an expired fact
+            # would be reported valid). None falls back to the unscoped lookup.
+            tv = self._db.get_temporal_validity(fact_id, profile_id or None)
             if tv is None:
                 return True  # No temporal record = assumed valid
             return (

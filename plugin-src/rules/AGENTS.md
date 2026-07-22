@@ -71,21 +71,49 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 
 ## Tool reference (core profile — 14 tools)
 
-| Tool               | Signature (key params)                                                         | Notes                              |
-|--------------------|--------------------------------------------------------------------------------|------------------------------------|
-| `remember`         | `content, tags="", project="", importance=5, session_id="", scope="personal", shared_with=""` | Store atomic fact. `scope` opt-in (personal default) |
-| `recall`           | `query, limit=10, agent_id, session_id="", fast=False, include_global, include_shared`         | Multi-channel retrieval. Scope flags off by default |
-| `search`           | `query, limit=10, profile_id=""`                                               | FTS5 BM25 keyword search           |
-| `fetch`            | `url, ...`                                                                     | Fetch remote content               |
-| `list_recent`      | `limit=20, profile_id=""`                                                      | Newest memories first              |
-| `update_memory`    | `fact_id, content, agent_id`                                                   | Correct an existing memory by id   |
-| `forget`           | `profile_id="", dry_run=True`                                                  | Decay cycle; always dry_run first  |
-| `session_init`     | `project_path="", query="", max_results=10, max_age_days=30`                   | Once per session; loads context    |
-| `close_session`    | `session_id=""`                                                                | Finalise session                   |
-| `slm_compress`     | `content, mode="auto", reversible=True, ttl_seconds=86400`                     | Returns compressed, lossy, ccr_id  |
-| `slm_retrieve`     | `ccr_id`                                                                       | Retrieve original from ccr_id      |
-| `slm_cache_set`    | `key, value, ttl_seconds=86400`                                                | KV cache set                       |
-| `slm_cache_get`    | `key`                                                                          | KV cache get; returns hit, value   |
-| `slm_optimize_stats` | `()`                                                                         | Returns compress_runs, tokens_saved_compress, cache_kv_hits |
+> The MCP config ships `SLM_MCP_PROFILE=code` (21 tools): the 14 core memory tools below
+> **plus** 6 code-graph tools (`build_code_graph`, `get_blast_radius`, `query_graph`,
+> `semantic_search_code`, `get_review_context`, `detect_changes`) and `switch_profile`.
+> Use `full` (39 tools) to add mesh coordination. Use `power` (51 tools) for governance
+> and audit tools. See slm-profile for profile switching.
 
-SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later
+| Tool               | Signature (key params)                                                                       | Notes                                  |
+|--------------------|----------------------------------------------------------------------------------------------|----------------------------------------|
+| `remember`         | `content, tags="", project="", importance=5, session_id="", scope="personal", shared_with=""` | Store atomic fact. `scope` opt-in (personal default). See slm-scope. |
+| `recall`           | `query, limit=10, agent_id, session_id="", fast=False, include_global, include_shared`       | Multi-channel retrieval. Scope flags off by default. See slm-scope. |
+| `search`           | `query, limit=10, profile_id=""`                                                             | FTS5 BM25 keyword search               |
+| `fetch`            | `url, ...`                                                                                   | Fetch remote content                   |
+| `list_recent`      | `limit=20, profile_id=""`                                                                    | Newest memories first                  |
+| `update_memory`    | `fact_id, content, agent_id`                                                                 | Correct an existing memory by id       |
+| `forget`           | `profile_id="", dry_run=True`                                                                | Decay cycle; always dry_run first      |
+| `session_init`     | `project_path="", query="", max_results=10, max_age_days=30`                                 | Once per session; loads context        |
+| `close_session`    | `session_id=""`                                                                              | Finalise session                       |
+| `slm_compress`     | `content, mode="auto", reversible=True, ttl_seconds=86400`                                   | Returns compressed, lossy, ccr_id      |
+| `slm_retrieve`     | `ccr_id`                                                                                     | Retrieve original from ccr_id          |
+| `slm_cache_set`    | `key, value, ttl_seconds=86400`                                                              | KV cache set                           |
+| `slm_cache_get`    | `key`                                                                                        | KV cache get; returns hit, value       |
+| `slm_optimize_stats` | `()`                                                                                       | Returns compress_runs, tokens_saved_compress, cache_kv_hits |
+
+## Skills
+
+| Skill | Purpose |
+|-------|---------|
+| slm-recall | Multi-channel memory retrieval |
+| slm-remember | Store durable facts and decisions |
+| slm-session | Session lifecycle (init + close) |
+| slm-status | Health check, optimize stats |
+| slm-cache | KV cache for repeated reads |
+| slm-compress | Reversible context compression |
+| slm-graph | Code graph: blast radius, callers, search (code profile) |
+| slm-scope | Personal / shared / global memory scoping |
+| slm-profile | Workspace isolation and profile switching |
+| slm-governance | Enterprise roles, retention, audit, GDPR |
+| slm-mesh | Cross-session peer coordination (full/mesh profile) |
+
+## Subagents
+
+- **slm-memory-advisor** — memory decisions, session hygiene, scope and profile guidance
+- **slm-optimize-advisor** — context compression and KV cache
+- **slm-governance-advisor** — scope/role compliance, retention policies, GDPR
+
+SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later

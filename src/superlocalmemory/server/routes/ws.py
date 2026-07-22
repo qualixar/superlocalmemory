@@ -6,11 +6,13 @@
 
 Routes: /ws/updates
 """
+import logging
 from typing import Set
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+logger = logging.getLogger("superlocalmemory.routes.ws")
 router = APIRouter()
 
 
@@ -71,10 +73,11 @@ async def websocket_updates(websocket: WebSocket):
 
             except WebSocketDisconnect:
                 break
-            except Exception as e:
+            except Exception:
+                logger.exception("ws route error")
                 await websocket.send_json({
                     "type": "error",
-                    "message": str(e),
+                    "message": "Internal server error",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 

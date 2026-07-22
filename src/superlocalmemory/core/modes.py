@@ -109,7 +109,7 @@ MODE_C = ModeCapabilities(
     data_stays_local=False,
     description=(
         "FULL POWER — UNRESTRICTED. Best embeddings (text-embedding-3-large, 3072-dim). "
-        "Best LLMs (GPT-5.2, Claude Opus). Agentic multi-round retrieval. "
+        "Best configured cloud LLMs (e.g. GPT-5, Claude Opus 4). Agentic multi-round retrieval. "
         "Cohere reranker option. No EU restriction. Target: 90%+"
     ),
 )

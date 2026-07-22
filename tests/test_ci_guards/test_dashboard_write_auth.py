@@ -13,7 +13,9 @@ def test_quick_store_fetches_and_sends_install_token() -> None:
 
     assert "/internal/token" in source
     assert "X-Install-Token" in source
-    assert "slm_install_token" in source
+    # The slm_install_token sessionStorage key was removed in 3.7.9 (B2/M-06 XSS
+    # fix). The token is fetched from /internal/token and sent as X-Install-Token
+    # (asserted above) — no longer parked in client-readable storage.
 
 
 def test_all_same_origin_browser_mutations_receive_install_token() -> None:
@@ -23,7 +25,9 @@ def test_all_same_origin_browser_mutations_receive_install_token() -> None:
 
     assert "/internal/token" in source
     assert "X-Install-Token" in source
-    assert "slm_install_token" in source
+    # The slm_install_token sessionStorage key was removed in 3.7.9 (B2/M-06 XSS
+    # fix). The token is fetched from /internal/token and sent as X-Install-Token
+    # (asserted above) — no longer parked in client-readable storage.
     for method in ("POST", "PUT", "PATCH", "DELETE"):
         assert method in source
 

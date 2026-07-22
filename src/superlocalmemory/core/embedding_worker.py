@@ -65,6 +65,21 @@ def _embedding_backend_order() -> tuple[str, str]:
     return ("onnx", "pytorch")
 
 
+# H-02 (3.7.9): trust_remote_code=_trusts_remote_code(name) runs arbitrary Python from the model
+# repository at load time. Restrict it to the pinned models SLM ships that
+# genuinely need custom modeling code (nomic-embed). Any other model — including
+# one swapped into config by a write-path attacker — loads with
+# trust_remote_code=False and therefore cannot execute repo code.
+_TRUSTED_REMOTE_CODE_MODELS = frozenset({
+    "nomic-ai/nomic-embed-text-v1.5",
+    "nomic-ai/nomic-embed-text-v1",
+})
+
+
+def _trusts_remote_code(model_name: str) -> bool:
+    return model_name in _TRUSTED_REMOTE_CODE_MODELS
+
+
 def _load_embedding_model(name: str) -> tuple:
     """Load embedding model. ONNX CPU-only first, PyTorch fallback.
 
@@ -84,14 +99,14 @@ def _load_embedding_model(name: str) -> tuple:
                 m = SentenceTransformer(
                     name,
                     backend="onnx",
-                    trust_remote_code=True,
+                    trust_remote_code=_trusts_remote_code(name),
                     model_kwargs={"provider": "CPUExecutionProvider"},
                 )
             else:
                 import torch
                 with torch.inference_mode():
                     m = SentenceTransformer(
-                        name, trust_remote_code=True, device="cpu",
+                        name, trust_remote_code=_trusts_remote_code(name), device="cpu",
                     )
             return m, backend
         except Exception:

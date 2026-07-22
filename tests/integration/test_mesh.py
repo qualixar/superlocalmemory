@@ -401,3 +401,92 @@ class TestMeshGuards:
         peers = broker.list_peers()
         assert peers[0]["project_path"] == "/projects/qos"
         assert peers[0]["agent_type"] == "claude_code"
+
+
+class TestRemotePeersThreadSafety:
+    """M02: _remote_peers must be protected by a lock so concurrent
+    add/remove/read calls cannot cause dict-mutation-during-iteration
+    errors or torn reads."""
+
+    def test_remote_peers_lock_exists(self, broker):
+        """Broker must expose a _remote_peers_lock attribute."""
+        import threading
+        assert hasattr(broker, "_remote_peers_lock"), (
+            "MeshBroker must have a _remote_peers_lock for thread-safety"
+        )
+        assert isinstance(broker._remote_peers_lock, type(threading.RLock())), (
+            "_remote_peers_lock must be a reentrant lock"
+        )
+
+    def test_concurrent_add_remove_read_does_not_crash(self, broker):
+        """Concurrent add_remote_peer / remove_remote_peer / get_remote_peers
+        calls must not crash or produce a RuntimeError from dict mutation
+        during iteration."""
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def writer():
+            i = 0
+            while not stop.is_set():
+                peer_id = f"rp-{i % 10}"
+                broker.add_remote_peer(peer_id, {"summary": f"peer {i}"})
+                broker.remove_remote_peer(peer_id)
+                i += 1
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    _ = broker.get_remote_peers()
+                except Exception as exc:
+                    errors.append(exc)
+                    stop.set()
+
+        threads = [
+            threading.Thread(target=writer, daemon=True),
+            threading.Thread(target=writer, daemon=True),
+            threading.Thread(target=reader, daemon=True),
+            threading.Thread(target=reader, daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        time.sleep(0.25)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2)
+
+        assert not errors, f"Thread-safety violation: {errors}"
+
+    def test_send_message_checks_remote_peers_safely(self, broker):
+        """send_message membership check on _remote_peers must be lock-protected
+        (exercises the read path that M02 fixes)."""
+        from unittest.mock import MagicMock
+
+        broker.add_remote_peer("remote-p1", {"summary": "remote"})
+
+        mock_sync = MagicMock()
+        mock_sync.send_to_remote.return_value = {"ok": True}
+        broker._sync_client = mock_sync
+
+        errors: list[Exception] = []
+
+        def mutator():
+            for i in range(200):
+                broker.add_remote_peer(f"rp-{i}", {"summary": f"tmp {i}"})
+                broker.remove_remote_peer(f"rp-{i}")
+
+        def sender():
+            r = broker.register_peer("test-send-session")
+            for _ in range(50):
+                try:
+                    broker.send_message(r["peer_id"], "remote-p1", "ping")
+                except Exception as exc:
+                    errors.append(exc)
+
+        t_mut = threading.Thread(target=mutator, daemon=True)
+        t_send = threading.Thread(target=sender, daemon=True)
+        t_mut.start()
+        t_send.start()
+        t_mut.join(timeout=3)
+        t_send.join(timeout=3)
+
+        assert not errors, f"send_message raised under concurrent mutation: {errors}"

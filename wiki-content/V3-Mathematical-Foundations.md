@@ -1,6 +1,6 @@
 # V3 Mathematical Foundations
 
-SuperLocalMemory V3 introduces three mathematical pillars — each a **world first** in agent memory systems. These are described in our paper ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
+SuperLocalMemory V3 introduces three mathematical pillars — to our knowledge the first application of each of these techniques to agent memory retrieval, as documented in our public arXiv preprints ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
 
 ## Published LoCoMo Evidence Carried into V3.7
 
@@ -24,6 +24,8 @@ them (**+12.7pp**) and must not be substituted for the aggregate rows above.
 **The problem:** Cosine similarity treats embeddings as direction vectors. Two memories with the same meaning but different confidence look identical.
 
 **Our solution:** We use the Fisher-Rao geodesic distance — the natural metric on statistical manifolds. Each memory embedding is modeled as a diagonal Gaussian distribution with learned mean and variance. Distance is measured along the geodesic (shortest path on the manifold), not through Euclidean space.
+
+> **Shipping default:** SLM ships `fisher_mode="simplified"` — a variance-weighted (Mahalanobis-style) approximation that is fast and stable for the common case. Set `fisher_mode="full"` to activate the full Atkinson-Mitchell geodesic (`arccosh` form) described here.
 
 **What this means in practice:**
 - A high-confidence memory and a low-confidence memory about the same topic are distinguished
@@ -85,6 +87,8 @@ This catches contradictions that no pairwise method can detect. Runs in **O(|E| 
 
 Evaluated on LoCoMo conv-30 (81 scored questions). Each row removes one component.
 
+> **Protocol:** zero-LLM answer construction (same as the Mode A Raw benchmark). This is why the full-system score here (60.4%) differs from the Fisher-Rao table below, which uses local retrieval + GPT-4.1-mini answer synthesis (Mode A Retrieval). The two tables are internally consistent (identical Fisher deltas) but use different answer-construction protocols.
+
 | Configuration | Aggregate (%) | Delta (pp) |
 |:-------------|:-----:|:------:|
 | **Full system** | **60.4** | — |
@@ -103,6 +107,8 @@ Evaluated on LoCoMo conv-30 (81 scored questions). Each row removes one componen
 - Bootstrap 95% CI for full system: [53.4, 74.0]; for cross-encoder removed: [17.1, 45.7] — non-overlapping, confirming statistical significance
 
 ### Fisher-Rao vs Cosine (6 Conversations, n=832)
+
+> **Protocol:** local retrieval + GPT-4.1-mini answer synthesis (Mode A Retrieval) — not directly comparable to the zero-LLM ablation table above.
 
 | Conversation | With Math (%) | Without Math (%) | Delta (pp) |
 |:-------------|:-----:|:-------:|:-----:|

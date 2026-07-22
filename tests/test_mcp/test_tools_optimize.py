@@ -302,6 +302,7 @@ async def test_stats_fresh_all_int_fields_present(tools, monkeypatch):
 
     mock_db = MagicMock()
     mock_db.metrics_load.return_value = MetricsSnapshot()
+    mock_db.kv_counters_load.return_value = {}  # M2: fall back to session counters
     monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
 
     result = await tools["slm_optimize_stats"]()
@@ -334,10 +335,18 @@ async def test_stats_after_kv_hit_increments_counter(tools, monkeypatch):
     def _get_value(cache_key, tenant_id):
         return store.get((cache_key, tenant_id))
 
+    # M2: track the durable KV counters so we exercise the persisted path.
+    kv_counters: dict = {}
+
+    def _kv_incr(name, delta=1):
+        kv_counters[name] = kv_counters.get(name, 0) + delta
+
     mock_db = MagicMock()
     mock_db.set.side_effect = _set
     mock_db.get_value.side_effect = _get_value
     mock_db.metrics_load.return_value = MetricsSnapshot()
+    mock_db.kv_counter_incr.side_effect = _kv_incr
+    mock_db.kv_counters_load.side_effect = lambda: dict(kv_counters)
     monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
 
     await tools["slm_cache_set"](key="stat_key", value="stat_val")
@@ -346,6 +355,7 @@ async def test_stats_after_kv_hit_increments_counter(tools, monkeypatch):
     result = await tools["slm_optimize_stats"]()
     assert result["ok"] is True
     assert result["cache_kv_hits"] >= 1
+    assert kv_counters.get("kv_hits", 0) >= 1  # durable counter was incremented
 
 
 # ─── Test 13: oversize content → ccr_id:None, note set, no crash ─────────────

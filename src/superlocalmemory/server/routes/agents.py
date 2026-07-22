@@ -19,6 +19,12 @@ from .helpers import DB_PATH
 logger = logging.getLogger("superlocalmemory.routes.agents")
 router = APIRouter()
 
+
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log full traceback server-side; return a generic message to the client."""
+    logger.exception("agents route error")
+    return HTTPException(status_code=500, detail=detail)
+
 # Feature flag: V3 trust scorer
 TRUST_AVAILABLE = False
 try:
@@ -56,8 +62,8 @@ async def get_agents(
             "count": len(agents),
             "stats": {"total_agents": len(agents)},
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent registry error: {str(e)}")
+    except Exception:
+        raise _internal_error("Agent registry error")
 
 
 @router.get("/api/agents/stats")
@@ -69,8 +75,8 @@ async def get_agent_stats(request: Request):
         registry = AgentRegistry(persist_path=_registry_path())
         agents = registry.list_agents()
         return {"total_agents": len(agents)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent stats error: {str(e)}")
+    except Exception:
+        raise _internal_error("Agent stats error")
 
 
 @router.get("/api/trust/stats")
@@ -144,8 +150,8 @@ async def get_trust_stats(request: Request):
             "enforcement": enforcement,
             "by_signal_type": by_signal_type,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Trust stats error: {str(e)}")
+    except Exception:
+        raise _internal_error("Trust stats error")
 
 
 @router.get("/api/trust/signals/{agent_id}")
@@ -167,5 +173,5 @@ async def get_agent_trust_signals(
                 "signals": signals, "count": len(signals),
             }
         return {"agent_id": agent_id, "signals": [], "count": 0}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Trust signals error: {str(e)}")
+    except Exception:
+        raise _internal_error("Trust signals error")

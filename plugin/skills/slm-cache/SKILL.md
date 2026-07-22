@@ -137,4 +137,12 @@ These subcommands control daemon-level cache settings. They do not read or write
 
 ---
 
-SuperLocalMemory v3.6.18 · Qualixar · AGPL-3.0-or-later
+## Related skills
+
+- `slm-compress` — for large content reduction; cache and compress work together
+- `slm-status` — view `cache_kv_hits`/`cache_kv_misses` counters from `slm_optimize_stats`
+- `slm-profile` — cache entries are namespaced per profile; switching profiles gives a fresh cache namespace
+
+---
+
+SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later

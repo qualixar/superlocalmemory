@@ -1,4 +1,4 @@
-# Optimize Overview — v3.6.11
+# Optimize Overview — v3.8.0
 > SuperLocalMemory V3 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
@@ -163,7 +163,7 @@ client = withSLM(OpenAI())  # same interface, zero API change
 slm optimize savings --since 1
 ```
 
-Or open the dashboard: `slm serve` → http://localhost:8700 → **Optimize** tab.
+Or open the dashboard: `slm serve` → http://localhost:8765 → **Optimize** tab.
 
 ---
 
@@ -201,7 +201,7 @@ Or open the dashboard: `slm serve` → http://localhost:8700 → **Optimize** ta
 ```bash
 slm optimize status|on|off|savings [--since N] [--provider P] [--json]
 slm cache    status|clear|invalidate --tag <t>|ttl --set <s> --semantic <s>|semantic on|off
-slm compress status|mode safe|aggressive|code on|off|prose on|off|ccr on|off|align on|off
+slm compress status|mode safe|aggressive|prose on|off
 slm proxy    [--port P] [--provider P] [--no-compress] [--semantic]
 slm wrap     <agent> [--list] [--persistent] [--dry-run]
 slm help-optimize [cache|compress|proxy|agents|safety]

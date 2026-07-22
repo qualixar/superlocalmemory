@@ -116,6 +116,13 @@ class ScaleEngineManager:
             # This command reads persisted state, not the live daemon. Never
             # turn a last-known backend row into a present-tense routing claim.
             "active": {"cozo": False, "lance": False},
+            # LOW-2 (3.7.9): after promote the daemon must restart before the
+            # backends actually serve; surface that explicitly so `status` isn't
+            # mistaken for "promotion failed".
+            "daemon_must_restart_to_activate": (
+                state == "promoted"
+                and not any(v == "active" for v in runtime.values())
+            ),
             "last_daemon_observation": runtime,
             "paths_present": paths_present,
             "retrieval_routing": (
@@ -319,6 +326,8 @@ class ScaleEngineManager:
                 raise ScaleEngineError(
                     f"projection parity failed: canonical={canonical}, observed={observed}"
                 )
+            with self._readonly_connection() as conn:
+                self._verify_content_sample(conn, cozo, canonical)
             manifest.update({"state": "verified", "verified_at": _utc_now(), "observed": observed})
             self._write_manifest(stage_dir, manifest)
             self.config.scale_engine_state = "verified"
@@ -510,7 +519,31 @@ class ScaleEngineManager:
         ).fetchone()[0]
         edges = count_logical_edges(conn, self.profile_id)
         vectors = count_canonical_vectors(conn, self.profile_id)
-        return {"entities": int(nodes), "edges": int(edges), "vectors": int(vectors)}
+        fact_entity = self._count_fact_entity_links(conn)
+        return {
+            "entities": int(nodes),
+            "edges": int(edges),
+            "vectors": int(vectors),
+            "fact_entity": int(fact_entity),
+        }
+
+    def _count_fact_entity_links(self, conn: sqlite3.Connection) -> int:
+        """Count fact->entity bridge rows exactly as ``bulk_import_from_sqlite``
+        projects them: dedup entity IDs per fact, drop empties. This bridge is
+        what lets Cozo map a query seed into the fact graph; if its import
+        silently fails, count parity on entities/edges/vectors still passes but
+        entity recall returns empty — so it must be verified explicitly."""
+        total = 0
+        for (raw,) in conn.execute(
+            "SELECT canonical_entities_json FROM atomic_facts WHERE profile_id=?",
+            (self.profile_id,),
+        ):
+            try:
+                entity_ids = json.loads(raw or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            total += sum(1 for eid in dict.fromkeys(entity_ids) if eid)
+        return total
 
     def _observed_counts(self, cozo: Any, lance: Any) -> dict[str, int]:
         graph = cozo.health_check()
@@ -521,7 +554,33 @@ class ScaleEngineManager:
             "entities": int(graph["entities"]),
             "edges": int(graph["edges"]),
             "vectors": int(vector["vectors"]),
+            "fact_entity": int(graph.get("fact_entity", 0)),
         }
+
+    def _verify_content_sample(
+        self, conn: sqlite3.Connection, cozo: Any, canonical: dict[str, int]
+    ) -> None:
+        """Content parity: count equality does not prove the import reproduced
+        the correct rows. Compare the projected entity-ID set against canonical
+        SQLite (bounded), catching a projection that has the right entity count
+        but the wrong identities."""
+        getter = getattr(cozo, "entity_ids", None)
+        n = int(canonical.get("entities", 0))
+        if not callable(getter) or n == 0:
+            return  # backend cannot sample, or nothing to compare
+        observed_ids = set(getter(limit=n))
+        rows = conn.execute(
+            "SELECT entity_id FROM canonical_entities WHERE profile_id=?",
+            (self.profile_id,),
+        ).fetchall()
+        expected_ids = {r[0] for r in rows}
+        if expected_ids != observed_ids:
+            missing = sorted(expected_ids - observed_ids)[:5]
+            extra = sorted(observed_ids - expected_ids)[:5]
+            raise ScaleEngineError(
+                "projection content parity failed: entity IDs diverged "
+                f"(missing sample={missing}, unexpected sample={extra})"
+            )
 
     def _projection_fingerprint(
         self, conn: sqlite3.Connection, counts: dict[str, int]

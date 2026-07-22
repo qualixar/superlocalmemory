@@ -11,6 +11,12 @@ for names and counts; a client still decides when to call a tool.
 > routed-result caching. They do not intercept or cache the primary
 > conversation turn without a proxy. [See Three Surfaces →](optimize-overview.md)
 
+> **Profile exposure:** The active `SLM_MCP_PROFILE` determines which tools are
+> visible to the connected client. Core tools are in every profile. Code-graph
+> tools require `code`, `full`, or `power`. Mesh tools require `full`, `power`, or
+> `mesh`. See [MCP Profiles →](../README.md#mcp--profiles) and
+> [docs/profiles.md](profiles.md).
+
 ## Connecting
 
 SLM supports two transports — both expose the exact same tools.
@@ -62,7 +68,7 @@ Search memories by natural language query.
 | Parameter | Type | Required | Description |
 |-----------|------|:--------:|-------------|
 | `query` | string | Yes | Natural language search query |
-| `limit` | number | No | Max results (default: 10) |
+| `limit` | number | No | Max results (default: 20) |
 
 Recall results follow [Score Contract v2](retrieval-score-contract.md):
 `relevance_score` is query relevance, `ranking_score` is diagnostic ranking
@@ -149,11 +155,81 @@ Correct a learned pattern that is wrong or outdated.
 
 ### `get_attribution`
 
-Return attribution and provenance information for a specific memory.
+Return system attribution metadata — product name, author, organization, license, and URLs.
+
+*No parameters.*
+
+Returns: `{success, product, author, organization, license, urls:{product, author, organization}}`
+
+### `forget`
+
+Run Ebbinghaus forgetting decay cycle. Computes retention scores and transitions memories between lifecycle zones (active → warm → cold → archive → forgotten) based on access patterns and importance. Run with `dry_run=true` first to preview changes.
 
 | Parameter | Type | Required | Description |
 |-----------|------|:--------:|-------------|
-| `id` | number | Yes | Memory ID |
+| `profile_id` | string | No | Profile to process (default: active profile) |
+| `dry_run` | boolean | No | If true, compute stats but do not apply transitions (default: true) |
+
+### `delete_memory`
+
+Delete a specific memory by exact fact ID. All deletions are logged with `agent_id` for audit.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `fact_id` | string | Yes | Exact fact ID to delete (from `recall` or `list_recent`) |
+| `agent_id` | string | No | Calling-agent identifier for audit log |
+
+### `update_memory`
+
+Update the content of a specific memory by exact fact ID. The fact must belong to the active profile.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `fact_id` | string | Yes | Exact fact ID to update |
+| `content` | string | Yes | New content (cannot be empty) |
+| `agent_id` | string | No | Calling-agent identifier for audit log |
+
+## Active Memory Tools (V3.1)
+
+Three tools for automatic context injection and learning. Call `session_init` once at the start of every session.
+
+### `session_init`
+
+Initialize session context from stored memories. Returns relevant memories for the project path or query, plus current learning status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `project_path` | string | No | Working directory path — used to derive the search query |
+| `query` | string | No | Override the search query (overrides `project_path` when set) |
+| `max_results` | number | No | Maximum memories to return (default: 10) |
+| `max_age_days` | number | No | Suppress memories older than N days unless relevance ≥ 0.70 (default: 30; set to 0 to disable) |
+
+### `observe`
+
+Send conversation content for automatic memory capture. The system evaluates whether the content contains decisions, bug fixes, or preferences worth storing and captures them when confidence > 0.5.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `content` | string | Yes | Conversation snippet to evaluate |
+| `agent_id` | string | No | Calling-agent attribution (defaults to `SLM_AGENT_ID` env var) |
+
+### `report_feedback`
+
+Report whether a recalled memory was useful. Trains the adaptive ranker over time.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `fact_id` | string | Yes | ID of the recalled memory |
+| `feedback` | string | No | `"relevant"`, `"irrelevant"`, or `"partial"` (default: `"relevant"`) |
+| `query` | string | No | The original query that surfaced this memory |
+
+### `close_session`
+
+Close the current session and create temporal summary events. Aggregates session facts into per-entity summaries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `session_id` | string | No | Session to close (default: most recent session) |
 
 ## V2.8 Tools
 
@@ -245,12 +321,234 @@ Recall with a full breakdown of how each retrieval channel scored each result.
 | `query` | string | Yes | Search query |
 | `limit` | number | No | Max results (default: 10) |
 
+## V3 Utility Tools
+
+### `get_version`
+
+Return the installed SLM version and build information.
+
+*No parameters.*
+
+**Returns:** `{success, version, build_info}`
+
+### `prestage_context`
+
+Pre-stage a recall query so the result is immediately available when `recall` or `session_init` is called next. Reduces perceived latency for known upcoming queries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `query` | string | Yes | Query to pre-stage |
+| `max_results` | integer | No | Maximum results to warm (default: 10) |
+
+### `get_retention_stats`
+
+Return retention statistics for the active profile: memory counts by lifecycle zone (active/warm/cold/archived) and current retention policy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `profile_id` | string | No | Profile to query (default: active profile) |
+
+### `consolidate_cognitive`
+
+Run the CCQ cognitive consolidation pipeline. Identifies redundant or contradictory memories and proposes consolidations. Does not apply changes unless `dry_run=false`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `profile_id` | string | No | Profile to consolidate (default: active profile) |
+| `dry_run` | boolean | No | If true, propose without applying (default: true) |
+
+### `get_soft_prompts`
+
+Return the auto-learned soft prompts for the active profile. Soft prompts capture recurring patterns and preferences observed across sessions.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `profile_id` | string | No | Profile to query (default: active profile) |
+| `limit` | integer | No | Max results (default: 20) |
+
+### `reap_processes`
+
+Find and optionally terminate orphaned SLM daemon or MCP processes. Safe to call from inside an agent: uses process metadata to identify orphans rather than killing all matching processes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `force` | boolean | No | If true, terminate found orphans (default: false — dry run) |
+
+---
+
+## Code-Graph Tools
+
+Available in profiles `code` (21 tools), `full` (39 tools), and `power` (51 tools). Not available in `core` or `mesh` profiles.
+
+These tools build and query a structural code graph over a local repository. The graph maps functions, classes, modules, call sites, imports, and dependencies. It is built on demand from the repository path and persisted in SLM's database.
+
+### `build_code_graph`
+
+Build or rebuild the code graph for a repository.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `repo_path` | string | Yes | Absolute path to the repository root |
+| `include_patterns` | string | No | Glob patterns to include (default: `**/*.py,**/*.ts,**/*.js`) |
+| `changed_files` | array | No | If set, incremental update for only these files |
+
+### `update_code_graph`
+
+Incrementally update the code graph for changed files without a full rebuild.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `repo_path` | string | Yes | Repository root |
+| `changed_files` | array | Yes | List of changed file paths (relative to repo root) |
+
+### `get_blast_radius`
+
+Given a symbol (function, class, or module), return all code that would be affected by changing it — direct callers, transitive dependents, and reachable test files.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `target` | string | Yes | Symbol name or file path |
+| `depth` | integer | No | Maximum traversal depth (default: 3) |
+
+### `get_review_context`
+
+Return the code-graph context relevant to a code review: callers, callees, related tests, and recent change history for the changed symbols.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `changed_files` | array | Yes | Files changed in the review |
+| `repo_path` | string | Yes | Repository root |
+
+### `query_graph`
+
+Query the code graph with a free-form description or a structural predicate.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `query` | string | Yes | Natural language or structural query |
+| `limit` | integer | No | Max results (default: 20) |
+
+### `semantic_search_code`
+
+Semantic search across code symbols using the same embedding model as memory recall.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `query` | string | Yes | Natural language description of the code to find |
+| `limit` | integer | No | Max results (default: 10) |
+
+### `list_graph_stats`
+
+Return summary statistics for the built code graph: node counts by type, edge counts, last build time.
+
+*No parameters.*
+
+### `find_large_functions`
+
+Return functions or methods exceeding a size threshold.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `min_lines` | integer | No | Minimum line count (default: 50) |
+| `limit` | integer | No | Max results (default: 20) |
+
+### `detect_changes`
+
+Compare the current on-disk state of files against the last-built graph and report which symbols have changed, been added, or been removed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `repo_path` | string | Yes | Repository root |
+| `files` | array | No | Specific files to check (default: all tracked) |
+
+### `get_architecture_overview`
+
+Return a high-level summary of the repository's module structure, dependency layers, and largest components.
+
+*No parameters.*
+
+### `list_flows` / `get_flow` / `get_affected_flows`
+
+Inspect call flows through the codebase.
+
+| Tool | Description |
+|------|-------------|
+| `list_flows` | List all named or detected flows in the graph |
+| `get_flow(name)` | Return the full call chain for a named flow |
+| `get_affected_flows(target)` | Return flows that pass through a given symbol |
+
+### `list_communities` / `get_community`
+
+Inspect logical module communities detected by graph clustering.
+
+| Tool | Description |
+|------|-------------|
+| `list_communities` | List detected communities with size and cohesion score |
+| `get_community(id)` | Return members and edges for a specific community |
+
+### `code_memory_search`
+
+Search memory facts that are linked to specific code symbols or file paths.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `query` | string | Yes | Query (may include symbol names) |
+| `limit` | integer | No | Max results (default: 10) |
+
+### `code_entity_history`
+
+Return the memory history for a code entity: all decisions, bugs, and observations linked to a given symbol.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `target` | string | Yes | Symbol name or file path |
+
+### `link_memory_to_code`
+
+Explicitly link a stored memory to a code symbol. Strengthens code-memory retrieval for that symbol.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `fact_id` | string | Yes | Memory fact ID to link |
+| `target` | string | Yes | Symbol name or file path to link to |
+
+### `enrich_blast_radius`
+
+Enrich a blast-radius result with relevant memories: decisions, known bugs, and past observations about the affected symbols.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `target` | string | Yes | Symbol to analyze |
+| `depth` | integer | No | Traversal depth (default: 3) |
+
+### `code_stale_check`
+
+Check whether stored memories about a symbol are stale relative to recent code changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `target` | string | Yes | Symbol or file path to check |
+
+### `refactor_preview` / `apply_refactor`
+
+Preview or apply a code refactor using graph-aware rename and dependency tracking.
+
+| Tool | Key Parameters | Description |
+|------|---------------|-------------|
+| `refactor_preview` | `target`, `new_name`, `repo_path` | Show all rename sites and impact before applying |
+| `apply_refactor` | `target`, `new_name`, `repo_path` | Apply the rename across the graph (writes files) |
+
+> `apply_refactor` writes files. Review the `refactor_preview` output before applying.
+
+---
+
 ## Resources
 
 MCP resources provide read-only data that AI assistants can access passively.
 
 | Resource URI | Description |
 |-------------|-------------|
+| `slm://context` | Active session context auto-injected on MCP connect. Returns relevant memories + learning status. |
 | `slm://recent` | The 20 most recently stored memories |
 | `slm://stats` | Memory count, database size, mode, profile |
 | `slm://clusters` | Topic clusters detected across memories |

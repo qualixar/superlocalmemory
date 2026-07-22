@@ -11,9 +11,10 @@ import json
 import logging
 import sqlite3
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from .helpers import get_active_profile, MEMORY_DIR, DB_PATH
+from .helpers import get_active_profile, get_engine_lazy, MEMORY_DIR, DB_PATH
+from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 logger = logging.getLogger("superlocalmemory.routes.lifecycle")
 router = APIRouter()
@@ -121,15 +122,65 @@ async def lifecycle_status():
             "recent_transitions": [],
             "age_stats": age_stats,
         }
-    except Exception as e:
-        logger.error("lifecycle_status error: %s", e)
-        return {"available": False, "error": str(e)}
+    except Exception:
+        logger.exception("lifecycle_status error")
+        return {"available": False, "error": "Internal server error"}
 
 
 @router.post("/api/lifecycle/compact")
-async def trigger_compaction(data: dict = {}):
-    """Trigger lifecycle compaction. Body: {dry_run: true/false}."""
+async def trigger_compaction(request: Request, data: dict = {}):
+    """Trigger lifecycle compaction for the active profile.
+
+    Body: ``{"dry_run": true|false}`` (default true — preview only).
+
+    Recomputes each fact's lifecycle zone (active→warm→cold→archive) from its
+    age/access pattern. dry_run returns the proposed transitions without
+    mutating; execute applies them and is profile-scoped + mutation-authorized.
+    """
     if not LIFECYCLE_AVAILABLE:
         return {"success": False, "error": "Lifecycle engine not available"}
 
-    return {"status": "not_implemented", "message": "Coming soon"}
+    dry_run = bool((data or {}).get("dry_run", True))
+    try:
+        engine = get_engine_lazy(request.app.state)
+        if engine is None:
+            return {"success": False, "error": "Engine not initialized"}
+        profile = get_active_profile()
+
+        mgr = LifecycleManager(engine._db)
+        facts = engine._db.get_all_facts(profile)
+        candidates = []
+        for f in facts:
+            new_state = mgr.get_lifecycle_state(f)
+            if new_state != f.lifecycle:
+                candidates.append({
+                    "fact_id": f.fact_id,
+                    "current": getattr(f.lifecycle, "value", str(f.lifecycle)),
+                    "proposed": getattr(new_state, "value", str(new_state)),
+                })
+
+        applied = 0
+        if not dry_run and candidates:
+            authorization = authorize_route_mutation(
+                request,
+                operation="update",
+                source_agent_id="http-lifecycle-compact",
+                profile_id=profile,
+            )
+            for c in candidates:
+                engine._db.update_fact(c["fact_id"], {"lifecycle": c["proposed"]})
+                applied += 1
+            authorization.complete()
+
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "active_profile": profile,
+            "total_facts": len(facts),
+            "candidates": len(candidates),
+            "applied": applied,
+            "transitions": candidates[:20],
+        }
+    except Exception as exc:
+        logger.exception("lifecycle compaction failed")
+        return {"success": False, "error": "internal error"}

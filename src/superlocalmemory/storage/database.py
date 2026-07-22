@@ -70,6 +70,17 @@ _MAX_RETRIES = _env_int("SLM_DB_MAX_RETRIES", 5)                # retry on SQLIT
 _RETRY_BASE_DELAY = _env_float("SLM_DB_RETRY_BASE_DELAY", 0.1)  # backoff base (s)
 
 
+def _unbounded_facts_ceiling() -> int:
+    """Hard upper bound applied when a fact fetch is called with limit=None, so
+    a large tenant can never materialize the whole table into memory. Tunable
+    via SLM_MAX_FACTS_UNBOUNDED (default 50_000)."""
+    import os as _os
+    try:
+        return max(1, int(_os.environ.get("SLM_MAX_FACTS_UNBOUNDED", "50000")))
+    except (TypeError, ValueError):
+        return 50000
+
+
 def _scope_where(
     profile_id: str,
     *,
@@ -147,6 +158,14 @@ class DatabaseManager:
             conn.commit()
         finally:
             conn.close()
+        # C4 encryption-at-rest defense-in-depth: sensitive DB files shipped
+        # world-readable (0644). Restrict to owner-only now that the file (and
+        # its WAL sidecars) exist. Best-effort, never blocks DB open.
+        try:
+            from superlocalmemory.core.security_primitives import harden_db_perms
+            harden_db_perms(self.db_path)
+        except Exception:
+            pass
 
     def initialize(self, schema_module: ModuleType) -> None:
         """Create all tables. *schema_module* must expose ``create_all_tables(conn)``."""
@@ -431,17 +450,16 @@ class DatabaseManager:
             include_global=include_global,
             include_shared=include_shared,
         )
-        if limit is not None:
-            rows = self.execute(
-                f"SELECT * FROM atomic_facts WHERE {where} "
-                "ORDER BY created_at DESC LIMIT ?",
-                (*params, int(limit)),
-            )
-        else:
-            rows = self.execute(
-                f"SELECT * FROM atomic_facts WHERE {where} ORDER BY created_at DESC",
-                (*params,),
-            )
+        # memory-bounding-02 + perf M-04: an unbounded fetch materializes the
+        # whole table (hundreds of MB with embeddings at 50k+ facts). Apply a
+        # hard, env-tunable ceiling even when the caller passes limit=None.
+        if limit is None:
+            limit = _unbounded_facts_ceiling()
+        rows = self.execute(
+            f"SELECT * FROM atomic_facts WHERE {where} "
+            "ORDER BY created_at DESC LIMIT ?",
+            (*params, int(limit)),
+        )
         return [self._row_to_fact(r) for r in rows]
 
     def get_external_visible_facts(
@@ -525,10 +543,19 @@ class DatabaseManager:
         "source_turn_ids_json", "session_id", "embedding",
         "fisher_mean", "fisher_variance", "lifecycle", "langevin_position",
         "emotional_valence", "emotional_arousal", "signal_type",
+        # Multi-scope (M016): allow re-scoping a fact after creation so a memory
+        # can be shared with a team or made global from the dashboard.
+        "scope", "shared_with",
     })
 
-    def update_fact(self, fact_id: str, updates: dict[str, Any]) -> None:
-        """Partial update on a fact. JSON-serializes list/dict values."""
+    def update_fact(self, fact_id: str, updates: dict[str, Any],
+                    profile_id: str | None = None) -> None:
+        """Partial update on a fact. JSON-serializes list/dict values.
+
+        Tenant safety: when ``profile_id`` is supplied the UPDATE is constrained
+        to that tenant, so a fact_id belonging to another profile cannot be
+        mutated. Authorized routes always pass it.
+        """
         if not updates:
             raise ValueError("updates dict must not be empty")
         bad_keys = set(updates) - self._UPDATABLE_FACT_COLUMNS
@@ -543,21 +570,44 @@ class DatabaseManager:
             else:
                 clean[k] = v
         set_clause = ", ".join(f"{k} = ?" for k in clean)
-        self.execute(
-            f"UPDATE atomic_facts SET {set_clause} WHERE fact_id = ?",
-            (*clean.values(), fact_id),
-        )
+        if profile_id is not None:
+            self.execute(
+                f"UPDATE atomic_facts SET {set_clause} WHERE fact_id = ? AND profile_id = ?",
+                (*clean.values(), fact_id, profile_id),
+            )
+        else:
+            self.execute(
+                f"UPDATE atomic_facts SET {set_clause} WHERE fact_id = ?",
+                (*clean.values(), fact_id),
+            )
 
-    def delete_fact(self, fact_id: str) -> None:
+    def delete_fact(self, fact_id: str, profile_id: str | None = None) -> None:
         """Hard-delete a fact.
 
         DatabaseManager connections enforce FKs (PRAGMA foreign_keys=ON), so
         embedding_metadata / fact_retention / edges cascade. The explicit
         embedding_metadata delete below is belt-and-suspenders for the case a
         future caller routes through a connection without FK enforcement.
+
+        Tenant safety: when ``profile_id`` is supplied the delete is constrained
+        to that tenant (the fact must belong to it), so a fact_id from another
+        profile cannot be destroyed. Authorized routes always pass it.
         """
+        if profile_id is not None:
+            row = self.execute(
+                "SELECT 1 FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
+            if not row:
+                return  # not this tenant's fact — no-op
         self.execute("DELETE FROM embedding_metadata WHERE fact_id = ?", (fact_id,))
-        self.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
+        if profile_id is not None:
+            self.execute(
+                "DELETE FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
+        else:
+            self.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
 
     def gc_orphaned_embedding_metadata(self) -> int:
         """Remove embedding_metadata rows whose parent atomic_fact is gone.
@@ -626,35 +676,55 @@ class DatabaseManager:
             fact_count=d["fact_count"],
         )
 
-    def store_alias(self, alias: EntityAlias) -> str:
-        """Persist an entity alias. Returns alias_id."""
+    def store_alias(self, alias: EntityAlias, profile_id: str) -> str:
+        """Persist an entity alias under a profile. Returns alias_id.
+
+        profile_id scopes the alias so the same entity_id appearing in two
+        profiles never shares aliases.
+        """
         self.execute(
             "INSERT OR REPLACE INTO entity_aliases "
-            "(alias_id, entity_id, alias, confidence, source) VALUES (?,?,?,?,?)",
-            (alias.alias_id, alias.entity_id, alias.alias,
+            "(alias_id, profile_id, entity_id, alias, confidence, source) "
+            "VALUES (?,?,?,?,?,?)",
+            (alias.alias_id, profile_id, alias.entity_id, alias.alias,
              alias.confidence, alias.source),
         )
         return alias.alias_id
 
-    def get_aliases_for_entity(self, entity_id: str) -> list[EntityAlias]:
-        """All aliases for a canonical entity."""
+    def get_aliases_for_entity(
+        self, entity_id: str, profile_id: str,
+    ) -> list[EntityAlias]:
+        """All aliases for a canonical entity within one profile."""
         rows = self.execute(
-            "SELECT * FROM entity_aliases WHERE entity_id = ?", (entity_id,),
+            "SELECT * FROM entity_aliases WHERE entity_id = ? AND profile_id = ?",
+            (entity_id, profile_id),
         )
         return [
             EntityAlias(**{k: dict(r)[k] for k in ("alias_id", "entity_id", "alias", "confidence", "source")})
             for r in rows
         ]
 
-    def get_memory_content_batch(self, memory_ids: list[str]) -> dict[str, str]:
-        """Batch-fetch original memory text. Returns {memory_id: content}."""
+    def get_memory_content_batch(
+        self, memory_ids: list[str], profile_id: str,
+        include_global: bool = False, include_shared: bool = False,
+    ) -> dict[str, str]:
+        """Batch-fetch original memory text. Returns {memory_id: content}.
+
+        C4 hardening: this exposes raw memory *content* and is reachable from
+        HTTP routes, so it is strictly tenant-scoped — a memory_id belonging to
+        another profile is never resolved. Widen only via the scope flags.
+        """
         if not memory_ids:
             return {}
         unique_ids = list(set(memory_ids))
         ph = ','.join('?' * len(unique_ids))
+        where, sparams = _scope_where(
+            profile_id, include_global=include_global, include_shared=include_shared,
+        )
         rows = self.execute(
-            f"SELECT memory_id, content FROM memories WHERE memory_id IN ({ph})",
-            tuple(unique_ids),
+            f"SELECT memory_id, content FROM memories "
+            f"WHERE memory_id IN ({ph}) AND {where}",
+            (*unique_ids, *sparams),
         )
         return {dict(r)["memory_id"]: dict(r)["content"] for r in rows}
 
@@ -876,11 +946,23 @@ class DatabaseManager:
     # Phase 0.6: Missing methods (BLOCKER / CRITICAL / HIGH)
     # ------------------------------------------------------------------
 
-    def get_fact(self, fact_id: str) -> AtomicFact | None:
-        """Get a single fact by ID."""
-        rows = self.execute(
-            "SELECT * FROM atomic_facts WHERE fact_id = ?", (fact_id,),
-        )
+    def get_fact(self, fact_id: str, profile_id: str | None = None) -> AtomicFact | None:
+        """Get a single fact by ID.
+
+        C4 defense-in-depth: when ``profile_id`` is provided the lookup is
+        tenant-scoped so a fact_id from another profile cannot resolve. Left
+        optional (fact_id is a random UUID sourced from already-scoped queries)
+        to avoid destabilizing the core store/consolidation write path.
+        """
+        if profile_id is not None:
+            rows = self.execute(
+                "SELECT * FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
+        else:
+            rows = self.execute(
+                "SELECT * FROM atomic_facts WHERE fact_id = ?", (fact_id,),
+            )
         return self._row_to_fact(rows[0]) if rows else None
 
     def get_facts_by_ids(
@@ -1017,12 +1099,17 @@ class DatabaseManager:
                     out.setdefault(fid, []).append(scene)
         return out
 
-    def increment_entity_fact_count(self, entity_id: str) -> None:
-        """Atomically increment fact_count for a canonical entity."""
+    def increment_entity_fact_count(self, entity_id: str, profile_id: str = "default") -> None:
+        """Atomically increment fact_count for a canonical entity scoped to profile.
+
+        L-01 fix: the original query had no profile_id guard; any entity_id match
+        would be updated regardless of owner. The AND profile_id = ? clause prevents
+        cross-profile mutations via shared entity_id values.
+        """
         self.execute(
             "UPDATE canonical_entities SET fact_count = fact_count + 1 "
-            "WHERE entity_id = ?",
-            (entity_id,),
+            "WHERE entity_id = ? AND profile_id = ?",
+            (entity_id, profile_id),
         )
 
     def store_trust_score(self, ts: TrustScore) -> str:
@@ -1121,11 +1208,17 @@ class DatabaseManager:
             (fact_id, profile_id, contextual_description, keywords, generated_by),
         )
 
-    def get_fact_context(self, fact_id: str) -> dict | None:
-        """Get contextual description for a fact."""
-        rows = self.execute(
-            "SELECT * FROM fact_context WHERE fact_id = ?", (fact_id,),
-        )
+    def get_fact_context(self, fact_id: str, profile_id: str | None = None) -> dict | None:
+        """Get contextual description for a fact (C4: optionally tenant-scoped)."""
+        if profile_id is not None:
+            rows = self.execute(
+                "SELECT * FROM fact_context WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
+        else:
+            rows = self.execute(
+                "SELECT * FROM fact_context WHERE fact_id = ?", (fact_id,),
+            )
         return dict(rows[0]) if rows else None
 
     def get_all_fact_contexts(self, profile_id: str) -> list[dict]:
@@ -1277,12 +1370,18 @@ class DatabaseManager:
             (fact_id, profile_id, valid_from, valid_until),
         )
 
-    def get_temporal_validity(self, fact_id: str) -> dict | None:
-        """Get temporal validity record for a fact."""
-        rows = self.execute(
-            "SELECT * FROM fact_temporal_validity WHERE fact_id = ?",
-            (fact_id,),
-        )
+    def get_temporal_validity(self, fact_id: str, profile_id: str | None = None) -> dict | None:
+        """Get temporal validity record for a fact (C4: optionally tenant-scoped)."""
+        if profile_id is not None:
+            rows = self.execute(
+                "SELECT * FROM fact_temporal_validity WHERE fact_id = ? AND profile_id = ?",
+                (fact_id, profile_id),
+            )
+        else:
+            rows = self.execute(
+                "SELECT * FROM fact_temporal_validity WHERE fact_id = ?",
+                (fact_id,),
+            )
         return dict(rows[0]) if rows else None
 
     def get_all_temporal_validity(self, profile_id: str) -> list[dict]:
@@ -1316,14 +1415,24 @@ class DatabaseManager:
         """Get fact_ids that are currently valid (not expired).
 
         Returns facts that either have no temporal record (assumed valid)
-        or have valid_until IS NULL and system_expired_at IS NULL.
+        or whose temporal record satisfies:
+          - valid_until IS NULL (open-ended) OR valid_until > now() (still in window)
+          - system_expired_at IS NULL (not system-invalidated)
+
+        M-02 fix: the original query used ``tv.valid_until IS NULL`` which
+        incorrectly excluded future-dated (still valid) facts. The correct
+        predicate is a date comparison against the current timestamp.
         """
         rows = self.execute(
             "SELECT f.fact_id FROM atomic_facts f "
             "LEFT JOIN fact_temporal_validity tv ON f.fact_id = tv.fact_id "
             "WHERE f.profile_id = ? "
-            "  AND (tv.fact_id IS NULL OR tv.valid_until IS NULL) "
-            "  AND (tv.fact_id IS NULL OR tv.system_expired_at IS NULL)",
+            "  AND (tv.fact_id IS NULL "
+            "       OR ( "
+            "           (tv.valid_until IS NULL "
+            "            OR tv.valid_until > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) "
+            "           AND tv.system_expired_at IS NULL "
+            "       ))",
             (profile_id,),
         )
         return [dict(r)["fact_id"] for r in rows]

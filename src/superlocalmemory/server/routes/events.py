@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from .helpers import DB_PATH
+from .helpers import DB_PATH, get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.events")
 router = APIRouter()
@@ -71,6 +71,11 @@ async def event_stream(
 
     import asyncio
 
+    # Scope this stream to the profile active at connect time. The dashboard
+    # opens a fresh stream after a profile switch, so a connection only ever
+    # surfaces ONE profile's events — never another profile's (GDPR).
+    active_profile = get_active_profile()
+
     client_queue = _queue.Queue(maxsize=100)
     with _sse_queues_lock:
         _sse_queues.add(client_queue)
@@ -86,6 +91,7 @@ async def event_stream(
                     bus = EventBus.get_instance(DB_PATH)
                     missed = bus.get_recent_events(
                         since_id=last_event_id, limit=50, event_type=event_type,
+                        profile_id=active_profile,
                     )
                     for evt in missed:
                         data = json.dumps(evt)
@@ -96,7 +102,9 @@ async def event_stream(
             else:
                 try:
                     bus = EventBus.get_instance(DB_PATH)
-                    recent = bus.get_recent_events(limit=1)
+                    recent = bus.get_recent_events(
+                        limit=1, profile_id=active_profile,
+                    )
                     if recent:
                         last_db_id = recent[-1].get('id', 0)
                 except Exception:
@@ -109,6 +117,9 @@ async def event_stream(
                     while True:
                         event = client_queue.get_nowait()
                         if event_type and event.get("event_type") != event_type:
+                            continue
+                        # Profile isolation: never forward another profile's event.
+                        if event.get("profile_id", "default") != active_profile:
                             continue
                         data = json.dumps(event)
                         event_id = event.get("id", event.get("seq", ""))
@@ -126,6 +137,7 @@ async def event_stream(
                         bus = EventBus.get_instance(DB_PATH)
                         new_events = bus.get_recent_events(
                             since_id=last_db_id, limit=10, event_type=event_type,
+                            profile_id=active_profile,
                         )
                         for evt in new_events:
                             data = json.dumps(evt)
@@ -162,13 +174,16 @@ async def get_events(
         return {"events": [], "count": 0, "message": "Event Bus not available"}
     try:
         bus = EventBus.get_instance(DB_PATH)
+        active_profile = get_active_profile()
         events = bus.get_recent_events(
             since_id=since_id, limit=limit, event_type=event_type,
+            profile_id=active_profile,
         )
-        stats = bus.get_event_stats()
+        stats = bus.get_event_stats(profile_id=active_profile)
         return {"events": events, "count": len(events), "stats": stats}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Event retrieval error: {str(e)}")
+    except Exception:
+        logger.exception("events route error")
+        raise HTTPException(status_code=500, detail="Event retrieval error")
 
 
 @router.get("/api/events/stats")
@@ -178,6 +193,7 @@ async def get_event_stats():
         return {"total_events": 0, "message": "Event Bus not available"}
     try:
         bus = EventBus.get_instance(DB_PATH)
-        return bus.get_event_stats()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Event stats error: {str(e)}")
+        return bus.get_event_stats(profile_id=get_active_profile())
+    except Exception:
+        logger.exception("events route error")
+        raise HTTPException(status_code=500, detail="Event stats error")

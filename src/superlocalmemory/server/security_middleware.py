@@ -36,13 +36,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content Security Policy (v3.4.22 — vendored assets, no CDN hosts).
         # All Bootstrap/D3/Sigma/graphology/Inter assets ship locally under
         # /static/vendor/, so we drop every CDN host from the allow-list.
-        # 'unsafe-inline' stays on script-src/style-src for the legacy inline
-        # click handlers in index.html — migrating those to addEventListener
-        # is tracked as a separate backlog item. img-src drops the https:
-        # wildcard now that nothing remote loads.
+        #
+        # v3.7.9 (B2): 'unsafe-inline' removed from script-src. Every inline
+        # on*= event handler was migrated to data-act-* attributes dispatched
+        # by js/event-delegation.js (nonces cannot authorise inline event-
+        # handler attributes, so delegation is the only real fix). A stored-XSS
+        # payload can no longer execute inline script here.
+        # 'unsafe-inline' is retained on style-src only: 82 inline style=
+        # attributes remain, style injection is far lower risk than script
+        # injection, and inline style attributes cannot be nonce'd either
+        # (GitHub/GitLab keep the same script-locked / style-inline posture).
+        # img-src drops the https: wildcard now that nothing remote loads.
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",
+            "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
             "font-src 'self'",
             "img-src 'self' data:",

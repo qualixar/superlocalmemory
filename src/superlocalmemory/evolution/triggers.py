@@ -294,17 +294,19 @@ class HealthCheckTrigger:
 
     _STATE_KEY = "health_check_cycle_count"
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, profile_id: str = "default"):
         self._db_path = str(db_path)
+        self._profile_id = profile_id or "default"
         self._check_every_n = 3  # Every 3rd consolidation (~18h)
 
     def _read_cycle_count(self) -> int:
-        """Read persisted cycle count from DB."""
+        """Read this profile's persisted cycle count."""
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT value FROM evolution_cycle_state WHERE key = ?",
-                (self._STATE_KEY,),
+                "SELECT value FROM evolution_cycle_state "
+                "WHERE profile_id = ? AND key = ?",
+                (self._profile_id, self._STATE_KEY),
             ).fetchone()
             return int(row[0]) if row else 0
         except sqlite3.OperationalError:
@@ -314,23 +316,30 @@ class HealthCheckTrigger:
             conn.close()
 
     def _write_cycle_count(self, count: int) -> None:
-        """Persist cycle count to DB.
+        """Persist this profile's cycle count.
 
-        Relies on evolution_cycle_state table created by EvolutionStore.
-        Falls back to CREATE IF NOT EXISTS for standalone use.
+        The evolution_cycle_state table (profile_id, key) is created by
+        EvolutionStore with the correct composite-PK schema — we do NOT
+        CREATE it here (the old single-key CREATE produced a conflicting
+        schema and cross-profile collisions).
         """
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
-            # Table schema matches evolution_store.py: value INTEGER
+            # Correct composite-PK schema (matches EvolutionStore). Created only
+            # for standalone use (tests); a real deployment already has it.
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS evolution_cycle_state "
-                "(key TEXT PRIMARY KEY, value INTEGER DEFAULT 0, updated_at TEXT)",
+                "CREATE TABLE IF NOT EXISTS evolution_cycle_state ("
+                "profile_id TEXT NOT NULL DEFAULT 'default', key TEXT NOT NULL, "
+                "value INTEGER DEFAULT 0, updated_at TEXT, "
+                "PRIMARY KEY (profile_id, key))",
             )
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
-                "INSERT OR REPLACE INTO evolution_cycle_state (key, value, updated_at) "
-                "VALUES (?, ?, ?)",
-                (self._STATE_KEY, count, now),
+                "INSERT INTO evolution_cycle_state (profile_id, key, value, updated_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(profile_id, key) DO UPDATE SET "
+                "value=excluded.value, updated_at=excluded.updated_at",
+                (self._profile_id, self._STATE_KEY, count, now),
             )
             conn.commit()
         except sqlite3.OperationalError as exc:

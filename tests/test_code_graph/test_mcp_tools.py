@@ -479,3 +479,81 @@ class TestCodeEntityHistory:
         assert result["success"] is True
         assert result["total_memories"] == 3
         assert len(result["timeline"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# B1 (3.7.9): update_code_graph repo_path containment + git hardening (RCE)
+# ---------------------------------------------------------------------------
+
+
+def _no_git_run(*_args, **_kwargs):
+    raise AssertionError("git subprocess must not run for a rejected repo_path")
+
+
+class TestUpdateRepoPathSecurity:
+    """update_code_graph must contain untrusted repo_path under $HOME and never
+    invoke git in an untrusted cwd. Regression for the RCE where a hostile repo's
+    .git config/hooks (core.fsmonitor / core.hooksPath) execute under ``git``.
+    """
+
+    def test_traversal_repo_path_rejected(self, tools_with_graph, monkeypatch):
+        import subprocess
+        tools, _ = tools_with_graph
+        monkeypatch.setattr(subprocess, "run", _no_git_run)
+        res = _run_async(tools["update_code_graph"](repo_path="../../../../etc"))
+        assert res["success"] is False
+        assert "Invalid repo_path" in res["error"]
+
+    def test_absolute_path_outside_home_rejected(
+        self, tools_with_graph, tmp_path, monkeypatch
+    ):
+        import subprocess
+        tools, _ = tools_with_graph
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(subprocess, "run", _no_git_run)
+        res = _run_async(tools["update_code_graph"](repo_path="/etc"))
+        assert res["success"] is False
+        assert "Invalid repo_path" in res["error"]
+
+    def test_home_path_without_dot_git_rejected(
+        self, tools_with_graph, tmp_path, monkeypatch
+    ):
+        import subprocess
+        tools, _ = tools_with_graph
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(subprocess, "run", _no_git_run)
+        plain_dir = tmp_path / "not_a_repo"
+        plain_dir.mkdir()
+        res = _run_async(tools["update_code_graph"](repo_path=str(plain_dir)))
+        assert res["success"] is False
+        assert "Not a git repository" in res["error"]
+
+    def test_valid_repo_invokes_hardened_git(
+        self, tools_with_graph, tmp_path, monkeypatch
+    ):
+        import subprocess
+        tools, _ = tools_with_graph
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+
+        captured: dict = {}
+
+        class _Result:
+            stdout = ""
+
+        def _fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["cwd"] = kwargs.get("cwd")
+            captured["env"] = kwargs.get("env") or {}
+            return _Result()
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        res = _run_async(tools["update_code_graph"](repo_path=str(repo)))
+
+        assert captured["cmd"][0] == "git"
+        assert "core.hooksPath=/dev/null" in captured["cmd"]
+        assert "core.fsmonitor=" in captured["cmd"]
+        assert captured["env"].get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert captured["cwd"] == str(repo.resolve())
+        assert res["success"] is True

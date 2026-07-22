@@ -242,6 +242,12 @@
   -webkit-backdrop-filter: blur(12px);
 }
 
+/* B2 (v3.7.9): CSP-safe hover border — replaces inline onmouseover/onmouseout
+   on entity cards (which forced script-src 'unsafe-inline'). */
+.ng-hover-border:hover {
+  border-color: var(--ng-border-prominent);
+}
+
 .ng-glass-elevated {
   background: var(--ng-bg-glass-hover);
   border: 1px solid var(--ng-border-default);

@@ -157,7 +157,7 @@ class PatternExtractor:
         all_patterns: list[PatternAssertion] = []
         all_patterns.extend(self._extract_from_core_memory(profile_id))
         all_patterns.extend(self._extract_from_behavioral(profile_id))
-        all_patterns.extend(self._extract_from_cross_project())
+        all_patterns.extend(self._extract_from_cross_project(profile_id))
         all_patterns.extend(self._extract_from_workflows(profile_id))
         # v3.4.7: Extract from behavioral assertions (learned patterns)
         all_patterns.extend(self._extract_from_assertions(profile_id))
@@ -270,9 +270,12 @@ class PatternExtractor:
                 ))
         return patterns
 
-    def _extract_from_cross_project(self) -> list[PatternAssertion]:
-        """Extract patterns from cross-project aggregator."""
+    def _extract_from_cross_project(
+        self, profile_id: str = "default"
+    ) -> list[PatternAssertion]:
+        """Extract patterns from cross-project aggregator, scoped to *profile_id*."""
         preferences = self._cross_project.get_preferences(
+            profile_id=profile_id,
             min_confidence=self._config.min_confidence,
         )
         patterns: list[PatternAssertion] = []

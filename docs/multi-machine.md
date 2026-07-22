@@ -27,7 +27,7 @@ SuperLocalMemory v3.4.48 enables two machines on the same LAN to share agent pee
 
 ```bash
 export SLM_MESH_SHARED_SECRET=your-shared-secret-here
-slm start   # or however you start SLM
+slm serve   # start the SLM daemon
 ```
 
 ### On M5 (add `SLM_MESH_PEER_URL` to your env/MCP config)

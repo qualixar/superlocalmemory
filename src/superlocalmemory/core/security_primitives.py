@@ -399,6 +399,35 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
 # ---------------------------------------------------------------------------
 
 
+def harden_db_perms(db_path: str | Path) -> None:
+    """Restrict a database file (and its WAL/SHM sidecars) to owner-only 0600
+    and its parent directory to 0700 (C4 encryption-at-rest defense-in-depth).
+
+    Best-effort and POSIX-only: on Windows or if the file does not exist yet
+    this is a silent no-op. The daemon's data dir is already 0700, but the DB
+    files themselves shipped 0644 (world-readable); on a shared host that is a
+    real exposure even with full-disk encryption at rest.
+    """
+    if _is_windows():
+        return
+    try:
+        p = Path(db_path)
+        parent = p.parent
+        try:
+            os.chmod(parent, 0o700)
+        except OSError:
+            pass
+        for suffix in ("", "-wal", "-shm"):
+            f = Path(str(p) + suffix)
+            if f.exists():
+                try:
+                    os.chmod(f, 0o600)
+                except OSError:
+                    pass
+    except Exception:  # pragma: no cover — never block DB open on a chmod
+        pass
+
+
 def _install_token_path() -> Path:  # pragma: no cover — monkeypatched in tests
     """Default install-token location — override in tests via monkeypatch."""
     from superlocalmemory.infra.data_root import state_path
@@ -598,8 +627,17 @@ def run_subprocess_safe(
       - Restricted environment by default — only a minimal set of safe keys.
       - Callers may pass an explicit ``env`` to add specific variables.
 
-    This is the ONE place in the codebase allowed to call ``subprocess.run``.
-    Grep guard in CI enforces this (LLD-07 §7 SEC-HR-06).
+    This is the PREFERRED wrapper for any subprocess whose ``argv`` includes
+    dynamic or externally-influenced values — routing them through here keeps
+    ``shell=False``, a mandatory timeout, and a restricted environment.
+
+    It is not the *only* ``subprocess.run`` call site: a small set of vetted
+    callers invoke ``subprocess.run`` directly where they need inherited stdio
+    for live progress, a long-lived managed process, or process-group control
+    (e.g. model downloads in ``cli/setup_wizard.py``, ``infra/process_reaper``,
+    ``cli/service_installer``). Those pass only fixed/argv-quoted values — never
+    a shell string. Do not read this wrapper as a guarantee that no other
+    subprocess call exists; audit new call sites individually. (L-01, 3.7.9)
     """
     if not isinstance(argv, list):
         raise TypeError("argv must be list[str], shell=False only")

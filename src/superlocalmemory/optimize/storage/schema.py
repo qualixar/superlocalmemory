@@ -120,6 +120,15 @@ _DDL_STATEMENTS: tuple[str, ...] = (
         updated_at                  REAL    NOT NULL DEFAULT 0
     )
     """,
+    # M2: durable KV hit/miss counters for the slm_cache_* MCP tools. Kept in a
+    # separate table (not llmcache_metrics, whose columns mirror MetricsSnapshot
+    # exactly) so KV stats survive daemon restarts.
+    """
+    CREATE TABLE IF NOT EXISTS llmcache_kv_counters (
+        name  TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 0
+    )
+    """,
 )
 
 
@@ -170,6 +179,7 @@ def get_table_names() -> tuple[str, ...]:
         "llmcache_boundaries",
         "llmcache_centroids",
         "llmcache_metrics",
+        "llmcache_kv_counters",
     )
 
 

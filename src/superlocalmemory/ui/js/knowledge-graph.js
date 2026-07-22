@@ -457,7 +457,7 @@ function openSigmaNodeDetail(nodeId) {
         var neighbors = sigmaGraph.neighbors(nodeId);
         var neighborList = neighbors.slice(0, 10).map(function(nid) {
             var na = sigmaGraph.getNodeAttributes(nid);
-            return '<div class="border-bottom py-1 cursor-pointer" onclick="sigmaHighlightNode(\'' + nid + '\')">'
+            return '<div class="border-bottom py-1 cursor-pointer" data-act-click="sigma-highlight-node" data-node-id="' + nid + '">'
                 + '<small class="text-primary">' + escapeHtml((na.label || '').substring(0, 40)) + '</small>'
                 + '</div>';
         }).join('');
@@ -477,7 +477,7 @@ function openSigmaNodeDetail(nodeId) {
             + '<h6 class="mb-1">Connected (' + neighbors.length + ')</h6>'
             + '<div style="max-height:250px;overflow-y:auto;">' + (neighborList || '<span class="text-muted">No connections</span>') + '</div>'
             + '<hr class="my-2">'
-            + '<button class="btn btn-sm btn-outline-primary w-100" onclick="openMemoryDetail({id:\'' + nodeId + '\',content:\'' + escapeHtml((attrs.slm_content || '').substring(0, 80).replace(/'/g, "\\'")) + '\',category:\'' + (attrs.slm_category || '') + '\',importance:' + (attrs.slm_importance || 0.5) + '},\'graph\')"><i class="bi bi-box-arrow-up-right"></i> Full Detail</button>';
+            + '<button class="btn btn-sm btn-outline-primary w-100" data-act-click="open-memory-detail" data-mem-id="' + nodeId + '" data-mem-content="' + escapeHtml((attrs.slm_content || '').substring(0, 80)).replace(/"/g, '&quot;') + '" data-mem-category="' + (attrs.slm_category || '') + '" data-mem-importance="' + (attrs.slm_importance || 0.5) + '"><i class="bi bi-box-arrow-up-right"></i> Full Detail</button>';
     }
 }
 
@@ -493,7 +493,7 @@ function updateSigmaStatsPanel(data) {
         categories[cat] = (categories[cat] || 0) + 1;
     });
     var catHtml = Object.keys(categories).map(function(k) {
-        return '<div>' + k + ': <strong>' + categories[k] + '</strong></div>';
+        return '<div>' + escapeHtml(k) + ': <strong>' + categories[k] + '</strong></div>';
     }).join('');
     panel.innerHTML = '<div>Nodes: <strong>' + nodes.length + '</strong></div>'
         + '<div>Edges: <strong>' + links.length + '</strong></div>'
@@ -738,14 +738,14 @@ function renderLiveCommunityPanel(communityMap) {
         // Generate simple label from most common entity
         var label = generateLiveLabel(c.community_id, c.members);
         html += '<div class="d-flex align-items-center mb-1 cursor-pointer" '
-            + 'onclick="sigmaFilterByCommunity(' + c.community_id + ', \'' + communitySource + '\')" '
+            + 'data-act-click="sigma-filter-community" data-community-id="' + c.community_id + '" data-community-src="' + communitySource + '" '
             + 'title="' + c.members.length + ' memories">'
             + '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>'
             + '<span class="ms-1 text-truncate" style="font-size:0.75rem;">' + escapeHtml(label) + '</span>'
             + '<span class="badge bg-light text-dark ms-auto" style="font-size:0.65rem;">' + c.members.length + '</span>'
             + '</div>';
     });
-    html += '<button class="btn btn-sm btn-outline-secondary w-100 mt-1" onclick="sigmaClearSearch()">'
+    html += '<button class="btn btn-sm btn-outline-secondary w-100 mt-1" data-act-click="sigma-clear-search">'
         + '<i class="bi bi-x-circle"></i> Clear Filter</button>';
     panel.innerHTML = html;
 }
@@ -780,7 +780,7 @@ function loadCommunities() {
             var communities = data.communities || [];
             if (communities.length === 0) {
                 panel.innerHTML = '<div class="text-muted small">No communities detected yet.</div>'
-                    + '<button class="btn btn-sm btn-outline-primary w-100 mt-1" onclick="runCommunityDetection()">'
+                    + '<button class="btn btn-sm btn-outline-primary w-100 mt-1" data-act-click="run-community-detection">'
                     + '<i class="bi bi-cpu"></i> Detect Communities</button>';
                 return;
             }
@@ -789,16 +789,16 @@ function loadCommunities() {
             communities.forEach(function(c) {
                 var color = c.color || SIGMA_CLUSTER_COLORS[c.community_id % SIGMA_CLUSTER_COLORS.length];
                 html += '<div class="d-flex align-items-center mb-1 cursor-pointer" '
-                    + 'onclick="sigmaFilterByCommunity(' + c.community_id + ', \'backend\')" '
-                    + 'title="' + (c.top_entities || []).join(', ') + '">'
+                    + 'data-act-click="sigma-filter-community" data-community-id="' + c.community_id + '" data-community-src="backend" '
+                    + 'title="' + escapeHtml((c.top_entities || []).join(', ')) + '">'
                     + '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>'
                     + '<span class="ms-1 text-truncate" style="font-size:0.75rem;">' + escapeHtml(c.label) + '</span>'
                     + '<span class="badge bg-light text-dark ms-auto" style="font-size:0.65rem;">' + c.member_count + '</span>'
                     + '</div>';
             });
-            html += '<button class="btn btn-sm btn-outline-secondary w-100 mt-1" onclick="sigmaClearSearch()">'
+            html += '<button class="btn btn-sm btn-outline-secondary w-100 mt-1" data-act-click="sigma-clear-search">'
                 + '<i class="bi bi-x-circle"></i> Clear Filter</button>';
-            html += '<button class="btn btn-sm btn-outline-primary w-100 mt-1" onclick="runCommunityDetection()">'
+            html += '<button class="btn btn-sm btn-outline-primary w-100 mt-1" data-act-click="run-community-detection">'
                 + '<i class="bi bi-arrow-clockwise"></i> Refresh</button>';
             panel.innerHTML = html;
         })
@@ -816,7 +816,7 @@ function runCommunityDetection() {
                 loadCommunities();
                 loadGraphSigma();
             } else {
-                if (panel) panel.innerHTML = '<div class="text-danger small">Failed: ' + (data.error || 'Unknown') + '</div>';
+                if (panel) panel.innerHTML = '<div class="text-danger small">Failed: ' + escapeHtml(data.error || 'Unknown') + '</div>';
             }
         })
         .catch(function(e) {

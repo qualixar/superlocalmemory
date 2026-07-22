@@ -32,8 +32,9 @@ def _response() -> RecallResponse:
 class _Engine:
     def __init__(self) -> None:
         self.response = _response()
+        self.profile_id = "default"
         self._db = SimpleNamespace(
-            get_memory_content_batch=lambda _ids: {
+            get_memory_content_batch=lambda _ids, *a, **k: {
                 "memory-1": "Source memory text",
             },
         )

@@ -44,7 +44,7 @@ Your IDE config should look like:
 | `get_status` | — | System status (mode, DB, count, math health) |
 | `health` | — | Math layer health (Fisher, Sheaf, Langevin) |
 | `build_graph` | — | Rebuild the knowledge graph |
-| `get_attribution` | `memory_id` | Get provenance chain for a memory |
+| `get_attribution` | — | Return system attribution metadata: product name, author, organization, license, and URLs. No parameters. |
 | `compact_memories` | — | Compress and optimize storage |
 | `memory_used` | — | Storage usage statistics |
 | `backup_status` | — | Backup and database health |
@@ -84,8 +84,8 @@ and `answer_confidence: null`.
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `recall_trace` | `query` | Recall with per-channel score breakdown |
-| `get_lifecycle_status` | — | Memory lifecycle health (active/warm/cold counts) |
+| `recall_trace` | `query`, `limit?` | Recall with per-channel score breakdown |
+| `get_lifecycle_status` | `limit?`, `status?` | Memory lifecycle health (active/warm/cold counts) |
 | `consistency_check` | — | Run sheaf consistency verification |
 | `set_mode` | `mode` | Switch operating mode (a/b/c) |
 | `get_mode` | — | Current operating mode |
@@ -96,12 +96,13 @@ MCP resources provide read-only data streams that IDEs can subscribe to.
 
 | Resource | URI | Description |
 |----------|-----|-------------|
-| Memory Stats | `memory://stats` | Total memories, storage size, profile count |
-| Recent Memories | `memory://recent` | Last 10 memories stored |
-| Active Profile | `memory://profile` | Current profile name and settings |
-| System Health | `memory://health` | Database status, math layer scores |
-| Knowledge Graph | `memory://graph` | Graph summary (nodes, edges, communities) |
-| Learning State | `memory://learning` | ML model state and learned patterns |
+| Active Context | `slm://context` | Active session context auto-injected on MCP connect. Returns relevant memories + learning status. |
+| Recent Memories | `slm://recent` | The 20 most recently stored memories |
+| Memory Stats | `slm://stats` | Memory count, database size, mode, profile |
+| Topic Clusters | `slm://clusters` | Topic clusters detected across memories |
+| Identity | `slm://identity` | Learned user preferences and patterns |
+| Learning State | `slm://learning` | Current state of the adaptive learning system |
+| Engagement | `slm://engagement` | Usage statistics and interaction patterns |
 
 ## Optimize Tools (v3.6.11)
 

@@ -27,6 +27,12 @@ from .helpers import (
 
 logger = logging.getLogger("superlocalmemory.routes.data_io")
 
+
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log full traceback server-side; return a generic message to the client."""
+    logger.exception("data_io route error")
+    return HTTPException(status_code=500, detail=detail)
+
 # WebSocket manager reference (set by ui_server.py at startup)
 ws_manager = None
 
@@ -35,11 +41,19 @@ router = APIRouter()
 
 @router.get("/api/export")
 async def export_memories(
+    request: Request,
     format: str = Query("json", pattern="^(json|jsonl|csv)$"),
     category: Optional[str] = None,
     project_name: Optional[str] = None,
 ):
     """Export memories as JSON, JSONL, or CSV."""
+    # Bulk data export. This GET is not covered by the mutation middleware and
+    # is reached both by a plain fetch and a top-level navigation, neither of
+    # which carries a credential header — so gate on the loopback-trusted
+    # mutation boundary: local owner allowed, remote uncredentialed fails closed.
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
+    require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
+                                actor_kind="data-export")
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
@@ -128,22 +142,29 @@ async def export_memories(
             },
         )
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
+    except Exception:
+        raise _internal_error("Export error")
 
 
 @router.post("/api/import")
 async def import_memories(request: Request, file: UploadFile = File(...)):
     """Import memories from JSON file using V3 engine."""
     try:
-        content = await file.read()
+        # Bound the upload so a huge file cannot OOM the daemon (read one byte
+        # past the cap to detect oversize without buffering the whole payload).
+        _MAX_IMPORT_BYTES = 50 * 1024 * 1024
+        content = await file.read(_MAX_IMPORT_BYTES + 1)
+        if len(content) > _MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=413,
+                                detail="Import file exceeds the 50 MB limit")
         if file.filename and file.filename.endswith('.gz'):
             content = gzip.decompress(content)
 
         try:
             data = json.loads(content)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+        except json.JSONDecodeError:
+            logger.warning("import: invalid JSON payload")
+            raise HTTPException(status_code=400, detail="Invalid JSON format")
 
         if isinstance(data, dict) and 'memories' in data:
             memories = data['memories']
@@ -224,7 +245,8 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 if "UNIQUE constraint failed" in str(e):
                     skipped += 1
                 else:
-                    errors.append(f"Memory {idx}: {str(e)}")
+                    logger.warning("import: memory %d failed: %s", idx, e)
+                    errors.append(f"Memory {idx}: import failed")
 
         return {
             "success": True, "imported_count": imported,
@@ -234,5 +256,5 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Import error: {str(e)}")
+    except Exception:
+        raise _internal_error("Import error")

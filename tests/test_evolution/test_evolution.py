@@ -328,8 +328,8 @@ class TestEvolutionStoreCRUD:
 
     def test_save_and_get_record(self, evo_store):
         record = _make_record(record_id="r1")
-        evo_store.save_record(record)
-        retrieved = evo_store.get_record("r1")
+        evo_store.save_record(record, "default")
+        retrieved = evo_store.get_record("r1", "default")
         assert retrieved is not None
         assert retrieved.id == "r1"
         assert retrieved.skill_name == "test-skill"
@@ -337,11 +337,11 @@ class TestEvolutionStoreCRUD:
         assert retrieved.trigger == TriggerType.POST_SESSION
 
     def test_get_nonexistent_record(self, evo_store):
-        assert evo_store.get_record("does-not-exist") is None
+        assert evo_store.get_record("does-not-exist", "default") is None
 
     def test_save_record_upsert(self, evo_store):
         r1 = _make_record(record_id="r1", status=EvolutionStatus.CANDIDATE)
-        evo_store.save_record(r1)
+        evo_store.save_record(r1, "default")
 
         r1_updated = EvolutionRecord(
             id="r1",
@@ -353,16 +353,16 @@ class TestEvolutionStoreCRUD:
             created_at=r1.created_at,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        evo_store.save_record(r1_updated)
+        evo_store.save_record(r1_updated, "default")
 
-        retrieved = evo_store.get_record("r1")
+        retrieved = evo_store.get_record("r1", "default")
         assert retrieved is not None
         assert retrieved.status == EvolutionStatus.PROMOTED
 
     def test_evidence_round_trip(self, evo_store):
         record = _make_record(evidence=("low perf", "3 retries", "error logged"))
-        evo_store.save_record(record)
-        retrieved = evo_store.get_record(record.id)
+        evo_store.save_record(record, "default")
+        retrieved = evo_store.get_record(record.id, "default")
         assert retrieved is not None
         assert retrieved.evidence == ("low perf", "3 retries", "error logged")
 
@@ -373,16 +373,15 @@ class TestEvolutionStoreCRUD:
                     record_id=f"r{i}",
                     skill_name="my-skill",
                     created_at=f"2026-04-{10 + i:02d}T00:00:00Z",
-                ),
-            )
-        history = evo_store.get_skill_history("my-skill", limit=3)
+                ), "default")
+        history = evo_store.get_skill_history("my-skill", "default", limit=3)
         assert len(history) == 3
         # Ordered by created_at DESC
         assert history[0].id == "r4"
         assert history[2].id == "r2"
 
     def test_get_skill_history_empty(self, evo_store):
-        assert evo_store.get_skill_history("nonexistent") == []
+        assert evo_store.get_skill_history("nonexistent", "default") == []
 
     def test_get_recent(self, evo_store):
         for i in range(5):
@@ -391,9 +390,8 @@ class TestEvolutionStoreCRUD:
                     record_id=f"r{i}",
                     skill_name=f"skill-{i}",
                     created_at=f"2026-04-{10 + i:02d}T00:00:00Z",
-                ),
-            )
-        recent = evo_store.get_recent(limit=2)
+                ), "default")
+        recent = evo_store.get_recent("default", limit=2)
         assert len(recent) == 2
         assert recent[0].id == "r4"
 
@@ -402,20 +400,20 @@ class TestEvolutionStoreBudget:
     """Budget control — max 3 evolutions per cycle."""
 
     def test_can_evolve_initially(self, evo_store):
-        assert evo_store.can_evolve() is True
+        assert evo_store.can_evolve("default") is True
 
     def test_budget_decrements(self, evo_store):
         for _ in range(MAX_EVOLUTIONS_PER_CYCLE):
-            assert evo_store.can_evolve() is True
-            evo_store.record_evolution_attempt()
-        assert evo_store.can_evolve() is False
+            assert evo_store.can_evolve("default") is True
+            evo_store.record_evolution_attempt("default")
+        assert evo_store.can_evolve("default") is False
 
     def test_reset_cycle_restores_budget(self, evo_store):
         for _ in range(MAX_EVOLUTIONS_PER_CYCLE):
-            evo_store.record_evolution_attempt()
-        assert evo_store.can_evolve() is False
-        evo_store.reset_cycle()
-        assert evo_store.can_evolve() is True
+            evo_store.record_evolution_attempt("default")
+        assert evo_store.can_evolve("default") is False
+        evo_store.reset_cycle("default")
+        assert evo_store.can_evolve("default") is True
 
     def test_max_evolutions_per_cycle_value(self):
         assert MAX_EVOLUTIONS_PER_CYCLE == 3
@@ -448,23 +446,19 @@ class TestEvolutionStoreAntiLoop:
                     record_id=f"r{i}",
                     skill_name="failing-skill",
                     status=EvolutionStatus.CANDIDATE,
-                ),
-            )
-        assert evo_store.count_attempts("failing-skill") == 4
+                ), "default")
+        assert evo_store.count_attempts("failing-skill", "default") == 4
 
     def test_count_attempts_excludes_only_promoted(self, evo_store):
         """H-ATTEMPTS fix: rejected and failed now count toward the cap."""
         evo_store.save_record(
-            _make_record(record_id="r0", status=EvolutionStatus.PROMOTED),
-        )
+            _make_record(record_id="r0", status=EvolutionStatus.PROMOTED), "default")
         evo_store.save_record(
-            _make_record(record_id="r1", status=EvolutionStatus.REJECTED),
-        )
+            _make_record(record_id="r1", status=EvolutionStatus.REJECTED), "default")
         evo_store.save_record(
-            _make_record(record_id="r2", status=EvolutionStatus.CANDIDATE),
-        )
+            _make_record(record_id="r2", status=EvolutionStatus.CANDIDATE), "default")
         # promoted is excluded, rejected + candidate both count
-        assert evo_store.count_attempts("test-skill") == 2
+        assert evo_store.count_attempts("test-skill", "default") == 2
 
     def test_has_exceeded_attempts(self, evo_store):
         for i in range(MAX_ATTEMPTS_PER_SKILL):
@@ -473,22 +467,20 @@ class TestEvolutionStoreAntiLoop:
                     record_id=f"r{i}",
                     skill_name="bad-skill",
                     status=EvolutionStatus.CONFIRMED,
-                ),
-            )
-        assert evo_store.has_exceeded_attempts("bad-skill") is True
+                ), "default")
+        assert evo_store.has_exceeded_attempts("bad-skill", "default") is True
 
     def test_has_not_exceeded_attempts(self, evo_store):
         evo_store.save_record(
-            _make_record(record_id="r0", skill_name="good-skill"),
-        )
-        assert evo_store.has_exceeded_attempts("good-skill") is False
+            _make_record(record_id="r0", skill_name="good-skill"), "default")
+        assert evo_store.has_exceeded_attempts("good-skill", "default") is False
 
 
 class TestEvolutionStoreStats:
     """Stats aggregation."""
 
     def test_stats_empty(self, evo_store):
-        stats = evo_store.get_stats()
+        stats = evo_store.get_stats("default")
         assert stats["total"] == 0
         assert stats["by_status"] == {}
         assert stats["by_type"] == {}
@@ -497,19 +489,16 @@ class TestEvolutionStoreStats:
     def test_stats_with_records(self, evo_store):
         evo_store.save_record(
             _make_record(record_id="r0", status=EvolutionStatus.PROMOTED,
-                         evo_type=EvolutionType.FIX),
-        )
+                         evo_type=EvolutionType.FIX), "default")
         evo_store.save_record(
             _make_record(record_id="r1", status=EvolutionStatus.REJECTED,
-                         evo_type=EvolutionType.FIX),
-        )
+                         evo_type=EvolutionType.FIX), "default")
         evo_store.save_record(
             _make_record(record_id="r2", status=EvolutionStatus.PROMOTED,
-                         evo_type=EvolutionType.DERIVED),
-        )
-        evo_store.record_evolution_attempt()
+                         evo_type=EvolutionType.DERIVED), "default")
+        evo_store.record_evolution_attempt("default")
 
-        stats = evo_store.get_stats()
+        stats = evo_store.get_stats("default")
         assert stats["total"] == 3
         assert stats["by_status"]["promoted"] == 2
         assert stats["by_status"]["rejected"] == 1
@@ -523,7 +512,7 @@ class TestEvolutionStoreRowToRecord:
 
     def test_malformed_evidence_json(self, evo_store):
         record = _make_record(evidence=("valid",))
-        evo_store.save_record(record)
+        evo_store.save_record(record, "default")
 
         # Manually corrupt the evidence JSON in the DB
         conn = sqlite3.connect(str(evo_store._db_path), timeout=10)
@@ -534,7 +523,7 @@ class TestEvolutionStoreRowToRecord:
         conn.commit()
         conn.close()
 
-        retrieved = evo_store.get_record(record.id)
+        retrieved = evo_store.get_record(record.id, "default")
         assert retrieved is not None
         assert retrieved.evidence == ()
 
@@ -569,9 +558,11 @@ def trigger_db(tmp_path):
             evidence_count INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS evolution_cycle_state (
-            key TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
             value INTEGER DEFAULT 0,
-            updated_at TEXT
+            updated_at TEXT,
+            PRIMARY KEY (profile_id, key)
         );
     """)
     conn.commit()
@@ -818,8 +809,8 @@ class TestHealthCheckTrigger:
         # Set it to 2 in DB so next should_run() call sees cycle 3.
         _conn = sqlite3.connect(str(trigger_db))
         _conn.execute(
-            "INSERT OR REPLACE INTO evolution_cycle_state (key, value, updated_at) "
-            "VALUES ('health_check_cycle_count', 2, '2026-04-15T00:00:00Z')",
+            "INSERT OR REPLACE INTO evolution_cycle_state (profile_id, key, value, updated_at) "
+            "VALUES ('default', 'health_check_cycle_count', 2, '2026-04-15T00:00:00Z')",
         )
         _conn.commit()
         _conn.close()
@@ -835,8 +826,8 @@ class TestHealthCheckTrigger:
         # Set cycle count to 2 in DB for the health check to fire
         _conn = sqlite3.connect(str(trigger_db))
         _conn.execute(
-            "INSERT OR REPLACE INTO evolution_cycle_state (key, value, updated_at) "
-            "VALUES ('health_check_cycle_count', 2, '2026-04-15T00:00:00Z')",
+            "INSERT OR REPLACE INTO evolution_cycle_state (profile_id, key, value, updated_at) "
+            "VALUES ('default', 'health_check_cycle_count', 2, '2026-04-15T00:00:00Z')",
         )
         _conn.commit()
         _conn.close()
@@ -1355,3 +1346,86 @@ class TestSkillEvolverHelpers:
         diff = "--- original\n+++ evolved\n-removed\n+added1\n+added2\n"
         summary = evolver._summarize_diff(diff)
         assert "+2/-1" in summary
+
+
+class TestEvolutionStoreProfileIsolation:
+    """Per-profile isolation of skill-evolution history AND cycle budget.
+
+    Regression guard for the confirmed leak: skill_evolution_log and
+    evolution_cycle_state had no profile_id, so every profile shared one
+    history and one evolve budget (one profile exhausting its 3-per-cycle
+    budget blocked all others).
+    """
+
+    def test_history_is_isolated_between_profiles(self, evo_store):
+        evo_store.save_record(_make_record(record_id="a1", skill_name="s"), "work")
+        evo_store.save_record(_make_record(record_id="a2", skill_name="s"), "work")
+        evo_store.save_record(_make_record(record_id="b1", skill_name="s"), "home")
+
+        assert len(evo_store.get_recent("work")) == 2
+        assert len(evo_store.get_recent("home")) == 1
+        assert evo_store.get_recent("empty") == []
+        # A record from 'work' is invisible to 'home'.
+        assert evo_store.get_record("a1", "work") is not None
+        assert evo_store.get_record("a1", "home") is None
+
+    def test_stats_are_isolated_between_profiles(self, evo_store):
+        evo_store.save_record(
+            _make_record(record_id="w1", status=EvolutionStatus.PROMOTED), "work")
+        assert evo_store.get_stats("work")["total"] == 1
+        assert evo_store.get_stats("home")["total"] == 0
+
+    def test_attempts_are_isolated_between_profiles(self, evo_store):
+        for i in range(3):
+            evo_store.save_record(
+                _make_record(record_id=f"w{i}", skill_name="risky",
+                             status=EvolutionStatus.REJECTED), "work")
+        assert evo_store.has_exceeded_attempts("risky", "work") is True
+        # The SAME skill name is untouched under 'home'.
+        assert evo_store.count_attempts("risky", "home") == 0
+        assert evo_store.has_exceeded_attempts("risky", "home") is False
+
+    def test_cycle_budget_is_isolated_between_profiles(self, evo_store):
+        # 'work' exhausts its 3-per-cycle budget.
+        for _ in range(3):
+            evo_store.record_evolution_attempt("work")
+        assert evo_store.can_evolve("work") is False
+        # 'home' still has its full, independent budget.
+        assert evo_store.can_evolve("home") is True
+        # Resetting 'work' does not touch 'home' and restores 'work'.
+        evo_store.reset_cycle("work")
+        assert evo_store.can_evolve("work") is True
+
+    def test_self_migration_backfills_legacy_rows_to_default(self, tmp_path):
+        """A pre-isolation DB (no profile_id) migrates + backfills to 'default'."""
+        db = tmp_path / "legacy_evo.db"
+        # Build the OLD schema by hand (no profile_id anywhere).
+        conn = sqlite3.connect(str(db))
+        conn.executescript(
+            "CREATE TABLE skill_evolution_log ("
+            " id TEXT PRIMARY KEY, skill_name TEXT NOT NULL,"
+            " evolution_type TEXT NOT NULL, trigger_type TEXT NOT NULL,"
+            " status TEXT DEFAULT 'candidate', evidence TEXT DEFAULT '[]',"
+            " created_at TEXT NOT NULL);"
+            "CREATE TABLE evolution_cycle_state ("
+            " key TEXT PRIMARY KEY, value INTEGER DEFAULT 0, updated_at TEXT);"
+            "INSERT INTO skill_evolution_log "
+            "(id, skill_name, evolution_type, trigger_type, status, created_at) "
+            "VALUES ('legacy1','oldskill','fix','post_session','promoted','2026-01-01T00:00:00Z');"
+            "INSERT INTO evolution_cycle_state (key, value) VALUES ('cycle_count', 2);"
+        )
+        conn.commit()
+        conn.close()
+
+        # Constructing the store must self-migrate.
+        store = EvolutionStore(db)
+        cols = {r[1] for r in sqlite3.connect(str(db)).execute(
+            "PRAGMA table_info(skill_evolution_log)").fetchall()}
+        assert "profile_id" in cols
+        # Legacy row is now under 'default'.
+        assert store.get_record("legacy1", "default") is not None
+        assert store.get_record("legacy1", "other") is None
+        # Legacy cycle counter migrated to 'default' (2 used → 1 left of 3).
+        assert store.can_evolve("default") is True
+        store.record_evolution_attempt("default")  # now 3 used
+        assert store.can_evolve("default") is False

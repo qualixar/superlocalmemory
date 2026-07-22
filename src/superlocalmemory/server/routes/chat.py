@@ -101,8 +101,9 @@ async def _stream_chat(
         memories = await loop.run_in_executor(
             None, _recall_memories, app_state, query, limit,
         )
-    except Exception as exc:
-        yield _sse_event("error", json.dumps({"message": f"Retrieval failed: {exc}"}))
+    except Exception:
+        logger.exception("chat: memory retrieval failed")
+        yield _sse_event("error", json.dumps({"message": "Memory retrieval failed"}))
         yield _sse_event("done", "")
         return
 
@@ -226,8 +227,9 @@ async def _stream_mode_bc(
                 yield _sse_event("token", token)
     except httpx.ConnectError:
         yield _sse_event("token", f"\n\n[Connection failed — is {provider} running?]")
-    except Exception as exc:
-        yield _sse_event("token", f"\n\n[LLM error: {exc}]")
+    except Exception:
+        logger.exception("chat: LLM streaming error")
+        yield _sse_event("token", "\n\n[LLM error: request failed]")
 
 
 # ── Ollama Streaming (/api/chat with messages) ───────────────────
@@ -359,7 +361,10 @@ def _recall_via_resident_engine(app_state, query: str, limit: int) -> list:
             if r.fact.memory_id
         })
         memory_map = (
-            engine._db.get_memory_content_batch(memory_ids) if memory_ids else {}
+            engine._db.get_memory_content_batch(
+                memory_ids, engine.profile_id,
+                include_global=True, include_shared=True,
+            ) if memory_ids else {}
         )
         from superlocalmemory.server.recall_serializer import (
             serialize_recall_response,

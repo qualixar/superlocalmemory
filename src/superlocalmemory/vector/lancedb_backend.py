@@ -186,10 +186,12 @@ class LanceDBVectorBackend:
         if tier_filter is None:
             tier_filter = ["active", "warm"]
 
-        # F-27: Validate tiers
-        assert all(t in self.VALID_TIERS for t in tier_filter), (
-            f"Invalid tier filter: {set(tier_filter) - self.VALID_TIERS}"
-        )
+        # F-27 / LOW-1 (3.7.9): validate tiers with a real check, not assert —
+        # `python -O` strips asserts, which would let an invalid tier build an
+        # invalid LanceDB predicate.
+        invalid = set(tier_filter) - self.VALID_TIERS
+        if invalid:
+            raise ValueError(f"Invalid tier filter: {invalid}")
 
         try:
             search = self._table.search(query_vector).metric("cosine").limit(top_k)
@@ -289,7 +291,7 @@ class LanceDBVectorBackend:
         """Update tier for a single fact."""
         try:
             self._table.update(
-                where=f"fact_id = '{fact_id}'",
+                where=self._fact_predicate(fact_id),
                 values={"tier": new_tier},
             )
         except Exception as exc:
@@ -309,7 +311,7 @@ class LanceDBVectorBackend:
             for fact_id, tier in rows:
                 try:
                     self._table.update(
-                        where=f"fact_id = '{fact_id}'",
+                        where=self._fact_predicate(fact_id),
                         values={"tier": tier},
                     )
                     updated += 1

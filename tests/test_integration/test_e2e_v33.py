@@ -691,7 +691,7 @@ class TestFullPipelineSmoke:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        def _mock_search(query, profile_id, top_k=50):
+        def _mock_search(query, profile_id, top_k=50, **kwargs):
             return [("f1", 0.9)]
 
         semantic = MagicMock()

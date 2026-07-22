@@ -144,6 +144,8 @@ function parseArgs(argv) {
     home: null,
     replyFile: null,
     homeOutsideHome: false, // H-10: opt-in flag for --home outside $HOME
+    // v3.8.0: deployment mode — "personal" | "enterprise" (default: personal)
+    deployment: null,
   };
   for (const a of argv) {
     if (a === '--dry-run') args.dryRun = true;
@@ -152,6 +154,11 @@ function parseArgs(argv) {
     else if (a.startsWith('--profile=')) args.profile = a.slice('--profile='.length);
     else if (a.startsWith('--home=')) args.home = a.slice('--home='.length);
     else if (a.startsWith('--reply-file=')) args.replyFile = a.slice('--reply-file='.length);
+    else if (a.startsWith('--deployment=')) {
+      const val = a.slice('--deployment='.length).toLowerCase();
+      // Only accept known presets; silently ignore anything else (safe default: personal)
+      args.deployment = (val === 'enterprise') ? 'enterprise' : 'personal';
+    }
   }
   return args;
 }
@@ -164,6 +171,22 @@ const {
   validateReplyFileSchema,
   validateHomePath,
 } = require('./postinstall/validation.js');
+
+// v3.8.0 — deployment mode helpers (personal vs enterprise)
+const {
+  DEPLOYMENT_PRESETS,
+  DEFAULT_DEPLOYMENT_MODE,
+  promptDeploymentMode,
+  renderDeploymentBlock,
+} = require('./postinstall/deployment.js');
+
+// v3.8.0 — IDE multi-select + non-destructive connect
+const {
+  IDE_IDS,
+  IDE_DISPLAY,
+  promptIdeMultiselect,
+  executeIdeConnections,
+} = require('./postinstall/ide-multiselect.js');
 
 // ------------------------------------------------------------------------
 // TTY detection
@@ -337,6 +360,11 @@ function renderConfigToml(config) {
   lines.push('[telemetry]');
   lines.push(`mode = ${tomlEscape(config.telemetry)}`);
   lines.push('');
+  // v3.8.0: [deployment] block — only serialised for non-personal modes to
+  // avoid churning existing config.toml files (no-churn contract).
+  // renderDeploymentBlock() returns [] for personal (the default).
+  const depLines = renderDeploymentBlock(config.deployment || null);
+  for (const dl of depLines) lines.push(dl);
   return lines.join('\n');
 }
 
@@ -626,12 +654,16 @@ async function main() {
     console.log(downgrade.line);
   }
 
+  // v3.8.0: resolve deployment preset (personal default; --deployment flag or TTY prompt).
+  let deploymentPreset = DEPLOYMENT_PRESETS[args.deployment] || DEPLOYMENT_PRESETS.personal;
+
   if (args.profile === 'custom' || (replyFileContents && replyFileContents.profile === 'custom')) {
     config = buildCustomConfig(replyFileContents || {});
   } else if (args.profile && PROFILES[args.profile]) {
     config = { profile: args.profile, ...PROFILES[args.profile] };
   } else if (nonInteractive) {
     // Non-TTY: silently apply recommended (benchmark-driven) profile.
+    // Deployment defaults to personal (no change to existing non-TTY behaviour).
     config = { profile: recommended, ...PROFILES[recommended] };
   } else {
     // Interactive TTY flow.
@@ -641,10 +673,23 @@ async function main() {
     });
     try {
       config = await runInteractiveFlow(rl, recommended);
+      // v3.8.0: deployment question (only in TTY if no --deployment flag given)
+      if (!args.deployment) {
+        deploymentPreset = await promptDeploymentMode(rl);
+      }
+      // v3.8.0: IDE multi-select (TTY only)
+      const selectedIdes = await promptIdeMultiselect(rl);
+      if (selectedIdes.length > 0) {
+        // Deferred — don't close rl yet so output lands before close message.
+        config._pendingIdes = selectedIdes;
+      }
     } finally {
       rl.close();
     }
   }
+
+  // Attach deployment to config object so renderConfigToml can serialise it.
+  config.deployment = deploymentPreset;
 
   // Dry-run: report only, no write.
   if (args.dryRun) {
@@ -692,12 +737,17 @@ async function main() {
       fs.closeSync(fd);
     }
     fs.renameSync(tmpPath, cfgPath);
-    console.log('SLM: wrote config.toml for profile=' + config.profile);
+    console.log('SLM: wrote config.toml for profile=' + config.profile +
+      (config.deployment && config.deployment.mode !== 'personal'
+        ? ' deployment=' + config.deployment.mode
+        : ''));
   } catch (e) {
     console.error('SLM: failed to write config.toml: ' + e.message);
     return 4;
   }
 
+  // v3.8.0: Execute IDE connections after config write so state is consistent.
+  if (config._pendingIdes) executeIdeConnections(config._pendingIdes, slmDir);
 
   // UX-G2: show the one-screen delta banner so upgraders see what shipped.
   printLivingBrainDelta();
@@ -736,4 +786,12 @@ module.exports = {
   PROFILES,
   CUSTOM_KNOB_ENUMS, // UX-M3
   printLivingBrainDelta, // UX-G2 (exposed for the test harness only)
+  // v3.8.0 — deployment
+  DEPLOYMENT_PRESETS,
+  DEFAULT_DEPLOYMENT_MODE,
+  renderDeploymentBlock,
+  // v3.8.0 — IDE multi-select
+  IDE_IDS,
+  IDE_DISPLAY,
+  executeIdeConnections,
 };

@@ -41,46 +41,169 @@ async function loadProfiles() {
     }
 }
 
-async function createProfile(nameOverride) {
-    var name = nameOverride || document.getElementById('new-profile-name').value.trim();
-    if (!name) {
-        name = prompt('Enter new profile name:');
-        if (!name || !name.trim()) return;
-        name = name.trim();
-    }
+var PROFILE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
-    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-        showToast('Invalid name. Use letters, numbers, dashes, underscores.');
-        return;
-    }
-
+// POST /api/profiles/create → { ok, status, detail }. Pure API step, no UI.
+async function _postCreateProfile(name) {
     try {
         var response = await fetch('/api/profiles/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ profile_name: name })
         });
-        var data = await response.json();
-        if (response.status === 409) {
-            showToast('Profile "' + name + '" already exists');
-            return;
-        }
-        if (!response.ok) {
-            showToast(data.detail || 'Failed to create profile');
-            return;
-        }
-        showToast('Profile "' + name + '" created');
-        var input = document.getElementById('new-profile-name');
-        if (input) input.value = '';
-        // Force reload with small delay to ensure backend has persisted
-        setTimeout(function() {
-            loadProfiles();
-            if (typeof loadProfilesTable === 'function') loadProfilesTable();
-        }, 300);
+        var data = {};
+        try { data = await response.json(); } catch (e) { /* empty body */ }
+        return { ok: response.ok, status: response.status, detail: data.detail || '' };
     } catch (error) {
         console.error('Error creating profile:', error);
-        showToast('Error creating profile');
+        return { ok: false, status: 0, detail: 'Network error creating profile' };
     }
+}
+
+// Refresh every profile-aware surface after a successful create.
+function _afterProfileMutation() {
+    // Small delay so the backend has persisted to both stores before re-read.
+    setTimeout(function () {
+        loadProfiles();
+        if (typeof loadProfilesTable === 'function') loadProfilesTable();
+    }, 300);
+}
+
+// Entry point used by the sidebar "+", the legacy Profiles-tab form, and the
+// data-act-click="create-profile" button. Resolves a name from (a) an explicit
+// override, (b) the legacy #new-profile-name input, or (c) an OD-styled modal —
+// never the native prompt() (crude for the non-technical dashboard users).
+async function createProfile(nameOverride) {
+    var name = (typeof nameOverride === 'string' && nameOverride) ? nameOverride : '';
+    if (!name) {
+        var input = document.getElementById('new-profile-name');
+        if (input && input.value.trim()) name = input.value.trim();
+    }
+    if (!name) {
+        openCreateProfileModal();
+        return;
+    }
+    if (!PROFILE_NAME_RE.test(name)) {
+        showToast('Invalid name. Use letters, numbers, dashes, underscores.');
+        return;
+    }
+    var res = await _postCreateProfile(name);
+    if (res.status === 409) { showToast('Profile "' + name + '" already exists'); return; }
+    if (!res.ok) { showToast(res.detail || 'Failed to create profile'); return; }
+    showToast('Profile "' + name + '" created');
+    var legacyInput = document.getElementById('new-profile-name');
+    if (legacyInput) legacyInput.value = '';
+    _afterProfileMutation();
+}
+
+// OD-styled create-profile dialog. Lazily built, reused across opens. Inline
+// validation + 409 handling; ESC / backdrop / Cancel dismiss; Enter submits.
+function openCreateProfileModal() {
+    var existing = document.getElementById('od-create-profile-overlay');
+    if (existing) { existing.remove(); }
+
+    var overlay = document.createElement('div');
+    overlay.id = 'od-create-profile-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Create a new profile');
+    overlay.style.cssText =
+        'position:fixed;inset:0;z-index:11000;display:flex;align-items:center;' +
+        'justify-content:center;background:rgba(0,0,0,0.45);backdrop-filter:blur(2px);';
+
+    var card = document.createElement('div');
+    card.style.cssText =
+        'width:min(420px,92vw);background:var(--card,#1a1f2e);color:var(--fg,#e8ecf3);' +
+        'border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:14px;' +
+        'box-shadow:0 20px 60px rgba(0,0,0,0.4);padding:22px 22px 18px;';
+
+    var h = document.createElement('h3');
+    h.textContent = 'Create a new profile';
+    h.style.cssText = 'margin:0 0 4px;font-size:1.05rem;font-weight:600;';
+    var sub = document.createElement('p');
+    sub.textContent = 'Each profile is a fully isolated memory space.';
+    sub.style.cssText = 'margin:0 0 16px;font-size:0.8125rem;color:var(--fg-3,#8b93a7);';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 32;
+    input.placeholder = 'e.g. work, personal, project-x';
+    input.setAttribute('aria-label', 'Profile name');
+    input.style.cssText =
+        'width:100%;box-sizing:border-box;padding:10px 12px;font-size:0.9rem;' +
+        'background:var(--page,rgba(255,255,255,0.04));color:var(--fg,#e8ecf3);' +
+        'border:1px solid var(--border,rgba(255,255,255,0.14));border-radius:8px;outline:none;';
+
+    var err = document.createElement('div');
+    err.style.cssText = 'min-height:18px;margin:6px 2px 0;font-size:0.75rem;color:#ff6b6b;';
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:16px;';
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.style.cssText =
+        'padding:8px 14px;font-size:0.85rem;border-radius:8px;cursor:pointer;' +
+        'background:transparent;color:var(--fg-3,#8b93a7);' +
+        'border:1px solid var(--border,rgba(255,255,255,0.14));';
+
+    var create = document.createElement('button');
+    create.type = 'button';
+    create.textContent = 'Create profile';
+    create.style.cssText =
+        'padding:8px 16px;font-size:0.85rem;border-radius:8px;cursor:pointer;' +
+        'background:var(--violet,#7c5cff);color:#fff;border:1px solid transparent;font-weight:600;';
+
+    actions.appendChild(cancel);
+    actions.appendChild(create);
+    card.appendChild(h);
+    card.appendChild(sub);
+    card.appendChild(input);
+    card.appendChild(err);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    setTimeout(function () { input.focus(); }, 30);
+
+    function close() {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+    }
+    function onKey(e) {
+        if (e.key === 'Escape') { close(); }
+        else if (e.key === 'Enter') { submit(); }
+    }
+    async function submit() {
+        var name = input.value.trim();
+        if (!name) { err.textContent = 'Please enter a profile name.'; return; }
+        if (!PROFILE_NAME_RE.test(name)) {
+            err.textContent = 'Use only letters, numbers, dashes and underscores.';
+            return;
+        }
+        create.disabled = true;
+        create.textContent = 'Creating…';
+        err.textContent = '';
+        var res = await _postCreateProfile(name);
+        if (res.status === 409) {
+            err.textContent = 'A profile named "' + name + '" already exists.';
+            create.disabled = false; create.textContent = 'Create profile';
+            return;
+        }
+        if (!res.ok) {
+            err.textContent = res.detail || 'Failed to create profile.';
+            create.disabled = false; create.textContent = 'Create profile';
+            return;
+        }
+        close();
+        showToast('Profile "' + name + '" created');
+        _afterProfileMutation();
+    }
+
+    cancel.addEventListener('click', close);
+    create.addEventListener('click', submit);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', onKey);
 }
 
 async function deleteProfile(name) {

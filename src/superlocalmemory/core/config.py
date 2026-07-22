@@ -677,18 +677,31 @@ class EvolutionConfig:
     """Configuration for Skill Evolution Engine (v3.4.10).
 
     OFF by default — opt in via `slm setup` (interactive) or
-    `slm config set evolution.enabled true` (CLI).
+    `slm config set evolution.enabled true` (CLI). Enabling makes
+    background LLM calls; the enable flow surfaces a cost advisory.
 
     Backend auto-detection priority:
       1. `claude` CLI available → spawn `claude --model haiku` (ECC pattern, free)
       2. Ollama running → use Ollama (free, local)
       3. API key set → use Anthropic/OpenAI API (paid)
       4. Nothing → dashboard-only (show candidates, manual evolution)
+
+    Model selection (v3.7.9): each pipeline step is configurable and
+    defaults to the lowest-cost capable model for the active backend
+    (Claude→haiku, Ollama→local). Leave a field empty ("") for "auto".
+    The blind verifier is kept on a *different* model from the generator
+    so it can't grade its own homework; see
+    ``evolution.model_selection.resolve_evolution_models``.
     """
 
     enabled: bool = False                        # OFF by default, opt-in
     backend: str = "auto"                        # auto, claude, ollama, anthropic, openai
     max_evolutions_per_cycle: int = 3            # Budget cap per consolidation
+    # Empty string == "auto" (resolve cheapest capable model at runtime).
+    # Accepts short aliases ("haiku"/"sonnet") or allow-listed model ids.
+    mutation_model: str = ""                     # generator (quality-sensitive)
+    verify_model: str = ""                       # blind verifier (must differ from generator)
+    confirm_model: str = ""                      # cheap yes/no gate
 
 
 @dataclass(frozen=True)
@@ -741,6 +754,152 @@ class AutoInvokeConfig:
     # Behavioral
     include_archived: bool = False
     relevance_threshold: float = 0.3           # Legacy compat with AutoRecall
+
+
+# ---------------------------------------------------------------------------
+# Deployment Config (v3.8.0)
+# ---------------------------------------------------------------------------
+
+_VALID_DEPLOYMENT_MODES = ("personal", "enterprise")
+
+
+@dataclass(frozen=True)
+class DeploymentConfig:
+    """Deployment mode configuration.
+
+    Personal (default, safe defaults):
+        Single-user install. No login required, no PII redaction, no
+        retention scheduler. Behaviour is identical to pre-3.8.0 installs.
+
+    Enterprise:
+        Multi-user / team / company install. Login required, PII redacted,
+        retention scheduler active, audit enabled.
+
+    SAFE DEFAULTS = Personal — an existing config.toml with no [deployment]
+    section continues to behave exactly as before.  Adding a [deployment]
+    section is opt-in; removing it reverts to Personal automatically.
+    """
+
+    mode: str = "personal"          # "personal" | "enterprise"
+    require_login: bool = False
+    pii_redaction: bool = False
+    retention_enabled: bool = False
+    audit: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode not in _VALID_DEPLOYMENT_MODES:
+            raise ValueError(
+                f"DeploymentConfig.mode must be one of {_VALID_DEPLOYMENT_MODES!r}, "
+                f"got {self.mode!r}"
+            )
+
+    @property
+    def is_personal(self) -> bool:
+        """True when operating in personal (single-user) mode."""
+        return self.mode == "personal"
+
+    @property
+    def is_enterprise(self) -> bool:
+        """True when operating in enterprise (team/company) mode."""
+        return self.mode == "enterprise"
+
+    def as_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "require_login": self.require_login,
+            "pii_redaction": self.pii_redaction,
+            "retention_enabled": self.retention_enabled,
+            "audit": self.audit,
+        }
+
+
+#: Canonical Personal preset — all permissive defaults.
+DEPLOYMENT_PERSONAL = DeploymentConfig(
+    mode="personal",
+    require_login=False,
+    pii_redaction=False,
+    retention_enabled=False,
+    audit=True,
+)
+
+#: Canonical Enterprise preset — all enforcement defaults.
+DEPLOYMENT_ENTERPRISE = DeploymentConfig(
+    mode="enterprise",
+    require_login=True,
+    pii_redaction=True,
+    retention_enabled=True,
+    audit=True,
+)
+
+
+def load_deployment_config(
+    config_toml_path: Path | None = None,
+) -> DeploymentConfig:
+    """Parse [deployment] from config.toml; return Personal defaults if absent.
+
+    config.toml is the installer-written performance config (separate from the
+    daemon's config.json managed by SLMConfig). This function reads ONLY the
+    [deployment] section. All other sections are ignored.
+
+    Args:
+        config_toml_path: Explicit path to config.toml. When None, resolved to
+            ``~/.superlocalmemory/config.toml`` via the canonical data root.
+
+    Returns:
+        DeploymentConfig — Personal preset when the file is absent, the section
+        is missing, or any parse error occurs (fail-open, non-destructive).
+    """
+    if config_toml_path is None:
+        try:
+            config_toml_path = _runtime_base_dir() / "config.toml"
+        except Exception:
+            return DEPLOYMENT_PERSONAL
+
+    if not config_toml_path.exists():
+        return DEPLOYMENT_PERSONAL
+
+    try:
+        import tomllib as _tomllib
+        raw = config_toml_path.read_text(encoding="utf-8")
+        data = _tomllib.loads(raw)
+    except Exception as exc:
+        logger.warning(
+            "load_deployment_config: failed to parse %s: %s", config_toml_path, exc
+        )
+        return DEPLOYMENT_PERSONAL
+
+    dep = data.get("deployment", {})
+    if not dep:
+        # No [deployment] section — personal defaults, no behaviour change.
+        return DEPLOYMENT_PERSONAL
+
+    raw_mode = str(dep.get("mode", "personal")).lower()
+    if raw_mode not in _VALID_DEPLOYMENT_MODES:
+        logger.warning(
+            "load_deployment_config: unknown mode %r in %s — defaulting to personal",
+            raw_mode, config_toml_path,
+        )
+        raw_mode = "personal"
+
+    # Use the preset for the mode as the base so omitted keys inherit
+    # sensible values (enterprise → require_login=True etc.).
+    base = DEPLOYMENT_ENTERPRISE if raw_mode == "enterprise" else DEPLOYMENT_PERSONAL
+
+    try:
+        return DeploymentConfig(
+            mode=raw_mode,
+            require_login=bool(dep.get("require_login", base.require_login)),
+            pii_redaction=bool(dep.get("pii_redaction", base.pii_redaction)),
+            retention_enabled=bool(dep.get("retention_enabled", base.retention_enabled)),
+            audit=bool(dep.get("audit", base.audit)),
+        )
+    except (ValueError, TypeError) as exc:
+        logger.warning(
+            "load_deployment_config: invalid values in [deployment] in %s: %s — "
+            "falling back to personal",
+            config_toml_path, exc,
+        )
+        return DEPLOYMENT_PERSONAL
 
 
 # ---------------------------------------------------------------------------
@@ -849,6 +1008,35 @@ class SLMConfig:
         path = config_path or (_runtime_base / "config.json")
         if not path.exists():
             return cls.for_mode(Mode.A, base_dir=_runtime_base)
+
+        # DASH-V4 (3.7.9): the ``current_mode`` file is the single source of
+        # truth for the ACTIVE mode. If config.json drifted from it (a writer
+        # bypassed switch_mode and reset the active config), load the
+        # authoritative per-mode file so daemon/CLI/dashboard all run the user's
+        # chosen mode — with its settings — instead of a stale one. Scoped to
+        # config.json so explicit per-mode loads (switch_mode) are untouched.
+        # Fail-open: any error falls through to the normal load below.
+        if path.name == "config.json":
+            try:
+                import json as _json
+                _disk_mode = str(
+                    _json.loads(path.read_text()).get("mode", "")
+                ).lower()
+                _active_mode = cls.read_current_mode(path.parent)
+                if _disk_mode and _active_mode and _disk_mode != _active_mode:
+                    _mode_path = cls._mode_config_path(
+                        path.parent, Mode(_active_mode)
+                    )
+                    if _mode_path.exists():
+                        logger.warning(
+                            "config.json mode=%s disagrees with current_mode=%s;"
+                            " loading authoritative %s",
+                            _disk_mode, _active_mode, _mode_path.name,
+                        )
+                        return cls.load(_mode_path)
+            except Exception:
+                pass  # fail-open — fall through to the normal load below
+
         import json
         try:
             data = json.loads(path.read_text())
@@ -1070,6 +1258,9 @@ class SLMConfig:
             "enabled": self.evolution.enabled,
             "backend": self.evolution.backend,
             "max_evolutions_per_cycle": self.evolution.max_evolutions_per_cycle,
+            "mutation_model": self.evolution.mutation_model,
+            "verify_model": self.evolution.verify_model,
+            "confirm_model": self.evolution.confirm_model,
         }
 
         # V3.4.65: Persist injection config

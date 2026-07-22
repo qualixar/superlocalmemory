@@ -307,4 +307,8 @@ def test_consolidation_trigger_never_calls_dead_send_command(
     code_only = "\n".join(code_lines)
     assert "pool.send_command" not in code_only
     assert "WorkerPool" not in code_only
-    assert "get_profile_runtime(request.app.state)" in code_only
+    # v3.4.64: the blocking work moved into asyncio.to_thread(). The closure
+    # captures the app state as `_app_state` so it can be referenced from the
+    # nested thread function — the runtime is still obtained from it.
+    assert "get_profile_runtime" in code_only
+    assert "runtime.operation()" in code_only

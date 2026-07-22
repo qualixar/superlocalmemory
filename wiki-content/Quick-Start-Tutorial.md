@@ -119,7 +119,7 @@ Works with: Claude Code, Cursor, VS Code Copilot, Windsurf, Continue, Cody, Chat
 slm dashboard
 ```
 
-Opens at http://localhost:8765. 17 tabs: memory browser, knowledge graph, recall lab, trust scores, math health, compliance, and more.
+Opens at http://localhost:8765. 11 workspaces: Dashboard, Brain, Knowledge Graph, Memories, Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and Optimize.
 
 ---
 
@@ -174,7 +174,7 @@ slm recall "something you stored in V2"   # Verify old memories are accessible
 | Lifecycle | Hardcoded thresholds | Self-organizing Langevin dynamics |
 | Modes | Single mode | A (zero-cloud), B (local LLM), C (cloud LLM) |
 | Privacy and compliance controls | Not addressed | Deployment-specific controls and assessment |
-| Dashboard | 5 tabs | 17 tabs |
+| Dashboard | 5 tabs | 11 workspaces |
 | MCP Tools | 6 | Profile-selected V3 tool surfaces |
 | Tests | Historical V2 suite | V3 unit, contract, artifact, and integration suites |
 

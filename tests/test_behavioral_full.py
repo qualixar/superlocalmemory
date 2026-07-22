@@ -1,29 +1,9 @@
 """Tests for Behavioral System — Task 13 of V3 build."""
 import pytest
 from pathlib import Path
-from superlocalmemory.learning.behavioral_listener import BehavioralListener
 from superlocalmemory.learning.behavioral import BehavioralPatternStore
 from superlocalmemory.learning.outcomes import OutcomeTracker
 
-
-class MockEventBus:
-    def __init__(self):
-        self._subscribers = []
-    def subscribe(self, callback):
-        self._subscribers.append(callback)
-    def publish(self, event_type, data=None):
-        event = {"event_type": event_type, "data": data or {}}
-        for sub in self._subscribers:
-            sub(event)
-
-
-@pytest.fixture
-def bus():
-    return MockEventBus()
-
-@pytest.fixture
-def listener(bus):
-    return BehavioralListener(event_bus=bus)
 
 @pytest.fixture
 def pattern_store(tmp_path):
@@ -37,37 +17,6 @@ def outcomes(tmp_path):
     db.initialize(real_schema)
     return OutcomeTracker(db)
 
-
-# -- Listener --
-def test_listener_subscribes(bus, listener):
-    bus.publish("memory.stored", {"fact_id": "f1"})
-    assert listener.event_count == 1
-
-def test_listener_captures_multiple_events(bus, listener):
-    bus.publish("memory.stored", {})
-    bus.publish("memory.recalled", {})
-    bus.publish("memory.stored", {})
-    assert listener.event_count == 3
-
-def test_listener_mine_refinement_pattern(bus, listener):
-    bus.publish("memory.stored", {})
-    bus.publish("memory.recalled", {"query_preview": "test"})
-    bus.publish("memory.stored", {})
-    patterns = listener.mine_patterns()
-    refinements = [p for p in patterns if p["pattern_type"] == "refinement"]
-    assert len(refinements) >= 1
-
-def test_listener_mine_interest_pattern(bus, listener):
-    for _ in range(5):
-        bus.publish("memory.recalled", {"query_preview": "auth bugs"})
-    patterns = listener.mine_patterns()
-    interests = [p for p in patterns if p["pattern_type"] == "interest"]
-    assert len(interests) >= 1
-
-def test_listener_clear(bus, listener):
-    bus.publish("memory.stored", {})
-    listener.clear()
-    assert listener.event_count == 0
 
 # -- Pattern Store --
 def test_record_and_get_patterns(pattern_store):

@@ -46,7 +46,7 @@ def test_delete_uses_capability_actor_and_treats_agent_label_as_metadata(
             "fact_id": "fact-1",
         },
     )
-    engine._db.delete_fact.assert_called_once_with("fact-1")
+    engine._db.delete_fact.assert_called_once_with("fact-1", profile_id="default")
 
 
 def test_update_uses_capability_actor_and_runs_write_authorization(
@@ -80,6 +80,7 @@ def test_update_uses_capability_actor_and_runs_write_authorization(
     engine._db.update_fact.assert_called_once_with(
         "fact-1",
         {"content": "new content"},
+        profile_id="default",
     )
 
 

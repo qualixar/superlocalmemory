@@ -173,6 +173,10 @@ def create_app() -> FastAPI:
     from superlocalmemory.server.routes.v3_api import router as v3_router
     application.include_router(v3_router)
 
+    # Config endpoints (storage, daemon, mesh, trust, forgetting)
+    from superlocalmemory.server.routes.config_api import router as config_api_router
+    application.include_router(config_api_router)
+
     # v3.4.1: Chat SSE + Insights + Timeline endpoints
     for _module_name_v341 in ("chat",):
         try:

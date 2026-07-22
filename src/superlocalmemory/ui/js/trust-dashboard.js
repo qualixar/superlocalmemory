@@ -2,8 +2,8 @@
 // Loads and displays Bayesian trust scores per agent and per fact.
 //
 // v3.4.21 (Operations pane): /api/v3/trust/dashboard returns
-// thousands of rows in one shot (3,900+ agents on Varun's live DB).
-// Client-side pagination keeps the table bounded; the user chooses
+// thousands of rows in one shot; client-side pagination keeps the table bounded.
+// The user chooses
 // sort order + page size; all data stays real (no mock fallback).
 
 (function trustDashboard() {

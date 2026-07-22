@@ -155,6 +155,21 @@ def _redact_headers(headers: dict) -> dict:
     }
 
 
+def _active_profile_for_cache() -> str:
+    """Resolve the active memory profile for cache-tenant scoping.
+
+    Lazy import keeps the optimize layer free of a hard server dependency; any
+    failure falls back to 'default'. The profiles.json active_profile cache is
+    kept in sync on every switch, so this is correct for the daemon-mounted
+    proxy even outside an HTTP request context.
+    """
+    try:
+        from superlocalmemory.server.routes.helpers import get_active_profile
+        return get_active_profile() or "default"
+    except Exception:
+        return "default"
+
+
 def _derive_tenant_id(provider: str, raw_credential: "str | None") -> "str | None":
     """Derive a per-tenant isolation key from the raw (un-redacted) credential.
 
@@ -163,18 +178,27 @@ def _derive_tenant_id(provider: str, raw_credential: "str | None") -> "str | Non
     into CacheManager.check() / .store() so that two users sharing the same
     prompt but using different API keys receive independent cache namespaces.
 
+    ISOLATION (I-5): the active memory profile is folded into the key so two
+    profiles sharing the SAME API key never serve each other's cached LLM
+    responses. Cross-profile cache reuse is intentionally sacrificed for
+    tenant isolation (the accepted cost tradeoff for a multi-tenant memory DB).
+
     Returns None when no credential is present — callers must SKIP caching
     (never collapse to the default tenant) to prevent cross-tenant disclosure.
 
-    Output: 64-char lowercase hex SHA-256 of ``f"{provider}:{raw_credential}"``.
-    Provider is folded in so anthropic:K and openai:K are distinct tenants even
-    if the literal key string coincidentally matches.
+    Output: 64-char lowercase hex SHA-256 of
+    ``f"{profile}:{provider}:{raw_credential}"``. Provider is folded in so
+    anthropic:K and openai:K are distinct tenants even if the literal key
+    string coincidentally matches.
     """
     import hashlib as _hashlib
 
     if not raw_credential:
         return None
-    return _hashlib.sha256(f"{provider}:{raw_credential}".encode()).hexdigest()
+    profile = _active_profile_for_cache()
+    return _hashlib.sha256(
+        f"{profile}:{provider}:{raw_credential}".encode()
+    ).hexdigest()
 
 
 def _body_has_tools(body: dict) -> bool:

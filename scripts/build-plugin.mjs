@@ -140,6 +140,13 @@ function normalizeAttribution(md, ver) {
     '| `--min-score` | float | No | 0.3 | Minimum relevance (0.0-1.0) |\n| `--tags` | string | No | None | Filter by tags (comma-separated) |'
   );
 
+  // Stamp the current version into every `SuperLocalMemory vX.Y.Z` footer so
+  // skills/agents never ship a stale version string to the LLM.
+  out = out.replace(
+    /SuperLocalMemory v\d+\.\d+\.\d+/g,
+    `SuperLocalMemory v${ver}`,
+  );
+
   return out;
 }
 
@@ -368,7 +375,12 @@ export function buildPlan(root, manifest) {
       if (fname === '.gitkeep') continue;
       const srcFile = path.join(agentsSrcPath, fname);
       if (!fs.statSync(srcFile).isFile()) continue;
-      const content = fs.readFileSync(srcFile, 'utf8');
+      let content = fs.readFileSync(srcFile, 'utf8');
+      // Stamp the version footer so agents don't ship a stale version string.
+      content = content.replace(
+        /SuperLocalMemory v\d+\.\d+\.\d+/g,
+        `SuperLocalMemory v${manifest.version}`,
+      );
       plan.set(path.join(pluginRoot, 'agents', fname), content);
     }
   }
@@ -418,7 +430,14 @@ export function buildPlan(root, manifest) {
   // ---------------------------------------------------------------------------
   const claudeFragmentPath = path.join(root, 'plugin-src', 'rules', 'CLAUDE.md.fragment');
   if (fs.existsSync(claudeFragmentPath)) {
-    const fragmentContent = fs.readFileSync(claudeFragmentPath, 'utf8');
+    let fragmentContent = fs.readFileSync(claudeFragmentPath, 'utf8');
+    // Stamp the current version into the fragment's `SuperLocalMemory vX.Y.Z`
+    // markers so plugin/CLAUDE.md never drifts from the manifest version
+    // (previously copied verbatim → shipped a stale version to every session).
+    fragmentContent = fragmentContent.replace(
+      /SuperLocalMemory v\d+\.\d+\.\d+/g,
+      `SuperLocalMemory v${manifest.version}`,
+    );
     plan.set(path.join(pluginRoot, 'CLAUDE.md'), fragmentContent);
   }
 

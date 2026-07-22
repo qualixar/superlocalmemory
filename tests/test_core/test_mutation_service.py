@@ -29,7 +29,7 @@ def test_authorized_delete_runs_trust_before_persistence() -> None:
 
     assert result["ok"] is True
     assert engine._hooks.run_pre.call_args_list[0].args[0] == "delete"
-    engine._db.delete_fact.assert_called_once_with("fact-1")
+    engine._db.delete_fact.assert_called_once_with("fact-1", profile_id="default")
     engine._hooks.run_post.assert_called_once()
 
 
@@ -51,7 +51,7 @@ def test_authorized_update_refreshes_indexes_after_trust_gate() -> None:
     assert result["ok"] is True
     assert engine._hooks.run_pre.call_args_list[0].args[0] == "update"
     engine._db.update_fact.assert_called_once_with(
-        "fact-1", {"content": "new content"}
+        "fact-1", {"content": "new content"}, profile_id="default"
     )
     bm25.add.assert_called_once_with("fact-1", "new content", "default")
     engine._hooks.run_post.assert_called_once()

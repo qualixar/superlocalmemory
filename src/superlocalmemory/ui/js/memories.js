@@ -27,8 +27,13 @@ var _slmLastTotal = 0;
 
 async function loadMemories(page) {
     if (typeof page === 'number') _slmPage = Math.max(0, page);
-    var category = document.getElementById('filter-category').value;
-    var project = document.getElementById('filter-project').value;
+    // OD dashboard renders memories via odRenderMemories; the legacy
+    // #filter-category / #filter-project selects may be absent. Null-guard so
+    // this legacy loader never throws on the OD panes.
+    var _catEl = document.getElementById('filter-category');
+    var _projEl = document.getElementById('filter-project');
+    var category = _catEl ? _catEl.value : '';
+    var project = _projEl ? _projEl.value : '';
     var limit = _slmPageSize;
     var offset = _slmPage * limit;
     var url = '/api/memories?limit=' + limit + '&offset=' + offset;
@@ -70,9 +75,9 @@ function renderPaginationControls(data) {
         '<div class="d-flex justify-content-between align-items-center mt-3 small">' +
           '<span class="text-muted">Showing ' + firstIdx + '\u2013' + showing + ' of ' + total + ' memories</span>' +
           '<div class="btn-group btn-group-sm">' +
-            '<button type="button" class="btn btn-outline-secondary" ' + prevDisabled + ' onclick="loadMemories(' + (_slmPage - 1) + ')"><i class="bi bi-chevron-left"></i> Prev</button>' +
+            '<button type="button" class="btn btn-outline-secondary" ' + prevDisabled + ' data-act-click="load-memories-page" data-page="' + (_slmPage - 1) + '"><i class="bi bi-chevron-left"></i> Prev</button>' +
             '<button type="button" class="btn btn-outline-secondary disabled">Page ' + (_slmPage + 1) + ' / ' + (lastPage + 1) + '</button>' +
-            '<button type="button" class="btn btn-outline-secondary" ' + nextDisabled + ' onclick="loadMemories(' + (_slmPage + 1) + ')">Next <i class="bi bi-chevron-right"></i></button>' +
+            '<button type="button" class="btn btn-outline-secondary" ' + nextDisabled + ' data-act-click="load-memories-page" data-page="' + (_slmPage + 1) + '">Next <i class="bi bi-chevron-right"></i></button>' +
           '</div>' +
         '</div>';
 }

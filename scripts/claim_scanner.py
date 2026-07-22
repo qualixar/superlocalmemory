@@ -128,7 +128,7 @@ RULES = (
     Rule(
         "unsupported-superlative",
         re.compile(
-            r"world['’]s\s+first|best[- ]in[- ]class|highest\s+(?:local|score)|"
+            r"world['’]s\s+first|world\s+first|best[- ]in[- ]class|highest\s+(?:local|score)|"
             r"only\s+(?:zero|local|publicly|local-first)|the\s+first\s+AI\s+agent\s+memory",
             re.IGNORECASE,
         ),

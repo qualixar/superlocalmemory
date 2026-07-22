@@ -20,6 +20,18 @@ logger = logging.getLogger("superlocalmemory.routes.memories")
 router = APIRouter()
 
 
+def _internal_error(detail: str = "Internal server error") -> HTTPException:
+    """SEC-H-02: log the full traceback server-side; return a generic message.
+
+    Returning ``str(e)`` to HTTP clients leaks DB schema (column/constraint
+    names), the data-directory filesystem path, and possibly config internals —
+    a GDPR Art. 32 gap. Call this only from inside an ``except`` block so
+    ``logger.exception`` captures the active traceback automatically.
+    """
+    logger.exception("memories route error")
+    return HTTPException(status_code=500, detail=detail)
+
+
 def _get_engine(request: Request):
     """Get V3 engine from app state, initializing lazily on first call."""
     return get_engine_lazy(request.app.state)
@@ -40,6 +52,15 @@ def _authorize_memory_mutation(
         request,
         getattr(request.app.state, "daemon_descriptor", None),
         actor_kind="dashboard",
+    )
+    # RBAC (C3): on top of machine auth, enforce the caller's role on the active
+    # profile. delete → DELETE; every other mutation → WRITE. A viewer (or an
+    # owner in require_login mode) is rejected here; owner/admin/member pass.
+    from superlocalmemory.access.rbac import Permission as _Perm
+    from superlocalmemory.server.rbac_enforce import require_permission as _rbac_require
+    _rbac_require(
+        request,
+        _Perm.DELETE if operation == "delete" else _Perm.WRITE,
     )
     engine = _get_engine(request)
     if engine is None:
@@ -253,6 +274,14 @@ async def get_memories(
         None,
         description="Named filter: 'high_reward' | 'being_forgotten'",
     ),
+    scope: Optional[str] = Query(
+        None,
+        description=(
+            "Scope view (v3 only): 'shared' (shared with this profile), "
+            "'global' (global memories), 'all' (this profile + global + shared). "
+            "Default None = this profile only (unchanged isolation)."
+        ),
+    ),
 ):
     """List memories with optional filtering and pagination.
 
@@ -274,15 +303,36 @@ async def get_memories(
         use_v3 = _has_table(cursor, 'atomic_facts')
 
         if use_v3:
-            query = """
-                SELECT fact_id as id, memory_id, content, fact_type as category,
-                       confidence as importance, access_count,
-                       created_at, created_at as updated_at,
-                       session_id as project_name
-                FROM atomic_facts WHERE profile_id = ?
-            """
-            params = [active_profile]
-            count_base = "SELECT COUNT(*) as total FROM atomic_facts WHERE profile_id = ?"
+            # Scope view clause. Default (scope=None) is this-profile-only —
+            # identical isolation to before. Other values widen the view to
+            # global and/or shared-with-this-profile memories.
+            _esc = active_profile.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            _shared_pat = f'%"{_esc}"%'
+            if scope == "global":
+                scope_where = "scope = 'global'"
+                scope_params = []
+            elif scope == "shared":
+                scope_where = "scope = 'shared' AND shared_with LIKE ? ESCAPE '\\'"
+                scope_params = [_shared_pat]
+            elif scope == "all":
+                scope_where = (
+                    "(profile_id = ? OR scope = 'global' "
+                    "OR (scope = 'shared' AND shared_with LIKE ? ESCAPE '\\'))"
+                )
+                scope_params = [active_profile, _shared_pat]
+            else:
+                scope_where = "profile_id = ?"
+                scope_params = [active_profile]
+
+            query = (
+                "SELECT fact_id as id, memory_id, content, fact_type as category, "
+                "confidence as importance, access_count, "
+                "created_at, created_at as updated_at, "
+                "session_id as project_name, scope, shared_with "
+                f"FROM atomic_facts WHERE {scope_where}"
+            )
+            params = list(scope_params)
+            count_base = f"SELECT COUNT(*) as total FROM atomic_facts WHERE {scope_where}"
         else:
             query = """
                 SELECT id, content, summary, category, project_name, project_path,
@@ -293,7 +343,8 @@ async def get_memories(
             params = [active_profile]
             count_base = "SELECT COUNT(*) as total FROM memories WHERE profile = ?"
 
-        count_params = [active_profile]
+        # count params must mirror the base WHERE params (scope-aware for v3).
+        count_params = list(params)
 
         if category:
             if use_v3:
@@ -396,8 +447,8 @@ async def get_memories(
             "has_more": (offset + limit) < total,
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception:
+        raise _internal_error("Database error")
 
 
 @router.get("/api/graph")
@@ -430,8 +481,8 @@ async def get_graph(
             },
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Graph error: {str(e)}")
+    except Exception:
+        raise _internal_error("Graph error")
 
 
 @router.post("/api/search")
@@ -455,17 +506,19 @@ async def search_memories(request: Request, body: SearchRequest):
         # directly in an async route blocks the ASGI event loop — Chrome detects
         # a stalled connection and aborts with "signal is aborted without reason"
         # before the response arrives. Fix: run in a thread-pool executor so the
-        # event loop stays alive to send keepalive frames. Also fast=False skips
-        # spreading_activation + Hopfield (saves ~7s on cold graph traversal).
+        # event loop stays alive to send keepalive frames.
+        # v3.4.64 (regression fix): fast=True skips spreading_activation + agentic
+        # LLM rounds (saves ~7s on cold graph traversal). fast=False is the SLOW
+        # path that enables both; the earlier comment had this inverted.
         import asyncio
         import time as _time
         engine = _get_engine(request)
         if engine is not None:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             t0 = _time.monotonic()
             response = await loop.run_in_executor(
                 None,
-                lambda: engine.recall(body.query, limit=body.limit, fast=False),
+                lambda: engine.recall(body.query, limit=body.limit, fast=True),
             )
             elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
             from superlocalmemory.server.recall_serializer import (
@@ -525,8 +578,8 @@ async def search_memories(request: Request, body: SearchRequest):
             "no_confident_match": False,
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+    except Exception:
+        raise _internal_error("Search error")
     finally:
         end_recall()
 
@@ -611,8 +664,8 @@ async def get_clusters(request: Request):
 
         conn.close()
         return {"clusters": clusters, "total_clusters": len(clusters), "unclustered_count": unclustered}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cluster error: {str(e)}")
+    except Exception:
+        raise _internal_error("Cluster error")
 
 
 @router.get("/api/clusters/{cluster_id}")
@@ -673,17 +726,19 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
             texts = [m.get("content", "")[:200] for m in members[:10] if m.get("content")]
             if texts:
                 from superlocalmemory.core.summarizer import Summarizer
-                from superlocalmemory.server.profile_runtime import get_profile_runtime
                 from superlocalmemory.server.routes.helpers import get_engine_lazy
 
-                runtime = get_profile_runtime(request.app.state)
-                with runtime.operation():
-                    engine = get_engine_lazy(request.app.state)
-                    if engine is not None:
-                        summarizer = Summarizer(engine._config)
-                        summary = summarizer.summarize_cluster(
-                            [{"content": t} for t in texts]
-                        ) or ""
+                # v3.4.64: Do NOT call runtime.operation() synchronously in an
+                # async route — if a transition is pending, acquire_operation()
+                # blocks the event loop thread, deadlocking the drain.  The
+                # middleware already holds an operation lease for this request;
+                # the engine is stable for the full duration of the handler.
+                engine = get_engine_lazy(request.app.state)
+                if engine is not None:
+                    summarizer = Summarizer(engine._config)
+                    summary = summarizer.summarize_cluster(
+                        [{"content": t} for t in texts]
+                    ) or ""
         except Exception:
             pass
 
@@ -695,8 +750,8 @@ async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Que
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cluster detail error: {str(e)}")
+    except Exception:
+        raise _internal_error("Cluster detail error")
 
 
 @router.get("/api/memories/{memory_id}/facts")
@@ -710,18 +765,21 @@ async def get_memory_facts(request: Request, memory_id: str):
     engine instead, exactly like the /recall route.
     """
     try:
-        from superlocalmemory.server.profile_runtime import get_profile_runtime
         from superlocalmemory.server.routes.helpers import get_engine_lazy
 
-        runtime = get_profile_runtime(request.app.state)
-        with runtime.operation():
-            engine = get_engine_lazy(request.app.state)
-            if engine is None:
-                raise HTTPException(status_code=503, detail="Engine not initialized")
-            active_profile = engine.profile_id
-            mem_map = engine._db.get_memory_content_batch([memory_id])
-            original = mem_map.get(memory_id, "")
-            facts = engine._db.get_facts_by_memory_id(memory_id, active_profile)
+        # v3.4.64: Do NOT call runtime.operation() synchronously in an async
+        # route — blocks the event loop when a transition is pending.  The
+        # middleware already holds an operation lease; the engine and its
+        # profile_id are stable for the full duration of this request.
+        engine = get_engine_lazy(request.app.state)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialized")
+        active_profile = engine.profile_id
+        mem_map = engine._db.get_memory_content_batch(
+            [memory_id], active_profile, include_global=True, include_shared=True,
+        )
+        original = mem_map.get(memory_id, "")
+        facts = engine._db.get_facts_by_memory_id(memory_id, active_profile)
         fact_list = [
             {
                 "fact_id": f.fact_id,
@@ -744,8 +802,8 @@ async def get_memory_facts(request: Request, memory_id: str):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    except Exception:
+        raise _internal_error()
 
 
 @router.get("/api/memories/{memory_id}/detail")
@@ -795,8 +853,8 @@ async def get_memory_detail(request: Request, memory_id: str):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Detail error: {str(e)}")
+    except Exception:
+        raise _internal_error("Detail error")
 
 
 @router.get("/api/facts/{fact_id}")
@@ -835,8 +893,8 @@ async def get_fact_detail(request: Request, fact_id: str):
         return row
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fact detail error: {str(e)}")
+    except Exception:
+        raise _internal_error("Fact detail error")
 
 
 @router.delete("/api/memories/{fact_id}")
@@ -859,8 +917,8 @@ async def delete_memory(request: Request, fact_id: str):
         return {"success": True, "deleted": fact_id}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Delete error: {str(e)}")
+    except Exception:
+        raise _internal_error("Delete error")
 
 
 @router.post("/api/memories/{fact_id}/forget")
@@ -920,8 +978,8 @@ async def forget_memory(request: Request, fact_id: str):
         return {"success": True, "fact_id": fact_id, "archived_at": archived_at}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Forget error: {str(e)}")
+    except Exception:
+        raise _internal_error("Forget error")
 
 
 @router.post("/api/memories/{fact_id}/merge")
@@ -989,8 +1047,8 @@ async def merge_memory(request: Request, fact_id: str):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Merge error: {str(e)}")
+    except Exception:
+        raise _internal_error("Merge error")
 
 
 @router.patch("/api/memories/{fact_id}")
@@ -1022,5 +1080,64 @@ async def edit_memory(request: Request, fact_id: str):
         return {"success": True, "fact_id": fact_id, "content": new_content}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Edit error: {str(e)}")
+    except Exception:
+        raise _internal_error("Edit error")
+
+
+_VALID_SCOPES = ("personal", "shared", "global")
+
+
+@router.patch("/api/memories/{fact_id}/scope")
+async def set_memory_scope(request: Request, fact_id: str):
+    """Set a memory's scope (personal | shared | global) + shared_with.
+
+    Body: {"scope": "shared", "shared_with": "alice,bob"}. shared_with accepts a
+    comma-separated string or a list; it is stored as a JSON array so the
+    _scope_where LIKE match works. Mutation-authorized, and the fact must
+    belong to the active profile (a caller cannot re-scope another profile's
+    fact). This is the write side of multi-scope sharing from the dashboard.
+    """
+    import json as _json
+    try:
+        body = await request.json()
+        scope = (body.get("scope") or "").strip().lower()
+        if scope not in _VALID_SCOPES:
+            raise HTTPException(400, detail=f"scope must be one of {_VALID_SCOPES}")
+
+        raw_shared = body.get("shared_with", [])
+        if isinstance(raw_shared, str):
+            shared_list = [s.strip() for s in raw_shared.split(",") if s.strip()]
+        elif isinstance(raw_shared, list):
+            shared_list = [str(s).strip() for s in raw_shared if str(s).strip()]
+        else:
+            shared_list = []
+        if scope == "shared" and not shared_list:
+            raise HTTPException(
+                400, detail="shared scope requires at least one profile in shared_with")
+        # global/personal never carry a shared_with list.
+        if scope != "shared":
+            shared_list = []
+
+        engine, active_profile, _ctx = _authorize_memory_mutation(
+            request, "update", fact_id, run_pre_hook=False,
+        )
+        # Ownership check: the fact must belong to the active profile.
+        rows = engine._db.execute(
+            "SELECT 1 FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, active_profile),
+        )
+        if not rows:
+            raise HTTPException(404, detail="Memory not found in this profile")
+
+        engine._db.update_fact(fact_id, {
+            "scope": scope,
+            "shared_with": _json.dumps(shared_list),
+        }, profile_id=active_profile)
+        return {
+            "success": True, "fact_id": fact_id, "scope": scope,
+            "shared_with": shared_list, "active_profile": active_profile,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise _internal_error("Scope update error")

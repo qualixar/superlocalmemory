@@ -54,7 +54,7 @@ mode, followed by fusion, optional reranking, and graph-based score
 enhancement. Results follow [Score Contract v2](Retrieval-Score-Contract).
 
 Options:
-- `--limit N` — Number of results (default: 10)
+- `--limit N` — Number of results (default: 20)
 - `--json` — Output structured JSON
 
 ### List
@@ -173,7 +173,7 @@ slm dashboard                 # Open web dashboard at http://localhost:8765
 slm dashboard --port 9000     # Use a custom port
 ```
 
-17-tab dashboard: memory browser, knowledge graph, recall lab, trust scores, math health, compliance, learning, IDE connections, settings, and more.
+11-workspace dashboard: Dashboard, Brain, Knowledge Graph, Memories, Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and Optimize.
 
 ## Examples
 

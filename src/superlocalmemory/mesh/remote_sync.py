@@ -98,6 +98,19 @@ class RemoteSyncClient:
         self._discovery_enabled: bool = (
             os.environ.get("SLM_MESH_DISCOVERY", "on") != "off"
         )
+        # M05: the shared secret is a bearer token — whoever receives it can
+        # replay it. mDNS discovery is unauthenticated (anyone on the LAN can
+        # advertise _slm-mesh._tcp.local.), so we must NOT push the secret to a
+        # discovered peer unless the operator explicitly trusts LAN discovery.
+        # An explicitly-configured peer (SLM_MESH_PEER_URL) is trusted; a peer
+        # set programmatically stays trusted; only the discovery path can
+        # downgrade trust.
+        self._peer_url_from_config: bool = self._peer_url is not None
+        self._trust_discovered: bool = (
+            os.environ.get("SLM_MESH_TRUST_DISCOVERED", "off").strip().lower()
+            in ("1", "on", "true", "yes")
+        )
+        self._peer_url_trusted: bool = True
         self._sync_thread: threading.Thread | None = None
         self._discovery_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -157,6 +170,14 @@ class RemoteSyncClient:
             if self._stop_event.wait(30):
                 break
 
+    def _auth_headers(self) -> dict[str, str]:
+        """Bearer header for the current peer — but ONLY if that peer is
+        trusted. Prevents leaking the shared secret to a spoofed mDNS peer
+        (M05)."""
+        if self._shared_secret and self._peer_url_trusted:
+            return {"Authorization": f"Bearer {self._shared_secret}"}
+        return {}
+
     def _sync_peers_from_remote(self) -> None:
         """Fetch peers from remote /mesh/peers and update broker."""
         if not self._peer_url:
@@ -164,9 +185,7 @@ class RemoteSyncClient:
 
         try:
             with httpx.Client(timeout=5) as client:
-                headers = {}
-                if self._shared_secret:
-                    headers["Authorization"] = f"Bearer {self._shared_secret}"
+                headers = self._auth_headers()
 
                 resp = client.get(
                     f"{self._peer_url}/mesh/peers", headers=headers, timeout=5
@@ -214,9 +233,7 @@ class RemoteSyncClient:
 
         try:
             with httpx.Client(timeout=10) as client:
-                headers = {}
-                if self._shared_secret:
-                    headers["Authorization"] = f"Bearer {self._shared_secret}"
+                headers = self._auth_headers()
 
                 payload = {
                     "from_peer": message_data.get("from_peer", ""),
@@ -297,8 +314,33 @@ class RemoteSyncClient:
         self.add_service(zeroconf, service_type, name)
 
     def _update_peer_url(self, host: str, port: int) -> None:
-        """Update peer URL from discovery."""
+        """Update peer URL from mDNS discovery.
+
+        Never overrides an explicitly-configured SLM_MESH_PEER_URL — explicit
+        config is the source of truth and must not be hijacked by a spoofed
+        mDNS announcement. A discovered peer is marked UNTRUSTED (the shared
+        secret is withheld) unless SLM_MESH_TRUST_DISCOVERED is enabled (M05).
+        """
+        if self._peer_url_from_config:
+            logger.debug(
+                "RemoteSyncClient: ignoring mDNS-discovered peer %s:%s — "
+                "SLM_MESH_PEER_URL is explicitly configured",
+                host, port,
+            )
+            return
         new_url = _peer_url(host, port)
         if self._peer_url != new_url:
             self._peer_url = new_url
-            logger.info("RemoteSyncClient: updated peer URL to %s", new_url)
+            self._peer_url_trusted = self._trust_discovered
+            logger.info(
+                "RemoteSyncClient: updated peer URL to %s (mDNS-discovered, "
+                "trusted=%s)", new_url, self._peer_url_trusted,
+            )
+            if self._shared_secret and not self._trust_discovered:
+                logger.warning(
+                    "RemoteSyncClient: a shared secret is set but "
+                    "SLM_MESH_TRUST_DISCOVERED is off — the secret will NOT be "
+                    "sent to mDNS-discovered peer %s. Set "
+                    "SLM_MESH_TRUST_DISCOVERED=on to trust LAN-discovered peers.",
+                    new_url,
+                )
