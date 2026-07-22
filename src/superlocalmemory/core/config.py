@@ -1264,6 +1264,7 @@ class SLMConfig:
             _c_emb = EmbeddingConfig(
                 model_name=embedding_model_name or "text-embedding-3-large",
                 dimension=embedding_dimension or 3072,
+                provider=_c_emb_provider,
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
                 deployment_name=embedding_deployment,
@@ -1275,8 +1276,11 @@ class SLMConfig:
             # 768-dim Ollama embedder, which made ingestion fail at vector
             # materialization. Cloud embeddings remain an explicit opt-in.
             _c_emb = EmbeddingConfig(
-                model_name="nomic-ai/nomic-embed-text-v1.5",
-                dimension=768,
+                # Honour an on-disk embedding model when one was configured (the
+                # load() path passes it through); default to the local nomic
+                # model so Mode C never silently requires a paid cloud embedder.
+                model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
+                dimension=embedding_dimension or 768,
             )
         return cls(
             mode=mode,

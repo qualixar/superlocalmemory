@@ -97,6 +97,9 @@ _HOP_BY_HOP = frozenset([
     "te", "trailer", "transfer-encoding", "upgrade", "host",
     "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto",
     "x-real-ip", "x-original-forwarded-for",
+    # ponytail: httpx decompresses gzip automatically; forwarding this header
+    # causes clients to double-decompress → ZlibError. Strip it here.
+    "content-encoding",
 ])
 
 _ANTHROPIC_FORWARD_HEADERS = frozenset([

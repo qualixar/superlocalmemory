@@ -73,6 +73,41 @@ def test_config_creates_parent_dirs(tmp_path):
     assert nested.exists()
 
 
+def test_mode_c_default_embedding_is_local_nomic():
+    """Mode C with no embedding overrides must default to a model the local
+    sentence-transformers worker can actually load. The prior default
+    'text-embedding-3-large' is an OpenAI cloud model name that fails on the
+    HuggingFace hub (401/RepositoryNotFound) and brings the semantic channel
+    down on every recall."""
+    config = SLMConfig.for_mode(Mode.C)
+    assert config.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
+    assert config.embedding.dimension == 768
+
+
+def test_mode_c_honors_disk_embedding_model_name():
+    """Mode C must honour embedding_model_name passed in by load() from
+    config.json, instead of discarding it. Regression for AIDEV-86 load path:
+    the on-disk model_name was silently overwritten by the hardcoded default."""
+    config = SLMConfig.for_mode(
+        Mode.C,
+        embedding_model_name="BAAI/bge-m3",
+        embedding_dimension=1024,
+    )
+    assert config.embedding.model_name == "BAAI/bge-m3"
+    assert config.embedding.dimension == 1024
+
+
+def test_mode_c_roundtrip_preserves_local_embedding(tmp_path):
+    """Save then load a Mode C config with the default local embedding and
+    confirm the reloaded model_name matches what was on disk — not the
+    Mode C hardcoded default."""
+    config = SLMConfig.for_mode(Mode.C)
+    config.save(tmp_path / "config.json")
+    reloaded = SLMConfig.load(tmp_path / "config.json")
+    assert reloaded.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
+    assert reloaded.embedding.dimension == 768
+
+
 def test_provider_presets_have_required_fields():
     presets = SLMConfig.provider_presets()
     for name, preset in presets.items():
