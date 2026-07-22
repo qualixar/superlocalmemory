@@ -4,9 +4,9 @@
 store (`VectorStoreCollection`) backed by the local data root of
 [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory).
 
-Give a Semantic Kernel agent an on-device record store for memory — no cloud,
-no telemetry — that is also visible through every other SLM surface (CLI, MCP,
-dashboard).
+Give a Semantic Kernel agent a record store for memory in your local SLM data
+root, visible through every other SLM surface (CLI, MCP, dashboard). Optional
+SLM providers, connectors, backup, and downloads have separate network behavior.
 
 ## Prerequisites
 

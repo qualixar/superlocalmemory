@@ -4,9 +4,10 @@ LangGraph [`BaseStore`](https://langchain-ai.github.io/langgraph/) (long-term
 memory) backed by the local data root of
 [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory).
 
-Give a LangGraph agent durable, namespaced long-term memory that lives entirely
-on-device — no cloud, no telemetry — and is also visible through every other
-SLM surface (CLI, MCP, dashboard).
+Give a LangGraph agent durable, namespaced long-term memory stored in your
+local SLM data root and visible through every other SLM surface (CLI, MCP,
+dashboard). Optional SLM providers, connectors, backup, and downloads have
+separate network behavior.
 
 ## Prerequisites
 

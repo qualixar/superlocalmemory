@@ -50,6 +50,7 @@ EXPECTED_SKILLS = [
     "slm-compress",
     "slm-governance",
     "slm-graph",
+    "slm-loop",
     "slm-mesh",
     "slm-profile",
     "slm-recall",

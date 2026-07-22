@@ -5,8 +5,9 @@
 
 Implements Semantic Kernel's ``VectorStoreCollection`` (the post-1.34 vector
 store abstraction that replaced the deprecated ``MemoryStoreBase``) backed by a
-local SuperLocalMemory data root. Records live on-device -- zero cloud, zero
-telemetry -- and are visible through every other SLM surface.
+local SuperLocalMemory data root. Records stay in your local SLM data root
+(optional SLM providers, connectors, backup, and downloads have separate
+network behavior) and are visible through every other SLM surface.
 
 Scope / status
 --------------

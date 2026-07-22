@@ -4,9 +4,10 @@
 memory + history providers backed by the local data root of
 [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory).
 
-Give an Agent Framework agent durable, on-device conversation history and
-memory enrichment — no cloud, no telemetry — visible through every other SLM
-surface.
+Give an Agent Framework agent durable conversation history and memory
+enrichment in your local SLM data root, visible through every other SLM
+surface. Optional SLM providers, connectors, backup, and downloads have
+separate network behavior.
 
 ## Prerequisites
 

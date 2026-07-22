@@ -4,8 +4,8 @@
 """SuperLocalMemory V3 - LangGraph BaseStore backend.
 
 Implements LangGraph's ``BaseStore`` (long-term memory store) backed by a local
-SuperLocalMemory data root. All data stays on-device -- zero cloud, zero
-telemetry.
+SuperLocalMemory data root. Data stays in your local SLM data root; optional
+SLM providers, connectors, backup, and downloads have separate network behavior.
 
 ``BaseStore`` declares only two abstract methods, ``batch`` and ``abatch``;
 every convenience method (``get``/``put``/``search``/``delete``/

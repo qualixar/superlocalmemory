@@ -18,6 +18,7 @@ Regenerate: `npm run build:copilot-plugin` (or `node scripts/build-copilot-plugi
 ## Files
 
 - `.github/agents/slm-governance-advisor.agent.md`
+- `.github/agents/slm-loop-runner.agent.md`
 - `.github/agents/slm-memory-advisor.agent.md`
 - `.github/agents/slm-optimize-advisor.agent.md`
 - `.github/copilot-instructions.md`
@@ -26,6 +27,7 @@ Regenerate: `npm run build:copilot-plugin` (or `node scripts/build-copilot-plugi
 - `.github/prompts/slm-compress.prompt.md`
 - `.github/prompts/slm-governance.prompt.md`
 - `.github/prompts/slm-graph.prompt.md`
+- `.github/prompts/slm-loop.prompt.md`
 - `.github/prompts/slm-mesh.prompt.md`
 - `.github/prompts/slm-profile.prompt.md`
 - `.github/prompts/slm-recall.prompt.md`

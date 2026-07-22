@@ -383,12 +383,10 @@ class TestSkillsLayout:
                 f"plugin/skills/{skill}/SKILL.md not found — expected 7 skills in v3.6.14"
             )
 
-    def test_no_commands_dir_in_plugin(self) -> None:
-        """Commands are folded into skills in v3.6.14; no plugin/commands/ dir."""
-        commands_dir = PLUGIN_ROOT / "commands"
-        assert not commands_dir.exists(), (
-            f"plugin/commands/ must not exist — commands folded into skills in v3.6.14"
-        )
+    def test_commands_dir_ships_slm_loop(self) -> None:
+        """v3.8.0: the /slm-loop bounded-loop command ships in plugin/commands/."""
+        cmd = PLUGIN_ROOT / "commands" / "slm-loop.md"
+        assert cmd.exists(), "plugin/commands/slm-loop.md must exist (v3.8.0)"
 
     def test_no_old_skills_in_plugin(self) -> None:
         """Old skills (slm-build-graph, slm-list-recent, etc.) must not exist."""
