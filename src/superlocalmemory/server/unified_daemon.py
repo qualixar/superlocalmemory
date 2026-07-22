@@ -678,6 +678,43 @@ async def _start_legacy_redirect(primary_port: int, legacy_port: int) -> None:
 # Lifespan
 # ---------------------------------------------------------------------------
 
+def _warm_spreading_activation(engine, runtime) -> bool:
+    """Pre-warm the spreading-activation channel for the active profile.
+
+    The ``--fast`` warmup recalls deliberately skip spreading activation (and the
+    Mode-C remote agentic verification), which left the first FULL user recall
+    paying the cold graph-load cost: the ``graph_edges`` + ``association_edges``
+    page cache and the ``fact_importance`` PageRank/community cache. This warms
+    that channel directly — pure local graph work, never a remote/LLM call — so
+    the first full recall is warm. Fail-soft; returns True only when it ran.
+    """
+    try:
+        retr = getattr(engine, "_retrieval_engine", None)
+        sa = getattr(retr, "_spreading_activation", None) if retr else None
+        embedder = getattr(retr, "_embedder", None) if retr else None
+        if sa is None or embedder is None or not hasattr(embedder, "embed"):
+            return False
+        query_embedding = embedder.embed("memory recall performance")
+        if query_embedding is None:
+            return False
+        active_pid = getattr(engine, "profile_id", "default") or "default"
+        lease = runtime.operation_nowait() if runtime is not None else None
+        if lease is not None:
+            with lease as snap:
+                if snap is None:
+                    return False
+                sa.search(query_embedding, profile_id=active_pid, top_k=7)
+        else:
+            sa.search(query_embedding, profile_id=active_pid, top_k=7)
+        logger.info(
+            "Spreading-activation graph pre-warmed for profile %s", active_pid,
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Spreading-activation warmup failed (non-fatal): %s", exc)
+        return False
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -967,6 +1004,9 @@ async def lifespan(application: FastAPI):
                             )
                             break
                         engine.recall(wq, limit=5, fast=True)  # short lease so a profile switch can drain within 5s
+                # v3.8: the --fast recalls above skip spreading activation; warm
+                # that channel directly so the first FULL recall is not cold.
+                _warm_spreading_activation(engine, profile_runtime)
                 elapsed = round((_t.monotonic() - t0) * 1000)
                 logger.info(
                     "Recall engine pre-warmed in %dms", elapsed,
