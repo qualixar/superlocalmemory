@@ -562,6 +562,9 @@
                 <div id="entity-detail-panel" class="mt-3" style="display:none"></div>
             </div>
 
+            <!-- Multi-Agent Memory — OD module renders into this pane via window.odRenderAgents -->
+            <div class="tab-pane fade" id="agents-pane"></div>
+
             <!-- Memories List -->
             <div class="tab-pane fade" id="memories-pane">
                 <!-- Domain 4 (v3.4.21): Recall Lab is the primary search at
@@ -1572,6 +1575,8 @@
     <script src="static/js/od-graph.js?v=379"></script>
     <script src="static/js/od-memories.js?v=379"></script>
     <script src="static/js/od-entities.js?v=379"></script>
+    <!-- Multi-Agent Memory pane (v3.8.0): visualises memory written by multiple agents -->
+    <script src="static/js/od-agents.js?v=380"></script>
     <script src="static/js/od-skills.js?v=379"></script>
     <script src="static/js/od-mesh.js?v=379"></script>
     <script src="static/js/od-optimize.js?v=379"></script>

@@ -65,9 +65,10 @@
       { k: 'brain-pane',     t: 'Brain',        i: 'brain',     crumb: 'Overview', tag: 'live', hero: true },
     ]},
     { g: 'Memory', items: [
-      { k: 'graph-pane',     t: 'Knowledge Graph',  i: 'graph',    crumb: 'Memory', hero: true },
-      { k: 'memories-pane',  t: 'Memories',          i: 'memories', crumb: 'Memory' },
-      { k: 'entities-pane',  t: 'Entity Explorer',   i: 'entity',   crumb: 'Memory' },
+      { k: 'graph-pane',     t: 'Knowledge Graph',   i: 'graph',    crumb: 'Memory', hero: true },
+      { k: 'memories-pane',  t: 'Memories',           i: 'memories', crumb: 'Memory' },
+      { k: 'entities-pane',  t: 'Entity Explorer',    i: 'entity',   crumb: 'Memory' },
+      { k: 'agents-pane',    t: 'Multi-Agent Memory', i: 'mesh',     crumb: 'Memory' },
     ]},
     { g: 'Intelligence', items: [
       { k: 'skills-pane',    t: 'Skill Evolution',  i: 'skill',    crumb: 'Intelligence' },
@@ -316,6 +317,9 @@
       case 'optimize-pane':
         if (od('odRenderOptimize')) break;
         if (typeof initOptimizeTab === 'function') initOptimizeTab();
+        break;
+      case 'agents-pane':
+        if (od('odRenderAgents')) break;
         break;
       case 'mcp-pane':
         od('odRenderMcp');

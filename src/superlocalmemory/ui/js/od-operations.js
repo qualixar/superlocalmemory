@@ -95,6 +95,7 @@
         '<button class="tab" data-od-tab="access">Access &amp; Users</button>' +
         '<button class="tab" data-od-tab="trust">Trust</button>' +
         '<button class="tab" data-od-tab="compliance">Compliance</button>' +
+        '<button class="tab" data-od-tab="loops">Bounded Loops</button>' +
       '</div>' +
 
       // ══════ LIFECYCLE TAB ══════════════════════════════════════════════
@@ -197,6 +198,122 @@
           '<div class="card-head"><h3>Team &amp; access</h3></div>' +
           '<div class="card-pad"><p class="muted">Loading…</p></div>' +
         '</div>' +
+      '</section>' +
+
+      // ══════ BOUNDED LOOPS TAB ════════════════════════════════════════
+      // Static info card — no backend calls.
+      // A bounded loop advances only when an INDEPENDENT gate passes, not
+      // when the agent claims success. Laps are persisted as SLM memory
+      // (tag loop:<name>) so the full run history is queryable.
+      '<section class="tabpane" data-od-pane="loops">' +
+
+        '<div class="page-head" style="margin-bottom:16px">' +
+          '<h2 style="font-size:20px;margin-bottom:6px">Bounded Loops</h2>' +
+          '<p style="font-size:13.5px">An iteration control pattern for agentic ' +
+            'frameworks &mdash; the loop advances only when an <strong>independent ' +
+            'gate</strong> passes, not when the agent claims success. Prevents ' +
+            'rationalisation: the model cannot self-certify completion.</p>' +
+        '</div>' +
+
+        // Two-column: concept + CLI reference
+        '<div class="grid" style="grid-template-columns:1fr 1fr;align-items:start;margin-bottom:16px">' +
+
+          '<div class="card">' +
+            '<div class="card-head"><h3>How it works</h3></div>' +
+            '<div class="card-pad">' +
+              '<p style="font-size:13px;line-height:1.6;margin-bottom:12px">' +
+                'Standard agentic loops let the model declare itself done &mdash; ' +
+                'a known failure mode when the model rationalises instead of verifying. ' +
+                'A bounded loop separates <em>execution</em> (the agent) from ' +
+                '<em>verification</em> (an independent gate such as a test suite, ' +
+                'linter, or judge LLM).' +
+              '</p>' +
+              '<p style="font-size:13px;line-height:1.6;margin-bottom:12px">' +
+                'The loop terminates only when the gate returns <code>DONE</code>, ' +
+                'or when a hard lap cap is reached (<code>HALT</code>). Each lap is ' +
+                'persisted as a queryable SLM memory tagged ' +
+                '<code>loop:&lt;name&gt;</code>.' +
+              '</p>' +
+              '<div style="background:var(--card-2);border-radius:var(--r-md);' +
+                'padding:10px 14px;font-size:12.5px;line-height:1.7">' +
+                '<div><span class="badge ok" style="margin-right:8px">DONE</span>' +
+                  'Gate passed &mdash; loop succeeded cleanly</div>' +
+                '<div style="margin-top:6px"><span class="badge warn" style="margin-right:8px">HALT</span>' +
+                  'Lap cap reached &mdash; hard stop applied</div>' +
+                '<div style="margin-top:6px"><span class="badge cyan" style="margin-right:8px">PAUSE</span>' +
+                  'Awaiting external input or approval</div>' +
+                '<div style="margin-top:6px"><span class="badge danger" style="margin-right:8px">KILLED</span>' +
+                  'Manually stopped by the operator</div>' +
+                '<div style="margin-top:6px"><span class="badge neutral" style="margin-right:8px">ERROR</span>' +
+                  'Unrecoverable failure during a lap</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="card">' +
+            '<div class="card-head"><h3>CLI reference</h3></div>' +
+            '<div class="card-pad">' +
+              '<p style="font-size:13px;margin-bottom:14px">' +
+                'All loop commands are available through the <code>slm</code> CLI. ' +
+                'Run the <code>slm-loop</code> skill inside Claude Code for the full ' +
+                'interactive walkthrough.' +
+              '</p>' +
+              '<div style="display:flex;flex-direction:column;gap:12px">' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop demo</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Run a live demo bounded loop</span>' +
+                '</div>' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop history</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">List all loop runs for this profile</span>' +
+                '</div>' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop show &lt;run_id&gt;</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Inspect a specific run lap-by-lap</span>' +
+                '</div>' +
+              '</div>' +
+              '<div style="margin-top:18px;padding:10px 14px;background:var(--card-2);' +
+                'border-radius:var(--r-md);font-size:12.5px;line-height:1.6">' +
+                '<b>Memory tagging:</b> each lap is stored with tag ' +
+                '<code>loop:&lt;name&gt;</code>. Recall the full history with ' +
+                '<br><code>slm recall --tag loop:my-loop-name</code>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+        '</div>' + // end two-column grid
+
+        // Framework adapters note
+        '<div class="card">' +
+          '<div class="card-head"><h3>Framework adapters</h3></div>' +
+          '<div class="card-pad">' +
+            '<p style="font-size:13px;line-height:1.6;margin-bottom:14px">' +
+              'Bounded loops integrate with any agentic framework that supports ' +
+              'tool-call round-trips. The gate is an ordinary SLM memory check &mdash; ' +
+              'no special framework wiring required. Each framework stamps ' +
+              '<code>SLM_AGENT_ID</code> so lap history is attribution-aware.' +
+            '</p>' +
+            '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">CrewAI</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">LangChain</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">LangGraph</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">Semantic Kernel</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">AutoGen</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">Any MCP-compatible agent</span>' +
+            '</div>' +
+            '<p style="margin-top:12px;font-size:12.5px;color:var(--fg-2)">' +
+              'Learn the full pattern: run <code>/slm-loop</code> (the slm-loop skill) ' +
+              'inside Claude Code for an interactive walkthrough with live examples.' +
+            '</p>' +
+          '</div>' +
+        '</div>' +
+
       '</section>' +
 
       // ══════ COMPLIANCE TAB ════════════════════════════════════════════

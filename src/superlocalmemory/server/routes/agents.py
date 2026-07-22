@@ -79,6 +79,88 @@ async def get_agent_stats(request: Request):
         raise _internal_error("Agent stats error")
 
 
+@router.get("/api/agents/memory-activity")
+async def get_agent_memory_activity(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Per-agent memory attribution for the multi-agent memory view.
+
+    Reports how many memories each writing agent contributed, when each was
+    last active, which ingestion sources they used, and the most recent
+    entries — grouped by ``ingestion_operations.trusted_actor_id`` (the agent
+    that wrote the memory). Profile-scoped. Uses a direct DB read because the
+    dashboard runs without the engine subprocess. Never raises to the client;
+    returns empty structures if the operations table is absent.
+    """
+    import sqlite3
+
+    from .helpers import get_active_profile
+
+    pid = get_active_profile()
+    agents: list[dict] = []
+    recent: list[dict] = []
+    total = 0
+
+    if DB_PATH.exists():
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                rows = conn.execute(
+                    "SELECT CASE WHEN trusted_actor_id='' THEN 'unknown' "
+                    "ELSE trusted_actor_id END AS agent_id, "
+                    "COUNT(*) AS cnt, MAX(created_at) AS last_active, "
+                    "GROUP_CONCAT(DISTINCT source_type) AS sources "
+                    "FROM ingestion_operations WHERE profile_id=? "
+                    "GROUP BY agent_id ORDER BY cnt DESC, agent_id ASC",
+                    (pid,),
+                ).fetchall()
+                for r in rows:
+                    agents.append({
+                        "agent_id": r["agent_id"],
+                        "count": r["cnt"],
+                        "last_active": r["last_active"],
+                        "source_types": (
+                            [s for s in (r["sources"] or "").split(",") if s]
+                        ),
+                    })
+                    total += r["cnt"]
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                rows = conn.execute(
+                    "SELECT CASE WHEN trusted_actor_id='' THEN 'unknown' "
+                    "ELSE trusted_actor_id END AS agent_id, "
+                    "substr(raw_content, 1, 160) AS snippet, "
+                    "created_at, source_type, session_id "
+                    "FROM ingestion_operations WHERE profile_id=? "
+                    "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                    (pid, int(limit)),
+                ).fetchall()
+                recent = [{
+                    "agent_id": r["agent_id"],
+                    "content": r["snippet"],
+                    "created_at": r["created_at"],
+                    "source_type": r["source_type"],
+                    "session_id": r["session_id"],
+                } for r in rows]
+            except sqlite3.OperationalError:
+                pass
+        finally:
+            conn.close()
+
+    return {
+        "ok": True,
+        "profile_id": pid,
+        "total_memories": total,
+        "agent_count": len(agents),
+        "agents": agents,
+        "recent": recent,
+    }
+
+
 @router.get("/api/trust/stats")
 async def get_trust_stats(request: Request):
     """Get trust scoring statistics.
