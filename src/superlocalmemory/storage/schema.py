@@ -52,6 +52,7 @@ _TABLES: Final[tuple[str, ...]] = (
     "compliance_audit",
     "bm25_tokens",
     "config",
+    "entity_communities",
 )
 
 _FTS_TABLES: Final[tuple[str, ...]] = (
@@ -687,6 +688,24 @@ CREATE TABLE IF NOT EXISTS config (
 );
 """
 
+# Wave Q: entity-community backbone (additive; safe on existing DBs).
+# One row per (profile, entity) mapping to the community it belongs to,
+# computed by Louvain over the entity co-occurrence graph in the background.
+# Shared spine for Q2 community summaries and Q3 progressive abstraction.
+_SQL_ENTITY_COMMUNITIES: Final[str] = """
+CREATE TABLE IF NOT EXISTS entity_communities (
+    profile_id  TEXT    NOT NULL,
+    entity_id   TEXT    NOT NULL,
+    community_id INTEGER NOT NULL,
+    computed_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_comm_profile
+    ON entity_communities(profile_id);
+CREATE INDEX IF NOT EXISTS idx_entity_comm_cid
+    ON entity_communities(profile_id, community_id);
+"""
+
 # ---------------------------------------------------------------------------
 # Ordered DDL list (tables before FTS, respects FK order)
 # ---------------------------------------------------------------------------
@@ -717,6 +736,8 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_ATOMIC_FACTS_FTS,
     # T3b: standalone expansion FTS (additive; safe on existing DBs)
     _SQL_FACT_EXPANSION_FTS,
+    # Wave Q: entity-community backbone (additive; safe on existing DBs)
+    _SQL_ENTITY_COMMUNITIES,
 )
 
 

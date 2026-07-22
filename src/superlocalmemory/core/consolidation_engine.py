@@ -49,6 +49,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _recompute_entity_communities(db: Any, profile_id: str) -> dict[str, int]:
+    """Wave Q: rebuild the entity-community backbone (fail-open, non-fatal).
+
+    Shared spine for Q2 community summaries and Q3 progressive abstraction.
+    Runs in the background consolidation lane; never blocks store/recall.
+    """
+    try:
+        from superlocalmemory.core.entity_community import EntityCommunityBuilder
+
+        result = EntityCommunityBuilder(db).compute_and_store(profile_id)
+        logger.info(
+            "Background entity-community: %d entities, %d communities",
+            result.get("entity_count", 0),
+            result.get("community_count", 0),
+        )
+        return result
+    except Exception as exc:
+        logger.debug("Entity-community recompute failed (non-fatal): %s", exc)
+        return {"entity_count": 0, "community_count": 0}
+
+
 class ConsolidationEngine:
     """Sleep-time memory consolidation with 6-step cycle.
 
@@ -254,21 +275,26 @@ class ConsolidationEngine:
         activation. Takes ~200-800ms, runs on daemon thread, zero impact
         on store/recall latency.
         """
-        if self._graph_analyzer is None:
-            return
         analyzer = self._graph_analyzer
         pid = profile_id
+        db = self._db
 
         def _run() -> None:
-            try:
-                result = analyzer.compute_and_store(pid)
-                logger.info(
-                    "Background graph analysis complete: %d nodes, %d communities",
-                    result.get("node_count", 0),
-                    result.get("community_count", 0),
-                )
-            except Exception as exc:
-                logger.debug("Background graph analysis failed (non-fatal): %s", exc)
+            if analyzer is not None:
+                try:
+                    result = analyzer.compute_and_store(pid)
+                    logger.info(
+                        "Background graph analysis complete: %d nodes, "
+                        "%d communities",
+                        result.get("node_count", 0),
+                        result.get("community_count", 0),
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Background graph analysis failed (non-fatal): %s", exc,
+                    )
+            # Wave Q: entity-community backbone (shared spine for Q2/Q3).
+            _recompute_entity_communities(db, pid)
 
         t = threading.Thread(target=_run, daemon=True, name="graph-analysis-bg")
         t.start()
@@ -561,14 +587,19 @@ class ConsolidationEngine:
     def _step5_recompute_graph(
         self, profile_id: str,
     ) -> dict[str, Any]:
-        """Recompute PageRank + communities.  Delegates to GraphAnalyzer."""
-        if self._graph_analyzer is None:
-            return {"node_count": 0, "community_count": 0}
-        try:
-            return self._graph_analyzer.compute_and_store(profile_id)
-        except Exception as exc:
-            logger.warning("Graph recompute failed: %s", exc)
-            return {"node_count": 0, "community_count": 0}
+        """Recompute PageRank + communities.  Delegates to GraphAnalyzer.
+
+        Wave Q: also rebuilds the entity-community backbone (Q2/Q3 spine).
+        """
+        result: dict[str, Any] = {"node_count": 0, "community_count": 0}
+        if self._graph_analyzer is not None:
+            try:
+                result = self._graph_analyzer.compute_and_store(profile_id)
+            except Exception as exc:
+                logger.warning("Graph recompute failed: %s", exc)
+        ec = _recompute_entity_communities(self._db, profile_id)
+        result["entity_community_count"] = ec.get("community_count", 0)
+        return result
 
     # ------------------------------------------------------------------
     # Step 6: Derive Associations
