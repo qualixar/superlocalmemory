@@ -367,7 +367,7 @@ export function buildPlan(root, manifest) {
   plan.set(path.join(root, '.claude-plugin', 'marketplace.json'), renderMarketplaceJson(manifest));
 
   // ---------------------------------------------------------------------------
-  // Agents (verbatim, no commands/)
+  // Agents (verbatim)
   // ---------------------------------------------------------------------------
   const agentsSrcPath = path.join(root, 'plugin-src', 'agents');
   if (fs.existsSync(agentsSrcPath)) {
@@ -382,6 +382,25 @@ export function buildPlan(root, manifest) {
         `SuperLocalMemory v${manifest.version}`,
       );
       plan.set(path.join(pluginRoot, 'agents', fname), content);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Slash commands (verbatim) — plugin-src/commands/*.md -> plugin/commands/
+  // A command binds a skill + agent + instructions (Claude Code pattern).
+  // ---------------------------------------------------------------------------
+  const commandsSrcPath = path.join(root, 'plugin-src', 'commands');
+  if (fs.existsSync(commandsSrcPath)) {
+    for (const fname of fs.readdirSync(commandsSrcPath)) {
+      if (fname === '.gitkeep') continue;
+      const srcFile = path.join(commandsSrcPath, fname);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      let content = fs.readFileSync(srcFile, 'utf8');
+      content = content.replace(
+        /SuperLocalMemory v\d+\.\d+\.\d+/g,
+        `SuperLocalMemory v${manifest.version}`,
+      );
+      plan.set(path.join(pluginRoot, 'commands', fname), content);
     }
   }
 

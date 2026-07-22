@@ -617,8 +617,15 @@ describe('Integration: real repo build', () => {
     }
   });
 
-  test('no commands/ dir exists in plugin/', () => {
-    const commandsDir = path.join(REPO_ROOT, 'plugin', 'commands');
-    assert.ok(!fs.existsSync(commandsDir), 'plugin/commands/ must not exist');
+  test('commands/ ships the slm-loop bounded-loop command', () => {
+    const cmd = path.join(REPO_ROOT, 'plugin', 'commands', 'slm-loop.md');
+    assert.ok(fs.existsSync(cmd), 'plugin/commands/slm-loop.md must exist');
+    const body = fs.readFileSync(cmd, 'utf8');
+    assert.ok(/bounded loop/i.test(body), 'command must describe a bounded loop');
+  });
+
+  test('slm-loop-runner agent ships in plugin/agents/', () => {
+    const agent = path.join(REPO_ROOT, 'plugin', 'agents', 'slm-loop-runner.md');
+    assert.ok(fs.existsSync(agent), 'plugin/agents/slm-loop-runner.md must exist');
   });
 });
