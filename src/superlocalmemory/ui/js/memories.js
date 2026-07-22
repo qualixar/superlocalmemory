@@ -90,6 +90,12 @@ function renderMemoriesTable(memories, showScores) {
     }
 
     window._slmMemories = memories;
+    // OD dashboard renders memories via odRenderMemories; the legacy
+    // #memories-list table is absent on those panes. The cache above is set
+    // for OD features that read window._slmMemories, but skip the legacy DOM
+    // render here so this loader never throws on OD panes (mirrors the
+    // #filter-category / #filter-project null-guards in loadMemories).
+    if (!container) return;
     var scoreHeader = showScores ? '<th>Score</th>' : '';
 
     var rows = '';
