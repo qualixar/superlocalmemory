@@ -14,8 +14,11 @@ import getpass
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import subprocess
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -29,6 +32,8 @@ DAEMON_PROTOCOL = 1
 DAEMON_SERVICE = "superlocalmemory-daemon"
 _NAMESPACE_DOMAIN = b"superlocalmemory-daemon-namespace-v1\0"
 _CAPABILITY_DOMAIN = b"superlocalmemory-daemon-capability-v1\0"
+
+logger = logging.getLogger(__name__)
 
 
 def _canonical_path(value: str | Path) -> Path:
@@ -144,6 +149,40 @@ def descriptor_path(data_root: str | Path | None = None) -> Path:
     return root / "daemon.json"
 
 
+def _restrict_to_owner(path: Path) -> None:
+    """Restrict a sensitive file to the current user on every platform.
+
+    ``daemon.json`` holds the capability token that authorizes write requests.
+    POSIX gets a 0600 chmod. On Windows chmod is a no-op, so use icacls to strip
+    inherited ACEs and grant the current user only — otherwise the token can be
+    read by other local accounts (privilege escalation on shared machines).
+    Files under %USERPROFILE% usually inherit user-only ACLs already; this is
+    defense-in-depth. Fail-soft — a hardening failure warns, never crashes.
+    """
+    if sys.platform == "win32":
+        try:
+            user = getpass.getuser()
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r"],
+                check=False, capture_output=True,
+            )
+            if user:
+                subprocess.run(
+                    ["icacls", str(path), "/grant:r", f"{user}:F"],
+                    check=False, capture_output=True,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "could not restrict ACL on %s (%s); the capability token may be "
+                "readable by other local users", path, exc,
+            )
+    else:
+        try:
+            os.chmod(path, 0o600)
+        except OSError as exc:
+            logger.warning("could not chmod %s to 0600: %s", path, exc)
+
+
 def write_descriptor(
     descriptor: DaemonDescriptor,
     *,
@@ -162,10 +201,7 @@ def write_descriptor(
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, destination)
-        try:
-            os.chmod(destination, 0o600)
-        except OSError:
-            pass
+        _restrict_to_owner(destination)
     finally:
         temporary.unlink(missing_ok=True)
     return destination

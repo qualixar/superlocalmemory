@@ -2772,6 +2772,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _require_write_actor(request)
         import subprocess
         import sys as _sys
+        from superlocalmemory.core.platform_utils import popen_platform_kwargs
 
         logger.info("Daemon restart requested via API")
         _observe_buffer.flush_sync()
@@ -2779,10 +2780,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
             subprocess.Popen(
                 [_sys.executable, "-m", "superlocalmemory.cli.main", "restart",
                  "--json"],
-                start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                close_fds=True,
+                # CP-04: use the shared platform kwargs (CREATE_NO_WINDOW on
+                # Windows, start_new_session on POSIX) like every other Popen so
+                # a GUI-triggered restart never flashes a console window.
+                # close_fds defaults to True on all platforms.
+                **popen_platform_kwargs(),
             )
         except Exception:
             logger.exception("Failed to spawn restart process")

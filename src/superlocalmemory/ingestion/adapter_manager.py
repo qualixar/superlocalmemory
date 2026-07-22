@@ -175,7 +175,10 @@ def stop_adapter(name: str) -> dict:
         proc.terminate()
         proc.wait(timeout=10)
     except ImportError:
-        os.kill(pid, 15)  # SIGTERM
+        # No psutil: best-effort termination. On Windows os.kill(pid, 15) maps to
+        # TerminateProcess (a hard kill, not a graceful SIGTERM) — psutil's
+        # terminate() does the same there, so behavior is equivalent either way.
+        os.kill(pid, 15)
     except Exception:
         pass
 

@@ -221,8 +221,22 @@ function probeColdStartMs() {
   // synchronous spawn with timeout to keep total benchmark ≤15s.
   try {
     const { spawnSync } = require('child_process');
+    // Windows has no `python3`; use the py launcher (`py -3`) or fall back to
+    // `python`. Probing the wrong name returns a pessimistic estimate and
+    // downgrades the recommended profile on every Windows install.
+    let pythonBin = 'python3';
+    let pythonArgs = ['-c', 'pass'];
+    if (process.platform === 'win32') {
+      if (spawnSync('py', ['-3', '-c', 'pass'], { timeout: 1000 }).status === 0) {
+        pythonBin = 'py';
+        pythonArgs = ['-3', '-c', 'pass'];
+      } else {
+        pythonBin = 'python';
+        pythonArgs = ['-c', 'pass'];
+      }
+    }
     const start = Date.now();
-    const r = spawnSync('python3', ['-c', 'pass'], { timeout: 5000 });
+    const r = spawnSync(pythonBin, pythonArgs, { timeout: 5000 });
     const elapsed = Date.now() - start;
     if (r.error || r.status !== 0) return 2000; // pessimistic
     return elapsed;
