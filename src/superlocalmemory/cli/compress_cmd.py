@@ -118,8 +118,13 @@ def cmd_compress_prose(args: Namespace) -> None:
     cfg = store.get()
 
     fields: dict = {"compress_prose": (value == "on")}
-    if value == "on" and not cfg.compress_enabled:
-        fields["compress_enabled"] = True
+    if value == "on":
+        # Prose (Layer 2) only fires in aggressive mode, so turning it on sets a
+        # COHERENT state — it can never be left enabled-but-inert in safe mode.
+        if not cfg.compress_enabled:
+            fields["compress_enabled"] = True
+        if cfg.compress_mode != "aggressive":
+            fields["compress_mode"] = "aggressive"
 
     try:
         cfg = dataclasses.replace(cfg, **fields)
@@ -129,13 +134,18 @@ def cmd_compress_prose(args: Namespace) -> None:
         sys.exit(1)
 
     if use_json:
-        print(json.dumps({"status": "ok", "compress_prose": value == "on"}))
+        print(json.dumps({
+            "status": "ok",
+            "compress_prose": value == "on",
+            "compress_mode": cfg.compress_mode,
+        }))
         return
 
     print(f"Prose compression (LLMLingua-2): {'ENABLED' if value == 'on' else 'DISABLED'}.")
     if value == "on":
-        print("  Requires: compress_mode=aggressive and llmlingua package installed.")
-        print("  Run: slm compress mode aggressive  (if not already set)")
-    if value == "on" and "compress_enabled" in fields:
-        print("  (also enabled global compress)")
+        if "compress_mode" in fields:
+            print("  Compression mode set to 'aggressive' (required for Layer 2).")
+        print("  Requires the llmlingua package for lossy prose compression.")
+        if "compress_enabled" in fields:
+            print("  (also enabled global compression)")
     print("Daemon hot-reload: active within 2s.")
