@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
-from superlocalmemory.retrieval.time_window import in_window, parse_window
+from superlocalmemory.retrieval.time_window import (
+    in_window,
+    infer_window_from_query,
+    parse_window,
+)
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.storage.models import (
     AtomicFact,
@@ -322,20 +326,28 @@ class RetrievalEngine:
         _em("expand+entity_enh")
 
         # T-window: prune candidates to the requested event-time range.
-        # Additive — a None or unparseable window applies no filter. Event
-        # times are fetched for the bounded candidate set only (indexed), then
-        # in-range facts are kept. Runs before fact load so out-of-window facts
-        # are never materialized.
-        if window is not None and fused:
-            bounds = parse_window(window)
+        # Event times are fetched for the bounded candidate set only (indexed),
+        # then in-range facts are kept — before fact load, so out-of-window facts
+        # are never materialized. T3: when the caller passes no explicit window,
+        # infer one from natural-language scope in the query ("last week").
+        # Safety: an EXPLICIT window is authoritative (honoured even if it empties
+        # the set — the user asked for that scope), but an INFERRED window is
+        # additive and never makes recall worse — if it would empty the results,
+        # fall back to the unwindowed set.
+        _explicit_window = window is not None
+        _window = window if _explicit_window else infer_window_from_query(query)
+        if _window is not None and fused:
+            bounds = parse_window(_window)
             if bounds is not None:
                 etimes = self._db.get_fact_event_times(
                     [fr.fact_id for fr in fused], profile_id,
                 )
-                fused = [
+                windowed = [
                     fr for fr in fused
                     if in_window(etimes.get(fr.fact_id), bounds)
                 ]
+                if windowed or _explicit_window:
+                    fused = windowed
                 _em("time_window")
 
         # 4. Load facts for rerank pool

@@ -465,3 +465,45 @@ class TestTimeWindowRecall:
         response = engine.recall("q", "default", window="someday")
         ids = {r.fact.fact_id for r in response.results}
         assert {"f_recent", "f_old"} <= ids  # bad spec => additive no-op
+
+    def test_query_infers_window(self) -> None:
+        # T3: no explicit window, but "last week" in the query auto-windows to 7d.
+        from datetime import datetime, timedelta, timezone
+        recent = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        facts = self._facts()
+        db = _mock_db(facts)
+        db.get_fact_event_times.side_effect = lambda ids, pid: {
+            k: v for k, v in
+            {"f_recent": recent, "f_old": "2019-01-01 00:00:00"}.items()
+            if k in ids
+        }
+        engine = _build_engine(
+            db=db, semantic_results=[("f_recent", 0.9), ("f_old", 0.88)],
+        )
+        response = engine.recall("what did I work on last week", "default")
+        ids = {r.fact.fact_id for r in response.results}
+        assert "f_recent" in ids
+        assert "f_old" not in ids
+
+    def test_inferred_window_falls_back_when_empty(self) -> None:
+        # An inferred (query-derived) window must never zero-out results: if it
+        # would exclude everything, recall falls back to the unwindowed set.
+        facts = self._facts()
+        db = _mock_db(facts)
+        db.get_fact_event_times.side_effect = lambda ids, pid: {
+            k: "2019-01-01 00:00:00" for k in ids  # all far outside "last week"
+        }
+        engine = _build_engine(
+            db=db, semantic_results=[("f_recent", 0.9), ("f_old", 0.88)],
+        )
+        response = engine.recall("what did I do last week", "default")  # inferred 7d
+        ids = {r.fact.fact_id for r in response.results}
+        assert {"f_recent", "f_old"} <= ids  # fallback keeps all
+
+    def test_explicit_empty_window_is_honored(self) -> None:
+        # An explicit user window is authoritative even when it empties results.
+        engine, _ = self._engine()   # f_recent=2026-07, f_old=2020
+        response = engine.recall(
+            "q", "default", window=("1900-01-01", "1900-12-31"),
+        )
+        assert response.results == []

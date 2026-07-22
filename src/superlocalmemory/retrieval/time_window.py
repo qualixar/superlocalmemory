@@ -26,7 +26,12 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-__all__ = ["parse_timestamp", "parse_window", "in_window"]
+__all__ = [
+    "parse_timestamp",
+    "parse_window",
+    "in_window",
+    "infer_window_from_query",
+]
 
 _REL = re.compile(r"^\s*(\d+)\s*([hdwmy])\s*$", re.IGNORECASE)
 
@@ -111,6 +116,49 @@ def parse_window(
                     return None
                 return (start, end) if start <= end else (end, start)
 
+    return None
+
+
+# Natural-language temporal-scope patterns → relative window spec. Ordered:
+# more specific ("last 3 weeks") is matched before generic ("last week").
+_UNIT_TO_SPEC = {"day": "d", "week": "w", "month": "m", "year": "y"}
+_QUERY_N_UNIT = re.compile(
+    r"\b(?:last|past|previous|prior)\s+(\d{1,3})\s+(day|week|month|year)s?\b",
+    re.IGNORECASE,
+)
+_QUERY_PHRASES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\btoday\b", re.IGNORECASE), "1d"),
+    (re.compile(r"\byesterday\b", re.IGNORECASE), "2d"),
+    (re.compile(r"\b(?:this|last|past|previous)\s+week\b", re.IGNORECASE), "7d"),
+    (re.compile(r"\b(?:this|last|past|previous)\s+month\b", re.IGNORECASE), "30d"),
+    (re.compile(r"\b(?:this|last|past|previous)\s+year\b", re.IGNORECASE), "1y"),
+    (re.compile(r"\b(?:recent|recently|lately)\b", re.IGNORECASE), "30d"),
+)
+
+
+def infer_window_from_query(query: str | None) -> str | None:
+    """Infer a relative time window from natural-language scope in a query.
+
+    Recognises a small, unambiguous set of temporal-scope phrases ("yesterday",
+    "last week", "past 3 months", "recently") and maps them to a relative
+    window spec ("2d", "7d", "3m", …) that ``parse_window`` understands. Returns
+    None when no clear temporal scope is present, so recall applies no window.
+
+    Deliberately conservative — only fires on explicit scope words, never on
+    bare content — so it augments, never surprises. Callers use it only when the
+    user did not pass an explicit window.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    m = _QUERY_N_UNIT.search(query)
+    if m:
+        n = int(m.group(1))
+        unit = _UNIT_TO_SPEC.get(m.group(2).lower())
+        if unit and n > 0:
+            return f"{n}{unit}"
+    for pattern, spec in _QUERY_PHRASES:
+        if pattern.search(query):
+            return spec
     return None
 
 

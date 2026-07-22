@@ -12,6 +12,7 @@ import pytest
 
 from superlocalmemory.retrieval.time_window import (
     in_window,
+    infer_window_from_query,
     parse_timestamp,
     parse_window,
 )
@@ -113,3 +114,36 @@ def test_in_window_unparseable_excluded() -> None:
     bounds = parse_window("7d", now=NOW)
     assert in_window(None, bounds) is False
     assert in_window("garbage", bounds) is False
+
+
+# ---- infer_window_from_query (T3 time-aware query) ----
+
+@pytest.mark.parametrize("query,expected", [
+    ("what did I do today", "1d"),
+    ("notes from yesterday", "2d"),
+    ("decisions last week", "7d"),
+    ("what happened this month", "30d"),
+    ("summary of the past year", "1y"),
+    ("what have I worked on recently", "30d"),
+    ("changes in the last 3 weeks", "3w"),
+    ("meetings in the last 5 days", "5d"),
+    ("past 2 months of work", "2m"),
+])
+def test_infer_window_from_query_hits(query, expected) -> None:
+    assert infer_window_from_query(query) == expected
+
+
+@pytest.mark.parametrize("query", [
+    "notes about cars",
+    "what is the architecture of the retrieval engine",
+    "",
+    None,
+    "weekly report format",   # "week" without a scope word must NOT fire
+])
+def test_infer_window_from_query_misses(query) -> None:
+    assert infer_window_from_query(query) is None
+
+
+def test_infer_n_unit_takes_precedence_over_generic() -> None:
+    # "last 3 weeks" must map to 3w, not the generic "last week" -> 7d.
+    assert infer_window_from_query("the last 3 weeks were busy") == "3w"
