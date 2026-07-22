@@ -298,14 +298,17 @@ class VCacheSemantic(SemanticTier):
         max_turns = int(getattr(cfg, "semantic_max_turns_for_semantic", _DEFAULT_MAX_TURNS))
         messages = _extract_messages(req)
 
-        # Step 1: Multi-turn guard
-        turn_count = self._context_key_builder.turn_count(messages)
-        if turn_count > max_turns:
-            logger.debug(
-                "VCacheSemantic: skip (turn_count=%d > max=%d)",
-                turn_count, max_turns,
-            )
-            return None
+        # Step 1: Multi-turn guard — on long conversations nearest-neighbour
+        # reuse is riskiest, so skip semantic there. Honours the
+        # semantic_multiturn_guard kill-switch (default on).
+        if bool(getattr(cfg, "semantic_multiturn_guard", True)):
+            turn_count = self._context_key_builder.turn_count(messages)
+            if turn_count > max_turns:
+                logger.debug(
+                    "VCacheSemantic: skip (turn_count=%d > max=%d)",
+                    turn_count, max_turns,
+                )
+                return None
 
         # Step 2: SAFE-CACHE centroid defense
         if bool(getattr(cfg, "semantic_centroid_defense", True)):
@@ -531,20 +534,25 @@ class VCacheSemantic(SemanticTier):
         cached_response: dict[str, Any],
         verifier_model: str,
     ) -> tuple[bool, dict[str, Any] | None]:
-        """Phase 3.0 stub: return (True, None) — treat as verified, no rewrite.
+        """Verify a verify-band candidate before it is served. Fails CLOSED.
 
-        Full implementation requires a sub-agent call to a cheap model.
-        Stub is conservative: boundary learning still fires, so over time
-        the boundary will tighten if errors accumulate.
+        Real verification (a cheap sub-agent check that the cached response
+        actually answers *this* prompt) is not yet implemented. Until it is,
+        this returns (False, None) so the caller treats every verify-band
+        candidate as a MISS rather than serving an UNVERIFIED cached response —
+        which, for a semantically-similar-but-distinct prompt (common in
+        coding), could be a wrong answer. Only high-confidence hits
+        (score >= return_threshold) are ever served.
 
-        A-03 fix: callers do NOT call record_outcome() on this stub path
-        (the True signal is fake — would poison the MLE model).
+        A prior stub returned (True, None), silently serving unverified hits;
+        that was a correctness hazard and is fixed here by failing closed.
         """
         logger.debug(
-            "VCacheSemantic._verify_and_rewrite: stub returning True "
-            "(verifier=%s entry=%s)", verifier_model, entry_id,
+            "VCacheSemantic._verify_and_rewrite: verifier not implemented — "
+            "failing closed to a miss (verifier=%s entry=%s)",
+            verifier_model, entry_id,
         )
-        return True, None
+        return False, None
 
     @staticmethod
     def _build_query_text(messages: list[dict[str, Any]], system: str) -> str:

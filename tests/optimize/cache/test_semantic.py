@@ -409,6 +409,31 @@ def test_vcache_multi_turn_guard(config_enabled, tmp_db, req_factory, monkeypatc
     assert result is None
 
 
+def test_vcache_multi_turn_guard_disabled_by_flag(tmp_db, req_factory, monkeypatch):
+    """semantic_multiturn_guard=False disables the long-conversation skip, so a high
+    turn count no longer short-circuits Step 1 (the flag was previously dead code)."""
+    from superlocalmemory.optimize.config.schema import OptimizeConfig
+    cfg = OptimizeConfig(
+        enabled=True, cache_enabled=True, semantic_enabled=True,
+        semantic_multiturn_guard=False,
+        semantic_max_turns_for_semantic=2,
+        semantic_centroid_defense=False,
+    )
+    tier = VCacheSemantic(db=tmp_db, config=cfg)
+    monkeypatch.setattr(tier._context_key_builder, "turn_count", lambda msgs: 99)
+    ann_called = {"hit": False}
+
+    def _spy_ann(*args, **kwargs):
+        ann_called["hit"] = True
+        return (None, 0.0)
+
+    monkeypatch.setattr(tier, "_ann_search", _spy_ann)
+    req = req_factory([{"role": "user", "content": "hi"}])
+    tier.lookup(req, "t1", embed=_unit_vec("hi"))
+    # Guard disabled → Step 1 does NOT short-circuit → _ann_search runs.
+    assert ann_called["hit"] is True
+
+
 def test_vcache_fetch_response_fail_open(config_enabled, tmp_db, monkeypatch):
     """_fetch_response catches exception → returns None (lines 465-469)."""
     tier = VCacheSemantic(db=tmp_db, config=config_enabled)
@@ -418,12 +443,32 @@ def test_vcache_fetch_response_fail_open(config_enabled, tmp_db, monkeypatch):
     assert result is None
 
 
-def test_vcache_verify_and_rewrite_stub(config_enabled, tmp_db):
-    """_verify_and_rewrite stub returns (True, None) (lines 486-490)."""
+def test_vcache_verify_and_rewrite_fails_closed(config_enabled, tmp_db):
+    """_verify_and_rewrite fails CLOSED: verification is not implemented, so it
+    returns (False, None) and the caller treats the verify-band candidate as a
+    miss — no UNVERIFIED cached response is ever served."""
     tier = VCacheSemantic(db=tmp_db, config=config_enabled)
     verified, rewritten = tier._verify_and_rewrite("eid", {"text": "hi"}, "verifier-model")
-    assert verified is True
+    assert verified is False
     assert rewritten is None
+
+
+def test_vcache_dual_threshold_verify_zone_with_verifier_misses(tmp_db, monkeypatch):
+    """Even WITH a verifier configured, the verify band misses (fail-closed) until
+    real verification is wired — protects against serving a wrong cached answer."""
+    from superlocalmemory.optimize.config.schema import OptimizeConfig
+    cfg = OptimizeConfig(
+        enabled=True, cache_enabled=True, semantic_enabled=True,
+        semantic_return_threshold=0.999,   # very high → forces verify zone
+        semantic_verify_lo=0.01,
+        semantic_verifier_model="some-cheap-model",  # verifier IS configured
+        semantic_error_target=0.02,
+        semantic_centroid_defense=False,
+    )
+    tier = VCacheSemantic(db=tmp_db, config=cfg)
+    monkeypatch.setattr(tier._db, "get_entry_by_id", lambda eid: {"text": "cached"})
+    result = tier._dual_threshold_decision("eid", 0.50, cfg)
+    assert result is None
 
 
 def test_vcache_dual_threshold_verify_zone_no_verifier(tmp_db, monkeypatch):
