@@ -236,6 +236,11 @@ class EncodingConfig:
     # Entropy gate
     entropy_threshold: float = 0.95
 
+    # Entity reflexion (Wave Q1) — Mode B/C self-review of extracted entities.
+    # Fail-open; one extra bounded LLM call per chunk. Mode A is unaffected.
+    enable_entity_reflexion: bool = True
+    reflexion_max_facts: int = 8
+
 
 # ---------------------------------------------------------------------------
 # Retrieval Config

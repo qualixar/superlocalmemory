@@ -685,10 +685,35 @@ class FactExtractor:
                 temperature=0.0,
                 max_tokens=1024,
             )
-            return self._parse_llm_response(raw, session_id, session_date)
+            facts = self._parse_llm_response(raw, session_id, session_date)
+            return self._reflexion_refine(conversation_text, facts)
         except Exception as exc:
             logger.warning("LLM fact extraction failed: %s", exc)
             return []
+
+    def _reflexion_refine(
+        self, source_text: str, facts: list[AtomicFact],
+    ) -> list[AtomicFact]:
+        """Wave Q1: bounded, fail-open entity self-review (Mode B/C only).
+
+        Reached only from the LLM extraction path, so Mode A never runs this.
+        Any failure returns the facts unchanged.
+        """
+        if not facts or not getattr(
+            self._config, "enable_entity_reflexion", True,
+        ):
+            return facts
+        try:
+            from superlocalmemory.encoding.entity_reflexion import EntityReflexion
+
+            reflexion = EntityReflexion(
+                self._llm,
+                max_facts=getattr(self._config, "reflexion_max_facts", 8),
+            )
+            return reflexion.refine(source_text, facts)
+        except Exception as exc:
+            logger.debug("Entity reflexion skipped: %s", exc)
+            return facts
 
     def _parse_llm_response(
         self,
