@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langgraph-superlocalmemory"
+version = "0.1.0"
+description = "LangGraph BaseStore (long-term memory) backed by a local SuperLocalMemory data root"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.11,<3.15"
+authors = [
+    { name = "Varun Pratap Bhardwaj" },
+]
+keywords = ["langgraph", "memory", "store", "local-first", "privacy", "sqlite", "agents", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "langgraph>=1.0.0",
+    "superlocalmemory>=3.6.23,<4",
+]
+
+[project.urls]
+Homepage = "https://github.com/qualixar/superlocalmemory"
+Documentation = "https://superlocalmemory.com/"
+Repository = "https://github.com/qualixar/superlocalmemory"
+
+[tool.hatch.build.targets.wheel]
+packages = ["langgraph_superlocalmemory"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
