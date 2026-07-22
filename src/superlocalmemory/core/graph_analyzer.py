@@ -211,6 +211,43 @@ class GraphAnalyzer:
                 result[node] = comm_id
         return result
 
+    def detect_communities_louvain(
+        self,
+        graph: Any = None,
+        profile_id: str = "",
+    ) -> dict[str, int]:
+        """Detect communities via Louvain (modularity-optimizing).
+
+        Higher quality than Label Propagation (deterministic with a seed,
+        no giant-community collapse), pure-Python via networkx — no extra
+        binary deps. Falls back to Label Propagation if unavailable.
+        """
+        import networkx as nx
+
+        if graph is None:
+            graph = self._build_networkx_graph(profile_id)
+        if graph.number_of_nodes() == 0:
+            return {}
+
+        undirected = graph.to_undirected()
+        try:
+            from networkx.algorithms.community import louvain_communities
+
+            communities = louvain_communities(
+                undirected, weight="weight", seed=42,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Louvain unavailable/failed (%s); using Label Propagation", exc,
+            )
+            return self.detect_communities(graph, profile_id)
+
+        result: dict[str, int] = {}
+        for comm_id, community in enumerate(communities):
+            for node in community:
+                result[node] = comm_id
+        return result
+
     # ── v3.4.1: Leiden Community Detection ────────────────────────
 
     def detect_communities_leiden(
@@ -234,9 +271,9 @@ class GraphAnalyzer:
             import igraph
         except ImportError:
             logger.info(
-                "leidenalg not installed, using Label Propagation fallback",
+                "leidenalg not installed, using Louvain fallback",
             )
-            return self.detect_communities(graph, profile_id)
+            return self.detect_communities_louvain(graph, profile_id)
 
         # Convert DiGraph -> undirected -> igraph
         undirected = graph.to_undirected()

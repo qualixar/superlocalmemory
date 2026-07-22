@@ -136,6 +136,21 @@ def test_communities_detected(ga_db, mock_db):
     assert communities["C"] == communities["D"]
 
 
+def test_communities_louvain(ga_db, mock_db):
+    """Louvain fallback (used when leidenalg absent) finds the same groups."""
+    _insert_graph_edge(ga_db, "e1", "default", "A", "B", "semantic", 0.9)
+    _insert_graph_edge(ga_db, "e2", "default", "B", "A", "semantic", 0.9)
+    _insert_graph_edge(ga_db, "e3", "default", "C", "D", "semantic", 0.9)
+    _insert_graph_edge(ga_db, "e4", "default", "D", "C", "semantic", 0.9)
+    ga_db.commit()
+
+    ga = GraphAnalyzer(mock_db)
+    communities = ga.detect_communities_louvain(profile_id="default")
+    assert communities["A"] == communities["B"]
+    assert communities["C"] == communities["D"]
+    assert communities["A"] != communities["C"]
+
+
 def test_compute_and_store_persists(ga_db, mock_db):
     """fact_importance table populated after compute_and_store."""
     _insert_graph_edge(ga_db, "e1", "default", "A", "B", "semantic", 0.8)
