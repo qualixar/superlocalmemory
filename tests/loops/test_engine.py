@@ -131,7 +131,7 @@ def test_token_budget_halts():
         gate=lambda lap: Verdict(False, "never"),
         run_id="r",
     )
-    # laps 1,2,3 spend 10/20/30; budget checked BEFORE lap 4 (30 > 25) → halt.
+    # laps 1,2,3 spend 10/20/30; budget checked BEFORE lap 4 (30 >= 25) → halt.
     assert out.status is Status.HALT
     assert out.reason == "token-budget"
 

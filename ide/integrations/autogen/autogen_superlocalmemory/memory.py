@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -40,6 +41,8 @@ from autogen_core.memory import (
     MemoryQueryResult,
     UpdateContextResult,
 )
+
+logger = logging.getLogger("slm.adapters.autogen")
 
 
 # ``SLM_INSTALL_DIR`` is legacy installer metadata only. It is deliberately
@@ -157,8 +160,10 @@ class SuperLocalMemoryMemory(Memory):
             try:
                 from autogen_core.models import SystemMessage
                 await model_context.add_message(SystemMessage(content=summary))
-            except Exception:
-                pass  # Defensive: context API variance across AutoGen versions
+            except Exception as exc:
+                # Context API varies across AutoGen versions; surface the
+                # degradation rather than silently dropping memory injection.
+                logger.warning("update_context injection skipped: %s", exc)
 
         # Build MemoryQueryResult from the recent memories.
         memory_contents = [_dict_to_memory_content(d) for d in recent]

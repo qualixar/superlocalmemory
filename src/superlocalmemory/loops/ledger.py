@@ -138,6 +138,12 @@ class SLMMemoryLedger:
         return [e for e in entries if e is not None]
 
     def runs(self, name: str) -> list[str]:
+        """Run ids for ``name``, newest run first.
+
+        ``list_prefix`` returns rows created_at DESC, so the first time a run's
+        id is seen it is its most-recent lap; ``slm loop history`` therefore
+        lists the most recent runs first.
+        """
         rows = self._store.list_prefix(_SESSION_PREFIX)
         ordered: list[str] = []
         for row in rows:
@@ -154,8 +160,13 @@ class _EngineLedgerStore:
     reads — the same contract the LangChain/LlamaIndex adapters depend on.
     """
 
-    def __init__(self, engine: Any) -> None:
+    def __init__(self, engine: Any, *, owns_engine: bool = True) -> None:
         self._engine = engine
+        # When False, this store does NOT own the engine's lifecycle (the
+        # caller — e.g. the MCP daemon — keeps it), so close() must not tear
+        # down a shared engine. open_engine_store() passes True (it built the
+        # engine); engine_backed_ledger() passes False (daemon-owned engine).
+        self._owns_engine = owns_engine
 
     def add(self, content: str, *, session_id: str, metadata: dict) -> None:
         # The parent memory row is what the ledger needs; fact extraction is a
@@ -163,10 +174,14 @@ class _EngineLedgerStore:
         self._engine.store(content, session_id=session_id, metadata=metadata)
 
     def list_session(self, session_id: str) -> list[dict]:
+        # Cap the read: a bounded-loop run is capped at max_iterations laps, so
+        # a legitimate run is small; the LIMIT stops a pathologically long
+        # session_id from forcing an unbounded materialization on every
+        # `slm loop show` / history lookup.
         rows = self._engine.db.execute(
             "SELECT content, created_at FROM memories "
             "WHERE profile_id=? AND session_id=? "
-            "ORDER BY created_at ASC, rowid ASC",
+            "ORDER BY created_at ASC, rowid ASC LIMIT 5000",
             (self._engine.profile_id, session_id),
         )
         return [dict(row) for row in rows]
@@ -184,7 +199,8 @@ class _EngineLedgerStore:
         return [dict(row) for row in rows]
 
     def close(self) -> None:
-        self._engine.close()
+        if self._owns_engine:
+            self._engine.close()
 
 
 def engine_backed_ledger(engine: Any) -> SLMMemoryLedger:
@@ -197,7 +213,7 @@ def engine_backed_ledger(engine: Any) -> SLMMemoryLedger:
     per-call, WAL-mode connection model makes the ledger's reads/writes safe
     from a worker thread.
     """
-    return SLMMemoryLedger(_EngineLedgerStore(engine))
+    return SLMMemoryLedger(_EngineLedgerStore(engine, owns_engine=False))
 
 
 def open_engine_store(db_path: str | Path) -> _EngineLedgerStore:

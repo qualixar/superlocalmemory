@@ -57,14 +57,21 @@ def _parse_dt(value: Any) -> Optional[datetime]:
 
 
 def _record_to_dict(record: MemoryRecord) -> dict[str, Any]:
-    """Convert a CrewAI MemoryRecord to the plain dict the core uses."""
+    """Convert a CrewAI MemoryRecord to the plain dict the core uses.
+
+    # Field set verified against CrewAI v1.x MemoryRecord (p4b2 research); confirm against installed crewai in CI.
+    """
     emb = getattr(record, "embedding", None)
+    cats = getattr(record, "categories", None)
     return {
         "id": str(record.id),
         "content": str(getattr(record, "content", "") or ""),
         "embedding": list(emb) if emb is not None else [],
         "scope": str(getattr(record, "scope", "/") or "/"),
-        "category": str(getattr(record, "category", "general") or "general"),
+        "categories": list(cats) if cats is not None else [],
+        "importance": float(getattr(record, "importance", 0.5) or 0.5),
+        "source": getattr(record, "source", None),
+        "private": bool(getattr(record, "private", False)),
         "metadata": dict(getattr(record, "metadata", None) or {}),
     }
 
@@ -75,7 +82,10 @@ def _dict_to_record(data: dict[str, Any]) -> MemoryRecord:
         "id": data["id"],
         "content": data.get("content", ""),
         "scope": data.get("scope", "/"),
-        "category": data.get("category", "general"),
+        "categories": list(data.get("categories") or []),
+        "importance": float(data.get("importance", 0.5) or 0.5),
+        "source": data.get("source"),
+        "private": bool(data.get("private", False)),
         "metadata": data.get("metadata", {}),
     }
     emb = data.get("embedding")

@@ -325,8 +325,8 @@ class V3ADKStore:
         facts = self._engine.db.execute(
             "SELECT af.fact_id FROM atomic_facts af JOIN memories m "
             "ON af.memory_id = m.memory_id "
-            "WHERE m.profile_id=? AND m.session_id LIKE ? ESCAPE '\\'",
-            (self._engine.profile_id, escaped + "%"),
+            "WHERE m.profile_id=? AND m.session_id LIKE ? ESCAPE '\\' LIMIT ?",
+            (self._engine.profile_id, escaped + "%", _MAX_SCAN),
         )
         fact_ids = [str(dict(r)["fact_id"]) for r in facts]
         with self._engine.db.transaction():

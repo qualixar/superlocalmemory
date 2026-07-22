@@ -9,9 +9,9 @@
 //     current: "core",
 //     profiles: {
 //       core:  { count: 14, tools: [...], description: "..." },
-//       code:  { count: 21, tools: [...], description: "..." },
-//       full:  { count: 39, tools: [...], description: "..." },
-//       power: { count: 51, tools: [...], description: "..." },
+//       code:  { count: 24, tools: [...], description: "..." },
+//       full:  { count: 42, tools: [...], description: "..." },
+//       power: { count: 54, tools: [...], description: "..." },
 //       mesh:  { count:  8, tools: [...], description: "..." },
 //     },
 //     aliases: { "code21": "code", ... },

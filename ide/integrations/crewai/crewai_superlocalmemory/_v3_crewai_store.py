@@ -120,7 +120,10 @@ class V3CrewAIStore:
             "content": content_str,
             "embedding": list(record.get("embedding") or []),
             "scope": str(record.get("scope", "/")),
-            "category": str(record.get("category", "general")),
+            "categories": list(record.get("categories") or []),
+            "importance": float(record.get("importance") if record.get("importance") is not None else 0.5),
+            "source": record.get("source"),
+            "private": bool(record.get("private", False)),
             "metadata": dict(record.get("metadata") or {}),
             "created_at": created,
             "updated_at": now,
@@ -134,7 +137,7 @@ class V3CrewAIStore:
                 "integration": "crewai",
                 "crewai_record_id": record_id,
                 "crewai_scope": envelope["scope"],
-                "crewai_category": envelope["category"],
+                "crewai_categories": ",".join(envelope["categories"]),
                 "tags": ["crewai"],
                 "importance": 3,
                 "project_name": "crewai",
@@ -193,7 +196,7 @@ class V3CrewAIStore:
             candidates = [e for e in candidates if _scope_matches_prefix(e["scope"], scope_prefix)]
         if categories:
             cat_set = set(categories)
-            candidates = [e for e in candidates if e["category"] in cat_set]
+            candidates = [e for e in candidates if set(e.get("categories", [])) & cat_set]
         if metadata_filter:
             candidates = [
                 e for e in candidates
@@ -248,7 +251,8 @@ class V3CrewAIStore:
             envelopes = [e for e in envelopes if _scope_matches_prefix(e["scope"], scope_prefix)]
         cats: dict[str, int] = {}
         for env in envelopes:
-            cats[env["category"]] = cats.get(env["category"], 0) + 1
+            for cat in env.get("categories", []):
+                cats[cat] = cats.get(cat, 0) + 1
         return cats
 
     def get_scope_info(self, scope: str) -> dict:
@@ -256,7 +260,8 @@ class V3CrewAIStore:
         envelopes = [e for e in self._all_envelopes() if e["scope"] == scope]
         cats: dict[str, int] = {}
         for env in envelopes:
-            cats[env["category"]] = cats.get(env["category"], 0) + 1
+            for cat in env.get("categories", []):
+                cats[cat] = cats.get(cat, 0) + 1
         timestamps = [e["created_at"] for e in envelopes if e.get("created_at")]
         return {
             "scope": scope,
@@ -339,10 +344,17 @@ class V3CrewAIStore:
             return None
         data.setdefault("embedding", [])
         data.setdefault("scope", "/")
-        data.setdefault("category", "general")
         data.setdefault("metadata", {})
         data.setdefault("created_at", "")
         data.setdefault("updated_at", data["created_at"])
+        data.setdefault("importance", 0.5)
+        data.setdefault("source", None)
+        data.setdefault("private", False)
+        # Legacy back-compat: rows stored before the categories→list migration
+        # had a singular "category" string; promote it to a one-element list.
+        if "categories" not in data:
+            legacy = data.pop("category", None)
+            data["categories"] = [legacy] if legacy is not None else []
         return data
 
     @staticmethod
@@ -353,7 +365,10 @@ class V3CrewAIStore:
             "content": env.get("content", ""),
             "embedding": env.get("embedding", []),
             "scope": env.get("scope", "/"),
-            "category": env.get("category", "general"),
+            "categories": env.get("categories", []),
+            "importance": env.get("importance", 0.5),
+            "source": env.get("source"),
+            "private": env.get("private", False),
             "metadata": env.get("metadata", {}),
             "created_at": env.get("created_at", ""),
             "updated_at": env.get("updated_at", ""),

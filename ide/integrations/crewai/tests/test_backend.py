@@ -22,7 +22,7 @@ def test_save_and_search(tmp_path):
 
     backend = SuperLocalMemoryBackend(db_path=str(tmp_path / "b.db"))
     rec = MemoryRecord(id="r1", content="hello world", scope="/test",
-                       embedding=[0.1, 0.2, 0.3], category="general")
+                       embedding=[0.1, 0.2, 0.3], categories=["general"])
     backend.save([rec])
     results = backend.search([0.1, 0.2, 0.3], scope_prefix="/test", limit=5)
     assert len(results) >= 1

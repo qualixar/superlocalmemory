@@ -183,6 +183,28 @@ class V3SessionStore:
         """
         _validate_session_id(session_id)
         escaped = _escape_like(_item_prefix(session_id))
+
+        if limit is not None:
+            # Take the newest `limit` rows AT THE DB LEVEL, then present them
+            # oldest-first. Doing the tail in SQL is correct even for sessions
+            # larger than _MAX_SCAN (a Python `items[-limit:]` over a capped
+            # ASC scan would return the wrong region of a huge history), and it
+            # avoids the `[-0:]` full-slice trap when limit == 0.
+            n = max(0, int(limit))
+            rows = self._engine.db.execute(
+                "SELECT content FROM memories "
+                "WHERE profile_id=? AND session_id LIKE ? ESCAPE '\\' "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (self._engine.profile_id, escaped + "%", n),
+            )
+            items = []
+            for row in rows:
+                env = self._parse(dict(row).get("content", ""))
+                if env is not None:
+                    items.append(env["item"])
+            items.reverse()  # DESC fetch → return oldest-first
+            return items
+
         rows = self._engine.db.execute(
             "SELECT content FROM memories "
             "WHERE profile_id=? AND session_id LIKE ? ESCAPE '\\' "
@@ -194,9 +216,6 @@ class V3SessionStore:
             env = self._parse(dict(row).get("content", ""))
             if env is not None:
                 items.append(env["item"])
-
-        if limit is not None:
-            items = items[-int(limit):]
         return items
 
     def pop_item(self, session_id: str) -> dict[str, Any] | None:
@@ -281,8 +300,8 @@ class V3SessionStore:
         facts = self._engine.db.execute(
             "SELECT af.fact_id FROM atomic_facts af JOIN memories m "
             "ON af.memory_id = m.memory_id "
-            "WHERE m.profile_id=? AND m.session_id LIKE ? ESCAPE '\\'",
-            (self._engine.profile_id, escaped + "%"),
+            "WHERE m.profile_id=? AND m.session_id LIKE ? ESCAPE '\\' LIMIT ?",
+            (self._engine.profile_id, escaped + "%", _MAX_SCAN),
         )
         fact_ids = [str(dict(r)["fact_id"]) for r in facts]
         with self._engine.db.transaction():

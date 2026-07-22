@@ -23,7 +23,7 @@ def _unit(v: list) -> list:
     return [x / norm for x in v]
 
 
-def _rec(rid: str = "r1", scope: str = "/", category: str = "general",
+def _rec(rid: str = "r1", scope: str = "/", categories: list | None = None,
          content: str = "test content for the record store") -> dict:
     """Minimal record dict for the framework-free core."""
     return {
@@ -31,7 +31,7 @@ def _rec(rid: str = "r1", scope: str = "/", category: str = "general",
         "content": content,
         "embedding": _unit(_vec(4)),
         "scope": scope,
-        "category": category,
+        "categories": categories if categories is not None else ["general"],
         "metadata": {},
     }
 
@@ -157,9 +157,9 @@ def test_list_scopes(crewai_store):
 
 
 def test_list_categories(crewai_store):
-    crewai_store.save(_rec("r1", category="ctx"))
-    crewai_store.save(_rec("r2", category="ctx"))
-    crewai_store.save(_rec("r3", category="short_term"))
+    crewai_store.save(_rec("r1", categories=["ctx"]))
+    crewai_store.save(_rec("r2", categories=["ctx"]))
+    crewai_store.save(_rec("r3", categories=["short_term"]))
     cats = crewai_store.list_categories()
     assert cats.get("ctx") == 2
     assert cats.get("short_term") == 1
@@ -254,9 +254,9 @@ def test_search_scope_prefix_filter(crewai_store):
 
 def test_search_category_filter(crewai_store):
     q = _unit([1.0, 0.0, 0.0, 0.0])
-    r1 = _rec("r1", category="ctx")
+    r1 = _rec("r1", categories=["ctx"])
     r1["embedding"] = _unit([1.0, 0.0, 0.0, 0.0])
-    r2 = _rec("r2", category="short_term")
+    r2 = _rec("r2", categories=["short_term"])
     r2["embedding"] = _unit([1.0, 0.0, 0.0, 0.0])
 
     crewai_store.save(r1)
@@ -309,3 +309,53 @@ def test_oversized_content_raises(crewai_store):
     r = _rec("big", content="x" * 1_000_001)
     with pytest.raises(ValueError, match="exceeds maximum size"):
         crewai_store.save(r)
+
+
+# ── field fidelity: importance / source / private round-trip ─────────────────
+
+def test_save_and_get_roundtrip_extra_fields(crewai_store):
+    """importance, source, and private must survive a save → get round-trip."""
+    r = _rec("r_extra")
+    r["importance"] = 0.8
+    r["source"] = "agent://planning"
+    r["private"] = True
+    crewai_store.save(r)
+    rec = crewai_store.get_record("r_extra")
+    assert rec is not None
+    assert rec["importance"] == pytest.approx(0.8)
+    assert rec["source"] == "agent://planning"
+    assert rec["private"] is True
+
+
+# ── multi-category search ─────────────────────────────────────────────────────
+
+def test_search_multi_category_filter(crewai_store):
+    """search(categories=[...]) matches records that share ANY listed category."""
+    q = _unit([1.0, 0.0, 0.0, 0.0])
+    r1 = _rec("r1", categories=["ctx", "short_term"])
+    r1["embedding"] = q
+    r2 = _rec("r2", categories=["long_term"])
+    r2["embedding"] = q
+    r3 = _rec("r3", categories=["short_term"])
+    r3["embedding"] = q
+
+    crewai_store.save(r1)
+    crewai_store.save(r2)
+    crewai_store.save(r3)
+
+    results = crewai_store.search(q, categories=["ctx", "short_term"], limit=10)
+    ids = {r[0]["id"] for r in results}
+    assert "r1" in ids    # has "ctx"
+    assert "r3" in ids    # has "short_term"
+    assert "r2" not in ids  # only "long_term"
+
+
+# ── list_categories with multi-category records ───────────────────────────────
+
+def test_list_categories_multi_category_record(crewai_store):
+    """A record with 2 categories increments both counters independently."""
+    crewai_store.save(_rec("r1", categories=["ctx", "short_term"]))
+    crewai_store.save(_rec("r2", categories=["ctx"]))
+    cats = crewai_store.list_categories()
+    assert cats.get("ctx") == 2
+    assert cats.get("short_term") == 1

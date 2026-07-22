@@ -115,6 +115,10 @@ def _build_memory_entry(envelope: dict[str, Any]) -> MemoryEntry:
     text = evt.get("text", "")
     author = evt.get("author", "unknown")
     ts_float = float(evt.get("timestamp_float", 0.0))
+    # ADK's MemoryEntry types timestamp as `datetime | None` — pass a datetime,
+    # not the raw epoch float (pydantic will not coerce a bare float).
+    from datetime import datetime as _dt, timezone as _tz
+    ts = _dt.fromtimestamp(ts_float, tz=_tz.utc) if ts_float and ts_float > 0 else None
 
     try:
         from google.genai import types as genai_types
@@ -126,11 +130,12 @@ def _build_memory_entry(envelope: dict[str, Any]) -> MemoryEntry:
     except Exception:  # ADK version difference or import failure
         content = text  # type: ignore[assignment]  # graceful fallback
 
-    return MemoryEntry(
-        content=content,
-        author=author,
-        timestamp=ts_float,
-    )
+    try:
+        return MemoryEntry(content=content, author=author, timestamp=ts)
+    except TypeError:
+        # Defensive: an ADK minor version that doesn't accept `timestamp` as a
+        # constructor kwarg still yields a usable entry.
+        return MemoryEntry(content=content, author=author)
 
 
 class SuperLocalMemoryService(BaseMemoryService):

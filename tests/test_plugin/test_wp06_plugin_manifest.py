@@ -237,7 +237,7 @@ class TestMcpJson:
         )
 
     def test_mcp_env_slm_mcp_profile_is_code(self) -> None:
-        """v3.6.14: profile must be 'code' (21 tools, includes graph intelligence)."""
+        """v3.6.14: profile must be 'code' (24 tools: graph intelligence + bounded loops)."""
         server = self._get_server()
         env = server.get("env", {})
         assert env.get("SLM_MCP_PROFILE") == "code", (
