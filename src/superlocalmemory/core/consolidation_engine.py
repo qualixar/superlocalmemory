@@ -86,6 +86,19 @@ def _recompute_entity_communities(
         )
     except Exception as exc:
         logger.debug("Community summaries failed (non-fatal): %s", exc)
+
+    # Wave Q3: persona roll-up (top tier over the community summaries).
+    try:
+        from superlocalmemory.core.progressive_abstraction import (
+            ProgressiveAbstraction,
+        )
+
+        pa = ProgressiveAbstraction(db, summarizer=summarizer).compute_and_store(
+            profile_id,
+        )
+        result["persona_built"] = bool(pa.get("built", False))
+    except Exception as exc:
+        logger.debug("Persona roll-up failed (non-fatal): %s", exc)
     return result
 
 

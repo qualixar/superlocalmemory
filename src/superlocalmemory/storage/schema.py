@@ -54,6 +54,7 @@ _TABLES: Final[tuple[str, ...]] = (
     "config",
     "entity_communities",
     "community_summaries",
+    "persona_summary",
 )
 
 _FTS_TABLES: Final[tuple[str, ...]] = (
@@ -726,6 +727,21 @@ CREATE INDEX IF NOT EXISTS idx_comm_summ_profile
     ON community_summaries(profile_id);
 """
 
+# Wave Q3: progressive-abstraction top tier — one persona roll-up per profile
+# consuming the top community summaries (additive; safe on existing DBs).
+# Recall-gated (never auto-injected into hot recall) and size-bounded to avoid
+# the V3.4.40 summary-pollution regression. Drill-down: community_ids_json →
+# communities → their member facts.
+_SQL_PERSONA_SUMMARY: Final[str] = """
+CREATE TABLE IF NOT EXISTS persona_summary (
+    profile_id         TEXT PRIMARY KEY,
+    summary            TEXT NOT NULL DEFAULT '',
+    keywords           TEXT NOT NULL DEFAULT '',
+    community_ids_json TEXT NOT NULL DEFAULT '[]',
+    computed_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 # ---------------------------------------------------------------------------
 # Ordered DDL list (tables before FTS, respects FK order)
 # ---------------------------------------------------------------------------
@@ -760,6 +776,8 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_ENTITY_COMMUNITIES,
     # Wave Q2: community summaries (additive; safe on existing DBs)
     _SQL_COMMUNITY_SUMMARIES,
+    # Wave Q3: persona roll-up tier (additive; safe on existing DBs)
+    _SQL_PERSONA_SUMMARY,
 )
 
 
