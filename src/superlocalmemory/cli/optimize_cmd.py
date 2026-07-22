@@ -98,6 +98,9 @@ def cmd_optimize_status(args: Namespace) -> None:
     print(f"  Compress:  {'enabled' if cfg.compress_enabled else 'disabled'}"
           f"  (mode: {cfg.compress_mode},"
           f" prose/L2: {'ON' if cfg.compress_prose else 'OFF'})")
+    if cfg.compress_prose or cfg.compress_mode == "aggressive":
+        print("             note: the live proxy applies LOSSLESS compression only;"
+              " lossy Layer-2 (prose) runs via the slm_compress tool.")
     proxy_status = f"running on :{OPTIMIZE_DEFAULT_PORT}" if proxy_running else "not running"
     print(f"  Proxy:     {proxy_status}")
     print(f"  Config:    ~/.superlocalmemory/optimize.json  (version {cfg.config_version})")

@@ -142,8 +142,9 @@ class CompressRouter:
         try:
             saved = max(0, before_tokens - after_tokens)
             if self._metrics_counters is not None:
-                # M-02: pass before/after directly (bytes_original, bytes_after contract)
-                self._metrics_counters.on_compress(before_tokens, after_tokens)
+                # M-02: pass before/after directly (bytes_original, bytes_after contract).
+                # lossy distinguishes Layer-2 (LLMLingua) from lossless runs.
+                self._metrics_counters.on_compress(before_tokens, after_tokens, lossy)
             logger.debug("on_compress: saved=%d tokens lossy=%s", saved, lossy)
         except Exception as exc:
             logger.debug("on_compress metrics update failed (non-fatal): %s", exc)

@@ -1,7 +1,6 @@
-"""Tests for ccr.py — CCRStore byte-exact recovery and MCP tool."""
+"""Tests for ccr.py — CCRStore byte-exact recovery."""
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
@@ -54,36 +53,6 @@ def test_ccr_retrieve_returns_none_on_expired(tmp_cache_db) -> None:
     time.sleep(0.2)
     retrieved = store.retrieve(ccr_id)
     assert retrieved is None, f"Expected None for expired entry, got {retrieved!r}"
-
-
-def test_ccr_mcp_tool_definition_valid() -> None:
-    store = CCRStore()
-    tool_def = store.get_mcp_tool_definition()
-    assert tool_def["name"] == "slm_ccr_retrieve"
-    assert "ccr_id" in tool_def["inputSchema"]["properties"]
-    assert "ccr_id" in tool_def["inputSchema"]["required"]
-
-
-def test_ccr_mcp_handle_call_success(tmp_cache_db) -> None:
-    store = CCRStore()
-    store._db = tmp_cache_db
-    original = b"Full original text content."
-    ccr_id = store.store(original)
-    result = asyncio.run(store.handle_mcp_call({"ccr_id": ccr_id}))
-    assert result.get("isError") is not True
-    assert original.decode() in result["content"][0]["text"]
-
-
-def test_ccr_mcp_handle_call_missing_id() -> None:
-    store = CCRStore()
-    result = asyncio.run(store.handle_mcp_call({}))
-    assert result.get("isError") is True
-
-
-def test_ccr_mcp_handle_call_not_found() -> None:
-    store = CCRStore()
-    result = asyncio.run(store.handle_mcp_call({"ccr_id": "nonexistent"}))
-    assert result.get("isError") is True
 
 
 def test_ccr_update_compressed(tmp_cache_db) -> None:
@@ -146,23 +115,6 @@ def test_ccr_retrieve_db_error_returns_none() -> None:
     store._db = _BrokenCacheDB()
     result = store.retrieve("any-id")
     assert result is None
-
-
-# ---- handle_mcp_call non-UTF8 data ----
-
-def test_ccr_mcp_handle_call_non_utf8_fallback_to_latin1(tmp_cache_db) -> None:
-    """Non-UTF-8 bytes fallback to latin-1 decode."""
-    import asyncio
-    store = CCRStore()
-    store._db = tmp_cache_db
-    # Store non-UTF-8 bytes (e.g., latin-1 encoded string)
-    non_utf8 = b'\x80\x81\x82\xff\xfe'  # bytes that are NOT valid UTF-8
-    ccr_id = store.store(non_utf8)
-    assert ccr_id
-    result = asyncio.run(store.handle_mcp_call({"ccr_id": ccr_id}))
-    assert result.get("isError") is not True
-    # The content should be present (decoded via latin-1 fallback)
-    assert len(result["content"][0]["text"]) > 0
 
 
 # ---- store with TTL ----

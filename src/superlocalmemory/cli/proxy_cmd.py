@@ -99,6 +99,10 @@ def cmd_proxy(args: Namespace) -> None:
             print("Or run: slm wrap claude")
             print()
             print("Proxy ready.")
+            print()
+            print("Note: 'slm proxy' enables the proxy independently — it does not")
+            print("flip the master optimize switch, so 'slm optimize status' may")
+            print("show OFF while the proxy is running.")
         else:
             print("Error: proxy failed to start. Check logs.", file=sys.stderr)
             sys.exit(1)

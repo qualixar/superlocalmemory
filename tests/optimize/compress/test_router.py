@@ -424,23 +424,23 @@ def test_on_compress_metrics_counter_wired() -> None:
     router = CompressRouter()
     
     # Mock mirrors the real counter signature:
-    # MetricsCounters.on_compress(bytes_original, bytes_after) — two ints, no
-    # lossy flag (v3.6.3 corrected the router to call this contract).
+    # MetricsCounters.on_compress(bytes_original, bytes_after, lossy) — the lossy
+    # flag distinguishes Layer-2 lossy runs from lossless ones.
     class MockCounters:
         def __init__(self):
             self.calls = []
 
-        def on_compress(self, bytes_original: int, bytes_after: int):
-            self.calls.append((bytes_original, bytes_after))
+        def on_compress(self, bytes_original: int, bytes_after: int, lossy: bool = False):
+            self.calls.append((bytes_original, bytes_after, lossy))
 
     counters = MockCounters()
     router.set_metrics(counters)
 
     router.on_compress(100, 40, False)
     assert len(counters.calls) == 1
-    # Router forwards (before_tokens, after_tokens) to the counter, which
-    # derives "saved" itself. The lossy flag is logged, not forwarded.
-    assert counters.calls[0] == (100, 40)
+    # Router forwards (before_tokens, after_tokens, lossy) to the counter, which
+    # derives "saved" itself.
+    assert counters.calls[0] == (100, 40, False)
 
 
 def test_on_compress_non_fatal_on_error() -> None:
