@@ -328,7 +328,15 @@
               '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
                 'background:var(--card-2);color:var(--fg-2)">Semantic Kernel</span>' +
               '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">LlamaIndex</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">Microsoft Agent Framework</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
                 'background:var(--card-2);color:var(--fg-2)">AutoGen</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">Google ADK</span>' +
+              '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
+                'background:var(--card-2);color:var(--fg-2)">OpenAI Agents</span>' +
               '<span style="padding:4px 12px;border-radius:99px;font-size:12px;' +
                 'background:var(--card-2);color:var(--fg-2)">Any MCP-compatible agent</span>' +
             '</div>' +
