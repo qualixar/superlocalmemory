@@ -914,24 +914,28 @@ async def lifespan(application: FastAPI):
         try:
             import sqlite3 as _sqlite3
             _idx_conn = _sqlite3.connect(str(_memory_db))
-            _idx_conn.execute("PRAGMA journal_mode=WAL")
-            _idx_conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_edges_source_weight "
-                "ON graph_edges(profile_id, source_id, weight DESC)"
-            )
-            _idx_conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_edges_target_weight "
-                "ON graph_edges(profile_id, target_id, weight DESC)"
-            )
-            _idx_conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_assoc_source_weight "
-                "ON association_edges(profile_id, source_fact_id, weight DESC)"
-            )
-            _idx_conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_assoc_target_weight "
-                "ON association_edges(profile_id, target_fact_id, weight DESC)"
-            )
-            _idx_conn.close()
+            try:
+                _idx_conn.execute("PRAGMA journal_mode=WAL")
+                _idx_conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_edges_source_weight "
+                    "ON graph_edges(profile_id, source_id, weight DESC)"
+                )
+                _idx_conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_edges_target_weight "
+                    "ON graph_edges(profile_id, target_id, weight DESC)"
+                )
+                _idx_conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_assoc_source_weight "
+                    "ON association_edges(profile_id, source_fact_id, weight DESC)"
+                )
+                _idx_conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_assoc_target_weight "
+                    "ON association_edges(profile_id, target_fact_id, weight DESC)"
+                )
+            finally:
+                # CP-09: close even if an execute() raises, so the connection
+                # (and its file handle / shared DB lock) never leaks.
+                _idx_conn.close()
         except Exception as _idx_exc:
             logger.debug("SpreadingActivation covering indexes skipped: %s", _idx_exc)
 

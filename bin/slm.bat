@@ -14,7 +14,13 @@ if "%~1"=="--version" goto :show_version
 if "%~1"=="-v" goto :show_version
 
 REM LLD-06 §6.3 — prefer the PyInstaller-built binary on the hot hook path.
-set "SLM_HOOK_BIN=%USERPROFILE%\.superlocalmemory\bin\slm-hook\slm-hook.exe"
+REM Resolve data root honoring the SLM_DATA_DIR -> SL_MEMORY_PATH -> SLM_HOME
+REM cascade (mirrors infra/data_root.py). Highest precedence is applied last.
+set "_SLM_ROOT=%USERPROFILE%\.superlocalmemory"
+if defined SLM_HOME set "_SLM_ROOT=%SLM_HOME%"
+if defined SL_MEMORY_PATH set "_SLM_ROOT=%SL_MEMORY_PATH%"
+if defined SLM_DATA_DIR set "_SLM_ROOT=%SLM_DATA_DIR%"
+set "SLM_HOOK_BIN=%_SLM_ROOT%\bin\slm-hook\slm-hook.exe"
 if defined SLM_HOOK_BINARY set "SLM_HOOK_BIN=%SLM_HOOK_BINARY%"
 if "%~1"=="hook" if "%~2"=="user_prompt_submit" (
     if exist "%SLM_HOOK_BIN%" (

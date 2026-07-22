@@ -19,7 +19,11 @@ done
 # If the onedir binary exists and isn't disabled, run it directly; the
 # binary is stdlib-only and ~30ms cold on Windows. Otherwise fall back
 # to the Python CLI below.
-SLM_HOOK_BIN="${SLM_HOOK_BINARY:-$HOME/.superlocalmemory/bin/slm-hook/slm-hook}"
+# Resolve the data root honoring the SLM_DATA_DIR -> SL_MEMORY_PATH -> SLM_HOME
+# cascade (mirrors infra/data_root.py) so custom / per-team roots still find the
+# hook binary. Hardcoding $HOME/.superlocalmemory broke SLM_DATA_DIR deployments.
+_SLM_ROOT="${SLM_DATA_DIR:-${SL_MEMORY_PATH:-${SLM_HOME:-$HOME/.superlocalmemory}}}"
+SLM_HOOK_BIN="${SLM_HOOK_BINARY:-${_SLM_ROOT}/bin/slm-hook/slm-hook}"
 if [ "${1:-}" = "hook" ] && [ "${2:-}" = "user_prompt_submit" ] \
    && [ -x "$SLM_HOOK_BIN" ] \
    && [ "${SLM_HOOK_BINARY_DISABLED:-0}" != "1" ]; then
