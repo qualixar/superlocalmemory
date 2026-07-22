@@ -10,6 +10,7 @@ import logging
 from typing import Any, Callable
 
 from superlocalmemory.core.injection import InjectableMemory, render_context
+from superlocalmemory.retrieval.temporal_frame import relative_age, temporal_frame
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,13 @@ class AutoRecall:
                 )
                 for r in relevant[:self._max_memories]
             ]
-            return render_context(memories, mode="B", cfg=None, wrap=True)
+            ctx = render_context(memories, mode="B", cfg=None, wrap=True)
+            # T-inject: anchor the injected memories to "now" so a time-blind
+            # model can weigh recency. Prepend a one-line temporal frame.
+            frame = temporal_frame(
+                [getattr(r.fact, "created_at", "") for r in relevant[:self._max_memories]]
+            )
+            return f"{frame}\n\n{ctx}" if ctx else ctx
         except Exception as exc:
             logger.warning("Auto-recall failed: %s", exc)
             return ""
@@ -104,12 +111,17 @@ class AutoRecall:
             response = self._recall(query, self._max_memories)
             if response is None:
                 return []
+            from datetime import datetime as _dt, timezone as _tz
+            _now = _dt.now(_tz.utc)
             results = []
             for r in response.results:
                 if r.score >= self._threshold:
+                    _created = getattr(r.fact, "created_at", "") or ""
                     results.append({
                         "fact_id": r.fact.fact_id,
                         "content": r.fact.content[:300],
+                        "created_at": _created,
+                        "age_label": relative_age(_created, _now),
                         "score": round(r.score, 3),
                         "relevance_score": round(
                             getattr(r, "relevance_score", r.score) or 0.0, 3

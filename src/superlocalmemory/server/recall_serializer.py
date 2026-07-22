@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.retrieval.temporal_frame import relative_age, temporal_frame
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +191,13 @@ def serialize_recall_response(
         is the evidence-floor signal lifted from the response (additive).
     """
     memory_map = memory_map or {}
+    # T-inject: one shared "now" so every result's age label is consistent.
+    from datetime import datetime as _dt, timezone as _tz
+    _now = _dt.now(_tz.utc)
     raw: list[dict] = []
     for r in (response.results or [])[:limit]:
         fact = r.fact
+        _created = getattr(fact, "created_at", "") or ""
         fact_type = getattr(fact, "fact_type", None)
         lifecycle = getattr(fact, "lifecycle", None)
         raw.append({
@@ -225,7 +230,10 @@ def serialize_recall_response(
                 if lifecycle is not None and hasattr(lifecycle, "value")
                 else (lifecycle or ""),
             "access_count": getattr(fact, "access_count", 0),
-            "created_at": getattr(fact, "created_at", "") or "",
+            "created_at": _created,
+            # T-inject: human-relative age so consumers (and the LLM) can
+            # weigh recency without doing date math. "" when undated.
+            "age_label": relative_age(_created, _now),
             "evidence_chain": list(getattr(r, "evidence_chain", []) or []),
         })
 
@@ -241,6 +249,12 @@ def serialize_recall_response(
 
 def recall_response_metadata(response: Any) -> dict:
     """Return Score Contract v2 response metadata for transport envelopes."""
+    # T-inject: a one-line temporal frame anchoring the result set to "now"
+    # and its age span, so time-blind LLMs get an explicit recency signal.
+    _timestamps = [
+        getattr(getattr(r, "fact", None), "created_at", "") or ""
+        for r in (getattr(response, "results", None) or [])
+    ]
     return {
         "score_contract_version": getattr(response, "score_contract_version", "2"),
         "calibration_status": getattr(response, "calibration_status", "uncalibrated"),
@@ -248,4 +262,5 @@ def recall_response_metadata(response: Any) -> dict:
         "answer_confidence": getattr(response, "answer_confidence", None),
         "abstained": bool(getattr(response, "abstained", False)),
         "abstention_reason": getattr(response, "abstention_reason", None),
+        "temporal_frame": temporal_frame(_timestamps),
     }

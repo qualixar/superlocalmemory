@@ -87,14 +87,19 @@ def test_serializer_exposes_aliases_and_canonical_fields() -> None:
     assert item["confidence"] == item["memory_confidence"] == 0.73
     assert item["ranking_score"] is None
     assert item["rank_position"] == 1
-    assert recall_response_metadata(response) == {
-        "score_contract_version": "2",
-        "calibration_status": "uncalibrated",
-        "calibration_id": None,
-        "answer_confidence": None,
-        "abstained": False,
-        "abstention_reason": None,
-    }
+    # T-inject: each result carries a human-relative age label (fact created_at
+    # defaults to now, so a freshly-built fact reads "just now").
+    assert item["age_label"] == "just now"
+
+    meta = recall_response_metadata(response)
+    assert meta["score_contract_version"] == "2"
+    assert meta["calibration_status"] == "uncalibrated"
+    assert meta["calibration_id"] is None
+    assert meta["answer_confidence"] is None
+    assert meta["abstained"] is False
+    assert meta["abstention_reason"] is None
+    # T-inject: response metadata carries a temporal frame anchored to now.
+    assert meta["temporal_frame"].startswith("Now:")
 
 
 def test_run_recall_no_longer_derives_confidence_from_score() -> None:
