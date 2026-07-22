@@ -49,12 +49,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _recompute_entity_communities(db: Any, profile_id: str) -> dict[str, int]:
-    """Wave Q: rebuild the entity-community backbone (fail-open, non-fatal).
+def _recompute_entity_communities(
+    db: Any, profile_id: str, summarizer: Any = None,
+) -> dict[str, int]:
+    """Wave Q: rebuild the entity-community backbone + summaries (fail-open).
 
     Shared spine for Q2 community summaries and Q3 progressive abstraction.
     Runs in the background consolidation lane; never blocks store/recall.
+    Community detection and summary generation are independently fail-open.
     """
+    result: dict[str, int] = {"entity_count": 0, "community_count": 0}
     try:
         from superlocalmemory.core.entity_community import EntityCommunityBuilder
 
@@ -64,10 +68,25 @@ def _recompute_entity_communities(db: Any, profile_id: str) -> dict[str, int]:
             result.get("entity_count", 0),
             result.get("community_count", 0),
         )
-        return result
     except Exception as exc:
         logger.debug("Entity-community recompute failed (non-fatal): %s", exc)
-        return {"entity_count": 0, "community_count": 0}
+        return result
+
+    # Wave Q2: one synthesized report per community (rides on the backbone).
+    try:
+        from superlocalmemory.core.community_summary import CommunitySummaryBuilder
+
+        summ = CommunitySummaryBuilder(db, summarizer=summarizer).compute_and_store(
+            profile_id,
+        )
+        result["summaries_written"] = summ.get("summaries_written", 0)
+        logger.info(
+            "Background community summaries: %d written",
+            summ.get("summaries_written", 0),
+        )
+    except Exception as exc:
+        logger.debug("Community summaries failed (non-fatal): %s", exc)
+    return result
 
 
 class ConsolidationEngine:
@@ -278,6 +297,7 @@ class ConsolidationEngine:
         analyzer = self._graph_analyzer
         pid = profile_id
         db = self._db
+        summarizer = self._summarizer
 
         def _run() -> None:
             if analyzer is not None:
@@ -293,8 +313,8 @@ class ConsolidationEngine:
                     logger.debug(
                         "Background graph analysis failed (non-fatal): %s", exc,
                     )
-            # Wave Q: entity-community backbone (shared spine for Q2/Q3).
-            _recompute_entity_communities(db, pid)
+            # Wave Q: entity-community backbone + summaries (Q2/Q3 spine).
+            _recompute_entity_communities(db, pid, summarizer)
 
         t = threading.Thread(target=_run, daemon=True, name="graph-analysis-bg")
         t.start()
@@ -597,8 +617,11 @@ class ConsolidationEngine:
                 result = self._graph_analyzer.compute_and_store(profile_id)
             except Exception as exc:
                 logger.warning("Graph recompute failed: %s", exc)
-        ec = _recompute_entity_communities(self._db, profile_id)
+        ec = _recompute_entity_communities(
+            self._db, profile_id, self._summarizer,
+        )
         result["entity_community_count"] = ec.get("community_count", 0)
+        result["community_summaries"] = ec.get("summaries_written", 0)
         return result
 
     # ------------------------------------------------------------------

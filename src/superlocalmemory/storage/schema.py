@@ -53,6 +53,7 @@ _TABLES: Final[tuple[str, ...]] = (
     "bm25_tokens",
     "config",
     "entity_communities",
+    "community_summaries",
 )
 
 _FTS_TABLES: Final[tuple[str, ...]] = (
@@ -706,6 +707,25 @@ CREATE INDEX IF NOT EXISTS idx_entity_comm_cid
     ON entity_communities(profile_id, community_id);
 """
 
+# Wave Q2: one synthesized report per entity community (additive; safe on
+# existing DBs). Generated in the background after entity_communities; the
+# summary excludes superseded facts. member_fact_ids enables drill-down.
+_SQL_COMMUNITY_SUMMARIES: Final[str] = """
+CREATE TABLE IF NOT EXISTS community_summaries (
+    profile_id      TEXT    NOT NULL,
+    community_id    INTEGER NOT NULL,
+    summary         TEXT    NOT NULL DEFAULT '',
+    keywords        TEXT    NOT NULL DEFAULT '',
+    entity_ids_json TEXT    NOT NULL DEFAULT '[]',
+    fact_ids_json   TEXT    NOT NULL DEFAULT '[]',
+    fact_count      INTEGER NOT NULL DEFAULT 0,
+    computed_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, community_id)
+);
+CREATE INDEX IF NOT EXISTS idx_comm_summ_profile
+    ON community_summaries(profile_id);
+"""
+
 # ---------------------------------------------------------------------------
 # Ordered DDL list (tables before FTS, respects FK order)
 # ---------------------------------------------------------------------------
@@ -738,6 +758,8 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_FACT_EXPANSION_FTS,
     # Wave Q: entity-community backbone (additive; safe on existing DBs)
     _SQL_ENTITY_COMMUNITIES,
+    # Wave Q2: community summaries (additive; safe on existing DBs)
+    _SQL_COMMUNITY_SUMMARIES,
 )
 
 
