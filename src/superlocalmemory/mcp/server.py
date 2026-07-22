@@ -107,6 +107,10 @@ _ESSENTIAL_TOOLS: set[str] = {
     "evolve_skill", "skill_health", "skill_lineage",
     # v3.6.11: Surface B Optimize tools (5)
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
+    # v3.8.0: bounded-loop tools (3) — CLI + /slm-loop command + MCP. Kept in
+    # the default exposure so any MCP client discovers gated loops, not just
+    # profile=code/full/power sessions.
+    "slm_loop_run", "slm_loop_history", "slm_loop_show",
 }
 
 # v3.4.4: Mesh tools — enabled if mesh_enabled in config or SLM_MCP_MESH_TOOLS=1
@@ -257,6 +261,8 @@ register_learning_tools(_target, get_engine)  # v3.4.7: Two-way learning tools
 register_evolution_tools(_target, get_engine)  # v3.4.11: Skill evolution tools
 from superlocalmemory.mcp.tools_optimize import register_optimize_tools
 register_optimize_tools(_target)  # v3.6.11: Surface B Optimize tools (proxy-free)
+from superlocalmemory.mcp.tools_loops import register_loop_tools
+register_loop_tools(_target, get_engine)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
 
 
 # V3.3.21: Eager engine warmup — start initializing BEFORE first tool call.

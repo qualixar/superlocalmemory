@@ -69,7 +69,7 @@ From an MCP-connected agent (v3.8.0, `code`/`full`/`power` profiles):
 { "tool": "switch_profile", "arguments": { "profile": "work" } }
 ```
 
-The `switch_profile` MCP tool is available in the `code` (21), `full` (39), and `power` (51) profiles. It is not included in `core` (14) or `mesh` (8). See [MCP Profiles →](../README.md#mcp--profiles).
+The `switch_profile` MCP tool is available in the `code` (24), `full` (42), and `power` (54) profiles. It is not included in `core` (14) or `mesh` (8). See [MCP Profiles →](../README.md#mcp--profiles).
 
 ## Use Cases
 

@@ -251,25 +251,50 @@
           '</div>' +
 
           '<div class="card">' +
-            '<div class="card-head"><h3>CLI reference</h3></div>' +
+            '<div class="card-head"><h3>Run it: CLI &middot; command &middot; MCP</h3></div>' +
             '<div class="card-pad">' +
               '<p style="font-size:13px;margin-bottom:14px">' +
-                'All loop commands are available through the <code>slm</code> CLI. ' +
-                'Run the <code>slm-loop</code> skill inside Claude Code for the full ' +
-                'interactive walkthrough.' +
+                'Bounded loops ship on three surfaces &mdash; the same engine and ' +
+                'the same queryable ledger behind each.' +
               '</p>' +
-              '<div style="display:flex;flex-direction:column;gap:12px">' +
+
+              '<div style="font-size:12px;font-weight:600;color:var(--fg-2);margin-bottom:6px">CLI</div>' +
+              '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">' +
                 '<div class="list-row">' +
-                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop demo</span>' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm loop demo</span>' +
                   '<span style="font-size:12.5px;color:var(--fg-2)">Run a live demo bounded loop</span>' +
                 '</div>' +
                 '<div class="list-row">' +
-                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop history</span>' +
-                  '<span style="font-size:12.5px;color:var(--fg-2)">List all loop runs for this profile</span>' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm loop history</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">List loop runs for this profile</span>' +
                 '</div>' +
                 '<div class="list-row">' +
-                  '<span class="mono" style="min-width:200px;font-size:13px">slm loop show &lt;run_id&gt;</span>' +
-                  '<span style="font-size:12.5px;color:var(--fg-2)">Inspect a specific run lap-by-lap</span>' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm loop show &lt;run_id&gt;</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Inspect a run lap-by-lap</span>' +
+                '</div>' +
+              '</div>' +
+
+              '<div style="font-size:12px;font-weight:600;color:var(--fg-2);margin-bottom:6px">Command (Claude Code / Codex)</div>' +
+              '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">/slm-loop</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Slash command bound to the slm-loop skill + runner agent</span>' +
+                '</div>' +
+              '</div>' +
+
+              '<div style="font-size:12px;font-weight:600;color:var(--fg-2);margin-bottom:6px">MCP tools (code / full / power profiles)</div>' +
+              '<div style="display:flex;flex-direction:column;gap:8px">' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm_loop_run</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Run a gated loop &mdash; the gate is an independent SLM recall</span>' +
+                '</div>' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm_loop_history</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">List runs (read-only)</span>' +
+                '</div>' +
+                '<div class="list-row">' +
+                  '<span class="mono" style="min-width:190px;font-size:13px">slm_loop_show</span>' +
+                  '<span style="font-size:12.5px;color:var(--fg-2)">Show a run lap-by-lap (read-only)</span>' +
                 '</div>' +
               '</div>' +
               '<div style="margin-top:18px;padding:10px 14px;background:var(--card-2);' +

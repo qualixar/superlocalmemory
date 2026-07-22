@@ -68,7 +68,7 @@ def test_profile_core_exact():
 
 
 # ---------------------------------------------------------------------------
-# RED-3: code == core | 6 code-graph names (==20)
+# RED-3: code == core | code-graph + switch_profile + 3 loop tools (==24)
 # ---------------------------------------------------------------------------
 
 _CODE_EXTRA = frozenset({
@@ -76,6 +76,8 @@ _CODE_EXTRA = frozenset({
     "semantic_search_code", "get_review_context", "detect_changes",
     # 3.8.0: plugin (code profile) can switch the active workspace over MCP.
     "switch_profile",
+    # 3.8.0: bounded-loop tools on the MCP surface (CLI + command + MCP).
+    "slm_loop_run", "slm_loop_history", "slm_loop_show",
 })
 
 
@@ -86,11 +88,11 @@ def test_profile_code_exact():
     assert code == expected, (
         f"code diff — extra: {code - expected}, missing: {expected - code}"
     )
-    assert len(code) == 21, f"code must be 21 names, got {len(code)}"
+    assert len(code) == 24, f"code must be 24 names, got {len(code)}"
 
 
 # ---------------------------------------------------------------------------
-# RED-4: full == 39 and ⊇ core memory names; built from explicit 31+8 literal
+# RED-4: full == 42 and ⊇ core memory names; built from explicit 34+8 literal
 # ---------------------------------------------------------------------------
 
 _EXPECTED_FULL_MESH = frozenset({
@@ -106,6 +108,8 @@ _EXPECTED_FULL_BASE = frozenset({
     "get_assertions", "reinforce_assertion", "contradict_assertion",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
+    # 3.8.0: bounded-loop tools (CLI + command + MCP).
+    "slm_loop_run", "slm_loop_history", "slm_loop_show",
 })
 
 _EXPECTED_FULL = _EXPECTED_FULL_BASE | _EXPECTED_FULL_MESH
@@ -117,14 +121,14 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 39, f"full must be 39 names, got {len(full)}"
+    assert len(full) == 42, f"full must be 42 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
 
 
 # ---------------------------------------------------------------------------
-# RED-5: power == 51 and ⊇ full
+# RED-5: power == 54 and ⊇ full
 # ---------------------------------------------------------------------------
 
 _POWER_EXTRA = frozenset({
@@ -142,7 +146,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 51, f"power must be 51 names, got {len(power)}"
+    assert len(power) == 54, f"power must be 54 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 
@@ -206,6 +210,7 @@ def test_every_profile_name_is_a_real_registered_tool():
     from superlocalmemory.mcp.tools_learning import register_learning_tools
     from superlocalmemory.mcp.tools_evolution import register_evolution_tools
     from superlocalmemory.mcp.tools_optimize import register_optimize_tools
+    from superlocalmemory.mcp.tools_loops import register_loop_tools
 
     collector = _NameCollector()
     get_engine_stub = lambda: None  # noqa: E731
@@ -220,6 +225,7 @@ def test_every_profile_name_is_a_real_registered_tool():
     register_learning_tools(collector, get_engine_stub)
     register_evolution_tools(collector, get_engine_stub)
     register_optimize_tools(collector)
+    register_loop_tools(collector, get_engine_stub)
 
     mod = _get_module()
     all_profile_names: set[str] = set()

@@ -19,6 +19,7 @@ from superlocalmemory.loops.ledger import (
     LedgerEntry,
     LedgerStore,
     SLMMemoryLedger,
+    engine_backed_ledger,
     open_engine_store,
 )
 from superlocalmemory.loops.models import (
@@ -47,6 +48,7 @@ __all__ = [
     "LedgerStore",
     "InMemoryLedger",
     "SLMMemoryLedger",
+    "engine_backed_ledger",
     "open_engine_store",
     "no_progress",
     "rung_requires_approval",

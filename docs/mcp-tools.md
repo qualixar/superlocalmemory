@@ -378,7 +378,7 @@ Find and optionally terminate orphaned SLM daemon or MCP processes. Safe to call
 
 ## Code-Graph Tools
 
-Available in profiles `code` (21 tools), `full` (39 tools), and `power` (51 tools). Not available in `core` or `mesh` profiles.
+Available in profiles `code` (24 tools), `full` (42 tools), and `power` (54 tools). Not available in `core` or `mesh` profiles.
 
 These tools build and query a structural code graph over a local repository. The graph maps functions, classes, modules, call sites, imports, and dependencies. It is built on demand from the repository path and persisted in SLM's database.
 
@@ -616,6 +616,55 @@ Return compression and cache statistics for the current session.
 **Returns:** `{ok, compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses, ccr_note, note}`
 
 > **Note:** Proxy stats are daemon-persisted (accurate across restarts). KV stats (`cache_kv_hits`, `cache_kv_misses`) are in-module counters for this MCP process session only.
+
+---
+
+## Bounded-Loop Tools (v3.8.0)
+
+Available in the default exposure and in the `code`, `full`, and `power` profiles. Bounded loops ship on three surfaces — the `slm loop` CLI, the `/slm-loop` command, and these MCP tools — all driving the same engine and the same durable ledger.
+
+A bounded loop finishes only when an **independent gate** passes, never when the agent claims it is done. Over MCP the gate is an SLM recall: the loop converges the first lap a memory matching the gate query becomes retrievable with confidence. This makes it a safe, shell-free coordination primitive — one agent can wait, under strict bounds, for a memory another agent will write.
+
+### `slm_loop_run`
+
+Run one bounded, gate-verified loop to a terminal outcome. **Blocks** (polling the gate every `poll_interval_s`) until the gate passes or a bound trips. Every lap is persisted to SLM memory (tag `loop:<name>`) and shows on the dashboard.
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `name` | string | Yes | Loop name and memory tag (1–128 chars). |
+| `gate_query` | string | Yes | Recall query the independent gate checks each lap. |
+| `gate_min_score` | number | No | Minimum top-result score to pass (default `0.0` = any confident hit). |
+| `max_iterations` | integer | No | Hard cap on laps (default 20, max 200). |
+| `max_wallclock_s` | number | No | Wall-clock ceiling in seconds (default 15, max 120; 0 disables). |
+| `poll_interval_s` | number | No | Seconds between laps (default 1.0, minimum 0.25). |
+| `max_tokens` | integer | No | Token budget (default 0 = disabled). |
+| `no_progress_window` | integer | No | Halt after this many consecutive no-change laps (default 0 = disabled). |
+
+**Returns:** `{ok, status, reason, passed, laps, run_id, ledger:[{lap, decision, passed, detail}], note}` where `status` is one of `DONE / HALT / PAUSE / KILLED / ERROR`.
+
+### `slm_loop_history`
+
+List recorded loop runs for a loop name (read-only).
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `name` | string | Yes | Loop name to list runs for. |
+| `limit` | integer | No | Maximum runs to return (default 20, max 200). |
+
+**Returns:** `{ok, name, count, runs:[{run_id, laps, final, ts}]}`
+
+### `slm_loop_show`
+
+Show every lap of one run, in order (read-only).
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `run_id` | string | Yes | Run identifier returned by `slm_loop_run`. |
+| `limit` | integer | No | Maximum laps to return (default 200, max 1000). |
+
+**Returns:** `{ok, run_id, count, laps:[{lap, ts, decision, passed, detail, agent_claimed_done, tokens}]}`
+
+> The agent's own `agent_claimed_done` flag is recorded on each lap for audit but never terminates the loop — only the independent gate can.
 
 ---
 

@@ -13,6 +13,8 @@
 //   C1 — all agent_id / content / source_type values through escapeHtml() before innerHTML
 //   C2 — empty state for zero agents / zero memories (adapter guide shown)
 //   C3 — fetch failure shows error card with Retry; never throws, never silent
+//   C4 — a 404 (route absent) reads as "not connected / restart the daemon",
+//        never a raw "HTTP 404"; the no-agents case is a friendly empty state
 //
 // Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar — AGPL-3.0
 
@@ -331,24 +333,47 @@
   }
 
   // ── Error/retry UI ─────────────────────────────────────────────────────────
+  // C4: turn a fetch failure into an actionable sentence. A 404 means the
+  // multi-agent route isn't on the running daemon (typically a daemon that
+  // predates this build) — say "not connected", point at `slm restart`, and
+  // never surface a bare status code.
+  function errorMessage(err) {
+    var status = err && err.httpStatus;
+    if (status === 404) {
+      return 'Multi-agent memory isn’t connected on this daemon. This view ' +
+             'ships with SLM 3.8.0 — if you just upgraded, restart the daemon ' +
+             '(run “slm restart”) to load it, then retry.';
+    }
+    if (status === 401 || status === 403) {
+      return 'Not authorised to read agent memory. Sign in to the dashboard, then retry.';
+    }
+    if (status) {
+      return 'The SLM daemon returned an error (status ' + status + '). Retry, ' +
+             'or check the daemon logs.';
+    }
+    // No status → the request never reached the daemon.
+    return 'Could not reach the SLM daemon. Check that it is running, then retry.';
+  }
+
   function showError(msg) {
     var band  = document.getElementById('od-agents-err');
     var msgEl = document.getElementById('od-agents-err-msg');
     if (band)  band.style.display  = 'flex';
     if (msgEl) msgEl.textContent   = msg || 'Could not load agent memory data';
 
-    // Degrade gracefully — show errors in both sub-panels
+    // Degrade gracefully — the actionable message lives in the band above;
+    // the sub-panels just stop showing a stale "Loading…" state.
     var grid = document.getElementById('od-agents-grid');
     if (grid) {
       grid.innerHTML =
         '<div style="grid-column:1/-1;text-align:center;padding:32px;' +
-          'color:var(--fg-3);font-size:13px">Could not load agent data.</div>';
+          'color:var(--fg-3);font-size:13px">Agent activity unavailable — see the message above.</div>';
     }
     var table = document.getElementById('od-agents-table');
     if (table) {
       table.innerHTML =
         '<div style="text-align:center;padding:32px;color:var(--fg-3);font-size:13px">' +
-          'Could not load recent memories.' +
+          'Recent memories unavailable — see the message above.' +
         '</div>';
     }
   }
@@ -362,7 +387,11 @@
   function loadAll() {
     fetch(API_URL, { credentials: 'same-origin' })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) {
+          var e = new Error('HTTP ' + r.status);
+          e.httpStatus = r.status;   // C4: preserve status for friendly messaging
+          throw e;
+        }
         return r.json();
       })
       .then(function (data) {
@@ -376,10 +405,9 @@
         renderRecentTable(_allRecent);
       })
       .catch(function (err) {
-        // CRIT C3: never throw, always show a visible error card
-        var msg = 'Could not load agent memory data' +
-          (err && err.message ? ' (' + err.message + ')' : '');
-        showError(msg);
+        // CRIT C3/C4: never throw; translate the failure into a message that
+        // tells the operator what to actually do, never a bare "HTTP 404".
+        showError(errorMessage(err));
       });
   }
 

@@ -23,13 +23,16 @@ _PROFILE_CORE: frozenset[str] = frozenset({  # 14
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
 })
 
-_PROFILE_CODE: frozenset[str] = _PROFILE_CORE | frozenset({  # 21
+_PROFILE_CODE: frozenset[str] = _PROFILE_CORE | frozenset({  # 24
     "build_code_graph", "get_blast_radius", "query_graph",
     "semantic_search_code", "get_review_context", "detect_changes",
     # switch_profile lets a plugin/IDE session change the active workspace over
     # MCP (the plugin ships SLM_MCP_PROFILE=code, so it must be here). The
     # underlying route is RBAC member-gated, so company-mode isolation holds.
     "switch_profile",
+    # v3.8.0: bounded loops on the MCP surface. Coding agents (the /slm-loop
+    # command's audience) run gated, bounded loops and inspect the ledger.
+    "slm_loop_run", "slm_loop_history", "slm_loop_show",
 })
 
 _PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 8
@@ -37,16 +40,18 @@ _PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 8
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
 })
 
-_PROFILE_FULL: frozenset[str] = frozenset({  # 31 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
+_PROFILE_FULL: frozenset[str] = frozenset({  # 34 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
     "remember", "recall", "search", "fetch", "list_recent", "delete_memory", "update_memory",
     "get_status", "session_init", "observe", "close_session", "report_feedback", "forget",
     "run_maintenance", "consolidate_cognitive", "get_soft_prompts", "set_mode", "report_outcome",
     "log_tool_event", "get_assertions", "reinforce_assertion", "contradict_assertion",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
-}) | _PROFILE_FULL_MESH  # 39
+    # v3.8.0: bounded-loop tools (CLI + /slm-loop command + MCP).
+    "slm_loop_run", "slm_loop_history", "slm_loop_show",
+}) | _PROFILE_FULL_MESH  # 42
 
-_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 51
+_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 54
     "get_version", "get_mode", "health", "consistency_check", "recall_trace",
     "get_lifecycle_status", "set_retention_policy", "compact_memories",
     "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",
@@ -69,16 +74,21 @@ _PROFILE_DEFINITIONS: dict[str, frozenset[str]] = {
 # at server startup.  Any other value is a configuration error (fail closed).
 _PROFILE_ALIASES: dict[str, str] = {
     "core14": "core",
-    # 3.8.0: switch_profile added to code/full/power (counts +1). Old count-
-    # suffixed names kept so a v3.6/3.7 config still resolves (back-compat).
+    # 3.8.0: switch_profile (+1) then bounded-loop tools (+3) grew code/full/
+    # power. Every historical count-suffixed name is kept so a v3.6/3.7/early-
+    # 3.8 config still resolves (back-compat); new 3.8.0 counts added alongside.
     "code20": "code",
     "code21": "code",
+    "code24": "code",
     "full38": "full",
     "full39": "full",
+    "full42": "full",
     "power50": "power",
     "power51": "power",
+    "power54": "power",
     "mesh8": "mesh",
     "whole81": "whole",
+    "whole84": "whole",
 }
 
 # Plain-English descriptions for UI display.

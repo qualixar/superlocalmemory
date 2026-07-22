@@ -187,6 +187,19 @@ class _EngineLedgerStore:
         self._engine.close()
 
 
+def engine_backed_ledger(engine: Any) -> SLMMemoryLedger:
+    """Build an SLM-backed ledger over an ALREADY-OPEN engine.
+
+    Unlike :func:`open_engine_store`, this neither creates nor owns the engine —
+    the caller (e.g. the MCP daemon, which keeps one long-lived engine per
+    profile) retains full ownership and lifecycle. The returned ledger never
+    closes the engine, so it is safe to build one per tool call. The engine's
+    per-call, WAL-mode connection model makes the ledger's reads/writes safe
+    from a worker thread.
+    """
+    return SLMMemoryLedger(_EngineLedgerStore(engine))
+
+
 def open_engine_store(db_path: str | Path) -> _EngineLedgerStore:
     """Build an engine-backed ledger store rooted at ``db_path``.
 

@@ -370,9 +370,9 @@
     codeBlock.textContent =
       '"env": {\n' +
       '  "SLM_MCP_PROFILE": "core"    // 14 tools — minimal\n' +
-      '  // "SLM_MCP_PROFILE": "code"  // 21 tools — + code graph\n' +
-      '  // "SLM_MCP_PROFILE": "full"  // 39 tools — + mesh\n' +
-      '  // "SLM_MCP_PROFILE": "power" // 51 tools — + governance\n' +
+      '  // "SLM_MCP_PROFILE": "code"  // 24 tools — + code graph + loops\n' +
+      '  // "SLM_MCP_PROFILE": "full"  // 42 tools — + mesh\n' +
+      '  // "SLM_MCP_PROFILE": "power" // 54 tools — + governance\n' +
       '  // "SLM_MCP_PROFILE": "mesh"  //  8 tools — mesh only\n' +
       '}';
     body2.appendChild(codeBlock);
