@@ -1523,6 +1523,31 @@ class DatabaseManager:
         )
 
     # ------------------------------------------------------------------
+    # Phase 4 (T3b): fact-augmented key expansion (BM25 alt-keys)
+    # ------------------------------------------------------------------
+
+    def upsert_fact_expansion(self, fact_id: str, alt_keys: str) -> None:
+        """Store/replace a fact's alternate keys in ``fact_expansion_fts``.
+
+        Standalone FTS5 (no external-content triggers), so we replace by hand:
+        delete any prior row for the fact, then insert the new alt-keys. An
+        empty/blank ``alt_keys`` clears the fact's expansion entry. Fail-soft:
+        a missing FTS table (legacy DB) never breaks the write path.
+        """
+        try:
+            self.execute(
+                "DELETE FROM fact_expansion_fts WHERE fact_id = ?", (fact_id,)
+            )
+            if alt_keys and alt_keys.strip():
+                self.execute(
+                    "INSERT INTO fact_expansion_fts (fact_id, alt_keys) "
+                    "VALUES (?, ?)",
+                    (fact_id, alt_keys.strip()),
+                )
+        except Exception as exc:  # pragma: no cover — legacy/missing FTS table
+            logger.debug("upsert_fact_expansion skipped for %s: %s", fact_id, exc)
+
+    # ------------------------------------------------------------------
     # Phase 5: Core Memory Blocks CRUD (Rule 15)
     # ------------------------------------------------------------------
 

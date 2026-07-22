@@ -56,6 +56,7 @@ _TABLES: Final[tuple[str, ...]] = (
 
 _FTS_TABLES: Final[tuple[str, ...]] = (
     "atomic_facts_fts",
+    "fact_expansion_fts",
 )
 
 
@@ -278,6 +279,24 @@ BEGIN
     INSERT INTO atomic_facts_fts (rowid, fact_id, content)
         VALUES (NEW.rowid, NEW.fact_id, NEW.content);
 END;
+"""
+
+
+# ---------------------------------------------------------------------------
+# Fact expansion FTS (Phase 4, T3b — fact-augmented key expansion)
+# ---------------------------------------------------------------------------
+# Standalone (NOT external-content) FTS5 holding per-fact alternate keys
+# (entity aliases + paraphrases). Kept separate from atomic_facts_fts so the
+# proven content index and its triggers are never touched. Populated by
+# core.key_expander on store (and backfilled), queried as an additive UNION in
+# the BM25 channel. fact_id is stored so results can be scope-JOINed to
+# atomic_facts.
+_SQL_FACT_EXPANSION_FTS: Final[str] = """
+CREATE VIRTUAL TABLE IF NOT EXISTS fact_expansion_fts
+    USING fts5(
+        fact_id UNINDEXED,
+        alt_keys
+    );
 """
 
 
@@ -696,6 +715,8 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_V2_MIGRATION_CLEANUP,
     # FTS5 must come after atomic_facts (content table) AND after cleanup
     _SQL_ATOMIC_FACTS_FTS,
+    # T3b: standalone expansion FTS (additive; safe on existing DBs)
+    _SQL_FACT_EXPANSION_FTS,
 )
 
 
