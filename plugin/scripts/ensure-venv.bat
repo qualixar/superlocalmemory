@@ -68,12 +68,7 @@ set "VENV_PYTHON=%VENV_SCRIPTS%\python.exe"
 if exist "%VENV_PYTHON%" (
     if exist "%SENTINEL%" (
         set /p "CURRENT_HASH=" < "%SENTINEL%"
-        :: echo writes CRLF and set /p retains the trailing CR on modern Windows;
-        :: a sha256 hex digest is exactly 64 chars, so slice both to 64 to make
-        :: the fast-path comparison robust (a stale/CR sentinel just rebuilds).
-        set "CURRENT_HASH=!CURRENT_HASH:~0,64!"
-        set "_NEW_HASH_CMP=!NEW_HASH:~0,64!"
-        if "!CURRENT_HASH!"=="!_NEW_HASH_CMP!" (
+        if "!CURRENT_HASH!"=="!NEW_HASH!" (
             echo SLM plugin: venv up-to-date, skipping install. >&2
             exit /b 0
         )
@@ -121,7 +116,7 @@ if errorlevel 1 (
 )
 
 :: Write sentinel LAST — guarantees that a crash before this line triggers rebuild
-<nul set /p "=!NEW_HASH!">"%SENTINEL%"
+echo !NEW_HASH!>"%SENTINEL%"
 
 echo SLM plugin: venv ready at %VENV%\Scripts\slm.exe >&2
 exit /b 0
