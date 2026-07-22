@@ -340,8 +340,8 @@ def main() -> None:
     )
 
     forget_p = sub.add_parser("forget", help="Delete memories matching a query (fuzzy)")
-    forget_p.add_argument("query", help="Query to match for deletion")
-    forget_p.add_argument("--dry-run", action="store_true", default=False, help="Preview matches without deleting")
+    forget_p.add_argument("query", nargs="?", default=None, help="Query to match for deletion. Optional with --dry-run (previews all memories).")
+    forget_p.add_argument("--dry-run", action="store_true", default=False, help="Preview matches without deleting. With no query, previews every memory.")
     forget_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
     forget_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 

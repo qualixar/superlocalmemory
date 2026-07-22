@@ -1450,12 +1450,32 @@ def cmd_forget(args: Namespace) -> None:
     from superlocalmemory.core.config import SLMConfig
 
     use_json = getattr(args, 'json', False)
+    dry_run = getattr(args, 'dry_run', False)
+    raw_query = getattr(args, 'query', None)
+
+    # F3: `query` is optional so `slm forget --dry-run` can preview every memory.
+    # Deletion ALWAYS requires an explicit query — a bare `slm forget` must never
+    # mass-delete. In dry-run mode a missing query means "match all" (preview).
+    if raw_query is None and not dry_run:
+        msg = (
+            "A query is required to delete. Preview everything with "
+            "'slm forget --dry-run', or delete matches with 'slm forget <query>'."
+        )
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print("forget", error={"code": "QUERY_REQUIRED", "message": msg})
+        else:
+            print(msg)
+        sys.exit(2)
+
+    query_lower = "" if raw_query is None else raw_query.lower()
+    query_label = raw_query if raw_query is not None else "*all*"
+
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
         engine.initialize()
         facts = engine._db.get_all_facts(engine.profile_id)
-        query_lower = args.query.lower()
         matches = [f for f in facts if query_lower in f.content.lower()]
     except Exception as exc:
         if use_json:
@@ -1463,8 +1483,6 @@ def cmd_forget(args: Namespace) -> None:
             json_print("forget", error={"code": "ENGINE_ERROR", "message": str(exc)})
             sys.exit(1)
         raise
-
-    dry_run = getattr(args, 'dry_run', False)
 
     def delete_fact_authorized_for_cli(fact_id: str) -> None:
         from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
@@ -1506,12 +1524,12 @@ def cmd_forget(args: Namespace) -> None:
                 "matches": match_items,
                 "hint": "Add --yes to confirm deletion",
             }, next_actions=[
-                {"command": f"slm forget '{args.query}' --json --yes", "description": "Confirm deletion"},
+                {"command": f"slm forget '{query_label}' --json --yes", "description": "Confirm deletion"},
             ])
         return
 
     if not matches:
-        print(f"No memories matching '{args.query}'")
+        print(f"No memories matching '{query_label}'")
         return
     print(f"Found {len(matches)} matching memories:")
     for f in matches[:10]:
