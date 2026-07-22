@@ -291,15 +291,27 @@ class WorkerPool:
             self._idle_timer.cancel()
             self._idle_timer = None
         if self._proc is not None:
-            pid = self._proc.pid
+            proc = self._proc
+            pid = proc.pid
             try:
-                self._proc.stdin.write('{"cmd":"quit"}\n')
-                self._proc.stdin.flush()
-                self._proc.wait(timeout=3)
+                proc.stdin.write('{"cmd":"quit"}\n')
+                proc.stdin.flush()
+                proc.wait(timeout=3)
             except Exception:
                 try:
-                    self._proc.kill()
-                    self._proc.wait(timeout=2)
+                    proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+            # L-CONC-1: deterministically close the pipe fds rather than leaving
+            # them to GC. This releases the OS handles immediately and unblocks
+            # any orphaned _readline_with_timeout reader thread (its readline
+            # returns/raises on the closed pipe), so repeated request timeouts
+            # cannot accumulate reader threads or file descriptors. Cross-platform.
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
                 except Exception:
                     pass
             self._proc = None
