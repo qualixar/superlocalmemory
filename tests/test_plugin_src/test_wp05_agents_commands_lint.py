@@ -56,11 +56,12 @@ REAL_SKILLS: frozenset[str] = frozenset(
         "slm-remember",
         "slm-session",
         "slm-status",
-        # v3.8.0 new skills (4)
+        # v3.8.0 new skills (5)
         "slm-scope",
         "slm-profile",
         "slm-governance",
         "slm-mesh",
+        "slm-loop",
         # retired skills (kept for backward-compat lint of older files)
         "slm-optimize",
         "slm-build-graph",
@@ -93,6 +94,7 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "optimize",
         "cache",
         "compress",
+        "loop",   # slm loop demo|history|show — bounded loops (v3.8.0)
     }
 )
 
