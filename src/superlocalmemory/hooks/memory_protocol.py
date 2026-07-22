@@ -95,6 +95,8 @@ def memory_protocol_markdown() -> str:
         "message or handoff note about — not every tool call.\n"
         "\n"
         + optimize_protocol_markdown()
+        + "\n"
+        + loop_protocol_markdown()
     )
 
 
@@ -125,10 +127,32 @@ def optimize_protocol_markdown() -> str:
     )
 
 
+def loop_protocol_markdown() -> str:
+    """Return the agent-facing bounded-loop protocol block.
+
+    Bounded loops make an agent stop when an INDEPENDENT gate passes — not when
+    the agent claims it is done. Persisting each lap to SLM memory makes a run
+    auditable and resumable. This block is appended to the shared memory
+    protocol so any connected front-end (Claude Code, Codex, Antigravity,
+    Cursor, and other IDEs) learns the feature exists and how to reach it.
+    """
+    return (
+        "## Runtime bounded-loop protocol\n"
+        "For a task with a checkable gate (tests, schema, lint, reconciliation), "
+        "run a *bounded loop*: iterate until an INDEPENDENT gate passes — never "
+        "on the agent's own claim, which is advisory only. Try `slm loop demo`; "
+        "inspect with `slm loop history` / `slm loop show <run_id>` (each lap "
+        "persists as SLM memory, tag `loop:<name>`). Statuses: DONE / HALT / "
+        "PAUSE / KILLED / ERROR — report exactly, never as success unless DONE. "
+        "Full guide: the slm-loop skill.\n"
+    )
+
+
 __all__ = (
     "SLM_MARKER_START",
     "SLM_MARKER_END",
     "strip_slm_block",
     "memory_protocol_markdown",
     "optimize_protocol_markdown",
+    "loop_protocol_markdown",
 )

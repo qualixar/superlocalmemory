@@ -65,6 +65,16 @@ Apply automatically when context pressure builds:
 
 ---
 
+## Bounded loops
+
+When a task has a checkable acceptance condition (tests, schema, lint, reconciliation), run it as a **bounded loop**: iterate until an INDEPENDENT gate passes — never stop because the agent believes it is done. The agent's own "done" claim is advisory only; the gate is the authority.
+
+- Try it: `slm loop demo` (keyless convergence demo, records every lap to SLM).
+- Inspect: `slm loop history` / `slm loop show <run_id>` — each lap is persisted as queryable SLM memory (tag `loop:<name>`), so runs are auditable and resumable.
+- Terminal statuses: `DONE` (gate passed + approved), `HALT` (bound tripped: iterations/no-progress/budget), `PAUSE` (approval pending), `KILLED`, `ERROR`. Report the exact status — never turn HALT/PAUSE/ERROR into success. See slm-loop.
+
+---
+
 ## Session end
 
 Call `close_session(session_id)` when the work in the session is meaningfully complete. This
@@ -128,6 +138,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | slm-cache | KV cache for repeated reads |
 | slm-compress | Reversible context compression |
 | slm-graph | Code graph: blast radius, callers, search (code profile) |
+| slm-loop | Bounded, gate-verified agent loops with an SLM-backed ledger |
 | slm-scope | Personal / shared / global memory scoping |
 | slm-profile | Workspace isolation and profile switching |
 | slm-governance | Enterprise roles, retention, audit, GDPR |

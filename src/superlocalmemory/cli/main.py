@@ -80,6 +80,8 @@ _NO_DAEMON_COMMANDS = {
     "wrap",
     # V3.6 Optimize commands that are config read/write only.
     "optimize", "cache", "compress", "help-optimize",
+    # Bounded loops use an in-process engine store, not the daemon.
+    "loop",
     # Lifecycle orchestration must run before any global auto-start hook.
     "serve", "restart",
 }
@@ -787,6 +789,25 @@ def main() -> None:
     )
 
     # ---- end SLM v3.6 Optimize subcommands ----
+
+    # slm loop demo|history|show — bounded, gate-verified agent loops (v3.8.0)
+    loop_p = sub.add_parser(
+        "loop",
+        help="Bounded loops: gate-verified agent loops with an SLM-backed ledger",
+    )
+    loop_sub = loop_p.add_subparsers(dest="loop_command", title="loop subcommands")
+    loop_demo_p = loop_sub.add_parser(
+        "demo", help="Run the keyless convergence demo (proves engine + ledger)")
+    loop_demo_p.add_argument(
+        "--iterations", type=int, default=10, help="Max iterations (default: 10)")
+    loop_hist_p = loop_sub.add_parser("history", help="List recorded loop runs")
+    loop_hist_p.add_argument(
+        "--name", default=None, help="Loop name (default: convergence-demo)")
+    loop_show_p = loop_sub.add_parser("show", help="Show every lap of one run")
+    loop_show_p.add_argument("run_id", help="Run id (from history)")
+    for _sp in loop_sub.choices.values():
+        _sp.add_argument("--json", action="store_true",
+                         help="Output structured JSON (agent-native)")
 
     args = parser.parse_args()
 

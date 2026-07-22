@@ -9,6 +9,7 @@
     { "name": "slm-compress", "hasReadme": false },
     { "name": "slm-governance", "hasReadme": false },
     { "name": "slm-graph", "hasReadme": false },
+    { "name": "slm-loop", "hasReadme": false },
     { "name": "slm-mesh", "hasReadme": false },
     { "name": "slm-profile", "hasReadme": false },
     { "name": "slm-recall", "hasReadme": false },

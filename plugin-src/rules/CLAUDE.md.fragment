@@ -24,6 +24,9 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 - NEVER compress/cache: code-for-edit, JSON-to-parse, secrets, ccr_ids, <500 chars.
 - If ok:false → continue with original; never block the task.
 
+### Bounded loops
+For a task with a checkable gate (tests/schema/lint), run a bounded loop: iterate until the INDEPENDENT gate passes, never on the agent's own "done" claim. `slm loop demo` to try; `slm loop history`/`slm loop show <run_id>` to inspect (laps persisted to SLM, tag `loop:<name>`). Statuses DONE/HALT/PAUSE/KILLED/ERROR — report exactly. See slm-loop.
+
 ### Session end
 `close_session(session_id)` when work is meaningfully complete.
 
@@ -31,7 +34,7 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 `slm recall "<q>" --limit N` · `slm search "<q>"` · `slm remember "<c>" --tags t` · `slm list --limit N` · `slm forget` (preview first) · `slm status` · `slm optimize status`
 
 ### Skills
-slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-compress · slm-graph · slm-scope · slm-profile · slm-governance · slm-mesh
+slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-compress · slm-graph · slm-loop · slm-scope · slm-profile · slm-governance · slm-mesh
 
 ### Subagents
 slm-memory-advisor (memory decisions, session hygiene, scope/profile guidance) · slm-optimize-advisor (context compression + KV cache) · slm-governance-advisor (scope/roles/compliance/GDPR)

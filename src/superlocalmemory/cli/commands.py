@@ -106,6 +106,11 @@ def _cmd_help_optimize(args: Namespace) -> None:
     cmd_help_optimize(args)
 
 
+def _cmd_loop(args: Namespace) -> None:
+    from superlocalmemory.cli.loop_cmd import cmd_loop
+    cmd_loop(args)
+
+
 # ---- end SLM v3.6 Optimize dispatch functions ----
 
 
@@ -228,6 +233,8 @@ def dispatch(args: Namespace) -> None:
         "compress": _cmd_compress,
         "proxy": _cmd_proxy,
         "help-optimize": _cmd_help_optimize,
+        # V3.8.0 bounded loops (gate-verified agent loops, SLM-backed ledger)
+        "loop": _cmd_loop,
     }
     handler = handlers.get(args.command)
     if handler:
