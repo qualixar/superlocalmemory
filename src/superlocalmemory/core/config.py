@@ -669,6 +669,14 @@ class TemporalValidatorConfig:
     # Sheaf contradiction threshold
     contradiction_threshold: float = 0.45        # Mode A threshold (768d)
 
+    # P5-INT-01: superseded facts are DEMOTED in recall, not hidden. A fact
+    # marked system_expired_at keeps its channel evidence but its per-channel
+    # score is multiplied by this factor, so current facts rank above it while
+    # nothing valid silently vanishes (Mem0-2026 non-destructive design;
+    # retrieval-time recency resolves conflicts). 0.0 restores the old hide
+    # behaviour; 1.0 disables demotion.
+    superseded_demotion_factor: float = 0.25
+
     # LLM pre-filter threshold (lower to catch more candidates)
     llm_prefilter_threshold: float = 0.30
 

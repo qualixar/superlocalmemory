@@ -4,19 +4,28 @@
 
 """Bi-temporal validity filter for the retrieval pipeline (Phase 4, T1).
 
-Post-retrieval admission filter that removes *system-invalidated* facts — a
-fact whose temporal record has ``system_expired_at`` set was superseded or
-contradicted by a newer fact (see ``invalidate_fact_temporal`` /
-conflict-resolution supersession). Such a fact is outdated and must never
-surface in default retrieval.
+Post-retrieval filter for *system-invalidated* facts — a fact whose temporal
+record has ``system_expired_at`` set was superseded/contradicted by a newer
+fact (see ``invalidate_fact_temporal`` / conflict-resolution supersession).
+
+P5-INT-01 (non-destructive supersession): such a fact is DEMOTED, not hidden.
+Its per-channel score is multiplied by ``superseded_demotion_factor`` (default
+0.25) and the channel lists are re-sorted, so currently-valid facts rank above
+it — but nothing valid silently vanishes. This is the Mem0-2026 design that
+wins long-term-memory benchmarks: keep every fact recallable and let
+retrieval-time recency resolve conflicts, rather than destructively deleting on
+a write-time contradiction guess (which over-fires: two complementary facts
+about the same entity diverge past the coboundary threshold and one would be
+wrongly hidden). A factor of 0.0 restores the legacy hide behaviour (a demoted
+score of 0 is gated out by the evidence floor).
 
 The filter runs on the per-channel candidate dict BEFORE RRF fusion, so fused
-ranks reflect only currently-valid facts. It queries validity only for the
-bounded candidate set (never the full ``get_valid_facts`` set), so it adds an
-indexed, O(candidates) lookup to the hot path — no full-table scan.
+ranks reflect the demotion. It queries validity only for the bounded candidate
+set (never the full ``get_valid_facts`` set) — an indexed, O(candidates) lookup
+on the hot path, no full-table scan.
 
 Pure SQL, no LLM → safe in every mode including Mode A. A no-op when nothing is
-invalidated (the bounded query returns empty) and when config.enabled is False.
+invalidated and when config.enabled is False.
 
 Integrates with ChannelRegistry.register_filter() using the FilterFn signature:
     (all_channel_results, profile_id, context) -> filtered_results
@@ -39,12 +48,15 @@ logger = logging.getLogger(__name__)
 
 
 class TemporalValidityFilter:
-    """Drops system-invalidated (superseded) facts from retrieval candidates."""
+    """Demotes system-invalidated (superseded) facts in retrieval candidates."""
 
-    __slots__ = ("_db",)
+    __slots__ = ("_db", "_demotion_factor")
 
-    def __init__(self, db: DatabaseManager) -> None:
+    def __init__(self, db: DatabaseManager, demotion_factor: float = 0.25) -> None:
         self._db = db
+        # Clamp to [0, 1]. 0.0 = legacy hide (evidence floor drops zero-score
+        # facts); 1.0 = no demotion.
+        self._demotion_factor = max(0.0, min(1.0, float(demotion_factor)))
 
     def filter(
         self,
@@ -52,7 +64,7 @@ class TemporalValidityFilter:
         profile_id: str,
         context: Any,
     ) -> dict[str, list[tuple[str, float]]]:
-        """Remove superseded fact_ids from every channel's candidate list.
+        """Demote superseded fact_ids in every channel's candidate list.
 
         Matches FilterFn signature from channel_registry.py.
 
@@ -62,8 +74,10 @@ class TemporalValidityFilter:
             context: Optional context (unused).
 
         Returns:
-            A new dict with system-invalidated facts removed. Inputs are never
-            mutated (immutability). Unchanged when nothing is invalidated.
+            A new dict where system-invalidated facts keep their channel
+            presence but have their score scaled by the demotion factor and the
+            channel lists re-sorted (so valid facts rank above them). Inputs are
+            never mutated (immutability). Unchanged when nothing is invalidated.
         """
         # Collect all unique candidate fact_ids across every channel.
         all_fact_ids: set[str] = set()
@@ -86,14 +100,18 @@ class TemporalValidityFilter:
         if not invalid:
             return all_results
 
-        filtered: dict[str, list[tuple[str, float]]] = {}
+        factor = self._demotion_factor
+        demoted: dict[str, list[tuple[str, float]]] = {}
         for channel_name, channel_results in all_results.items():
-            filtered[channel_name] = [
-                (fact_id, score)
+            new_list = [
+                (fact_id, score * factor if fact_id in invalid else score)
                 for fact_id, score in channel_results
-                if fact_id not in invalid
             ]
-        return filtered
+            # Re-sort descending so demoted (superseded) facts fall below
+            # currently-valid facts in this channel's rank order.
+            new_list.sort(key=lambda pair: pair[1], reverse=True)
+            demoted[channel_name] = new_list
+        return demoted
 
 
 def register_temporal_validity_filter(
@@ -112,5 +130,6 @@ def register_temporal_validity_filter(
     """
     if not getattr(config, "enabled", True):
         return
-    f = TemporalValidityFilter(db)
+    factor = getattr(config, "superseded_demotion_factor", 0.25)
+    f = TemporalValidityFilter(db, demotion_factor=factor)
     registry.register_filter(f.filter)

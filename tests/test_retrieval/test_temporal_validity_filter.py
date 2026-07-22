@@ -4,8 +4,10 @@
 
 """Tests for the bi-temporal validity filter — Phase 4 (T1).
 
-Covers: superseded-fact removal across channels, valid/no-record passthrough,
-fail-open on DB error, empty results, and register gating.
+Covers: superseded-fact DEMOTION across channels (P5-INT-01 non-destructive
+supersession — facts stay recallable but ranked below valid ones),
+valid/no-record passthrough, fail-open on DB error, empty results, and register
+gating.
 """
 
 from __future__ import annotations
@@ -43,29 +45,32 @@ def _make_mock_db(invalid_ids: set[str]) -> MagicMock:
     return db
 
 
-# ---- T1-1: superseded facts are removed, valid ones kept ----
+# ---- T1-1: superseded facts are DEMOTED (kept, scaled, re-ranked below valid) ----
 
-def test_filter_removes_superseded() -> None:
+def test_filter_demotes_superseded() -> None:
     db = _make_mock_db({"fact_superseded"})
-    filt = TemporalValidityFilter(db)
+    filt = TemporalValidityFilter(db, demotion_factor=0.25)
 
     all_results = {
         "semantic": [("fact_valid", 0.9), ("fact_superseded", 0.8)],
     }
     filtered = filt.filter(all_results, "default", None)
 
-    ids = [fid for fid, _ in filtered["semantic"]]
-    assert "fact_valid" in ids
-    assert "fact_superseded" not in ids
-    # Score of the surviving fact is untouched.
-    assert filtered["semantic"] == [("fact_valid", 0.9)]
+    scores = dict(filtered["semantic"])
+    # Non-destructive: superseded fact stays recallable, valid untouched.
+    assert "fact_superseded" in scores
+    assert scores["fact_valid"] == 0.9
+    assert scores["fact_superseded"] == pytest.approx(0.8 * 0.25)
+    # Re-sorted so the valid fact outranks the demoted superseded one.
+    assert filtered["semantic"][0][0] == "fact_valid"
+    assert filtered["semantic"][1][0] == "fact_superseded"
 
 
-# ---- T1-2: removal applies across every channel ----
+# ---- T1-2: demotion applies across every channel ----
 
-def test_filter_removes_across_channels() -> None:
+def test_filter_demotes_across_channels() -> None:
     db = _make_mock_db({"gone"})
-    filt = TemporalValidityFilter(db)
+    filt = TemporalValidityFilter(db, demotion_factor=0.25)
 
     all_results = {
         "semantic": [("keep1", 0.9), ("gone", 0.8)],
@@ -74,9 +79,25 @@ def test_filter_removes_across_channels() -> None:
     }
     filtered = filt.filter(all_results, "default", None)
 
-    assert filtered["semantic"] == [("keep1", 0.9)]
-    assert filtered["bm25"] == [("keep2", 0.6)]
-    assert filtered["temporal"] == [("keep3", 0.5)]
+    sem = dict(filtered["semantic"])
+    assert sem["gone"] == pytest.approx(0.8 * 0.25)
+    assert filtered["semantic"][0][0] == "keep1"        # valid outranks demoted
+    bm = dict(filtered["bm25"])
+    assert bm["gone"] == pytest.approx(0.7 * 0.25)
+    assert filtered["bm25"][0][0] == "keep2"            # re-sorted above demoted
+    assert filtered["temporal"] == [("keep3", 0.5)]     # untouched
+
+
+# ---- T1-2b: factor 0.0 restores legacy hide (zero score -> floor drops it) ----
+
+def test_filter_factor_zero_zeroes_superseded() -> None:
+    db = _make_mock_db({"gone"})
+    filt = TemporalValidityFilter(db, demotion_factor=0.0)
+    all_results = {"semantic": [("keep", 0.9), ("gone", 0.8)]}
+    filtered = filt.filter(all_results, "default", None)
+    scores = dict(filtered["semantic"])
+    assert scores["gone"] == 0.0        # evidence floor then gates it out
+    assert scores["keep"] == 0.9
 
 
 # ---- T1-3: nothing invalidated -> unchanged (and same object, cheap path) ----
