@@ -1859,6 +1859,25 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         _lb_write_limiter = RateLimiter(max_requests=_lb_write, window_seconds=_rl_window)
         _lb_read_limiter = RateLimiter(max_requests=_lb_read, window_seconds=_rl_window)
 
+        # Task #47: register the live limiters so the dashboard PUT
+        # /api/v3/ratelimit reconfigures them at runtime (no restart), then
+        # apply any persisted override from config.json.
+        try:
+            from superlocalmemory.infra.rate_limiter import (
+                register_managed as _reg_rl, reset_managed as _reset_rl,
+            )
+            _reset_rl()
+            _reg_rl("write", _write_limiter)
+            _reg_rl("read", _read_limiter)
+            _reg_rl("lb_write", _lb_write_limiter)
+            _reg_rl("lb_read", _lb_read_limiter)
+            from superlocalmemory.server.routes.ratelimit import (
+                load_persisted_limits as _load_rl,
+            )
+            _load_rl()
+        except Exception as _reg_exc:  # pragma: no cover - defensive
+            logger.debug("rate-limit runtime registration skipped: %s", _reg_exc)
+
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"
@@ -2128,6 +2147,10 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Config endpoints (storage, daemon, mesh, trust, forgetting)
     from superlocalmemory.server.routes.config_api import router as config_api_router
     application.include_router(config_api_router)
+
+    # Task #47: dashboard-editable rate limits (GET/PUT /api/v3/ratelimit)
+    from superlocalmemory.server.routes.ratelimit import router as ratelimit_router
+    application.include_router(ratelimit_router)
 
     # v3.4.1 chat SSE
     for _mod_name in ("chat",):

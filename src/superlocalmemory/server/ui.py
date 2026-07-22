@@ -104,6 +104,16 @@ def create_app() -> FastAPI:
         _write_limiter = RateLimiter(max_requests=_rl_write, window_seconds=_rl_window)
         _read_limiter = RateLimiter(max_requests=_rl_read, window_seconds=_rl_window)
 
+        # Task #47: register for runtime reconfiguration via the dashboard.
+        try:
+            from superlocalmemory.infra.rate_limiter import (
+                register_managed as _reg_rl,
+            )
+            _reg_rl("write", _write_limiter)
+            _reg_rl("read", _read_limiter)
+        except Exception:
+            pass
+
         @application.middleware("http")
         async def rate_limit_middleware(request, call_next):
             client_ip = request.client.host if request.client else "unknown"

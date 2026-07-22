@@ -118,6 +118,22 @@ class RateLimiter:
                 del self._requests[k]
             return len(stale)
 
+    def configure(
+        self,
+        max_requests: int | None = None,
+        window_seconds: int | None = None,
+    ) -> None:
+        """Reconfigure limits at runtime (thread-safe).
+
+        Recorded request timestamps are preserved; only the ceilings change,
+        so a raised limit takes effect immediately for the current window.
+        """
+        with self._lock:
+            if max_requests is not None:
+                self.max_requests = max(1, int(max_requests))
+            if window_seconds is not None:
+                self.window = max(1, int(window_seconds))
+
     def get_stats(self) -> dict:
         """Return a snapshot of limiter state."""
         with self._lock:
@@ -133,3 +149,80 @@ class RateLimiter:
 # ---------------------------------------------------------------------------
 write_limiter = RateLimiter(max_requests=WRITE_LIMIT, window_seconds=WINDOW_SECONDS)
 read_limiter = RateLimiter(max_requests=READ_LIMIT, window_seconds=WINDOW_SECONDS)
+
+
+# ---------------------------------------------------------------------------
+# Runtime-configurable limits (task #47) — dashboard-editable thresholds.
+#
+# The enforcement middleware builds its own limiter instances; it registers
+# them here by role so a single set_limits() call reconfigures every live
+# limiter at once (no restart). Loopback limiters derive from write/read,
+# matching the startup derivation in unified_daemon.
+# ---------------------------------------------------------------------------
+
+_MANAGED: List[Tuple[str, "RateLimiter"]] = []
+_MANAGED_LOCK = threading.Lock()
+_CURRENT: Dict[str, int] = {
+    "write": WRITE_LIMIT, "read": READ_LIMIT, "window": WINDOW_SECONDS,
+}
+
+
+def _loopback_write(write: int) -> int:
+    return max(300, int(write) * 10)
+
+
+def _loopback_read(read: int) -> int:
+    return max(2000, int(read) * 20)
+
+
+def register_managed(role: str, limiter: "RateLimiter") -> None:
+    """Register an enforcement limiter so set_limits() can reconfigure it.
+
+    role is one of: 'write', 'read', 'lb_write', 'lb_read'.
+    """
+    with _MANAGED_LOCK:
+        _MANAGED.append((role, limiter))
+
+
+def reset_managed() -> None:
+    """Drop all registered limiters (app teardown / test isolation)."""
+    with _MANAGED_LOCK:
+        _MANAGED.clear()
+
+
+def get_limits() -> Dict[str, int]:
+    """Return the current effective write/read/window limits."""
+    with _MANAGED_LOCK:
+        return dict(_CURRENT)
+
+
+def set_limits(
+    write: int | None = None,
+    read: int | None = None,
+    window: int | None = None,
+) -> Dict[str, int]:
+    """Update limits and reconfigure every registered limiter live.
+
+    Partial updates are supported (pass only what changes). Loopback
+    limiters re-derive from the new write/read. Returns the new effective
+    limits. Values are floored at 1.
+    """
+    with _MANAGED_LOCK:
+        if write is not None:
+            _CURRENT["write"] = max(1, int(write))
+        if read is not None:
+            _CURRENT["read"] = max(1, int(read))
+        if window is not None:
+            _CURRENT["window"] = max(1, int(window))
+        w, r, win = _CURRENT["write"], _CURRENT["read"], _CURRENT["window"]
+        lb_w, lb_r = _loopback_write(w), _loopback_read(r)
+        for role, limiter in _MANAGED:
+            if role == "write":
+                limiter.configure(max_requests=w, window_seconds=win)
+            elif role == "read":
+                limiter.configure(max_requests=r, window_seconds=win)
+            elif role == "lb_write":
+                limiter.configure(max_requests=lb_w, window_seconds=win)
+            elif role == "lb_read":
+                limiter.configure(max_requests=lb_r, window_seconds=win)
+        return dict(_CURRENT)
