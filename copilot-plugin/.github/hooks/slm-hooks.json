@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "slm hook mandate 2>/dev/null || true",
+        "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "slm hook start 2>/dev/null || true",
+        "timeoutSec": 15
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "slm hook stop 2>/dev/null || true",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
+        "bash": "slm hook stop_outcome 2>/dev/null || true",
+        "timeoutSec": 10
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "slm hook topic_shift 2>/dev/null || true",
+        "timeoutSec": 3
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "slm hook checkpoint 2>/dev/null || true",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

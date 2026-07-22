@@ -48,7 +48,9 @@
   "scripts": {
     "build:plugin": "node scripts/build-plugin.mjs",
     "check:plugin": "node scripts/build-plugin.mjs --check",
-    "prepack": "node scripts/build-plugin.mjs && node scripts/prepack.js",
+    "build:copilot-plugin": "node scripts/build-copilot-plugin.mjs",
+    "check:copilot-plugin": "node scripts/build-copilot-plugin.mjs --check",
+    "prepack": "node scripts/build-plugin.mjs && node scripts/build-copilot-plugin.mjs && node scripts/prepack.js",
     "postinstall": "node scripts/postinstall.js",
     "preuninstall": "node scripts/preuninstall.js",
     "test": "node scripts/run-ui-tests.mjs"

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# slm-launch — WP-F SuperLocalMemory MCP launcher (POSIX)
+#
+# Cross-platform counterpart: slm-launch.bat (Windows)
+# Referenced by plugin/.mcp.json as the MCP server command.
+#
+# Resolves the correct slm binary for POSIX and joins the namespace daemon
+# before opening the MCP stdio transport. This preserves one writer for all
+# parallel Claude sessions that share CLAUDE_PLUGIN_DATA.
+#
+# On Windows, Claude Code invokes slm-launch.bat instead (same-stem, .bat extension).
+#
+# Environment:
+#   CLAUDE_PLUGIN_DATA — persistent data dir where the plugin venv lives
+#   SLM_DATA_DIR       — optional; SLM data dir (default: ~/.superlocalmemory)
+#   SLM_LAUNCHER       — optional; which slm binary to use:
+#                          plugin (default) — the plugin venv binary
+#                          system           — the system `slm` on PATH
+#                          <path>           — an explicit slm binary (leading ~ expanded)
+
+_SLM_DATA="${SLM_DATA_DIR:-$HOME/.superlocalmemory}"
+
+# If a system daemon is already running (its pidfile points at a live process),
+# there is no need to boot the plugin's own venv daemon — we can open an MCP
+# writer against the daemon that is already up. This skips a redundant, slow
+# venv bootstrap on every session start.
+_daemon_running=0
+if [ -f "${_SLM_DATA}/daemon.pid" ] \
+   && kill -0 "$(cat "${_SLM_DATA}/daemon.pid" 2>/dev/null)" 2>/dev/null; then
+    _daemon_running=1
+fi
+
+case "${SLM_LAUNCHER:-plugin}" in
+    plugin)
+        SLM_BIN="${CLAUDE_PLUGIN_DATA}/venv/bin/slm"
+        # Only bootstrap the owned daemon when one is not already running.
+        if [ "${_daemon_running}" -eq 0 ]; then
+            if ! "${SLM_BIN}" serve start >&2; then
+                echo "SLM plugin: unable to start the owned daemon; refusing a direct MCP writer." >&2
+                exit 1
+            fi
+        fi
+        exec "${SLM_BIN}" mcp
+        ;;
+    system)
+        exec slm mcp
+        ;;
+    *)
+        # Explicit binary path. Expand a leading ~ to $HOME WITHOUT eval — eval
+        # on an environment value is a command-injection foot-gun. Only tilde
+        # expansion is supported here; pass an already-expanded path for $VARs.
+        case "${SLM_LAUNCHER}" in
+            "~"*) _SLM_BIN="${HOME}${SLM_LAUNCHER#\~}" ;;
+            *)    _SLM_BIN="${SLM_LAUNCHER}" ;;
+        esac
+        if [ ! -x "${_SLM_BIN}" ]; then
+            echo "SLM_LAUNCHER is not an executable slm binary: ${_SLM_BIN}" >&2
+            exit 1
+        fi
+        exec "${_SLM_BIN}" mcp
+        ;;
+esac
