@@ -7,10 +7,16 @@ import sysconfig
 from pathlib import Path
 
 SKILLS = ("slm-cache", "slm-compress", "slm-graph", "slm-recall", "slm-remember", "slm-session", "slm-status")
-AGENTS = {
-    "slm-memory-advisor.toml": 'name = "slm-memory-advisor"\ndescription = "Use SuperLocalMemory safely: initialize once, recall before remember, and store only durable atomic facts."\ninstructions = "Use SLM for memory discipline only. Check results before claiming success; preserve private scope unless the user explicitly asks to share."\n',
-    "slm-optimize-advisor.toml": 'name = "slm-optimize-advisor"\ndescription = "Analyze SuperLocalMemory retrieval, ingestion, cache, compression, and optimization evidence."\ninstructions = "Inspect real SLM evidence before advising. Separate observed performance from targets and recommend measurable experiments."\n',
-}
+
+# Codex subagent files written to ~/.codex/agents (content built by _agent_files()).
+AGENTS = ("slm-memory-advisor.toml", "slm-optimize-advisor.toml")
+
+_MEMORY_ADVISOR_TOML = (
+    'name = "slm-memory-advisor"\n'
+    'description = "Use SuperLocalMemory safely: initialize once, recall before remember, and store only durable atomic facts."\n'
+    'instructions = "Use SLM for memory discipline only. Check results before claiming success; preserve private scope unless the user explicitly asks to share."\n'
+)
+
 
 def _source_root() -> Path:
     development = Path(__file__).resolve().parents[3] / "plugin-src" / "skills"
@@ -20,6 +26,57 @@ def _source_root() -> Path:
     if installed.exists():
         return installed
     raise FileNotFoundError("Bundled Codex skills were not found in this installation")
+
+
+def _agents_source_root() -> Path | None:
+    development = Path(__file__).resolve().parents[3] / "plugin-src" / "agents"
+    if development.exists():
+        return development
+    installed = Path(sysconfig.get_path("data")) / "share" / "superlocalmemory" / "codex" / "agents"
+    return installed if installed.exists() else None
+
+
+def _optimize_advisor_toml() -> str:
+    """Build the optimize-advisor TOML from the canonical advisor doc so Codex
+    ships the FULL decision rules (the 8-rule tree), not a one-line stub. Falls
+    back to a short instruction only if the source doc is unavailable.
+    """
+    description = (
+        "Apply SuperLocalMemory's no-proxy context-optimization rules — reversible "
+        "compression of large tool output and KV-caching of repeated reads/searches."
+    )
+    body = ""
+    root = _agents_source_root()
+    if root is not None:
+        src = root / "slm-optimize-advisor.md"
+        if src.exists():
+            text = src.read_text(encoding="utf-8")
+            if text.startswith("---"):  # strip YAML frontmatter, keep the guidance body
+                end = text.find("\n---", 3)
+                if end != -1:
+                    text = text[end + 4:]
+            body = text.strip()
+    if not body:
+        body = (
+            "Reduce context-window pressure with the Surface-B tools (reversible CCR "
+            "compression + a per-agent KV cache); fail-open — never block the task."
+        )
+    # TOML literal multi-line string ('''...'''): no escape processing, and the
+    # advisor body contains no ''' sequence.
+    return (
+        'name = "slm-optimize-advisor"\n'
+        f'description = "{description}"\n'
+        f"instructions = '''\n{body}\n'''\n"
+    )
+
+
+def _agent_files() -> dict:
+    """Return {filename: TOML content} for the Codex subagents."""
+    return {
+        "slm-memory-advisor.toml": _MEMORY_ADVISOR_TOML,
+        "slm-optimize-advisor.toml": _optimize_advisor_toml(),
+    }
+
 
 def install_assets(*, home: Path | None = None, dry_run: bool = False) -> dict:
     """Copy only named SLM assets; never rewrite user-owned assets."""
@@ -37,9 +94,10 @@ def install_assets(*, home: Path | None = None, dry_run: bool = False) -> dict:
         target = skills_root / skill
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / skill / "SKILL.md", target / "SKILL.md")
-    for filename, content in AGENTS.items():
+    for filename, content in _agent_files().items():
         (agents_root / filename).write_text(content, encoding="utf-8")
     return {"success": True, "skills": list(SKILLS), "agents": list(AGENTS), "dry_run": False}
+
 
 def remove_assets(*, home: Path | None = None, dry_run: bool = False) -> dict:
     """Remove only the known SLM directories and files."""
@@ -51,6 +109,7 @@ def remove_assets(*, home: Path | None = None, dry_run: bool = False) -> dict:
         for target in existing:
             shutil.rmtree(target) if target.is_dir() else target.unlink()
     return {"success": True, "removed": [str(x) for x in existing], "dry_run": dry_run}
+
 
 def status_assets(*, home: Path | None = None) -> dict:
     home = home or Path.home()

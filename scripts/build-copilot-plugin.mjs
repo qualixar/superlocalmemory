@@ -111,7 +111,10 @@ for (const fname of readdirSync(SRC_AGENTS).filter((f) => f.endsWith('.md')).sor
         { type: 'command', bash: 'slm hook topic_shift 2>/dev/null || true', timeoutSec: 3 },
       ],
       postToolUse: [
-        { type: 'command', bash: 'slm hook checkpoint 2>/dev/null || true', timeoutSec: 5 },
+        // matcher scopes the checkpoint to file-write tools on Copilot CLI (GA,
+        // honours native-name matchers). VS Code (Preview) ignores matchers and
+        // fires on every tool; harmless — the hook is cheap and fail-open.
+        { matcher: 'create|edit|str_replace_editor|apply_patch', type: 'command', bash: 'slm hook checkpoint 2>/dev/null || true', timeoutSec: 5 },
       ],
     },
   };

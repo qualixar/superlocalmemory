@@ -139,7 +139,7 @@ IDE_MATRIX: dict[str, IDEDescriptor] = {
         mcp_path_project=".mcp.json",
         server_key="mcpServers",
         fmt="json",
-        agents_md_path=None,
+        agents_md_path=".junie/AGENTS.md",  # Junie guidelines file (GA) — carries memory + optimize protocol
         server_block={"command": "slm", "args": ["mcp"], "type": "stdio"},
         caveats="path per product [CN-ONLINE]",
     ),
