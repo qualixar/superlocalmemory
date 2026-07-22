@@ -364,15 +364,32 @@ class SemanticChannel:
 
         scored: list[tuple[str, float]] = []
         for fact in facts:
-            cos_sim = knn_scores.get(fact.fact_id, 0.0)
+            # C2-ret H-01: recompute the final cosine from the canonical
+            # full-precision embedding using the SAME formula as the full-scan
+            # fallback, so the fast path is observationally equivalent — identical
+            # score MAGNITUDES, not merely identical rankings. The KNN/vector-store
+            # score is a candidate-SELECTION signal only (it decides which facts
+            # are Fisher-rescored), never the final magnitude; trusting it here
+            # leaked the vector store's negative-cosine clamp into public scores.
+            # When a candidate carries no usable embedding (index-only rows), fall
+            # back to the normalized KNN score, preserving the M-01 contract.
+            f_vec: np.ndarray | None = None
+            if fact.embedding is not None:
+                candidate = np.array(fact.embedding, dtype=np.float32)
+                if candidate.shape == q_vec.shape:
+                    f_vec = candidate
+
+            if f_vec is not None:
+                cos_sim = (_cosine_similarity(q_vec, f_vec) + 1.0) / 2.0
+            else:
+                cos_sim = knn_scores.get(fact.fact_id, 0.0)
 
             fisher_weight = self._fisher_weight(fact.access_count)
 
             if (fisher_weight > 0.01
                     and fact.fisher_variance is not None
-                    and fact.embedding is not None
+                    and f_vec is not None
                     and len(fact.fisher_variance) == len(q_vec)):
-                f_vec = np.array(fact.embedding, dtype=np.float32)
                 var_vec = np.array(fact.fisher_variance, dtype=np.float32)
                 f_sim = self._compute_fisher_sim(
                     q_vec, f_vec, var_vec, fact, q_mean, q_var,

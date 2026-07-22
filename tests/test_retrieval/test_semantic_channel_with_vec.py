@@ -115,14 +115,6 @@ class TestVectorStoreFastPath:
         mock_vs.search.assert_called_once()
         assert len(results) >= 1
 
-    @pytest.mark.xfail(
-        reason="Known pre-existing divergence (tracked): the vector-store fast "
-        "path and the full-scan fallback return the SAME ranking but slightly "
-        "different score magnitudes because Fisher re-scoring is computed via two "
-        "code paths. Rankings (recall order) are unaffected. Unifying the two "
-        "scoring implementations needs dedicated recall-quality verification.",
-        strict=False,
-    )
     def test_fast_and_fallback_fisher_scores_are_equivalent(
         self, db: DatabaseManager,
     ) -> None:
@@ -144,7 +136,10 @@ class TestVectorStoreFastPath:
             cosine = float(np.dot(query, vector) / (
                 np.linalg.norm(query) * np.linalg.norm(vector)
             ))
-            knn.append((fact.fact_id, (cosine + 1.0) / 2.0))
+            # Model the real VectorStore.search contract: max(0.0, 1.0 - distance),
+            # i.e. max(0, cosine) for the cosine metric — NOT the canonical
+            # (cosine+1)/2 normalization (that is applied inside the channel).
+            knn.append((fact.fact_id, max(0.0, cosine)))
 
         mock_vs = MagicMock(available=True)
         mock_vs.search.return_value = sorted(
