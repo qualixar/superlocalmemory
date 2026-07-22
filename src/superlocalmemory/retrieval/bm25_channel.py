@@ -236,7 +236,31 @@ class BM25Channel:
             if not fid:
                 continue
             out.append((fid, -float(d.get("rank", 0.0))))
-        return out
+
+        # T3b: UNION fact-expansion (alias / paraphrase) matches so a query for
+        # a synonym matches a fact that only used the canonical term. Additive —
+        # direct content hits stay primary; an alias-only hit is added at a
+        # discount so it ranks below content matches. Fail-open if the expansion
+        # FTS is absent (legacy DB).
+        content_ids = {fid for fid, _ in out}
+        try:
+            exp_sql = (
+                "SELECT af.fact_id AS fact_id, bm25(fact_expansion_fts) AS rank "
+                "FROM fact_expansion_fts "
+                "JOIN atomic_facts af ON af.fact_id = fact_expansion_fts.fact_id "
+                f"WHERE fact_expansion_fts MATCH ? AND {where} "
+                "ORDER BY rank LIMIT ?"
+            )
+            for r in self._db.execute(exp_sql, (match_expr, *params, int(top_k))):
+                d = dict(r)
+                fid = d.get("fact_id")
+                if fid and fid not in content_ids:
+                    out.append((fid, -float(d.get("rank", 0.0)) * 0.85))
+        except Exception as exc:  # pragma: no cover — legacy/missing expansion FTS
+            logger.debug("Expansion FTS search skipped: %s", exc)
+
+        out.sort(key=lambda x: x[1], reverse=True)
+        return out[:top_k]
 
     def search(
         self,

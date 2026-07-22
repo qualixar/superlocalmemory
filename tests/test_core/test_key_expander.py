@@ -146,3 +146,43 @@ class TestFactExpansionUpsert:
             ('"automobile"',),
         )
         assert [dict(r)["fact_id"] for r in rows] == ["f1"]
+
+
+class TestExpansionBackfill:
+    def test_run_maintenance_backfills_existing_facts(self, db: DatabaseManager) -> None:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.maintenance import run_maintenance
+
+        _seed_entity_with_aliases(db)
+        db.store_memory(MemoryRecord(memory_id="m0", content="parent"))
+        db.store_fact(AtomicFact(
+            fact_id="f1", memory_id="m0", profile_id="default",
+            content="visited the city", canonical_entities=["New York City"],
+        ))
+        # No expansion row yet for this pre-existing fact.
+        n0 = db.execute(
+            "SELECT COUNT(*) AS n FROM fact_expansion_fts WHERE fact_id='f1'"
+        )
+        assert dict(n0[0])["n"] == 0
+
+        counts = run_maintenance(db, SLMConfig(), "default")
+        assert counts["expansion_backfilled"] >= 1
+
+        rows = db.execute(
+            "SELECT alt_keys FROM fact_expansion_fts WHERE fact_id='f1'"
+        )
+        assert "NYC" in dict(rows[0])["alt_keys"]
+
+    def test_backfill_skips_already_populated(self, db: DatabaseManager) -> None:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.maintenance import run_maintenance
+
+        _seed_entity_with_aliases(db)
+        db.store_memory(MemoryRecord(memory_id="m0", content="parent"))
+        db.store_fact(AtomicFact(
+            fact_id="f1", memory_id="m0", profile_id="default",
+            content="visited the city", canonical_entities=["New York City"],
+        ))
+        db.upsert_fact_expansion("f1", "preexisting")  # already populated
+        counts = run_maintenance(db, SLMConfig(), "default")
+        assert counts["expansion_backfilled"] == 0  # skipped

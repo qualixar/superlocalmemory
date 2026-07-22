@@ -595,6 +595,18 @@ def run_store(
                     fact.fact_id, exc,
                 )
 
+        # Phase 4b: fact-augmented key expansion (T3b). Index entity aliases /
+        # canonical names as BM25 alt-keys so paraphrased queries match. Mode A
+        # (entity graph) is zero-LLM and safe on the hot store path; LLM
+        # paraphrase enrichment (Mode B/C) is left to background consolidation.
+        try:
+            from superlocalmemory.core.key_expander import KeyExpander
+            _alt_keys = KeyExpander(db).expand(fact, profile_id, mode="a")
+            if _alt_keys:
+                db.upsert_fact_expansion(fact.fact_id, _alt_keys)
+        except Exception as exc:
+            logger.debug("Key expansion skipped for %s: %s", fact.fact_id, exc)
+
         if observation_builder:
             for eid in fact.canonical_entities:
                 observation_builder.update_profile(eid, fact, profile_id)

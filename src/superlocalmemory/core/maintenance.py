@@ -127,6 +127,7 @@ def run_maintenance(
         "sheaf_checked": 0,
         "entity_summaries_consolidated": 0,  # V3.4.40
         "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
+        "expansion_backfilled": 0,           # T3b
     }
 
     # P1-3 (embeddings-vector-02): sweep orphaned embedding_metadata left by
@@ -140,6 +141,28 @@ def run_maintenance(
     facts = db.get_all_facts(profile_id)
     if not facts:
         return counts
+
+    # T3b: backfill fact-expansion alt-keys (Mode A, entity-alias based) for
+    # facts stored before expansion existed. Bounded per run + skips already-
+    # populated and entity-less facts, so it converges without re-work churn.
+    try:
+        from superlocalmemory.core.key_expander import KeyExpander
+        populated = {
+            dict(r)["fact_id"]
+            for r in db.execute("SELECT DISTINCT fact_id FROM fact_expansion_fts")
+        }
+        expander = KeyExpander(db)
+        for f in facts:
+            if counts["expansion_backfilled"] >= 500:
+                break
+            if f.fact_id in populated or not f.canonical_entities:
+                continue
+            alt = expander.expand(f, profile_id, mode="a")
+            if alt:
+                db.upsert_fact_expansion(f.fact_id, alt)
+                counts["expansion_backfilled"] += 1
+    except Exception as exc:  # pragma: no cover — legacy DB / missing FTS
+        logger.debug("expansion backfill skipped: %s", exc)
 
     # 1a. Backfill: seed uninitialized facts with metadata-aware positions (B+C)
     if config.math.langevin_persist_positions:

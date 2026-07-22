@@ -315,3 +315,45 @@ class TestBM25FTS5Path:
         assert ch.search("zzz nonexistent", "default") == []
         # get_all_facts (the fallback cold-load) must NOT have been called.
         db.get_all_facts.assert_not_called()
+
+
+class TestBM25ExpansionUnion:
+    """T3b: BM25 UNIONs fact-expansion (alias/paraphrase) matches."""
+
+    @pytest.fixture()
+    def db(self, tmp_path: Path) -> DatabaseManager:
+        mgr = DatabaseManager(tmp_path / "test.db")
+        mgr.initialize(real_schema)
+        return mgr
+
+    @staticmethod
+    def _fact(db: DatabaseManager, fact_id: str, content: str) -> None:
+        db.store_memory(MemoryRecord(memory_id=f"m-{fact_id}", content="parent"))
+        db.store_fact(AtomicFact(
+            fact_id=fact_id, memory_id=f"m-{fact_id}", content=content,
+        ))
+
+    def test_alias_query_matches_via_expansion(self, db: DatabaseManager) -> None:
+        self._fact(db, "f1", "I drive a car daily")
+        ch = BM25Channel(db)
+        # Baseline: a synonym absent from content matches nothing.
+        assert ch.search("automobile", "default") == []
+        # Add alt-keys → the synonym query now matches via the UNION.
+        db.upsert_fact_expansion("f1", "automobile motorcar vehicle")
+        results = ch.search("automobile", "default")
+        assert [fid for fid, _ in results] == ["f1"]
+
+    def test_fact_in_both_dedups_to_content_score(self, db: DatabaseManager) -> None:
+        self._fact(db, "f1", "the automobile guide")
+        db.upsert_fact_expansion("f1", "automobile")  # also in expansion
+        ch = BM25Channel(db)
+        results = ch.search("automobile", "default")
+        # Appears exactly once — content hit is primary, not double-counted.
+        assert [fid for fid, _ in results] == ["f1"]
+
+    def test_missing_expansion_fts_is_fail_open(self, db: DatabaseManager) -> None:
+        db.execute("DROP TABLE IF EXISTS fact_expansion_fts")
+        self._fact(db, "f1", "alice is an engineer")
+        ch = BM25Channel(db)
+        # Content search still works even though the expansion table is gone.
+        assert [fid for fid, _ in ch.search("engineer", "default")] == ["f1"]
