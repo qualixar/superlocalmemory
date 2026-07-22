@@ -45,6 +45,11 @@ def test_framework_integrations_do_not_treat_data_root_as_install_root() -> None
     for relative in (
         "ide/integrations/langchain/langchain_superlocalmemory/chat_message_history.py",
         "ide/integrations/llamaindex/llama_index/storage/chat_store/superlocalmemory/base.py",
+        # v3.8.0 adapters — same data-root contract.
+        "ide/integrations/crewai/crewai_superlocalmemory/backend.py",
+        "ide/integrations/autogen/autogen_superlocalmemory/memory.py",
+        "ide/integrations/google-adk/google_adk_superlocalmemory/memory_service.py",
+        "ide/integrations/openai-agents/openai_agents_superlocalmemory/session.py",
     ):
         text = _text(relative)
         assert "SLM_INSTALL_DIR" in text

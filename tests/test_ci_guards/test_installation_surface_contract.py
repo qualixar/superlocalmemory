@@ -20,6 +20,11 @@ ACTIVE_INSTALL_SURFACES = (
     "ide/integrations/llamaindex/README.md",
     "ide/integrations/llamaindex/llama_index/storage/chat_store/superlocalmemory/base.py",
     "src/superlocalmemory/cli/commands.py",
+    # v3.8.0 framework adapters — same install-surface guarantees.
+    "ide/integrations/crewai/README.md",
+    "ide/integrations/autogen/README.md",
+    "ide/integrations/google-adk/README.md",
+    "ide/integrations/openai-agents/README.md",
 )
 
 

@@ -51,6 +51,8 @@ slm-time-papers/
 # is writing to that str()-coerced path. Fix: use a real tmp_path/fake_home
 # in the patch. Root cause isolated + fixed by WP-16 in v3.6.14.
 <MagicMock*
+# Isolated test data root (SLM_TEST_ISOLATION) — embedding-worker pid etc.
+.pytest_tmp_data/
 # Empty sentinel sometimes left by shell redirect typos
 /x
 
