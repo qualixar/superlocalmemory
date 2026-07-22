@@ -533,3 +533,94 @@ class TestContradictionInvalidation:
         record = db.get_temporal_validity(fid0)
         assert record is not None
         assert record["invalidation_reason"] == "Sheaf severity 0.750"
+
+
+class TestTemporalAnchorGuard:
+    """T2 guard: distinct-era historical facts are not superseded (no over-fire)."""
+
+    @staticmethod
+    def _mock_sheaf(old_fid: str) -> MagicMock:
+        m = MagicMock()
+        m.fact_id_a = "new"
+        m.fact_id_b = old_fid
+        m.severity = 0.9
+        m.edge_type = "entity"
+        m.description = "contradiction"
+        s = MagicMock()
+        s.check_consistency.return_value = [m]
+        return s
+
+    @staticmethod
+    def _store(db: DatabaseManager, content: str, referenced_date: str | None) -> str:
+        rec = MemoryRecord(profile_id="default", content="parent", session_id="s")
+        db.store_memory(rec)
+        f = AtomicFact(
+            profile_id="default", memory_id=rec.memory_id,
+            content=content, referenced_date=referenced_date,
+        )
+        db.store_fact(f)
+        db.store_temporal_validity(f.fact_id, "default", valid_from=referenced_date)
+        return f.fact_id
+
+    def _validator(self, db: DatabaseManager, old_fid: str) -> TemporalValidator:
+        return TemporalValidator(
+            db=db, sheaf_checker=self._mock_sheaf(old_fid),
+            config=TemporalValidatorConfig(enabled=True, mode="a"),
+        )
+
+    def test_distinct_era_not_superseded(self, db: DatabaseManager) -> None:
+        old_fid = self._store(db, "lived in Delhi", "2020-01-01")
+        tv = self._validator(db, old_fid)
+        new_fact = AtomicFact(
+            profile_id="default", memory_id="m1",
+            content="lives in Mumbai", referenced_date="2024-01-01",
+        )
+        actions = tv.validate_and_invalidate(new_fact, "default")
+        assert actions == []  # guard skipped supersession
+        rec = db.get_temporal_validity(old_fid)
+        assert rec["system_expired_at"] is None       # never invalidated
+        # T1 keeps the historical fact recallable.
+        assert db.get_invalidated_fact_ids([old_fid], "default") == set()
+
+    def test_same_day_anchor_still_supersedes(self, db: DatabaseManager) -> None:
+        old_fid = self._store(db, "status A", "2024-06-01")
+        tv = self._validator(db, old_fid)
+        new_fact = AtomicFact(
+            profile_id="default", memory_id="m1",
+            content="status B", referenced_date="2024-06-01",
+        )
+        actions = tv.validate_and_invalidate(new_fact, "default")
+        assert len(actions) == 1  # same day => genuine contradiction
+        assert db.get_temporal_validity(old_fid)["system_expired_at"] is not None
+
+    def test_undated_new_fact_still_supersedes(self, db: DatabaseManager) -> None:
+        old_fid = self._store(db, "old dated fact", "2020-01-01")
+        tv = self._validator(db, old_fid)
+        new_fact = AtomicFact(
+            profile_id="default", memory_id="m1", content="new undated",
+        )  # no anchor on the new fact => guard does not fire
+        actions = tv.validate_and_invalidate(new_fact, "default")
+        assert len(actions) == 1
+
+
+class TestT2T1ClosedLoop:
+    """T2 supersession -> T1 exclusion, end to end."""
+
+    def test_supersession_excludes_from_t1(
+        self, db: DatabaseManager, _seed_facts: tuple[str, str, str],
+    ) -> None:
+        old_fid = _seed_facts[0]
+        db.store_temporal_validity(old_fid, "default")
+        m = MagicMock()
+        m.fact_id_a, m.fact_id_b = "new", old_fid
+        m.severity, m.edge_type, m.description = 0.9, "entity", "contradiction"
+        sheaf = MagicMock()
+        sheaf.check_consistency.return_value = [m]
+        tv = TemporalValidator(
+            db=db, sheaf_checker=sheaf,
+            config=TemporalValidatorConfig(enabled=True, mode="a"),
+        )
+        new_fact = AtomicFact(profile_id="default", memory_id="m1", content="new")
+        tv.validate_and_invalidate(new_fact, "default")
+        # T2 set system_expired_at; T1's admission filter must now exclude it.
+        assert db.get_invalidated_fact_ids([old_fid], "default") == {old_fid}

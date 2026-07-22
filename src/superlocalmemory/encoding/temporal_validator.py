@@ -96,6 +96,18 @@ class TemporalValidator:
             severity = contradiction["severity"]
             reason = contradiction["description"]
 
+            # Temporal-anchor guard: if the new fact and the old fact carry
+            # distinct explicit event anchors, they describe the same subject at
+            # different times (a valid timeline — "lived in Delhi (2020)" vs
+            # "lives in Mumbai (2024)"), NOT a contradiction. Do not supersede;
+            # both stay recallable so historical queries still find them.
+            if self._is_historical_progression(new_fact, old_fact_id):
+                logger.debug(
+                    "Temporal: %s vs %s have distinct event anchors — historical "
+                    "progression, not superseding", new_fact.fact_id, old_fact_id,
+                )
+                continue
+
             # Step 1: Invalidate the old fact (bi-temporal)
             self.invalidate_fact(
                 fact_id=old_fact_id,
@@ -118,6 +130,54 @@ class TemporalValidator:
             len(actions), new_fact.fact_id,
         )
         return actions
+
+    @staticmethod
+    def _event_anchor(
+        referenced_date: str | None,
+        observation_date: str | None,
+        interval_start: str | None,
+    ) -> str | None:
+        """The most-specific explicit event time, or None when undated."""
+        return referenced_date or observation_date or interval_start or None
+
+    def _is_historical_progression(
+        self, new_fact: AtomicFact, old_fact_id: str,
+    ) -> bool:
+        """True when new_fact and the old fact have distinct explicit event
+        anchors (same subject, different times) — a valid timeline rather than a
+        contradiction. Conservative: False unless BOTH anchors are present and
+        resolve to different calendar days, so undated facts supersede as before.
+        """
+        new_anchor = self._event_anchor(
+            getattr(new_fact, "referenced_date", None),
+            getattr(new_fact, "observation_date", None),
+            getattr(new_fact, "interval_start", None),
+        )
+        if not new_anchor:
+            return False
+        try:
+            rows = self._db.execute(
+                "SELECT referenced_date, observation_date, interval_start "
+                "FROM atomic_facts WHERE fact_id = ?",
+                (old_fact_id,),
+            )
+        except Exception:
+            return False
+        if not rows:
+            return False
+        d = dict(rows[0])
+        old_anchor = self._event_anchor(
+            d.get("referenced_date"), d.get("observation_date"),
+            d.get("interval_start"),
+        )
+        if not old_anchor:
+            return False
+        from superlocalmemory.retrieval.time_window import parse_timestamp
+        nd = parse_timestamp(new_anchor)
+        od = parse_timestamp(old_anchor)
+        if nd is None or od is None:
+            return False
+        return nd.date() != od.date()
 
     def detect_contradiction(
         self,
