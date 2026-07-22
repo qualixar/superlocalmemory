@@ -143,7 +143,13 @@
     var o = overlay();
     o.textContent = '';
     var c = card();
-    c.appendChild(elmt('h2', { text: 'Sign in', style: 'font-size:18px;margin:0 0 16px' }));
+    c.appendChild(elmt('h2', { text: 'Sign in', style: 'font-size:18px;margin:0 0 6px' }));
+    c.appendChild(elmt('p', {
+      text: 'Use the admin username and password created when this workspace '
+        + 'was set up. SuperLocalMemory has no default password. Forgot it? '
+        + 'An admin can reset it from Settings › Access.',
+      style: 'font-size:12.5px;opacity:0.7;margin:0 0 16px',
+    }));
     var user = { id: 'slm-gate-user', placeholder: 'Username', autocomplete: 'username' };
     var pass = { id: 'slm-gate-pass', type: 'password', placeholder: 'Password', autocomplete: 'current-password' };
     c.appendChild(field('Username', user));
@@ -179,10 +185,13 @@
     var o = overlay();
     o.textContent = '';
     var c = card();
-    c.appendChild(elmt('h2', { text: 'Create the first admin', style: 'font-size:18px;margin:0 0 6px' }));
+    c.appendChild(elmt('h2', { text: 'Welcome — create your admin account', style: 'font-size:18px;margin:0 0 6px' }));
     c.appendChild(elmt('p', {
-      text: 'This workspace requires sign-in. Choose the admin username and a '
-        + 'password you control — SuperLocalMemory ships no default login.',
+      text: 'This is the first time SuperLocalMemory has opened on this '
+        + 'workspace. Choose an admin username and password right here in your '
+        + 'browser — no config files or terminal needed. For your security '
+        + 'there is no default login. You can add people or change this later '
+        + 'under Settings › Access.',
       style: 'font-size:12.5px;opacity:0.7;margin:0 0 16px',
     }));
     c.appendChild(field('Username', { id: 'slm-gate-nu', placeholder: 'e.g. admin', autocomplete: 'username' }));
