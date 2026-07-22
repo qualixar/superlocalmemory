@@ -588,6 +588,19 @@ def init_retrieval(
     except Exception as exc:
         logger.debug("Forgetting filter registration failed: %s", exc)
 
+    # Phase 4 (T1): Register bi-temporal validity filter. Drops superseded /
+    # system-invalidated facts from retrieval so contradicted memories never
+    # resurface. Pure SQL, safe in all modes; no-op until a fact is invalidated.
+    try:
+        from superlocalmemory.retrieval.temporal_validity_filter import (
+            register_temporal_validity_filter,
+        )
+        register_temporal_validity_filter(
+            engine._registry, db, config.temporal_validator,
+        )
+    except Exception as exc:
+        logger.debug("Temporal validity filter registration failed: %s", exc)
+
     return engine
 
 

@@ -1437,6 +1437,46 @@ class DatabaseManager:
         )
         return [dict(r)["fact_id"] for r in rows]
 
+    def get_invalidated_fact_ids(
+        self, fact_ids: list[str], profile_id: str,
+    ) -> set[str]:
+        """Return the subset of ``fact_ids`` that are system-invalidated.
+
+        A fact is system-invalidated when ``system_expired_at`` is set — i.e.
+        it was superseded/contradicted by a newer fact (see
+        ``invalidate_fact_temporal``). Such facts are wrong/outdated and must be
+        excluded from default retrieval (T1, Phase 4).
+
+        Bounded + indexed: only the supplied candidate ids are queried (never a
+        full-table scan), keyed on the ``fact_id`` PK with the
+        ``idx_temporal_system_expired`` index covering the predicate. Chunked to
+        stay well under SQLite's ~999 bound-parameter limit. Facts with no
+        temporal record — or a record whose ``system_expired_at`` is NULL — are
+        NOT returned (treated as valid), so existing DBs need no backfill.
+
+        Event-time expiry (``valid_until`` in the past) is intentionally NOT
+        applied here: it is query-scoped (historical queries legitimately want
+        expired facts, per ``include_expired_in_history``) and handled by the
+        time-window path, not by this blanket admission filter.
+        """
+        if not fact_ids:
+            return set()
+        invalid: set[str] = set()
+        chunk = 900
+        for start in range(0, len(fact_ids), chunk):
+            batch = fact_ids[start:start + chunk]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                f"SELECT fact_id FROM fact_temporal_validity "
+                f"WHERE fact_id IN ({placeholders}) "
+                f"  AND profile_id = ? "
+                f"  AND system_expired_at IS NOT NULL",
+                (*batch, profile_id),
+            )
+            for r in rows:
+                invalid.add(dict(r)["fact_id"])
+        return invalid
+
     def delete_temporal_validity(self, fact_id: str) -> None:
         """Delete temporal validity record (for testing/rollback only)."""
         self.execute(

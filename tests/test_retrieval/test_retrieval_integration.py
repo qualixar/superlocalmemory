@@ -363,3 +363,55 @@ class TestContentQualityPenalty:
         assert scores.get("f_long", 0) > scores.get("f_short", 0), (
             f"Long content ({scores.get('f_long')}) should outscore short content ({scores.get('f_short')})"
         )
+
+
+# ---------------------------------------------------------------------------
+# T1: bi-temporal validity filter wired into the recall pipeline
+# ---------------------------------------------------------------------------
+
+class TestTemporalValidityWiring:
+    """Superseded (system-invalidated) facts must not surface in recall."""
+
+    @staticmethod
+    def _facts() -> list[AtomicFact]:
+        return [
+            _make_fact("f_valid", "Alice currently lives in Mumbai and works there daily"),
+            _make_fact("f_superseded", "Alice used to live in Delhi before relocating recently"),
+        ]
+
+    def test_superseded_fact_absent_after_filter(self) -> None:
+        from superlocalmemory.core.config import TemporalValidatorConfig
+        from superlocalmemory.retrieval.temporal_validity_filter import (
+            register_temporal_validity_filter,
+        )
+        facts = self._facts()
+        db = _mock_db(facts)
+        db.get_invalidated_fact_ids.side_effect = (
+            lambda ids, pid: {"f_superseded"} & set(ids)
+        )
+        engine = _build_engine(
+            db=db,
+            semantic_results=[("f_valid", 0.9), ("f_superseded", 0.85)],
+        )
+        register_temporal_validity_filter(
+            engine._registry, db, TemporalValidatorConfig(),
+        )
+
+        response = engine.recall("where does Alice live?", "default")
+        ids = {r.fact.fact_id for r in response.results}
+        assert "f_valid" in ids
+        assert "f_superseded" not in ids
+
+    def test_without_filter_superseded_fact_present(self) -> None:
+        # Control: without the filter, both facts surface — proving the filter
+        # (not some other pipeline stage) is what removes the superseded one.
+        facts = self._facts()
+        db = _mock_db(facts)
+        engine = _build_engine(
+            db=db,
+            semantic_results=[("f_valid", 0.9), ("f_superseded", 0.85)],
+        )
+        response = engine.recall("where does Alice live?", "default")
+        ids = {r.fact.fact_id for r in response.results}
+        assert "f_valid" in ids
+        assert "f_superseded" in ids
