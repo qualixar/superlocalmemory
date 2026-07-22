@@ -186,12 +186,6 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 relevance score is ≥ 0.70 (architectural decisions that remain
                 permanently relevant still surface). Default: 30.
                 Set to 0 to disable the age gate entirely.
-
-        Scoring: five candidate producers (semantic + BM25 + temporal +
-        spreading_activation + hopfield) feed RRF fusion; the entity graph then
-        applies an optional post-fusion score enhancement. Combined with
-        Ebbinghaus exponential recency decay and FSRS stability strengthening by
-        access frequency.
         """
         try:
             from superlocalmemory.hooks.rules_engine import RulesEngine

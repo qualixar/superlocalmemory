@@ -288,7 +288,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
-        S9-DASH-02: optional ``session_id`` threads through to the
+        Optional ``session_id`` threads through to the
         engine's outcome-queue so PostToolUse / Stop hooks can attach
         engagement signals to this recall. Claude Code should pass its
         ``CLAUDE_SESSION_ID``. Omitting it degrades to "no closed-loop
