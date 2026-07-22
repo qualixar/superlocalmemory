@@ -2352,6 +2352,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         include_source: bool = False,
         include_global: bool | None = None,
         include_shared: bool | None = None,
+        window: str = "",
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -2401,6 +2402,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 fast=fast,
                 include_global=include_global,
                 include_shared=include_shared,
+                window=window or None,
             )
             # v3.4.26: return the same field shape as recall_worker so
             # MCP processes proxying through the daemon get recall_trace-

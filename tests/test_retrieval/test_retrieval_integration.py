@@ -415,3 +415,53 @@ class TestTemporalValidityWiring:
         ids = {r.fact.fact_id for r in response.results}
         assert "f_valid" in ids
         assert "f_superseded" in ids
+
+
+# ---------------------------------------------------------------------------
+# T-window: event-time range pruning in recall()
+# ---------------------------------------------------------------------------
+
+class TestTimeWindowRecall:
+    """recall(window=...) keeps only candidates whose event time is in range."""
+
+    @staticmethod
+    def _facts() -> list[AtomicFact]:
+        return [
+            _make_fact("f_recent", "The deployment pipeline was refactored this month in detail"),
+            _make_fact("f_old", "The original prototype was written a long time ago back then"),
+        ]
+
+    def _engine(self) -> tuple[RetrievalEngine, MagicMock]:
+        facts = self._facts()
+        db = _mock_db(facts)
+        db.get_fact_event_times.side_effect = lambda ids, pid: {
+            k: v for k, v in
+            {"f_recent": "2026-07-20 09:00:00", "f_old": "2020-01-01 09:00:00"}.items()
+            if k in ids
+        }
+        engine = _build_engine(
+            db=db, semantic_results=[("f_recent", 0.9), ("f_old", 0.88)],
+        )
+        return engine, db
+
+    def test_window_keeps_only_in_range(self) -> None:
+        engine, _ = self._engine()
+        response = engine.recall(
+            "q", "default", window=("2026-07-01", "2026-07-31"),
+        )
+        ids = {r.fact.fact_id for r in response.results}
+        assert "f_recent" in ids
+        assert "f_old" not in ids
+
+    def test_no_window_returns_both(self) -> None:
+        engine, db = self._engine()
+        response = engine.recall("q", "default")  # window=None
+        ids = {r.fact.fact_id for r in response.results}
+        assert {"f_recent", "f_old"} <= ids
+        db.get_fact_event_times.assert_not_called()  # no window -> no lookup
+
+    def test_unparseable_window_applies_no_filter(self) -> None:
+        engine, _ = self._engine()
+        response = engine.recall("q", "default", window="someday")
+        ids = {r.fact.fact_id for r in response.results}
+        assert {"f_recent", "f_old"} <= ids  # bad spec => additive no-op

@@ -82,3 +82,34 @@ class TestGetInvalidatedFactIds:
                                     invalidation_reason="contradicted")
         # Querying under a different profile must not see this profile's row.
         assert db.get_invalidated_fact_ids(["f1"], "other") == set()
+
+
+class TestGetFactEventTimes:
+    def test_empty_input(self, db: DatabaseManager) -> None:
+        assert db.get_fact_event_times([], "default") == {}
+
+    def test_created_at_fallback(self, db: DatabaseManager) -> None:
+        _seed_three_facts(db)  # no dates set -> event_time falls back to created_at
+        et = db.get_fact_event_times(["f1", "f2", "f3"], "default")
+        assert set(et) == {"f1", "f2", "f3"}
+        assert all(v for v in et.values())  # every fact has a non-empty time
+
+    def test_referenced_date_wins(self, db: DatabaseManager) -> None:
+        db.store_memory(MemoryRecord(memory_id="m0", content="parent"))
+        db.store_fact(AtomicFact(
+            fact_id="fx", memory_id="m0", content="met on a specific date",
+            fact_type=FactType.SEMANTIC,
+            referenced_date="2026-03-15", observation_date="2026-07-01",
+        ))
+        et = db.get_fact_event_times(["fx"], "default")
+        assert et["fx"].startswith("2026-03-15")
+
+    def test_valid_from_used_when_no_fact_dates(self, db: DatabaseManager) -> None:
+        _seed_three_facts(db)  # f1 has no referenced/observation date
+        db.store_temporal_validity("f1", "default", valid_from="2025-01-01")
+        et = db.get_fact_event_times(["f1"], "default")
+        assert et["f1"].startswith("2025-01-01")
+
+    def test_profile_scoped(self, db: DatabaseManager) -> None:
+        _seed_three_facts(db)
+        assert db.get_fact_event_times(["f1"], "other") == {}

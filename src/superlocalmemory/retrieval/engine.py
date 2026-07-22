@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
+from superlocalmemory.retrieval.time_window import in_window, parse_window
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.storage.models import (
     AtomicFact,
@@ -149,6 +150,7 @@ class RetrievalEngine:
         extra_disabled_channels: set[str] | None = None,
         include_global: bool = False,
         include_shared: bool = False,
+        window: str | tuple[str, str] | None = None,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
 
@@ -318,6 +320,24 @@ class RetrievalEngine:
                 logger.warning("Entity graph signal enhancement: %s", exc)
 
         _em("expand+entity_enh")
+
+        # T-window: prune candidates to the requested event-time range.
+        # Additive — a None or unparseable window applies no filter. Event
+        # times are fetched for the bounded candidate set only (indexed), then
+        # in-range facts are kept. Runs before fact load so out-of-window facts
+        # are never materialized.
+        if window is not None and fused:
+            bounds = parse_window(window)
+            if bounds is not None:
+                etimes = self._db.get_fact_event_times(
+                    [fr.fact_id for fr in fused], profile_id,
+                )
+                fused = [
+                    fr for fr in fused
+                    if in_window(etimes.get(fr.fact_id), bounds)
+                ]
+                _em("time_window")
+
         # 4. Load facts for rerank pool
         pool = min(len(fused), max(effective_limit * 3, 30))
         top = fused[:pool]

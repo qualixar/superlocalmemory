@@ -623,6 +623,7 @@ def run_recall(
     fast: bool = False,
     include_global: bool = False,
     include_shared: bool = False,
+    window: str | tuple[str, str] | None = None,
 ) -> RecallResponse:
     """Recall relevant facts for a query.
 
@@ -663,6 +664,7 @@ def run_recall(
         extra_disabled_channels=extra_disabled,
         include_global=include_global,
         include_shared=include_shared,
+        window=window,
     )
     _mark("retrieval(chan+rerank)")
 

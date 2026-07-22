@@ -132,7 +132,7 @@ class TestRecallTool:
         # session_id when the caller doesn't supply one is ``mcp:<agent_id>``.
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
-            fast=False, include_global=None, include_shared=None,
+            fast=False, include_global=None, include_shared=None, window=None,
         )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
@@ -153,7 +153,7 @@ class TestRecallTool:
 
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
-            fast=True, include_global=None, include_shared=None,
+            fast=True, include_global=None, include_shared=None, window=None,
         )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
@@ -227,7 +227,7 @@ class TestRecallEdgeCases:
         from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
         pool.recall.assert_called_once_with(
             "", limit=CANONICAL_RECALL_LIMIT, session_id="mcp:mcp_client", fast=False,
-            include_global=None, include_shared=None,
+            include_global=None, include_shared=None, window=None,
         )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
@@ -248,7 +248,7 @@ class TestRecallEdgeCases:
 
         pool.recall.assert_called_once_with(
             "limit test", limit=5, session_id="mcp:mcp_client", fast=False,
-            include_global=None, include_shared=None,
+            include_global=None, include_shared=None, window=None,
         )
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")

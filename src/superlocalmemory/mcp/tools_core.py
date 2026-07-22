@@ -284,6 +284,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         session_id: str = "", fast: bool = False,
         include_global: bool | None = None,
         include_shared: bool | None = None,
+        window: str = "",
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
@@ -297,6 +298,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
         scopes participate in retrieval. Leave them unset (``None``) to use the
         configured default — shared memory is OPT-IN, so by default recall
         returns only this profile's own facts. Pass ``True`` to opt in per call.
+
+        Time window: optional ``window`` restricts results to a event-time
+        range. Accepts a relative span (``"24h"``, ``"7d"``, ``"30d"``,
+        ``"1y"``) or an explicit range (``"2026-07-01..2026-07-31"``). Empty =
+        no time filter.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -353,6 +359,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 fast=bool(fast),
                 include_global=include_global,
                 include_shared=include_shared,
+                window=window or None,
             )
             if result.get("ok"):
                 # Record implicit feedback: every returned result is a recall_hit

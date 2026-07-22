@@ -516,9 +516,17 @@ async def search_memories(request: Request, body: SearchRequest):
         if engine is not None:
             loop = asyncio.get_running_loop()
             t0 = _time.monotonic()
+            # T-window: prefer an explicit ``window`` spec; otherwise derive a
+            # range from the legacy date_from/date_to pair when both are set.
+            _window = getattr(body, "window", None) or ""
+            if not _window and getattr(body, "date_from", None) and getattr(body, "date_to", None):
+                _window = f"{body.date_from}..{body.date_to}"
             response = await loop.run_in_executor(
                 None,
-                lambda: engine.recall(body.query, limit=body.limit, fast=True),
+                lambda: engine.recall(
+                    body.query, limit=body.limit, fast=True,
+                    window=_window or None,
+                ),
             )
             elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
             from superlocalmemory.server.recall_serializer import (

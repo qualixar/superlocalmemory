@@ -613,6 +613,7 @@ class MemoryEngine:
         *,
         include_global: bool | None = None,
         include_shared: bool | None = None,
+        window: str | tuple[str, str] | None = None,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -664,6 +665,7 @@ class MemoryEngine:
                 fast=fast,
                 include_global=include_global,
                 include_shared=include_shared,
+                window=window,
             )
         except Exception as exc:
             from superlocalmemory.infra.local_diagnostics import record_operation

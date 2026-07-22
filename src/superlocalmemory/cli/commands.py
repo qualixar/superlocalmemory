@@ -1325,10 +1325,12 @@ def cmd_recall(args: Namespace) -> None:
                 scope_qs += f"&include_global={str(include_global).lower()}"
             if include_shared is not None:
                 scope_qs += f"&include_shared={str(include_shared).lower()}"
+            _window = getattr(args, "window", "") or ""
+            window_qs = f"&window={quote(_window)}" if _window else ""
             result = daemon_request(
                 "GET",
                 f"/recall?q={quote(args.query)}&limit={args.limit}"
-                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}",
+                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response
@@ -1366,6 +1368,7 @@ def cmd_recall(args: Namespace) -> None:
             fast=getattr(args, "fast", False),
             include_global=include_global,
             include_shared=include_shared,
+            window=getattr(args, "window", "") or None,
         )
     except Exception as exc:
         if use_json:

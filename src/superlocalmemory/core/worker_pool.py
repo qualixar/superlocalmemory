@@ -70,6 +70,7 @@ class WorkerPool:
         fast: bool = False,
         include_global: bool | None = None,
         include_shared: bool | None = None,
+        window: str | None = None,
     ) -> dict:
         """Run recall in worker subprocess. Returns result dict.
 
@@ -91,6 +92,8 @@ class WorkerPool:
             msg["include_global"] = bool(include_global)
         if include_shared is not None:
             msg["include_shared"] = bool(include_shared)
+        if window:
+            msg["window"] = window
         return self._send(msg)
 
     def store(self, content: str, metadata: dict | None = None) -> dict:

@@ -781,6 +781,7 @@ async def recall_trace(request: Request):
         body = await request.json()
         query = body.get("query", "")
         limit = body.get("limit", 10)
+        window = body.get("window", "") or ""
 
         # Use daemon engine — already loaded, shares warm page cache.
         # run_in_executor keeps event loop alive so browser doesn't abort.
@@ -793,7 +794,7 @@ async def recall_trace(request: Request):
         t0 = _time.monotonic()
         response = await loop.run_in_executor(
             None,
-            lambda: engine.recall(query, limit=limit, fast=False),
+            lambda: engine.recall(query, limit=limit, fast=False, window=window or None),
         )
         elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
 

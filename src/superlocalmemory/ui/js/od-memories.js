@@ -159,11 +159,21 @@
 
   function _allScaffold(id) {
     return (
-      '<div style="margin-bottom:16px">' +
+      '<div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">' +
         '<input data-od-act="search" placeholder="Search all memories…" autocomplete="off" ' +
-          'style="width:100%;padding:8px 12px;border:1px solid var(--border);' +
+          'style="flex:1;padding:8px 12px;border:1px solid var(--border);' +
           'border-radius:var(--r-md);background:var(--card-2);color:var(--fg);' +
           'font-size:13.5px;outline:none">' +
+        '<select data-od-act="window" title="Limit search to a time window" ' +
+          'style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);' +
+          'background:var(--card-2);color:var(--fg);font-size:13px;outline:none">' +
+          '<option value="">Any time</option>' +
+          '<option value="24h">Last 24h</option>' +
+          '<option value="7d">Last 7 days</option>' +
+          '<option value="30d">Last 30 days</option>' +
+          '<option value="90d">Last 90 days</option>' +
+          '<option value="1y">Last year</option>' +
+        '</select>' +
       '</div>' +
       // Filter bar: category chips (populated after cat-count fetch) + sort seg
       '<div id="' + id + '-cats" ' +
@@ -439,7 +449,7 @@
       if (wrap) wrap.innerHTML = _loading('Searching…');
       fetch('/api/search', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, limit: 50 })
+        body: JSON.stringify({ query: q, limit: 50, window: _st.window || '' })
       }).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -798,6 +808,13 @@
     });
 
     // Search — input event
+    container.addEventListener('change', function (e) {
+      if (e.target.dataset.odAct === 'window') {
+        _st = Object.assign({}, _st, { window: e.target.value || '' });
+        var wq = (_st.searchQ || '').trim();
+        if (wq) _doSearch(id, wq);   // re-run active search with the new window
+      }
+    });
     container.addEventListener('input', function (e) {
       if (e.target.dataset.odAct === 'search') _doSearch(id, e.target.value.trim());
     });

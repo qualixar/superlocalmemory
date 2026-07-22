@@ -431,6 +431,10 @@ class SearchRequest(BaseModel):
     cluster_id: Optional[int] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    # T-window: relative span ("7d", "30d", "1y") or explicit range
+    # ("2026-07-01..2026-07-31"). When empty, date_from/date_to (if both set)
+    # are used as the range. Empty + no dates = no time filter.
+    window: Optional[str] = None
 
 
 class ProfileSwitch(BaseModel):

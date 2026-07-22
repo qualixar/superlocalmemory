@@ -1477,6 +1477,44 @@ class DatabaseManager:
                 invalid.add(dict(r)["fact_id"])
         return invalid
 
+    def get_fact_event_times(
+        self, fact_ids: list[str], profile_id: str,
+    ) -> dict[str, str]:
+        """Map each candidate fact_id to its best-available event time.
+
+        Priority (most specific first): ``referenced_date`` (the date the fact
+        is *about*) → ``observation_date`` (when it was observed) →
+        ``valid_from`` (bi-temporal event start) → ``created_at`` (storage
+        time, always present). Used by time-window recall to prune candidates
+        by when the underlying event happened, falling back to capture time for
+        undated facts.
+
+        Bounded + indexed (candidate ids only, ``fact_id`` PK), chunked under
+        SQLite's bound-parameter limit. Facts absent from the result (unknown
+        id / wrong profile) are simply omitted.
+        """
+        if not fact_ids:
+            return {}
+        out: dict[str, str] = {}
+        chunk = 900
+        for start in range(0, len(fact_ids), chunk):
+            batch = fact_ids[start:start + chunk]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                f"SELECT f.fact_id AS fact_id, "
+                f"COALESCE(f.referenced_date, f.observation_date, "
+                f"         tv.valid_from, f.created_at) AS event_time "
+                f"FROM atomic_facts f "
+                f"LEFT JOIN fact_temporal_validity tv ON f.fact_id = tv.fact_id "
+                f"WHERE f.fact_id IN ({placeholders}) AND f.profile_id = ?",
+                (*batch, profile_id),
+            )
+            for r in rows:
+                d = dict(r)
+                if d.get("event_time"):
+                    out[d["fact_id"]] = d["event_time"]
+        return out
+
     def delete_temporal_validity(self, fact_id: str) -> None:
         """Delete temporal validity record (for testing/rollback only)."""
         self.execute(

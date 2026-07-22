@@ -104,6 +104,8 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
         _recall_kwargs["include_global"] = kwargs["include_global"]
     if "include_shared" in kwargs:
         _recall_kwargs["include_shared"] = kwargs["include_shared"]
+    if kwargs.get("window"):
+        _recall_kwargs["window"] = kwargs["window"]
     raw = _pool().recall(**_recall_kwargs)
     _unwrap_error(raw, "recall")
     items = raw.get("results", []) if isinstance(raw, dict) else []

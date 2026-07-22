@@ -43,6 +43,7 @@ class DaemonPoolProxy:
         fast: bool = False,
         include_global: bool | None = None,
         include_shared: bool | None = None,
+        window: str | None = None,
     ) -> dict[str, Any]:
         _params: dict[str, Any] = {
             "q": query,
@@ -57,6 +58,8 @@ class DaemonPoolProxy:
             _params["include_global"] = "true" if include_global else "false"
         if include_shared is not None:
             _params["include_shared"] = "true" if include_shared else "false"
+        if window:
+            _params["window"] = window
         params = urllib.parse.urlencode(_params)
         try:
             from superlocalmemory.cli.daemon import daemon_request

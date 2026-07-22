@@ -1,0 +1,133 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+# Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
+
+"""Time-window parsing + membership for recall (Phase 4, T-window).
+
+Pure, dependency-free helpers so recall() can prune candidates to an
+event-time range. Two window forms are accepted:
+
+  * relative string — ``"1h" | "24h" | "7d" | "30d" | "90d" | "1y"`` etc.
+    (``<int><unit>`` where unit is h/d/w/m/y; m≈30d, y≈365d) → ``[now-Δ, now]``.
+  * explicit range — ``(start_iso, end_iso)`` two-tuple of timestamps.
+
+Timestamps are parsed tolerantly: SQLite ``datetime('now')`` form
+(``"YYYY-MM-DD HH:MM:SS"``), ISO-8601 with ``T`` and/or trailing ``Z``, and
+date-only ``"YYYY-MM-DD"`` are all accepted. Comparing the *strings* would be
+wrong (a space sorts before ``T``), so everything is parsed to tz-aware UTC
+datetimes before comparison — never lexicographic.
+
+Part of Qualixar | Author: Varun Pratap Bhardwaj
+License: AGPL-3.0-or-later
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timedelta, timezone
+
+__all__ = ["parse_timestamp", "parse_window", "in_window"]
+
+_REL = re.compile(r"^\s*(\d+)\s*([hdwmy])\s*$", re.IGNORECASE)
+
+# Hours per unit. Month and year are documented approximations.
+_UNIT_HOURS: dict[str, int] = {
+    "h": 1,
+    "d": 24,
+    "w": 24 * 7,
+    "m": 24 * 30,
+    "y": 24 * 365,
+}
+
+
+def parse_timestamp(value: str | None) -> datetime | None:
+    """Parse a stored timestamp into a tz-aware UTC datetime, or None.
+
+    Accepts SQLite ``datetime('now')`` (space-separated), ISO-8601 (``T`` and
+    optional ``Z``), and date-only strings. Naive values are assumed UTC.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    dt: datetime | None = None
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        # Fall back to a date-only prefix (e.g. "2026-03-15 ...").
+        try:
+            dt = datetime.fromisoformat(text[:10])
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def parse_window(
+    window: str | tuple[str, str] | list | None,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime] | None:
+    """Resolve a window spec to a ``(start, end)`` UTC datetime pair, or None.
+
+    Returns None when the spec is None or unparseable (caller then applies no
+    time filter — additive, fail-open).
+    """
+    if window is None:
+        return None
+    _now = now or datetime.now(timezone.utc)
+    if _now.tzinfo is None:
+        _now = _now.replace(tzinfo=timezone.utc)
+
+    # Explicit (start, end) range.
+    if isinstance(window, (tuple, list)):
+        if len(window) != 2:
+            return None
+        start = parse_timestamp(window[0])
+        end = parse_timestamp(window[1])
+        if start is None or end is None:
+            return None
+        return (start, end) if start <= end else (end, start)
+
+    # String forms: relative "<int><unit>" or an explicit range written as
+    # "start..end" / "start,end" (so it survives URL params, JSON, and CLI args
+    # as a single value — no tuple serialization needed on the wire).
+    if isinstance(window, str):
+        m = _REL.match(window)
+        if m:
+            n = int(m.group(1))
+            unit = m.group(2).lower()
+            hours = n * _UNIT_HOURS[unit]
+            return (_now - timedelta(hours=hours), _now)
+        for sep in ("..", ","):
+            if sep in window:
+                left, _, right = window.partition(sep)
+                start = parse_timestamp(left)
+                end = parse_timestamp(right)
+                if start is None or end is None:
+                    return None
+                return (start, end) if start <= end else (end, start)
+
+    return None
+
+
+def in_window(
+    event_time: str | None,
+    bounds: tuple[datetime, datetime] | None,
+) -> bool:
+    """True if ``event_time`` falls within ``bounds`` (inclusive).
+
+    No bounds → always True (no filtering). An unparseable/missing event time
+    is excluded (conservative: a windowed query returns only datable facts in
+    range).
+    """
+    if bounds is None:
+        return True
+    dt = parse_timestamp(event_time)
+    if dt is None:
+        return False
+    start, end = bounds
+    return start <= dt <= end

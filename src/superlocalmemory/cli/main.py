@@ -313,6 +313,12 @@ def main() -> None:
     )
     recall_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
     recall_p.add_argument(
+        "--window", default="",
+        help="Restrict results to an event-time range: a relative span "
+             "(24h, 7d, 30d, 1y) or an explicit range (2026-07-01..2026-07-31). "
+             "Default: no time filter.",
+    )
+    recall_p.add_argument(
         "--fast", action="store_true",
         help="Skip graph-assisted candidate expansion and remote agentic verification for a "
              "latency-bounded response. Other configured retrieval channels still run. "
