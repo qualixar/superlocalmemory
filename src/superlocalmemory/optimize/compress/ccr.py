@@ -2,11 +2,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later
 #
-# CCR (Compressed Context Retrieval) concept and pattern:
-#   headroom/ccr/ package (Apache-2.0, Headroom contributors)
-#   Specifically: batch_store.py (BatchContext dataclass, TTL pattern),
-#   tool_injection.py (MCP tool injection pattern)
-#   Attribution: See ATTRIBUTION.md.
 # Storage: llmcache_ccr table defined in INTERFACE-CONTRACT §1.
 # Database access: CacheDB.ccr_put() and CacheDB.ccr_get() per INTERFACE-CONTRACT §1.
 
@@ -116,7 +111,7 @@ class CCRStore:
 
     def get_mcp_tool_definition(self) -> dict:
         return {
-            "name": "headroom_retrieve",
+            "name": "slm_ccr_retrieve",
             "description": (
                 "Retrieve the original (pre-compression) text for a compressed content block. "
                 "Use this when you need the full, uncompressed version of content that was "
@@ -137,7 +132,7 @@ class CCRStore:
     async def handle_mcp_call(
         self, arguments: dict, tenant_id: str = "default",
     ) -> dict:
-        """Handle the headroom_retrieve MCP tool call.
+        """Handle the slm_ccr_retrieve MCP tool call.
 
         H-02: tenant_id must match the value used during store() to enforce
         row-level isolation. Pass the current session tenant here; the default

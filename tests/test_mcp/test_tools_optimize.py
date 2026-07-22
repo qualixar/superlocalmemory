@@ -399,14 +399,15 @@ async def test_compress_fail_open_on_engine_crash(tools, monkeypatch):
     assert "internal error" in result["note"].lower()
 
 
-# ─── Test 15: integration — _FilteredServer, 5 tools, no headroom_* ──────────
+# ─── Test 15: integration — _FilteredServer, 5 tools, all SLM-branded ────────
 
 
-async def test_integration_filtered_server_five_tools_no_headroom():
+async def test_integration_filtered_server_five_tools_all_slm_branded():
     """Register on _FilteredServer with optimize names allowed.
 
-    Asserts: exactly 5 tools registered, names match _OPTIMIZE_TOOL_NAMES,
-    zero headroom_* tools — fulfills AUDIT L-03.
+    Asserts: exactly 5 tools registered, names match _OPTIMIZE_TOOL_NAMES, and
+    every registered tool is SLM-branded (no foreign-branded name leaks into the
+    MCP surface) — fulfills AUDIT L-03.
     """
     from superlocalmemory.mcp.tools_optimize import register_optimize_tools, _OPTIMIZE_TOOL_NAMES
 
@@ -435,5 +436,5 @@ async def test_integration_filtered_server_five_tools_no_headroom():
     assert registered == set(_OPTIMIZE_TOOL_NAMES), (
         f"Name mismatch. Expected {_OPTIMIZE_TOOL_NAMES}, got {registered}"
     )
-    headroom = {n for n in registered if n.startswith("headroom")}
-    assert not headroom, f"headroom_* tools must not be registered: {headroom}"
+    foreign = {n for n in registered if not n.startswith("slm_")}
+    assert not foreign, f"only SLM-branded optimize tools may be registered: {foreign}"

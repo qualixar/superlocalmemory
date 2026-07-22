@@ -59,7 +59,7 @@ def test_ccr_retrieve_returns_none_on_expired(tmp_cache_db) -> None:
 def test_ccr_mcp_tool_definition_valid() -> None:
     store = CCRStore()
     tool_def = store.get_mcp_tool_definition()
-    assert tool_def["name"] == "headroom_retrieve"
+    assert tool_def["name"] == "slm_ccr_retrieve"
     assert "ccr_id" in tool_def["inputSchema"]["properties"]
     assert "ccr_id" in tool_def["inputSchema"]["required"]
 

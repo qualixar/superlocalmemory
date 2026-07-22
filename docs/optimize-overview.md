@@ -261,8 +261,6 @@ No data loss. No downtime. Zero configuration changes needed.
 ## License & Attribution
 
 - SuperLocalMemory: **AGPL-3.0-or-later**
-- Extract patterns adapted from **Headroom** (Apache-2.0) → NOTICE preserved per project
-- Cache patterns adapted from **OmniCache** (MIT) → license notice preserved
 - Prose compression via **LLMLingua-2** (MIT, Microsoft) → bundled when enabled
 
 See `ATTRIBUTION.md` and `NOTICE` for full attribution.

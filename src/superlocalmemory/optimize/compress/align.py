@@ -1,17 +1,13 @@
 # compress/align.py
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later
-#
-# Volatile-detection algorithm adapted from:
-#   headroom/transforms/cache_aligner.py (Apache-2.0, Headroom contributors)
-#   Specifically: _is_uuid(), _is_iso8601(), _is_jwt_shape(), _is_hex_hash(),
-#   _classify_token(), _split_tokens(), detect_volatile_content()
-#   Lines: cache_aligner.py:76-200
-#   Attribution: See ATTRIBUTION.md.
 
-"""CacheAligner — volatile-token detector for system prompt prefix stability.
+"""CacheAligner — flags volatile tokens in a system prompt.
 
-Phase 2: Detection only. No mutation of the system prompt.
+A "volatile" token is one that differs between otherwise-identical requests —
+a UUID, an ISO-8601 timestamp, a JWT, or a hex digest. When such tokens sit in
+the stable prefix of a prompt they break provider prefix caching, so the router
+surfaces them. This module only *detects*; it never rewrites the prompt.
 """
 
 from __future__ import annotations
@@ -25,10 +21,13 @@ from datetime import datetime
 
 logger = logging.getLogger("slm.optimize.compress.align")
 
-_HEX_HASH_LENGTHS = frozenset({32, 40, 64})
-_UUID_CANONICAL_LEN = 36  # L-02: 36 chars INCLUDING 4 dashes (RFC 4122 canonical form: 8-4-4-4-12)
-_JWT_SEGMENT_COUNT = 3
+_HEX_HASH_LENGTHS = frozenset({32, 40, 64})   # md5 / sha1 / sha256 hex widths
+_UUID_CANONICAL_LEN = 36                       # 8-4-4-4-12, dashes included
+_JWT_SEGMENTS = 3                              # header.payload.signature
 _JWT_MIN_SEGMENT_BYTES = 4
+_MAX_FINDINGS = 20                             # cap the sample list we retain
+_SAMPLE_LEN = 20                               # chars kept per finding sample
+_TOKEN_STRIP = ".,;:!?\"'()[]{}<>`|\\"         # trimmed off each raw token
 
 _LABEL_UUID = "uuid"
 _LABEL_ISO8601 = "iso8601"
@@ -64,38 +63,44 @@ class CacheAligner:
 def _detect(text: str) -> AlignResult:
     tokens = _split_tokens(text)
     findings: list[VolatileFinding] = []
-    volatile_count = 0
-
+    volatile = 0
     for token in tokens:
         label = _classify_token(token)
-        if label is not None:
-            volatile_count += 1
-            if len(findings) < 20:
-                findings.append(VolatileFinding(label=label, sample=token[:20]))
+        if label is None:
+            continue
+        volatile += 1
+        if len(findings) < _MAX_FINDINGS:
+            findings.append(VolatileFinding(label=label, sample=token[:_SAMPLE_LEN]))
 
     total = len(tokens)
-    score = 1.0 - (volatile_count / total) if total > 0 else 1.0
-
+    score = round(1.0 - volatile / total, 4) if total else 1.0
     return AlignResult(
-        prefix_stable=(volatile_count == 0),
-        stability_score=round(score, 4),
+        prefix_stable=(volatile == 0),
+        stability_score=score,
         findings=findings,
         total_tokens_scanned=total,
     )
 
 
 def _split_tokens(content: str) -> list[str]:
+    """Whitespace-split, then strip surrounding punctuation/quoting from each
+    token so a value wrapped in backticks or brackets is still recognised."""
     if not content:
         return []
     tokens: list[str] = []
     for raw in content.split():
-        cleaned = raw.strip(".,;:!?\"'()[]{}<>`|\\")
+        cleaned = raw.strip(_TOKEN_STRIP)
         if cleaned:
             tokens.append(cleaned)
     return tokens
 
 
 def _classify_token(token: str) -> str | None:
+    """Return the volatile-kind label for a token, or None when it is stable.
+
+    Ordered most-specific first: a canonical-length UUID before a dotted JWT,
+    then timestamps, then bare hex digests.
+    """
     if _is_uuid(token):
         return _LABEL_UUID
     if "." in token and _is_jwt_shape(token):
@@ -120,6 +125,7 @@ def _is_uuid(token: str) -> bool:
 def _is_iso8601(token: str) -> bool:
     if len(token) < 8 or ("T" not in token and "-" not in token):
         return False
+    # datetime.fromisoformat pre-3.11 rejects a trailing 'Z'; normalise it.
     candidate = token[:-1] + "+00:00" if token.endswith("Z") else token
     try:
         datetime.fromisoformat(candidate)
@@ -129,13 +135,13 @@ def _is_iso8601(token: str) -> bool:
 
 
 def _is_jwt_shape(token: str) -> bool:
-    if token.count(".") != _JWT_SEGMENT_COUNT - 1:
-        return False
     segments = token.split(".")
+    if len(segments) != _JWT_SEGMENTS:
+        return False
     for seg in segments:
         if len(seg) < _JWT_MIN_SEGMENT_BYTES:
             return False
-        padded = seg + "=" * (-len(seg) % 4)
+        padded = seg + "=" * (-len(seg) % 4)  # restore base64url padding
         try:
             base64.urlsafe_b64decode(padded.encode("ascii"))
         except (binascii.Error, ValueError, UnicodeEncodeError):

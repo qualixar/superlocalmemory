@@ -1,7 +1,4 @@
-"""SLM OpenAI SDK adapter.
-
-Adapted from OmniCache (MIT). See ATTRIBUTION.md.
-"""
+"""SLM OpenAI SDK adapter."""
 
 from __future__ import annotations
 

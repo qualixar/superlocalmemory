@@ -1,7 +1,4 @@
-"""SLM Anthropic SDK adapter.
-
-Adapted from OmniCache (MIT). See ATTRIBUTION.md.
-"""
+"""SLM Anthropic SDK adapter."""
 
 from __future__ import annotations
 

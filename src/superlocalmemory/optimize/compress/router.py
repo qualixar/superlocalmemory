@@ -1,11 +1,6 @@
 # compress/router.py
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later
-#
-# Routing pattern adapted from:
-#   headroom/transforms/content_router.py (Apache-2.0, Headroom contributors)
-#   Specifically: ContentRouter._determine_strategy(), _strategy_from_detection()
-#   Attribution: See ATTRIBUTION.md.
 
 """CompressRouter — implements CompressHook, dispatches to sub-compressors.
 
