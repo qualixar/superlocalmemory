@@ -261,6 +261,17 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                         "command": _wrap_python_cmd("stop_outcome"),
                         "timeout": 10000,
                     },
+                    # Commit temporal summaries so session decisions survive beyond
+                    # the git-state snapshot written by `slm hook stop`.
+                    {
+                        "type": "command",
+                        "command": (
+                            'cmd /c "slm session close 2>NUL || exit /b 0"'
+                            if sys.platform == "win32"
+                            else "slm session close 2>/dev/null || true"
+                        ),
+                        "timeout": 15000,
+                    },
                 ]
             }
         ],
