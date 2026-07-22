@@ -4,7 +4,8 @@
 """SuperLocalMemory V3 - LangChain Chat Message History
 
 Implements LangChain's BaseChatMessageHistory backed by SuperLocalMemory V3's
-local SQLite storage. All data stays on your machine -- zero cloud, zero telemetry.
+local SQLite data root. Messages stay in your local SLM data root (optional SLM
+providers, connectors, backup, and downloads have separate network behavior).
 
 Usage:
     from langchain_superlocalmemory import SuperLocalMemoryChatMessageHistory
@@ -91,9 +92,9 @@ class SuperLocalMemoryChatMessageHistory(BaseChatMessageHistory):
     """LangChain chat message history backed by SuperLocalMemory V3.
 
     Each message is stored as an individual memory entry in the SLM SQLite
-    database, tagged with the session ID for isolation.  This keeps the data
-    fully local and queryable via any SLM access method (MCP, CLI, Skills,
-    REST API).
+    database, tagged with the session ID for isolation.  The data lives in your
+    local SLM data root and is queryable via any SLM access method (MCP, CLI,
+    Skills, REST API).
 
     Parameters
     ----------

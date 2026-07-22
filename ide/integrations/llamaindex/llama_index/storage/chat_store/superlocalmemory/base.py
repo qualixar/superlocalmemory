@@ -3,15 +3,22 @@
 # Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
 """SuperLocalMemory V3 - LlamaIndex Chat Store Backend
 
-Implements LlamaIndex's BaseChatStore backed by SuperLocalMemory V3's
-local SQLite storage. All data stays on-device — zero cloud, zero telemetry.
+Implements LlamaIndex's BaseChatStore backed by SuperLocalMemory V3's local
+SQLite data root. Messages stay in your local SLM data root (optional SLM
+providers, connectors, backup, and downloads have separate network behavior).
+
+BaseChatStore is the stable persistence layer that LlamaIndex's memory system
+builds on. (``ChatMemoryBuffer`` / ``BaseChatStoreMemory`` are deprecated in
+llama-index-core 0.14.x; wire this store into the current ``Memory`` system per
+the LlamaIndex memory docs.)
 
 Usage:
     from llama_index.storage.chat_store.superlocalmemory import SuperLocalMemoryChatStore
-    from llama_index.core.memory import ChatMemoryBuffer
+    from llama_index.core.llms import ChatMessage
 
     chat_store = SuperLocalMemoryChatStore()
-    memory = ChatMemoryBuffer.from_defaults(chat_store=chat_store, chat_store_key="user-123")
+    chat_store.add_message("user-123", ChatMessage(role="user", content="hello"))
+    history = chat_store.get_messages("user-123")
 """
 import hashlib
 import json
@@ -121,8 +128,9 @@ def _extract_key(content: str) -> Optional[str]:
 class SuperLocalMemoryChatStore(BaseChatStore):
     """LlamaIndex chat store backed by SuperLocalMemory V3.
 
-    Stores chat messages in SuperLocalMemory's local SQLite database,
-    keeping all data on-device with zero cloud calls.
+    Stores chat messages in SuperLocalMemory's local SQLite data root
+    (optional SLM providers, connectors, backup, and downloads have separate
+    network behavior).
 
     Each message is stored as a separate SLM memory entry tagged with
     ``li:chat:<hash>`` so different conversation sessions are cleanly
