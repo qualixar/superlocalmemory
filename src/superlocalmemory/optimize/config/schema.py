@@ -165,8 +165,12 @@ class OptimizeConfig:
     semantic_max_index_entries: int = 10000
     semantic_max_tenants: int = 10000
 
-    # Compress
-    compress_enabled: bool = False
+    # Compress. Safe lossless compression (whitespace normalize + JSON minify) is
+    # ON by default; it runs proxy-free via the slm_compress tool and never
+    # touches code. Lossy prose (LLMLingua) stays gated behind compress_mode=
+    # "aggressive" + compress_prose. Set compress_enabled=False (slm optimize off)
+    # to disable entirely.
+    compress_enabled: bool = True
     compress_mode: str = "safe"
     compress_prose: bool = False
     compress_protect_recent: int = 4
@@ -260,7 +264,7 @@ class OptimizeConfig:
             ),
             semantic_max_index_entries=int(d.get("semantic_max_index_entries", 10000)),
             semantic_max_tenants=int(d.get("semantic_max_tenants", 10000)),
-            compress_enabled=bool(d.get("compress_enabled", False)),
+            compress_enabled=bool(d.get("compress_enabled", True)),
             compress_mode=_normalize_compress_mode(d.get("compress_mode", "safe")),
             compress_prose=bool(d.get("compress_prose", False)),
             compress_protect_recent=int(d.get("compress_protect_recent", 4)),

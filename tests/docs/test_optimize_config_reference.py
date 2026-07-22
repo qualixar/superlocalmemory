@@ -11,10 +11,10 @@ _DOC = Path(__file__).resolve().parents[2] / "docs" / "optimize-config.md"
 
 
 def test_optimize_config_reference_matches_current_compression_contract() -> None:
-    """Removed knobs and disabled-by-default compression must not be advertised."""
+    """Removed knobs must not be advertised; safe lossless compression is on by default."""
     text = _DOC.read_text(encoding="utf-8")
 
-    assert "| `compress_enabled` | bool | `false`" in text
+    assert "| `compress_enabled` | bool | `true`" in text
     assert "| `compress_protect_recent` | int | `4`" in text
     for removed in ("compress_code", "compress_json", "compress_ccr", "compress_align"):
         assert f"`{removed}`" not in text

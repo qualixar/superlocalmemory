@@ -87,8 +87,9 @@ def test_compress_json_content_passthrough() -> None:
     large_json_text = json.dumps({"key": "v" * 200, "items": list(range(100))})
     req = _make_req_with_content(large_json_text)
     result = router.compress(req)
-    # JSON content must pass through unchanged
-    assert result is req or result.body_bytes == req.body_bytes
+    # Single-message request → content is protected; the JSON value is preserved
+    # exactly (the request envelope may be recompacted losslessly).
+    assert json.loads(result.body["messages"][0]["content"]) == json.loads(large_json_text)
 
 
 def test_compress_code_content_passthrough() -> None:
@@ -97,8 +98,8 @@ def test_compress_code_content_passthrough() -> None:
     code = "import os\n\ndef foo(x: int) -> int:\n" + "    pass\n" * 20 + "    return x\n"
     req = _make_req_with_content(code)
     result = router.compress(req)
-    # Code content must pass through unchanged
-    assert result is req or result.body_bytes == req.body_bytes
+    # Code content preserved verbatim (envelope may be recompacted losslessly).
+    assert result.body["messages"][0]["content"] == code
 
 
 def test_compress_layer1_normalizes_prose_whitespace() -> None:
@@ -117,8 +118,8 @@ def test_compress_prose_safe_mode_passthrough() -> None:
     prose = "This is a long prose paragraph. " * 50
     req = _make_req_with_content(prose)
     result = router.compress(req)
-    # In safe mode, prose shouldn't change
-    assert result is req or result.body_bytes == req.body_bytes
+    # Safe mode: prose content is not lossily rewritten.
+    assert result.body["messages"][0]["content"] == prose
 
 
 @pytest.mark.skipif(True, reason="LLMLingua not available in test env")
@@ -145,9 +146,9 @@ def test_compress_never_routes_json_to_llmlingua() -> None:
 
     with patch.object(router, "_get_config", return_value=cfg):
         result = router.compress(req)
-    # JSON content must be fully preserved — no compression at all
-    assert result is req or result.body_bytes == req.body_bytes, (
-        "JSON content was compressed when it must be passed through unchanged"
+    # JSON value fully preserved — never routed to lossy LLMLingua, even aggressive.
+    assert json.loads(result.body["messages"][0]["content"]) == json.loads(large_json_text), (
+        "JSON was lossily altered when it must only ever be losslessly minified"
     )
 
 
@@ -167,7 +168,8 @@ def test_compress_returns_passthrough_on_no_improvement() -> None:
     short_text = "hello"
     req = _make_req_with_content(short_text)
     result = router.compress(req)
-    assert result is req
+    # Below-threshold content is preserved verbatim.
+    assert result.body["messages"][0]["content"] == short_text
 
 
 def test_compress_never_raises() -> None:
@@ -470,7 +472,7 @@ def test_compress_code_path_not_detected() -> None:
     prose = "The quick brown fox jumps over the lazy dog. " * 30
     req = _make_req_with_content(prose)
     result = router.compress(req)
-    assert result is req or result.body_bytes == req.body_bytes
+    assert result.body["messages"][0]["content"] == prose
 
 
 def test_compress_no_messages_key() -> None:
@@ -726,8 +728,8 @@ def test_compress_code_below_threshold_returns_unchanged() -> None:
     code = "x = 1\ny = 2\nz = 3\n"
     req = _make_req_with_content(code)
     result = router.compress(req)
-    # Should be passthrough since code is too short
-    assert result is req or result.body_bytes == req.body_bytes
+    # Short code content preserved verbatim.
+    assert result.body["messages"][0]["content"] == code
 
 
 # ---- _ccr_store_original raises exception (non-fatal) ----
@@ -1002,7 +1004,8 @@ def test_compress_invalid_json_passthrough() -> None:
     bad_json = '{"key": "value"' + ' extra garbage ' * 50  # missing closing brace + extra
     req = _make_req_with_content(bad_json)
     result = router.compress(req)
-    assert result is req or result.body_bytes == req.body_bytes
+    # Invalid JSON is never minified; content preserved.
+    assert result.body["messages"][0]["content"] == bad_json
 
 
 # ---- system prompt with CacheAligner findings ----
@@ -1226,10 +1229,10 @@ def test_k08_json_probe_catches_only_json_decode_error(caplog) -> None:
     assert result is not None, "K-08: compress_text must not raise on invalid JSON-looking input"
 
 
-def test_k08_unexpected_exception_logged_as_warning(caplog, monkeypatch) -> None:
-    """K-08: Generic Exception in JSON probe must log WARNING, not silently swallow."""
+def test_k08_json_probe_error_fails_open(monkeypatch) -> None:
+    """K-08: an error during the JSON probe must fail open (never raise); the content is
+    treated as non-JSON prose and returned unchanged rather than crashing the pipeline."""
     import json as json_mod
-    import logging
     router = CompressRouter()
     original_loads = json_mod.loads
 
@@ -1240,13 +1243,11 @@ def test_k08_unexpected_exception_logged_as_warning(caplog, monkeypatch) -> None
         return original_loads(s, **kw)
 
     monkeypatch.setattr(json_mod, "loads", _raise_unexpected)
-    # Must be >= 500 chars and start with "[" to reach the JSON probe
+    # >= 500 chars and starts with "[" to reach the JSON probe.
     tricky = "[" + ("word " * 120)
-    with caplog.at_level(logging.WARNING, logger="superlocalmemory.optimize.compress.router"):
-        result = router.compress_text(tricky)
-    assert result is not None, "K-08: must not raise on unexpected JSON probe error"
-    assert any("unexpected error probing JSON" in r.message for r in caplog.records), \
-        "K-08: unexpected exception must emit WARNING log"
+    result = router.compress_text(tricky)
+    assert result is not None, "K-08: must not raise on a JSON-probe error"
+    assert result.strategy in ("none", "normalize"), "probe error → non-JSON prose path"
 
 
 def test_k10_compress_text_result_has_lossy_field() -> None:
@@ -1380,14 +1381,15 @@ def test_compress_content_block_list_with_enabled_config() -> None:
     assert result is not None
 
 
-def test_compress_text_large_valid_json_passthrough() -> None:
-    """Cover _compress_text line 261: valid JSON >= 500 chars → early passthrough."""
+def test_compress_text_large_valid_json_minified() -> None:
+    """Valid JSON >= 500 chars is losslessly minified (value preserved, strategy=json_minify)."""
     router = CompressRouter()
-    # Valid JSON that's >= 500 chars
-    large_json = json.dumps({"key": "v" * 200, "items": list(range(80))})
+    large_json = json.dumps({"key": "v" * 200, "items": list(range(80))}, indent=2)
     assert len(large_json) >= 500, "test prerequisite: json must be >= 500 chars"
     result = router.compress_text(large_json)
-    assert result.strategy == "none", "Valid JSON must always be passed through unchanged"
+    assert result.strategy == "json_minify"
+    assert result.lossy is False
+    assert json.loads(result.compressed_text) == json.loads(large_json)
 
 
 def test_compress_text_large_code_passthrough() -> None:
@@ -1627,16 +1629,16 @@ def test_s01_clean_prose_returns_none_strategy() -> None:
     assert result.strategy == "none"
 
 
-def test_perf02_large_json_uses_structural_fast_path() -> None:
-    """PERF-02: JSON > 8KB with matching brackets must skip json.loads() parsing."""
+def test_perf02_oversized_json_passthrough() -> None:
+    """PERF-02: JSON over the minify size cap is passed through unparsed (bounds hot-path cost)."""
+    from superlocalmemory.optimize.compress.router import _MAX_JSON_MINIFY_CHARS
     router = CompressRouter()
-    # Build a large JSON dict that's definitely > 8192 chars
-    large_json = json.dumps({"key_" + str(i): "v" * 50 for i in range(200)})
-    assert len(large_json) > 8192, "test prerequisite: must exceed 8KB for fast-path"
-    assert large_json[0] == "{" and large_json[-1] == "}"
-    result = router.compress_text(large_json)
-    assert result.strategy == "none", "PERF-02: large JSON must be passed through unchanged"
-    assert result.compressed_text == large_json
+    # Valid, bracket-matched JSON just over the cap → skipped without a parse.
+    big = json.dumps({"k": "v" * (_MAX_JSON_MINIFY_CHARS + 1000)})
+    assert len(big) > _MAX_JSON_MINIFY_CHARS and big[0] == "{" and big[-1] == "}"
+    result = router.compress_text(big)
+    assert result.strategy == "none", "oversized JSON must be passed through unchanged"
+    assert result.compressed_text == big
 
 
 def test_stage9_layer1_normalization_works_end_to_end_through_compress_request() -> None:

@@ -25,6 +25,16 @@ import pytest
 # The benchmark modules live in benchmarks/optimize (not on the package path).
 _BENCH_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "optimize"
 
+# /benchmarks/ is gitignored (internal harness — not shipped). On a clean
+# checkout / CI without the internal harness the modules are absent, so this
+# offline correctness gate is skipped rather than erroring at import time.
+if not _BENCH_DIR.is_dir():
+    pytest.skip(
+        "optimize benchmark harness (benchmarks/optimize/) not present "
+        "— internal & gitignored; skipping the benchmark gate",
+        allow_module_level=True,
+    )
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _add_bench_to_path():

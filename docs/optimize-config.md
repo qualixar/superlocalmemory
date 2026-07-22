@@ -97,12 +97,14 @@ config file changes do not mount proxy routes in an already-running daemon.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `compress_enabled` | bool | `false` | Enable compression |
+| `compress_enabled` | bool | `true` | Lossless compression on by default (whitespace normalization + JSON minification); proxy-free. Set `false` (`slm optimize off`) to disable |
 | `compress_mode` | str | `"safe"` | `"safe"` (lossless whitespace normalization) or `"aggressive"` (lossy prose allowed) |
 | `compress_prose` | bool | `false` | Prose compression (LLMLingua-2, opt-in) |
 | `compress_protect_recent` | int | `4` | Number of most recent messages to skip compression |
 
-Layer 1 lossless whitespace normalization runs whenever compression is enabled.
+Layer 1 lossless compression — whitespace normalization plus JSON minification
+(parse → reserialize with no insignificant whitespace, value-preserving; code is
+never touched) — runs whenever compression is enabled, which is the default.
 Layer 2 prose compression requires `compress_mode="aggressive"`,
 `compress_prose=true`, and the optional LLMLingua dependency. The legacy
 `code`, `ccr`, and `align` compression subcommands and their configuration
@@ -187,7 +189,7 @@ The optimize module uses a separate SQLite database:
   "semantic_centroid_min_similarity": 0.85,
   "semantic_max_index_entries": 10000,
   "semantic_max_tenants": 10000,
-  "compress_enabled": false,
+  "compress_enabled": true,
   "compress_mode": "safe",
   "compress_prose": false,
   "compress_protect_recent": 4,
