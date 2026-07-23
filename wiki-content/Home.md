@@ -46,7 +46,7 @@ optional enrichers and retrieval channels are dependency- and mode-aware.
 | Optimize | Exact cache, tag invalidation, safe compression, opt-in lossy prose compression and CCR originals | Only the proxy can intercept a primary provider turn. |
 | Mesh | Authenticated peer messages, locks, inbox/outbox, queues and optional discovery | Mesh coordinates peers; it is not a replicated distributed-memory database. |
 | Governance | Provenance, audit, retention, policy, export/erasure, health and diagnostics | Deployment configuration determines compliance posture. |
-| Integrations | CLI, Python SDK, MCP, Claude plugin, Codex add-on, documented IDE configs, Gmail/Calendar/transcript adapters | Connectors and hooks are opt-in and have their own data paths. |
+| Integrations | CLI, Python SDK, MCP, Claude plugin, Codex add-on, documented IDE configs, Gmail/Calendar/transcript adapters, nine framework adapters (LangGraph, Semantic Kernel, Microsoft Agent Framework, LangChain, LlamaIndex, CrewAI, AutoGen, Google ADK, OpenAI Agents) | Connectors and hooks are opt-in and have their own data paths. |
 
 ## Operating modes
 
@@ -60,9 +60,9 @@ Mode A does not disable model downloads, adapters, backup, proxy providers, or
 other integrations that an operator explicitly enables. Review the complete
 deployment before making a privacy or compliance determination.
 
-## Teams and enterprise memory (v3.8.0)
+## What's new in V3.8.0
 
-V3.8.0 adds multi-user and compliance controls:
+**Teams and enterprise memory**
 
 - **Users and roles** — admin / member / viewer, scoped per workspace
 - **Login gate** — `require_login = true` for team and enterprise deployments
@@ -71,6 +71,19 @@ V3.8.0 adds multi-user and compliance controls:
 - **PII redaction** — configurable automatic redaction before memory content crosses trust boundaries
 
 Personal installs are unchanged — no login required by default. See [[RBAC and Teams]] and [[GDPR Compliance]].
+
+**Bounded loops** — gate-verified iteration with a durable SLM-backed ledger. Three surfaces:
+`slm loop` CLI, `/slm-loop` plugin command, and MCP tools `slm_loop_run` /
+`slm_loop_history` / `slm_loop_show`. The gate is an independent recall query;
+the agent's claim of completion is never used. See [[Bounded Loops]].
+
+**Nine framework adapters** — LangGraph, Semantic Kernel, Microsoft Agent
+Framework, LangChain, LlamaIndex, CrewAI, AutoGen, Google ADK, and OpenAI
+Agents. Each implements its framework's native memory interface and writes
+through the SLM V3 ingestion contract. See [[Framework Adapters]].
+
+**MCP profile update** — profiles now include bounded-loop tools. Counts:
+core 14 / code 24 / full 42 / power 54 / whole 84. See [[MCP Tools]].
 
 ## Dashboard workspaces
 

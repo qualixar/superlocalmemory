@@ -760,6 +760,50 @@ slm evolve --session abc123 --profile work
 
 ---
 
+## Bounded Loops (v3.8.0)
+
+### `slm loop demo [--iterations N] [--json]`
+
+Run the keyless convergence demo. A stub proposer runs laps against a deterministic gate (fails twice, passes on lap 3). Every lap is written to SLM memory under tag `loop:convergence-demo` and is visible on the dashboard.
+
+```bash
+slm loop demo
+slm loop demo --iterations 5
+slm loop demo --json
+```
+
+Confirms the bounded-loop engine, SLM ledger, and gate mechanism end to end without a credentialed agent or a running daemon. Use it to verify the installation after an upgrade.
+
+### `slm loop history [--name NAME] [--json]`
+
+List recorded runs for a loop name from the SLM ledger.
+
+```bash
+slm loop history                          # defaults to "convergence-demo"
+slm loop history --name deploy-gate
+slm loop history --name deploy-gate --json
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--name NAME` | `convergence-demo` | Loop name to query |
+| `--json` | off | Emit structured JSON |
+
+### `slm loop show <run_id> [--json]`
+
+Show every lap of one run, in order.
+
+```bash
+slm loop show <run_id>
+slm loop show <run_id> --json
+```
+
+`run_id` is printed by `slm loop demo` and returned by the `slm_loop_run` MCP tool. Each lap row records `decision`, gate pass/fail, detail text, and token budget.
+
+The MCP equivalents are `slm_loop_run`, `slm_loop_history`, and `slm_loop_show`. See [MCP Tools Reference → Bounded-Loop Tools](mcp-tools.md#bounded-loop-tools-v380).
+
+---
+
 ## Database Maintenance
 
 ### `slm db migrate [options]`

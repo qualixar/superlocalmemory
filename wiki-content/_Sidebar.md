@@ -17,6 +17,11 @@
 * [Auto-Memory](Auto-Memory)
 * [Active Memory (V3.1)](Active-Memory)
 
+**Integrations**
+* [Framework Adapters](Framework-Adapters)
+* [Bounded Loops](Bounded-Loops)
+* [Multi-Agent Memory](Multi-Agent-Memory)
+
 **Architecture**
 * [Architecture Overview](V3-Architecture)
 * [Capabilities and Operations](Capabilities-and-Operations)

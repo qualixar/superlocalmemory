@@ -1,4 +1,4 @@
-# V3.7 Architecture
+# V3.8.0 Architecture
 
 SuperLocalMemory combines a local canonical memory store, multi-channel
 retrieval, lifecycle and learning controls, Optimize, Mesh, and MCP/CLI/IDE

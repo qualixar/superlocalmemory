@@ -135,6 +135,34 @@ enable:
 
 You can still use `slm remember` and `slm recall` from the terminal whenever you want explicit control.
 
+## Try Bounded Loops (v3.8.0)
+
+A bounded loop runs laps until an independent gate passes — not until the agent claims it is done. Every lap is persisted to your SLM data root, queryable via `slm recall`, and visible on the dashboard.
+
+Verify the engine end to end with the built-in demo:
+
+```bash
+slm loop demo
+```
+
+Expected output:
+
+```
+✓ [DONE] gate passed on lap 3 (laps: 3)
+   lap 1: changed  gate-fail  demo gate: lap 1
+   lap 2: changed  gate-fail  demo gate: lap 2
+   lap 3: changed  gate-pass  demo gate: lap 3
+run_id: <id>  (recall with tag loop:convergence-demo)
+```
+
+Then recall the stored lap history:
+
+```bash
+slm recall "convergence-demo loop"
+```
+
+For the full parameter set, see [CLI Reference → Bounded Loops](cli-reference.md#bounded-loops-v380) and [MCP Tools Reference → Bounded-Loop Tools](mcp-tools.md#bounded-loop-tools-v380).
+
 ## Next Steps
 
 | What you want to do | Guide |
@@ -144,6 +172,7 @@ You can still use `slm remember` and `slm recall` from the terminal whenever you
 | Learn all CLI commands | [CLI Reference](cli-reference.md) |
 | Migrate from V2 | [Migration from V2](migration-from-v2.md) |
 | Understand how it works | [Architecture](architecture.md) |
+| Use SLM from a Python framework | [Framework Adapters](framework-adapters.md) |
 
 ---
 

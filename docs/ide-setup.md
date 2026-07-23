@@ -517,6 +517,28 @@ slm connect zed
 
 ---
 
+## Framework Adapters (v3.8.0)
+
+Nine Python packages back their framework's native memory interface with the local SLM data root. Install alongside the framework; no running daemon is required for core usage.
+
+| Framework | Install name | Implements |
+|-----------|-------------|------------|
+| LangGraph | `langgraph-superlocalmemory` | `BaseStore` |
+| Semantic Kernel | `semantic-kernel-superlocalmemory` | `VectorStore` |
+| Microsoft Agent Framework | `agent-framework-superlocalmemory` | `ContextProvider` / `HistoryProvider` |
+| LangChain | `langchain-superlocalmemory` | `BaseChatMessageHistory` |
+| LlamaIndex | `llama-index-storage-chat-store-superlocalmemory` | `BaseChatStore` |
+| CrewAI | `crewai-superlocalmemory` | `StorageBackend` |
+| AutoGen | `autogen-superlocalmemory` | `Memory` |
+| Google ADK | `google-adk-superlocalmemory` | `BaseMemoryService` |
+| OpenAI Agents | `openai-agents-superlocalmemory` | `SessionABC` |
+
+All adapters write to the same SLM data root that the CLI, MCP, and dashboard surface. Optional SLM providers, connectors, and backup have separate network behavior.
+
+Full usage examples and prerequisites: [Framework Adapters →](framework-adapters.md)
+
+---
+
 ## Verifying the Connection
 
 After connecting any IDE, verify it works:

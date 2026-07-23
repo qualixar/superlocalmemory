@@ -125,6 +125,7 @@ health surfaces expose the stages actually completed by the installed runtime.
 | Knowledge Graph and Memories | graph neighborhoods, entities, scenes, temporal evidence, memory inspection and mutation |
 | Operations | ingestion-operation state, traces, maintenance and lifecycle work |
 | Entity Explorer and Skill Evolution | compiled entity summaries/timelines; opt-in skill lineage, budgets and verification outcomes |
+| Multi-Agent Memory | per-agent write activity and attribution; memories stamped by `SLM_AGENT_ID`, agent write counts, and trust signals |
 | Mesh Peers | configured peers, inbox/outbox, pending coordination and locks |
 | Settings and Optimize | mode/provider/configuration; cache, compression and savings telemetry |
 
@@ -544,6 +545,61 @@ Full reference: [docs/rbac-teams.md](docs/rbac-teams.md) · [docs/deployment-tie
 
 ---
 
+## Bounded Loops (v3.8.0)
+
+A bounded loop terminates only when an **independent gate** passes — a test
+suite exit code, a linter, a JSON-schema check, or an SLM-recall condition.
+The agent's own "I finished" message is recorded as advisory context and never
+used as the termination signal. Every lap is persisted to SLM memory under the
+tag `loop:<name>`, so runs are auditable and resumable across sessions.
+
+Three surfaces ship together:
+
+| Surface | How you use it |
+|---------|---------------|
+| **CLI** | `slm loop demo` · `slm loop history [--name <n>]` · `slm loop show <run_id>` |
+| **Skill + agent** | `/slm-loop` skill with the `slm-loop-runner` agent — delegate a task that has a checkable acceptance condition |
+| **MCP tools** | `slm_loop_run` · `slm_loop_history` · `slm_loop_show` — call from any IDE or agent (available in the `code` and `full` MCP profiles) |
+
+```bash
+# Run the built-in convergence demo (no API key needed)
+slm loop demo
+
+# Inspect recorded runs
+slm loop history --name convergence-demo
+slm loop show <run_id>
+```
+
+Loop laps are stored as ordinary SLM memories and are visible in the dashboard
+under Knowledge Graph and Memories (filter by tag `loop:<name>`) and in the
+Multi-Agent Memory workspace.
+
+---
+
+## Framework Adapters (v3.8.0)
+
+SLM ships nine framework adapters under `ide/integrations/`. Each adapter
+wires SLM as the memory and history provider for the respective framework
+without replacing the framework's own agent runtime.
+
+| Framework | Directory |
+|-----------|-----------|
+| LangGraph | `ide/integrations/langgraph/` |
+| Semantic Kernel | `ide/integrations/semantic-kernel/` |
+| Microsoft Agent Framework | `ide/integrations/agent-framework/` |
+| LangChain | `ide/integrations/langchain/` |
+| LlamaIndex | `ide/integrations/llamaindex/` |
+| CrewAI | `ide/integrations/crewai/` |
+| AutoGen | `ide/integrations/autogen/` |
+| Google ADK | `ide/integrations/google-adk/` |
+| OpenAI Agents | `ide/integrations/openai-agents/` |
+
+Pydantic AI is not included — it does not expose a formal memory interface for
+external providers. Each adapter's `README.md` covers installation and
+configuration for that framework.
+
+---
+
 ## Advanced
 
 | Topic | Link |
@@ -572,14 +628,16 @@ Full reference: [docs/rbac-teams.md](docs/rbac-teams.md) · [docs/deployment-tie
 slm dashboard    # Opens at http://localhost:8765
 ```
 The dashboard includes Dashboard, Brain, Knowledge Graph, Memories, Health,
-Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and
-Optimize workspaces. Features are populated only when their corresponding
-runtime capability is enabled and healthy.
+Operations, Entity Explorer, Skill Evolution, Multi-Agent Memory, Mesh Peers,
+Settings, and Optimize workspaces. Features are populated only when their
+corresponding runtime capability is enabled and healthy.
 
 **Release history:**
 
 | Version | Codename | Key Features |
 |---|---|---|
+| **v3.8.0** | Teams & Bounded Loops | Team/role/GDPR controls, bounded loops with gate-verified iteration (`slm loop`, MCP tools `slm_loop_run/history/show`, `/slm-loop` skill), nine framework adapters (LangGraph · Semantic Kernel · Microsoft Agent Framework · LangChain · LlamaIndex · CrewAI · AutoGen · Google ADK · OpenAI Agents), multi-agent memory dashboard |
+| **v3.7.x** | Security & Stability | Profile-isolation leak fix, loopback auth opt-in, Scale Engine parity promotion, skill-evolution cost caps, dashboard landing page fixes, auth hardening across MCP/API/dashboard |
 | **v3.6.23** | Cross-platform Patch | Windows doctor/cache stats fixes (#65), neutral SLM hook guidance (#64), pi.dev MCP docs (#31), contributor fixes for dashboard profile path resolution (#63) and tz-naive Langevin maintenance backfill (#66) |
 | **v3.6.22** | Stability | backbone.py JSONDecodeError on empty HTTP 200 body (issue #62) — retries 3× then returns "" gracefully; remaining dashboard UI audit: clusters/compliance/entities r.ok guards, math-health status badge colors |
 | **v3.6.21** | Dashboard Audit | Full UI audit across all 7 dashboard tabs — auth fix for mesh panel (issue #60 frontend), Quick Store endpoint, timeline endpoint, r.ok guards, SSE \r fix, event delegation for lazy tabs, optimize toggle revert |

@@ -121,6 +121,42 @@ boundary.
 
 > **Hard constraint:** Surfaces B and C cache results you explicitly route through SLM — not the Claude conversation turn. Full-turn caching requires Surface A (proxy).
 
+## MCP Profiles (V3.8.0)
+
+A profile is a named, fixed subset of tools exposed to the connecting client.
+Set the active profile via the `SLM_MCP_PROFILE` environment variable or the
+`switch_profile` tool. The `whole` profile exposes the raw server with all
+tools (set `SLM_MCP_ALL_TOOLS=1`).
+
+| Profile | Tool count | Included surfaces |
+|---|---|---|
+| `core` | **14** | Store, recall, search, sessions, optimize |
+| `code` | **24** | Core + code-graph tools + profile switching + bounded loops |
+| `full` | **42** | All everyday memory, optimize, brain, and mesh tools |
+| `power` | **54** | Full + governance and behavioral analysis tools |
+| `whole` | **84** | All registered tools (raw server) |
+
+Legacy count-suffixed aliases (`code24`, `full42`, `power54`, `whole84`, etc.)
+resolve to their canonical name for backward compatibility.
+
+The three bounded-loop tools (`slm_loop_run`, `slm_loop_history`,
+`slm_loop_show`) are included in `code`, `full`, `power`, and `whole`.
+See [Bounded Loops](Bounded-Loops) for the tool reference.
+
+Switch profiles without restarting the daemon:
+
+```bash
+slm profile switch code    # CLI
+```
+
+Or via MCP tool:
+
+```python
+await switch_profile(name="full")
+```
+
+The active profile is visible in the dashboard under **MCP & Tools**.
+
 ## How MCP Integration Works
 
 1. Your IDE connects to the SuperLocalMemory MCP server via `slm mcp`

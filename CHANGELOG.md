@@ -5,7 +5,7 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.8.0] - 2026-07-22 — Teams, roles, and multi-tenant memory
+## [3.8.0] - 2026-07-23 — Teams, bounded loops, and nine framework adapters
 
 ### Added
 
@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optional personal-data scrubbing on save.** Enable PII redaction and emails,
   phone numbers, national IDs, payment cards, and IP addresses are stripped from
   content before it is ever stored.
+- **Bounded loops — gate-verified iteration.** A loop terminates only when an
+  independent gate passes (a test exit code, a linter, a JSON-schema check, or
+  an SLM-recall condition) — never when the agent reports completion. Every lap
+  is persisted to SLM memory under the tag `loop:<name>`, making runs auditable
+  and resumable across sessions. Ships on three surfaces: the `slm loop` CLI
+  (`demo` / `history` / `show`), the `/slm-loop` skill with the
+  `slm-loop-runner` agent, and the MCP tools `slm_loop_run` /
+  `slm_loop_history` / `slm_loop_show` (available in the `code` and `full`
+  profiles).
+- **Nine framework adapters.** SLM now ships adapters under `ide/integrations/`
+  for LangGraph, Semantic Kernel, Microsoft Agent Framework, LangChain,
+  LlamaIndex, CrewAI, AutoGen, Google ADK, and OpenAI Agents. Each adapter
+  wires SLM as the memory and history provider without replacing the framework's
+  agent runtime. Pydantic AI is intentionally not included — it does not expose
+  a formal memory interface for external providers.
+- **Multi-Agent Memory dashboard page.** A new dashboard workspace shows
+  per-agent write activity and attribution for environments where multiple
+  agents share one SLM deployment. Memory entries are stamped via
+  `SLM_AGENT_ID`; the page surfaces per-agent write counts, recent activity,
+  and agent trust signals.
 
 ### Changed / Fixed
 

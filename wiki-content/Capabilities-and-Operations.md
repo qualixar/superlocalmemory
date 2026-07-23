@@ -1,6 +1,6 @@
 # Capabilities and Operations
 
-This page is the product-level map for SuperLocalMemory V3.7. It separates
+This page is the product-level map for SuperLocalMemory V3.8.0. It separates
 what the runtime provides from what an operator must explicitly configure or
 verify.
 
@@ -63,6 +63,19 @@ uses conservative normalization; aggressive prose compression is opt-in and
 lossy. MCP and skill use do not intercept the primary conversation turn unless
 a proxy is in the path.
 
+## Bounded loops and multi-agent coordination
+
+V3.8.0 adds gate-verified bounded loops. The invariant: an independent gate
+decides when a loop is done, never the agent's own claim. Every lap is
+persisted to the SLM data root with tag `loop:<name>`.
+
+Three surfaces: `slm loop` CLI (demo / history / show), the `/slm-loop`
+plugin command, and three MCP tools (`slm_loop_run`, `slm_loop_history`,
+`slm_loop_show`). Over MCP the gate is a recall query — one agent waits under
+strict bounds for a memory another agent will write.
+
+See [Bounded Loops](Bounded-Loops) and [Multi-Agent Memory](Multi-Agent-Memory).
+
 ## Mesh and integrations
 
 SLM Mesh provides authenticated messages, queues, locks, inbox/outbox, and
@@ -70,11 +83,16 @@ optional peer discovery. It coordinates configured peers; it is not a
 replicated, conflict-resolving memory database.
 
 SLM exposes CLI, Python, MCP HTTP/stdio, dashboard, a Claude Code plugin, and
-an additive Codex add-on. Named IDE configurations are available through `slm
-connect`; hooks, IDE configuration, connectors, cloud backup, and Gmail,
-Calendar, or transcript adapters must be enabled explicitly. Dynamic memories
-are retrieved at runtime as bounded untrusted evidence, not copied into IDE
-instruction files.
+an additive Codex add-on. Nine framework adapters are available for LangGraph,
+Semantic Kernel, Microsoft Agent Framework, LangChain, LlamaIndex, CrewAI,
+AutoGen, Google ADK, and OpenAI Agents. Named IDE configurations are available
+through `slm connect`; hooks, IDE configuration, connectors, cloud backup, and
+Gmail, Calendar, or transcript adapters must be enabled explicitly. Dynamic
+memories are retrieved at runtime as bounded untrusted evidence, not copied
+into IDE instruction files.
+
+See [Framework Adapters](Framework-Adapters) for installation and interface
+details.
 
 ## Governance and verification
 

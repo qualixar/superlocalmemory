@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
-description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally with zero cloud dependency."
-version: "3.4.22"
+description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally. Local data root; optional networked features have separate behavior."
+version: "3.8.0"
 author: "Varun Pratap Bhardwaj"
 license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
@@ -19,7 +19,7 @@ triggers:
 
 # SuperLocalMemory
 
-AI agent memory that runs 100% locally. Five candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) fuse via RRF, with an entity-graph post-fusion score enhancement — all with mathematical similarity scoring. No cloud, no API keys, EU AI Act compliant.
+AI agent memory with a local data root. Five candidate producers (semantic, BM25, temporal, spreading-activation, Hopfield) fuse via RRF, with an entity-graph post-fusion score enhancement — all with mathematical similarity scoring. Mode A operates without sending memory content to a cloud model provider; optional connectors, backup, and proxy providers are explicit choices with separate behavior.
 
 ## Installation
 
@@ -75,6 +75,18 @@ slm connect --json                        # Auto-configure IDEs
 slm connect --list --json                 # List supported IDEs
 ```
 
+### Bounded Loops
+
+```bash
+slm loop demo                             # Run built-in convergence demo (no API key needed)
+slm loop history [--name <loop-name>]     # List recorded runs from SLM memory
+slm loop show <run_id>                    # Show every lap of one run
+```
+
+Loop laps are persisted to SLM memory under the tag `loop:<name>`. MCP tools
+`slm_loop_run`, `slm_loop_history`, and `slm_loop_show` are available in the
+`code` and `full` profiles.
+
 ### Services (no --json)
 
 ```bash
@@ -121,7 +133,7 @@ Error responses:
 
 | Mode | Description | Cloud Required |
 |------|-------------|----------------|
-| A | Local Guardian -- zero cloud, zero LLM, EU AI Act compliant | None |
+| A | Local Guardian -- core memory runs without a cloud model provider; optional connectors and model downloads may use the network | None (for core memory) |
 | B | Smart Local -- local Ollama LLM, data stays on your machine | Local only |
 | C | Full Power -- cloud LLM for maximum accuracy | Yes |
 
@@ -129,8 +141,8 @@ Error responses:
 
 SuperLocalMemory works via both MCP and CLI:
 
-- **MCP**: 24 tools for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed)
-- **CLI**: 18 commands with `--json` for scripts, CI/CD, agent frameworks (OpenClaw, Codex, Goose)
+- **MCP**: 24 tools (`code` profile) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`
+- **CLI**: commands with `--json` for scripts, CI/CD, and agent frameworks; includes `slm loop demo/history/show`
 
 ---
 

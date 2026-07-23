@@ -147,6 +147,38 @@ V3 uses three mathematical layers. These are not academic additions — they sol
 
 **Effect:** Active memories stay prominent. Stale memories fade gracefully. Storage stays efficient.
 
+## Bounded Loop Engine (v3.8.0)
+
+A gate-verified iteration primitive. The engine runs laps until an independent gate passes or a hard bound trips. The agent's own claim that it is done is recorded per lap for audit, but does not terminate the run — only the independent gate can.
+
+Three surfaces drive the same engine and the same durable ledger:
+
+| Surface | Entry point |
+|---------|-------------|
+| CLI | `slm loop {demo\|history\|show}` |
+| MCP | `slm_loop_run`, `slm_loop_history`, `slm_loop_show` |
+| Slash command | `/slm-loop` |
+
+Every lap is stored in the active SLM data root under tag `loop:<name>`, making the full run history queryable via `slm recall` and visible on the dashboard.
+
+## Framework Adapters (v3.8.0)
+
+Nine Python packages implement each framework's native memory interface, backed by the local SLM data root:
+
+| Package | Framework | Interface |
+|---------|-----------|-----------|
+| `langgraph-superlocalmemory` | LangGraph | `BaseStore` |
+| `semantic-kernel-superlocalmemory` | Semantic Kernel | `VectorStore` |
+| `agent-framework-superlocalmemory` | Microsoft Agent Framework | `ContextProvider` / `HistoryProvider` |
+| `langchain-superlocalmemory` | LangChain | `BaseChatMessageHistory` |
+| `llama-index-storage-chat-store-superlocalmemory` | LlamaIndex | `BaseChatStore` |
+| `crewai-superlocalmemory` | CrewAI | `StorageBackend` |
+| `autogen-superlocalmemory` | AutoGen | `Memory` |
+| `google-adk-superlocalmemory` | Google ADK | `BaseMemoryService` |
+| `openai-agents-superlocalmemory` | OpenAI Agents | `SessionABC` |
+
+Each adapter delegates persistence to the same SLM engine that powers the CLI and MCP surfaces. Optional SLM providers, connectors, and backup retain their documented network behavior. See [Framework Adapters →](framework-adapters.md).
+
 ## Privacy and compliance controls
 
 SuperLocalMemory provides controls that may support a deployment's privacy and compliance program. It is not a legal certification. Operators must assess the configured system, use case, data flows, and surrounding services.
