@@ -6,9 +6,9 @@
 </p>
 
 <h1 align="center">SuperLocalMemory V3.8.0</h1>
-<p align="center"><strong>Cache. Compress. Remember. Three surfaces — proxy, MCP tools, or skill. Every setup covered.</strong><br/>
-<em>Local-first agent memory with explicit operating modes, auditable retrieval, and optional Optimize tools.</em></p>
-<p align="center"><code>v3.8.0</code> — <strong>Team &amp; company memory: users, roles, and per-workspace isolation, with GDPR export and erasure built in.</strong><br/>
+<p align="center"><strong>Enterprise-grade, local-first memory for AI agents and teams.</strong><br/>
+<em>A persistent, auditable long-term brain for your agents that runs on your own infrastructure — with multi-workspace isolation, role-based access, and GDPR + EU AI Act governance controls built in.</em></p>
+<p align="center"><code>v3.8.0</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, and the <strong>Claude, Codex, and GitHub Copilot</strong> plugins.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -19,6 +19,7 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
   <a href="#privacy-controls-and-operating-modes"><img src="https://img.shields.io/badge/Privacy-Deployment_Assessed-brightgreen?style=for-the-badge" alt="Privacy controls require deployment assessment"/></a>
+  <a href="#teams-and-enterprise-memory-v380"><img src="https://img.shields.io/badge/Enterprise-GDPR_%7C_EU_AI_Act-0b5394?style=for-the-badge" alt="Enterprise governance: GDPR and EU AI Act controls"/></a>
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
@@ -29,6 +30,8 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
 
 ## Why SuperLocalMemory?
 
+SuperLocalMemory is an enterprise-grade, local-first memory control plane for AI agents. Your team's agent memory lives on infrastructure you control, with per-workspace isolation, role-based access, and GDPR / EU AI Act governance controls — built for organizations, and for EU data-residency obligations where agent context must not leave your environment by default.
+
 Agent-memory systems make different storage, model-provider, and deployment trade-offs. SuperLocalMemory starts with a local runtime and makes provider-backed enrichment, cloud backup, connectors, and proxy use explicit choices.
 
 SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
@@ -38,7 +41,7 @@ SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph
 **What V3.8.0 adds.** This release is a reliability and governance pass on that foundation, not one feature:
 
 - **Temporal depth** — the time-aware retrieval and lifecycle described above.
-- **Governance** — [team roles, workspace isolation, a login gate, memory scopes, and GDPR export/erasure controls](#teams-and-enterprise-memory-v380).
+- **Governance & EU compliance** — [team roles, workspace isolation, a login gate, multi-scope memory, GDPR access/erasure/portability rights, a hash-chained audit trail, and per-mode EU AI Act self-assessment](#teams-and-enterprise-memory-v380).
 - **Framework adapters** — [drop-in, engine-backed memory for nine agent frameworks](#framework-adapters-v380).
 - **Bounded loops** — [gate-verified agent loops where an independent check, not the agent's own claim, decides when a task is done](#bounded-loops-v380).
 - **Stronger cache and compression** — exact-match caching with tagged invalidation plus opt-in reversible compression, across proxy, MCP, and skill surfaces.
@@ -461,6 +464,28 @@ not a byte-preserving operation; use it only when you want the MCP server
 configured. Check the result with `slm codex status`; undo SLM-owned add-ons
 with `slm codex remove`.
 
+## GitHub Copilot plugin
+
+GitHub Copilot gets SuperLocalMemory as its long-term brain — at parity with the
+Claude and Codex plugins — across VS Code, Visual Studio, JetBrains, Eclipse, and
+the Copilot CLI:
+
+```bash
+slm connect copilot
+```
+
+A non-destructive merge into your existing project (nothing is overwritten):
+
+- **`.vscode/mcp.json`** — the SLM MCP server, GA on every Copilot IDE (the reliable baseline).
+- **`.github/copilot-instructions.md`** — SLM agent rules, merged inside `<!-- SLM-START -->` / `<!-- SLM-END -->` markers.
+- **`.github/prompts/*.prompt.md`** — 12 slash-command skills: `slm-cache`, `slm-compress`, `slm-governance`, `slm-graph`, `slm-loop`, `slm-mesh`, `slm-profile`, `slm-recall`, `slm-remember`, `slm-scope`, `slm-session`, `slm-status`.
+- **`.github/agents/*.agent.md`** — memory, optimize, and governance advisors.
+- **`.github/hooks/slm-hooks.json`** — session lifecycle (stable on Copilot CLI and cloud agents; VS Code Preview as of 2026).
+
+MCP works on every Copilot IDE at GA; prompts, agents, and hooks are additive and
+degrade gracefully where an IDE does not yet support them. An instruction-level
+fallback in `copilot-instructions.md` keeps memory working even without hooks.
+
 ---
 
 ## Privacy controls and operating modes
@@ -540,6 +565,15 @@ SLM ships built-in controls that support GDPR compliance programs:
 - **PII redaction** — configurable automatic redaction before memory content crosses trust boundaries
 
 These are engineering controls. Compliance depends on deployment configuration, use case, and operator responsibility. See [docs/compliance.md](docs/compliance.md).
+
+### EU AI Act mode verification
+
+SLM includes a per-mode EU AI Act self-assessment. The `EUAIActChecker` produces a compliance report for the active operating mode — risk category, whether data stays local, whether generative AI is used, and transparency / human-oversight signals:
+
+- **Mode A (Local Guardian)** and **Mode B (Smart Local)** — assessed as compliant: memory processing stays local and uses no generative AI.
+- **Mode C (Provider-assisted)** — flagged non-compliant, because query or enrichment content is sent to a cloud model provider.
+
+This is operator self-assessment tooling, not a legal certification or conformity assessment; actual EU AI Act obligations depend on your system, deployment, and role. See [docs/compliance.md](docs/compliance.md).
 
 ### Deployment tiers
 
