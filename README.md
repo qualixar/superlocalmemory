@@ -33,6 +33,19 @@ Agent-memory systems make different storage, model-provider, and deployment trad
 
 SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
+**Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
+
+**What V3.8.0 adds.** This release is a reliability and governance pass on that foundation, not one feature:
+
+- **Temporal depth** — the time-aware retrieval and lifecycle described above.
+- **Governance** — [team roles, workspace isolation, a login gate, memory scopes, and GDPR export/erasure controls](#teams-and-enterprise-memory-v380).
+- **Framework adapters** — [drop-in, engine-backed memory for nine agent frameworks](#framework-adapters-v380).
+- **Bounded loops** — [gate-verified agent loops where an independent check, not the agent's own claim, decides when a task is done](#bounded-loops-v380).
+- **Stronger cache and compression** — exact-match caching with tagged invalidation plus opt-in reversible compression, across proxy, MCP, and skill surfaces.
+- **Stability** — a long defect-and-audit sweep across ingestion, retrieval, mesh, and the dashboard hardens the everyday path.
+
+SLM is one strand of Qualixar's work on AI reliability engineering: making agent behavior observable, bounded, and reproducible instead of best-effort.
+
 **Published benchmark evidence carried into V3.8.0:** the architecture evaluated in the V3 paper remains the foundation of this release. The figures below keep their original LoCoMo protocol, answer-construction, model, and sample scope; they are not a claim of a newly rerun V3.8.0 package benchmark.
 
 ### How SLM fits beside other memory systems
