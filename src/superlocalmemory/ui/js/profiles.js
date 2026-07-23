@@ -332,25 +332,13 @@ async function switchProfile(profileName) {
         var acknowledged = response.ok && data.success === true &&
             data.active_profile === profileName && Number.isInteger(data.generation);
         if (acknowledged) {
-            showToast('Switched to profile: ' + profileName);
-            loadProfiles();
-            loadStats();
-            if (typeof loadGraph === 'function') loadGraph();
-            loadProfilesTable();
-            // v2.7.4: Reload ALL tabs for new profile
-            if (typeof loadLearning === 'function') loadLearning();
-            if (typeof refreshFeedbackStats === 'function') refreshFeedbackStats();
-            if (typeof loadLearningDataStats === 'function') loadLearningDataStats();
-            if (typeof loadAgents === 'function') loadAgents();
-            if (typeof loadMemories === 'function') loadMemories();
-            if (typeof loadTimeline === 'function') loadTimeline();
-            if (typeof loadEvents === 'function') loadEvents();
-            // v2.8 tabs
-            if (typeof loadLifecycle === 'function') loadLifecycle();
-            if (typeof loadBehavioral === 'function') loadBehavioral();
-            if (typeof loadCompliance === 'function') loadCompliance();
-            var activeTab = document.querySelector('#mainTabs .nav-link.active');
-            if (activeTab) activeTab.click();
+            // A profile switch is a full context change: reload the whole
+            // dashboard so EVERY pane, KPI, graph, and table reflects the new
+            // profile. Piecemeal per-pane refresh (the legacy loadX pile) left
+            // stale cross-profile data in any pane that wasn't re-fetched, and
+            // the OD dashboard's panes aren't driven by those legacy loaders.
+            showToast('Switched to profile: ' + profileName + ' — refreshing…');
+            setTimeout(function () { window.location.reload(); }, 350);
             return true;
         } else {
             showToast(data.detail || 'Daemon did not acknowledge the requested profile');
