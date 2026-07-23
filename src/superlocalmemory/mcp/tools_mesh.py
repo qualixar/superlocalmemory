@@ -166,7 +166,15 @@ def _ensure_registered() -> None:
         "session_id": os.environ.get("CLAUDE_SESSION_ID", _PEER_ID),
         "summary": _SESSION_SUMMARY or "SLM MCP session",
         "project_path": _PROJECT_PATH,
-        "agent_type": os.environ.get("CLAUDE_AGENT_TYPE", "claude_code"),
+        # Peer identity is the canonical SLM_AGENT_ID (same var memory
+        # attribution uses), so Antigravity/Hermes/Cursor/etc. show as
+        # themselves instead of collapsing to "claude_code". Fall back to the
+        # legacy CLAUDE_AGENT_TYPE, then a generic default.
+        "agent_type": (
+            os.environ.get("SLM_AGENT_ID")
+            or os.environ.get("CLAUDE_AGENT_TYPE")
+            or "claude_code"
+        ),
     })
     if result:
         # v3.6.12 (mesh-1): the broker mints its OWN peer_id (RegisterRequest has
