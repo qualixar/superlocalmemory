@@ -52,6 +52,15 @@
     return Math.floor(d / 86400) + 'd ago';
   }
 
+  // An agent is "active" only if it wrote memory recently. This page's data is
+  // last-write time, not a live connection, so most agents are historical.
+  var ACTIVE_WINDOW_MS = 10 * 60 * 1000;  // 10 minutes
+  function isRecent(iso) {
+    if (!iso) return false;
+    var t = new Date(iso).getTime();
+    return !isNaN(t) && (Date.now() - t) < ACTIVE_WINDOW_MS;
+  }
+
   function fmtDate(iso) {
     if (!iso) return '—';
     try {
@@ -123,9 +132,9 @@
             '<div class="delta" id="od-agents-kpi-profile">&nbsp;</div>' +
           '</div>' +
           '<div class="card kpi">' +
-            '<div class="label"><span data-ic="mesh"></span> Active agents</div>' +
+            '<div class="label"><span data-ic="mesh"></span> Contributing agents</div>' +
             '<div class="value num" id="od-agents-kpi-count">—</div>' +
-            '<div class="delta">stamped SLM_AGENT_ID</div>' +
+            '<div class="delta" id="od-agents-kpi-active">&nbsp;</div>' +
           '</div>' +
         '</section>' +
 
@@ -177,6 +186,12 @@
     if (totEl)  totEl.textContent  = Number(data.total_memories || 0).toLocaleString();
     if (cntEl)  cntEl.textContent  = Number(data.agent_count   || 0).toLocaleString();
     if (profEl) profEl.textContent = 'profile: ' + escapeHtml(data.profile_id || 'default');
+    var actEl = document.getElementById('od-agents-kpi-active');
+    if (actEl) {
+      var agents = Array.isArray(data.agents) ? data.agents : [];
+      var live = agents.filter(function (a) { return isRecent(a.last_active); }).length;
+      actEl.textContent = live + (live === 1 ? ' active in last 10m' : ' active in last 10m');
+    }
   }
 
   // ── Render: per-agent cards ───────────────────────────────────────────────
@@ -214,15 +229,22 @@
       var letter = escapeHtml(rawId.charAt(0).toUpperCase());  // SEC: escape before innerHTML
       var bg     = avatarColor(rawId);
       var ago    = escapeHtml(timeAgo(a.last_active));
+      var live   = isRecent(a.last_active);
+      var dot    = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;' +
+                   'margin-right:5px;vertical-align:middle;background:' +
+                   (live ? 'var(--ok)' : 'var(--fg-3)') + '"></span>';
 
+      // Clickable: card drills into this agent's memories (sets the filter).
       html +=
-        '<div class="card launch-card" style="cursor:default">' +
+        '<div class="card launch-card slm-agent-card" data-agent="' + id + '" ' +
+          'style="cursor:pointer" title="View ' + id + '’s recent memories">' +
           '<div style="display:flex;align-items:center;gap:11px;margin-bottom:12px">' +
             '<span class="avatar" style="background:' + bg + '">' + letter + '</span>' +
             '<div style="flex:1;min-width:0">' +
               '<h3 style="font-size:15px;white-space:nowrap;overflow:hidden;' +
                 'text-overflow:ellipsis" title="' + id + '">' + id + '</h3>' +
-              '<span class="mono dim" style="font-size:11px">active ' + ago + '</span>' +
+              '<span class="mono dim" style="font-size:11px">' + dot +
+                (live ? 'active ' : 'wrote ') + ago + '</span>' +
             '</div>' +
             '<span class="badge ok">' + count.toLocaleString() + '</span>' +
           '</div>' +
@@ -230,6 +252,7 @@
             '<span class="dim">source types</span>' +
           '</div>' +
           '<div>' + fmtChips(a.source_types) + '</div>' +
+          '<div style="margin-top:10px;font-size:11.5px;color:var(--violet)">View memories →</div>' +
         '</div>';
     });
     grid.innerHTML = html;
@@ -431,6 +454,21 @@
       retryBtn.addEventListener('click', function () {
         hideError();
         loadAll();
+      });
+    }
+
+    // Click an agent card → filter Recent memories to that agent + scroll to it.
+    var grid = container.querySelector('#od-agents-grid');
+    if (grid) {
+      grid.addEventListener('click', function (e) {
+        var card = e.target && e.target.closest ? e.target.closest('.slm-agent-card') : null;
+        if (!card) return;
+        var agent = card.getAttribute('data-agent');
+        if (!agent) return;
+        var f = document.getElementById('od-agents-filter');
+        if (f) { f.value = agent; applyFilter(); }
+        var tbl = document.getElementById('od-agents-table');
+        if (tbl && tbl.scrollIntoView) tbl.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     }
   }

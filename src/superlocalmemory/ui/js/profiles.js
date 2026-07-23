@@ -338,7 +338,9 @@ async function switchProfile(profileName) {
             // stale cross-profile data in any pane that wasn't re-fetched, and
             // the OD dashboard's panes aren't driven by those legacy loaders.
             showToast('Switched to profile: ' + profileName + ' — refreshing…');
-            setTimeout(function () { window.location.reload(); }, 350);
+            setTimeout(function () {
+                try { window.location.reload(); } catch (e) { /* headless/jsdom */ }
+            }, 350);
             return true;
         } else {
             showToast(data.detail || 'Daemon did not acknowledge the requested profile');

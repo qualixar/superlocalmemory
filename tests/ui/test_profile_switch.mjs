@@ -26,7 +26,7 @@ function profileHarness(response) {
 }
 
 describe('dashboard profile switching', function() {
-    it('refreshes profile-bound views only after an exact daemon ACK', async function() {
+    it('acknowledges an exact daemon ACK and drops piecemeal refresh', async function() {
         const h = profileHarness({
             ok: true,
             status: 200,
@@ -40,8 +40,12 @@ describe('dashboard profile switching', function() {
         assert.equal(result, true);
         assert.equal(h.calls[0].url, '/api/profiles/beta/switch');
         assert.equal(h.calls[0].options.method, 'POST');
-        assert.ok(h.calls.some(call => call.reload === 'profiles'));
-        assert.ok(h.calls.some(call => call.reload === 'stats'));
+        // v3.8.0: an acknowledged switch does ONE full window reload (not
+        // observable under jsdom), so the legacy piecemeal per-view refreshers
+        // must NOT run — that's the behavior change.
+        assert.ok(!h.calls.some(call => call.reload === 'stats'));
+        assert.ok(!h.calls.some(call => call.reload === 'profiles'));
+        assert.ok(h.calls.some(call => /switched to profile/i.test(call.toast || '')));
     });
 
     it('rejects HTTP errors even if their body contains active_profile', async function() {
