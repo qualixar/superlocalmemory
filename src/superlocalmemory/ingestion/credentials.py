@@ -42,7 +42,7 @@ def store_credential(service: str, key: str, value: str) -> bool:
     except Exception:
         pass
 
-    # Fallback: encrypted file with restricted permissions
+    # Fallback: restricted-permission file (0600) when no OS keychain is present
     try:
         cred_dir = _credential_dir()
         cred_dir.mkdir(parents=True, exist_ok=True)

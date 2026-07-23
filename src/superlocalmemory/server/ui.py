@@ -61,11 +61,12 @@ from superlocalmemory.server.security_middleware import SecurityHeadersMiddlewar
 # caused dashboard-created profiles to land in a different memory.db than
 # `slm profile list` reads when a custom data dir was configured.
 from superlocalmemory.server.routes.helpers import MEMORY_DIR, DB_PATH
-# V3.3.21: UI shipped inside the package for pip/npm installs.
-# Check package location first, then fall back to repo root for dev mode.
-_PKG_UI = Path(__file__).resolve().parent.parent / "ui"
-_REPO_UI = Path(__file__).resolve().parent.parent.parent.parent / "ui"
-UI_DIR = _PKG_UI if (_PKG_UI / "index.html").exists() else _REPO_UI
+# V3.3.21+: the dashboard ships inside the package (superlocalmemory/ui) for
+# every install path — pip, npm, and editable checkouts. The legacy repo-root
+# ui/ dev fallback was retired in v3.8.0 when that copy was deleted; the
+# packaged directory is authoritative. A missing dir is surfaced at request
+# time (see the "UI not found" handler below).
+UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
 
 def create_app() -> FastAPI:

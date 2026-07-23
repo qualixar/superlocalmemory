@@ -48,10 +48,10 @@ logger = logging.getLogger("superlocalmemory.api_server")
 # V3 paths
 MEMORY_DIR = DynamicStatePath()
 DB_PATH = DynamicStatePath("memory.db")
-# V3.3.21: UI shipped inside the package for pip/npm installs.
-_PKG_UI = Path(__file__).resolve().parent.parent / "ui"
-_REPO_UI = Path(__file__).resolve().parent.parent.parent.parent / "ui"
-UI_DIR = _PKG_UI if (_PKG_UI / "index.html").exists() else _REPO_UI
+# V3.3.21+: the dashboard ships inside the package (superlocalmemory/ui) for
+# every install path. The legacy repo-root ui/ dev fallback was retired in
+# v3.8.0 when that copy was deleted; the packaged directory is authoritative.
+UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
 
 # ============================================================================
