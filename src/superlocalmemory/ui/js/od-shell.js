@@ -235,8 +235,17 @@
 
     // Fire lazy data loaders
     triggerTabLoad(paneId);
-    // Deferred retry for async-heavy tabs that need extra time
-    setTimeout(function () { triggerTabLoad(paneId); }, 500);
+    // Deferred retry ONLY if the first render produced nothing (a pane that ran
+    // before it was visible/sized). Re-running unconditionally used to wipe and
+    // rebuild every pane 500ms after each switch — the visible "cards reload"
+    // flicker on every tab change. Guard on an empty, still-active pane so a
+    // successful render is never torn down and repainted.
+    setTimeout(function () {
+      var p = document.getElementById(paneId);
+      if (p && p.classList.contains('active') && p.children.length === 0) {
+        triggerTabLoad(paneId);
+      }
+    }, 500);
 
     // Scroll the active sidebar item into view (mobile)
     var activeLink = document.querySelector('.nav-link[data-tab="' + paneId + '"]');
