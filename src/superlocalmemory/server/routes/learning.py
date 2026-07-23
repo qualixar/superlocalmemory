@@ -9,15 +9,27 @@ Routes: /api/learning/status, /api/feedback, /api/feedback/dwell,
         /api/learning/retrain
 Uses V3 learning modules: FeedbackCollector, EngagementTracker, AdaptiveLearner.
 """
-import shutil
 import logging
+import shutil
+import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 
-from .helpers import get_active_profile, MEMORY_DIR
+from .helpers import MEMORY_DIR, get_active_profile
+from .learning_telemetry import ReadOnlyRankerStore
+from .learning_telemetry import (
+    load_model_state as _load_model_state,
+)
+from .learning_telemetry import (
+    load_source_quality_state as _load_source_quality_state,
+)
+from .learning_telemetry import (
+    sqlite_status as _sqlite_status,
+)
 
 logger = logging.getLogger("superlocalmemory.routes.learning")
 router = APIRouter()
@@ -25,9 +37,45 @@ router = APIRouter()
 LEARNING_DB = MEMORY_DIR / "learning.db"
 
 
+def _require_write(request: Request) -> None:
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    require_permission(request, Permission.WRITE, profile=get_active_profile())
+
+
+def _require_delete(request: Request) -> None:
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    require_permission(request, Permission.DELETE, profile=get_active_profile())
+
+
+def _require_manage(request: Request) -> None:
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request, profile=get_active_profile())
+
+
 # ---------------------------------------------------------------------------
 # LLD-02 §4.10 — Dashboard phase truth
 # ---------------------------------------------------------------------------
+
+
+def _phase_payload(
+    phase: int,
+    key: str,
+    label: str,
+    model_active: bool,
+    signals: int,
+    gates: dict,
+    status: str,
+) -> dict:
+    return {
+        "phase": phase, "key": key, "label": label,
+        "model_active": model_active, "signals": signals,
+        "gates": gates, "status": status,
+    }
 
 
 def _compute_ranker_phase(
@@ -41,60 +89,75 @@ def _compute_ranker_phase(
     SHA-256 verification on the model_cache load. Tampered bytes fall
     back to phase 2.
     """
-    from superlocalmemory.learning.database import LearningDatabase
-    from superlocalmemory.learning.model_cache import load_active, invalidate
+    from superlocalmemory.learning.model_cache import load_active
+    from superlocalmemory.learning.ranker import (
+        PHASE_2_THRESHOLD,
+        PHASE_3_THRESHOLD,
+    )
 
     db_path = Path(learning_db_path) if learning_db_path else LEARNING_DB
+    gates = {
+        "rule_based_min_signals": PHASE_2_THRESHOLD,
+        "ml_model_min_signals": PHASE_3_THRESHOLD,
+        "ml_model_requires_verified_active_model": True,
+    }
     if not db_path.exists():
-        return {
-            "phase": 1,
-            "label": "Cold start (cross-encoder only)",
-            "model_active": False,
-            "signals": 0,
-        }
+        return _phase_payload(
+            1, "baseline", "Cold start (cross-encoder only)", False, 0,
+            gates, "missing_database",
+        )
 
-    db = LearningDatabase(db_path)
+    try:
+        db = ReadOnlyRankerStore(db_path)
+    except Exception as exc:
+        logger.warning("ranker database unavailable: %s", exc)
+        status = (
+            _sqlite_status(exc)
+            if isinstance(exc, sqlite3.Error) else "query_error"
+        )
+        return _phase_payload(
+            1, "baseline", "Cold start (cross-encoder only)", False, 0,
+            gates, status,
+        )
+
+    signal_status = "available"
     try:
         signals = db.count_signals(profile_id)
     except Exception as exc:
         logger.warning("count_signals failed: %s", exc)
         signals = 0
+        signal_status = (
+            "missing_table"
+            if isinstance(exc, sqlite3.OperationalError)
+            and "no such table" in str(exc).lower()
+            else (
+                _sqlite_status(exc)
+                if isinstance(exc, sqlite3.Error) else "query_error"
+            )
+        )
 
-    # Force a cache-bypass load — the dashboard read is rare and we want
-    # tamper detection to surface immediately.
-    invalidate(profile_id)
     try:
-        model = load_active(db, profile_id, use_cache=False)
+        # Official train/promote/rollback paths invalidate this cache.  Reuse
+        # the verified object here so tab navigation does not deserialize a
+        # LightGBM model on every dashboard request.
+        model = load_active(db, profile_id, use_cache=True)
     except Exception as exc:
         logger.warning("load_active failed: %s", exc)
         model = None
 
     active = model is not None
 
-    if active and signals >= 200:
-        return {
-            "phase": 3,
-            "label": "LightGBM ranker active",
-            "model_active": True,
-            "signals": signals,
-        }
-    if signals >= 50:
-        return {
-            "phase": 2,
-            "label": "Contextual bandit",
-            "model_active": False,
-            "signals": signals,
-        }
-    return {
-        "phase": 1,
-        "label": "Cold start (cross-encoder only)",
-        "model_active": False,
-        "signals": signals,
-    }
+    if active and signals >= PHASE_3_THRESHOLD:
+        phase = (3, "ml_model", "LightGBM ranker active", True)
+    elif signals >= PHASE_2_THRESHOLD:
+        phase = (2, "rule_based", "Contextual bandit", False)
+    else:
+        phase = (1, "baseline", "Cold start (cross-encoder only)", False)
+    return _phase_payload(*phase, signals, gates, signal_status)
 
 
 @router.get("/api/learning/ranker_phase")
-async def ranker_phase():
+def ranker_phase():
     """Dashboard endpoint — LLD-02 §4.10 phase truth."""
     try:
         profile = get_active_profile()
@@ -106,14 +169,14 @@ async def ranker_phase():
 LEARNING_AVAILABLE = False
 BEHAVIORAL_AVAILABLE = False
 try:
-    from superlocalmemory.learning.feedback import FeedbackCollector
     from superlocalmemory.learning.engagement import EngagementTracker
-    from superlocalmemory.learning.ranker import AdaptiveRanker
+    from superlocalmemory.learning.feedback import FeedbackCollector
+    from superlocalmemory.learning.ranker import AdaptiveRanker  # noqa: F401
     LEARNING_AVAILABLE = True
 except ImportError as e:
     logger.warning("V3 learning primary import failed: %s", e)
     try:
-        from superlocalmemory.learning.adaptive import AdaptiveLearner
+        from superlocalmemory.learning.adaptive import AdaptiveLearner  # noqa: F401
         LEARNING_AVAILABLE = True
     except ImportError as e2:
         logger.warning("V3 learning fallback import failed: %s", e2)
@@ -149,30 +212,73 @@ def _get_engagement() -> "EngagementTracker | None":
     return _engagement
 
 
+def _source_quality_repair_telemetry(request: Request) -> dict:
+    status = getattr(
+        request.app.state, "source_quality_repair_status", None,
+    )
+    if not isinstance(status, dict):
+        return {
+            "state": "not_scheduled",
+            "source": "daemon_app_state",
+            "last_error": None,
+        }
+    return {
+        "state": str(status.get("state") or "unknown"),
+        "source": str(status.get("source") or "daemon_app_state"),
+        "batch_size": int(status.get("batch_size") or 0),
+        "profiles_total": len(status.get("profiles") or []),
+        "profiles_complete": len(status.get("completed_profiles") or []),
+        "batches_completed": int(status.get("batches_completed") or 0),
+        "scanned": int(status.get("scanned") or 0),
+        "observations": int(status.get("observations") or 0),
+        "last_error": status.get("last_error"),
+    }
+
+
 @router.get("/api/learning/status")
-async def learning_status():
+def learning_status(request: Request):
     """Get comprehensive learning system status for dashboard."""
+    repair_telemetry = _source_quality_repair_telemetry(request)
     if not LEARNING_AVAILABLE:
         return {
             "available": False, "ranking_phase": None,
+            "ranker_phase": None, "ranking_phase_gates": {},
             "stats": None, "tech_preferences": [], "workflow_patterns": [],
             "source_scores": {}, "engagement": None,
+            "telemetry_status": {
+                "source_quality_repair": repair_telemetry["state"],
+            },
+            "source_quality_repair": repair_telemetry,
             "message": "Learning features not installed.",
         }
 
-    result = {"available": True}
+    result = {
+        "available": True,
+        "telemetry_status": {
+            "source_quality_repair": repair_telemetry["state"],
+        },
+        "source_quality_repair": repair_telemetry,
+    }
 
     try:
         active_profile = get_active_profile()
         result["active_profile"] = active_profile
+        ranker_state = _compute_ranker_phase(active_profile)
+        result["ranker_phase"] = ranker_state
+        result["ranking_phase"] = ranker_state["key"]
+        result["ranking_phase_gates"] = ranker_state["gates"]
+        result["telemetry_status"]["ranker"] = ranker_state.get(
+            "status", "available",
+        )
 
         # Real signal count from V3.1 learning_feedback table
         signal_count = 0
         unique_queries = 0
         try:
-            from superlocalmemory.learning.feedback import FeedbackCollector
-            from pathlib import Path
             import sqlite3 as _sqlite3
+
+            from superlocalmemory.learning.feedback import FeedbackCollector
+
             learning_db = LEARNING_DB
             if learning_db.exists():
                 collector = FeedbackCollector(learning_db)
@@ -194,25 +300,25 @@ async def learning_status():
         except Exception:
             pass
 
-        # Ranking phase based on real signal count
-        if signal_count >= 200:
-            result["ranking_phase"] = "ml_model"
-        elif signal_count >= 20:
-            result["ranking_phase"] = "rule_based"
-        else:
-            result["ranking_phase"] = "baseline"
-
         # Feedback stats — merge old system + new V3.1 signals
-        stats_dict = {"feedback_count": signal_count, "unique_queries": unique_queries, "active_profile": active_profile}
+        stats_dict = {
+            "feedback_count": signal_count,
+            "unique_queries": unique_queries,
+            "ranker_signal_count": ranker_state["signals"],
+            "active_profile": active_profile,
+        }
         feedback = _get_feedback()
         if feedback:
             try:
                 old_stats = feedback.get_feedback_summary(active_profile)
                 if isinstance(old_stats, dict):
-                    old_stats["feedback_count"] = signal_count
-                    old_stats["unique_queries"] = unique_queries
-                    old_stats["active_profile"] = active_profile
-                    stats_dict = old_stats
+                    stats_dict = {
+                        **old_stats,
+                        "feedback_count": signal_count,
+                        "unique_queries": unique_queries,
+                        "ranker_signal_count": ranker_state["signals"],
+                        "active_profile": active_profile,
+                    }
             except Exception as exc:
                 logger.debug("feedback summary: %s", exc)
 
@@ -252,21 +358,37 @@ async def learning_status():
         # Tech preferences + workflow patterns from V3.1 behavioral store
         try:
             from superlocalmemory.learning.behavioral import BehavioralPatternStore
-            from pathlib import Path
+
             learning_db = LEARNING_DB
             if learning_db.exists():
                 store = BehavioralPatternStore(str(learning_db))
                 all_patterns = store.get_patterns(profile_id=active_profile)
                 tech = [
-                    {"key": "tech", "value": p.get("metadata", {}).get("value", p.get("pattern_key", "")),
-                     "confidence": p.get("confidence", 0), "evidence": p.get("evidence_count", 0)}
-                    for p in all_patterns if p.get("pattern_type") == "tech_preference"
+                    {
+                        "type": "tech_preference",
+                        "key": p.get("pattern_key", ""),
+                        "value": p.get("metadata", {}).get(
+                            "value", p.get("pattern_key", ""),
+                        ),
+                        "confidence": p.get("confidence", 0),
+                        "evidence_count": p.get("evidence_count", 0),
+                        # Compatibility alias for pre-3.8 dashboard clients.
+                        "evidence": p.get("evidence_count", 0),
+                    }
+                    for p in all_patterns
+                    if p.get("pattern_type") == "tech_preference"
                 ]
+                workflow_types = {
+                    "temporal", "workflow", "session_activity",
+                    "co_retrieval_clusters",
+                }
                 workflows = [
                     {"type": p.get("pattern_type"), "key": p.get("pattern_key", ""),
                      "value": p.get("metadata", {}).get("value", ""),
-                     "confidence": p.get("confidence", 0)}
-                    for p in all_patterns if p.get("pattern_type") in ("temporal", "interest")
+                     "confidence": p.get("confidence", 0),
+                     "evidence_count": p.get("evidence_count", 0)}
+                    for p in all_patterns
+                    if p.get("pattern_type") in workflow_types
                 ]
                 result["tech_preferences"] = tech
                 result["workflow_patterns"] = workflows
@@ -276,10 +398,6 @@ async def learning_status():
                 db_size = os.path.getsize(str(learning_db)) // 1024 if learning_db.exists() else 0
                 stats_dict["db_size_kb"] = db_size
                 stats_dict["transferable_patterns"] = len(all_patterns)
-                stats_dict["models_trained"] = 1 if signal_count >= 200 else 0
-                stats_dict["tracked_sources"] = len(set(
-                    p.get("pattern_type") for p in all_patterns
-                ))
             else:
                 result["tech_preferences"] = []
                 result["workflow_patterns"] = []
@@ -288,9 +406,22 @@ async def learning_status():
             result["tech_preferences"] = []
             result["workflow_patterns"] = []
             result["pattern_error"] = str(exc)
-        result["source_scores"] = {}
+        source_state = _load_source_quality_state(
+            active_profile, LEARNING_DB,
+        )
+        model_state = _load_model_state(active_profile, LEARNING_DB)
+        result["source_scores"] = source_state["scores"]
+        result["source_scores_source"] = "learning.db:source_quality"
+        result["source_scores_are_posterior"] = True
+        result["telemetry_status"]["source_quality"] = source_state["status"]
+        result["telemetry_status"]["model_state"] = model_state["status"]
+        stats_dict["tracked_sources"] = source_state["tracked_sources"]
+        stats_dict["models_trained"] = model_state["models_trained"]
+        stats_dict["models_active_verified"] = int(
+            bool(ranker_state["model_active"]),
+        )
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error getting learning status")
         result["error"] = "Internal server error"
 
@@ -302,8 +433,9 @@ async def learning_status():
 # ============================================================================
 
 @router.post("/api/feedback")
-async def record_feedback(data: dict):
+def record_feedback(request: Request, data: dict):
     """Record explicit feedback from dashboard (thumbs up/down, pin)."""
+    _require_write(request)
     if not LEARNING_AVAILABLE:
         return {"success": False, "error": "Learning system not available"}
 
@@ -333,14 +465,15 @@ async def record_feedback(data: dict):
             "message": f"Feedback recorded: {feedback_type} for memory #{memory_id}",
             "feedback_id": row_id,
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Error recording feedback")
         return {"success": False, "error": "Internal server error"}
 
 
 @router.post("/api/feedback/dwell")
-async def record_dwell(data: dict):
+def record_dwell(request: Request, data: dict):
     """Record dwell time feedback from dashboard modal."""
+    _require_write(request)
     if not LEARNING_AVAILABLE:
         return {"success": False, "error": "Learning system not available"}
 
@@ -378,13 +511,13 @@ async def record_dwell(data: dict):
             "message": f"Dwell feedback recorded: {feedback_type} ({dwell_seconds:.1f}s)",
             "feedback_id": row_id,
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Error recording dwell")
         return {"success": False, "error": "Internal server error"}
 
 
 @router.get("/api/feedback/stats")
-async def feedback_stats():
+def feedback_stats():
     """Get feedback signal statistics for dashboard progress bar."""
     if not LEARNING_AVAILABLE:
         return {
@@ -413,9 +546,12 @@ async def feedback_stats():
             "progress": round(progress, 1), "target": target,
             "by_channel": by_channel, "by_type": by_type, "available": True,
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Error getting feedback stats")
-        return {"total_signals": 0, "ranking_phase": "baseline", "progress": 0, "error": "Internal server error"}
+        return {
+            "total_signals": 0, "ranking_phase": "baseline",
+            "progress": 0, "error": "Internal server error",
+        }
 
 
 # ============================================================================
@@ -424,7 +560,7 @@ async def feedback_stats():
 
 
 @router.delete("/api/patterns/delete")
-async def delete_pattern(data: dict) -> dict:
+def delete_pattern(request: Request, data: dict) -> dict:
     """S9-DASH-04: delete a single auto-detected pattern by key.
 
     Body: ``{pattern_type: str, pattern_key: str}``
@@ -432,6 +568,7 @@ async def delete_pattern(data: dict) -> dict:
     Returns ``{success: bool, deleted: int}``. The pattern is scoped
     to the active profile so cross-profile deletion is impossible.
     """
+    _require_delete(request)
     if not BEHAVIORAL_AVAILABLE:
         return {"success": False, "error": "Behavioral engine not available"}
     ptype = (data or {}).get("pattern_type", "")
@@ -459,7 +596,7 @@ async def delete_pattern(data: dict) -> dict:
 
 
 @router.get("/api/patterns")
-async def get_patterns():
+def get_patterns():
     """Get learned behavioral patterns for the Patterns dashboard tab.
 
     v3.4.1: This endpoint was MISSING — patterns.js calls /api/patterns
@@ -510,43 +647,74 @@ async def get_patterns():
             result["pattern_error"] = str(exc)
 
     # Learning signal stats (feedback count, co-retrieval, channel credits)
-    try:
-        from superlocalmemory.learning.signals import LearningSignals
-        signals = LearningSignals(str(LEARNING_DB))
-        result["signal_stats"] = signals.get_signal_stats(active_profile)
-    except Exception as exc:
-        logger.debug("Signal stats unavailable: %s", exc)
+    if LEARNING_AVAILABLE:
+        try:
+            from superlocalmemory.learning.signals import LearningSignals
+            signals = LearningSignals(str(LEARNING_DB))
+            result["signal_stats"] = signals.get_signal_stats(active_profile)
+        except Exception as exc:
+            logger.debug("Signal stats unavailable: %s", exc)
 
     # Graph intelligence contribution to learning (v3.4.1)
     try:
         import sqlite3 as _sqlite3
+
         from superlocalmemory.server.routes.helpers import DB_PATH
         if DB_PATH.exists():
-            conn = _sqlite3.connect(str(DB_PATH))
-            conn.row_factory = _sqlite3.Row
-            row = conn.execute(
-                "SELECT COUNT(*) AS cnt, COUNT(DISTINCT community_id) AS communities, "
-                "ROUND(AVG(pagerank_score), 4) AS avg_pagerank "
-                "FROM fact_importance WHERE profile_id = ?",
-                (active_profile,),
-            ).fetchone()
-            if row:
-                d = dict(row)
-                result["graph_intelligence"] = {
-                    "facts_analyzed": d.get("cnt", 0),
-                    "communities_detected": d.get("communities", 0),
-                    "avg_pagerank": float(d.get("avg_pagerank", 0) or 0),
-                }
-            conn.close()
+            with closing(_sqlite3.connect(str(DB_PATH))) as conn:
+                conn.row_factory = _sqlite3.Row
+                row = conn.execute(
+                    "SELECT COUNT(*) AS cnt, "
+                    "COUNT(DISTINCT community_id) AS communities, "
+                    "ROUND(AVG(pagerank_score), 4) AS avg_pagerank "
+                    "FROM fact_importance WHERE profile_id = ?",
+                    (active_profile,),
+                ).fetchone()
+                if row:
+                    d = dict(row)
+                    result["graph_intelligence"] = {
+                        "facts_analyzed": d.get("cnt", 0),
+                        "communities_detected": d.get("communities", 0),
+                        "avg_pagerank": float(
+                            d.get("avg_pagerank", 0) or 0,
+                        ),
+                    }
     except Exception:
         pass
 
+    all_patterns = [
+        pattern
+        for category_patterns in patterns.values()
+        for pattern in category_patterns
+    ]
+    confidences = [
+        float(pattern["confidence"])
+        for pattern in all_patterns
+        if pattern.get("confidence") is not None
+    ]
+    result.update({
+        "total_patterns": len(all_patterns),
+        "pattern_types": [
+            category
+            for category, category_patterns in patterns.items()
+            if category_patterns
+        ],
+        "confidence_stats": {
+            "avg": (
+                sum(confidences) / len(confidences)
+                if confidences else 0.0
+            ),
+            "min": min(confidences) if confidences else 0.0,
+            "max": max(confidences) if confidences else 0.0,
+        },
+    })
     return result
 
 
 @router.post("/api/learning/backup")
-async def learning_backup():
+def learning_backup(request: Request):
     """Backup learning.db to a timestamped file."""
+    _require_manage(request)
     try:
         if not LEARNING_DB.exists():
             return {"success": False, "error": "No learning.db found"}
@@ -561,14 +729,15 @@ async def learning_backup():
             "path": str(backup_path),
             "message": f"Learning DB backed up to {backup_name}",
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Error backing up learning DB")
         return {"success": False, "error": "Internal server error"}
 
 
 @router.post("/api/learning/reset")
-async def learning_reset():
+def learning_reset(request: Request):
     """Reset all learning data for the active profile. Memories preserved."""
+    _require_delete(request)
     if not LEARNING_AVAILABLE:
         return {"success": False, "error": "Learning system not available"}
     try:
@@ -587,13 +756,14 @@ async def learning_reset():
 
 
 @router.post("/api/learning/retrain")
-async def learning_retrain(data: dict | None = None):
+async def learning_retrain(request: Request, data: dict | None = None):
     """Force a retrain of the LightGBM ranker.
 
     Body (optional, JSON):
         ``{"include_synthetic": bool}`` — when True, migrated legacy rows
         (``is_synthetic=1``) participate in training. Default False.
     """
+    _require_manage(request)
     if not LEARNING_AVAILABLE:
         return {"success": False, "error": "Learning system not available"}
     include_synthetic = bool(
@@ -647,7 +817,7 @@ async def learning_retrain(data: dict | None = None):
 
 
 @router.post("/api/learning/migrate-legacy")
-async def learning_migrate_legacy():
+def learning_migrate_legacy(request: Request):
     """Copy ``learning_feedback`` rows into LLD-02 tables for training.
 
     Idempotent: subsequent calls detect the migration_log sentinel and
@@ -655,6 +825,7 @@ async def learning_migrate_legacy():
     with ``is_synthetic=1`` to preserve provenance; the trainer must be
     invoked with ``include_synthetic=True`` to use them.
     """
+    _require_manage(request)
     if not LEARNING_AVAILABLE:
         return {"success": False, "error": "Learning system not available"}
     try:

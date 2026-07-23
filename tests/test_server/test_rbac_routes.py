@@ -16,8 +16,6 @@ warning: a defined-but-uncalled access layer is worse than none):
 
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -149,3 +147,201 @@ def test_require_login_blocks_owner_data_but_not_manage(client):
     # ...but owner can STILL administer (MANAGE) — no dashboard lockout.
     ru = tc.get("/api/rbac/users", headers=h)
     assert ru.status_code == 200, ru.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v3/brain",
+        "/api/v3/brain/evolution-timeseries",
+        "/api/v3/learning/stats",
+        "/api/v3/patterns",
+        "/api/v3/behavioral",
+    ),
+)
+def test_brain_routes_authorize_the_requested_profile(client, path):
+    """A valid install token cannot bypass profile-scoped READ authorization."""
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    tc, h = client
+    engine = tc.app.state.engine
+    engine._db.execute(
+        "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('other', 'other')"
+    )
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "brain-viewer", "password": "password-1234",
+              "role": "viewer"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {user["username"]: user["user_id"] for user in rbac.list_users()}["brain-viewer"]
+    session = rbac.create_session(user_id)
+    headers = {
+        **h,
+        "X-Install-Token": ensure_install_token(),
+        "X-SLM-User-Session": session,
+    }
+
+    allowed = tc.get(path, params={"profile_id": "default"}, headers=headers)
+    assert allowed.status_code == 200, allowed.text
+
+    denied = tc.get(path, params={"profile_id": "other"}, headers=headers)
+    assert denied.status_code == 403, denied.text
+
+
+def test_brain_route_requires_session_in_company_mode(client):
+    """Install-token ownership does not bypass company-mode data READ rules."""
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "company-brain-admin", "password": "password-1234",
+              "role": "admin"},
+        headers=h,
+    )
+    tc.app.state.rbac.set_require_login(True)
+
+    response = tc.get(
+        "/api/v3/brain",
+        headers={**h, "X-Install-Token": ensure_install_token()},
+    )
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v3/associations",
+        "/api/v3/associations/stats",
+        "/api/v3/consolidation/status",
+        "/api/v3/core-memory",
+        "/api/v3/vector-store/status",
+        "/api/v3/forgetting/stats",
+        "/api/v3/quantization/stats",
+        "/api/v3/ccq/blocks",
+        "/api/v3/soft-prompts",
+        "/api/v3/graph/communities",
+        "/api/v3/v33/overview",
+    ),
+)
+def test_v3_profile_readers_authorize_the_requested_profile(client, path):
+    """A profile query may never bypass the role on that requested profile."""
+    tc, h = client
+    engine = tc.app.state.engine
+    engine._db.execute(
+        "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('other-v3', 'other-v3')"
+    )
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "v3-viewer", "password": "password-1234", "role": "viewer"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {user["username"]: user["user_id"] for user in rbac.list_users()}["v3-viewer"]
+    headers = {**h, "X-SLM-User-Session": rbac.create_session(user_id)}
+
+    denied = tc.get(path, params={"profile": "other-v3"}, headers=headers)
+    assert denied.status_code == 403, denied.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    ("/api/v3/health/processes", "/api/v3/forgetting/stats"),
+)
+def test_v3_sensitive_readers_require_a_session_in_company_mode(client, path):
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "company-v3-admin", "password": "password-1234", "role": "admin"},
+        headers=h,
+    )
+    tc.app.state.rbac.set_require_login(True)
+
+    response = tc.get(path, headers=h)
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize(
+    "path,body",
+    (
+        ("/api/v3/consolidation/trigger", {"profile": "other-manage"}),
+        ("/api/v3/forgetting/run", {"profile": "other-manage"}),
+    ),
+)
+def test_v3_profile_mutations_require_manage_on_target_profile(client, path, body):
+    tc, h = client
+    engine = tc.app.state.engine
+    engine._db.execute(
+        "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('other-manage', 'other-manage')"
+    )
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "target-viewer", "password": "password-1234", "role": "viewer"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {user["username"]: user["user_id"] for user in rbac.list_users()}["target-viewer"]
+    response = tc.post(
+        path,
+        json=body,
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_embedding_probe_requires_manage_before_outbound_network_access(client):
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "embedding-viewer", "password": "password-1234", "role": "viewer"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {user["username"]: user["user_id"] for user in rbac.list_users()}["embedding-viewer"]
+
+    response = tc.post(
+        "/api/v3/embedding/test",
+        json={"api_endpoint": "http://127.0.0.1:9"},
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_daemon_rejects_uncredentialed_browser_writes_from_another_local_port(client):
+    """The production middleware must not trust localhost without port identity."""
+    tc, _headers = client
+    response = tc.post(
+        "/api/v3/embedding/test",
+        json={"api_endpoint": "http://127.0.0.1:9"},
+        headers={"Origin": "http://localhost:8417"},
+    )
+    assert response.status_code == 403, response.text
+    assert "cross-origin" in response.json()["error"]
+
+
+def test_ratelimit_read_requires_session_in_company_mode(client):
+    """Governance limits follow the same READ policy as other dashboard data."""
+    tc, headers = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "rate-viewer", "password": "password-1234",
+              "role": "viewer"},
+        headers=headers,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {
+        user["username"]: user["user_id"] for user in rbac.list_users()
+    }["rate-viewer"]
+    session = rbac.create_session(user_id)
+    rbac.set_require_login(True)
+
+    unauthenticated = tc.get("/api/v3/ratelimit", headers=headers)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
+    authenticated = tc.get(
+        "/api/v3/ratelimit",
+        headers={**headers, "X-SLM-User-Session": session},
+    )
+    assert authenticated.status_code == 200, authenticated.text

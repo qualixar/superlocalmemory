@@ -15,7 +15,9 @@ DOC-CORRECT layout (v3.6.14):
 
 Tests verify:
   - plugin.json: full §5 schema (name, version, description, author{Qualixar}, repo, keywords,
-    mcpServers pointer, hooks pointer) — lives at plugin/.claude-plugin/plugin.json
+    mcpServers pointer) — lives at plugin/.claude-plugin/plugin.json. Claude Code
+    automatically discovers plugin/hooks/hooks.json, so the manifest must not
+    declare that standard file a second time.
   - .mcp.json: command ends with /venv/bin/slm, contains ${CLAUDE_PLUGIN_DATA}, args==["mcp"],
     NEVER bare "slm"/"python"/"superlocalmemory.mcp", env SLM_MCP_PROFILE=code, SLM_DATA_DIR set
   - marketplace.json: at repo root .claude-plugin/, NO version key in plugin entry, source="./plugin"
@@ -147,12 +149,11 @@ class TestPluginJson:
             f"mcpServers must point to .mcp.json, got {data['mcpServers']!r}"
         )
 
-    def test_plugin_json_has_hooks_pointer(self) -> None:
+    def test_plugin_json_does_not_duplicate_standard_hooks_file(self) -> None:
         data = _load_json(PLUGIN_CLAUDE_DIR / "plugin.json")
-        assert "hooks" in data, "plugin.json missing 'hooks' pointer"
-        hooks_ptr = str(data["hooks"])
-        assert "hooks.json" in hooks_ptr, (
-            f"hooks must reference hooks.json, got {data['hooks']!r}"
+        assert "hooks" not in data, (
+            "Claude Code auto-loads plugin/hooks/hooks.json; declaring it in the "
+            "manifest causes a duplicate-hook load failure"
         )
 
 

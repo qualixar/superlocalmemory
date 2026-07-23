@@ -6,6 +6,7 @@ All tests are pure unit tests. Zero real SLM calls — every dependency mocked.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -31,13 +32,21 @@ class TestEstimateTokens:
     def test_empty_string(self):
         assert estimate_tokens("") == 0
 
-    @patch.dict("sys.modules", {"tiktoken": None})
     def test_chars_div_4(self):
-        # Force the chars/4 fallback path (tiktoken import → ImportError) so
-        # this test deterministically exercises the heuristic it documents,
-        # regardless of whether the optional tiktoken dep is installed.
         assert estimate_tokens("1234") == 1
         assert estimate_tokens("12345678") == 2
+
+    def test_exact_native_count_is_explicit_opt_in(self):
+        fake_tiktoken = SimpleNamespace(
+            get_encoding=lambda _name: SimpleNamespace(
+                encode=lambda _text: [1, 2, 3],
+            ),
+        )
+        with (
+            patch.dict(os.environ, {"SLM_INJECTION_EXACT_TOKENS": "1"}),
+            patch.dict("sys.modules", {"tiktoken": fake_tiktoken}),
+        ):
+            assert estimate_tokens("12345678") == 3
 
     def test_minimum_one(self):
         assert estimate_tokens("a") == 1

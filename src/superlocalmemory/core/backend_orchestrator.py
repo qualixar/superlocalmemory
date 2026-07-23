@@ -52,7 +52,7 @@ class BackendOrchestrator:
     """Central coordinator for multi-backend architecture.
 
     Lifecycle:
-      on_daemon_start() → migrate backends → ready
+      on_daemon_start() → initialize bounded backend state → ready
       sync_new_fact() → called from store_pipeline after SQLite write
       health_check() → returns status of all backends
     """
@@ -71,7 +71,7 @@ class BackendOrchestrator:
     # ------------------------------------------------------------------
 
     def on_daemon_start(self) -> None:
-        """Called once on daemon startup. Order matters (F-11: rebalance before migration)."""
+        """Initialize bounded backend state without delaying daemon readiness."""
         logger.info("BackendOrchestrator: daemon starting")
 
         # 1. Apply schema (if not already applied)
@@ -82,18 +82,13 @@ class BackendOrchestrator:
         try:
             from superlocalmemory.core.tier_manager import evaluate_tiers
             self._tiers = evaluate_tiers
-            logger.info("BackendOrchestrator: TierManager initialized")
+            logger.info("BackendOrchestrator: tier evaluator registered")
         except Exception as exc:
             logger.warning("TierManager init failed (non-fatal): %s", exc)
 
-        # 3. Run initial tier rebalance FIRST (F-11: before migration)
-        try:
-            from superlocalmemory.core.tier_manager import evaluate_tiers as rebalance
-            result = rebalance(self._db)
-            logger.info("BackendOrchestrator: initial rebalance — %s",
-                         result.get("total_evaluated", "?"))
-        except Exception as exc:
-            logger.warning("Initial rebalance failed (non-fatal): %s", exc)
+        # Full-database tier evaluation belongs to MaintenanceScheduler. Running
+        # it here blocks FastAPI lifespan readiness on mature upgrade databases
+        # and occurs before optional projection backends are fully registered.
 
         self._recover_interrupted_scale_promotion()
 
@@ -107,12 +102,12 @@ class BackendOrchestrator:
             )
             return
 
-        # 4. Initialize CozoDB if available
+        # 3. Initialize CozoDB if available
         cozo_available = self._detect_cozo()
         if cozo_available:
             self._init_cozo()
 
-        # 5. Initialize LanceDB if available
+        # 4. Initialize LanceDB if available
         lancedb_available = self._detect_lancedb()
         if lancedb_available:
             self._init_lancedb()
@@ -139,13 +134,19 @@ class BackendOrchestrator:
         try:
             from superlocalmemory.core.scale_engine import ScaleEngineManager
 
-            result = ScaleEngineManager(self._config, profile_id="default").recover_interrupted_promotion()
+            result = ScaleEngineManager(
+                self._config,
+                profile_id="default",
+            ).recover_interrupted_promotion()
             if result:
                 logger.warning("Scale Engine promotion recovery: %s", result)
         except Exception as exc:
             # A scale projection is derived data. Startup must keep serving
             # canonical SQLite even if optional recovery itself is unhealthy.
-            logger.error("Scale Engine recovery requires repair; Local Core remains active: %s", exc)
+            logger.error(
+                "Scale Engine recovery requires repair; Local Core remains active: %s",
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # Incremental Sync (F-04: called from store_pipeline)
@@ -401,7 +402,8 @@ class BackendOrchestrator:
     def _apply_schema_v345(self) -> None:
         try:
             from superlocalmemory.storage.schema_v345 import (
-                apply_migration, schema_version_applied,
+                apply_migration,
+                schema_version_applied,
             )
             # #47 fix: use raw_connection() — DatabaseManager has no `.conn`,
             # so the old code raised AttributeError that was silently swallowed,

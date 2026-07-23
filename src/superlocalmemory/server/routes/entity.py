@@ -6,48 +6,117 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from .helpers import require_engine, get_active_profile
+from .helpers import get_active_profile, require_engine
 
 router = APIRouter(prefix="/api/entity", tags=["entity"])
 
 
+def _list_entities_sql(where_sql: str) -> str:
+    """Build the page-first entity query after ``where_sql`` is parameterized."""
+    return f"""
+        WITH page_entities AS MATERIALIZED (
+            SELECT ce.entity_id, ce.profile_id, ce.canonical_name,
+                   ce.entity_type, ce.fact_count, ce.first_seen, ce.last_seen
+            FROM canonical_entities ce
+            WHERE {where_sql}
+            ORDER BY ce.fact_count DESC, ce.entity_id ASC
+            LIMIT ? OFFSET ?
+        ),
+        ranked_profiles AS MATERIALIZED (
+            SELECT ep.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ep.entity_id, ep.profile_id
+                       ORDER BY COALESCE(ep.last_compiled_at, '') DESC,
+                                ep.project_name COLLATE NOCASE ASC,
+                                ep.rowid ASC
+                   ) AS summary_rank
+            FROM entity_profiles ep
+            JOIN page_entities page
+              ON page.entity_id = ep.entity_id
+             AND page.profile_id = ep.profile_id
+            WHERE ep.profile_id = ?
+        )
+        SELECT ce.entity_id, ce.canonical_name, ce.entity_type,
+               ce.fact_count, ce.first_seen, ce.last_seen,
+               ep.knowledge_summary, ep.compiled_truth,
+               ep.compilation_confidence, ep.last_compiled_at
+        FROM page_entities ce
+        LEFT JOIN ranked_profiles ep
+          ON ce.entity_id = ep.entity_id
+         AND ep.profile_id = ce.profile_id
+         AND ep.summary_rank = 1
+        ORDER BY ce.fact_count DESC, ce.entity_id ASC
+    """
+
+
+def _require_read(request: Request, profile: str) -> None:
+    """Authorize entity metadata access for the explicitly requested profile."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    require_permission(request, Permission.READ, profile=profile)
+
+
+def _require_manage(request: Request, profile: str) -> None:
+    """Authorize entity recompilation for the explicitly requested profile."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request, profile=profile)
+
+
 @router.get("/list")
-async def list_entities(
+def list_entities(
     request: Request,
     profile: str | None = Query(default=None),
+    entity_type: str | None = Query(default=None, alias="type", max_length=80),
+    search: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
-    """List all entities with basic info (canonical name, type, fact count)."""
+    """List a profile's entities, filtering before count and pagination."""
     engine = require_engine(request)
     # Default to the ACTIVE profile (request runtime truth), never the literal
     # "default" — otherwise every profile sees the default profile's entities.
     profile = profile or get_active_profile()
+    _require_read(request, profile)
 
     import sqlite3
-    import json
     conn = sqlite3.connect(str(engine._config.db_path))
     conn.row_factory = sqlite3.Row
     try:
+        where = ["ce.profile_id = ?"]
+        params: list[object] = [profile]
+        if entity_type and entity_type.lower() != "all":
+            where.append("ce.entity_type = ? COLLATE NOCASE")
+            params.append(entity_type.strip().lower())
+        if search and search.strip():
+            escaped = (search.strip().lower().replace("\\", "\\\\")
+                       .replace("%", "\\%").replace("_", "\\_"))
+            where.append(
+                "(LOWER(ce.canonical_name) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(ce.entity_type, 'unknown')) LIKE ? ESCAPE '\\' "
+                "OR EXISTS ("
+                "SELECT 1 FROM entity_profiles eps "
+                "WHERE eps.entity_id = ce.entity_id "
+                "AND eps.profile_id = ce.profile_id "
+                "AND LOWER(COALESCE(eps.knowledge_summary, '')) "
+                "LIKE ? ESCAPE '\\'))"
+            )
+            params.extend([f"%{escaped}%"] * 3)
+        where_sql = " AND ".join(where)
+
         total = conn.execute(
-            "SELECT COUNT(*) FROM canonical_entities WHERE profile_id = ?",
-            (profile,),
+            "SELECT COUNT(*) FROM canonical_entities ce "
+            f"WHERE {where_sql}",
+            params,
         ).fetchone()[0]
 
-        rows = conn.execute("""
-            SELECT ce.entity_id, ce.canonical_name, ce.entity_type,
-                   ce.fact_count, ce.first_seen, ce.last_seen,
-                   ep.knowledge_summary, ep.compiled_truth,
-                   ep.compilation_confidence, ep.last_compiled_at
-            FROM canonical_entities ce
-            LEFT JOIN entity_profiles ep
-              ON ce.entity_id = ep.entity_id AND ep.profile_id = ce.profile_id
-            WHERE ce.profile_id = ?
-            ORDER BY ce.fact_count DESC
-            LIMIT ? OFFSET ?
-        """, (profile, limit, offset)).fetchall()
+        rows = conn.execute(
+            _list_entities_sql(where_sql),
+            [*params, limit, offset, profile],
+        ).fetchall()
 
         entities = []
         for r in rows:
@@ -65,13 +134,19 @@ async def list_entities(
                 "last_compiled_at": r["last_compiled_at"],
             })
 
-        return {"entities": entities, "total": total, "limit": limit, "offset": offset}
+        return {
+            "entities": entities,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < total,
+        }
     finally:
         conn.close()
 
 
 @router.get("/{entity_name}")
-async def get_entity(
+def get_entity(
     entity_name: str,
     request: Request,
     profile: str | None = Query(default=None),
@@ -80,9 +155,10 @@ async def get_entity(
     """Get compiled truth + timeline for an entity."""
     engine = require_engine(request)
     profile = profile or get_active_profile()
+    _require_read(request, profile)
 
-    import sqlite3
     import json
+    import sqlite3
     conn = sqlite3.connect(str(engine._config.db_path))
     conn.row_factory = sqlite3.Row
     try:
@@ -116,7 +192,7 @@ async def get_entity(
 
 
 @router.post("/{entity_name}/recompile")
-async def recompile_entity(
+def recompile_entity(
     entity_name: str,
     request: Request,
     profile: str | None = Query(default=None),
@@ -125,6 +201,7 @@ async def recompile_entity(
     """Force immediate recompilation of an entity."""
     engine = require_engine(request)
     profile = profile or get_active_profile()
+    _require_manage(request, profile)
 
     import sqlite3
     conn = sqlite3.connect(str(engine._config.db_path))

@@ -240,11 +240,12 @@ def connect_ide(
     here: bool = False,
     profile: str | None = None,
     agents_md_source: Callable[[], str] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Wire SLM into the target IDE config via merge-not-clobber.
 
     Returns a result dict:
-        {ide, mcp_config: wrote|merged|unchanged|skipped|error,
+        {ide, mcp_config: wrote|merged|unchanged|would_write|skipped|error,
          mcp_path, agents_md: wrote|skipped(...)|unchanged|error,
          servers_preserved: int, error: str|None}
     """
@@ -262,6 +263,13 @@ def connect_ide(
     if desc is None:
         result["error"] = (
             f"Unknown IDE '{ide_id}'. Supported: {', '.join(supported_ides())}"
+        )
+        return result
+
+    if ide_id == "vscode-copilot" and not here:
+        result["error"] = (
+            "VS Code / Copilot integration is project-scoped. "
+            "Run `slm connect vscode-copilot --here` from the project root."
         )
         return result
 
@@ -325,7 +333,28 @@ def connect_ide(
         result["servers_preserved"] = max(0, pre_count - (0 if pre_slm is None else 1))
         result["mcp_config"] = mcp_status
 
-    # Step 6 — atomic write
+    # Step 6 — atomic write. A dry run deliberately exercises the merge and
+    # packaged-asset lookup path without touching a user-owned IDE config.
+    if dry_run:
+        result["mcp_config"] = "would_write"
+        if desc.agents_md_path is None:
+            result["agents_md"] = "skipped(unsupported)"
+        elif agents_md_source is None:
+            result["agents_md"] = "skipped(no-source)"
+        else:
+            try:
+                source_content = agents_md_source()
+            except Exception as exc:
+                result["agents_md"] = "error(source-unavailable)"
+                result["error"] = f"AGENTS.md asset lookup failed: {exc}"
+                return result
+            if not isinstance(source_content, str) or not source_content.strip():
+                result["agents_md"] = "error(empty-source)"
+                result["error"] = "AGENTS.md asset is empty"
+                return result
+            result["agents_md"] = "would_write"
+        return result
+
     try:
         _atomic_write(config_path, data, desc.fmt)
     except Exception as exc:
@@ -528,6 +557,9 @@ def _handle_agents_md(
     except Exception as exc:
         logger.warning("agents_md_source() failed: %s — skipping AGENTS.md write", exc)
         return "skipped(source-error)"
+    if not isinstance(source_content, str) or not source_content.strip():
+        logger.warning("agents_md_source() returned no content — skipping AGENTS.md write")
+        return "skipped(no-source-content)"
 
     # Read existing content
     existing = ""

@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-version: "3.8.0"
+version: "3.8.1"
 agent: agent
 tools:
   - slm_optimize_stats
@@ -166,4 +166,4 @@ multi-profile setup. To switch the active profile, see `slm-profile`.
 
 ---
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later

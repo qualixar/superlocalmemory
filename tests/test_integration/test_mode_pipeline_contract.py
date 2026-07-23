@@ -30,6 +30,7 @@ import pytest
 
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.core.engine import MemoryEngine
+from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
 from superlocalmemory.core.ingestion_command import (
     IngestionOperationRepository,
     IngestionState,
@@ -128,9 +129,16 @@ def test_every_mode_completes_canonical_ingestion_and_graph_aware_recall(
         operation = IngestionOperationRepository(engine.db).list_operations()
         assert len(operation) == 1
         operation = operation[0]
+        # The public engine facade is now durable/queryable-first.  Explicitly
+        # complete its M018 operation before asserting the full A/B/C pipeline.
+        operation = build_engine_ingestion_command(engine).materialize(
+            operation.operation_id
+        )
         assert operation.state is IngestionState.COMPLETE
         assert operation.session_date == "2026-07-15"
-        assert set(fact_ids) == set(operation.final_fact_ids)
+        # Admission's raw projection remains a stable subset; enrichment may
+        # add structured facts with additional evidence and entities.
+        assert set(fact_ids).issubset(operation.final_fact_ids)
         assert all(operation.derivation_state.values()), operation.derivation_state
         assert {
             "relational", "fts", "extraction", "canonicalization",
@@ -138,7 +146,7 @@ def test_every_mode_completes_canonical_ingestion_and_graph_aware_recall(
             "trust_policy", "embeddings", "ann", "vector", "bm25",
         }.issubset(operation.derivation_state)
 
-        facts = engine.db.get_facts_by_ids(fact_ids, engine.profile_id)
+        facts = engine.db.get_facts_by_ids(operation.final_fact_ids, engine.profile_id)
         assert facts
         # Some facts retain the parsed UTC midnight timestamp while an LLM
         # extraction can retain the source date string.  Both forms preserve

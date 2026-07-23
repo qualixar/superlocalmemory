@@ -68,4 +68,4 @@ assessment. The gate is the authority.
 
 ---
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later

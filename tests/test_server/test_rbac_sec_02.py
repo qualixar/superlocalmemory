@@ -80,7 +80,21 @@ def test_member_can_read(client):
 
 # -- M-API-5 config-metadata GETs respect the read gate ----------------------
 
-_CONFIG_GETS = ("/api/v3/dashboard", "/api/v3/mode", "/api/v3/embedding/config")
+_CONFIG_GETS = (
+    "/api/v3/dashboard",
+    "/api/v3/mode",
+    "/api/v3/embedding/config",
+    "/api/learning/status",
+    "/api/learning/ranker_phase",
+    "/api/behavioral/status",
+    "/api/behavioral/assertions",
+    "/api/behavioral/tool-events",
+    "/api/behavioral/soft-prompts",
+    "/api/patterns",
+    "/api/feedback/stats",
+    "/api/stats",
+    "/api/timeline",
+)
 
 
 def test_config_gets_open_in_single_operator_mode(client):
@@ -100,6 +114,66 @@ def test_config_gets_require_login_in_company_mode(client):
     for p in _CONFIG_GETS:
         r = tc.get(p)  # no session, no daemon capability
         assert r.status_code == 401, f"{p} -> {r.status_code}: {r.text}"
+
+
+_WRITE_MUTATIONS = (
+    ("post", "/api/feedback", {}),
+    ("post", "/api/feedback/dwell", {}),
+    ("post", "/api/behavioral/report-outcome", {}),
+    ("post", "/api/v3/tool-event", {}),
+)
+_DELETE_MUTATIONS = (
+    ("delete", "/api/patterns/delete", {}),
+    ("post", "/api/learning/reset", {}),
+)
+_MANAGE_MUTATIONS = (
+    ("post", "/api/learning/backup", {}),
+    ("post", "/api/learning/retrain", {}),
+    ("post", "/api/learning/migrate-legacy", {}),
+)
+
+
+@pytest.mark.parametrize("method,path,body", _WRITE_MUTATIONS + _DELETE_MUTATIONS)
+def test_learning_data_mutations_require_login_in_company_mode(
+    client, method, path, body,
+):
+    tc, h = client
+    _mk_user(tc, h, "company_admin", role="admin", profile_id="default")
+    tc.app.state.rbac.set_require_login(True)
+
+    response = tc.request(method.upper(), path, json=body, headers=h)
+
+    assert response.status_code == 401, (
+        f"{method.upper()} {path} bypassed company-mode login: "
+        f"{response.status_code} {response.text}"
+    )
+
+
+@pytest.mark.parametrize(
+    "method,path,body",
+    _WRITE_MUTATIONS + _DELETE_MUTATIONS + _MANAGE_MUTATIONS,
+)
+def test_viewer_cannot_mutate_learning_or_behavioral_state(
+    client, method, path, body,
+):
+    tc, h = client
+    viewer = _mk_user(
+        tc, h, f"viewer_{path.replace('/', '_')}",
+        role="viewer", profile_id="default",
+    )
+    token = _session(tc, viewer)
+
+    response = tc.request(
+        method.upper(),
+        path,
+        json=body,
+        headers={**h, "X-SLM-User-Session": token},
+    )
+
+    assert response.status_code == 403, (
+        f"{method.upper()} {path} allowed viewer mutation: "
+        f"{response.status_code} {response.text}"
+    )
 
 
 # -- SEC-H-01 config mutations are admin-only (privilege-escalation guard) ----

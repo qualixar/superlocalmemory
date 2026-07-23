@@ -11,8 +11,10 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
-import logging
+import hashlib
 import json
+import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -21,13 +23,72 @@ if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
 
 from superlocalmemory.storage.models import (
-    AtomicFact, FactType, MemoryRecord,
+    AtomicFact,
+    FactType,
+    MemoryRecord,
 )
 
 logger = logging.getLogger(__name__)
 
 # Langevin initialization radius for new facts (ACTIVE zone < 0.3)
 _INIT_LANGEVIN_RADIUS = 0.05
+
+
+def _ingestion_effect_id(operation_id: str, *parts: object) -> str:
+    """Return a stable ID for a relational effect owned by one ingestion."""
+    if not operation_id:
+        return uuid.uuid4().hex
+    payload = "\0".join((operation_id, *(str(part) for part in parts)))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _record_fact_entity_association(
+    db: DatabaseManager,
+    *,
+    operation_id: str,
+    profile_id: str,
+    fact_id: str,
+    entity_id: str,
+) -> None:
+    """Apply one fact/entity count effect in O(1), exactly once."""
+    if not operation_id:
+        db.increment_entity_fact_count(entity_id, profile_id)
+        return
+    with db.transaction():
+        claimed = db.execute(
+            "INSERT INTO fact_entity_associations "
+            "(profile_id,fact_id,entity_id,first_operation_id,count_applied) "
+            "SELECT ?,?,?,?,"
+            "CASE WHEN fact.rowid > repair.target_fact_rowid THEN 1 ELSE 0 END "
+            "FROM canonical_entities AS entity "
+            "JOIN atomic_facts AS fact "
+            "ON fact.fact_id=? AND fact.profile_id=? "
+            "JOIN fact_entity_association_repair_state AS repair "
+            "ON repair.repair_key='historical-backfill' "
+            "WHERE entity.entity_id=? AND entity.profile_id=? "
+            "ON CONFLICT(profile_id,fact_id,entity_id) DO UPDATE SET "
+            "count_applied=excluded.count_applied,"
+            "first_operation_id=excluded.first_operation_id "
+            "WHERE fact_entity_associations.count_applied=0 "
+            "AND excluded.count_applied=1 "
+            "RETURNING count_applied",
+            (
+                profile_id,
+                fact_id,
+                entity_id,
+                operation_id,
+                fact_id,
+                profile_id,
+                entity_id,
+                profile_id,
+            ),
+        )
+        if claimed and int(claimed[0]["count_applied"]) == 1:
+            db.execute(
+                "UPDATE canonical_entities SET fact_count=fact_count+1 "
+                "WHERE entity_id=? AND profile_id=?",
+                (entity_id, profile_id),
+            )
 
 
 def _init_langevin_position(dim: int = 8) -> list[float]:
@@ -60,7 +121,7 @@ def enrich_fact(
     temporal_parser: Any,
 ) -> AtomicFact:
     """Enrich fact with embeddings, entities, temporal, emotional data."""
-    from superlocalmemory.encoding.emotional import tag_emotion, emotional_importance_boost
+    from superlocalmemory.encoding.emotional import emotional_importance_boost, tag_emotion
     from superlocalmemory.encoding.signal_inference import infer_signal
 
     embedding = embedder.embed(fact.content) if embedder else None
@@ -189,6 +250,9 @@ def run_store(
     ingestion_source_type: str = "store",
     ingestion_operation_id: str = "",
     derivation_report: dict[str, bool] | None = None,
+    precompleted_derivation_stages: frozenset[str] = frozenset(),
+    materialization_progress: dict[str, Any] | None = None,
+    materialization_checkpoint: Any = None,
 ) -> list[str]:
     """Store content and extract structured facts. Returns fact_ids.
 
@@ -286,10 +350,19 @@ def run_store(
         )
         db.store_memory(record)
 
-    extraction_complete = False
-    consolidation_complete = consolidator is not None
-    canonicalization_complete = entity_resolver is not None
-    graph_complete = graph_builder is not None
+    extraction_complete = "extraction" in precompleted_derivation_stages
+    consolidation_complete = (
+        "consolidation" in precompleted_derivation_stages
+        or consolidator is not None
+    )
+    canonicalization_complete = (
+        "canonicalization" in precompleted_derivation_stages
+        or entity_resolver is not None
+    )
+    graph_complete = (
+        "graph" in precompleted_derivation_stages
+        or graph_builder is not None
+    )
     temporal_complete = True
     provenance_complete = provenance is not None
 
@@ -330,7 +403,6 @@ def run_store(
             and content.strip()
             and len(content.strip()) >= 40
             and len(content.strip().split()) >= _MIN_VERBATIM_WORDS):
-        import uuid
         import re as _re
         _verbatim_text = content.strip()
         # Extract entities using the same regex as fact_extractor
@@ -374,7 +446,6 @@ def run_store(
     # their data should NEVER be silently dropped. The min-length and min-word filters
     # are designed for automatic conversation extraction, not explicit user storage.
     if not facts and content.strip():
-        import uuid
         facts = [AtomicFact(
             fact_id=uuid.uuid4().hex[:16],
             content=content.strip(),
@@ -402,6 +473,22 @@ def run_store(
             entity_resolver=entity_resolver,
             temporal_parser=temporal_parser,
         )
+
+        if (
+            materialization_progress is not None
+            and not materialization_progress.get("relational_started", False)
+        ):
+            if materialization_checkpoint is not None:
+                materialization_checkpoint(
+                    "relational_started",
+                    (),
+                    {
+                        "pipeline_started": True,
+                        "relational_started": True,
+                        "pipeline": False,
+                    },
+                )
+            materialization_progress["relational_started"] = True
 
         is_queryable_promotion = fact.fact_id in queryable_ids
         if is_queryable_promotion:
@@ -515,6 +602,8 @@ def run_store(
 
         if fact.fact_id not in stored_ids:
             stored_ids.append(fact.fact_id)
+            if materialization_progress is not None:
+                materialization_progress["fact_ids"] = tuple(stored_ids)
 
         # Dual-write embedding to ANN index + vector store (embed on-demand if
         # a consolidated ADD fact arrived without one). See _upsert_fact_vectors.
@@ -611,12 +700,17 @@ def run_store(
             for eid in fact.canonical_entities:
                 observation_builder.update_profile(eid, fact, profile_id)
 
-        # Increment fact_count for each linked canonical entity (scoped to profile).
+        # The normalized association key makes this O(1) and exactly-once
+        # across retries, crashes, and separate operations that consolidate to
+        # the same fact.
         for eid in fact.canonical_entities:
-            try:
-                db.increment_entity_fact_count(eid, profile_id)
-            except Exception:
-                pass  # Non-critical — entity may have been deleted
+            _record_fact_entity_association(
+                db,
+                operation_id=ingestion_operation_id,
+                profile_id=profile_id,
+                fact_id=fact.fact_id,
+                entity_id=eid,
+            )
         if scene_builder:
             scene_builder.assign_to_scene(fact, profile_id)
 
@@ -627,6 +721,13 @@ def run_store(
             from superlocalmemory.storage.models import TemporalEvent
             for eid in fact.canonical_entities:
                 event = TemporalEvent(
+                    event_id=_ingestion_effect_id(
+                        ingestion_operation_id,
+                        "temporal",
+                        fact.fact_id,
+                        eid,
+                        "observed",
+                    ),
                     profile_id=profile_id, entity_id=eid,
                     fact_id=fact.fact_id,
                     scope=fact.scope,
@@ -644,8 +745,16 @@ def run_store(
             from superlocalmemory.encoding.foresight import extract_foresight_signals
             from superlocalmemory.storage.models import TemporalEvent as _TE
             foresight_signals = extract_foresight_signals(fact)
-            for sig in foresight_signals:
+            for signal_index, sig in enumerate(foresight_signals):
                 f_event = _TE(
+                    event_id=_ingestion_effect_id(
+                        ingestion_operation_id,
+                        "temporal",
+                        fact.fact_id,
+                        sig.get("entity_id", ""),
+                        "foresight",
+                        signal_index,
+                    ),
                     profile_id=profile_id,
                     entity_id=sig.get("entity_id", ""),
                     fact_id=fact.fact_id,
@@ -679,11 +788,6 @@ def run_store(
 
     logger.info("Stored %d facts (session=%s)", len(stored_ids), session_id)
 
-    # Post-operation hooks (audit, trust signal, event bus)
-    hook_ctx["fact_ids"] = stored_ids
-    hook_ctx["fact_count"] = len(stored_ids)
-    hooks.run_post("store", hook_ctx)
-
     if derivation_report is not None:
         derivation_report.update({
             "extraction": extraction_complete,
@@ -693,6 +797,35 @@ def run_store(
             "temporal": temporal_complete,
             "provenance": provenance_complete,
         })
+
+    # Stage observations and emitted fact IDs are recorded before optional
+    # post-hooks.  A hook failure must not erase the durable retry boundary and
+    # cause extraction/consolidation to run again.
+    if materialization_progress is not None:
+        materialization_progress["fact_ids"] = tuple(stored_ids)
+        materialization_progress["relational_complete"] = True
+        materialization_progress["post_hooks"] = False
+    if materialization_checkpoint is not None and stored_ids:
+        materialization_checkpoint(
+            "relational_complete",
+            tuple(stored_ids),
+            {
+                "pipeline_started": True,
+                "relational_started": True,
+                "pipeline": True,
+                "post_hooks": False,
+                "relational": True,
+                **dict(derivation_report or {}),
+            },
+        )
+
+    # Post-operation hooks (audit, trust signal, event bus)
+    hook_ctx["ingestion_operation_id"] = ingestion_operation_id
+    hook_ctx["fact_ids"] = stored_ids
+    hook_ctx["fact_count"] = len(stored_ids)
+    hooks.run_post("store", hook_ctx)
+    if materialization_progress is not None:
+        materialization_progress["post_hooks"] = True
 
     # Phase 5: Step-count trigger for lightweight consolidation (L7)
     if consolidation_engine is not None:

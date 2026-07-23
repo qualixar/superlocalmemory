@@ -26,6 +26,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from superlocalmemory import __version__
+
 # ---------------------------------------------------------------------------
 # Cross-platform temp paths
 # ---------------------------------------------------------------------------
@@ -221,7 +223,10 @@ def _codex_mcp_session_init(project_dir: str, payload: dict) -> dict:
         proc.stdin.write(json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                       "clientInfo": {"name": "superlocalmemory-codex-hook", "version": "3.7"}},
+                       "clientInfo": {
+                           "name": "superlocalmemory-codex-hook",
+                           "version": __version__,
+                       }},
         }) + "\n")
         proc.stdin.flush()
         proc.stdout.readline()

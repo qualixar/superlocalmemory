@@ -8,21 +8,154 @@ Routes:
   Cloud:  /api/backup/destinations, /api/backup/connect/github, /api/backup/connect/gdrive,
           /api/backup/disconnect/{id}, /api/backup/sync, /api/backup/export
 """
-import logging
 import gzip
 import hashlib
+import hmac
+import html as _html
+import logging
+import secrets
 import shutil
+import tempfile
+import threading
+import time
 import urllib.parse
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from starlette.background import BackgroundTask
 
-from .helpers import BackupConfigRequest, DB_PATH, MEMORY_DIR
+from .helpers import DB_PATH, MEMORY_DIR, BackupConfigRequest
 
 logger = logging.getLogger("superlocalmemory.routes.backup")
 router = APIRouter()
+
+_OAUTH_STATE_TTL_SECONDS = 10 * 60
+_OAUTH_STATE_LOCK = threading.Lock()
+_OAUTH_STATES: dict[str, dict[str, object]] = {}
+
+
+def _require_read(request: Request) -> None:
+    """Require READ on the active profile for backup metadata."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    require_permission(request, Permission.READ)
+
+
+def _require_manage(request: Request) -> dict:
+    """Require MANAGE for backup configuration, creation, and cloud access."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    return require_manage(request)
+
+
+def _require_oauth_start(request: Request) -> None:
+    """Allow OAuth initiation from the exact dashboard or an authenticated admin."""
+    from superlocalmemory.server.origin import origin_is_daemon
+
+    fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    if fetch_site == "cross-site":
+        raise HTTPException(
+            status_code=403,
+            detail="Cross-site OAuth initiation is not allowed.",
+        )
+    principal = _require_manage(request)
+    origin = request.headers.get("origin", "")
+    if origin:
+        descriptor = getattr(
+            getattr(request.app, "state", None),
+            "daemon_descriptor",
+            None,
+        )
+        daemon_port = (
+            getattr(descriptor, "port", None)
+            or request.url.port
+            or 8765
+        )
+        if not origin_is_daemon(origin, port=int(daemon_port)):
+            raise HTTPException(
+                status_code=403,
+                detail="OAuth initiation requires the local dashboard origin.",
+            )
+    elif fetch_site and fetch_site != "same-origin":
+        # Browser top-level navigations commonly omit Origin. Sec-Fetch-Site
+        # still distinguishes this daemon's own page (same-origin) from a
+        # different localhost port (same-site).
+        raise HTTPException(
+            status_code=403,
+            detail="OAuth initiation requires the local dashboard origin.",
+        )
+
+    host = request.client.host if request.client else ""
+    is_loopback = host in {"127.0.0.1", "::1", "localhost", "testclient"}
+    if not is_loopback and principal.get("kind") != "user":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "OAuth connections must start from the local dashboard or an "
+                "authenticated admin session."
+            ),
+        )
+
+
+def _oauth_context(request: Request) -> str:
+    """Fingerprint the local browser/session that initiated an OAuth flow.
+
+    OAuth callbacks cannot carry the install-token header, so the random state
+    is bound to stable browser context available on both the start and callback:
+    loopback client address, dashboard user session (when present), and user
+    agent. Only the digest is retained in memory.
+    """
+    client_host = request.client.host if request.client else ""
+    session = request.headers.get("X-SLM-User-Session", "")
+    if not session:
+        session = request.cookies.get("slm_session", "")
+    user_agent = request.headers.get("user-agent", "")
+    material = "\x00".join((client_host, session, user_agent))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _issue_oauth_state(provider: str, request: Request) -> str:
+    """Create a cryptographically random, expiring, provider-bound state."""
+    now = time.monotonic()
+    state = secrets.token_urlsafe(32)
+    record = {
+        "provider": provider,
+        "context": _oauth_context(request),
+        "expires_at": now + _OAUTH_STATE_TTL_SECONDS,
+    }
+    with _OAUTH_STATE_LOCK:
+        expired = [
+            key for key, value in _OAUTH_STATES.items()
+            if float(value.get("expires_at", 0)) <= now
+        ]
+        for key in expired:
+            _OAUTH_STATES.pop(key, None)
+        _OAUTH_STATES[state] = record
+    return state
+
+
+def _consume_oauth_state(state: str, provider: str, request: Request) -> bool:
+    """Atomically consume and validate OAuth state.
+
+    The pop happens under the lock, so parallel/replayed callbacks cannot both
+    exchange the same authorization code. A mismatched provider or browser
+    context fails closed and the suspicious state cannot be retried.
+    """
+    if not state:
+        return False
+    with _OAUTH_STATE_LOCK:
+        record = _OAUTH_STATES.pop(state, None)
+    if not record or float(record.get("expires_at", 0)) <= time.monotonic():
+        return False
+    return (
+        hmac.compare_digest(str(record.get("provider", "")), provider)
+        and hmac.compare_digest(
+            str(record.get("context", "")),
+            _oauth_context(request),
+        )
+    )
 
 
 def _internal_error(detail: str = "Internal server error") -> HTTPException:
@@ -42,9 +175,11 @@ except ImportError:
 
 try:
     from superlocalmemory.infra.cloud_backup import (
-        get_destinations, add_destination, remove_destination,
-        connect_github, connect_google_drive,
-        sync_all_destinations, update_sync_status,
+        connect_github,
+        connect_google_drive,
+        get_destinations,
+        remove_destination,
+        sync_all_destinations,
     )
     CLOUD_AVAILABLE = True
 except ImportError:
@@ -74,8 +209,9 @@ class GDriveClientConfig(BaseModel):
 # ---- Local backup routes (existing) ---------------------------------------
 
 @router.get("/api/backup/status")
-async def backup_status():
+def backup_status(request: Request):
     """Get auto-backup system status + cloud destinations."""
+    _require_read(request)
     if not BACKUP_AVAILABLE:
         return {"status": "not_implemented", "message": "Backup module not available"}
     try:
@@ -91,8 +227,9 @@ async def backup_status():
 
 
 @router.post("/api/backup/create")
-async def backup_create():
+def backup_create(request: Request):
     """Create a manual backup immediately."""
+    _require_manage(request)
     if not BACKUP_AVAILABLE:
         return {"success": False, "message": "Backup module not available"}
     try:
@@ -110,16 +247,17 @@ async def backup_create():
 
 
 @router.post("/api/backup/configure")
-async def backup_configure(request: BackupConfigRequest):
+def backup_configure(request: Request, payload: BackupConfigRequest):
     """Update auto-backup configuration."""
+    _require_manage(request)
     if not BACKUP_AVAILABLE:
         return {"success": False, "message": "Backup module not available"}
     try:
         manager = _get_backup_manager()
         result = manager.configure(
-            interval_hours=request.interval_hours,
-            max_backups=request.max_backups,
-            enabled=request.enabled,
+            interval_hours=payload.interval_hours,
+            max_backups=payload.max_backups,
+            enabled=payload.enabled,
         )
         return {"success": True, "message": "Backup configuration updated", "status": result}
     except Exception:
@@ -127,8 +265,9 @@ async def backup_configure(request: BackupConfigRequest):
 
 
 @router.get("/api/backup/list")
-async def backup_list(request: Request):
+def backup_list(request: Request):
     """List all available backups."""
+    _require_read(request)
     if not BACKUP_AVAILABLE:
         return {"backups": [], "count": 0, "message": "Backup module not available"}
     # This GET is not covered by the mutation middleware. The local machine
@@ -151,49 +290,54 @@ async def backup_list(request: Request):
 # ---- Cloud destination routes (v3.4.10) -----------------------------------
 
 @router.get("/api/backup/destinations")
-async def list_destinations():
+def list_destinations(request: Request):
     """List all configured cloud backup destinations."""
+    _require_read(request)
     if not CLOUD_AVAILABLE:
         return {"destinations": [], "cloud_available": False}
     return {"destinations": get_destinations(DB_PATH), "cloud_available": True}
 
 
 @router.post("/api/backup/connect/github")
-async def connect_github_route(request: GitHubConnectRequest):
+def connect_github_route(request: Request, payload: GitHubConnectRequest):
     """Connect GitHub as a backup destination using PAT."""
+    _require_manage(request)
     if not CLOUD_AVAILABLE:
         raise HTTPException(status_code=501, detail="Cloud backup module not available")
-    result = connect_github(request.pat, request.repo_name)
+    result = connect_github(payload.pat, payload.repo_name)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
 
 @router.post("/api/backup/connect/gdrive/config")
-async def configure_gdrive_client(request: GDriveClientConfig):
+def configure_gdrive_client(request: Request, payload: GDriveClientConfig):
     """Store Google OAuth client credentials (one-time setup)."""
+    _require_manage(request)
     if not CLOUD_AVAILABLE:
         raise HTTPException(status_code=501, detail="Cloud backup module not available")
     from superlocalmemory.infra.cloud_backup import _store_credential
-    _store_credential("gdrive_client_id", request.client_id)
-    _store_credential("gdrive_client_secret", request.client_secret)
+    _store_credential("gdrive_client_id", payload.client_id)
+    _store_credential("gdrive_client_secret", payload.client_secret)
     return {"success": True, "message": "Google OAuth client configured"}
 
 
 @router.post("/api/backup/connect/gdrive")
-async def connect_gdrive_route(request: GDriveConnectRequest):
+def connect_gdrive_route(request: Request, payload: GDriveConnectRequest):
     """Complete Google Drive OAuth2 flow with authorization code."""
+    _require_manage(request)
     if not CLOUD_AVAILABLE:
         raise HTTPException(status_code=501, detail="Cloud backup module not available")
-    result = connect_google_drive(request.auth_code, request.redirect_uri)
+    result = connect_google_drive(payload.auth_code, payload.redirect_uri)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
 
 @router.delete("/api/backup/disconnect/{dest_id}")
-async def disconnect_destination(dest_id: str):
+def disconnect_destination(request: Request, dest_id: str):
     """Remove a cloud backup destination."""
+    _require_manage(request)
     if not CLOUD_AVAILABLE:
         raise HTTPException(status_code=501, detail="Cloud backup module not available")
     ok = remove_destination(dest_id, DB_PATH)
@@ -203,16 +347,16 @@ async def disconnect_destination(dest_id: str):
 
 
 @router.post("/api/backup/sync")
-async def sync_cloud():
+def sync_cloud(request: Request):
     """Manually trigger sync to all cloud destinations.
 
     Runs the upload in a background thread so it doesn't block the
     dashboard. Returns immediately with status 'syncing'. The actual
     upload status is reflected in the destination's last_sync_status.
     """
-    import asyncio
     import threading
 
+    _require_manage(request)
     if not CLOUD_AVAILABLE:
         raise HTTPException(status_code=501, detail="Cloud backup module not available")
     if not BACKUP_AVAILABLE:
@@ -237,25 +381,28 @@ async def sync_cloud():
     return {
         "success": True,
         "backup": filename,
-        "sync": {"status": "syncing", "message": "Upload started in background. Check destination status for progress."},
+        "sync": {
+            "status": "syncing",
+            "message": (
+                "Upload started in background. Check destination status for progress."
+            ),
+        },
     }
 
 
 # ---- Export / Download route (v3.4.10) ------------------------------------
 
-@router.get("/api/backup/export")
-async def export_backup(request: Request):
-    """Create and download a compressed backup archive."""
+@router.post("/api/backup/export")
+def export_backup(request: Request):
+    """Create and download a compressed backup archive.
+
+    Export is a credentialed mutation because it creates a local snapshot.
+    The compressed transport file is temporary and is removed after the
+    response completes; the normal retention policy owns the snapshot itself.
+    """
+    _require_manage(request)
     if not BACKUP_AVAILABLE:
         raise HTTPException(status_code=501, detail="Backup module not available")
-    # Full-database download. This GET is not covered by the mutation
-    # middleware and is triggered by a top-level navigation (window.location),
-    # which cannot carry a custom credential header — so it uses the
-    # loopback-trusted mutation-actor boundary: the local owner may export,
-    # a non-loopback caller without a credential fails closed.
-    from superlocalmemory.server.write_identity import require_http_mutation_actor
-    require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
-                                actor_kind="backup-export")
 
     manager = _get_backup_manager()
     filename = manager.create_backup(label="export")
@@ -266,16 +413,28 @@ async def export_backup(request: Request):
     if not backup_path.exists():
         raise HTTPException(status_code=500, detail="Backup file not found")
 
-    # Compress for download
-    gz_path = backup_path.with_suffix(".db.gz")
-    with open(backup_path, "rb") as f_in:
-        with gzip.open(gz_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    # Compress into a one-response transport file. Never retain another full
+    # copy beside the bounded snapshot set.
+    with tempfile.NamedTemporaryFile(
+        prefix="slm-export-",
+        suffix=".db.gz",
+        dir=backup_path.parent,
+        delete=False,
+    ) as temp_file:
+        gz_path = backup_path.parent / temp_file.name
+    try:
+        with open(backup_path, "rb") as f_in:
+            with gzip.open(gz_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+    except Exception:
+        gz_path.unlink(missing_ok=True)
+        raise
 
     return FileResponse(
         path=str(gz_path),
         media_type="application/gzip",
-        filename=gz_path.name,
+        filename=f"{backup_path.name}.gz",
+        background=BackgroundTask(gz_path.unlink, missing_ok=True),
     )
 
 
@@ -332,7 +491,6 @@ p {{ color: #999; margin: 0 0 20px; font-size: 13px; }}
 # ``str.format`` doesn't escape HTML, so a hostile OAuth callback can
 # inject ``<script>`` into these pages. These helpers HTML-escape every
 # interpolated value before emitting the template.
-import html as _html
 
 
 def _oauth_error_page(icon: str, error: str) -> str:
@@ -353,8 +511,9 @@ def _oauth_success_page(icon: str, title: str, message: str) -> str:
 # ---- Google OAuth SSO Flow ------------------------------------------------
 
 @router.get("/api/backup/oauth/google/start")
-async def google_oauth_start(request: Request):
+def google_oauth_start(request: Request):
     """Start Google OAuth2 flow — redirects to Google's login page."""
+    _require_oauth_start(request)
     if not CLOUD_AVAILABLE:
         return HTMLResponse(_oauth_error_page(icon="&#x26A0;", error="Cloud backup module not available"))
 
@@ -422,7 +581,7 @@ a { color: #00D4AA; }
 </div>
 
 <p style="color:#555;font-size:11px;margin-top:16px;">
-Your credentials are stored in your OS keychain (macOS Keychain / Windows Credential Locker) &mdash; never in plaintext.
+Credentials use your OS credential store when available, with a permission-restricted local fallback.
 Full guide: <a href="https://github.com/qualixar/superlocalmemory/wiki/Cloud-Backup#google-drive-backup" target="_blank">Cloud Backup Wiki</a>
 </p>
 </div>
@@ -432,20 +591,29 @@ async function saveAndConnect() {
   var csec = document.getElementById('csec').value.trim();
   if (!cid || !csec) { document.getElementById('status').innerHTML = '<span style="color:#ff4757">Both fields required</span>'; return; }
   document.getElementById('saveBtn').disabled = true;
-  document.getElementById('status').innerHTML = '<span style="color:#999">Saving...</span>';
+  var status = document.getElementById('status');
+  status.style.color = '#999';
+  status.textContent = 'Saving...';
   try {
+    var tokenResp = await fetch('/internal/token', {credentials: 'same-origin'});
+    if (!tokenResp.ok) throw new Error('Could not authorize this dashboard');
+    var tokenData = await tokenResp.json();
+    if (!tokenData.token) throw new Error('Could not authorize this dashboard');
     var resp = await fetch('/api/backup/connect/gdrive/config', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'X-Install-Token': tokenData.token},
       body: JSON.stringify({client_id: cid, client_secret: csec})
     });
     if (resp.ok) {
       window.location.href = '/api/backup/oauth/google/start';
     } else {
-      document.getElementById('status').innerHTML = '<span style="color:#ff4757">Failed to save</span>';
+      status.style.color = '#ff4757';
+      status.textContent = 'Failed to save';
       document.getElementById('saveBtn').disabled = false;
     }
   } catch(e) {
-    document.getElementById('status').innerHTML = '<span style="color:#ff4757">Error: ' + e.message + '</span>';
+    status.style.color = '#ff4757';
+    status.textContent = 'Error: ' + e.message;
     document.getElementById('saveBtn').disabled = false;
   }
 }
@@ -454,22 +622,37 @@ async function saveAndConnect() {
     # Build the Google OAuth URL
     base_url = str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/backup/oauth/google/callback"
+    state = _issue_oauth_state("google", request)
 
     params = urllib.parse.urlencode({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email",
+        "scope": "openid https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email",
         "access_type": "offline",
         "prompt": "consent",
+        "state": state,
     })
 
     return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
 
 
 @router.get("/api/backup/oauth/google/callback")
-async def google_oauth_callback(request: Request, code: str = "", error: str = ""):
+def google_oauth_callback(
+    request: Request,
+    code: str = "",
+    error: str = "",
+    state: str = "",
+):
     """Google OAuth2 callback — exchanges code for tokens."""
+    if not _consume_oauth_state(state, "google", request):
+        return HTMLResponse(
+            _oauth_error_page(
+                icon="&#x274C;",
+                error="Invalid, expired, or already-used OAuth state. Start the connection again.",
+            ),
+            status_code=400,
+        )
     if error:
         return HTMLResponse(_oauth_error_page(icon="&#x274C;", error=f"Google denied access: {error}"))
 
@@ -487,7 +670,7 @@ async def google_oauth_callback(request: Request, code: str = "", error: str = "
     return HTMLResponse(_oauth_success_page(
         icon="&#x2601;&#xFE0F;",
         title="Google Drive Connected!",
-        message=f"Signed in as {result.get('email', 'unknown')}. Your memories will be backed up automatically."
+        message=f"Signed in as {result.get('email', 'unknown')}. The destination is configured; sync status will appear after an upload."
     ))
 
 
@@ -497,8 +680,9 @@ async def google_oauth_callback(request: Request, code: str = "", error: str = "
 # otherwise fall back to Device Flow with a nice UI.
 
 @router.get("/api/backup/oauth/github/start")
-async def github_oauth_start(request: Request):
+def github_oauth_start(request: Request):
     """Start GitHub OAuth flow."""
+    _require_oauth_start(request)
     if not CLOUD_AVAILABLE:
         return HTMLResponse(_oauth_error_page(icon="&#x26A0;", error="Cloud backup module not available"))
 
@@ -511,12 +695,13 @@ async def github_oauth_start(request: Request):
         # Full OAuth Web Flow — browser redirects to GitHub login
         base_url = str(request.base_url).rstrip("/")
         redirect_uri = f"{base_url}/api/backup/oauth/github/callback"
+        state = _issue_oauth_state("github", request)
 
         params = urllib.parse.urlencode({
             "client_id": gh_client_id,
             "redirect_uri": redirect_uri,
             "scope": "repo",
-            "state": hashlib.sha256(base_url.encode()).hexdigest()[:16],
+            "state": state,
         })
         return RedirectResponse(f"https://github.com/login/oauth/authorize?{params}")
 
@@ -558,38 +743,61 @@ a { color: #00D4AA; }
 
 <p class="hint">
   Need a token? <a href="https://github.com/settings/tokens/new?scopes=repo&description=SLM+Backup" target="_blank">Create one here</a> (select <code>repo</code> scope).
-  Your token is stored securely in your OS keychain.
+  Your token uses the OS credential store when available, with a permission-restricted local fallback.
 </p>
 </div>
 <script>
 async function doConnect() {
   var pat = document.getElementById('pat').value.trim();
   var repo = document.getElementById('repo').value.trim();
-  if (!pat) { document.getElementById('status').innerHTML = '<span style="color:#ff4757">Token required</span>'; return; }
+  var status = document.getElementById('status');
+  if (!pat) { status.style.color = '#ff4757'; status.textContent = 'Token required'; return; }
 
   var btn = document.getElementById('connectBtn');
   btn.disabled = true; btn.textContent = 'Connecting...';
-  document.getElementById('status').innerHTML = '<span style="color:#999">Verifying token and creating repo...</span>';
+  status.style.color = '#999';
+  status.textContent = 'Verifying token and creating repo...';
 
   try {
+    var tokenResp = await fetch('/internal/token', {credentials: 'same-origin'});
+    if (!tokenResp.ok) throw new Error('Could not authorize this dashboard');
+    var tokenData = await tokenResp.json();
+    if (!tokenData.token) throw new Error('Could not authorize this dashboard');
     var resp = await fetch('/api/backup/connect/github', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'X-Install-Token': tokenData.token},
       body: JSON.stringify({pat: pat, repo_name: repo || 'slm-backup'})
     });
     var data = await resp.json();
     if (resp.ok) {
-      document.body.innerHTML = '<div class="card" style="text-align:center;background:rgba(255,255,255,0.05);border:1px solid rgba(0,212,170,0.3);border-radius:16px;padding:40px;max-width:400px;">' +
-        '<div style="font-size:48px;margin-bottom:16px;">&#x2705;</div>' +
-        '<h2 style="color:#00D4AA;margin:0 0 8px;">GitHub Connected!</h2>' +
-        '<p style="color:#999;margin:0 0 20px;">Repository: ' + (data.repo || repo) + '</p>' +
-        '<button class="btn" style="background:#00D4AA;color:#0a0a0f;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-weight:600;" onclick="window.close()">Close Window</button></div>';
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.style.cssText = 'text-align:center;background:rgba(255,255,255,0.05);border:1px solid rgba(0,212,170,0.3);border-radius:16px;padding:40px;max-width:400px;';
+      var icon = document.createElement('div');
+      icon.style.cssText = 'font-size:48px;margin-bottom:16px;';
+      icon.textContent = '\u2705';
+      var title = document.createElement('h2');
+      title.style.cssText = 'color:#00D4AA;margin:0 0 8px;';
+      title.textContent = 'GitHub Connected!';
+      var repoText = document.createElement('p');
+      repoText.style.cssText = 'color:#999;margin:0 0 20px;';
+      repoText.textContent = 'Repository: ' + (data.repo || repo);
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'btn';
+      closeBtn.style.cssText = 'background:#00D4AA;color:#0a0a0f;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-weight:600;';
+      closeBtn.textContent = 'Close Window';
+      closeBtn.addEventListener('click', function () { window.close(); });
+      card.append(icon, title, repoText, closeBtn);
+      document.body.replaceChildren(card);
     } else {
-      document.getElementById('status').innerHTML = '<span style="color:#ff4757">' + (data.detail || 'Connection failed') + '</span>';
+      status.style.color = '#ff4757';
+      status.textContent = data.detail || 'Connection failed';
       btn.disabled = false; btn.textContent = 'Connect';
     }
   } catch(e) {
-    document.getElementById('status').innerHTML = '<span style="color:#ff4757">Connection failed</span>';
+    status.style.color = '#ff4757';
+    status.textContent = 'Connection failed';
     btn.disabled = false; btn.textContent = 'Connect';
   }
 }
@@ -597,16 +805,30 @@ async function doConnect() {
 
 
 @router.get("/api/backup/oauth/github/callback")
-async def github_oauth_callback(request: Request, code: str = "", error: str = ""):
+def github_oauth_callback(
+    request: Request,
+    code: str = "",
+    error: str = "",
+    state: str = "",
+):
     """GitHub OAuth callback — exchanges code for access token."""
+    if not _consume_oauth_state(state, "github", request):
+        return HTMLResponse(
+            _oauth_error_page(
+                icon="&#x274C;",
+                error="Invalid, expired, or already-used OAuth state. Start the connection again.",
+            ),
+            status_code=400,
+        )
     if error:
         return HTMLResponse(_oauth_error_page(icon="&#x274C;", error=f"GitHub denied access: {error}"))
 
     if not code:
         return HTMLResponse(_oauth_error_page(icon="&#x274C;", error="No authorization code received"))
 
-    from superlocalmemory.infra.cloud_backup import _get_credential, _store_credential
     import httpx
+
+    from superlocalmemory.infra.cloud_backup import _get_credential
 
     gh_client_id = _get_credential("github_client_id")
     gh_client_secret = _get_credential("github_client_secret")
@@ -635,8 +857,9 @@ async def github_oauth_callback(request: Request, code: str = "", error: str = "
         return HTMLResponse(_oauth_success_page(
             icon="&#x2705;",
             title="GitHub Connected!",
-            message=f"Repository: {result.get('repo', 'slm-backup')}. Your memories will be backed up automatically."
+            message=f"Repository: {result.get('repo', 'slm-backup')}. The destination is configured; sync status will appear after an upload."
         ))
 
-    except Exception as exc:
-        return HTMLResponse(_oauth_error_page(icon="&#x274C;", error=str(exc)))
+    except Exception:
+        logger.exception("GitHub OAuth callback failed")
+        return HTMLResponse(_oauth_error_page(icon="&#x274C;", error="GitHub connection failed"))

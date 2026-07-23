@@ -113,6 +113,15 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M027_transferable_patterns_profile as _M027,
 )
+from superlocalmemory.storage.migrations import (
+    M028_fact_entity_associations as _M028,
+)
+from superlocalmemory.storage.migrations import (
+    M029_behavioral_history_indexes as _M029,
+)
+from superlocalmemory.storage.migrations import (
+    M030_entity_explorer_indexes as _M030,
+)
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
 # that lets the runner detect "already applied" state when an idempotent
@@ -144,6 +153,9 @@ _MODULES = {
     _M025.NAME: _M025,
     _M026.NAME: _M026,
     _M027.NAME: _M027,
+    _M028.NAME: _M028,
+    _M029.NAME: _M029,
+    _M030.NAME: _M030,
 }
 
 logger = logging.getLogger(__name__)
@@ -218,6 +230,10 @@ MIGRATIONS: list[Migration] = [
 # position proxy when the column is absent, so a failed deferred apply never
 # crashes the trainer — it just keeps the old label path.
 DEFERRED_MIGRATIONS: list[Migration] = [
+    # M028 captures an atomic_facts rowid high-water mark before readiness.
+    # atomic_facts/canonical_entities are bootstrapped by MemoryEngine.
+    Migration(name=_M028.NAME, db_target="memory", ddl=_M028.DDL,
+              dependencies=(_M018.NAME,)),
     Migration(name=_M006.NAME, db_target="memory", ddl=_M006.DDL),
     # M011 extends atomic_facts + creates memory_archive / memory_merge_log.
     # atomic_facts is bootstrapped at engine init, so M011 defers alongside M006.
@@ -256,6 +272,10 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # consolidation run, not during engine init or apply_all. apply() is a no-op
     # when the table is absent (first install after the schema change).
     Migration(name=_M027.NAME, db_target="learning", ddl=_M027.DDL),
+    # M029 indexes behavioral tables bootstrapped during engine initialization.
+    Migration(name=_M029.NAME, db_target="memory", ddl=_M029.DDL),
+    # M030 bounds Entity Explorer pagination and profile-summary ranking.
+    Migration(name=_M030.NAME, db_target="memory", ddl=_M030.DDL),
 ]
 
 
@@ -401,7 +421,65 @@ def _apply_single(
                 )
                 logger.warning(detail)
                 return ("failed", detail)
-            return ("skipped", "already complete")
+            # A matching migration-log row is not proof that the promised
+            # schema still exists. Existing installs can retain a migration log
+            # while a partial restore drops an additive table or index.
+            #
+            # Never replay a historical migration merely because verify()
+            # fails. Some migrations rebuild tables and transform data; replay
+            # would be destructive (M002 is the canonical example). Only a
+            # module-supplied repair(conn) hook is allowed to reconcile a
+            # completed migration's end-state.
+            mod = _MODULES.get(migration.name)
+            verify_fn = (
+                getattr(mod, "verify", None) if mod is not None else None
+            )
+            if verify_fn is None:
+                return ("skipped", "already complete")
+            try:
+                schema_complete = bool(verify_fn(conn))
+            except sqlite3.Error as exc:
+                return (
+                    "failed",
+                    f"schema verification failed for {migration.name}: {exc}",
+                )
+            if schema_complete:
+                return ("skipped", "already complete (schema verified)")
+            if dry_run:
+                return (
+                    "skipped",
+                    "dry-run: would repair missing migration end-state",
+                )
+            repair_fn = (
+                getattr(mod, "repair", None) if mod is not None else None
+            )
+            if not callable(repair_fn):
+                detail = (
+                    f"schema incomplete for completed migration "
+                    f"{migration.name}; automatic replay is disabled"
+                )
+                logger.warning(detail)
+                return ("failed", detail)
+            try:
+                repair_fn(conn)
+            except sqlite3.Error as exc:
+                return (
+                    "failed",
+                    f"safe repair failed for {migration.name}: {exc}",
+                )
+            try:
+                if not bool(verify_fn(conn)):
+                    return (
+                        "failed",
+                        f"safe repair did not restore {migration.name}",
+                    )
+            except sqlite3.Error as exc:
+                return (
+                    "failed",
+                    f"post-repair verification failed for "
+                    f"{migration.name}: {exc}",
+                )
+            return ("applied", "missing end-state repaired safely")
         # status is 'failed' or 'in_progress' → retry from scratch.
         if dry_run:
             return ("skipped", f"dry-run: would retry (status={status})")

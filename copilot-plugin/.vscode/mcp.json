@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "superlocalmemory": {
+      "type": "stdio",
+      "command": "slm",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

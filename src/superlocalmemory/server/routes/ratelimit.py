@@ -33,9 +33,9 @@ from superlocalmemory.infra.rate_limiter import (
     set_limits,
 )
 from superlocalmemory.server.routes.config_api import (
-    _atomic_write,
     _read_config,
     _require_admin,
+    _update_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,22 +81,26 @@ def load_persisted_limits() -> None:
         logger.debug("load_persisted_limits skipped: %s", exc)
 
 
+def _require_read(request: Request) -> None:
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import get_active_profile
+
+    require_permission(request, Permission.READ, profile=get_active_profile())
+
+
 @router.get("/ratelimit")
-def get_ratelimit() -> JSONResponse:
+def get_ratelimit(request: Request) -> JSONResponse:
+    _require_read(request)
     return JSONResponse(_effective())
 
 
 @router.put("/ratelimit")
-async def put_ratelimit(request: Request) -> JSONResponse:
+def put_ratelimit(
+    request: Request,
+    payload: RateLimitUpdate,
+) -> JSONResponse:
     _require_admin(request)
-    try:
-        raw = await request.json()
-    except Exception:
-        raw = {}
-    try:
-        payload = RateLimitUpdate(**(raw or {}))
-    except Exception as exc:
-        return JSONResponse(status_code=422, content={"error": str(exc)})
 
     if payload.write is None and payload.read is None and payload.window is None:
         return JSONResponse(
@@ -104,21 +108,25 @@ async def put_ratelimit(request: Request) -> JSONResponse:
             content={"error": "Provide at least one of write, read, window."},
         )
 
-    # Runtime apply (reconfigures every live limiter — no restart).
-    effective = set_limits(
-        write=payload.write, read=payload.read, window=payload.window,
-    )
-
-    # Persist so the override survives restart.
+    current = get_limits()
+    requested = {
+        "write": payload.write if payload.write is not None else current["write"],
+        "read": payload.read if payload.read is not None else current["read"],
+        "window": payload.window if payload.window is not None else current["window"],
+    }
+    # Persist first. A response must never say success for a runtime-only
+    # setting that silently disappears after restart.
     try:
-        cfg = _read_config()
-        cfg[_CONFIG_KEY] = {
-            "write": effective["write"],
-            "read": effective["read"],
-            "window": effective["window"],
-        }
-        _atomic_write(cfg)
+        _update_config(
+            lambda cfg: cfg.update({_CONFIG_KEY: dict(requested)}),
+        )
     except Exception as exc:
-        logger.warning("rate-limit persist failed (applied at runtime): %s", exc)
+        logger.warning("rate-limit persist failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Rate-limit configuration was not persisted."},
+        )
 
+    # Runtime apply reconfigures every live limiter; no restart is required.
+    set_limits(**requested)
     return JSONResponse({"success": True, **_effective()})

@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 
+from superlocalmemory.learning.model_cache import invalidate as invalidate_model_cache
 from superlocalmemory.learning.ranker_common import (
     _build_training_matrix,
     _compute_eval_metrics,
@@ -389,6 +390,7 @@ def _promote_candidate(
                 (json.dumps(meta), candidate_id),
             )
             conn.commit()
+            invalidate_model_cache(profile_id)
             return True
         except sqlite3.Error as exc:
             conn.rollback()

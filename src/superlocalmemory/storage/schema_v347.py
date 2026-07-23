@@ -48,6 +48,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_events_session
     ON tool_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_events_project
     ON tool_events(project_path);
+CREATE INDEX IF NOT EXISTS idx_tool_events_profile_created
+    ON tool_events(profile_id, created_at DESC);
 """
 
 # ---------------------------------------------------------------------------
@@ -80,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_assertions_project
     ON behavioral_assertions(project_path, profile_id);
 CREATE INDEX IF NOT EXISTS idx_assertions_category
     ON behavioral_assertions(category);
+CREATE INDEX IF NOT EXISTS idx_assertions_profile_confidence
+    ON behavioral_assertions(profile_id, confidence DESC);
 """
 
 # ---------------------------------------------------------------------------

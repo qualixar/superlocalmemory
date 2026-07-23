@@ -267,6 +267,13 @@ def daemon_request(
         if capability is not None:
             headers["X-SLM-Daemon-Capability"] = capability
             headers["X-SLM-Target-Instance"] = descriptor.instance_id
+        # Daemon ownership proves that this CLI targets the local instance; it
+        # does not replace a dashboard user's profile-scoped authorization in
+        # governed workspaces. The user opts in by supplying an explicit
+        # session through the process environment (never logged or persisted).
+        user_session = os.environ.get("SLM_USER_SESSION", "").strip()
+        if user_session:
+            headers["X-SLM-User-Session"] = user_session
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         resp = urllib.request.urlopen(req, timeout=timeout_seconds)
         return json.loads(resp.read().decode())

@@ -31,9 +31,11 @@ module or skip cleanly if lightgbm is unavailable on the runner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -203,6 +205,40 @@ def _seed_previous_model(
             " trained_at, updated_at) "
             "VALUES (?, ?, ?, 0, 1, ?, ?)",
             (profile_id, state_bytes, "0" * 64, _now_iso(), _now_iso()),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+
+
+def _seed_cacheable_model(
+    db_path: Path,
+    *,
+    profile_id: str,
+    state_bytes: bytes,
+    is_active: int = 0,
+    is_previous: int = 0,
+    is_candidate: int = 0,
+) -> int:
+    """Insert a model row that passes the production integrity gate."""
+    from superlocalmemory.learning.features import FEATURE_NAMES
+
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO learning_model_state "
+            "(profile_id, state_bytes, bytes_sha256, feature_names, "
+            " is_active, is_previous, is_candidate, trained_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                profile_id,
+                state_bytes,
+                hashlib.sha256(state_bytes).hexdigest(),
+                json.dumps(FEATURE_NAMES),
+                is_active,
+                is_previous,
+                is_candidate,
+                _now_iso(),
+                _now_iso(),
+            ),
         )
         conn.commit()
         return int(cur.lastrowid or 0)
@@ -522,6 +558,95 @@ def test_promotion_flips_lineage_atomically(learning_db: Path) -> None:
             conn.commit()
 
 
+def test_promotion_replaces_warm_active_model_cache(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed promotion must be visible to the next warm recall."""
+    from superlocalmemory.learning.consolidation_worker import _promote_candidate
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.learning.model_cache import load_active
+
+    monkeypatch.setitem(
+        sys.modules,
+        "lightgbm",
+        type("_FakeLightGBM", (), {"Booster": staticmethod(lambda model_str: model_str)}),
+    )
+    profile_id = f"cache-promotion-{uuid.uuid4().hex}"
+    _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"old-active-model",
+        is_active=1,
+    )
+    candidate_id = _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"new-candidate-model",
+        is_candidate=1,
+    )
+    db = LearningDatabase(learning_db)
+
+    warmed = load_active(db, profile_id)
+    assert warmed is not None
+    assert warmed.sha256 == hashlib.sha256(b"old-active-model").hexdigest()
+
+    assert _promote_candidate(
+        str(learning_db),
+        profile_id=profile_id,
+        candidate_id=candidate_id,
+    )
+
+    promoted = load_active(db, profile_id)
+    assert promoted is not None
+    assert promoted.sha256 == hashlib.sha256(b"new-candidate-model").hexdigest()
+
+
+def test_promotion_reverifies_tampered_candidate_after_warm_cache(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Promotion must not keep serving the warm predecessor on bad bytes."""
+    from superlocalmemory.learning.consolidation_worker import _promote_candidate
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.learning.model_cache import load_active
+
+    monkeypatch.setitem(
+        sys.modules,
+        "lightgbm",
+        type("_FakeLightGBM", (), {"Booster": staticmethod(lambda model_str: model_str)}),
+    )
+    profile_id = f"cache-tamper-{uuid.uuid4().hex}"
+    _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"old-good-model",
+        is_active=1,
+    )
+    candidate_id = _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"candidate-before-tamper",
+        is_candidate=1,
+    )
+    db = LearningDatabase(learning_db)
+    assert load_active(db, profile_id) is not None
+
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "UPDATE learning_model_state SET state_bytes = ? WHERE id = ?",
+            (b"tampered-candidate", candidate_id),
+        )
+        conn.commit()
+
+    assert _promote_candidate(
+        str(learning_db),
+        profile_id=profile_id,
+        candidate_id=candidate_id,
+    )
+    assert load_active(db, profile_id) is None
+
+
 # ---------------------------------------------------------------------------
 # Rollback
 # ---------------------------------------------------------------------------
@@ -715,6 +840,97 @@ def test_rollback_restores_is_previous(learning_db: Path) -> None:
         ).fetchone()
         assert active is not None
         assert bytes(active[0]) == b"old-good"
+
+
+def test_rollback_replaces_warm_active_model_cache(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed rollback must be visible to the next warm recall."""
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.learning.model_cache import load_active
+    from superlocalmemory.learning.model_rollback import ModelRollback
+
+    monkeypatch.setitem(
+        sys.modules,
+        "lightgbm",
+        type("_FakeLightGBM", (), {"Booster": staticmethod(lambda model_str: model_str)}),
+    )
+    profile_id = f"cache-rollback-{uuid.uuid4().hex}"
+    _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"previous-verified-model",
+        is_previous=1,
+    )
+    _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"regressed-active-model",
+        is_active=1,
+    )
+    db = LearningDatabase(learning_db)
+
+    warmed = load_active(db, profile_id)
+    assert warmed is not None
+    assert warmed.sha256 == hashlib.sha256(b"regressed-active-model").hexdigest()
+
+    rollback = ModelRollback(
+        learning_db_path=str(learning_db),
+        profile_id=profile_id,
+        baseline_ndcg=0.5,
+    )
+    assert rollback.execute_rollback(reason="cache_regression")
+
+    restored = load_active(db, profile_id)
+    assert restored is not None
+    assert restored.sha256 == hashlib.sha256(b"previous-verified-model").hexdigest()
+
+
+def test_rollback_reverifies_tampered_previous_after_warm_cache(
+    learning_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rollback must integrity-check the restored row after cache eviction."""
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.learning.model_cache import load_active
+    from superlocalmemory.learning.model_rollback import ModelRollback
+
+    monkeypatch.setitem(
+        sys.modules,
+        "lightgbm",
+        type("_FakeLightGBM", (), {"Booster": staticmethod(lambda model_str: model_str)}),
+    )
+    profile_id = f"cache-rollback-tamper-{uuid.uuid4().hex}"
+    previous_id = _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"previous-before-tamper",
+        is_previous=1,
+    )
+    _seed_cacheable_model(
+        learning_db,
+        profile_id=profile_id,
+        state_bytes=b"current-good-model",
+        is_active=1,
+    )
+    db = LearningDatabase(learning_db)
+    assert load_active(db, profile_id) is not None
+
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "UPDATE learning_model_state SET state_bytes = ? WHERE id = ?",
+            (b"tampered-previous", previous_id),
+        )
+        conn.commit()
+
+    rollback = ModelRollback(
+        learning_db_path=str(learning_db),
+        profile_id=profile_id,
+        baseline_ndcg=0.5,
+    )
+    assert rollback.execute_rollback(reason="tampered_restore")
+    assert load_active(db, profile_id) is None
 
 
 def test_rollback_disables_retrain_24h(learning_db: Path) -> None:

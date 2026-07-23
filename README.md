@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.8.0</h1>
+<h1 align="center">SuperLocalMemory V3.8.1</h1>
 <p align="center"><strong>Enterprise-grade, local-first memory for AI agents and teams.</strong><br/>
 <em>A persistent, auditable long-term brain for your agents that runs on your own infrastructure — with multi-workspace isolation, role-based access, and GDPR + EU AI Act governance controls built in.</em></p>
-<p align="center"><code>v3.8.0</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, and the <strong>Claude, Codex, and GitHub Copilot</strong> plugins.<br/>
+<p align="center"><code>v3.8.1</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -34,11 +34,14 @@ SuperLocalMemory is an enterprise-grade, local-first memory control plane for AI
 
 Agent-memory systems make different storage, model-provider, and deployment trade-offs. SuperLocalMemory starts with a local runtime and makes provider-backed enrichment, cloud backup, connectors, and proxy use explicit choices.
 
+Different products solve different boundaries. The published benchmark evidence carried into V3.8.0 is protocol-scoped evidence from the published V3 research, not a claim of a newly rerun V3.8.0 package benchmark.
+
 SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
 **Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
 
-**What V3.8.0 adds.** This release is a reliability and governance pass on that foundation, not one feature:
+**What V3.8.0 added.** The 3.8.0 capability release introduced the following
+foundation; 3.8.1 is the existing-install stability patch for it:
 
 - **Temporal depth** — the time-aware retrieval and lifecycle described above.
 - **Governance & EU compliance** — [team roles, workspace isolation, a login gate, multi-scope memory, GDPR access/erasure/portability rights, a hash-chained audit trail, and per-mode EU AI Act self-assessment](#teams-and-enterprise-memory-v380).
@@ -49,7 +52,7 @@ SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph
 
 SLM is one strand of Qualixar's work on AI reliability engineering: making agent behavior observable, bounded, and reproducible instead of best-effort.
 
-**Published benchmark evidence carried into V3.8.0:** the architecture evaluated in the V3 paper remains the foundation of this release. The figures below keep their original LoCoMo protocol, answer-construction, model, and sample scope; they are not a claim of a newly rerun V3.8.0 package benchmark.
+The architecture evaluated in the V3 paper remains the foundation of this release. The figures below keep their original LoCoMo protocol, answer-construction, model, and sample scope.
 
 ### How SLM fits beside other memory systems
 
@@ -82,7 +85,7 @@ memory, retrieve bounded evidence for an agent, and expose cache, compression,
 and peer-coordination controls through a CLI, MCP, dashboard, and supported
 IDE integrations.
 
-![SuperLocalMemory V3.7 capability architecture: modes, seven operating layers, Scale Engine, Mesh, delivery surfaces, and opt-in adapters](docs/assets/slm-v37-capability-architecture.png)
+![SuperLocalMemory V3 capability architecture: modes, seven operating layers, Scale Engine, Mesh, delivery surfaces, and opt-in adapters](docs/assets/slm-v37-capability-architecture.png)
 
 *Architecture boundary: SQLite + sqlite-vec remain canonical; CozoDB and
 LanceDB are parity-gated projections; Mesh coordinates trusted peers rather
@@ -464,27 +467,21 @@ not a byte-preserving operation; use it only when you want the MCP server
 configured. Check the result with `slm codex status`; undo SLM-owned add-ons
 with `slm codex remove`.
 
-## GitHub Copilot plugin
+## GitHub Copilot integration
 
-GitHub Copilot gets SuperLocalMemory as its long-term brain — at parity with the
-Claude and Codex plugins — across VS Code, Visual Studio, JetBrains, Eclipse, and
-the Copilot CLI:
+The shipped installer configures the SuperLocalMemory MCP server and additive
+agent instructions for VS Code with GitHub Copilot:
 
 ```bash
-slm connect copilot
+slm connect vscode-copilot --here
 ```
 
-A non-destructive merge into your existing project (nothing is overwritten):
-
-- **`.vscode/mcp.json`** — the SLM MCP server, GA on every Copilot IDE (the reliable baseline).
-- **`.github/copilot-instructions.md`** — SLM agent rules, merged inside `<!-- SLM-START -->` / `<!-- SLM-END -->` markers.
-- **`.github/prompts/*.prompt.md`** — 12 slash-command skills: `slm-cache`, `slm-compress`, `slm-governance`, `slm-graph`, `slm-loop`, `slm-mesh`, `slm-profile`, `slm-recall`, `slm-remember`, `slm-scope`, `slm-session`, `slm-status`.
-- **`.github/agents/*.agent.md`** — memory, optimize, and governance advisors.
-- **`.github/hooks/slm-hooks.json`** — session lifecycle (stable on Copilot CLI and cloud agents; VS Code Preview as of 2026).
-
-MCP works on every Copilot IDE at GA; prompts, agents, and hooks are additive and
-degrade gracefully where an IDE does not yet support them. An instruction-level
-fallback in `copilot-instructions.md` keeps memory working even without hooks.
+Run it from the project root. It semantically merges the SLM server into
+`.vscode/mcp.json` and adds SLM-owned guidance inside
+`.github/copilot-instructions.md`, preserving unrelated servers and existing
+instructions. The generated `copilot-plugin/` source bundle is maintained for
+parity checks, but v3.8.1 does not claim that `slm connect` installs its prompt,
+agent, or hook files.
 
 ---
 
@@ -670,84 +667,19 @@ configuration for that framework.
 | Retrieval score contract | [docs/retrieval-score-contract.md](docs/retrieval-score-contract.md) |
 | Wiki | [github.com/qualixar/superlocalmemory/wiki](https://github.com/qualixar/superlocalmemory/wiki) |
 
-**Web dashboard:**
-```bash
-slm dashboard    # Opens at http://localhost:8765
-```
-The dashboard includes Dashboard, Brain, Knowledge Graph, Memories, Health,
-Operations, Entity Explorer, Skill Evolution, Multi-Agent Memory, Mesh Peers,
-Settings, and Optimize workspaces. Features are populated only when their
-corresponding runtime capability is enabled and healthy.
-
-**Release history:**
-
-| Version | Codename | Key Features |
-|---|---|---|
-| **v3.8.0** | Teams & Bounded Loops | Team/role/GDPR controls, bounded loops with gate-verified iteration (`slm loop`, MCP tools `slm_loop_run/history/show`, `/slm-loop` skill), nine framework adapters (LangGraph · Semantic Kernel · Microsoft Agent Framework · LangChain · LlamaIndex · CrewAI · AutoGen · Google ADK · OpenAI Agents), multi-agent memory dashboard |
-| **v3.7.x** | Security & Stability | Profile-isolation leak fix, loopback auth opt-in, Scale Engine parity promotion, skill-evolution cost caps, dashboard landing page fixes, auth hardening across MCP/API/dashboard |
-| **v3.6.23** | Cross-platform Patch | Windows doctor/cache stats fixes (#65), neutral SLM hook guidance (#64), pi.dev MCP docs (#31), contributor fixes for dashboard profile path resolution (#63) and tz-naive Langevin maintenance backfill (#66) |
-| **v3.6.22** | Stability | backbone.py JSONDecodeError on empty HTTP 200 body (issue #62) — retries 3× then returns "" gracefully; remaining dashboard UI audit: clusters/compliance/entities r.ok guards, math-health status badge colors |
-| **v3.6.21** | Dashboard Audit | Full UI audit across all 7 dashboard tabs — auth fix for mesh panel (issue #60 frontend), Quick Store endpoint, timeline endpoint, r.ok guards, SSE \r fix, event delegation for lazy tabs, optimize toggle revert |
-| **v3.6.20** | Mesh Auth | Remote mesh auth fix (issue #60) — `_get_broker` now accepts Bearer + X-Mesh-Secret from non-loopback callers; config settings preservation on hot reload |
-| **v3.6.17** | Community | 8 contributor PRs (observability events, marker-bounded adapter writes, daemon port discovery, anthropic `api_base`, OpenMP workers, atomic-write rehash, `_jl` sentinel, LFS pointer); dashboard-feedback fix (#53/#59); env-tunable SQLite knobs + idle backoff; remote LLM test-probe (#40) |
-| **v3.6.16** | Docs | Corrected Claude Code plugin install — adds the required `/plugin marketplace add` step; clarifies plugin vs pip/npm delivery |
-| **v3.6.15** | Multi-scope | **Opt-in [shared memory](docs/shared-memory.md)** (personal/shared/global, off by default), default-deny scope at every read path, recall scope-race fix, contributor PRs #42/#43/#44, fixes #46–#49 |
-| **v3.6.14** | Plugin-native | Claude Code Plugin (WP-06), MCP profiles (WP-01), IDE connect (WP-08), asset consolidation, UI polish (WP-12) |
-| **v3.6.x** | Optimize Everywhere / Distributed-ready | Three surfaces (proxy/MCP/skill), `SLM_REMOTE=1` LAN mode, remote dashboard, custom LLM endpoints |
-| **v3.5.0** | Historical scale work | Early CozoDB/LanceDB projection paths, retrieval additions, Core Memory Block, context injection v2, score normalization |
-| **v3.4.x** | Scale-Ready (foundation) | Tiered storage, graph pruning, Hopfield channel, LightGBM ranking, mDNS mesh discovery |
-| **v3.3.x** | Foundation | BM25Plus, Fisher-Rao, sqlite-vec, RRF fusion, cross-encoder rerank. 3 published papers |
-
----
+Open the web dashboard with `slm dashboard`; workspaces appear only when their
+runtime capability is enabled and healthy. See [CHANGELOG.md](CHANGELOG.md) for
+the complete release history.
 
 ## Research Papers
 
-SuperLocalMemory is backed by three published research papers (arXiv preprints + Zenodo DOIs). These are preprints — not conference-accepted or journal-published yet.
+SuperLocalMemory is backed by three preprints by Varun Pratap Bhardwaj (2026):
 
-### Paper 3: The Living Brain (V3.3)
-> **SuperLocalMemory V3.3: The Living Brain — Biologically-Inspired Forgetting, Cognitive Quantization, and Multi-Channel Retrieval for Zero-LLM Agent Memory Systems**
-> Varun Pratap Bhardwaj (2026)
-> [arXiv:2604.04514](https://arxiv.org/abs/2604.04514) · [Zenodo DOI: 10.5281/zenodo.19435120](https://zenodo.org/records/19435120)
+- **The Living Brain (V3.3):** [arXiv:2604.04514](https://arxiv.org/abs/2604.04514) · [Zenodo 19435120](https://zenodo.org/records/19435120)
+- **Information-Geometric Foundations (V3):** [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) · [Zenodo 19038659](https://zenodo.org/records/19038659)
+- **Trust & Behavioral Foundations (V2):** [arXiv:2603.02240](https://arxiv.org/abs/2603.02240) · [Zenodo 18709670](https://zenodo.org/records/18709670)
 
-### Paper 2: Information-Geometric Foundations (V3)
-> **SuperLocalMemory V3: Information-Geometric Foundations for Zero-LLM Enterprise Agent Memory**
-> Varun Pratap Bhardwaj (2026)
-> [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) · [Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)
-
-### Paper 1: Trust & Behavioral Foundations (V2)
-> **SuperLocalMemory: A Structured Local Memory Architecture for Persistent AI Agent Context**
-> Varun Pratap Bhardwaj (2026)
-> [arXiv:2603.02240](https://arxiv.org/abs/2603.02240) · [Zenodo DOI: 10.5281/zenodo.18709670](https://zenodo.org/records/18709670)
-
-### Cite This Work
-
-```bibtex
-@article{bhardwaj2026slmv33,
-  title={SuperLocalMemory V3.3: The Living Brain — Biologically-Inspired
-         Forgetting, Cognitive Quantization, and Multi-Channel Retrieval
-         for Zero-LLM Agent Memory Systems},
-  author={Bhardwaj, Varun Pratap},
-  journal={arXiv preprint arXiv:2604.04514},
-  year={2026},
-  url={https://arxiv.org/abs/2604.04514}
-}
-
-@article{bhardwaj2026slmv3,
-  title={Information-Geometric Foundations for Zero-LLM Enterprise Agent Memory},
-  author={Bhardwaj, Varun Pratap},
-  journal={arXiv preprint arXiv:2603.14588},
-  year={2026}
-}
-
-@article{bhardwaj2026slm,
-  title={A Structured Local Memory Architecture for Persistent AI Agent Context},
-  author={Bhardwaj, Varun Pratap},
-  journal={arXiv preprint arXiv:2603.02240},
-  year={2026}
-}
-```
-
----
+Use the citation metadata on the linked arXiv or Zenodo records.
 
 ## Support / License / Qualixar
 
@@ -763,34 +695,14 @@ Part of [Qualixar](https://qualixar.com) · Author: [Varun Pratap Bhardwaj](http
 
 ### Acknowledgments
 
-- **[Everything Claude Code (ECC)](https://github.com/affaan-m/everything-claude-code)** — SLM's skill observation patterns were inspired by ECC's continuous learning architecture. SLM supports direct ingestion of ECC observations via `slm ingest --source ecc`. We recommend ECC for Claude Code users who want the deepest learning experience alongside SLM.
-- **[HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace)** — The skill evolution research in SLM draws from the EvoSkills co-evolutionary verification concepts (arXiv:2604.01687). We adopted their 3-trigger evolution system and anti-loop guard patterns.
+- **[Everything Claude Code (ECC)](https://github.com/affaan-m/everything-claude-code)** inspired SLM's skill-observation patterns; SLM can ingest ECC observations with `slm ingest --source ecc`.
+- **[HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace)** informed the skill-evolution verification design (arXiv:2604.01687).
 
 ### Qualixar AI Agent Reliability Platform
 
-Qualixar is building the open-source infrastructure for AI agent reliability engineering. Seven products, one coherent platform:
-
-| Product | Purpose | Install |
-|---------|---------|---------|
-| **[SuperLocalMemory](https://github.com/qualixar/superlocalmemory)** | Persistent memory + learning | `npm install -g superlocalmemory` |
-| **[Qualixar OS](https://github.com/qualixar/qualixar-os)** | Universal agent runtime | `npx qualixar-os` |
-| **[SLM Mesh](https://github.com/qualixar/slm-mesh)** | P2P coordination across sessions | `npm i slm-mesh` |
-| **[SLM MCP Hub](https://github.com/qualixar/slm-mcp-hub)** | Federate 430+ MCP tools | `pip install slm-mcp-hub` |
-| **[AgentAssay](https://github.com/qualixar/agentassay)** | Token-efficient agent testing | `pip install agentassay` |
-| **[AgentAssert](https://github.com/qualixar/agentassert-abc)** | Behavioral contracts + drift detection | `pip install agentassert-abc` |
-| **[SkillFortify](https://github.com/qualixar/skillfortify)** | Formal verification for agent skills | `pip install skillfortify` |
-
-**Local-first architecture. Deployment-specific privacy and compliance controls.**
-
-Start here → **[qualixar.com](https://qualixar.com)** · [All papers on Qualixar HuggingFace](https://huggingface.co/Qualixar)
-
----
-
-<p align="center">
-  <sub>Built with mathematical rigor. Not in the race — here to help everyone build better AI memory systems.</sub>
-</p>
-
----
+Qualixar builds open-source infrastructure for AI reliability engineering.
+Start at **[qualixar.com](https://qualixar.com)** or browse the
+[Qualixar research archive](https://huggingface.co/Qualixar).
 
 ## Star This Project
 

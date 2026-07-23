@@ -11,7 +11,7 @@
  *   POST /api/backup/connect/github     body: {pat, repo_name}
  *   DELETE /api/backup/disconnect/{id}
  *   POST /api/backup/sync
- *   GET  /api/backup/export             → FileResponse (.db.gz download)
+ *   POST /api/backup/export             → FileResponse (.db.gz download)
  *   GET  /api/backup/oauth/github/start → OAuth redirect or PAT form
  *   GET  /api/backup/oauth/google/start → Google OAuth redirect
  * No mock / seed data — every render goes to the live daemon.
@@ -22,6 +22,54 @@
 
   var OVERLAY_ID = 'od-backup-overlay';
   var P = 'od-bk';
+  var tokenPromise = null;
+
+  function getToken(forceRefresh, retriedEmpty) {
+    if (forceRefresh) tokenPromise = null;
+    if (!tokenPromise) {
+      tokenPromise = fetch('/internal/token', { credentials:'same-origin' })
+        .then(function (response) {
+          if (!response.ok) throw new Error('Dashboard authorization failed');
+          return response.json();
+        })
+        .then(function (data) {
+          if (!data.token && !retriedEmpty) {
+            tokenPromise = null;
+            return getToken(true, true);
+          }
+          if (!data.token) throw new Error('Dashboard authorization token is unavailable');
+          return data.token;
+        })
+        .catch(function (error) {
+          tokenPromise = null;
+          throw error;
+        });
+    }
+    return tokenPromise;
+  }
+  function authMutation(url, method, body) {
+    function send(forceRefresh) {
+      return getToken(forceRefresh).then(function (token) {
+        return fetch(url, {
+          method: method,
+          credentials: 'same-origin',
+          headers: { 'Content-Type':'application/json', 'X-Install-Token': token },
+          body: body === undefined ? undefined : JSON.stringify(body)
+        });
+      }).then(function (response) {
+        if (!forceRefresh && (response.status === 401 || response.status === 403)) {
+          return send(true);
+        }
+        if (!response.ok) {
+          return response.text().then(function (message) {
+            throw new Error(message || ('Request failed (' + response.status + ')'));
+          });
+        }
+        return response;
+      });
+    }
+    return send(false);
+  }
 
   /* ── Tiny utilities ──────────────────────────────────────── */
   function esc(s) {
@@ -142,12 +190,12 @@
     // Title + badge + sub
     var titleArea = el('div', null, { flex:'1', minWidth:'200px' });
     var titleRow = el('div', null, { display:'flex', alignItems:'center', gap:'10px' });
-    var titleEl = el('h3', { id: P + '-cloud-title', text:'Personal cloud connected' },
+    var titleEl = el('h3', { id: P + '-cloud-title', text:'Checking cloud backup' },
       { fontSize:'17px', margin:'0' });
     titleRow.appendChild(titleEl);
     var syncBadge = el('span', { id: P + '-cloud-badge' });
-    syncBadge.className = 'badge ok';
-    syncBadge.innerHTML = '<span class="dot"></span> Synced';
+    syncBadge.className = 'badge neutral';
+    syncBadge.innerHTML = '<span class="dot"></span> Checking';
     titleRow.appendChild(syncBadge);
     titleArea.appendChild(titleRow);
     var subEl = el('p', { id: P + '-cloud-sub', text:'Connecting to your cloud…' },
@@ -155,12 +203,12 @@
     titleArea.appendChild(subEl);
     inner.appendChild(titleArea);
 
-    // Stats: Last backup / Next scheduled / Encryption
+    // Stats: Last backup / Next scheduled / on-disk representation
     var statsRow = el('div', null, { display:'flex', gap:'26px', flexWrap:'wrap' });
     [
       { id:'hero-last',    lbl:'Last backup' },
       { id:'hero-next',    lbl:'Next scheduled' },
-      { id:'hero-encrypt', lbl:'Encryption' }
+      { id:'hero-encrypt', lbl:'Backup format' }
     ].forEach(function (s) {
       var item = el('div');
       item.appendChild(el('div', { text: s.lbl },
@@ -188,7 +236,7 @@
     exportBtn.className = 'btn ghost';
     exportBtn.textContent = 'Export .db.gz';
     exportBtn.addEventListener('click', function () {
-      window.location.href = '/api/backup/export';
+      doExport(exportBtn);
     });
     btnGroup.appendChild(exportBtn);
     inner.appendChild(btnGroup);
@@ -203,9 +251,9 @@
   function buildKPIs() {
     var kpis = [
       { id:'kpi-total', lbl:'Total backups',    icon:'cloud' },
-      { id:'kpi-size',  lbl:'Cloud storage used', icon:'memories' },
+      { id:'kpi-size',  lbl:'Local storage used', icon:'memories' },
       { id:'kpi-retain',lbl:'Retention',         icon:'clock' },
-      { id:'kpi-count', lbl:'Restore points',    icon:'shield' }
+      { id:'kpi-count', lbl:'Local snapshots',   icon:'shield' }
     ];
     var strip = el('div', null, { marginBottom:'16px' });
     strip.className = 'kpi-strip';
@@ -277,7 +325,9 @@
     var frag = document.createDocumentFragment();
     PROVIDERS.forEach(function (prov) {
       var dest = destinations.filter(function (d) {
-        return d.type === prov.id || d.provider === prov.id;
+        var destinationType = d.destination_type || d.type || d.provider;
+        return destinationType === prov.id ||
+          (prov.id === 'google' && destinationType === 'google_drive');
       })[0];
       frag.appendChild(buildConnRow(root, prov, dest || null));
     });
@@ -303,9 +353,18 @@
     detailEl.className = 'dim';
     Object.assign(detailEl.style, { fontSize:'12.5px' });
     if (dest) {
-      var repoOrBucket = dest.repo || dest.bucket || dest.folder_id || '';
-      detailEl.innerHTML = 'Connected' +
-        (repoOrBucket ? ' · <span class="mono">' + esc(repoOrBucket) + '</span>' : '');
+      var config = {};
+      try { config = typeof dest.config === 'string' ? JSON.parse(dest.config) : (dest.config || {}); }
+      catch (e) { config = {}; }
+      var repoOrBucket = dest.repo || dest.bucket || dest.folder_id ||
+        config.full_repo || config.repo || config.folder || '';
+      var syncStatus = dest.last_sync_status || 'never';
+      var statusText = syncStatus === 'success' && dest.last_sync_at
+        ? 'Last sync succeeded ' + fmtDate(dest.last_sync_at)
+        : syncStatus === 'failed'
+          ? 'Last sync failed'
+          : 'Connected · never synced';
+      detailEl.textContent = statusText + (repoOrBucket ? ' · ' + repoOrBucket : '');
     } else {
       detailEl.textContent = prov.hint;
     }
@@ -317,9 +376,9 @@
     if (dest) {
       var syncBtn = el('button', { type:'button' });
       syncBtn.className = 'btn sm ghost';
-      syncBtn.textContent = 'Sync';
+      syncBtn.textContent = 'Sync all';
       syncBtn.addEventListener('click', function () {
-        doSync(root, dest.id || dest.dest_id || prov.id);
+        doSync(root);
       });
       btnWrap.appendChild(syncBtn);
 
@@ -348,7 +407,7 @@
      Design: .bk-ctl rows with .switch toggles; Schedule at bottom
   ══════════════════════════════════════════════════════════ */
   function buildScope() {
-    var c = card('Backup scope', 'choose what mirrors to the cloud', 'operations');
+    var c = card('Backup scope', 'current managed database set', 'operations');
 
     // Scope items — matching design's 4 items with toggle switches
     var scopeItems = [
@@ -356,10 +415,10 @@
         sub:'<span class="mono">memory.db</span> · facts & conversations', on: true },
       { id:'scope-learn', lbl:'Learning data',
         sub:'<span class="mono">learning.db</span> · ranking model', on: true },
-      { id:'scope-cfg',   lbl:'Config & profiles',
-        sub:'<span class="mono">config.json</span> · modes, providers', on: true },
-      { id:'scope-cache', lbl:'Optimization cache',
-        sub:'<span class="mono">llmcache.db</span> · rebuildable', on: false }
+      { id:'scope-audit', lbl:'Audit & code data',
+        sub:'<span class="mono">audit_chain.db · code_graph.db</span> · when present', on: true },
+      { id:'scope-pending', lbl:'Pending operations',
+        sub:'<span class="mono">pending.db</span> · when present', on: true }
     ];
 
     scopeItems.forEach(function (item) {
@@ -379,11 +438,8 @@
       sw.className = 'switch' + (item.on ? ' on' : '');
       sw.setAttribute('role', 'switch');
       sw.setAttribute('aria-checked', String(item.on));
-      sw.addEventListener('click', function () {
-        sw.classList.toggle('on');
-        sw.setAttribute('aria-checked', String(sw.classList.contains('on')));
-        // No dedicated /api/backup/scope endpoint yet
-      });
+      sw.disabled = true;
+      sw.title = 'Managed database scope is fixed in this release';
       row.appendChild(sw);
       c.body.appendChild(row);
     });
@@ -405,11 +461,11 @@
           var tb = document.getElementById(P + '-seg-' + t.toLowerCase());
           if (tb) tb.className = (t === s ? 'active' : '');
         });
-        var hours = s === 'Daily' ? 24 : s === 'Manual' ? 0 : 168;
-        fetch('/api/backup/configure', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ interval_hours: hours })
-        }).then(function (r) { return r.json(); })
+        var schedule = s === 'Manual'
+          ? { enabled: false }
+          : { enabled: true, interval_hours: s === 'Daily' ? 24 : 168 };
+        authMutation('/api/backup/configure', 'POST', schedule)
+          .then(function (r) { return r.json(); })
           .then(function () { toast(s + ' schedule saved'); })
           .catch(function () { toast('Schedule save failed', true); });
       });
@@ -423,8 +479,7 @@
 
   /* ══════════════════════════════════════════════════════════
      BACKUP HISTORY TABLE
-     Design: .tbl class, columns When/Scope/Size/Destination/Status/Restore
-     card-head has sub "every snapshot is restorable" + All/Cloud/Local seg
+     Design: .tbl class, columns When/Scope/Size/Destination/Status
   ══════════════════════════════════════════════════════════ */
   // Map backup type from API to a human-readable scope string
   function fmtScope(bk) {
@@ -445,7 +500,7 @@
   var _histFilter = 'all'; // all | cloud | local
 
   function buildHistory() {
-    var c = card('Backup history', 'every snapshot is restorable', 'health');
+    var c = card('Backup history', 'local snapshots and upload evidence', 'health');
 
     // Add filter segment to card-head (All / Cloud / Local)
     var spacer = el('div');
@@ -525,15 +580,9 @@
       statusBadge.innerHTML = '<span class="dot"></span>' + esc(statusTxt);
       tdStatus.appendChild(statusBadge);
       tr.appendChild(tdStatus);
-      // Restore button
+      // Restore is intentionally absent until the dashboard has a guarded,
+      // tested restore endpoint and a daemon-safe restart workflow.
       var tdAct = el('td', null, { textAlign:'right' });
-      var restoreBtn = el('button', { type:'button' });
-      restoreBtn.className = 'btn sm ghost';
-      restoreBtn.textContent = 'Restore';
-      restoreBtn.addEventListener('click', function () {
-        toast('Restore from ' + (bk.filename || 'snapshot') + ' — not yet implemented');
-      });
-      tdAct.appendChild(restoreBtn);
       tr.appendChild(tdAct);
       tbody.appendChild(tr);
     });
@@ -547,7 +596,7 @@
   ══════════════════════════════════════════════════════════ */
   function doBackupNow(root) {
     var btn = q(root, 'btn-now'); if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
-    fetch('/api/backup/create', { method:'POST' })
+    authMutation('/api/backup/create', 'POST')
       .then(function (r) { return r.json(); })
       .then(function (d) {
         toast(d.success ? 'Backup created: ' + esc(d.filename || '') : 'Backup failed', !d.success);
@@ -560,17 +609,41 @@
       });
   }
 
-  function doSync(root, destId) {
-    fetch('/api/backup/sync', { method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ destination_id: destId })
-    }).then(function (r) { return r.json(); })
+  function doSync(root) {
+    authMutation('/api/backup/sync', 'POST')
+      .then(function (r) { return r.json(); })
       .then(function (d) { toast(d.success ? 'Sync started' : 'Sync failed: ' + esc(d.error || ''), !d.success); })
       .catch(function () { toast('Sync error', true); });
   }
 
+  function doExport(button) {
+    if (button) button.disabled = true;
+    authMutation('/api/backup/export', 'POST')
+      .then(function (response) {
+        return response.blob().then(function (blob) {
+          return { blob: blob, disposition: response.headers.get('Content-Disposition') || '' };
+        });
+      })
+      .then(function (download) {
+        var match = download.disposition.match(/filename="?([^";]+)"?/i);
+        var link = document.createElement('a');
+        var objectUrl = URL.createObjectURL(download.blob);
+        link.href = objectUrl;
+        link.download = match ? match[1] : 'superlocalmemory-backup.db.gz';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+        toast('Backup export downloaded');
+      })
+      .catch(function () { toast('Backup export failed', true); })
+      .finally(function () { if (button) button.disabled = false; });
+  }
+
   function doDisconnect(root, destId) {
     if (!window.confirm('Disconnect this cloud destination? Existing backups are not deleted.')) return;
-    fetch('/api/backup/disconnect/' + encodeURIComponent(destId), { method:'DELETE' })
+    authMutation('/api/backup/disconnect/' + encodeURIComponent(destId), 'DELETE')
       .then(function (r) { return r.json(); })
       .then(function (d) {
         toast(d.success ? 'Disconnected' : 'Disconnect failed: ' + esc(d.error || ''), !d.success);
@@ -585,7 +658,7 @@
     var timer = setInterval(function () {
       if (!popup || popup.closed) {
         clearInterval(timer);
-        // Reload destinations after OAuth popup closes
+        // A closed popup is not proof of success; refresh runtime truth only.
         loadDestinations(root, true);
       }
     }, 800);
@@ -602,29 +675,47 @@
         // Hero stats
         var lastStr = d.last_backup ? fmtDate(d.last_backup) : 'Never';
         set(root, 'hero-last',    lastStr);
-        var next = d.last_backup && d.interval_hours
-          ? new Date(new Date(d.last_backup).getTime() + d.interval_hours * 3600000).toLocaleString()
-          : (d.enabled ? 'Scheduled' : 'Manual only');
+        var next = !d.enabled
+          ? 'Manual only'
+          : (d.last_backup && d.interval_hours
+            ? new Date(new Date(d.last_backup).getTime() + d.interval_hours * 3600000).toLocaleString()
+            : 'Scheduled');
         set(root, 'hero-next',    next);
-        set(root, 'hero-encrypt', 'AES-256');
+        set(root, 'hero-encrypt', 'Plain SQLite');
 
-        // Hero title + badge: reflect connection state
+        // Hero title + badge: reflect configured and witnessed sync state.
         var hasCloud = d.cloud_destinations && d.cloud_destinations.length > 0;
+        var allSuccessful = hasCloud && d.cloud_destinations.every(function (dest) {
+          return dest.last_sync_status === 'success' && Boolean(dest.last_sync_at);
+        });
+        var failed = hasCloud && d.cloud_destinations.some(function (dest) {
+          return dest.last_sync_status === 'failed';
+        });
         var titleEl = q(root, 'cloud-title');
-        if (titleEl) titleEl.textContent = hasCloud ? 'Personal cloud connected' : 'No personal cloud';
+        if (titleEl) titleEl.textContent = hasCloud ? 'Cloud destination configured' : 'No cloud destination';
         var badgeEl = q(root, 'cloud-badge');
         if (badgeEl) {
-          badgeEl.className = 'badge ' + (hasCloud ? 'ok' : 'warn');
-          badgeEl.innerHTML = '<span class="dot"></span> ' + (hasCloud ? 'Synced' : 'Not connected');
+          badgeEl.className = 'badge ' + (failed ? 'danger' : allSuccessful ? 'ok' : 'warn');
+          badgeEl.replaceChildren();
+          var dot = el('span'); dot.className = 'dot';
+          badgeEl.appendChild(dot);
+          badgeEl.appendChild(document.createTextNode(
+            failed
+              ? ' One or more syncs failed'
+              : allSuccessful
+                ? ' Latest reported syncs succeeded'
+                : hasCloud ? ' Sync incomplete or pending' : ' Not connected'
+          ));
         }
         var subEl = q(root, 'cloud-sub');
         if (subEl) {
           if (hasCloud) {
             var dest = d.cloud_destinations[0];
-            var destStr = dest.repo || dest.bucket || dest.folder_id || dest.provider || 'cloud';
-            subEl.innerHTML = 'Mirroring to <b>' + esc(destStr) + '</b> · encrypted with your local key.';
+            var destStr = dest.display_name || dest.destination_type || 'cloud';
+            subEl.textContent = 'Plain SQLite copies upload to your private ' + destStr +
+              '. Access protection comes from that provider account.';
           } else {
-            subEl.textContent = 'Connect a provider below to enable encrypted cloud mirroring.';
+            subEl.textContent = 'Local snapshots are plaintext SQLite. Connect a private provider only if you accept its access controls.';
           }
         }
         var orb = q(root, 'orb');
@@ -644,7 +735,7 @@
 
         // Sync schedule segment buttons
         var hours = d.interval_hours || 168;
-        var active = hours <= 24 ? 'daily' : hours >= 9999 ? 'manual' : 'weekly';
+        var active = !d.enabled ? 'manual' : hours <= 24 ? 'daily' : 'weekly';
         ['daily','weekly','manual'].forEach(function (s) {
           var b = document.getElementById(P + '-seg-' + s);
           if (b) b.className = (s === active ? 'active' : '');
@@ -658,8 +749,8 @@
         var dests = d && d.destinations ? d.destinations : [];
         renderConnections(root, dests);
         if (forceReload) {
-          toast(dests.length > 0 ? 'Connected successfully' : 'Connection complete');
-          // Re-load status so hero reflects new connection state
+          toast('Destination status refreshed');
+          // Re-load status without inferring whether the popup succeeded.
           loadStatus(root);
         }
       }).catch(function () {});
@@ -694,9 +785,9 @@
     pageHead.className = 'page-head';
     pageHead.appendChild(el('h2', { text:'Backup & cloud sync' }));
     var desc = el('p');
-    desc.innerHTML = 'Your memory lives on this machine. Optionally encrypt and mirror it to' +
-      ' <b>your own</b> cloud — a private GitHub repo or your Google Drive via Gmail.' +
-      ' You hold the keys; SuperLocalMemory never sees your data.';
+    desc.textContent = 'Your memory lives on this machine as plaintext SQLite snapshots. ' +
+      'You can copy snapshots to a private GitHub repository or your Google Drive. ' +
+      'Those providers control remote access; this release does not encrypt backup files.';
     pageHead.appendChild(desc);
     hub.appendChild(pageHead);
 

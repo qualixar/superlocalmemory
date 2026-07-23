@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.8.0"
+version = "3.8.1"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -171,6 +171,7 @@ superlocalmemory = ["ui/**/*", "optimize/NOTICE"]
 "share/superlocalmemory/codex/skills/slm-remember" = ["plugin-src/skills/slm-remember/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-session" = ["plugin-src/skills/slm-session/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-status" = ["plugin-src/skills/slm-status/SKILL.md"]
+"share/superlocalmemory/portable-kit/rules" = ["plugin-src/rules/AGENTS.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -129,6 +129,18 @@ def test_ssrf_allowlist_ignored_when_remote_mode_off(
     ) is not None
 
 
+def test_embedding_probe_reuses_private_target_ssrf_guard() -> None:
+    """Embedding connectivity probes must not become an alternate SSRF path."""
+    app = FastAPI()
+    app.include_router(v3_api.router)
+    response = TestClient(app).post(
+        "/api/v3/embedding/test",
+        json={"api_endpoint": "http://127.0.0.1:11434"},
+    )
+    assert response.status_code == 400
+    assert "Internal/private" in response.json()["error"]
+
+
 def test_custom_endpoint_empty_key_no_auth_header(client: TestClient) -> None:
     resp = client.post("/api/v3/provider/test", json={
         "provider": "openai",

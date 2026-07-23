@@ -1,34 +1,684 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later
 
-"""Production-adapter contracts for V3.7 canonical ingestion."""
+"""Production-adapter contracts for V3.7 canonical ingestion.
+
+Saga design note (research/LLD for the retry regression):
+
+* Model-heavy extraction/enrichment must run without a live SQLite writer
+  transaction, otherwise an Ollama/embedding stall blocks every interactive
+  write.
+* Once the relational pipeline has emitted fact IDs, that partial result is the
+  durable retry boundary.  A later exception must checkpoint those IDs and its
+  operation-scoped stage observations before marking the operation failed.
+* Retrying a checkpointed operation may repair idempotent projections, but must
+  never replay extraction/consolidation.  Those stages mutate evidence/access
+  counters and can create provenance, graph, and temporal observations.
+
+The tests below exercise the real ``MemoryEngine`` adapter rather than only the
+generic command callback seam.
+"""
 
 from __future__ import annotations
 
 import threading
-from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
+from superlocalmemory.core.engine_ingestion import (
+    build_engine_ingestion_command,
+    canonical_store,
+    canonical_store_fact,
+)
 from superlocalmemory.core.ingestion_command import (
     IngestionOperationRepository,
     IngestionRequest,
     IngestionState,
+)
+from superlocalmemory.core.store_pipeline import (
+    _record_fact_entity_association,
+    run_store,
 )
 from superlocalmemory.server.unified_daemon import (
     _materialize_ingestion_one_pass,
     _materialize_legacy_pending_item,
     _run_materializer_operation,
 )
-from superlocalmemory.storage.migrations import M018_ingestion_operations
-from superlocalmemory.storage.models import AtomicFact, FactType
+from superlocalmemory.storage.migrations import (
+    M018_ingestion_operations,
+    M028_fact_entity_associations,
+)
+from superlocalmemory.storage.models import (
+    AtomicFact,
+    CanonicalEntity,
+    FactType,
+    MemoryRecord,
+)
 
 
 def _install_m018(engine) -> None:
     with engine._db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
+
+
+def _relational_ingestion_snapshot(engine) -> dict[str, int]:
+    fact_totals = dict(engine._db.execute(
+        "SELECT COUNT(*) AS fact_count, "
+        "COALESCE(SUM(evidence_count), 0) AS evidence_count, "
+        "COALESCE(SUM(access_count), 0) AS access_count "
+        "FROM atomic_facts WHERE profile_id=?",
+        (engine._profile_id,),
+    )[0])
+    table_counts = {
+        name: int(dict(engine._db.execute(
+            f"SELECT COUNT(*) AS count FROM {name} WHERE profile_id=?",
+            (engine._profile_id,),
+        )[0])["count"])
+        for name in (
+            "provenance",
+            "graph_edges",
+            "temporal_events",
+            "fact_temporal_validity",
+        )
+    }
+    return {
+        **{name: int(value) for name, value in fact_totals.items()},
+        **table_counts,
+    }
+
+
+def test_entity_fact_count_effect_is_constant_query_and_idempotent(
+    engine_with_mock_deps,
+    monkeypatch,
+) -> None:
+    engine = engine_with_mock_deps
+    engine._db.store_entity(CanonicalEntity(
+        entity_id="entity-alice",
+        profile_id=engine._profile_id,
+        canonical_name="Alice",
+    ))
+    memory = MemoryRecord(
+        memory_id="memory-1",
+        profile_id=engine._profile_id,
+        content="Alice owns the reliability review.",
+    )
+    engine._db.store_memory(memory)
+    engine._db.store_fact(AtomicFact(
+        fact_id="fact-1",
+        memory_id=memory.memory_id,
+        profile_id=engine._profile_id,
+        content="Alice owns the reliability review.",
+    ))
+    statements: list[str] = []
+    execute = engine._db.execute
+
+    def record_execute(sql, params=()):
+        statements.append(" ".join(sql.split()))
+        return execute(sql, params)
+
+    monkeypatch.setattr(engine._db, "execute", record_execute)
+    for _ in range(2):
+        _record_fact_entity_association(
+            engine._db,
+            operation_id="operation-1",
+            profile_id=engine._profile_id,
+            fact_id="fact-1",
+            entity_id="entity-alice",
+        )
+
+    effect_statements = [
+        sql for sql in statements
+        if "fact_entity_associations" in sql
+        or sql.startswith("UPDATE canonical_entities")
+    ]
+    assert len(effect_statements) == 3
+    assert not any(
+        " LIKE " in sql or "COUNT(" in sql for sql in effect_statements
+    )
+    assert engine._db.execute(
+        "SELECT fact_count FROM canonical_entities WHERE entity_id=?",
+        ("entity-alice",),
+    )[0]["fact_count"] == 1
+    assert engine._db.execute(
+        "SELECT COUNT(*) AS count FROM fact_entity_associations"
+    )[0]["count"] == 1
+
+    plan = " ".join(
+        str(column)
+        for row in engine._db.execute(
+            "EXPLAIN QUERY PLAN UPDATE canonical_entities "
+            "SET fact_count=fact_count+1 WHERE entity_id=? AND profile_id=?",
+            ("entity-alice", engine._profile_id),
+        )
+        for column in row
+    )
+    assert "USING INDEX" in plan
+    assert "SCAN canonical_entities" not in plan
+
+
+def test_live_entity_count_survives_backfill_interleaving(
+    engine_with_mock_deps,
+) -> None:
+    """A post-readiness fact must be outside the historical repair boundary."""
+    engine = engine_with_mock_deps
+    with engine._db.raw_connection() as conn:
+        M028_fact_entity_associations.apply(conn)
+    engine._db.store_entity(CanonicalEntity(
+        entity_id="entity-live",
+        profile_id=engine._profile_id,
+        canonical_name="Live Entity",
+    ))
+    memory = MemoryRecord(
+        memory_id="memory-live",
+        profile_id=engine._profile_id,
+        content="Live Entity owns the reliability review.",
+    )
+    engine._db.store_memory(memory)
+    engine._db.store_fact(AtomicFact(
+        fact_id="fact-live",
+        memory_id=memory.memory_id,
+        profile_id=engine._profile_id,
+        content="Live Entity owns the reliability review.",
+        canonical_entities=["entity-live"],
+    ))
+
+    # This ordering reproduces the race: background repair wins its write
+    # before the live ingestion path records and counts the association.
+    while not M028_fact_entity_associations.repair_fact_entity_associations(
+        engine._db.db_path,
+        batch_size=1,
+        max_batches=1,
+    )["complete"]:
+        pass
+    _record_fact_entity_association(
+        engine._db,
+        operation_id="operation-live",
+        profile_id=engine._profile_id,
+        fact_id="fact-live",
+        entity_id="entity-live",
+    )
+
+    assert engine._db.execute(
+        "SELECT fact_count FROM canonical_entities WHERE entity_id=?",
+        ("entity-live",),
+    )[0]["fact_count"] == 1
+    association = dict(engine._db.execute(
+        "SELECT first_operation_id,count_applied "
+        "FROM fact_entity_associations WHERE fact_id=? AND entity_id=?",
+        ("fact-live", "entity-live"),
+    )[0])
+    assert association == {
+        "first_operation_id": "operation-live",
+        "count_applied": 1,
+    }
+
+
+def test_entity_association_storage_failure_marks_ingestion_incomplete(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Mira approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="association-storage-failure",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    derived = AtomicFact(
+        fact_id="derived-association-failure",
+        content="Mira approved the Atlas recovery checkpoint on July 23, 2026.",
+        entities=["Mira", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+    )
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        return_value=[derived],
+    ), patch(
+        "superlocalmemory.core.store_pipeline."
+        "_record_fact_entity_association",
+        side_effect=RuntimeError("association schema unavailable"),
+    ):
+        failed = command.materialize(receipt.operation_id)
+
+    assert failed.state is IngestionState.FAILED
+    assert failed.derivation_state["relational_started"] is True
+    assert failed.derivation_state["pipeline"] is False
+    assert "association schema unavailable" in failed.last_error
+
+
+def test_partial_relational_failure_retries_without_replaying_extraction_or_consolidation(
+    engine_with_mock_deps,
+) -> None:
+    """Finish idempotent effects from stored facts after an association failure."""
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Mira approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="partial-relational-retry",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    derived = AtomicFact(
+        fact_id="derived-partial-relational-retry",
+        content="Mira approved the Atlas recovery checkpoint on July 23, 2026.",
+        entities=["Mira", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+    )
+    original_association = _record_fact_entity_association
+    association_calls = 0
+
+    def record_once_then_fail(*args, **kwargs):
+        nonlocal association_calls
+        association_calls += 1
+        original_association(*args, **kwargs)
+        if association_calls == 1:
+            raise RuntimeError("association acknowledgement lost")
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        return_value=[derived],
+    ) as extract_facts, patch.object(
+        engine._consolidator,
+        "consolidate",
+        wraps=engine._consolidator.consolidate,
+    ) as consolidate, patch(
+        "superlocalmemory.core.store_pipeline._record_fact_entity_association",
+        side_effect=record_once_then_fail,
+    ):
+        failed = command.materialize(receipt.operation_id)
+        extraction_calls = extract_facts.call_count
+        consolidation_calls = consolidate.call_count
+        partial = _relational_ingestion_snapshot(engine)
+        completed = command.retry(receipt.operation_id)
+        recovered = _relational_ingestion_snapshot(engine)
+        retried = command.materialize(receipt.operation_id)
+
+    assert failed.state is IngestionState.FAILED
+    assert failed.derivation_state["relational_started"] is True
+    assert failed.derivation_state["pipeline"] is False
+    assert partial["fact_count"] > 0
+    assert completed.state is IngestionState.COMPLETE, (
+        completed.derivation_state, completed.last_error,
+    )
+    assert retried.state is IngestionState.COMPLETE
+    assert extract_facts.call_count == extraction_calls
+    assert consolidate.call_count == consolidation_calls
+    assert recovered == _relational_ingestion_snapshot(engine)
+
+
+def test_failed_production_materialization_retries_do_not_replay_relational_pipeline(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Alice approved the Atlas recovery plan on July 23, 2026 and "
+            "recorded the decision for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="bounded-relational-retry",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    derived = AtomicFact(
+        fact_id="derived-atlas-recovery",
+        content="Alice approved the Atlas recovery plan on July 23, 2026.",
+        entities=["Alice", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+        confidence=0.95,
+    )
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        return_value=[derived],
+    ), patch.object(
+        engine._hooks,
+        "run_post",
+        side_effect=RuntimeError("audit sink unavailable"),
+    ):
+        failed = command.materialize(receipt.operation_id)
+        assert failed.state is IngestionState.FAILED
+        assert failed.final_fact_ids
+        baseline = _relational_ingestion_snapshot(engine)
+        assert baseline["provenance"] > 0
+        assert baseline["graph_edges"] > 0
+        assert baseline["temporal_events"] > 0
+
+        for _ in range(3):
+            failed = command.retry(receipt.operation_id)
+            assert failed.state is IngestionState.FAILED
+            assert _relational_ingestion_snapshot(engine) == baseline
+
+
+def test_provenance_repair_observes_partial_write_without_duplicate(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Mira approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="provenance-observation-repair",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    original_record = engine._provenance.record
+
+    def record_then_fail(**kwargs):
+        original_record(**kwargs)
+        raise RuntimeError("provenance acknowledgement lost")
+
+    with patch.object(
+        engine._provenance,
+        "record",
+        side_effect=record_then_fail,
+    ):
+        failed = command.materialize(receipt.operation_id)
+
+    assert failed.state is IngestionState.FAILED
+    assert failed.derivation_state["provenance"] is False
+    baseline = _relational_ingestion_snapshot(engine)
+    completed = command.retry(receipt.operation_id)
+
+    assert completed.state is IngestionState.COMPLETE
+    assert completed.derivation_state["provenance"] is True
+    assert _relational_ingestion_snapshot(engine) == baseline
+
+
+def test_transient_post_hook_failure_continues_to_complete_without_replay(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Rhea approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="post-hook-stage-continuation",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    calls = 0
+
+    def transient_post_hook(_operation, _context):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("audit sink unavailable")
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        wraps=engine._fact_extractor.extract_facts,
+    ) as extract_facts, patch.object(
+        engine._consolidator,
+        "consolidate",
+        wraps=engine._consolidator.consolidate,
+    ) as consolidate, patch.object(
+        engine._hooks,
+        "run_post",
+        side_effect=transient_post_hook,
+    ):
+        failed = command.materialize(receipt.operation_id)
+        baseline = _relational_ingestion_snapshot(engine)
+        extraction_calls = extract_facts.call_count
+        consolidation_calls = consolidate.call_count
+        completed = command.retry(receipt.operation_id)
+
+    assert failed.state is IngestionState.FAILED
+    assert failed.derivation_state["pipeline"] is True
+    # The relational checkpoint is the retry boundary.  A post-hook failure
+    # must retain the facts and every already-observed pipeline stage instead
+    # of reconstructing a partial state from the exception path.
+    assert failed.derivation_state["relational"] is True
+    assert failed.derivation_state["post_hooks"] is False
+    assert completed.state is IngestionState.COMPLETE
+    assert completed.derivation_state["post_hooks"] is True
+    assert calls == 2
+    assert extract_facts.call_count == extraction_calls
+    assert consolidate.call_count == consolidation_calls
+    assert _relational_ingestion_snapshot(engine) == baseline
+
+
+def test_prebuilt_fact_post_hook_retry_keeps_consolidation_complete(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    fact = AtomicFact(
+        fact_id="prebuilt-post-hook-retry",
+        content=(
+            "Rhea approved the Atlas prebuilt recovery checkpoint on "
+            "July 23, 2026 for the reliability team."
+        ),
+        entities=["Rhea", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+    )
+
+    with patch(
+        "superlocalmemory.core.store_pipeline.run_store",
+        wraps=run_store,
+    ) as pipeline, patch.object(
+        engine._hooks,
+        "run_post",
+        side_effect=[RuntimeError("audit sink unavailable"), None],
+    ):
+        with pytest.raises(RuntimeError, match="audit sink unavailable"):
+            canonical_store_fact(
+                engine,
+                fact,
+                trusted_actor_id="daemon-capability:owned-instance",
+            )
+        result = canonical_store_fact(
+            engine,
+            fact,
+            trusted_actor_id="daemon-capability:owned-instance",
+        )
+
+    operation_row = engine._db.execute(
+        "SELECT operation_id FROM ingestion_operations "
+        "WHERE profile_id=? AND source_type=? AND idempotency_key=?",
+        (
+            engine._profile_id,
+            "python-api-prebuilt",
+            "prebuilt:prebuilt-post-hook-retry",
+        ),
+    )[0]
+    operation = IngestionOperationRepository(engine._db).get(
+        operation_row["operation_id"],
+    )
+    assert result == fact.fact_id
+    assert operation.state is IngestionState.COMPLETE
+    assert operation.derivation_state["consolidation"] is True
+    assert operation.derivation_state["post_hooks"] is True
+    assert pipeline.call_count == 1
+
+
+def test_worker_death_before_relational_start_is_retryable(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Tara approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="pre-relational-worker-death",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    derived = AtomicFact(
+        fact_id="derived-pre-relational-retry",
+        content="Tara approved the Atlas recovery checkpoint on July 23, 2026.",
+        entities=["Tara", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+    )
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        side_effect=[SystemExit("worker terminated before writes"), [derived]],
+    ):
+        with pytest.raises(SystemExit, match="before writes"):
+            command.materialize(receipt.operation_id)
+        interrupted = command.repository.get(receipt.operation_id)
+        assert interrupted.state is IngestionState.ENRICHING
+        assert interrupted.final_fact_ids == ()
+        assert interrupted.derivation_state == {
+            "pipeline_started": True,
+            "pipeline": False,
+        }
+
+        completed = command.materialize(receipt.operation_id)
+
+    assert completed.state is IngestionState.COMPLETE
+    assert completed.final_fact_ids
+    assert completed.derivation_state["pipeline"] is True
+
+
+def test_expired_production_attempt_resumes_from_started_stage_ledger(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Isha approved the Atlas recovery checkpoint on July 23, 2026 "
+            "for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="crash-safe-stage-ledger",
+        trusted_actor_id="daemon-capability:owned-instance",
+        session_date="2026-07-23",
+    ))
+    derived = AtomicFact(
+        fact_id="derived-crash-checkpoint",
+        content="Isha approved the Atlas recovery checkpoint on July 23, 2026.",
+        entities=["Isha", "Atlas"],
+        fact_type=FactType.SEMANTIC,
+        observation_date="2026-07-23",
+    )
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        return_value=[derived],
+    ), patch.object(
+        engine._hooks,
+        "run_post",
+        side_effect=[SystemExit("worker terminated"), None],
+    ):
+        with pytest.raises(SystemExit, match="worker terminated"):
+            command.materialize(receipt.operation_id)
+        baseline = _relational_ingestion_snapshot(engine)
+        interrupted = command.repository.get(receipt.operation_id)
+        assert interrupted.state is IngestionState.ENRICHING
+        assert interrupted.final_fact_ids
+        assert interrupted.derivation_state["pipeline_started"] is True
+        assert interrupted.derivation_state["relational_started"] is True
+        assert interrupted.derivation_state["pipeline"] is True
+        assert interrupted.derivation_state["post_hooks"] is False
+
+        completed = command.materialize(receipt.operation_id)
+
+    assert completed.state is IngestionState.COMPLETE
+    assert completed.derivation_state["post_hooks"] is True
+    assert _relational_ingestion_snapshot(engine) == baseline
+
+
+def test_production_model_work_does_not_block_interactive_sqlite_writer(
+    engine_with_mock_deps,
+) -> None:
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+    engine._db.execute(
+        "CREATE TABLE ingestion_interactive_probe (value TEXT NOT NULL)"
+    )
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content=(
+            "Nia owns the Atlas retrieval service and records every approved "
+            "recovery checkpoint for the reliability team."
+        ),
+        profile_id=engine._profile_id,
+        source_type="http",
+        idempotency_key="production-writer-concurrency",
+        trusted_actor_id="daemon-capability:owned-instance",
+    ))
+    entered_model_work = threading.Event()
+    release_model_work = threading.Event()
+
+    def slow_extract(**_kwargs):
+        entered_model_work.set()
+        assert release_model_work.wait(timeout=5)
+        return []
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        side_effect=slow_extract,
+    ), ThreadPoolExecutor(max_workers=2) as executor:
+        materialization = executor.submit(command.materialize, receipt.operation_id)
+        assert entered_model_work.wait(timeout=5)
+        interactive_write = executor.submit(
+            engine._db.execute,
+            "INSERT INTO ingestion_interactive_probe(value) VALUES (?)",
+            ("interactive",),
+        )
+        try:
+            interactive_write.result(timeout=1)
+        finally:
+            release_model_work.set()
+        assert materialization.result(timeout=5).state is IngestionState.COMPLETE
+
+    assert [
+        dict(row)["value"]
+        for row in engine._db.execute(
+            "SELECT value FROM ingestion_interactive_probe"
+        )
+    ] == ["interactive"]
 
 
 def test_materialization_ignores_admission_gate_for_submitted_operation(
@@ -244,7 +894,8 @@ def test_swallowed_pipeline_fallback_cannot_claim_complete_derivation(
     assert target is not None
     assert failed.state is IngestionState.FAILED
     assert stage in failed.last_error
-    assert failed.final_fact_ids == ()
+    assert failed.final_fact_ids == receipt.queryable_fact_ids
+    assert failed.derivation_state[stage] is False
     assert engine._db.get_fact(receipt.queryable_fact_ids[0]) is not None
 
 
@@ -534,6 +1185,37 @@ def test_public_python_store_routes_through_canonical_ingestion_and_preserves_co
         role="assistant",
         require_complete=False,
     )
+
+
+def test_nonblocking_canonical_store_returns_queryable_receipt_before_enrichment(
+    engine_with_mock_deps,
+) -> None:
+    """Mode B-style extraction must never run on the interactive receipt path."""
+    engine = engine_with_mock_deps
+    _install_m018(engine)
+
+    with patch.object(
+        engine._fact_extractor,
+        "extract_facts",
+        side_effect=AssertionError("interactive write invoked model extraction"),
+    ):
+        fact_ids = canonical_store(
+            engine,
+            "Rhea approved the durable queryable ingestion boundary.",
+            source_type="python-api",
+            trusted_actor_id="local-capability:python-api:test",
+            idempotency_key="nonblocking-canonical-store-1",
+            require_complete=False,
+        )
+
+    assert len(fact_ids) == 1
+    operation = engine._db.execute(
+        "SELECT state, queryable_fact_ids_json FROM ingestion_operations "
+        "WHERE idempotency_key=?",
+        ("nonblocking-canonical-store-1",),
+    )[0]
+    assert operation["state"] == "queryable"
+    assert fact_ids[0] in operation["queryable_fact_ids_json"]
 
 
 def test_production_materialization_preserves_session_speaker_and_role(

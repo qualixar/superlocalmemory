@@ -632,8 +632,8 @@ def run_recall(
 
     Pipeline: retrieval -> agentic sufficiency (if configured) -> post-recall updates.
 
-    ``fast=True`` skips spreading activation and remote agentic verification,
-    retaining the bounded single-pass retrieval channels.
+    ``fast=True`` skips remote agentic verification while retaining the six
+    local retrieval channels.
     """
     # Pre-operation hooks
     hook_ctx = {
@@ -658,7 +658,9 @@ def run_recall(
             logger.warning("[RECALL-TIMING] %-22s %.0f ms",
                            _label, (_time_t.monotonic() - _t0) * 1000.0)
 
-    extra_disabled = {"spreading_activation"} if fast else None
+    # The interactive path must retain the complete local retrieval contract.
+    # Only agentic verification can invoke an unbounded model round.
+    extra_disabled = None
     response = retrieval_engine.recall(
         query, profile_id, m, limit,
         extra_disabled_channels=extra_disabled,

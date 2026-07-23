@@ -359,6 +359,8 @@ V32_DDL: list[str] = [
         ON soft_prompt_templates(profile_id, active);
     CREATE INDEX IF NOT EXISTS idx_soft_prompt_category
         ON soft_prompt_templates(profile_id, category);
+    CREATE INDEX IF NOT EXISTS idx_soft_prompts_profile_active_category
+        ON soft_prompt_templates(profile_id, active, category, prompt_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_soft_prompt_unique_cat
         ON soft_prompt_templates(profile_id, category)
         WHERE active = 1;

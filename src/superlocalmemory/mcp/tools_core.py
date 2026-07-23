@@ -84,8 +84,9 @@ def _record_recall_hits(
             enqueue_shown_flip,
         )
 
-        engine = get_engine()
-        pid = profile_id or engine.profile_id
+        pid = profile_id
+        if not pid:
+            pid = get_engine().profile_id
         slm_dir = canonical_data_root()
 
         shown_ids = [r.get("fact_id", "") for r in results[:10]
@@ -121,7 +122,7 @@ def _record_recall_hits(
 def register_core_tools(server, get_engine: Callable) -> None:
     """Register the 13 core MCP tools on *server*."""
 
-    @server.tool(annotations=ToolAnnotations(idempotentHint=True))
+    @server.tool()
     async def remember(
         content: str, tags: str = "", project: str = "",
         importance: int = 5, session_id: str = "",

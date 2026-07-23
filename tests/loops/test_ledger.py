@@ -96,6 +96,56 @@ def test_slm_ledger_runs_isolates_by_name():
     assert led.laps("run-a") and not led.laps("run-a")[0].run_id == "run-b"
 
 
+def test_engine_ledger_uses_nonblocking_write_through_path():
+    from superlocalmemory.loops.ledger import _EngineLedgerStore
+
+    class _Engine:
+        profile_id = "default"
+
+        def __init__(self):
+            self.calls = []
+
+        def store(self, *_args, **_kwargs):
+            raise AssertionError("ledger must not run synchronous enrichment")
+
+        def store_fast(self, content, *, metadata, index_external):
+            self.calls.append((content, metadata, index_external))
+            return ["fact"]
+
+    engine = _Engine()
+    store = _EngineLedgerStore(engine, owns_engine=False)
+    store.add("lap", session_id="slm-loop:run", metadata={"loop": "demo"})
+
+    assert engine.calls == [
+        (
+            "lap",
+            {"loop": "demo", "session_id": "slm-loop:run"},
+            False,
+        ),
+    ]
+
+
+def test_engine_ledger_falls_back_for_legacy_adapter_engine():
+    from superlocalmemory.loops.ledger import _EngineLedgerStore
+
+    class _LegacyEngine:
+        profile_id = "default"
+
+        def __init__(self):
+            self.calls = []
+
+        def store(self, content, *, session_id, metadata):
+            self.calls.append((content, session_id, metadata))
+
+    engine = _LegacyEngine()
+    store = _EngineLedgerStore(engine, owns_engine=False)
+    store.add("lap", session_id="slm-loop:run", metadata={"loop": "demo"})
+
+    assert engine.calls == [
+        ("lap", "slm-loop:run", {"loop": "demo"}),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # SLMMemoryLedger against a REAL engine on a temp DB (value-add path)
 # ---------------------------------------------------------------------------

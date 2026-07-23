@@ -19,21 +19,21 @@ MEMORY_DIR to a tmp_path.
 Restart-required semantics:
   - graph_backend / vector_backend: changes take effect only on daemon restart.
   - daemon_port / daemon_legacy_port: changes take effect only on daemon restart.
-  - All other fields: hot-applied on next engine reconfigure cycle.
+  - mesh, trust, and forgetting are persisted safely but require restart
+    because no complete supported worker-rebind transaction exists for them.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
+from superlocalmemory.server.config_file import read_config, update_config
 from superlocalmemory.server.routes.helpers import MEMORY_DIR
 
 logger = logging.getLogger(__name__)
@@ -73,24 +73,18 @@ def _config_path() -> Path:
 
 
 def _read_config() -> dict:
-    """Read config.json as a raw dict.  Returns {} on missing/corrupt file."""
+    """Read one coherent config snapshot."""
     p = _config_path()
-    if not p.exists():
-        return {}
     try:
-        return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
+        return read_config(p)
+    except (ValueError, OSError) as exc:
         logger.warning("config_api: could not read config.json: %s", exc)
-        return {}
+        raise
 
 
-def _atomic_write(data: dict) -> None:
-    """Atomic config.json write: .tmp → os.replace."""
-    p = _config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
+def _update_config(mutator) -> dict:
+    """Run one interprocess-locked read/modify/replace transaction."""
+    return update_config(_config_path(), mutator)
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +169,7 @@ _FORGETTING_DEFAULTS: dict = {
 
 
 @router.get("/storage/config")
-async def get_storage_config():
+def get_storage_config():
     """Return current storage backend configuration.
 
     base_dir is read-only — it is derived from the process namespace and
@@ -188,7 +182,7 @@ async def get_storage_config():
             "vector_backend": data.get("vector_backend", "auto"),
             "base_dir": data.get("base_dir", str(MEMORY_DIR)),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("get_storage_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -199,7 +193,7 @@ async def get_storage_config():
 
 
 @router.put("/storage/config")
-async def put_storage_config(request: Request, body: StorageConfigUpdate):
+def put_storage_config(request: Request, body: StorageConfigUpdate):
     """Update graph_backend and/or vector_backend.
 
     Both fields require a daemon restart to take effect.
@@ -207,19 +201,20 @@ async def put_storage_config(request: Request, body: StorageConfigUpdate):
     """
     _require_admin(request)
     try:
-        data = _read_config()
-        if body.graph_backend is not None:
-            data["graph_backend"] = body.graph_backend
-        if body.vector_backend is not None:
-            data["vector_backend"] = body.vector_backend
-        _atomic_write(data)
+        def mutate(data: dict) -> None:
+            if body.graph_backend is not None:
+                data["graph_backend"] = body.graph_backend
+            if body.vector_backend is not None:
+                data["vector_backend"] = body.vector_backend
+
+        data = _update_config(mutate)
         return {
             "graph_backend": data.get("graph_backend", "auto"),
             "vector_backend": data.get("vector_backend", "auto"),
             "base_dir": data.get("base_dir", str(MEMORY_DIR)),
             "restart_required": True,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("put_storage_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -230,7 +225,7 @@ async def put_storage_config(request: Request, body: StorageConfigUpdate):
 
 
 @router.get("/daemon/config")
-async def get_daemon_config():
+def get_daemon_config():
     """Return current daemon configuration."""
     try:
         data = _read_config()
@@ -240,7 +235,7 @@ async def get_daemon_config():
             "legacy_port": data.get("daemon_legacy_port", 8767),
             "enable_legacy_port": data.get("daemon_enable_legacy_port", True),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("get_daemon_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -251,7 +246,7 @@ async def get_daemon_config():
 
 
 @router.put("/daemon/config")
-async def put_daemon_config(request: Request, body: DaemonConfigUpdate):
+def put_daemon_config(request: Request, body: DaemonConfigUpdate):
     """Update daemon configuration.
 
     Port / legacy_port changes require a daemon restart.
@@ -259,19 +254,22 @@ async def put_daemon_config(request: Request, body: DaemonConfigUpdate):
     """
     _require_admin(request)
     try:
-        data = _read_config()
         port_changed = False
-        if body.idle_timeout is not None:
-            data["daemon_idle_timeout"] = body.idle_timeout
-        if body.port is not None:
-            data["daemon_port"] = body.port
-            port_changed = True
-        if body.legacy_port is not None:
-            data["daemon_legacy_port"] = body.legacy_port
-            port_changed = True
-        if body.enable_legacy_port is not None:
-            data["daemon_enable_legacy_port"] = body.enable_legacy_port
-        _atomic_write(data)
+
+        def mutate(data: dict) -> None:
+            nonlocal port_changed
+            if body.idle_timeout is not None:
+                data["daemon_idle_timeout"] = body.idle_timeout
+            if body.port is not None:
+                data["daemon_port"] = body.port
+                port_changed = True
+            if body.legacy_port is not None:
+                data["daemon_legacy_port"] = body.legacy_port
+                port_changed = True
+            if body.enable_legacy_port is not None:
+                data["daemon_enable_legacy_port"] = body.enable_legacy_port
+
+        data = _update_config(mutate)
         return {
             "idle_timeout": data.get("daemon_idle_timeout", 0),
             "port": data.get("daemon_port", 8765),
@@ -279,7 +277,7 @@ async def put_daemon_config(request: Request, body: DaemonConfigUpdate):
             "enable_legacy_port": data.get("daemon_enable_legacy_port", True),
             "restart_required": port_changed,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("put_daemon_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -290,12 +288,12 @@ async def put_daemon_config(request: Request, body: DaemonConfigUpdate):
 
 
 @router.get("/mesh/config")
-async def get_mesh_config():
+def get_mesh_config():
     """Return current mesh configuration."""
     try:
         data = _read_config()
         return {"enabled": data.get("mesh_enabled", True)}
-    except Exception as exc:
+    except Exception:
         logger.exception("get_mesh_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -306,15 +304,15 @@ async def get_mesh_config():
 
 
 @router.put("/mesh/config")
-async def put_mesh_config(request: Request, body: MeshConfigUpdate):
-    """Enable or disable the mesh sync layer."""
+def put_mesh_config(request: Request, body: MeshConfigUpdate):
+    """Persist mesh state; restart is required to rebuild the mesh worker."""
     _require_admin(request)
     try:
-        data = _read_config()
-        data["mesh_enabled"] = body.enabled
-        _atomic_write(data)
-        return {"enabled": body.enabled}
-    except Exception as exc:
+        _update_config(
+            lambda data: data.update({"mesh_enabled": body.enabled}),
+        )
+        return {"enabled": body.enabled, "restart_required": True}
+    except Exception:
         logger.exception("put_mesh_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -325,7 +323,7 @@ async def put_mesh_config(request: Request, body: MeshConfigUpdate):
 
 
 @router.get("/trust/config")
-async def get_trust_config():
+def get_trust_config():
     """Return current trust configuration.
 
     Fields are spread across three config sections:
@@ -343,7 +341,7 @@ async def get_trust_config():
             "trust_first_party": injection.get("trust_first_party", False),
             "promotion_min_trust": consolidation.get("promotion_min_trust", 0.5),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("get_trust_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -354,7 +352,7 @@ async def get_trust_config():
 
 
 @router.put("/trust/config")
-async def put_trust_config(request: Request, body: TrustConfigUpdate):
+def put_trust_config(request: Request, body: TrustConfigUpdate):
     """Update trust configuration.
 
     Each field is stored in its canonical config.json sub-section.
@@ -362,17 +360,18 @@ async def put_trust_config(request: Request, body: TrustConfigUpdate):
     """
     _require_admin(request)
     try:
-        data = _read_config()
-        if body.use_trust_weighting is not None:
-            retrieval = data.setdefault("retrieval", {})
-            retrieval["use_trust_weighting"] = body.use_trust_weighting
-        if body.trust_first_party is not None:
-            injection = data.setdefault("injection", {})
-            injection["trust_first_party"] = body.trust_first_party
-        if body.promotion_min_trust is not None:
-            consolidation = data.setdefault("consolidation", {})
-            consolidation["promotion_min_trust"] = body.promotion_min_trust
-        _atomic_write(data)
+        def mutate(data: dict) -> None:
+            if body.use_trust_weighting is not None:
+                retrieval = data.setdefault("retrieval", {})
+                retrieval["use_trust_weighting"] = body.use_trust_weighting
+            if body.trust_first_party is not None:
+                injection = data.setdefault("injection", {})
+                injection["trust_first_party"] = body.trust_first_party
+            if body.promotion_min_trust is not None:
+                consolidation = data.setdefault("consolidation", {})
+                consolidation["promotion_min_trust"] = body.promotion_min_trust
+
+        data = _update_config(mutate)
         retrieval = data.get("retrieval", {})
         injection = data.get("injection", {})
         consolidation = data.get("consolidation", {})
@@ -380,8 +379,9 @@ async def put_trust_config(request: Request, body: TrustConfigUpdate):
             "use_trust_weighting": retrieval.get("use_trust_weighting", True),
             "trust_first_party": injection.get("trust_first_party", False),
             "promotion_min_trust": consolidation.get("promotion_min_trust", 0.5),
+            "restart_required": True,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("put_trust_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -392,7 +392,7 @@ async def put_trust_config(request: Request, body: TrustConfigUpdate):
 
 
 @router.get("/forgetting/config")
-async def get_forgetting_config():
+def get_forgetting_config():
     """Return all Ebbinghaus forgetting configuration fields."""
     try:
         data = _read_config()
@@ -401,7 +401,7 @@ async def get_forgetting_config():
         result = {**_FORGETTING_DEFAULTS, **stored}
         # Keep only known fields
         return {k: result[k] for k in _FORGETTING_DEFAULTS}
-    except Exception as exc:
+    except Exception:
         logger.exception("get_forgetting_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
@@ -412,25 +412,27 @@ async def get_forgetting_config():
 
 
 @router.put("/forgetting/config")
-async def put_forgetting_config(request: Request, body: ForgettingConfigUpdate):
+def put_forgetting_config(request: Request, body: ForgettingConfigUpdate):
     """Update Ebbinghaus forgetting configuration.
 
     Only provided fields are changed; all other forgetting fields are
-    preserved.  Changes take effect on the next daemon startup (or after
-    the scheduler fires its next cycle).
+    preserved. Changes take effect after the daemon restarts.
     """
     _require_admin(request)
     try:
-        data = _read_config()
-        stored = data.get("forgetting", {})
-        # Apply defaults for missing fields, then overlay the stored values,
-        # then overlay the requested updates.
-        merged = {**_FORGETTING_DEFAULTS, **stored}
         updates = body.model_dump(exclude_none=True)
-        merged.update(updates)
-        data["forgetting"] = merged
-        _atomic_write(data)
-        return {k: merged[k] for k in _FORGETTING_DEFAULTS}
-    except Exception as exc:
+
+        def mutate(data: dict) -> None:
+            stored = data.get("forgetting", {})
+            merged = {**_FORGETTING_DEFAULTS, **stored, **updates}
+            data["forgetting"] = merged
+
+        data = _update_config(mutate)
+        merged = data["forgetting"]
+        return {
+            **{k: merged[k] for k in _FORGETTING_DEFAULTS},
+            "restart_required": True,
+        }
+    except Exception:
         logger.exception("put_forgetting_config failed")
         return JSONResponse({"error": "Internal server error"}, status_code=500)

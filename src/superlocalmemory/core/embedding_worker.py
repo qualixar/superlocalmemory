@@ -75,6 +75,8 @@ _TRUSTED_REMOTE_CODE_MODELS = frozenset({
     "nomic-ai/nomic-embed-text-v1",
 })
 
+_RSS_LIMIT_MB = int(os.environ.get("SLM_EMBED_WORKER_RSS_LIMIT_MB", 2500))
+
 
 def _trusts_remote_code(model_name: str) -> bool:
     return model_name in _TRUSTED_REMOTE_CODE_MODELS
@@ -119,10 +121,10 @@ def _worker_main() -> None:
     _start_parent_watchdog()
 
     import numpy as np
+
     from superlocalmemory.core.platform_utils import get_rss_mb
 
     model = None
-    model_name = None
     dim = 0
 
     for line in sys.stdin:
@@ -154,7 +156,6 @@ def _worker_main() -> None:
                     _respond({"ok": False, "error": f"Dimension mismatch: {dim} != {expected_dim}"})
                     model = None
                     continue
-                model_name = name
                 _respond({"ok": True, "dim": dim, "model": name, "backend": active_backend})
             else:
                 _respond({"ok": False, "error": "Model load failed"})
@@ -170,7 +171,6 @@ def _worker_main() -> None:
                 model, active_backend = _load_embedding_model(name)
                 if model is not None:
                     dim = model.get_sentence_embedding_dimension()
-                    model_name = name
                 else:
                     _respond({"ok": False, "error": "Model load failed"})
                     continue
@@ -185,9 +185,8 @@ def _worker_main() -> None:
                 _respond({"ok": False, "error": str(exc)})
 
             # V3.3.16: RSS watchdog — V3.4.24: cross-platform via platform_utils.
-            _rss_limit = int(os.environ.get("SLM_EMBED_WORKER_RSS_LIMIT_MB", 1800))
             rss_mb = get_rss_mb()
-            if rss_mb > 0 and rss_mb > _rss_limit:
+            if rss_mb > 0 and rss_mb > _RSS_LIMIT_MB:
                 sys.exit(0)
 
             continue

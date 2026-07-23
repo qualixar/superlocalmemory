@@ -38,6 +38,8 @@ _TABLES: Final[tuple[str, ...]] = (
     "memories",
     "atomic_facts",
     "canonical_entities",
+    "fact_entity_associations",
+    "fact_entity_association_repair_state",
     "entity_aliases",
     "entity_profiles",
     "memory_scenes",
@@ -328,7 +330,52 @@ CREATE INDEX IF NOT EXISTS idx_entities_profile
 CREATE INDEX IF NOT EXISTS idx_entities_name_lower
     ON canonical_entities (profile_id, canonical_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_entities_type
-    ON canonical_entities (profile_id, entity_type);"""
+    ON canonical_entities (profile_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_entities_profile_fact_count
+    ON canonical_entities (profile_id, fact_count DESC);
+CREATE INDEX IF NOT EXISTS idx_entities_profile_type_fact_count
+    ON canonical_entities (
+        profile_id, entity_type COLLATE NOCASE, fact_count DESC
+    );"""
+
+
+# ---------------------------------------------------------------------------
+# Normalized fact/entity associations (also the ingestion effect ledger)
+# ---------------------------------------------------------------------------
+
+_SQL_FACT_ENTITY_ASSOCIATIONS: Final[str] = """
+CREATE TABLE IF NOT EXISTS fact_entity_associations (
+    profile_id TEXT NOT NULL,
+    fact_id TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    first_operation_id TEXT NOT NULL DEFAULT '',
+    count_applied INTEGER NOT NULL DEFAULT 0
+        CHECK (count_applied IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    ),
+    PRIMARY KEY (profile_id, fact_id, entity_id),
+    FOREIGN KEY (fact_id) REFERENCES atomic_facts(fact_id) ON DELETE CASCADE,
+    FOREIGN KEY (entity_id)
+        REFERENCES canonical_entities(entity_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_fact_entity_associations_entity
+    ON fact_entity_associations(profile_id, entity_id, fact_id);
+CREATE TABLE IF NOT EXISTS fact_entity_association_repair_state (
+    repair_key TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending', 'running', 'retrying', 'complete')),
+    target_fact_rowid INTEGER NOT NULL DEFAULT -1,
+    last_fact_rowid INTEGER NOT NULL DEFAULT 0,
+    scanned INTEGER NOT NULL DEFAULT 0,
+    inserted INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO fact_entity_association_repair_state
+    (repair_key, state, target_fact_rowid, updated_at)
+VALUES ('historical-backfill', 'pending', -1, '');
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +799,7 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_MEMORIES,
     _SQL_ATOMIC_FACTS,
     _SQL_CANONICAL_ENTITIES,
+    _SQL_FACT_ENTITY_ASSOCIATIONS,
     _SQL_ENTITY_ALIASES,
     _SQL_ENTITY_PROFILES,
     _SQL_MEMORY_SCENES,

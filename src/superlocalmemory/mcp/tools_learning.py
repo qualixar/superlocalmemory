@@ -143,7 +143,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             logger.debug("get_assertions failed: %s", exc)
             return {"assertions": [], "count": 0, "error": str(exc)}
 
-    @server.tool(annotations=ToolAnnotations(idempotentHint=True))
+    @server.tool()
     async def reinforce_assertion(assertion_id: str) -> dict:
         """Reinforce a behavioral assertion (increase confidence).
 
@@ -171,7 +171,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    @server.tool(annotations=ToolAnnotations(idempotentHint=True))
+    @server.tool()
     async def contradict_assertion(assertion_id: str) -> dict:
         """Contradict a behavioral assertion (decrease confidence).
 

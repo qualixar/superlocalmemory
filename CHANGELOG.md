@@ -5,6 +5,66 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1] - 2026-07-23 — Existing-install stability
+
+### Fixed
+
+- **Large existing databases no longer delay daemon readiness for a full tier
+  rebalance.** Startup now initializes bounded backend state and leaves the
+  scheduled full-database tier evaluation to maintenance.
+- **Failed enrichment can no longer retry forever.** Automatic durable-ingestion
+  materialization stops after ten attempts; an operator can still request an
+  explicit retry after correcting the underlying issue.
+- **Background enrichment no longer monopolizes SQLite.** Durable
+  materialization now uses short saga checkpoints instead of holding one
+  database write transaction across model extraction and embedding work, so
+  remember, update, delete, and dashboard actions remain writable while
+  enrichment continues.
+- **Durable enrichment retries are idempotent after partial failure.** Fact,
+  evidence, provenance, graph, temporal, and entity-association effects are
+  checkpointed or keyed so retries and process recovery cannot inflate them.
+- **Entity counts stay O(1) on mature databases.** A normalized, indexed
+  fact/entity association ledger replaces per-entity scans of the full facts
+  table; existing associations are backfilled once during upgrade.
+- **Newly queryable memories are immediately visible to recall.** A strong
+  exact BM25/FTS hit now retains one bounded result slot even when semantic
+  candidates would otherwise fill a small `limit`, preserving the
+  queryable-before-enrichment contract.
+- **Mesh heartbeat writes no longer block the async HTTP event loop.** SQLite
+  work runs in FastAPI's worker thread pool, keeping health, token, dashboard,
+  recall, and remember endpoints responsive during peer activity.
+- **Dashboard navigation preserves mounted pane state.** Brain, Knowledge Graph,
+  Memories, and Entity Explorer do not remount and refetch on every return.
+  Successful writes and configuration changes invalidate pane state once so
+  the next visit refreshes deliberately.
+- **Brain telemetry is historical and provenance-backed.** Existing reward
+  outcomes are repaired into source-quality observations in resumable bounded
+  batches, and transient database errors can no longer be reported as a
+  completed repair.
+- **Company-mode learning controls enforce workspace permissions.** Learning
+  and behavioral reads and mutations now apply the same read, write, delete,
+  and manage gates as the rest of the control plane.
+- **Large graph views have a fixed browser-compute budget.** The dashboard can
+  render the requested graph result while force simulation is bounded, with a
+  short initial settle and finite animation window; selecting a large graph can
+  no longer monopolize the browser main thread.
+- **Interactive model workers stay warm instead of repeatedly cold-starting.**
+  Embedding and reranker workers now remain resident for a 30-minute working
+  session by default, and the embedding peak guard matches the daemon's
+  2.5 GB per-worker watchdog. Low-RAM installations can retain shorter idle
+  windows and stricter recycling through the existing environment overrides.
+- **CLI mutations use the resident daemon as the single database writer.**
+  Exact delete and update commands no longer initialize a competing engine
+  beside a running daemon, preventing lock failures on active existing
+  installations.
+- **Skill Evolution repairs incomplete historical schemas.** The migration
+  runner verifies a completed migration's promised end-state before skipping
+  it and reapplies additive DDL when an older upgrade left a required table
+  missing.
+- **Release packages are deterministic again.** Canonical data-root routing,
+  generated plugin parity checks, truthful integration instructions, and the
+  bounded npm package surface are restored.
+
 ## [3.8.0] - 2026-07-23 — Teams, bounded loops, and nine framework adapters
 
 ### Added

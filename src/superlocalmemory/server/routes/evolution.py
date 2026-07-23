@@ -8,36 +8,73 @@ Routes: /api/evolution/status, /api/evolution/enable, /api/evolution/run
 """
 
 import logging
-from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from .helpers import get_active_profile, MEMORY_DIR
+from superlocalmemory.server.config_file import read_config, update_config
+
+from .helpers import MEMORY_DIR, get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.evolution")
 router = APIRouter()
 
 
+def _require_read(request: Request) -> None:
+    """Guard evolution telemetry with READ on the active profile."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    require_permission(request, Permission.READ, profile=get_active_profile())
+
+
+def _require_manage(request: Request) -> None:
+    """Guard evolution mutations with the same RBAC boundary as v3 settings."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request)
+
+
+def _read_evolution_config() -> dict:
+    """Read one process-safe evolution config snapshot."""
+    return dict(read_config(MEMORY_DIR / "config.json").get("evolution", {}))
+
+
+def _update_evolution_config(update) -> dict:
+    """Atomically update evolution without losing other config sections."""
+    config_path = MEMORY_DIR / "config.json"
+
+    def mutate(cfg: dict) -> None:
+        evolution = cfg.setdefault("evolution", {})
+        update(evolution)
+
+    cfg = update_config(config_path, mutate)
+    return dict(cfg.get("evolution", {}))
+
+
+def _enable_evolution(config: dict) -> None:
+    config["enabled"] = True
+    config.setdefault("backend", "auto")
+
+
 @router.get("/api/evolution/status")
-async def evolution_status():
+def evolution_status(request: Request):
     """Get evolution engine status, backend, and recent history."""
+    _require_read(request)
     try:
-        import json as _json
-        from superlocalmemory.evolution.skill_evolver import detect_backend
         from superlocalmemory.evolution.evolution_store import EvolutionStore
+        from superlocalmemory.evolution.skill_evolver import detect_backend
 
-        # Read config directly from config.json (SLMConfig.load doesn't serialize evolution)
-        config_path = MEMORY_DIR / "config.json"
-        evo_cfg = {}
-        if config_path.exists():
-            with open(config_path) as f:
-                cfg = _json.load(f)
-            evo_cfg = cfg.get("evolution", {})
-
+        evo_cfg = _read_evolution_config()
         enabled = evo_cfg.get("enabled", False)
-        backend = detect_backend() if enabled else "none"
+        backend_setting = evo_cfg.get("backend", "auto")
+        backend = (
+            detect_backend() if enabled and backend_setting == "auto"
+            else backend_setting if enabled
+            else "none"
+        )
         db_path = str(MEMORY_DIR / "memory.db")
 
         profile_id = get_active_profile()
@@ -49,7 +86,7 @@ async def evolution_status():
             "enabled": enabled,
             "backend": backend,
             "config": {
-                "backend_setting": evo_cfg.get("backend", "auto"),
+                "backend_setting": backend_setting,
                 "max_per_cycle": evo_cfg.get("max_evolutions_per_cycle", 3),
                 "mutation_model": evo_cfg.get("mutation_model", ""),
                 "verify_model": evo_cfg.get("verify_model", ""),
@@ -82,53 +119,26 @@ async def evolution_status():
 
 
 @router.post("/api/evolution/enable")
-async def evolution_enable():
-    """Enable skill evolution engine. Writes directly to config.json."""
+def evolution_enable(request: Request):
+    """Enable evolution without replacing the user's selected backend."""
+    _require_manage(request)
     try:
-        import json as _json
-
-        config_path = MEMORY_DIR / "config.json"
-        cfg = {}
-        if config_path.exists():
-            with open(config_path) as f:
-                cfg = _json.load(f)
-
-        if "evolution" not in cfg:
-            cfg["evolution"] = {}
-        cfg["evolution"]["enabled"] = True
-        cfg["evolution"]["backend"] = "auto"
-
-        with open(config_path, "w") as f:
-            _json.dump(cfg, f, indent=2)
-
-        return {"ok": True, "message": "Evolution enabled. Will use auto-detected backend."}
+        evolution = _update_evolution_config(_enable_evolution)
+        return {
+            "ok": True,
+            "message": f"Evolution enabled with {evolution['backend']} backend.",
+        }
     except Exception:
         logger.exception("evolution_enable error")
         return {"ok": False, "error": "Internal server error"}
 
 
 @router.post("/api/evolution/disable")
-async def evolution_disable():
+def evolution_disable(request: Request):
     """Disable skill evolution engine.  Mirrors /api/evolution/enable."""
+    _require_manage(request)
     try:
-        import json as _json
-        import os as _os
-
-        config_path = MEMORY_DIR / "config.json"
-        cfg: dict = {}
-        if config_path.exists():
-            with open(config_path) as f:
-                cfg = _json.load(f)
-
-        if "evolution" not in cfg:
-            cfg["evolution"] = {}
-        cfg["evolution"]["enabled"] = False
-
-        # Atomic write — protect against truncated config.json on crash.
-        tmp = config_path.with_suffix(".json.evo_disable_tmp")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
-        _os.replace(tmp, config_path)
+        _update_evolution_config(lambda cfg: cfg.update({"enabled": False}))
 
         return {"ok": True, "message": "Evolution disabled."}
     except Exception:
@@ -137,18 +147,13 @@ async def evolution_disable():
 
 
 @router.post("/api/evolution/run")
-async def evolution_run():
+def evolution_run(request: Request):
     """Manually trigger an evolution cycle."""
+    _require_manage(request)
     try:
-        import json as _json
         from superlocalmemory.evolution.skill_evolver import SkillEvolver
 
-        config_path = MEMORY_DIR / "config.json"
-        evo_cfg = {}
-        if config_path.exists():
-            with open(config_path) as f:
-                evo_cfg = _json.load(f).get("evolution", {})
-
+        evo_cfg = _read_evolution_config()
         if not evo_cfg.get("enabled", False):
             return {"ok": False, "error": "Evolution is disabled. Enable first."}
 
@@ -159,17 +164,17 @@ async def evolution_run():
         # per-step model fields (v3.7.9) or a dashboard-triggered run would
         # silently ignore the user's configured models and fall back to the
         # cheapest defaults.
-        class _EvoCfg:
-            enabled = True
-            backend = evo_cfg.get("backend", "auto")
-            max_evolutions_per_cycle = evo_cfg.get("max_evolutions_per_cycle", 3)
-            mutation_model = evo_cfg.get("mutation_model", "")
-            verify_model = evo_cfg.get("verify_model", "")
-            confirm_model = evo_cfg.get("confirm_model", "")
-        class _Cfg:
-            evolution = _EvoCfg()
-
-        evolver = SkillEvolver(db_path, _Cfg())
+        evolution_config = SimpleNamespace(
+            enabled=True,
+            backend=evo_cfg.get("backend", "auto"),
+            max_evolutions_per_cycle=evo_cfg.get("max_evolutions_per_cycle", 3),
+            mutation_model=evo_cfg.get("mutation_model", ""),
+            verify_model=evo_cfg.get("verify_model", ""),
+            confirm_model=evo_cfg.get("confirm_model", ""),
+        )
+        evolver = SkillEvolver(
+            db_path, SimpleNamespace(evolution=evolution_config)
+        )
         result = evolver.run_consolidation_cycle(profile)
 
         return {"ok": True, **result}
@@ -188,16 +193,15 @@ class EvolutionConfigUpdate(BaseModel):
 
 
 @router.post("/api/evolution/config")
-async def evolution_config(body: EvolutionConfigUpdate):
+def evolution_config(request: Request, body: EvolutionConfigUpdate):
     """Update evolution config from the dashboard (v3.7.9).
 
     Validates model + backend values against the same allow-list the CLI uses
     (``slm config set evolution.*``) and persists to config.json atomically.
     Only fields provided in the body are changed.
     """
+    _require_manage(request)
     try:
-        import json as _json
-        import os as _os
         from superlocalmemory.evolution.model_selection import _MODEL_ALIASES
 
         accepted_models = set(_MODEL_ALIASES) | {"", "auto"}
@@ -217,27 +221,23 @@ async def evolution_config(body: EvolutionConfigUpdate):
                 and not 0 < body.max_evolutions_per_cycle <= 50):
             return {"ok": False, "error": "max_evolutions_per_cycle must be 1..50"}
 
-        config_path = MEMORY_DIR / "config.json"
-        cfg = {}
-        if config_path.exists():
-            with open(config_path) as f:
-                cfg = _json.load(f)
-        evo = cfg.setdefault("evolution", {})
+        def _apply(evo: dict) -> None:
+            for field in (
+                "enabled",
+                "backend",
+                "max_evolutions_per_cycle",
+                "mutation_model",
+                "verify_model",
+                "confirm_model",
+            ):
+                value = getattr(body, field)
+                if value is None:
+                    continue
+                if field.endswith("_model") and value == "auto":
+                    value = ""
+                evo[field] = value
 
-        for field in ("enabled", "backend", "max_evolutions_per_cycle",
-                      "mutation_model", "verify_model", "confirm_model"):
-            val = getattr(body, field)
-            if val is None:
-                continue
-            # "auto" is the UI label for the resolver's "" (pick cheapest model).
-            if field.endswith("_model") and val == "auto":
-                val = ""
-            evo[field] = val
-
-        # Atomic write — a truncated config.json would brick every slm call.
-        tmp = config_path.with_suffix(".json.evo_tmp")
-        tmp.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
-        _os.replace(tmp, config_path)
+        evo = _update_evolution_config(_apply)
 
         return {"ok": True, "config": {
             "enabled": evo.get("enabled", False),
@@ -253,11 +253,13 @@ async def evolution_config(body: EvolutionConfigUpdate):
 
 
 @router.get("/api/evolution/lineage")
-async def evolution_lineage(skill_name: str = ""):
+def evolution_lineage(request: Request, skill_name: str = ""):
     """Get evolution lineage for a skill or all skills.
 
     Returns lineage records and a tree structure grouped by root skill.
     """
+    _require_read(request)
+    conn = None
     try:
         import sqlite3 as _sqlite3
 
@@ -286,8 +288,6 @@ async def evolution_lineage(skill_name: str = ""):
                 "ORDER BY created_at DESC LIMIT 100",
                 (profile_id,),
             ).fetchall()
-
-        conn.close()
 
         lineage = [
             {
@@ -329,3 +329,6 @@ async def evolution_lineage(skill_name: str = ""):
     except Exception:
         logger.exception("evolution_lineage error")
         return {"lineage": [], "lineage_count": 0, "tree": {}, "error": "Internal server error"}
+    finally:
+        if conn is not None:
+            conn.close()

@@ -7,8 +7,8 @@
 // Design-system CSS classes used throughout — no invented inline colours.
 //
 // Endpoints (all via meshFetch → X-Install-Token):
-//   GET  /mesh/status   → {broker_up, peer_count, uptime_s}
-//   GET  /mesh/peers    → {peers:[{peer_id, session_id, status, last_heartbeat,
+//   GET  /mesh/status   → {broker_up, remote_peer_count, local_session_count, uptime_s}
+//   GET  /mesh/peers?view=all    → {peers:[{peer_id, session_id, status, last_heartbeat,
 //                                   summary, host, port, agent_type, project_path}]}
 //   POST /mesh/send     → body:{from_peer, to_peer, content, type} → {ok:true}
 //
@@ -76,6 +76,7 @@
   var _container  = null;
   var _timer      = null;
   var _observer   = null;     // MutationObserver — re-starts refresh on tab activate
+  var _requestSeq = 0;
 
   // ── HTML helpers ──────────────────────────────────────────────────────────
   // CRIT C3: every API-derived string MUST pass through this.
@@ -198,12 +199,15 @@
       return;
     }
     var up  = data.broker_up === true ? 'Broker up' : 'Broker offline';
-    var cnt = data.peer_count != null
-      ? data.peer_count + ' peer' + (data.peer_count === 1 ? '' : 's')
+    var remoteCount = data.remote_peer_count != null ? data.remote_peer_count : data.peer_count;
+    var cnt = remoteCount != null
+      ? remoteCount + ' remote peer' + (remoteCount === 1 ? '' : 's')
       : '';
+    var localCount = data.local_session_count || 0;
     var upt = data.uptime_s != null ? 'uptime ' + fmtUptime(data.uptime_s) : '';
     var parts = [up];
     if (cnt) parts.push(cnt);
+    if (localCount) parts.push(localCount + ' local session' + (localCount === 1 ? '' : 's'));
     if (upt) parts.push(upt);
     el.textContent = 'Agents sharing this memory mesh on your machine and LAN. ' +
       parts.join(' · ') + '. Peers go stale after 5 min without a heartbeat, dead after 30.';
@@ -236,10 +240,10 @@
             'justify-content:center;margin-bottom:16px;color:var(--fg-3)">' +
             meshEmptyIcon() +
           '</div>' +
-          '<h3 style="font-size:15px;margin-bottom:6px">No peers connected</h3>' +
+          '<h3 style="font-size:15px;margin-bottom:6px">No mesh sessions connected</h3>' +
           '<p style="font-size:12.5px;color:var(--fg-2);' +
             'max-width:30ch;line-height:1.5">' +
-            'Start another agent session. Peers register via the' +
+            'Start another agent session or connect a trusted LAN peer. Sessions register via the' +
             ' <code>mesh_summary</code> MCP tool.' +
           '</p>' +
         '</div>';
@@ -253,6 +257,9 @@
       var pidFrag  = escapeHtml((p.peer_id || '').slice(0, 12));
       var summary  = escapeHtml(p.summary || 'No summary');
       var atype    = escapeHtml(p.agent_type || 'unknown');
+      var isLocal  = String(p.host || '').toLowerCase() === '127.0.0.1' ||
+        String(p.host || '').toLowerCase() === 'localhost' || String(p.host || '') === '::1';
+      var scopeLabel = isLocal ? 'local session' : 'remote peer';
       var ago      = escapeHtml(timeAgo(p.last_heartbeat));
       var proj     = escapeHtml(p.project_path || '~');
       var port     = p.port ? ' · :' + p.port : '';
@@ -274,7 +281,7 @@
             '<div style="flex:1;min-width:0">' +
               '<h3 style="font-size:15px;white-space:nowrap;overflow:hidden;' +
                 'text-overflow:ellipsis">' + name + '</h3>' +
-              '<span class="mono dim" style="font-size:11px">' + pidFrag + '</span>' +
+              '<span class="mono dim" style="font-size:11px">' + pidFrag + ' · ' + scopeLabel + '</span>' +
             '</div>' +
             '<span class="badge ' + badgeCls(st) + '">' +
               '<span class="dot"></span>' + escapeHtml(st) +
@@ -424,15 +431,22 @@
 
   // ── Data loaders ──────────────────────────────────────────────────────────
   function loadAll() {
+    var requestSeq = _requestSeq + 1;
+    _requestSeq = requestSeq;
     meshFetch('/mesh/status')
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; })
-      .then(renderPageDesc);
+      .then(function (data) {
+        if (_requestSeq === requestSeq) renderPageDesc(data);
+      });
 
-    meshFetch('/mesh/peers')
+    // The broker distinguishes remote LAN peers from local agent sessions.
+    // Both are real mesh participants and must be visible to operators.
+    meshFetch('/mesh/peers?view=all')
       .then(function (r) { return r.ok ? r.json() : { peers: [] }; })
       .catch(function () { return { peers: [] }; })
       .then(function (d) {
+        if (_requestSeq !== requestSeq) return;
         _peers = Array.isArray(d && d.peers) ? d.peers : [];
         renderPeers(_peers);
         // If the currently selected peer has expired, deselect

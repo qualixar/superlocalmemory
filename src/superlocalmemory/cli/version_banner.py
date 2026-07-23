@@ -26,6 +26,15 @@ _VERSION_PATTERN = re.compile(r"^[0-9A-Za-z.\-+_]{1,32}$")
 
 _MAX_MARKER_BYTES = 64  # a semver string is ≤ 32 chars; 64 is plenty
 
+_RELEASE_NOTES: dict[str, tuple[str, ...]] = {
+    "3.8.1": (
+        "Large existing databases no longer delay daemon readiness",
+        "Failed enrichment retries stop after ten automatic attempts",
+        "Dashboard panes stay mounted between navigation changes",
+        "Local model workers stay warm for a 30-minute working session",
+    ),
+}
+
 
 def _data_dir() -> Path:
     from superlocalmemory.infra.data_root import canonical_data_root
@@ -116,11 +125,16 @@ def _banner(prior: str | None, current: str) -> str:
     header = (f"SuperLocalMemory upgraded from {prior} to {current}"
               if prior else
               f"SuperLocalMemory upgraded to {current} (from an earlier version)")
+    notes = _RELEASE_NOTES.get(
+        current,
+        (
+            "The installed version has changed; existing memory remains in place",
+            "See the release notes for version-specific changes",
+        ),
+    )
     return "\n".join([
         header,
-        "  - Multi-IDE MCP processes now share a worker — large RAM drop",
-        "  - Feedback and learning signals flow from every IDE to the daemon",
-        "  - Silent data migration complete; no manual steps required",
+        *(f"  - {note}" for note in notes),
         "Run `slm doctor` to verify your setup.",
         "",
     ])

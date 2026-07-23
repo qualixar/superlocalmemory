@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from concurrent.futures import ThreadPoolExecutor
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 
@@ -18,6 +18,7 @@ from superlocalmemory.core.ingestion_command import (
     IngestionRequest,
     IngestionState,
     InvalidStateTransition,
+    LeaseLost,
     MaterializationResult,
     OperationInProgress,
 )
@@ -220,7 +221,7 @@ def test_failure_is_inspectable_and_retry_does_not_repeat_queryable_write(
     assert queryable_writes == 1
 
 
-def test_partial_materialization_db_writes_roll_back_before_failed_state(
+def test_partial_materialization_checkpoint_survives_with_failed_state(
     db, ingestion_request,
 ) -> None:
     db.execute("CREATE TABLE materialization_probe (value TEXT NOT NULL)")
@@ -239,7 +240,110 @@ def test_partial_materialization_db_writes_roll_back_before_failed_state(
     failed = command.materialize(receipt.operation_id)
 
     assert failed.state is IngestionState.FAILED
-    assert db.execute("SELECT * FROM materialization_probe") == []
+    assert [
+        row["value"] for row in db.execute("SELECT * FROM materialization_probe")
+    ] == ["partial"]
+
+
+def test_materialization_does_not_hold_writer_lock_during_model_work(
+    db, ingestion_request,
+) -> None:
+    db.execute("CREATE TABLE materialization_probe (value TEXT NOT NULL)")
+    entered_model_work = threading.Event()
+    release_model_work = threading.Event()
+
+    def slow_materializer(_operation):
+        db.execute("INSERT INTO materialization_probe(value) VALUES ('checkpoint')")
+        entered_model_work.set()
+        assert release_model_work.wait(timeout=5)
+        return ["fact-fast-1"]
+
+    command = IngestionCommand(
+        IngestionOperationRepository(db),
+        write_queryable=lambda *_: ["fact-fast-1"],
+        materialize=slow_materializer,
+    )
+    receipt = command.submit(ingestion_request)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        materialization = executor.submit(command.materialize, receipt.operation_id)
+        assert entered_model_work.wait(timeout=5)
+        competing_write = executor.submit(
+            db.execute,
+            "INSERT INTO materialization_probe(value) VALUES ('interactive')",
+        )
+        try:
+            competing_write.result(timeout=1)
+        finally:
+            release_model_work.set()
+        assert materialization.result(timeout=5).state is IngestionState.COMPLETE
+
+    assert {
+        row["value"] for row in db.execute("SELECT value FROM materialization_probe")
+    } == {"checkpoint", "interactive"}
+
+
+def test_long_materializer_renews_owner_bound_lease(
+    db, ingestion_request, monkeypatch,
+) -> None:
+    renewed = threading.Event()
+    command = IngestionCommand(
+        IngestionOperationRepository(db),
+        write_queryable=lambda *_: ["fact-fast-1"],
+        materialize=lambda *_: (
+            ["fact-fast-1"] if renewed.wait(timeout=2) else []
+        ),
+        lease_seconds=1,
+    )
+    actual_renew = command.repository.renew_enriching_lease
+
+    def record_renewal(*args, **kwargs):
+        result = actual_renew(*args, **kwargs)
+        renewed.set()
+        return result
+
+    monkeypatch.setattr(
+        command.repository, "renew_enriching_lease", record_renewal,
+    )
+    receipt = command.submit(ingestion_request)
+
+    completed = command.materialize(receipt.operation_id)
+
+    assert completed.state is IngestionState.COMPLETE
+    assert renewed.is_set()
+
+
+def test_lost_materialization_lease_aborts_before_checkpoint(
+    db, ingestion_request, monkeypatch,
+) -> None:
+    renewal_attempted = threading.Event()
+
+    def materialize(_operation):
+        assert renewal_attempted.wait(timeout=2)
+        return ["fact-fast-1"]
+
+    command = IngestionCommand(
+        IngestionOperationRepository(db),
+        write_queryable=lambda *_: ["fact-fast-1"],
+        materialize=materialize,
+        lease_seconds=1,
+    )
+
+    def lose_lease(*_args, **_kwargs):
+        renewal_attempted.set()
+        return False
+
+    monkeypatch.setattr(
+        command.repository, "renew_enriching_lease", lose_lease,
+    )
+    receipt = command.submit(ingestion_request)
+
+    with pytest.raises(LeaseLost, match=receipt.operation_id):
+        command.materialize(receipt.operation_id)
+
+    stranded = command.repository.get(receipt.operation_id)
+    assert stranded.final_fact_ids == ()
+    assert stranded.state is IngestionState.ENRICHING
 
 
 def test_incomplete_declared_derivation_cannot_be_marked_complete(
@@ -262,7 +366,11 @@ def test_incomplete_declared_derivation_cannot_be_marked_complete(
 
     assert failed.state is IngestionState.FAILED
     assert "provenance" in failed.last_error
-    assert failed.derivation_state == {}
+    assert failed.final_fact_ids == ("fact-fast-1",)
+    assert failed.derivation_state == {
+        "relational": True,
+        "provenance": False,
+    }
 
 
 def test_external_projection_retry_resumes_checkpoint_without_rederiving(
@@ -447,6 +555,31 @@ def test_materializable_queue_respects_failed_retry_backoff(
         queryable.operation_id,
         failed.operation_id,
     ]
+
+
+def test_materializable_queue_stops_automatic_retry_after_budget(
+    db, ingestion_request,
+) -> None:
+    command = IngestionCommand(
+        IngestionOperationRepository(db),
+        write_queryable=lambda *_: ["fact-fast-1"],
+        materialize=lambda *_: (_ for _ in ()).throw(RuntimeError("deterministic failure")),
+    )
+    receipt = command.submit(ingestion_request)
+    failed = command.materialize(receipt.operation_id)
+    db.execute(
+        "UPDATE ingestion_operations SET attempt_count=10, next_retry_at=0 "
+        "WHERE operation_id=?",
+        (failed.operation_id,),
+    )
+
+    assert command.repository.list_materializable(limit=10) == []
+
+    # Circuit breaking automatic work must not destroy the operator escape
+    # hatch: an explicit retry remains possible after configuration repair.
+    command._materializer = lambda *_: ["fact-fast-1"]
+    completed = command.retry(failed.operation_id)
+    assert completed.state is IngestionState.COMPLETE
 
 
 def test_materializable_queue_can_defer_fresh_queryable_receipts(

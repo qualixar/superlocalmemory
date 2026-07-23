@@ -1,7 +1,7 @@
 ---
 name: slm-cache
 description: KV cache for repeated reads — call slm_cache_get(key) first; on a miss do the expensive operation then slm_cache_set(key, value, ttl_seconds) to store it; on a hit use the returned value directly; always fail-open (hit:false on any error, never raises); saves tokens when the same file, query result, or tool output is read more than once in a session.
-version: "3.8.0"
+version: "3.8.1"
 agent: agent
 tools:
   - slm_cache_set
@@ -149,4 +149,4 @@ These subcommands control daemon-level cache settings. They do not read or write
 
 ---
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later

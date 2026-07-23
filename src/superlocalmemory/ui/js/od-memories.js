@@ -106,6 +106,8 @@
     catCounts: {},     // pre-fetched per-category totals
     tlRange:   '30d',
     cluLoaded: false,  // reset in render() to avoid stale state on re-entry
+    searchQ:   null,
+    requestSeq: 0,
   };
 
   // Known categories from the daemon (pre-fetched at render time)
@@ -119,7 +121,7 @@
     var id = 'od-mem-' + Math.random().toString(36).slice(2, 8);
     _st = Object.assign({}, _st, {
       rootId: id, page: 0, category: null, sort: 'created',
-      memories: [], catCounts: {}, cluLoaded: false,
+      memories: [], catCounts: {}, cluLoaded: false, searchQ: null, requestSeq: 0,
     });
     // Clear per-id timeline cache for this render instance
     _tlLoaded = {};
@@ -306,6 +308,8 @@
     if (_st.scopeView && _st.scopeView !== 'mine') {
       url += '&scope=' + encodeURIComponent(_st.scopeView);
     }
+    var requestSeq = _st.requestSeq + 1;
+    _st = Object.assign({}, _st, { requestSeq: requestSeq });
     var wrap = document.getElementById(id + '-tbl-wrap');
     if (wrap) wrap.innerHTML = _loading('Loading memories…');
 
@@ -315,10 +319,12 @@
         return r.json();
       })
       .then(function (d) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         _st = Object.assign({}, _st, { memories: d.memories || [], total: d.total || 0 });
         _renderTable(id, d);
       })
       .catch(function (err) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         var w = document.getElementById(id + '-tbl-wrap');
         if (w) w.innerHTML = '<div class="card-pad" style="color:var(--danger);text-align:center">' +
           'Failed to load memories: ' + _esc(err.message) + '</div>';
@@ -442,22 +448,38 @@
   var _searchTimer = null;
   function _doSearch(id, q) {
     clearTimeout(_searchTimer);
+    var requestSeq = _st.requestSeq + 1;
+    // /api/search is a full-corpus semantic query. It cannot truthfully retain
+    // the list endpoint's category/scope selection, so clear those controls
+    // before the request rather than leaving the table and chips disagreeing.
+    _st = Object.assign({}, _st, {
+      searchQ: q || null,
+      category: q ? null : _st.category,
+      scopeView: q ? 'mine' : _st.scopeView,
+      page: 0,
+      requestSeq: requestSeq,
+    });
+    if (q) _rebuildCatBar(id);
     _searchTimer = setTimeout(function () {
-      _st = Object.assign({}, _st, { searchQ: q || null });
+      if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
       if (!q) { _loadMem(id); return; }
       var wrap = document.getElementById(id + '-tbl-wrap');
       if (wrap) wrap.innerHTML = _loading('Searching…');
       fetch('/api/search', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
+        slmInvalidatesCache: false,
+        slmRequiresWriteAuth: false,
         body: JSON.stringify({ query: q, limit: 50, window: _st.window || '' })
       }).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       }).then(function (d) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         var mems = (d.results || []).map(_normSearch);
         _st = Object.assign({}, _st, { memories: mems, total: mems.length });
         _renderTable(id, { memories: mems, total: mems.length, limit: mems.length, offset: 0 });
       }).catch(function (err) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         var w = document.getElementById(id + '-tbl-wrap');
         if (w) w.innerHTML = '<div class="card-pad" style="color:var(--danger);text-align:center;' +
           'padding:24px">Search failed: ' + _esc(err.message) + '</div>';
@@ -760,7 +782,13 @@
         if (bar) bar.querySelectorAll('[data-od-act="cat"]').forEach(function (c) {
           c.classList.toggle('on', c.dataset.cat === el.dataset.cat);
         });
-        _st = Object.assign({}, _st, { category: el.dataset.cat || null, page: 0 });
+        clearTimeout(_searchTimer);
+        _st = Object.assign({}, _st, {
+          category: el.dataset.cat || null, page: 0, searchQ: null,
+          requestSeq: _st.requestSeq + 1,
+        });
+        var searchInput = document.querySelector('#' + id + ' [data-od-act="search"]');
+        if (searchInput) searchInput.value = '';
         _loadMem(id);
         return;
       }
@@ -778,7 +806,13 @@
         if (sroot) sroot.querySelectorAll('[data-od-act="scope-view"]').forEach(function (b) {
           b.classList.toggle('active', b.dataset.scope === el.dataset.scope);
         });
-        _st = Object.assign({}, _st, { scopeView: el.dataset.scope, page: 0 });
+        clearTimeout(_searchTimer);
+        _st = Object.assign({}, _st, {
+          scopeView: el.dataset.scope, page: 0, searchQ: null,
+          requestSeq: _st.requestSeq + 1,
+        });
+        var scopedSearchInput = document.querySelector('#' + id + ' [data-od-act="search"]');
+        if (scopedSearchInput) scopedSearchInput.value = '';
         _loadMem(id);
         return;
       }
@@ -791,7 +825,15 @@
       if (act === 'close-drawer') { _closeDrawer(); return; }
       if (act === 'pg') {
         var pg = parseInt(el.dataset.page, 10);
-        if (!isNaN(pg)) { _st = Object.assign({}, _st, { page: pg }); _loadMem(id); }
+        if (!isNaN(pg)) {
+          clearTimeout(_searchTimer);
+          _st = Object.assign({}, _st, {
+            page: pg, searchQ: null, requestSeq: _st.requestSeq + 1,
+          });
+          var pagedSearchInput = document.querySelector('#' + id + ' [data-od-act="search"]');
+          if (pagedSearchInput) pagedSearchInput.value = '';
+          _loadMem(id);
+        }
         return;
       }
       if (act === 'expand-cluster') { _expandCluster(id, el.dataset.cid); return; }

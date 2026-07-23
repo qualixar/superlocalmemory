@@ -2,7 +2,7 @@
 
 Local-first agent memory + reversible context compression for OpenAI Codex CLI.
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later
 
 ---
 
@@ -190,4 +190,4 @@ root (not inside a subdirectory), then restart Codex.
 
 ---
 
-SuperLocalMemory v3.8.0 · Qualixar · https://github.com/qualixar/superlocalmemory
+SuperLocalMemory v3.8.1 · Qualixar · https://github.com/qualixar/superlocalmemory

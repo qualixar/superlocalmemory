@@ -24,21 +24,24 @@ from __future__ import annotations
 
 import importlib
 import os
-import sys
-
+from contextlib import contextmanager
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _reload_with_env(module_name: str, env: dict) -> object:
-    """Reimport ``module_name`` with ``env`` overlaid on ``os.environ``.
+@contextmanager
+def _reload_with_env(module_name: str, env: dict):
+    """Reload ``module_name`` with ``env`` overlaid on ``os.environ``.
 
-    Returns the freshly-loaded module. Caller is responsible for resetting
-    ``os.environ`` if it cares about isolation (we save/restore here).
+    Reload the existing module object instead of deleting it from
+    ``sys.modules``. Deleting it leaves classes imported during test
+    collection bound to a stale globals dictionary, so later patch targets
+    silently affect a different module instance.
     """
     saved = {k: os.environ.get(k) for k in env}
+    module = importlib.import_module(module_name)
     try:
         for k, v in env.items():
             if v is None:
@@ -46,18 +49,14 @@ def _reload_with_env(module_name: str, env: dict) -> object:
             else:
                 os.environ[k] = str(v)
 
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-        module = importlib.import_module(module_name)
-        return module
+        yield importlib.reload(module)
     finally:
         for k, old in saved.items():
             if old is None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = old
-        if module_name in sys.modules:
-            del sys.modules[module_name]
+        importlib.reload(module)
 
 
 # ---------------------------------------------------------------------------
@@ -66,48 +65,48 @@ def _reload_with_env(module_name: str, env: dict) -> object:
 
 
 class TestEmbeddingIdleTimeout:
-    """Cover the v3.4.37 default and the env override."""
+    """Cover the v3.8.1 stability default and the env override."""
 
-    def test_default_is_5_minutes(self):
-        """v3.4.37 ships a 5-minute default (300 s) — RAM-balanced for laptops.
+    def test_default_is_30_minutes(self):
+        """v3.8.1 keeps the worker warm for an interactive working session.
 
-        Was 1800 s in v3.4.19 but reduced because holding 1.1 GB for 30 min idle
-        wasted RAM on laptops. 5 min covers bursty session_init+recall while
-        freeing memory between sessions. Override via SLM_EMBED_IDLE_TIMEOUT.
+        Five-minute recycling caused repeated 20-30 second cold starts on
+        existing-user databases. Low-RAM installs can keep the shorter policy
+        through ``SLM_EMBED_IDLE_TIMEOUT``.
         """
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.core.embeddings",
             {"SLM_EMBED_IDLE_TIMEOUT": None},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 300, (
-            f"v3.4.37 ships a 5-minute default. Got {mod._IDLE_TIMEOUT_SECONDS}s."
-        )
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 1800, (
+                f"v3.8.1 ships a 30-minute default. Got {mod._IDLE_TIMEOUT_SECONDS}s."
+            )
 
     def test_env_var_overrides_default(self):
         """``SLM_EMBED_IDLE_TIMEOUT=120`` reverts to the legacy aggressive policy."""
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.core.embeddings",
             {"SLM_EMBED_IDLE_TIMEOUT": "120"},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 120, (
-            "Kill-switch broken: SLM_EMBED_IDLE_TIMEOUT should restore 120 s."
-        )
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 120, (
+                "Kill-switch broken: SLM_EMBED_IDLE_TIMEOUT should restore 120 s."
+            )
 
     def test_env_var_can_set_30_minutes(self):
         """Power users wanting the old 30-min default can opt in via env."""
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.core.embeddings",
             {"SLM_EMBED_IDLE_TIMEOUT": "1800"},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 1800
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 1800
 
     def test_env_var_accepts_zero_for_immediate_kill(self):
         """Edge case: ``0`` means 'kill immediately' — useful for CI/stress tests."""
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.core.embeddings",
             {"SLM_EMBED_IDLE_TIMEOUT": "0"},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 0
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 0
 
 
 # ---------------------------------------------------------------------------
@@ -116,22 +115,39 @@ class TestEmbeddingIdleTimeout:
 
 
 class TestRerankerIdleTimeout:
-    """Same v3.4.37 RAM-balanced contract for the cross-encoder reranker."""
+    """Same v3.8.1 warm-session contract for the cross-encoder reranker."""
 
-    def test_default_is_5_minutes(self):
-        """v3.4.37: 300 s default (was 1800 s) for laptop RAM hygiene."""
-        mod = _reload_with_env(
+    def test_default_is_30_minutes(self):
+        with _reload_with_env(
             "superlocalmemory.retrieval.reranker",
             {"SLM_RERANKER_IDLE_TIMEOUT": None},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 300
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 1800
 
     def test_env_var_overrides_default(self):
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.retrieval.reranker",
             {"SLM_RERANKER_IDLE_TIMEOUT": "120"},
-        )
-        assert mod._IDLE_TIMEOUT_SECONDS == 120
+        ) as mod:
+            assert mod._IDLE_TIMEOUT_SECONDS == 120
+
+
+class TestEmbeddingWorkerRssLimit:
+    """Peak guard agrees with the daemon's per-worker memory watchdog."""
+
+    def test_default_is_2500_mb(self):
+        with _reload_with_env(
+            "superlocalmemory.core.embedding_worker",
+            {"SLM_EMBED_WORKER_RSS_LIMIT_MB": None},
+        ) as mod:
+            assert mod._RSS_LIMIT_MB == 2500
+
+    def test_env_var_can_restore_aggressive_recycling(self):
+        with _reload_with_env(
+            "superlocalmemory.core.embedding_worker",
+            {"SLM_EMBED_WORKER_RSS_LIMIT_MB": "1800"},
+        ) as mod:
+            assert mod._RSS_LIMIT_MB == 1800
 
 
 # ---------------------------------------------------------------------------
@@ -146,11 +162,11 @@ class TestRecallWorkerIdleUnchanged:
 
     def test_recall_worker_idle_is_still_short(self):
         """Should be ≤ 300 s. Tests catch a well-meaning future bump."""
-        mod = _reload_with_env(
+        with _reload_with_env(
             "superlocalmemory.core.worker_pool",
             {"SLM_RECALL_IDLE_TIMEOUT": None},
-        )
-        assert mod._IDLE_TIMEOUT <= 300, (
-            f"recall_worker should stay short-lived; got {mod._IDLE_TIMEOUT}s. "
-            "If this was intentional, update the test."
-        )
+        ) as mod:
+            assert mod._IDLE_TIMEOUT <= 300, (
+                f"recall_worker should stay short-lived; got {mod._IDLE_TIMEOUT}s. "
+                "If this was intentional, update the test."
+            )

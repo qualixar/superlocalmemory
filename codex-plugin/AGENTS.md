@@ -144,5 +144,5 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | slm-governance | Enterprise roles, retention, audit, GDPR |
 | slm-mesh | Cross-session peer coordination (full/mesh profile) |
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later
 <!-- END SuperLocalMemory -->

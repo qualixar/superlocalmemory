@@ -31,21 +31,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["internal"])
 
 
-_ALLOWED_ORIGIN_PREFIXES = (
-    "http://127.0.0.1",
-    "https://127.0.0.1",
-    "http://localhost",
-    "https://localhost",
-    "http://[::1]",
-    "https://[::1]",
-)
-
-
 def _origin_is_loopback(origin: str) -> bool:
     """Return True iff ``origin`` is absent or a loopback URL."""
-    if not origin:
-        return True
-    return any(origin.startswith(p) for p in _ALLOWED_ORIGIN_PREFIXES)
+    from superlocalmemory.server.origin import origin_is_loopback
+
+    return origin_is_loopback(origin)
 
 
 @router.get("/internal/token")

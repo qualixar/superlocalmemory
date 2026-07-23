@@ -6,11 +6,10 @@
 
 ROOT CAUSE (audit cycle-3, 2026-07-22)
 --------------------------------------
-Cycle-2 hardening added an auth check to five GET routes that are *not* covered
+Cycle-2 hardening added an auth check to GET routes that are *not* covered
 by the mutation middleware (they read/download sensitive data):
 
     GET /api/backup/list
-    GET /api/backup/export            (window.location download)
     GET /api/compliance/audit
     GET /api/compliance/gdpr/export   (a.href download)
     GET /api/export                   (window.location download)
@@ -38,8 +37,8 @@ present a credential; an uncredentialed remote caller still fails closed. A
 backup filename list is no more sensitive than the memory content already served
 to the same loopback owner.
 
-These tests assert the trusted local caller is NOT forbidden (403) on any of the
-five routes — the exact regression. They intentionally do not assert 200,
+These tests assert the trusted local caller is NOT forbidden (403) on each
+remaining GET route — the exact regression. They intentionally do not assert 200,
 because module-availability early-returns (BACKUP/COMPLIANCE not importable in a
 minimal env) legitimately short-circuit before the handler body; a 403 is the
 only status that would signal the auth regression has returned.
@@ -56,7 +55,6 @@ from superlocalmemory.server.unified_daemon import create_app
 # Every route below is reached by the dashboard WITHOUT a credential header.
 _TRUSTED_GET_ROUTES = [
     "/api/backup/list",
-    "/api/backup/export",
     "/api/compliance/audit?limit=5",
     "/api/compliance/gdpr/export",
     "/api/export?format=json",

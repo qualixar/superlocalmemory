@@ -159,7 +159,10 @@ def cmd_session(args: Namespace) -> None:
 def dispatch(args: Namespace) -> None:
     """Route CLI command to the appropriate handler."""
     # Auto-install/upgrade hooks on version change (single file read, ~0.1ms)
-    if args.command not in ("hooks", "codex", "init", "mcp"):
+    if (
+        args.command not in ("hooks", "codex", "init", "mcp")
+        and not getattr(args, "dry_run", False)
+    ):
         try:
             from superlocalmemory.hooks.claude_code_hooks import auto_install_if_needed
             auto_install_if_needed()
@@ -958,16 +961,22 @@ def _agents_md_source_factory():
     Gracefully skips if absent — never fails the MCP write.
     """
     from pathlib import Path
+    import sysconfig
 
     # Resolve relative to the package root (src/superlocalmemory/../../)
     _pkg_root = Path(__file__).resolve().parents[3]
-    _agents_src = _pkg_root / "plugin-src" / "rules" / "AGENTS.md"
+    _candidates = (
+        _pkg_root / "plugin-src" / "rules" / "AGENTS.md",
+        Path(sysconfig.get_path("data")) / "share" / "superlocalmemory"
+        / "portable-kit" / "rules" / "AGENTS.md",
+    )
 
     def _read() -> str | None:
-        if _agents_src.exists():
-            return _agents_src.read_text(encoding="utf-8")
+        for candidate in _candidates:
+            if candidate.exists():
+                return candidate.read_text(encoding="utf-8")
         logger.warning(
-            "WP-05 AGENTS.md not found at %s — skipping AGENTS.md write", _agents_src
+            "WP-05 AGENTS.md is not bundled — skipping AGENTS.md write"
         )
         return None
 
@@ -1008,9 +1017,10 @@ def cmd_connect(args: Namespace) -> None:
                 here=here,
                 profile=profile,
                 agents_md_source=_agents_md_source_factory(),
+                dry_run=getattr(args, "dry_run", False),
             )
 
-            if not result.get("error"):
+            if not result.get("error") and not getattr(args, "dry_run", False):
                 from superlocalmemory.infra.local_diagnostics import record_operation
 
                 record_operation("activation", client=ide_arg)
@@ -1029,6 +1039,7 @@ def cmd_connect(args: Namespace) -> None:
                 sys.exit(1)
 
             status_sym = {"wrote": "[+]", "merged": "[~]", "unchanged": "[=]",
+                          "would_write": "[~]",
                           "skipped": "[s]", "error": "[!]"}.get(
                 result["mcp_config"], "[?]"
             )
@@ -1057,6 +1068,7 @@ def cmd_connect(args: Namespace) -> None:
     from superlocalmemory.hooks.ide_connector import IDEConnector
 
     connector = IDEConnector()
+    dry_run = bool(getattr(args, "dry_run", False))
 
     if getattr(args, 'json', False):
         from superlocalmemory.cli.json_output import json_print
@@ -1068,6 +1080,14 @@ def cmd_connect(args: Namespace) -> None:
         elif getattr(args, "ide", None):
             success = connector.connect(args.ide)
             json_print("connect", data={"ide": args.ide, "connected": success})
+        elif dry_run:
+            json_print(
+                "connect",
+                data={
+                    "dry_run": True,
+                    "would_configure": connector.get_status(),
+                },
+            )
         else:
             json_print("connect", data={"results": connector.connect_all()},
                        next_actions=[
@@ -1080,6 +1100,12 @@ def cmd_connect(args: Namespace) -> None:
         for s in status:
             mark = "[+]" if s["installed"] else "[-]"
             print(f"  {mark} {s['name']:20s} {s['config_path']}")
+        return
+    if dry_run:
+        status = connector.get_status()
+        print("Dry run — no IDE, hook, config, or SLM data files were written.")
+        for item in status:
+            print(f"  would inspect/configure: {item['name']} ({item['config_path']})")
         return
     if getattr(args, "ide", None):
         success = connector.connect(args.ide)
@@ -1563,16 +1589,86 @@ def cmd_forget(args: Namespace) -> None:
 
 def cmd_delete(args: Namespace) -> None:
     """Delete a specific memory by exact fact ID."""
+    import urllib.parse
+
+    from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
 
     use_json = getattr(args, 'json', False)
+    fact_id = args.fact_id.strip()
+    if is_daemon_running():
+        path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+        confirmed = getattr(args, "yes", False)
+        content = ""
+        if not confirmed:
+            detail = daemon_request(
+                "GET",
+                "/api/facts/" + urllib.parse.quote(fact_id, safe=""),
+            )
+            if not isinstance(detail, dict):
+                if use_json:
+                    from superlocalmemory.cli.json_output import json_print
+                    json_print("delete", error={
+                        "code": "DAEMON_MUTATION_FAILED",
+                        "message": "Resident daemon could not resolve the memory.",
+                    })
+                    sys.exit(1)
+                raise RuntimeError("Resident daemon could not resolve the memory.")
+            content = str(detail.get("content") or "")
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("delete", data={
+                    "fact_id": fact_id,
+                    "content": content[:120],
+                    "deleted": False,
+                    "hint": "Add --yes to confirm deletion",
+                }, next_actions=[
+                    {
+                        "command": f"slm delete {fact_id} --json --yes",
+                        "description": "Confirm deletion",
+                    },
+                ])
+                return
+            print(f"Memory: {content[:120]}")
+            confirmed = input("Delete this memory? [y/N] ").strip().lower() in (
+                "y", "yes",
+            )
+            if not confirmed:
+                print("Cancelled.")
+                return
+
+        result = daemon_request("DELETE", path)
+        if not isinstance(result, dict) or not result.get("success"):
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("delete", error={
+                    "code": "DAEMON_MUTATION_FAILED",
+                    "message": "Resident daemon rejected the delete operation.",
+                })
+                sys.exit(1)
+            raise RuntimeError("Resident daemon rejected the delete operation.")
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "delete",
+                data={"deleted": fact_id, "content": content[:120]},
+                next_actions=[
+                    {
+                        "command": "slm list --json",
+                        "description": "Verify remaining memories",
+                    },
+                ],
+            )
+        else:
+            print(f"Deleted: {fact_id}")
+        return
+
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
         engine.initialize()
 
-        fact_id = args.fact_id.strip()
         rows = engine._db.execute(
             "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
             (fact_id, engine.profile_id),
@@ -1642,6 +1738,9 @@ def cmd_delete(args: Namespace) -> None:
 
 def cmd_update(args: Namespace) -> None:
     """Update the content of a specific memory by exact fact ID."""
+    import urllib.parse
+
+    from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
 
@@ -1655,6 +1754,34 @@ def cmd_update(args: Namespace) -> None:
             json_print("update", error={"code": "INVALID_INPUT", "message": "content cannot be empty"})
             sys.exit(1)
         print("Error: content cannot be empty")
+        return
+
+    if is_daemon_running():
+        path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+        result = daemon_request("PATCH", path, {"content": new_content})
+        if not isinstance(result, dict) or not result.get("success"):
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("update", error={
+                    "code": "DAEMON_MUTATION_FAILED",
+                    "message": "Resident daemon rejected the update operation.",
+                })
+                sys.exit(1)
+            raise RuntimeError("Resident daemon rejected the update operation.")
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print("update", data={
+                "fact_id": fact_id,
+                "new_content": new_content[:120],
+            }, next_actions=[
+                {
+                    "command": "slm list --json",
+                    "description": "List recent memories",
+                },
+            ])
+        else:
+            print(f"New: {new_content[:100]}")
+            print(f"Updated: {fact_id}")
         return
 
     try:

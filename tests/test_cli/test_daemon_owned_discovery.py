@@ -222,6 +222,54 @@ def test_daemon_request_sends_private_capability_after_identity_match() -> None:
     assert normalized["x-slm-target-instance"] == descriptor.instance_id
 
 
+def test_daemon_request_forwards_explicit_user_session_after_identity_match(
+    monkeypatch,
+) -> None:
+    """Governed CLI requests retain the authenticated dashboard identity."""
+    from superlocalmemory.cli import daemon
+
+    _owned_descriptor(port=43131)
+    descriptor = read_descriptor()
+    assert descriptor is not None
+    health = {"status": "ok", **descriptor.public_health_fields()}
+    seen_headers: list[dict[str, str]] = []
+    monkeypatch.setenv("SLM_USER_SESSION", "session-from-explicit-login")
+
+    def _respond(request, timeout: float):
+        if isinstance(request, str):
+            return _HealthResponse(health)
+        seen_headers.append(dict(request.header_items()))
+        return _HealthResponse({"ok": True})
+
+    with patch("urllib.request.urlopen", side_effect=_respond):
+        assert daemon.daemon_request("DELETE", "/memories/fact-1") == {"ok": True}
+
+    normalized = {key.lower(): value for key, value in seen_headers[0].items()}
+    assert normalized["x-slm-user-session"] == "session-from-explicit-login"
+
+
+def test_daemon_request_omits_blank_user_session_after_identity_match(monkeypatch) -> None:
+    """Whitespace must not create an empty credential header."""
+    from superlocalmemory.cli import daemon
+
+    descriptor = _owned_descriptor(port=43132)
+    health = {"status": "ok", **descriptor.public_health_fields()}
+    seen_headers: list[dict[str, str]] = []
+    monkeypatch.setenv("SLM_USER_SESSION", "   ")
+
+    def _respond(request, timeout: float):
+        if isinstance(request, str):
+            return _HealthResponse(health)
+        seen_headers.append(dict(request.header_items()))
+        return _HealthResponse({"ok": True})
+
+    with patch("urllib.request.urlopen", side_effect=_respond):
+        assert daemon.daemon_request("POST", "/remember", {"content": "owned"}) == {"ok": True}
+
+    normalized = {key.lower(): value for key, value in seen_headers[0].items()}
+    assert "x-slm-user-session" not in normalized
+
+
 def test_stop_never_scans_or_kills_machine_wide_processes() -> None:
     from superlocalmemory.cli import daemon
 

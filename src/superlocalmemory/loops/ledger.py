@@ -156,8 +156,10 @@ class SLMMemoryLedger:
 class _EngineLedgerStore:
     """Minimal profile-scoped store over a SuperLocalMemory engine.
 
-    Uses ``MemoryEngine.store`` for writes and direct, escaped, profile-scoped
-    reads — the same contract the LangChain/LlamaIndex adapters depend on.
+    Uses the engine's non-blocking write-through path when available and
+    direct, escaped, profile-scoped reads.  The ``store`` fallback preserves
+    compatibility with lightweight adapter/test engines that predate
+    ``store_fast``.
     """
 
     def __init__(self, engine: Any, *, owns_engine: bool = True) -> None:
@@ -169,9 +171,27 @@ class _EngineLedgerStore:
         self._owns_engine = owns_engine
 
     def add(self, content: str, *, session_id: str, metadata: dict) -> None:
-        # The parent memory row is what the ledger needs; fact extraction is a
-        # bonus, so (unlike chat history) an empty fact set is not an error.
-        self._engine.store(content, session_id=session_id, metadata=metadata)
+        # A loop ledger needs the durable parent row and immediate lexical
+        # recall, not synchronous embeddings/entity/graph enrichment. Loading
+        # the heavyweight embedding worker for every bounded-loop lap can stall
+        # the loop for the full worker timeout and consume ~1 GB for metadata.
+        # The write-through path persists the same session-scoped content in
+        # milliseconds; ordinary background enrichment can still promote it.
+        fast_metadata = {**metadata, "session_id": session_id}
+        store_fast = getattr(self._engine, "store_fast", None)
+        if callable(store_fast):
+            store_fast(
+                content,
+                metadata=fast_metadata,
+                index_external=False,
+            )
+            return
+
+        self._engine.store(
+            content,
+            session_id=session_id,
+            metadata=metadata,
+        )
 
     def list_session(self, session_id: str) -> list[dict]:
         # Cap the read: a bounded-loop run is capped at max_iterations laps, so

@@ -30,23 +30,67 @@
   var _tokenCache    = null;
 
   /* ── Auth helper ──────────────────────────────────────────── */
-  function getToken() {
+  function tokenError(message) {
+    var error = new Error(message);
+    error.code = 'install_token_missing';
+    return error;
+  }
+  function getToken(refresh) {
+    if (refresh) _tokenCache = null;
     if (_tokenCache) return Promise.resolve(_tokenCache);
     return fetch('/internal/token')
-      .then(function (r) { return r.json(); })
-      .then(function (d) { _tokenCache = d.token || ''; return _tokenCache; })
-      .catch(function () { return ''; });
-  }
-  /** PUT with X-Install-Token. Use for all new config endpoints. */
-  function authPut(url, body) {
-    return getToken().then(function (tok) {
-      return fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Install-Token': tok },
-        body: JSON.stringify(body)
+      .then(function (response) {
+        if (!response.ok) throw new Error('Could not refresh dashboard credential');
+        return response.json();
+      })
+      .then(function (data) {
+        var token = data.token || '';
+        if (!token) throw tokenError('Dashboard credential is empty');
+        _tokenCache = token;
+        return token;
       });
+  }
+  function sendAuthenticated(url, method, body, token) {
+    return fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', 'X-Install-Token': token },
+      body: JSON.stringify(body)
     });
   }
+  function requireSuccess(response) {
+    if (response.ok) return Promise.resolve(response);
+    var details = typeof response.json === 'function'
+      ? response.json().catch(function () { return {}; })
+      : Promise.resolve({});
+    return details.then(function (data) {
+      var message = data.error || data.detail || data.message ||
+        ('Request failed with status ' + response.status);
+      var error = new Error(message);
+      error.status = response.status;
+      throw error;
+    });
+  }
+  /** Authenticated dashboard mutation; callers must re-read daemon truth on success. */
+  function authRequest(url, method, body) {
+    function attempt(refresh) {
+      return getToken(refresh).then(function (token) {
+        return sendAuthenticated(url, method, body, token);
+      });
+    }
+    return attempt(false).then(function (response) {
+      if (response.status === 401 || response.status === 403) {
+        return attempt(true).then(requireSuccess);
+      }
+      return requireSuccess(response);
+    }, function (error) {
+      if (error && error.code === 'install_token_missing') {
+        return attempt(true).then(requireSuccess);
+      }
+      throw error;
+    });
+  }
+  function authPut(url, body) { return authRequest(url, 'PUT', body); }
+  function authPost(url, body) { return authRequest(url, 'POST', body); }
 
   /* ── Helpers ──────────────────────────────────────────────── */
   function esc(s) {
@@ -270,9 +314,7 @@
     var ep = q('endpoint') ? q('endpoint').value : '';
     if (k)  { body.api_key = k; }
     if (ep) { body.base_url = ep; body.endpoint = ep; }
-    fetch('/api/v3/mode/set', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
-    }).then(function (r) { return r.json(); })
+    authPost('/api/v3/mode/set', body).then(function (r) { return r.json(); })
       .then(function () { setSt('mode', 'Saved', true); toast('Mode saved'); loadMode(); })
       .catch(function () { setSt('mode', 'Error', false); toast('Mode save failed', true); });
   }
@@ -348,10 +390,8 @@
           embedding_dimension: parseInt(q('emb-dim') ? q('emb-dim').value : '768') || 768,
           embedding_key:       q('emb-key')      ? q('emb-key').value      : '' }
       : { embedding_provider:'default' };
-    fetch('/api/v3/mode/set', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
-    }).then(function (r) { return r.json(); })
-      .then(function () { setSt('emb', 'Saved', true); toast('Embedding config saved'); })
+    authPost('/api/v3/mode/set', body).then(function (r) { return r.json(); })
+      .then(function () { setSt('emb', 'Saved', true); toast('Embedding config saved'); loadEmb(); })
       .catch(function () { setSt('emb', 'Error', false); toast('Embedding save failed', true); });
   }
   function testEmb() {
@@ -418,6 +458,7 @@
         setSt('stor', 'Saved', true);
         toast('Storage backends saved');
         showRestartNote('stor', !!d.restart_required);
+        loadStorage();
       }).catch(function () { setSt('stor', 'Error', false); toast('Storage save failed', true); });
   }
 
@@ -442,6 +483,7 @@
       }).then(function (r) { return r.json(); })
         .then(function (d) {
           setSt('scope', d.success !== false ? 'Applied' : esc(d.error || 'Error'), d.success !== false);
+          if (d.success !== false) loadScope();
         })
         .catch(function () { setSt('scope', 'Error', false); toast('Scope save failed', true); });
     }
@@ -481,9 +523,9 @@
         capture_decisions: swDec.classList.contains('on'),
         capture_bugs:      swBug.classList.contains('on')
       });
-      fetch('/api/v3/auto-capture/config', {
-        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
-      }).catch(function () { toast('Auto-capture save failed', true); });
+      authPut('/api/v3/auto-capture/config', body)
+        .then(function (r) { if (!r.ok) throw new Error('Save failed'); loadCapture(); })
+        .catch(function () { toast('Auto-capture save failed', true); });
     }
     sw.addEventListener('od-toggle', save);
     swDec.addEventListener('od-toggle', save);
@@ -516,13 +558,11 @@
     var sw     = makeSwitch('rec-en',   true);
     var swSess = makeSwitch('rec-sess', true);
     function save() {
-      fetch('/api/v3/auto-recall/config', {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
+      authPut('/api/v3/auto-recall/config', {
           enabled:          sw.classList.contains('on'),
           on_session_start: swSess.classList.contains('on')
-        })
-      }).catch(function () { toast('Auto-recall save failed', true); });
+        }).then(function (r) { if (!r.ok) throw new Error('Save failed'); loadRecall(); })
+        .catch(function () { toast('Auto-recall save failed', true); });
     }
     sw.addEventListener('od-toggle', save);
     swSess.addEventListener('od-toggle', save);
@@ -552,15 +592,12 @@
     var arSw  = makeSwitch('ai-actr', false);
     var st    = makeSt('ai');
     function save() {
-      fetch('/api/v3/auto-invoke/config', {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
+      authPut('/api/v3/auto-invoke/config', {
           enabled:    sw.classList.contains('on'),
           min_score:  parseFloat(q('ai-fok') ? q('ai-fok').value : '0.12'),
           act_r_mode: arSw.classList.contains('on')
-        })
-      }).then(function (r) { return r.json(); })
-        .then(function () { setSt('ai', 'Saved', true); })
+        }).then(function (r) { return r.json(); })
+        .then(function () { setSt('ai', 'Saved', true); loadInvoke(); })
         .catch(function () { toast('Auto-invoke save failed', true); });
     }
     sw.addEventListener('od-toggle', save);
@@ -602,6 +639,7 @@
       { fontSize:'12px', color:'var(--fg-2)', fontFamily:'var(--font-mono)' });
     var saveBtn = makeBtn('forg-save', 'Save Forgetting', true);
     var st = makeSt('forg');
+    var restNote = makeRestartNote('forg');
     saveBtn.addEventListener('click', saveForgetting);
     onSw.addEventListener('od-toggle',  saveForgetting);
     immSw.addEventListener('od-toggle', saveForgetting);
@@ -615,7 +653,7 @@
       makeRow('Forget threshold', 'Memories below this strength are permanently deleted', 'forgetting.forget_threshold', fgtR),
       makeRow('Run every (minutes)', 'How often the forgetting engine runs in the background', 'forgetting.scheduler_interval_minutes', intInp),
       makeRow('Memory zone stats', '', 'forgetting.stats', statsEl),
-      makeRow('Actions', '', '', bRow(saveBtn, st))
+      makeRow('Actions', '', '', bRow(saveBtn, st, restNote))
     ]);
   }
   function loadForgetting() {
@@ -647,6 +685,7 @@
   }
   function saveForgetting() {
     setSt('forg', 'Saving…', null);
+    showRestartNote('forg', false);
     authPut('/api/v3/forgetting/config', {
       enabled:                    q('forg-en')  ? q('forg-en').classList.contains('on')  : false,
       core_memory_immune:         q('forg-imm') ? q('forg-imm').classList.contains('on') : true,
@@ -654,7 +693,12 @@
       forget_threshold:   parseFloat(q('forg-fgt') ? q('forg-fgt').value : '0.05'),
       scheduler_interval_minutes: parseInt(q('forg-int') ? q('forg-int').value : '30') || 30
     }).then(function (r) { return r.json(); })
-      .then(function () { setSt('forg', 'Saved', true); toast('Forgetting settings saved'); })
+      .then(function (d) {
+        setSt('forg', 'Saved', true);
+        toast('Forgetting settings saved');
+        showRestartNote('forg', !!d.restart_required);
+        loadForgetting();
+      })
       .catch(function () { setSt('forg', 'Error', false); toast('Forgetting save failed', true); });
   }
 
@@ -673,7 +717,7 @@
     var st = makeSt('evo');
     sw.addEventListener('od-toggle', function () {
       var on = sw.classList.contains('on');
-      fetch(on ? '/api/evolution/enable' : '/api/evolution/disable', { method:'POST' })
+      authPost(on ? '/api/evolution/enable' : '/api/evolution/disable', {})
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.ok === false) {
@@ -692,11 +736,9 @@
     });
     saveBtn.addEventListener('click', function () {
       setSt('evo', 'Saving…', null);
-      fetch('/api/evolution/config', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ backend: q('evo-bk') ? q('evo-bk').value : 'auto' })
-      }).then(function (r) { return r.json(); })
-        .then(function () { setSt('evo', 'Saved', true); })
+      authPost('/api/evolution/config', { backend: q('evo-bk') ? q('evo-bk').value : 'auto' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d.ok === false) throw new Error(d.error || 'Save failed'); setSt('evo', 'Saved', true); loadEvolution(); })
         .catch(function () { setSt('evo', 'Error', false); toast('Evolution save failed', true); });
     });
     return makeGrp('Skill Evolution', 'skill', [
@@ -731,7 +773,7 @@
     saveBtn.addEventListener('click', saveBackupConfig);
     nowBtn.addEventListener('click', function () {
       setSt('bk', 'Creating…', null);
-      fetch('/api/backup/create', { method:'POST' }).then(function (r) { return r.json(); })
+      authPost('/api/backup/create', {}).then(function (r) { return r.json(); })
         .then(function (d) {
           setSt('bk', d.success ? 'Done: ' + esc(d.filename || '') : 'Failed', d.success);
           toast(d.success ? 'Backup created' : 'Backup failed', !d.success);
@@ -768,15 +810,12 @@
   }
   function saveBackupConfig() {
     setSt('bk', 'Saving…', null);
-    fetch('/api/backup/configure', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
+    authPost('/api/backup/configure', {
         interval_hours: parseInt(q('bk-int') ? q('bk-int').value : '168'),
         max_backups:    parseInt(q('bk-max') ? q('bk-max').value : '10'),
         enabled:        q('bk-en') ? q('bk-en').classList.contains('on') : true
-      })
-    }).then(function (r) { return r.json(); })
-      .then(function () { setSt('bk', 'Saved', true); toast('Backup settings saved'); })
+      }).then(function (r) { return r.json(); })
+      .then(function (d) { if (d.success === false) throw new Error(d.message || 'Save failed'); setSt('bk', 'Saved', true); toast('Backup settings saved'); loadBackup(); })
       .catch(function () { setSt('bk', 'Error', false); toast('Backup save failed', true); });
   }
 
@@ -787,15 +826,24 @@
   function buildMesh() {
     var sw = makeSwitch('mesh-en', false);
     var st = makeSt('mesh');
+    var restNote = makeRestartNote('mesh');
     sw.addEventListener('od-toggle', function () {
+      showRestartNote('mesh', false);
       authPut('/api/v3/mesh/config', { enabled: sw.classList.contains('on') })
         .then(function (r) { return r.json(); })
-        .then(function () { setSt('mesh', 'Saved', true); })
-        .catch(function () { setSt('mesh', 'Error', false); toast('Mesh save failed', true); });
+        .then(function (d) {
+          setSt('mesh', 'Saved', true);
+          showRestartNote('mesh', !!d.restart_required);
+        })
+        .catch(function () {
+          setSt('mesh', 'Error', false);
+          toast('Mesh save failed', true);
+          loadMesh();
+        });
     });
     return makeGrp('Mesh Network', 'mesh', [
       makeRow('Enable mesh sync', 'Synchronise memories across devices on the same local network', 'mesh.enabled', sw),
-      makeRow('Status', '', '', st)
+      makeRow('Status', '', '', bRow(st, restNote))
     ]);
   }
   function loadMesh() {
@@ -817,6 +865,7 @@
     var pmR  = makeRange('trust-pm', '0', '1', '0.01', '0.5');
     var saveBtn = makeBtn('trust-save', 'Save Trust', true);
     var st = makeSt('trust');
+    var restNote = makeRestartNote('trust');
     saveBtn.addEventListener('click', saveTrust);
     twSw.addEventListener('od-toggle', saveTrust);
     fpSw.addEventListener('od-toggle', saveTrust);
@@ -825,7 +874,7 @@
       makeRow('Weight recall by trust', 'Higher-trust sources appear first in recall results', 'trust.use_trust_weighting', twSw),
       makeRow('Prefer first-party agents', 'Your own Claude/Gemini sessions rank higher than third-party', 'trust.trust_first_party', fpSw),
       makeRow('Promotion min trust', 'Min trust score required to promote a memory to long-term storage', 'trust.promotion_min_trust', pmR),
-      makeRow('Actions', '', '', bRow(saveBtn, st))
+      makeRow('Actions', '', '', bRow(saveBtn, st, restNote))
     ]);
   }
   function loadTrust() {
@@ -842,12 +891,17 @@
   }
   function saveTrust() {
     setSt('trust', 'Saving…', null);
+    showRestartNote('trust', false);
     authPut('/api/v3/trust/config', {
       use_trust_weighting: q('trust-tw') ? q('trust-tw').classList.contains('on') : true,
       trust_first_party:   q('trust-fp') ? q('trust-fp').classList.contains('on') : false,
       promotion_min_trust: parseFloat(q('trust-pm') ? q('trust-pm').value : '0.5')
     }).then(function (r) { return r.json(); })
-      .then(function () { setSt('trust', 'Saved', true); })
+      .then(function (d) {
+        setSt('trust', 'Saved', true);
+        showRestartNote('trust', !!d.restart_required);
+        loadTrust();
+      })
       .catch(function () { setSt('trust', 'Error', false); toast('Trust save failed', true); });
   }
 
@@ -899,7 +953,7 @@
       read:   parseInt(q('rl-read')   ? q('rl-read').value   : '300') || 300,
       window: parseInt(q('rl-window') ? q('rl-window').value : '60')  || 60
     }).then(function (r) { return r.json(); })
-      .then(function (d) { setSt('rl', 'Saved', true); _rlSetLb(d); })
+      .then(function (d) { setSt('rl', 'Saved', true); _rlSetLb(d); loadRateLimit(); })
       .catch(function () { setSt('rl', 'Error', false); toast('Rate limit save failed', true); });
   }
 
@@ -952,6 +1006,7 @@
         setSt('dmn', 'Saved', true);
         toast('Daemon settings saved');
         showRestartNote('dmn', !!d.restart_required);
+        loadDaemon();
       }).catch(function () { setSt('dmn', 'Error', false); toast('Daemon save failed', true); });
   }
 
@@ -992,7 +1047,7 @@
     var headDiv = el('div', null, { marginBottom:'22px' });
     headDiv.appendChild(el('h2', { text:'Settings' },
       { fontSize:'22px', fontWeight:'650', letterSpacing:'-0.02em' }));
-    headDiv.appendChild(el('p', { text:'Every SuperLocalMemory configuration, grouped and searchable — no config files to edit by hand. Changes hot-reload the local daemon.' },
+    headDiv.appendChild(el('p', { text:'Every SuperLocalMemory configuration, grouped and searchable — no config files to edit by hand. Settings show when a daemon restart is required.' },
       { color:'var(--fg-2)', marginTop:'5px', maxWidth:'62ch' }));
     hub.appendChild(headDiv);
 
@@ -1022,15 +1077,14 @@
     var discardBtn = el('button', { type:'button' }); discardBtn.className = 'btn ghost';
     discardBtn.textContent = 'Discard';
     var syncBadge = el('span', null, { alignSelf:'center', marginLeft:'auto' });
-    syncBadge.className = 'badge ok';
-    syncBadge.innerHTML = '<span class="dot"></span> All synced';
+    syncBadge.className = 'badge';
+    syncBadge.innerHTML = '<span class="dot"></span> Ready';
     saveAllBtn.addEventListener('click', function () {
       ['mode-save','emb-save','stor-save','forg-save','trust-save','rl-save','evo-save','bk-save','dmn-save']
         .forEach(function (i) { var b = q(i); if (b) b.click(); });
       saveBackupConfig();
-      syncBadge.className = 'badge ok';
-      syncBadge.innerHTML = '<span class="dot"></span> Saved';
-      setTimeout(function () { syncBadge.innerHTML = '<span class="dot"></span> All synced'; }, 3000);
+      syncBadge.className = 'badge';
+      syncBadge.innerHTML = '<span class="dot"></span> Check each section';
     });
     discardBtn.addEventListener('click', function () { loadAll(); });
     foot.appendChild(saveAllBtn); foot.appendChild(discardBtn); foot.appendChild(syncBadge);

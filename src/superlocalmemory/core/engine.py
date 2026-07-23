@@ -180,6 +180,15 @@ class MemoryEngine:
         except Exception as exc:
             logger.warning("V3.4.6 schema migration failed: %s", exc)
 
+        # V3.4.7: Apply "Learning Brain" schema before deferred migrations.
+        # M029 adds composite history indexes to these runtime tables, so the
+        # tables must exist before the migration runner records M029 complete.
+        try:
+            from superlocalmemory.storage.schema_v347 import apply_v347_schema
+            apply_v347_schema(str(self._db.db_path))
+        except Exception as exc:
+            logger.warning("V3.4.7 schema migration failed: %s", exc)
+
         # v3.6.15: apply ALL pending migrations — including DEFERRED ones like
         # M016 (scope/shared_with columns) — for DIRECT-engine usage: `slm
         # remember --sync`, the Python API, and LangChain/CrewAI integrations.
@@ -212,13 +221,6 @@ class MemoryEngine:
                 "MemoryEngine initialization stopped because the required "
                 f"ingestion migration failed: {exc}"
             ) from exc
-
-        # V3.4.7: Apply "Learning Brain" schema (tool_events, behavioral_assertions)
-        try:
-            from superlocalmemory.storage.schema_v347 import apply_v347_schema
-            apply_v347_schema(str(self._db.db_path))
-        except Exception as exc:
-            logger.warning("V3.4.7 schema migration failed: %s", exc)
 
         # V3.4.10: Apply "Fortress" schema (backup_destinations, entity_blacklist)
         try:
@@ -360,16 +362,17 @@ class MemoryEngine:
 
         self._check_embedding_migration()
 
-        # V3.3.13: Background maintenance scheduler (Langevin/Ebbinghaus/Sheaf)
-        if self._config.forgetting.enabled:
-            try:
-                from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
-                self._maintenance_scheduler = MaintenanceScheduler(
-                    self._db, self._config, self._profile_id,
-                )
-                self._maintenance_scheduler.start()
-            except Exception as exc:
-                logger.debug("Maintenance scheduler init failed: %s", exc)
+        # Lifecycle/tier evaluation, bounded housekeeping, and backup checks
+        # must continue even when optional forgetting/math maintenance is
+        # disabled. The scheduler itself gates those optional calculations.
+        try:
+            from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
+            self._maintenance_scheduler = MaintenanceScheduler(
+                self._db, self._config, self._profile_id,
+            )
+            self._maintenance_scheduler.start()
+        except Exception as exc:
+            logger.debug("Maintenance scheduler init failed: %s", exc)
 
     def _process_pending_memories(self) -> None:
         """Process pending memories from store-first async pattern.
@@ -624,10 +627,10 @@ class MemoryEngine:
         ``put_nowait`` and the actual ``pending_outcomes`` INSERT runs
         on a background worker.
 
-        ``fast=True`` is the latency-bounded path: it skips spreading
-        activation and remote agentic verification while retaining semantic,
-        lexical, graph, temporal, and Hopfield retrieval. Use full recall when
-        maximum multi-round quality matters more than response time.
+        ``fast=True`` is the latency-bounded path: it retains all six local
+        retrieval channels but skips remote agentic verification. Use
+        ``fast=False`` only when maximum multi-round quality matters more than
+        response time.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
         scopes participate in retrieval. ``None`` (the default) means "use the

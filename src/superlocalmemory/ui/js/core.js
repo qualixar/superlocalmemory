@@ -35,11 +35,11 @@ window.slmInstallToken = (function () {
     };
 })();
 
-// Global fetch patch: apply the abort timeout to every relative-URL request
+// Global fetch patch: apply the abort timeout to every same-origin request
 // automatically. 17 UI modules call bare fetch() — patching here avoids
 // touching each one and guarantees no future callsite can regress to an
-// un-timed fetch that holds the spinner forever. Absolute URLs (external
-// resources) are passed through unchanged. Callers that already supply
+// un-timed fetch that holds the spinner forever. External URLs are passed
+// through unchanged. Callers that already supply
 // `signal` keep their own behavior. `init.timeoutMs` lets callers override
 // the default per-request.
 (function patchFetch() {
@@ -49,25 +49,68 @@ window.slmInstallToken = (function () {
     window.__slmOriginalFetch = _origFetch;
     window.fetch = function (input, init) {
         init = Object.assign({}, init || {});
-        var urlStr = typeof input === 'string' ? input : (input && input.url) || '';
-        var isRelative = !(/^https?:\/\//i.test(urlStr));
+        var urlStr = typeof input === 'string'
+            ? input
+            : (input && (input.url || input.href)) || '';
+        // Resolve every URL before deciding whether it is local. In particular,
+        // protocol-relative URLs such as //host/path inherit the current scheme
+        // but are not same-origin and must never receive the install token.
+        var isSameOrigin = false;
+        var requestUrl = null;
+        try {
+            requestUrl = new URL(urlStr, window.location.href);
+            isSameOrigin = requestUrl.origin === window.location.origin;
+        } catch (e) {
+            // A malformed URL is handled by native fetch. Treat it as external
+            // here so it cannot obtain local credentials while failing.
+        }
         var method = String(
             init.method || (input && input.method) || 'GET'
         ).toUpperCase();
         var mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1;
+        var invalidatesCache = init.slmInvalidatesCache !== false;
+        var requiresWriteAuth = init.slmRequiresWriteAuth !== false;
+        delete init.slmInvalidatesCache;
+        delete init.slmRequiresWriteAuth;
+
+        function invalidateAfterMutation(request) {
+            if (!isSameOrigin || !mutating || !invalidatesCache) return request;
+            return request.then(function (response) {
+                if (
+                    response && response.ok &&
+                    typeof window.slmInvalidatePanes === 'function'
+                ) {
+                    window.slmInvalidatePanes();
+                }
+                if (
+                    response && response.ok &&
+                    typeof window.slmInvalidateDashboardCache === 'function'
+                ) {
+                    window.slmInvalidateDashboardCache();
+                }
+                return response;
+            });
+        }
 
         function send() {
-            if (!isRelative || init.signal) {
-                return _origFetch(input, init);
+            if (!isSameOrigin || init.signal) {
+                return invalidateAfterMutation(_origFetch(input, init));
             }
             var controller = new AbortController();
             var timeoutMs = init.timeoutMs || window.SLM_FETCH_TIMEOUT_MS;
             var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
             init.signal = controller.signal;
-            return _origFetch(input, init).finally(function () { clearTimeout(timer); });
+            return invalidateAfterMutation(
+                _origFetch(input, init).finally(function () { clearTimeout(timer); })
+            );
         }
 
-        if (isRelative && mutating && urlStr !== '/internal/token') {
+        if (
+            isSameOrigin &&
+            mutating &&
+            requiresWriteAuth &&
+            (!requestUrl || requestUrl.pathname !== '/internal/token')
+        ) {
             return window.slmInstallToken(false).then(function (token) {
                 if (!token) throw new Error('local write credential unavailable');
                 var headers = new Headers(

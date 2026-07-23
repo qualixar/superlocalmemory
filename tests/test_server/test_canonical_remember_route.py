@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -198,3 +199,51 @@ def test_wait_remember_keeps_durable_fact_queryable_when_enrichment_retries(
     assert payload["materialization_state"] == "failed"
     assert payload["fact_ids"] == ["fact-queryable"]
     assert "retry" in payload["note"]
+
+
+def test_wait_remember_returns_queryable_after_bounded_enrichment_wait(
+    engine_with_mock_deps,
+    monkeypatch,
+) -> None:
+    """A slow local model cannot pin the daemon event loop behind wait=true."""
+    client = _client(engine_with_mock_deps)
+    receipt = SimpleNamespace(
+        operation_id="bounded-wait-op",
+        state=IngestionState.QUERYABLE,
+        fact_ids=("fact-queryable",),
+    )
+
+    def slow_materialize(_operation_id):
+        time.sleep(0.05)
+        return SimpleNamespace(
+            operation_id="bounded-wait-op",
+            state=IngestionState.COMPLETE,
+            fact_ids=("fact-queryable",),
+            last_error="",
+        )
+
+    command = SimpleNamespace(
+        submit=lambda _request: receipt,
+        materialize=slow_materialize,
+    )
+    monkeypatch.setattr(
+        "superlocalmemory.server.unified_daemon._REMEMBER_ENRICHMENT_WAIT_SECONDS",
+        0.001,
+    )
+    with patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+        return_value=command,
+    ):
+        response = client.post(
+            "/remember?wait=true",
+            json={
+                "content": "A slow enrichment keeps the dashboard responsive.",
+                "idempotency_key": "bounded-wait-route-1",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "queryable"
+    assert payload["materialization_state"] == "queryable"
+    assert payload["wait_budget_exhausted"] is True

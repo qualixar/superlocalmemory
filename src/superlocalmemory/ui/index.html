@@ -182,7 +182,6 @@
                   <div class="value num" id="k-clu">—</div>
                   <div class="delta" id="k-clu-delta">&nbsp;</div>
                   <div class="spark" id="sp-clu"></div>
-                  <!-- TODO: endpoint /api/v3/clusters/count does not exist yet -->
                 </div>
               </section>
 
@@ -192,8 +191,8 @@
                 <!-- memory growth + quick actions -->
                 <div class="card">
                   <div class="card-head">
-                    <h3>Memory growth</h3>
-                    <span class="sub">facts stored over time</span>
+                    <h3>Memory activity</h3>
+                    <span class="sub">facts added by day · past year</span>
                     <div class="spacer"></div>
                   </div>
                   <div class="card-pad">
@@ -300,9 +299,7 @@
                 <div class="card">
                   <div class="card-head"><h3>Where memories come from</h3></div>
                   <div class="card-pad">
-                    <!-- populated by loadDashboardSources() in dashboard.js -->
-                    <!-- TODO: endpoint /api/v3/ingestion/sources does not exist yet;
-                         showing static breakdown from /api/stats for now -->
+                    <!-- populated by loadDashboardSources() from profile-scoped provenance -->
                     <div id="src">
                       <div class="muted" style="padding:16px;text-align:center;font-size:13px">Loading...</div>
                     </div>

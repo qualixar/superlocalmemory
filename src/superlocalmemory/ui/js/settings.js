@@ -529,7 +529,21 @@ async function syncCloudNow() {
 async function exportBackup() {
     showToast('Preparing backup export...');
     try {
-        window.location.href = '/api/backup/export';
+        var response = await fetch('/api/backup/export', { method: 'POST' });
+        if (!response.ok) throw new Error('Export rejected');
+        var blob = await response.blob();
+        var disposition = response.headers.get('Content-Disposition') || '';
+        var match = disposition.match(/filename="?([^";]+)"?/i);
+        var objectUrl = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = match ? match[1] : 'superlocalmemory-backup.db.gz';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+        showToast('Backup export downloaded');
     } catch (error) {
         showToast('Export failed');
     }

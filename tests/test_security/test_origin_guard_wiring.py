@@ -67,11 +67,21 @@ def _build_origin_guard_app(
         if is_write:
             _origin = headers.get("origin", "")
             if _origin:
-                _ok_origin = any(_origin.startswith(p) for p in (
-                    "http://127.0.0.1", "https://127.0.0.1",
-                    "http://localhost", "https://localhost",
-                    "http://[::1]", "https://[::1]",
-                ))
+                from superlocalmemory.server.origin import (
+                    origin_is_daemon,
+                    origin_is_loopback,
+                )
+                _ok_origin = origin_is_daemon(_origin, port=8765)
+                _has_credential = any(
+                    headers.get(name)
+                    for name in (
+                        "x-slm-daemon-capability",
+                        "x-install-token",
+                        "x-slm-api-key",
+                    )
+                )
+                if not _ok_origin and origin_is_loopback(_origin) and _has_credential:
+                    _ok_origin = True
                 if not _ok_origin:
                     from superlocalmemory.core.remote_mode import is_remote_origin_allowed
                     _ok_origin = is_remote_origin_allowed(_origin)
@@ -150,17 +160,27 @@ class TestOriginGuardWiring:
             f"Loopback origin was blocked (status {resp.status_code})"
         )
 
-    def test_localhost_origin_allowed(
+    def test_unrelated_loopback_origin_is_rejected_without_credential(
         self, guard_client: TestClient,
     ) -> None:
-        """localhost origin passes."""
+        """Another local web server cannot issue ambient browser writes."""
         resp = guard_client.post(
             "/test-write",
             headers={"Origin": "http://localhost:8417"},
         )
-        assert resp.status_code == 200, (
-            f"localhost origin was blocked (status {resp.status_code})"
+        assert resp.status_code == 403
+
+    def test_unrelated_loopback_origin_needs_a_credential(
+        self, guard_client: TestClient,
+    ) -> None:
+        resp = guard_client.post(
+            "/test-write",
+            headers={
+                "Origin": "http://localhost:8417",
+                "X-Install-Token": "integration-will-validate-this-token",
+            },
         )
+        assert resp.status_code == 200
 
     def test_get_request_not_checked(
         self, guard_client: TestClient,

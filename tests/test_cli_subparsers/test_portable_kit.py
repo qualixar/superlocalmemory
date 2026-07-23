@@ -83,7 +83,9 @@ def fake_agents_md_source(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ide_id", MCP_IDES)
+@pytest.mark.parametrize(
+    "ide_id", [ide_id for ide_id in MCP_IDES if ide_id != "vscode-copilot"],
+)
 def test_connect_writes_correct_key(ide_id: str, fake_home: Path):
     """SLM block appears under the exact server_key; command == 'slm'."""
     desc = IDE_MATRIX[ide_id]
@@ -230,7 +232,9 @@ def _assert_other_server_deep_equal(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ide_id", MCP_IDES)
+@pytest.mark.parametrize(
+    "ide_id", [ide_id for ide_id in MCP_IDES if ide_id != "vscode-copilot"],
+)
 def test_idempotent(ide_id: str, fake_home: Path):
     """Second call produces byte-identical file; status==unchanged."""
     desc = IDE_MATRIX[ide_id]
@@ -463,6 +467,33 @@ def test_here_no_project_errors(fake_home: Path):
     assert result["mcp_config"] == "error"
 
 
+def test_vscode_copilot_requires_project_scope(fake_home: Path) -> None:
+    result = connect_ide("vscode-copilot", home=fake_home)
+    assert result["error"] is not None
+    assert "--here" in result["error"]
+    assert result["mcp_config"] == "error"
+    assert not (fake_home / ".vscode" / "mcp.json").exists()
+
+
+def test_vscode_copilot_here_writes_supported_project_files(
+    fake_home: Path,
+    fake_agents_md_source,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "copilot-project"
+    project.mkdir()
+    result = connect_ide(
+        "vscode-copilot",
+        home=fake_home,
+        here=True,
+        project=project,
+        agents_md_source=fake_agents_md_source,
+    )
+    assert result["error"] is None
+    assert (project / ".vscode" / "mcp.json").is_file()
+    assert (project / ".github" / "copilot-instructions.md").is_file()
+
+
 # ---------------------------------------------------------------------------
 # Additional branch coverage tests
 # ---------------------------------------------------------------------------
@@ -567,6 +598,39 @@ def test_agents_md_skipped_when_no_source(fake_home: Path):
     result = connect_ide("cursor", home=fake_home, agents_md_source=None)
     assert result["error"] is None
     assert result["agents_md"] == "skipped(no-source)"
+
+
+def test_codex_dry_run_never_writes_config_or_agents(fake_home: Path, fake_agents_md_source):
+    """The exact ``slm connect codex --dry-run`` path is read-only."""
+    result = connect_ide(
+        "codex",
+        home=fake_home,
+        agents_md_source=fake_agents_md_source,
+        dry_run=True,
+    )
+
+    assert result["error"] is None
+    assert result["mcp_config"] == "would_write"
+    assert not (fake_home / ".codex" / "config.toml").exists()
+    assert not (fake_home / "AGENTS.md").exists()
+
+
+def test_codex_dry_run_fails_when_packaged_agents_asset_is_missing(fake_home: Path):
+    """Dry-run must prove the packaged rule asset can actually be loaded."""
+    def missing_asset():
+        raise FileNotFoundError("plugin-src/rules/AGENTS.md")
+
+    result = connect_ide(
+        "codex",
+        home=fake_home,
+        agents_md_source=missing_asset,
+        dry_run=True,
+    )
+
+    assert result["agents_md"] == "error(source-unavailable)"
+    assert "asset lookup failed" in result["error"]
+    assert not (fake_home / ".codex" / "config.toml").exists()
+    assert not (fake_home / "AGENTS.md").exists()
 
 
 def test_yaml_load_config_none_result(fake_home: Path, tmp_path: Path):

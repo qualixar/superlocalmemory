@@ -5,29 +5,64 @@
 //   loadDashboard()        → GET /api/v3/dashboard → system card (#dashboard-mode etc.)
 //   loadDashboardStats()   → GET /api/stats        → OD KPI strip (#k-mem, #k-nodes, #k-edges)
 //   loadDashboardFeed()    → GET /api/memories?limit=6 → activity feed (#feed)
-//   loadDashboardSources() → static from stats breakdown → capture-sources (#src)
-//   loadDashboardSparklines() → builds sparklines from stats values via slmSpark
+//   loadDashboardSources() → real provenance from /api/stats → capture-sources (#src)
+//   loadDashboardTimeline() → real daily fact counts from /api/timeline → #sp-big
+
+var DASHBOARD_CACHE_MS = 30000;
+var dashboardLastRefresh = 0;
+var dashboardRefreshInFlight = null;
+var dashboardCacheGeneration = 0;
+var dashboardRefreshQueued = false;
+
+window.slmInvalidateDashboardCache = function() {
+    dashboardCacheGeneration += 1;
+    dashboardLastRefresh = 0;
+    if (dashboardRefreshInFlight) dashboardRefreshQueued = true;
+};
 
 // Auto-refresh dashboard when tab becomes visible (fixes stale data after settings change)
 document.addEventListener('visibilitychange', function() {
     if (!document.hidden) refreshDashboard();
 });
 
-// Refresh system card on focus (alt-tab back to browser).
-// Only calls loadDashboard() — not the feed/sparklines, which would cause
-// DOM teardown and rebuild on every focus event (excessive churn).
-window.addEventListener('focus', function() { loadDashboard(); });
+// Focus and tab navigation use a short cache window. This keeps normal
+// browser switching from repeatedly querying a large local database.
+window.addEventListener('focus', function() { refreshDashboard(); });
 
 // Load when the Dashboard tab is shown via the sidebar. od-shell.js's activateTab()
 // dispatches shown.bs.tab on the hidden #dashboard-tab button.
 document.getElementById('dashboard-tab')?.addEventListener('shown.bs.tab', function() { refreshDashboard(); });
 
-// refreshDashboard: fires all OD + legacy loaders in parallel (called by event-delegation.js 'refresh-dashboard')
-window.refreshDashboard = function() {
-    loadDashboard();
-    loadDashboardStats();
-    loadDashboardFeed();
-    loadDashboardSources();
+// refreshDashboard coalesces concurrent startup/navigation events and keeps a
+// 30-second snapshot. Mutations pass {force:true} to re-read daemon truth.
+window.refreshDashboard = function(options) {
+    var force = options && options.force === true;
+    var now = Date.now();
+    if (dashboardRefreshInFlight) {
+        if (force) dashboardRefreshQueued = true;
+        return dashboardRefreshInFlight;
+    }
+    if (!force && dashboardLastRefresh && now - dashboardLastRefresh < DASHBOARD_CACHE_MS) {
+        return Promise.resolve();
+    }
+    var refreshGeneration = dashboardCacheGeneration;
+    dashboardRefreshInFlight = Promise.all([
+        loadDashboard(),
+        loadDashboardStats(),
+        loadDashboardTimeline(),
+        loadDashboardFeed()
+    ]).then(function(results) {
+        dashboardLastRefresh = refreshGeneration === dashboardCacheGeneration && results.every(Boolean)
+            ? Date.now()
+            : 0;
+    }).finally(function() {
+        dashboardRefreshInFlight = null;
+    }).then(function() {
+        if (!dashboardRefreshQueued) return;
+        dashboardRefreshQueued = false;
+        return window.refreshDashboard({ force: true });
+    });
+    return dashboardRefreshInFlight;
 };
 
 // ----------------------------------------------------------------
@@ -36,7 +71,7 @@ window.refreshDashboard = function() {
 async function loadDashboardStats() {
     try {
         var r = await fetch('/api/stats', { credentials: 'same-origin' });
-        if (!r.ok) return;
+        if (!r.ok) return false;
         var data = await r.json();
         var ov = data.overview || {};
 
@@ -44,12 +79,14 @@ async function loadDashboardStats() {
         var facts    = ov.total_facts    || 0;
         var nodes    = ov.graph_nodes    || 0;
         var edges    = ov.graph_edges    || 0;
+        var clusters = ov.total_clusters || 0;
 
         // OD KPI strip
         setKpiValue('k-mem',   memories);
         setKpiValue('k-nodes', nodes);
         setKpiValue('k-edges', edges);
         setKpiValue('k-facts', facts);
+        setKpiValue('k-clu',   clusters);
 
         // Legacy hidden compat IDs (core.js loadStats() may race — that's OK,
         // the hidden IDs are only a data bridge, not visible).
@@ -57,51 +94,62 @@ async function loadDashboardStats() {
         setTextById('stat-facts',    facts);
         setTextById('stat-nodes',    nodes);
         setTextById('stat-edges',    edges);
-
-        // Sparklines — build synthetic ascending series from the real count
-        // (no time-series endpoint exists yet; honest placeholder).
-        // TODO: replace with GET /api/v3/stats/history when that endpoint ships.
-        if (typeof window.slmSpark === 'function') {
-            loadDashboardSparklines(memories, nodes, edges);
-        }
+        loadDashboardSources(data);
+        return true;
     } catch (e) {
         // Non-fatal: KPI strip shows — values
+        return false;
     }
 }
 
 // ----------------------------------------------------------------
-// loadDashboardSparklines — builds inline SVG sparklines from totals
-// No time-series endpoint yet: we synthesise a plausible trailing
-// series anchored to the real current total. Honest placeholder.
+// loadDashboardTimeline — renders real daily fact counts from /api/timeline
 // ----------------------------------------------------------------
-function loadDashboardSparklines(memories, nodes, edges) {
-    function syntheticSeries(current, n, volatility) {
-        var a = [];
-        var v = current * 0.60;
-        var step = (current - v) / n;
-        for (var i = 0; i < n; i++) {
-            v += step + (Math.random() - 0.45) * volatility * current;
-            a.push(Math.max(0, Math.round(v)));
+async function loadDashboardTimeline() {
+    var spBig = document.getElementById('sp-big');
+    if (!spBig) return true;
+    try {
+        var response = await fetch('/api/timeline?days=365&group_by=day&include_categories=false', {
+            credentials: 'same-origin'
+        });
+        if (!response.ok) throw new Error('timeline unavailable');
+        var stats = await response.json();
+        var points = Array.isArray(stats.timeline) ? stats.timeline : [];
+        var byDate = {};
+        points.forEach(function(point) {
+            if (point && point.period) byDate[String(point.period)] = Number(point.count) || 0;
+        });
+        var counts = [];
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+        for (var dayOffset = 364; dayOffset >= 0; dayOffset--) {
+            var day = new Date(today);
+            day.setDate(today.getDate() - dayOffset);
+            counts.push(byDate[day.toISOString().slice(0, 10)] || 0);
         }
-        a[n - 1] = current;
-        return a;
-    }
-    var memSeries  = syntheticSeries(memories || 1, 24, 0.015);
-    var nodeSeries = syntheticSeries(nodes    || 1, 24, 0.018);
-    var edgeSeries = syntheticSeries(edges    || 1, 24, 0.020);
-    var bigSeries  = syntheticSeries(memories || 1, 90, 0.012);
+        var total = counts.reduce(function(sum, value) { return sum + value; }, 0);
+        var avgEl = document.getElementById('k-avg-day');
+        if (avgEl) avgEl.textContent = (total / 365).toFixed(1);
 
-    var spMem   = document.getElementById('sp-mem');
-    var spNodes = document.getElementById('sp-nodes');
-    var spEdges = document.getElementById('sp-edges');
-    var spBig   = document.getElementById('sp-big');
-
-    if (spMem)   spMem.innerHTML   = window.slmSpark(memSeries,  { color: 'var(--violet)' });
-    if (spNodes) spNodes.innerHTML = window.slmSpark(nodeSeries, { color: 'var(--cyan)'   });
-    if (spEdges) spEdges.innerHTML = window.slmSpark(edgeSeries, { color: 'var(--violet)' });
-    if (spBig)   spBig.innerHTML   = window.slmSpark(bigSeries,  { w: 600, h: 140, color: 'var(--violet)' });
-    if (spBig && spBig.querySelector('svg')) {
-        spBig.querySelector('svg').style.cssText = 'width:100%;height:140px;display:block;';
+        if (!total || typeof window.slmSpark !== 'function') {
+            spBig.textContent = 'No dated memory history recorded for this profile.';
+            spBig.className = 'muted';
+            return true;
+        }
+        spBig.className = '';
+        spBig.innerHTML = window.slmSpark(counts, {
+            w: 600,
+            h: 140,
+            color: 'var(--violet)'
+        });
+        if (spBig.querySelector('svg')) {
+            spBig.querySelector('svg').style.cssText = 'width:100%;height:140px;display:block;';
+        }
+        return true;
+    } catch (e) {
+        spBig.textContent = 'Memory history unavailable.';
+        spBig.className = 'muted';
+        return false;
     }
 }
 
@@ -110,7 +158,7 @@ function loadDashboardSparklines(memories, nodes, edges) {
 // ----------------------------------------------------------------
 async function loadDashboardFeed() {
     var feedEl = document.getElementById('feed');
-    if (!feedEl) return;
+    if (!feedEl) return true;
 
     var CATEGORY_COLORS = {
         'episodic':  ['rgba(34,197,94,0.12)',  '#22c55e'],
@@ -131,13 +179,13 @@ async function loadDashboardFeed() {
         var r = await fetch('/api/memories?limit=6', { credentials: 'same-origin' });
         if (!r.ok) {
             feedEl.innerHTML = '<div class="muted" style="padding:12px;text-align:center;font-size:13px">No recent activity</div>';
-            return;
+            return false;
         }
         var data = await r.json();
         var items = data.memories || data.results || data || [];
         if (!Array.isArray(items) || items.length === 0) {
             feedEl.innerHTML = '<div class="muted" style="padding:12px;text-align:center;font-size:13px">No memories yet — start capturing!</div>';
-            return;
+            return true;
         }
 
         // Build feed using DOM methods (XSS-safe — no innerHTML with user content)
@@ -180,37 +228,76 @@ async function loadDashboardFeed() {
             item.appendChild(time);
             feedEl.appendChild(item);
         });
+        return true;
     } catch (e) {
         feedEl.innerHTML = '<div class="muted" style="padding:12px;text-align:center;font-size:13px">Activity unavailable</div>';
+        return false;
     }
 }
 
 // ----------------------------------------------------------------
-// loadDashboardSources — static breakdown from available stats
-// TODO: GET /api/v3/ingestion/sources does not exist yet.
+// loadDashboardSources — profile-scoped provenance returned by /api/stats
 // ----------------------------------------------------------------
-function loadDashboardSources() {
+function loadDashboardSources(stats) {
     var srcEl = document.getElementById('src');
     if (!srcEl) return;
-    // Honest static breakdown until endpoint ships.
-    // These are representative percentages, not synthetic fake data —
-    // they describe the general SLM capture pattern.
-    var SRC = [
-        ['MCP agents (Claude, Cursor)', 62, 'var(--violet)'],
-        ['Auto-capture · decisions',    21, 'var(--cyan)'],
-        ['Auto-capture · bugs',          9, 'var(--warn,#f59e0b)'],
-        ['Manual / CLI',                 8, 'var(--fg-3)'],
-    ];
-    srcEl.innerHTML = SRC.map(function(s) {
-        return '<div style="margin-bottom:14px">' +
-          '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">' +
-            '<span>' + s[0] + '</span><b class="num">' + s[1] + '%</b>' +
-          '</div>' +
-          '<div class="meter"><i style="width:' + s[1] + '%;background:' + s[2] + '"></i></div>' +
-        '</div>';
-    }).join('') + '<p style="font-size:11px;color:var(--fg-3);margin-top:8px">' +
-        '<!-- TODO: wire to /api/v3/ingestion/sources when available -->' +
-    '</p>';
+    var sourceStatus = stats && stats.ingestion_sources_status;
+    if (sourceStatus && sourceStatus.available === false) {
+        srcEl.textContent = 'Provenance metrics are temporarily unavailable.';
+        srcEl.className = 'muted';
+        return;
+    }
+    var sources = stats && Array.isArray(stats.ingestion_sources)
+        ? stats.ingestion_sources
+        : [];
+    if (!sources.length) {
+        srcEl.textContent = 'No provenance recorded for this profile.';
+        srcEl.className = 'muted';
+        return;
+    }
+
+    var LABELS = {
+        'store': 'Historical / engine store',
+        'http': 'Dashboard, hooks, and API',
+        'http-observe': 'Auto-capture observations',
+        'mcp-offline-worker': 'Queued MCP ingestion',
+        'cli-sync': 'CLI sync',
+        'unknown': 'Unclassified'
+    };
+    var COLORS = ['var(--violet)', 'var(--cyan)', 'var(--warn,#f59e0b)', 'var(--fg-3)'];
+    var total = sources.reduce(function(sum, source) {
+        return sum + (Number(source.count) || 0);
+    }, 0);
+
+    srcEl.className = '';
+    srcEl.textContent = '';
+    sources.forEach(function(source, index) {
+        var count = Number(source.count) || 0;
+        var percent = total ? Math.round((count / total) * 100) : 0;
+        var row = document.createElement('div');
+        row.style.marginBottom = '14px';
+
+        var heading = document.createElement('div');
+        heading.style.cssText = 'display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px';
+        var label = document.createElement('span');
+        label.textContent = LABELS[source.source_type] || source.source_type || 'Unclassified';
+        var value = document.createElement('b');
+        value.className = 'num';
+        value.textContent = count.toLocaleString() + ' · ' + percent + '%';
+        heading.appendChild(label);
+        heading.appendChild(value);
+
+        var meter = document.createElement('div');
+        meter.className = 'meter';
+        var fill = document.createElement('i');
+        fill.style.width = percent + '%';
+        fill.style.background = COLORS[index % COLORS.length];
+        meter.appendChild(fill);
+
+        row.appendChild(heading);
+        row.appendChild(meter);
+        srcEl.appendChild(row);
+    });
 }
 
 // ----------------------------------------------------------------
@@ -247,7 +334,7 @@ async function loadDashboard() {
         var response = await fetch('/api/v3/dashboard', { credentials: 'same-origin' });
         if (!response.ok) {
             showPaneError(PANE_ID, paneErrorMessage(response.status), loadDashboard, true);
-            return;
+            return false;
         }
         var data = await response.json();
 
@@ -282,9 +369,11 @@ async function loadDashboard() {
         document.querySelectorAll('.mode-btn').forEach(function(btn) {
             btn.classList.toggle('active', btn.dataset.mode === data.mode);
         });
+        return true;
     } catch (e) {
         showPaneError(PANE_ID, paneErrorMessage(0), loadDashboard, true);
         console.log('Dashboard load error:', e);
+        return false;
     }
 }
 
@@ -293,10 +382,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // od-shell.js calls activateTab('dashboard-pane') which dispatches shown.bs.tab,
     // but the listener may not yet be attached at that point. Call directly as well.
     setTimeout(function() {
-        loadDashboard();
-        loadDashboardStats();
-        loadDashboardFeed();
-        loadDashboardSources();
+        refreshDashboard({ force: true });
     }, 200);
 });
 
@@ -351,8 +437,7 @@ document.getElementById('quick-store-btn')?.addEventListener('click', async func
         }
         await r.json();
         if (input) input.value = '';
-        loadDashboard();
-        loadDashboardFeed();
+        refreshDashboard({ force: true });
         showToast('Stored!');
     } catch(e) {
         showToast('Store failed: ' + e.message);
@@ -372,6 +457,8 @@ document.getElementById('quick-recall-btn')?.addEventListener('click', function(
     fetch('/api/search', {
         method: 'POST', credentials: 'same-origin',
         headers: {'Content-Type': 'application/json'},
+        slmInvalidatesCache: false,
+        slmRequiresWriteAuth: false,
         body: JSON.stringify({query: query, limit: 5})
     }).then(function(r) {
         btn.disabled = false;

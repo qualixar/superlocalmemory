@@ -111,7 +111,14 @@ class TestCreateAllTables:
 class TestProfileIdColumn:
     """Every data table (except schema_version) must have profile_id."""
 
-    _TABLES_WITHOUT_PROFILE_ID = {"schema_version", "entity_aliases", "config"}
+    _TABLES_WITHOUT_PROFILE_ID = {
+        "schema_version",
+        "entity_aliases",
+        "config",
+        # One durable cursor scans the shared atomic_facts rowid space while
+        # every materialized association remains profile-scoped.
+        "fact_entity_association_repair_state",
+    }
 
     def test_profile_id_on_data_tables(self, conn: sqlite3.Connection) -> None:
         for table_name in _TABLES:

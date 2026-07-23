@@ -1,4 +1,4 @@
-**SuperLocalMemory V3.8.0**
+**SuperLocalMemory V3.8.1**
 
 * [Home](Home)
 

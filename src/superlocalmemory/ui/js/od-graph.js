@@ -16,6 +16,9 @@
   var GRAPH_URL = '/api/graph';
   var RECALL_URL = '/api/search';   /* POST {query, limit} -> {results:[...]} */
   var MAX_NODES = 120;              /* default budget; slider range 20-2000 */
+  /* Keep force-layout work bounded even when a user asks to render "All". */
+  var PHYSICS_MAX_NODES = 160;
+  var PRE_SETTLE_TICKS = 24;
 
   /* ---- 16-colour categorical palette (Tableau-inspired, accessible) ---- */
   var CAT_PALETTE = [
@@ -41,7 +44,7 @@
   var raf = null, running = false, fitFrames = 0;
   /* settle-freeze: stop the rAF loop once kinetic energy drops below SETTLE_KE */
   var frames = 0, _ke = 0;
-  var SETTLE_MIN = 60, SETTLE_KE = 0.2, SETTLE_MAX_FRAMES = 600;
+  var SETTLE_MIN = 30, SETTLE_KE = 0.2, SETTLE_MAX_FRAMES = 180;
   var NODES = [], LINKS = [], idx = {};
   var tierVisible = { 1: true, 2: true, 3: true };  /* independent tier toggles */
   var scale = 1, ox = 0, oy = 0, dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -223,7 +226,11 @@
 
   /* ---------------- physics (ported from design) ---------------- */
   function tick() {
-    var vis = NODES.filter(visible), i, j;
+    /* Force repulsion is O(n^2).  Render every requested node, but only
+       simulate a stable bounded subset so the dashboard remains interactive
+       for existing installs with very large graphs. */
+    var vis = NODES.filter(visible).slice(0, PHYSICS_MAX_NODES), simulated = {}, i, j;
+    vis.forEach(function (n) { simulated[n.id] = true; });
     for (i = 0; i < vis.length; i++) {
       var a = vis[i];
       for (j = i + 1; j < vis.length; j++) {
@@ -234,7 +241,7 @@
       }
     }
     LINKS.forEach(function (l) {
-      if (!visLink(l)) return;
+      if (!visLink(l) || !simulated[l.s] || !simulated[l.t]) return;
       var a = idx[l.s], b = idx[l.t];
       var dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) + 0.01;
       var rest = (a.type === 'community' || b.type === 'community') ? 150 : 100;
@@ -557,7 +564,7 @@
         running = false; draw(); updateCount(); updateLegend(); return;
       }
       readPalette(); resize(); updateCount(); updateLegend(); selected = null; setInspectorEmpty();
-      for (var i = 0; i < 120; i++) tick();   /* pre-settle so it doesn't open as a clump */
+      for (var i = 0; i < PRE_SETTLE_TICKS; i++) tick();   /* bounded pre-settle keeps navigation responsive */
       fitFrames = 0; frames = 0;
       if (!running) { running = true; loop(); } else { wake(); }
     }).catch(function (err) {

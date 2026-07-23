@@ -7,8 +7,8 @@
 All PyTorch/model work runs in a SEPARATE subprocess. The main process
 (dashboard, MCP, CLI) never imports torch and stays at ~60 MB.
 
-The worker subprocess auto-kills after 2 minutes idle, returning all
-memory to the OS. It respawns on next embed call (~3 sec cold start).
+The worker subprocess has a configurable idle timeout and respawns on the
+next embed call when it has been unloaded.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
@@ -29,13 +29,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from superlocalmemory.core.config import EmbeddingConfig
+
 # Track all live embedding services for atexit cleanup
 _live_embedding_services: set[weakref.ref] = set()
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-from superlocalmemory.core.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ class DimensionMismatchError(RuntimeError):
 
 _MAX_CONCURRENT_WORKERS = int(os.environ.get("SLM_MAX_EMBEDDING_WORKERS", 1))
 _embedding_lock_fd: int | None = None
+_embedding_lock_state_guard = threading.Lock()
 
 
 def _embedding_lock_file() -> Path:
@@ -106,57 +107,87 @@ def register_embedding_worker_pid(pid: int) -> None:
 def acquire_embedding_lock(timeout: float = 5.0) -> bool:
     """Acquire system-wide embedding worker lock.
 
-    v3.4.13: First checks if a worker PID is already alive (fast path).
-    Falls back to fcntl.flock on Unix. On Windows, falls back to PID check only.
+    The caller must re-check the PID file after acquisition before spawning.
+    POSIX uses flock; Windows uses a one-byte msvcrt lock.
     Returns True if lock acquired (safe to spawn), False if another worker active.
     """
     global _embedding_lock_fd
 
-    # v3.4.13: Fast path — if a worker PID is alive, don't even try the lock
-    if _is_embedding_worker_alive():
-        return False
+    # Serialize local contenders as well as cross-process contenders. The file
+    # descriptor stays local until its OS lock succeeds, so a failed acquire
+    # can never overwrite and leak the descriptor that owns the live worker.
+    with _embedding_lock_state_guard:
+        if _embedding_lock_fd is not None:
+            return False
+        if _is_embedding_worker_alive():
+            return False
 
-    if sys.platform == "win32":
-        return True  # No file locking on Windows — PID check above is the guard
+        lock_file = _embedding_lock_file()
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        candidate_fd: int | None = None
+        try:
+            candidate_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    if sys.platform == "win32":
+                        import msvcrt
 
-    import fcntl
-    lock_file = _embedding_lock_file()
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
+                        if os.fstat(candidate_fd).st_size == 0:
+                            os.write(candidate_fd, b"\0")
+                        os.lseek(candidate_fd, 0, os.SEEK_SET)
+                        msvcrt.locking(candidate_fd, msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
 
-    try:
-        _embedding_lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                fcntl.flock(_embedding_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return True
-            except (BlockingIOError, OSError):
-                time.sleep(0.2)
-        # Timeout — another worker holds the lock
-        os.close(_embedding_lock_fd)
-        _embedding_lock_fd = None
-        return False
-    except Exception:
-        return True  # On error, allow through (don't block functionality)
+                        fcntl.flock(
+                            candidate_fd,
+                            fcntl.LOCK_EX | fcntl.LOCK_NB,
+                        )
+                    _embedding_lock_fd = candidate_fd
+                    return True
+                except (BlockingIOError, OSError):
+                    time.sleep(0.2)
+            os.close(candidate_fd)
+            return False
+        except Exception:
+            if candidate_fd is not None:
+                try:
+                    os.close(candidate_fd)
+                except OSError:
+                    pass
+            return False
 
 
 def release_embedding_lock() -> None:
     """Release system-wide embedding worker lock."""
     global _embedding_lock_fd
-    if _embedding_lock_fd is not None:
+    with _embedding_lock_state_guard:
+        if _embedding_lock_fd is None:
+            return
         try:
-            import fcntl
-            fcntl.flock(_embedding_lock_fd, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                import msvcrt
+
+                os.lseek(_embedding_lock_fd, 0, os.SEEK_SET)
+                msvcrt.locking(_embedding_lock_fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(_embedding_lock_fd, fcntl.LOCK_UN)
             os.close(_embedding_lock_fd)
         except Exception:
-            pass
+            try:
+                os.close(_embedding_lock_fd)
+            except OSError:
+                pass
         _embedding_lock_fd = None
 
 
-_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes — balance cold-start vs RAM.
-# V3.4.37: Reduced from 1800 → 300. Holding 1.1 GB for 30 min idle
-# wastes RAM on laptops. 5 min covers bursty session_init+recall
-# patterns while freeing memory between sessions.
+_IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes — keep interactive sessions warm.
+# V3.8.1: existing-user soaks showed that the five-minute policy repeatedly
+# recycled a ~1.1 GB local model and imposed 20-30 second cold starts. The
+# explicit environment override remains available for low-RAM installations.
 _IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_EMBED_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
 # V3.3.21: Configurable response timeout — 180s default, but batch ingestion
 # (2-turn chunks across 10 conversations) needs 600s+ to survive cold-start
@@ -186,6 +217,7 @@ class EmbeddingService:
         self._last_used: float = 0.0
         self._idle_timer: threading.Timer | None = None
         self._worker_ready = False
+        self._owns_worker_lock = False
         self._request_count: int = 0
         self._http_client: object | None = None
 
@@ -478,18 +510,32 @@ class EmbeddingService:
         v3.4.13: Machine-wide singleton — checks PID file before spawning.
         Only ONE embedding_worker can exist at a time on the machine.
         """
-        if self._worker_proc is not None and self._worker_proc.poll() is None:
-            return
-        self._worker_proc = None
+        if self._worker_proc is not None:
+            if self._worker_proc.poll() is None:
+                return
+            # An unexpectedly exited child still leaves this service holding
+            # its lifetime flock. Fully close the dead process and release that
+            # lock before attempting the normal acquire/spawn sequence. Merely
+            # dropping the Popen reference makes the process deadlock against
+            # its own old flock until the acquire timeout expires.
+            self._kill_worker()
 
-        # v3.4.13: Check if another worker is already alive (machine-wide)
+        # Serialize the check/spawn/register sequence across processes. Checking
+        # the PID file without this lock allows two cold callers to both see no
+        # worker and launch memory-heavy children.
+        if not acquire_embedding_lock():
+            logger.debug("Embedding worker owned by another process")
+            self._available = False
+            return
         if _is_embedding_worker_alive():
-            logger.debug("Embedding worker already alive (PID file), skipping spawn")
+            release_embedding_lock()
+            logger.debug("Embedding worker already alive after lock acquisition")
             self._available = False
             return
 
         # V3.3.28: Check memory pressure before spawning
         if not self._check_memory_pressure():
+            release_embedding_lock()
             logger.warning("Skipping embedding worker spawn due to memory pressure")
             self._available = False
             return
@@ -524,9 +570,23 @@ class EmbeddingService:
             )
             # v3.4.13: Register PID for machine-wide singleton guard
             register_embedding_worker_pid(self._worker_proc.pid)
+            self._owns_worker_lock = True
             logger.info("Embedding worker spawned (PID %d)", self._worker_proc.pid)
             self._worker_ready = True
         except Exception as exc:
+            failed_proc = self._worker_proc
+            if failed_proc is not None:
+                try:
+                    failed_proc.terminate()
+                    failed_proc.wait(timeout=3)
+                except Exception:
+                    try:
+                        failed_proc.kill()
+                        failed_proc.wait(timeout=3)
+                    except Exception:
+                        pass
+            release_embedding_lock()
+            self._owns_worker_lock = False
             logger.warning(
                 "Failed to spawn embedding worker: %s. "
                 "Run 'slm doctor' to verify your Python environment. "
@@ -576,9 +636,23 @@ class EmbeddingService:
                             stream.close()
                         except (BrokenPipeError, OSError, ValueError):
                             pass
+        if getattr(self, "_owns_worker_lock", False):
+            try:
+                pid_file = _embedding_pid_file()
+                if (
+                    proc is not None
+                    and pid_file.exists()
+                    and pid_file.read_text().strip() == str(proc.pid)
+                ):
+                    pid_file.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                pass
+            finally:
+                self._owns_worker_lock = False
+                release_embedding_lock()
 
     def _reset_idle_timer(self) -> None:
-        """Reset idle timer — kills worker after 2 min inactivity."""
+        """Reset the configurable worker-idle timer."""
         if self._idle_timer is not None:
             self._idle_timer.cancel()
         self._idle_timer = threading.Timer(

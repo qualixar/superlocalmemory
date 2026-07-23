@@ -184,15 +184,15 @@ export function renderPluginJson(manifest) {
     },
     description: manifest.marketplace.description,
     displayName: manifest.displayName || manifest.pluginName,
-    hooks: './.mcp.json' === manifest.targets.plugin ? './hooks/hooks.json' : './hooks/hooks.json',
     keywords: manifest.keywords || [],
     mcpServers: './.mcp.json',
     name: manifest.pluginName,
     repository: manifest.repository || '',
     version: manifest.version,
   };
-  // hooks pointer is always ./hooks/hooks.json relative to plugin root
-  obj.hooks = './hooks/hooks.json';
+  // Claude Code automatically loads the conventional plugin/hooks/hooks.json.
+  // Declaring it in the manifest as well makes current Claude Code load it
+  // twice and rejects the whole plugin as a duplicate hook file.
   obj.mcpServers = './.mcp.json';
   return stableStringify(obj);
 }

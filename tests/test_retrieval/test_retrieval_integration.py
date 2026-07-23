@@ -25,9 +25,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
+from superlocalmemory.core.config import RetrievalConfig
+from superlocalmemory.retrieval.bm25_channel import BM25Channel
 from superlocalmemory.retrieval.engine import RetrievalEngine
-from superlocalmemory.storage.models import AtomicFact, Mode, RecallResponse
+from superlocalmemory.storage import schema as real_schema
+from superlocalmemory.storage.database import DatabaseManager
+from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +160,92 @@ class TestFourChannelPipeline:
         engine = _build_engine(db=db, bm25_results=[("f1", 0.8)])
         response = engine.recall("q", "default")
         assert len(response.results) == 1
+
+    def test_exact_bm25_hit_survives_semantic_top_k_pressure(self) -> None:
+        """A newly queryable exact-token fact must not hide below semantic hits."""
+        semantic_ids = [f"semantic-{index}" for index in range(5)]
+        facts = [
+            *[
+                _make_fact(
+                    fact_id,
+                    f"Semantically similar older memory number {index}",
+                )
+                for index, fact_id in enumerate(semantic_ids)
+            ],
+            _make_fact(
+                "exact-new",
+                "SLM381_UNIQUE_QUERYABLE_MARKER is immediately recallable",
+            ),
+        ]
+        engine = _build_engine(
+            db=_mock_db(facts),
+            semantic_results=[
+                (fact_id, 0.95 - index * 0.01)
+                for index, fact_id in enumerate(semantic_ids)
+            ],
+            bm25_results=[("exact-new", 12.0)],
+        )
+
+        response = engine.recall(
+            "SLM381_UNIQUE_QUERYABLE_MARKER",
+            "default",
+            limit=3,
+        )
+
+        assert len(response.results) == 3
+        assert "exact-new" in {result.fact.fact_id for result in response.results}
+
+    def test_real_fts5_exact_hit_keeps_bounded_slot(
+        self,
+        tmp_path,
+    ) -> None:
+        """A real sub-1.0 FTS5 hit remains visible under semantic pressure."""
+        db = DatabaseManager(tmp_path / "fts5-exact-slot.db")
+        db.initialize(real_schema)
+        semantic_ids = [f"semantic-{index}" for index in range(3)]
+        for index, fact_id in enumerate([*semantic_ids, "exact-new"]):
+            memory_id = f"memory-{fact_id}"
+            content = (
+                "SLM381_UNIQUE_QUERYABLE_MARKER is immediately recallable"
+                if fact_id == "exact-new"
+                else f"Semantically similar older memory number {index}"
+            )
+            db.store_memory(MemoryRecord(memory_id=memory_id, content=content))
+            db.store_fact(AtomicFact(
+                fact_id=fact_id,
+                memory_id=memory_id,
+                content=content,
+            ))
+
+        bm25 = BM25Channel(db)
+        lexical = bm25.search("SLM381_UNIQUE_QUERYABLE_MARKER", "default")
+        assert len(lexical) == 1
+        assert lexical[0][0] == "exact-new"
+        assert 0.0 < lexical[0][1] < 1.0
+
+        engine = RetrievalEngine(
+            db=db,
+            config=RetrievalConfig(),
+            channels={
+                "semantic": _mock_channel([
+                    (fact_id, 0.95 - index * 0.01)
+                    for index, fact_id in enumerate(semantic_ids)
+                ]),
+                "bm25": bm25,
+            },
+            embedder=_mock_embedder(),
+        )
+        try:
+            response = engine.recall(
+                "SLM381_UNIQUE_QUERYABLE_MARKER",
+                "default",
+                limit=2,
+            )
+        finally:
+            engine.close()
+
+        assert len(response.results) == 2
+        assert "exact-new" in {result.fact.fact_id for result in response.results}
 
     def test_entity_graph_enhances_bm25(self) -> None:
         """V3.4.12: entity_graph is a signal enhancer, not independent channel.

@@ -34,6 +34,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Final
 
+from superlocalmemory.learning.model_cache import invalidate as invalidate_model_cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -235,6 +237,7 @@ class ModelRollback:
                 )
                 return False
 
+        invalidate_model_cache(self._profile_id)
         logger.warning(
             "AUTO-ROLLBACK profile=%s reason=%s observations=%d "
             "baseline_ndcg=%.4f current_ndcg=%.4f",

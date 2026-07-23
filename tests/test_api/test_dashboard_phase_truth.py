@@ -21,8 +21,8 @@ from superlocalmemory.learning.consolidation_worker import _retrain_ranker_impl
 from superlocalmemory.learning.signals import record_signal_batch
 from superlocalmemory.server.routes.learning import _compute_ranker_phase
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
     open_conn,
 )
 
@@ -49,6 +49,31 @@ def test_phase1_on_clean_db(tmp_path):
     assert phase["phase"] == 1
     assert phase["model_active"] is False
     assert phase["signals"] == 0
+    assert phase["key"] == "baseline"
+    assert phase["gates"] == {
+        "rule_based_min_signals": 50,
+        "ml_model_min_signals": 200,
+        "ml_model_requires_verified_active_model": True,
+    }
+
+
+def test_phase_read_does_not_migrate_a_legacy_empty_database(tmp_path):
+    """Status reads must leave an upgraded user's database untouched."""
+    db_path = tmp_path / "legacy-learning.db"
+    sqlite3.connect(db_path).close()
+
+    phase = _compute_ranker_phase("p1", learning_db_path=db_path)
+
+    assert phase["phase"] == 1
+    assert phase["status"] == "missing_table"
+    connection = sqlite3.connect(db_path)
+    try:
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ).fetchall()
+    finally:
+        connection.close()
+    assert tables == []
 
 
 def test_phase2_with_signals_no_model(tmp_path):

@@ -52,6 +52,42 @@ async def _apply_runtime_config(request: Request, config, *, mode_change: bool) 
     authorization.complete()
 
 
+def _require_manage(request: Request) -> None:
+    """Use one explicit authorization boundary for dashboard configuration."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request)
+
+
+def _resolve_profile(request: Request, requested: str = "") -> str:
+    """Resolve a profile override and enforce READ on its actual target."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import get_active_profile
+
+    if requested and not isinstance(requested, str):
+        raise HTTPException(status_code=422, detail="profile must be a string")
+    profile = requested.strip() if requested else get_active_profile()
+    require_permission(request, Permission.READ, profile=profile)
+    return profile
+
+
+def _resolve_mutation_profile(requested: object) -> str:
+    """Resolve a body-supplied profile without silently coercing bad input."""
+    from superlocalmemory.server.routes.helpers import get_active_profile
+
+    if requested is not None and not isinstance(requested, str):
+        raise HTTPException(status_code=422, detail="profile must be a string")
+    return requested.strip() if requested and requested.strip() else get_active_profile()
+
+
+def _require_manage_for_profile(request: Request, profile: str) -> None:
+    """Enforce MANAGE on the resolved mutation target before any side effect."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request, profile=profile)
+
+
 # ── Dashboard ────────────────────────────────────────────────
 
 @router.get("/dashboard")
@@ -448,9 +484,9 @@ async def set_scope_config(request: Request):
 @router.post("/embedding/test")
 async def test_embedding_endpoint(request: Request):
     """Test connectivity to a custom embedding endpoint."""
+    _require_manage(request)
     try:
         import httpx
-        from urllib.parse import urlparse
         body = await request.json()
         endpoint = body.get("api_endpoint", "").rstrip("/")
         model = body.get("model_name", "test")
@@ -459,12 +495,10 @@ async def test_embedding_endpoint(request: Request):
         if not endpoint:
             return JSONResponse({"error": "No endpoint provided"}, status_code=400)
 
-        parsed = urlparse(endpoint)
-        if parsed.scheme not in ("http", "https"):
-            return JSONResponse({"error": "Only http/https endpoints supported"}, status_code=400)
-        host = parsed.hostname or ""
-        if host in ("169.254.169.254", "metadata.google.internal"):
-            return JSONResponse({"error": "Cloud metadata endpoints not allowed"}, status_code=400)
+        client_host = request.client.host if request.client else ""
+        error = _validate_provider_url(endpoint, client_host)
+        if error:
+            return JSONResponse({"error": error}, status_code=400)
 
         if not endpoint.endswith("/embeddings"):
             endpoint = f"{endpoint}/embeddings"
@@ -980,6 +1014,7 @@ async def get_auto_capture_config():
 @router.put("/auto-capture/config")
 async def set_auto_capture_config(request: Request):
     """Update auto-capture config. Body: {"enabled": true, "capture_decisions": true, ...}"""
+    _require_manage(request)
     try:
         body = await request.json()
         from superlocalmemory.hooks.rules_engine import RulesEngine
@@ -1010,6 +1045,7 @@ async def get_auto_recall_config():
 @router.put("/auto-recall/config")
 async def set_auto_recall_config(request: Request):
     """Update auto-recall config."""
+    _require_manage(request)
     try:
         body = await request.json()
         from superlocalmemory.hooks.rules_engine import RulesEngine
@@ -1096,6 +1132,7 @@ async def run_consolidation(request: Request):
 
         config = SLMConfig.load()
         learning_db = DB_PATH.parent / "learning.db"
+        _require_manage_for_profile(request, config.active_profile)
         authorization = authorize_route_mutation(
             request,
             operation="update",
@@ -1213,6 +1250,7 @@ async def set_auto_invoke_config(request: Request):
 
     Body: {"enabled": true, "min_score": 0.15, "weights": {...}}
     """
+    _require_manage(request)
     try:
         body = await request.json()
 
@@ -1254,10 +1292,10 @@ async def get_associations(
     profile: str = "",
 ):
     """Get association edges for a profile with content previews."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {"edges": [], "total": 0}
@@ -1321,10 +1359,10 @@ async def get_associations(
 @router.get("/associations/stats")
 async def get_association_stats(request: Request, profile: str = ""):
     """Get association graph statistics."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {
@@ -1422,12 +1460,12 @@ async def get_association_stats(request: Request, profile: str = ""):
 @router.get("/consolidation/status")
 async def get_consolidation_status(request: Request, profile: str = ""):
     """Get consolidation status and last run results."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         from superlocalmemory.core.config import SLMConfig
         import sqlite3
 
-        pid = profile or get_active_profile()
         config = SLMConfig.load()
         cons_cfg = config.consolidation
 
@@ -1520,7 +1558,8 @@ async def trigger_consolidation(request: Request):
         profile = body.get("profile", "")
 
         from superlocalmemory.server.routes.helpers import get_active_profile
-        pid = profile or get_active_profile()
+        pid = _resolve_mutation_profile(profile)
+        _require_manage_for_profile(request, pid)
         authorization = authorize_route_mutation(
             request,
             operation="update",
@@ -1590,10 +1629,10 @@ async def trigger_consolidation(request: Request):
 @router.get("/core-memory")
 async def get_core_memory(request: Request, profile: str = ""):
     """Get all Core Memory blocks for a profile."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {"blocks": [], "total_chars": 0, "char_limit": 2000}
@@ -1719,6 +1758,7 @@ async def update_core_memory_block(block_id: str, request: Request):
 @router.get("/vector-store/status")
 async def get_vector_store_status(request: Request, profile: str = ""):
     """Get VectorStore health and statistics."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.server.routes.helpers import DB_PATH
@@ -1749,7 +1789,8 @@ async def get_vector_store_status(request: Request, profile: str = ""):
             try:
                 conn = sqlite3.connect(str(DB_PATH))
                 count = conn.execute(
-                    "SELECT COUNT(*) FROM embedding_metadata"
+                    "SELECT COUNT(*) FROM embedding_metadata WHERE profile_id = ?",
+                    (pid,),
                 ).fetchone()[0]
                 result["total_vectors"] = count
                 conn.close()
@@ -1779,10 +1820,10 @@ async def get_vector_store_status(request: Request, profile: str = ""):
 @router.get("/forgetting/stats")
 async def forgetting_stats(request: Request, profile: str = ""):
     """Get memory retention zone distribution."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
 
         zones = {"active": 0, "warm": 0, "cold": 0, "archive": 0, "forgotten": 0}
         total = 0
@@ -1830,7 +1871,8 @@ async def run_forgetting(request: Request):
 
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
+        pid = _resolve_mutation_profile(profile)
+        _require_manage_for_profile(request, pid)
 
         if not DB_PATH.exists():
             return {"success": False, "error": "Database not found"}
@@ -1907,10 +1949,10 @@ async def run_forgetting(request: Request):
 @router.get("/quantization/stats")
 async def quantization_stats(request: Request, profile: str = ""):
     """Get embedding quantization tier distribution."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
 
         tiers = {"float32": 0, "int8": 0, "polar4": 0, "polar2": 0}
         total = 0
@@ -1970,10 +2012,10 @@ async def quantization_stats(request: Request, profile: str = ""):
 @router.get("/ccq/blocks")
 async def ccq_blocks(request: Request, profile: str = "", limit: int = 50):
     """Get CCQ consolidated blocks."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {"blocks": [], "total": 0}
@@ -2030,10 +2072,10 @@ async def ccq_blocks(request: Request, profile: str = "", limit: int = 50):
 @router.get("/soft-prompts")
 async def get_soft_prompts(request: Request, profile: str = ""):
     """Get active soft prompt templates."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {"prompts": [], "total": 0, "total_tokens": 0}
@@ -2083,6 +2125,7 @@ async def get_soft_prompts(request: Request, profile: str = ""):
 @router.get("/health/processes")
 async def process_health(request: Request):
     """Get SLM process health status."""
+    _resolve_profile(request)
     try:
         import os as _os
 
@@ -2137,10 +2180,10 @@ async def get_graph_communities(request: Request, profile: str = ""):
     at consolidation time). Falls back to inline word frequency if labels
     not yet computed.
     """
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3
-        pid = profile or get_active_profile()
 
         if not DB_PATH.exists():
             return {"communities": [], "total": 0}
@@ -2267,6 +2310,7 @@ async def run_community_detection(request: Request):
         from superlocalmemory.core.graph_analyzer import GraphAnalyzer
 
         pid = get_active_profile()
+        _require_manage_for_profile(request, pid)
         authorization = authorize_route_mutation(
             request,
             operation="update",
@@ -2289,10 +2333,10 @@ async def run_community_detection(request: Request):
 @router.get("/v33/overview")
 async def v33_overview(request: Request, profile: str = ""):
     """Get SLM 3.3 feature overview -- all new capabilities at a glance."""
+    pid = _resolve_profile(request, profile)
     try:
         from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
         import sqlite3 as _sqlite3
-        pid = profile or get_active_profile()
 
         overview: dict = {
             "version": "3.3",

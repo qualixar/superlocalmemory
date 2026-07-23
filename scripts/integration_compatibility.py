@@ -74,11 +74,17 @@ def _portable_config(repo: Path, client_id: str, work: Path) -> str:
 
     descriptor = IDE_MATRIX[client_id]
     home = work / client_id
-    first = connect_ide(client_id, home=home)
-    second = connect_ide(client_id, home=home)
+    connect_kwargs: dict[str, Any] = {"home": home}
+    if client_id == "vscode-copilot":
+        # VS Code/Copilot owns project-local .vscode and .github surfaces;
+        # generating them in a synthetic home would advertise an unsupported
+        # global installation contract.
+        connect_kwargs.update({"here": True, "project": home})
+    first = connect_ide(client_id, **connect_kwargs)
+    second = connect_ide(client_id, **connect_kwargs)
     if first["error"] or second["error"] or second["mcp_config"] != "unchanged":
         raise AssertionError(f"non-idempotent generated config: {first!r}, {second!r}")
-    path = home / descriptor.mcp_path_global
+    path = Path(first["mcp_path"])
     data = _parse_config(path, descriptor.fmt)
     block = _extract_slm_block(data, descriptor)
     if block.get("command") != "slm" or block.get("args") != ["mcp"]:

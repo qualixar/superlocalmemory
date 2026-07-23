@@ -128,20 +128,25 @@ def _load_injection_config():
 
 
 def estimate_tokens(text: str) -> int:
-    """chars/4 heuristic. Optional tiktoken if installed (best-effort).
+    """Estimate context tokens without loading native code by default.
 
-    tiktoken is an optional dependency (pip install superlocalmemory[injection]).
-    Falls back to chars/4 if tiktoken is not installed or raises any error.
-    All exception types (MemoryError, SystemError etc.) are subclasses of
-    Exception in Python ≥ 3.11, so the bare except Exception covers all paths.
+    The stable default is the deterministic ``chars / 4`` heuristic.  Loading
+    the optional native ``tiktoken`` extension in a long-lived daemon that also
+    hosts torch/scipy workers can terminate the whole process on a native fault;
+    Python exception handling cannot recover from SIGBUS/SIGSEGV.  Users who
+    explicitly need exact OpenAI token counts can opt in with
+    ``SLM_INJECTION_EXACT_TOKENS=1``.
     """
     if not text:
         return 0
+    heuristic = max(1, len(text) // 4)
+    if os.environ.get("SLM_INJECTION_EXACT_TOKENS", "0") != "1":
+        return heuristic
     try:
         import tiktoken
         return len(tiktoken.get_encoding("cl100k_base").encode(text))
     except Exception:
-        return max(1, len(text) // 4)
+        return heuristic
 
 
 def resolve_budget(mode: str, cfg) -> int:

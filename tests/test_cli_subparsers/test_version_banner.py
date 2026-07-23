@@ -9,9 +9,13 @@ End-user contract:
 """
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 
 from superlocalmemory.cli.version_banner import (
+    _banner,
     check_and_emit_upgrade_banner,
     read_marker_version,
     write_marker_version,
@@ -39,6 +43,16 @@ class TestMarkerFile:
 
 
 class TestUpgradeBannerEmission:
+    def test_v381_banner_describes_actual_stability_fixes(self):
+        banner = _banner(prior="3.8.0", current="3.8.1")
+
+        assert "Large existing databases no longer delay daemon readiness" in banner
+        assert "Failed enrichment retries stop after ten automatic attempts" in banner
+        assert "Dashboard panes stay mounted between navigation changes" in banner
+        assert "Local model workers stay warm for a 30-minute working session" in banner
+        assert "Multi-IDE MCP processes now share a worker" not in banner
+        assert "Silent data migration complete" not in banner
+
     def test_fresh_install_no_banner(self, slm_home, capsys):
         """No prior marker AND no existing memory.db = fresh install.
         Setup wizard owns the welcome; this helper stays silent."""
@@ -106,7 +120,6 @@ class TestSecurityHardening:
     """v3.4.26 Stage 9 security fixes."""
 
     def test_marker_written_at_0600_perms(self, slm_home):
-        import os, sys
         if sys.platform == "win32":
             pytest.skip("POSIX perm check")
         write_marker_version("3.4.26")
@@ -114,7 +127,6 @@ class TestSecurityHardening:
         assert mode == 0o600, f"marker mode {oct(mode)} leaks upgrade timing"
 
     def test_read_refuses_symlinked_marker(self, slm_home, tmp_path):
-        import os, sys
         if sys.platform == "win32":
             pytest.skip("symlink perms differ on Windows")
         target = tmp_path / "elsewhere.txt"

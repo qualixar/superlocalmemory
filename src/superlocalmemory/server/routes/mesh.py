@@ -11,14 +11,17 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
-import asyncio
 import re
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/mesh", tags=["mesh"])
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_STALE_AFTER = timedelta(minutes=5)
+_EXPIRE_AFTER = timedelta(minutes=30)
 
 
 # -- Request models --
@@ -89,6 +92,7 @@ def _get_broker(request: Request):
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "::1", "localhost"):
             import hmac
+
             from superlocalmemory.core.security_primitives import verify_install_token
 
             # Path 1: install token — dashboard/browser callers hold this and
@@ -154,7 +158,7 @@ def _reject_secret_state(key: str, value: str) -> None:
 # -- Routes --
 
 @router.post("/register")
-async def register(req: RegisterRequest, request: Request):
+def register(req: RegisterRequest, request: Request):
     broker = _get_broker(request)
     if not req.session_id:
         raise HTTPException(400, detail="session_id required")
@@ -165,7 +169,7 @@ async def register(req: RegisterRequest, request: Request):
 
 
 @router.post("/deregister")
-async def deregister(req: DeregisterRequest, request: Request):
+def deregister(req: DeregisterRequest, request: Request):
     broker = _get_broker(request)
     result = broker.deregister_peer(req.peer_id, profile_id=_active_profile())
     if not result.get("ok"):
@@ -185,7 +189,8 @@ def _peer_activity_counts(request: Request, session_ids: list[str]) -> dict:
         return {}
     try:
         from superlocalmemory.server.routes.helpers import (
-            get_engine_lazy, get_active_profile,
+            get_active_profile,
+            get_engine_lazy,
         )
         engine = get_engine_lazy(request.app.state)
         if engine is None:
@@ -216,21 +221,102 @@ def _peer_activity_counts(request: Request, session_ids: list[str]) -> dict:
         return {}
 
 
+def _parse_heartbeat(value: object) -> datetime | None:
+    """Parse a stored heartbeat as UTC without trusting malformed values."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _mesh_read_model(records: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Return bounded remote peers and local sessions with read-time liveness.
+
+    The broker persists local agent sessions in ``mesh_peers`` for messaging.
+    That storage detail must not make them look like remote mesh neighbours in
+    the dashboard. Classification is read-only so an ordinary dashboard GET
+    neither mutates a live database nor waits for the five-minute cleanup loop.
+    """
+    now = datetime.now(timezone.utc)
+    remote: list[dict] = []
+    local: list[dict] = []
+    for record in records:
+        heartbeat = _parse_heartbeat(record.get("last_heartbeat"))
+        if heartbeat is None:
+            continue
+        age = now - heartbeat
+        if age >= _EXPIRE_AFTER:
+            continue
+        stale_at = heartbeat + _STALE_AFTER
+        expires_at = heartbeat + _EXPIRE_AFTER
+        status = "active" if age < _STALE_AFTER else "stale"
+        normalized = {
+            **record,
+            "status": status,
+            "stale_at": stale_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+        if str(record.get("host") or "").lower() in _LOOPBACK_HOSTS:
+            local.append(normalized)
+        else:
+            remote.append(normalized)
+    return remote, local
+
+
+def _mesh_counts(remote: list[dict], local: list[dict]) -> dict:
+    """Expose active counts separately while retaining the legacy total key."""
+    active_remote = sum(peer["status"] == "active" for peer in remote)
+    active_local = sum(session["status"] == "active" for session in local)
+    return {
+        "peer_count": active_remote + active_local,
+        "active_peer_count": active_remote + active_local,
+        "remote_peer_count": active_remote,
+        "local_session_count": active_local,
+        "stale_peer_count": sum(peer["status"] == "stale" for peer in remote),
+        "stale_local_session_count": sum(session["status"] == "stale" for session in local),
+    }
+
+
 @router.get("/peers")
-async def peers(request: Request):
+def peers(request: Request, view: str = "all"):
     broker = _get_broker(request)
-    peer_list = broker.list_all_peers(_active_profile())
+    if view not in {"all", "remote", "local"}:
+        raise HTTPException(422, detail="view must be all, remote, or local")
+    remote_peers, local_sessions = _mesh_read_model(
+        broker.list_all_peers(_active_profile()),
+    )
+    peer_list = (
+        remote_peers if view == "remote" else
+        local_sessions if view == "local" else
+        [*remote_peers, *local_sessions]
+    )
     session_ids = [p.get("session_id") for p in peer_list if p.get("session_id")]
     counts = _peer_activity_counts(request, session_ids)
+    enriched = []
     for p in peer_list:
         c = counts.get(p.get("session_id"), {})
-        p["tool_count"] = c.get("tool_count", 0)
-        p["memory_count"] = c.get("memory_count", 0)
-    return {"peers": peer_list}
+        enriched.append({
+            **p,
+            "tool_count": c.get("tool_count", 0),
+            "memory_count": c.get("memory_count", 0),
+        })
+    return {
+        "peers": enriched,
+        "remote_peers": remote_peers,
+        "local_sessions": local_sessions,
+        "view": view,
+        **_mesh_counts(remote_peers, local_sessions),
+    }
 
 
 @router.post("/heartbeat")
-async def heartbeat(req: HeartbeatRequest, request: Request):
+def heartbeat(req: HeartbeatRequest, request: Request):
+    """Update peer liveness without blocking the daemon's async event loop."""
     broker = _get_broker(request)
     result = broker.heartbeat(req.peer_id, profile_id=_active_profile())
     if not result.get("ok"):
@@ -239,7 +325,7 @@ async def heartbeat(req: HeartbeatRequest, request: Request):
 
 
 @router.post("/summary")
-async def summary(req: SummaryRequest, request: Request):
+def summary(req: SummaryRequest, request: Request):
     broker = _get_broker(request)
     result = broker.update_summary(req.peer_id, req.summary,
                                    profile_id=_active_profile())
@@ -249,21 +335,17 @@ async def summary(req: SummaryRequest, request: Request):
 
 
 @router.post("/send")
-async def send(req: SendRequest, request: Request):
+def send(req: SendRequest, request: Request):
     broker = _get_broker(request)
     to_target = req.to_peer or req.to  # v3.4.6: accept both field names
     if not to_target:
         raise HTTPException(400, detail="'to' or 'to_peer' required")
-    # Resolve the tenant on the event loop (the request ContextVar is set here);
-    # a worker thread would not inherit it.
     profile = _active_profile()
-    # send_message may make a blocking httpx call (up to 10s) when delivering
-    # to a remote peer. Offload to a worker thread so a slow/dead peer network
-    # never stalls the daemon event loop for all other users. The broker opens
-    # a fresh SQLite connection per call, so this is thread-safe.
-    result = await asyncio.to_thread(
-        broker.send_message, req.from_peer, to_target, req.content,
-        req.type, "", profile,
+    # This sync FastAPI route already runs in the worker thread pool, so the
+    # broker's SQLite retries and optional remote HTTP delivery cannot block
+    # the daemon event loop.
+    result = broker.send_message(
+        req.from_peer, to_target, req.content, req.type, "", profile,
     )
     if not result.get("ok"):
         status = 413 if "too large" in result.get("error", "") else 404
@@ -272,21 +354,21 @@ async def send(req: SendRequest, request: Request):
 
 
 @router.get("/inbox/{peer_id}")
-async def inbox(peer_id: str, request: Request, project_path: str = ""):
+def inbox(peer_id: str, request: Request, project_path: str = ""):
     broker = _get_broker(request)
     return {"messages": broker.get_inbox(peer_id, project_path,
                                          profile_id=_active_profile())}
 
 
 @router.post("/inbox/{peer_id}/read")
-async def mark_read(peer_id: str, req: ReadRequest, request: Request):
+def mark_read(peer_id: str, req: ReadRequest, request: Request):
     broker = _get_broker(request)
     return broker.mark_read(peer_id, req.message_ids,
                             profile_id=_active_profile())
 
 
 @router.get("/pending/{peer_id}")
-async def pending(peer_id: str, request: Request, project_path: str = ""):
+def pending(peer_id: str, request: Request, project_path: str = ""):
     """Get pending broadcast/project messages for this peer."""
     broker = _get_broker(request)
     messages = broker.get_pending(peer_id, project_path,
@@ -295,13 +377,13 @@ async def pending(peer_id: str, request: Request, project_path: str = ""):
 
 
 @router.get("/state")
-async def state_all(request: Request):
+def state_all(request: Request):
     broker = _get_broker(request)
     return {"state": broker.get_state(profile_id=_active_profile())}
 
 
 @router.post("/state")
-async def state_set(req: StateSetRequest, request: Request):
+def state_set(req: StateSetRequest, request: Request):
     broker = _get_broker(request)
     if not req.key:
         raise HTTPException(400, detail="key required")
@@ -311,7 +393,7 @@ async def state_set(req: StateSetRequest, request: Request):
 
 
 @router.get("/state/{key}")
-async def state_get(key: str, request: Request):
+def state_get(key: str, request: Request):
     broker = _get_broker(request)
     result = broker.get_state_key(key, profile_id=_active_profile())
     if result is None:
@@ -320,7 +402,7 @@ async def state_get(key: str, request: Request):
 
 
 @router.post("/lock")
-async def lock(req: LockRequest, request: Request):
+def lock(req: LockRequest, request: Request):
     broker = _get_broker(request)
     if not req.file_path or not req.locked_by:
         raise HTTPException(400, detail="file_path and locked_by required")
@@ -331,12 +413,19 @@ async def lock(req: LockRequest, request: Request):
 
 
 @router.get("/events")
-async def events(request: Request):
+def events(request: Request):
     broker = _get_broker(request)
     return {"events": broker.get_events(profile_id=_active_profile())}
 
 
 @router.get("/status")
-async def status(request: Request):
+def status(request: Request):
     broker = _get_broker(request)
-    return broker.get_status(profile_id=_active_profile())
+    broker_status = broker.get_status(profile_id=_active_profile())
+    remote_peers, local_sessions = _mesh_read_model(
+        broker.list_all_peers(_active_profile()),
+    )
+    return {
+        **broker_status,
+        **_mesh_counts(remote_peers, local_sessions),
+    }

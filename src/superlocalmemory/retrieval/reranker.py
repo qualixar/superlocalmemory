@@ -25,9 +25,8 @@ import sys
 import threading
 import time
 import weakref
-from typing import Any
-
 from pathlib import Path
+from typing import Any
 
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.storage.models import AtomicFact
@@ -57,9 +56,9 @@ _live_rerankers: set[weakref.ref] = set()
 
 logger = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT_SECONDS = 300  # V3.4.37: 5 min (was 30) — balance cold-start vs RAM.
+_IDLE_TIMEOUT_SECONDS = 1800  # V3.8.1: keep interactive sessions warm.
 # V3.3.12: Configurable via SLM_RERANKER_IDLE_TIMEOUT env var.
-# V3.4.19: Bumped from 120 → 1800 in lock-step with the embedding worker.
+# Low-RAM installations can retain aggressive recycling through the override.
 # Set ``SLM_RERANKER_IDLE_TIMEOUT=120`` + ``slm restart`` to revert.
 _IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_RERANKER_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
 _SUBPROCESS_RESPONSE_TIMEOUT = 15  # v3.4.52: 15s (was 180s). Long timeout blocked the

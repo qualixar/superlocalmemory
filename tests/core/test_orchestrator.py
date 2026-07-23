@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-import pytest
 import sqlite3
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from superlocalmemory.core.backend_orchestrator import (
     BackendOrchestrator,
@@ -97,6 +98,20 @@ def orch():
 class TestLifecycle:
     def test_orchestrator_singleton(self, orch):
         assert get_orchestrator() is orch
+
+    def test_daemon_start_defers_tier_rebalance_to_maintenance_scheduler(self, orch):
+        """Startup readiness never waits on a full-database maintenance pass."""
+        with (
+            patch(
+                "superlocalmemory.core.tier_manager.evaluate_tiers",
+                return_value={"total_evaluated": 12_016},
+            ) as evaluate,
+            patch.object(orch, "_recover_interrupted_scale_promotion"),
+        ):
+            orch.on_daemon_start()
+
+        assert orch._tiers is evaluate
+        evaluate.assert_not_called()
 
     def test_daemon_start_no_backends(self, orch):
         """Daemon starts without CozoDB or LanceDB installed."""

@@ -127,15 +127,20 @@
     typeFilter: 'all',
     search:    '',
     selected:  null, // entity name
+    requestSeq: 0,
   };
+  var _searchTimer = null;
 
   // ── Main entry ─────────────────────────────────────────────────────────────
 
   function render(container) {
     if (!container) return;
+    clearTimeout(_searchTimer);
     _injectCSS();
     var id = 'od-ent-' + Math.random().toString(36).slice(2, 8);
-    _st = Object.assign({}, _st, { rootId: id, page: 0, typeFilter: 'all', selected: null });
+    _st = Object.assign({}, _st, {
+      rootId: id, page: 0, typeFilter: 'all', search: '', selected: null, requestSeq: 0,
+    });
     container.innerHTML = _scaffold(id);
     _wire(container, id);
     _loadList(id);
@@ -231,6 +236,10 @@
   function _loadList(id) {
     var offset = _st.page * _st.pageSize;
     var url = '/api/entity/list?limit=' + _st.pageSize + '&offset=' + offset;
+    if (_st.typeFilter !== 'all') url += '&type=' + encodeURIComponent(_st.typeFilter);
+    if (_st.search) url += '&search=' + encodeURIComponent(_st.search);
+    var requestSeq = _st.requestSeq + 1;
+    _st = Object.assign({}, _st, { requestSeq: requestSeq });
     var listEl = document.getElementById(id + '-list');
     if (listEl) {
       listEl.innerHTML = '<div style="padding:40px;text-align:center;' +
@@ -243,6 +252,7 @@
         return r.json();
       })
       .then(function (d) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         _st = Object.assign({}, _st, {
           entities: d.entities || [],
           total: d.total || 0,
@@ -255,6 +265,7 @@
         }
       })
       .catch(function (err) {
+        if (_st.rootId !== id || _st.requestSeq !== requestSeq) return;
         var el = document.getElementById(id + '-list');
         if (el) {
           el.innerHTML = '<div style="padding:24px;text-align:center;' +
@@ -264,21 +275,10 @@
   }
 
   function _renderList(id) {
-    var q      = _st.search.toLowerCase();
-    var tf     = _st.typeFilter;
-    var all    = _st.entities;
-
-    var filtered = all.filter(function (e) {
-      var typeOk = tf === 'all' || e.type === tf;
-      var searchOk = !q ||
-        (e.name || '').toLowerCase().indexOf(q) >= 0 ||
-        (e.type || '').toLowerCase().indexOf(q) >= 0 ||
-        (e.summary_preview || '').toLowerCase().indexOf(q) >= 0;
-      return typeOk && searchOk;
-    });
+    var filtered = _st.entities;
 
     var cntEl = document.getElementById(id + '-count');
-    if (cntEl) cntEl.textContent = filtered.length + ' of ' + _st.total.toLocaleString();
+    if (cntEl) cntEl.textContent = _st.total.toLocaleString();
 
     var listEl = document.getElementById(id + '-list');
     if (!listEl) return;
@@ -286,7 +286,7 @@
     if (filtered.length === 0) {
       listEl.innerHTML = '<div style="padding:40px;text-align:center;' +
         'color:var(--fg-2);font-size:13px">' +
-        (q || tf !== 'all' ? 'No entities match this filter.' :
+        (_st.search || _st.typeFilter !== 'all' ? 'No entities match this filter.' :
           'No entities found. Entity extraction runs during consolidation.') +
         '</div>';
       return;
@@ -521,12 +521,9 @@
       var act = el.dataset.odAct;
 
       if (act === 'type-filter') {
-        _st = Object.assign({}, _st, { typeFilter: el.dataset.type, search: '' });
-        // Clear the search input DOM value so it stays in sync with state
-        var searchEl = document.getElementById(id + '-search');
-        if (searchEl) searchEl.value = '';
+        _st = Object.assign({}, _st, { typeFilter: el.dataset.type, page: 0 });
         _refreshTypeChips(id, el.dataset.type);
-        _renderList(id);
+        _loadList(id);
         return;
       }
       if (act === 'select-entity') {
@@ -546,8 +543,11 @@
 
     container.addEventListener('input', function (e) {
       if (e.target.dataset.odAct === 'ent-search') {
-        _st = Object.assign({}, _st, { search: e.target.value.trim() });
-        _renderList(id);
+        _st = Object.assign({}, _st, { search: e.target.value.trim(), page: 0 });
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(function () {
+          if (_st.rootId === id) _loadList(id);
+        }, 250);
       }
     });
   }

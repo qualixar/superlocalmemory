@@ -13,7 +13,7 @@ MASTER-PLAN-V5-ADDENDUM.md §1.11 + M-C-19 + T-H-08.
 
 Also verifies destructive operations (delete_memory, forget) are marked
 `destructiveHint=True` so clients can require confirmation, and
-idempotent operations (remember, update_memory) are marked
+idempotent operations (currently update_memory) are marked
 `idempotentHint=True` so clients can retry safely.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
@@ -56,11 +56,12 @@ DESTRUCTIVE_TOOLS: set[str] = {
 
 # Tools that can be safely retried — same input produces same outcome.
 IDEMPOTENT_TOOLS: set[str] = {
-    # content_hash dedup on pending.db (Invariant 6)
-    "remember",
     # same update applied twice = same state
     "update_memory",
-    # reinforce/contradict are idempotent per assertion_id
+}
+
+NON_IDEMPOTENT_MUTATIONS: set[str] = {
+    "remember",
     "reinforce_assertion",
     "contradict_assertion",
 }
@@ -183,9 +184,7 @@ def test_destructive_tools_have_destructiveHint_true(tools: dict[str, object]) -
 def test_idempotent_tools_have_idempotentHint_true(tools: dict[str, object]) -> None:
     """Idempotent tools must be marked so clients can retry safely.
 
-    remember: content_hash dedup (Invariant 6)
     update_memory: same update = same state
-    reinforce/contradict: same assertion_id operation is idempotent
     """
     wrong: list[str] = []
     for name in sorted(IDEMPOTENT_TOOLS):
@@ -199,6 +198,21 @@ def test_idempotent_tools_have_idempotentHint_true(tools: dict[str, object]) -> 
         "These idempotent tools MUST have idempotentHint=True: "
         f"{wrong}"
     )
+
+
+def test_non_idempotent_mutations_do_not_claim_safe_retry(
+    tools: dict[str, object],
+) -> None:
+    """Repeated state-changing calls must not advertise idempotency."""
+    liars: list[str] = []
+    for name in sorted(NON_IDEMPOTENT_MUTATIONS):
+        tool = tools.get(name)
+        if tool is None:
+            continue
+        ann = getattr(tool, "annotations", None)
+        if ann is not None and getattr(ann, "idempotentHint", None) is True:
+            liars.append(name)
+    assert not liars, f"These tools falsely claim idempotency: {liars}"
 
 
 def test_read_only_count_at_least_13(tools: dict[str, object]) -> None:

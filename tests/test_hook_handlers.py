@@ -302,6 +302,27 @@ class TestHookStart:
         assert "memory 1" in out
 
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.Popen")
+    def test_mcp_initialize_reports_installed_package_version(
+        self, mock_popen
+    ):
+        from superlocalmemory import __version__
+        from superlocalmemory.hooks import hook_handlers
+
+        stdin = MagicMock()
+        stdout = MagicMock()
+        stdout.readline.side_effect = ["{}\n", "{}\n"]
+        mock_popen.return_value.stdin = stdin
+        mock_popen.return_value.stdout = stdout
+
+        hook_handlers._codex_mcp_session_init("/tmp/project", {"prompt": "test"})
+
+        initialize = json.loads(stdin.write.call_args_list[0].args[0])
+        assert initialize["params"]["clientInfo"] == {
+            "name": "superlocalmemory-codex-hook",
+            "version": __version__,
+        }
+
+    @patch("superlocalmemory.hooks.hook_handlers.subprocess.Popen")
     @patch("superlocalmemory.hooks.hook_handlers.subprocess.run")
     def test_prints_advisory_session_init(self, mock_run, mock_popen, capsys):
         mock_run.return_value = MagicMock(stdout="", returncode=0)

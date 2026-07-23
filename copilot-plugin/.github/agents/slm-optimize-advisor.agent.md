@@ -9,7 +9,7 @@ description: >
 tools: slm_compress, slm_retrieve, slm_cache_set, slm_cache_get, slm_optimize_stats, Read, Bash
 model: inherit
 target: vscode
-version: "3.8.0"
+version: "3.8.1"
 ---
 
 # Role
@@ -43,4 +43,4 @@ slm-compress · slm-cache · slm-status · slm-profile
 # What NOT to do
 Never compress code-for-edit/JSON-to-parse/<500 chars; never store secrets/ccr_ids; never let optimize failure block/alter the task; never claim a specific savings %; never carry ccr_ids across profile switches.
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later

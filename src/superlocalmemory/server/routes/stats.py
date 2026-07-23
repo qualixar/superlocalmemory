@@ -4,19 +4,76 @@
 """SuperLocalMemory V3 - Stats Routes
  - AGPL-3.0-or-later
 
-Routes: /api/stats, /api/timeline, /api/patterns
+Routes: /api/stats, /api/timeline
 """
-import json
 import logging
-from collections import defaultdict
+import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH, MEMORY_DIR
+from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH
 
 logger = logging.getLogger("superlocalmemory.routes.stats")
 router = APIRouter()
+
+
+def _query_ingestion_sources(cursor, profile_id: str) -> list[dict]:
+    """Query profile-scoped ingestion provenance without double-counting facts."""
+    cursor.execute(
+        """
+        SELECT COALESCE(NULLIF(TRIM(source_type), ''), 'unknown') AS source_type,
+               COUNT(DISTINCT fact_id) AS count
+        FROM provenance
+        WHERE profile_id = ?
+        GROUP BY COALESCE(NULLIF(TRIM(source_type), ''), 'unknown')
+        ORDER BY count DESC, source_type ASC
+        """,
+        (profile_id,),
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def _load_ingestion_sources_with_status(
+    cursor, profile_id: str,
+) -> tuple[list[dict], dict]:
+    """Return provenance plus a truthful availability state.
+
+    Older databases may not have the provenance table.  In that case the
+    dashboard must report an empty/unknown state rather than inventing a split.
+    Lock or I/O failures are distinct from a legitimate legacy-empty state.
+    """
+    try:
+        return _query_ingestion_sources(cursor, profile_id), {
+            "available": True,
+            "state": "recorded",
+            "source": "memory.db:provenance",
+        }
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return [], {
+                "available": True,
+                "state": "legacy_not_recorded",
+                "source": "memory.db:provenance",
+            }
+        logger.warning("provenance metrics temporarily unavailable: %s", exc)
+        return [], {
+            "available": False,
+            "state": "temporarily_unavailable",
+            "source": "memory.db:provenance",
+        }
+    except sqlite3.Error as exc:
+        logger.warning("provenance metrics unavailable: %s", exc)
+        return [], {
+            "available": False,
+            "state": "temporarily_unavailable",
+            "source": "memory.db:provenance",
+        }
+
+
+def _load_ingestion_sources(cursor, profile_id: str) -> list[dict]:
+    """Compatibility helper returning only the provenance rows."""
+    return _load_ingestion_sources_with_status(cursor, profile_id)[0]
 
 
 def _internal_error(detail: str = "Internal server error") -> HTTPException:
@@ -26,7 +83,7 @@ def _internal_error(detail: str = "Internal server error") -> HTTPException:
 
 
 @router.get("/api/stats")
-async def get_stats():
+def get_stats():
     """Get comprehensive system statistics."""
     try:
         conn = get_db_connection()
@@ -205,6 +262,9 @@ async def get_stats():
             importance_dist = cursor.fetchall()
 
         db_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+        ingestion_sources, ingestion_sources_status = (
+            _load_ingestion_sources_with_status(cursor, active_profile)
+        )
 
         if total_graph_nodes > 1:
             max_edges = (total_graph_nodes * (total_graph_nodes - 1)) / 2
@@ -241,6 +301,8 @@ async def get_stats():
                     if total_graph_nodes > 0 else 0
                 ),
             },
+            "ingestion_sources": ingestion_sources,
+            "ingestion_sources_status": ingestion_sources_status,
         }
 
     except Exception:
@@ -248,11 +310,12 @@ async def get_stats():
 
 
 @router.get("/api/timeline")
-async def get_timeline(
+def get_timeline(
     days: int = Query(30, ge=1, le=365),
     group_by: str = Query("day", pattern="^(day|week|month)$"),
+    include_categories: bool = Query(True),
 ):
-    """Get temporal view of memory creation with flexible grouping."""
+    """Get temporal memory creation; dashboard callers may skip category scans."""
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
@@ -286,22 +349,29 @@ async def get_timeline(
         """, (days, active_profile))
         timeline = cursor.fetchall()
 
-        cursor.execute(f"""
-            SELECT {date_group} as period, {cat_col} as category, COUNT(*) as count
-            FROM {table}
-            WHERE created_at >= datetime('now', '-' || ? || ' days')
-              AND {cat_col} IS NOT NULL AND {profile_col} = ?
-            GROUP BY {date_group}, {cat_col} ORDER BY period DESC, count DESC
-        """, (days, active_profile))
-        category_trend = cursor.fetchall()
+        if include_categories:
+            cursor.execute(f"""
+                SELECT {date_group} as period, {cat_col} as category, COUNT(*) as count
+                FROM {table}
+                WHERE created_at >= datetime('now', '-' || ? || ' days')
+                  AND {cat_col} IS NOT NULL AND {profile_col} = ?
+                GROUP BY {date_group}, {cat_col} ORDER BY period DESC, count DESC
+            """, (days, active_profile))
+            category_trend = cursor.fetchall()
 
-        cursor.execute(f"""
-            SELECT COUNT(*) as total_memories,
-                   COUNT(DISTINCT {cat_col}) as categories_used
-            FROM {table}
-            WHERE created_at >= datetime('now', '-' || ? || ' days') AND {profile_col} = ?
-        """, (days, active_profile))
-        period_stats = cursor.fetchone()
+            cursor.execute(f"""
+                SELECT COUNT(*) as total_memories,
+                       COUNT(DISTINCT {cat_col}) as categories_used
+                FROM {table}
+                WHERE created_at >= datetime('now', '-' || ? || ' days') AND {profile_col} = ?
+            """, (days, active_profile))
+            period_stats = cursor.fetchone()
+        else:
+            category_trend = []
+            period_stats = {
+                "total_memories": sum(int(row["count"] or 0) for row in timeline),
+                "categories_used": None,
+            }
 
         conn.close()
 
@@ -313,135 +383,3 @@ async def get_timeline(
 
     except Exception:
         raise _internal_error("Timeline error")
-
-
-@router.get("/api/patterns")
-async def get_patterns():
-    """Get learned patterns."""
-    try:
-        conn = get_db_connection()
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        active_profile = get_active_profile()
-
-        # Check for V3 learning tables or V2 identity_patterns
-        patterns = []
-        table_name = None
-        for candidate in ('learned_patterns', 'identity_patterns'):
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (candidate,),
-            )
-            if cursor.fetchone():
-                table_name = candidate
-                break
-
-        if not table_name:
-            conn.close()
-            # Fall through to V3.1 behavioral pattern store
-            try:
-                from superlocalmemory.learning.behavioral import BehavioralPatternStore
-                store = BehavioralPatternStore(str(MEMORY_DIR / "learning.db"))
-                raw = store.get_patterns(profile_id=active_profile)
-                # v3.4.7: Map all pattern types to frontend categories
-                type_map = {
-                    "tech_preference": "preference",
-                    "interest": "preference",
-                    "entity_preferences": "preference",
-                    "style": "style",
-                    "fact_type_distribution": "style",
-                    "knowledge_structure": "style",
-                    "terminology": "terminology",
-                    "temporal": "workflow",
-                    "session_activity": "workflow",
-                    "workflow": "workflow",
-                    "co_retrieval_clusters": "workflow",
-                    "channel_performance": "performance",
-                }
-                grouped = defaultdict(list)
-                for p in raw:
-                    meta = p.get("metadata", {})
-                    data = meta  # metadata IS the data dict
-                    frontend_key = type_map.get(p.get("pattern_type", ""), "preference")
-                    # Extract human-readable value from data fields
-                    readable_value = (
-                        data.get("value")
-                        or data.get("topic")
-                        or data.get("pattern_key", "")
-                        or p.get("pattern_key", "")
-                    )
-                    readable_key = (
-                        data.get("pattern_key")
-                        or data.get("key")
-                        or p.get("pattern_key", "")
-                    )
-                    grouped[frontend_key].append({
-                        "pattern_type": p.get("pattern_type", ""),
-                        "key": readable_key,
-                        "value": readable_value,
-                        "confidence": p.get("confidence", 0),
-                        "evidence_count": data.get("evidence", p.get("evidence_count", 0)),
-                    })
-                all_patterns = [p for ps in grouped.values() for p in ps]
-                confs = [p["confidence"] for p in all_patterns if p.get("confidence")]
-                return {
-                    "patterns": dict(grouped),
-                    "total_patterns": len(all_patterns),
-                    "pattern_types": list(grouped.keys()),
-                    "confidence_stats": {
-                        "avg": sum(confs) / len(confs) if confs else 0,
-                        "min": min(confs) if confs else 0,
-                        "max": max(confs) if confs else 0,
-                    },
-                }
-            except Exception:
-                return {
-                    "patterns": {}, "total_patterns": 0, "pattern_types": [],
-                    "message": "Pattern learning not initialized.",
-                }
-
-        if table_name == 'identity_patterns':
-            cursor.execute("""
-                SELECT pattern_type, key, value, confidence, evidence_count,
-                       updated_at as last_updated
-                FROM identity_patterns WHERE profile = ?
-                ORDER BY confidence DESC, evidence_count DESC
-            """, (active_profile,))
-        else:
-            cursor.execute("""
-                SELECT pattern_type, key, value, confidence, evidence_count,
-                       last_updated
-                FROM learned_patterns WHERE is_active = 1
-                ORDER BY confidence DESC, evidence_count DESC
-            """)
-
-        patterns = cursor.fetchall()
-
-        for pattern in patterns:
-            if pattern.get('value'):
-                try:
-                    pattern['value'] = json.loads(pattern['value'])
-                except Exception:
-                    pass
-
-        grouped = defaultdict(list)
-        for pattern in patterns:
-            grouped[pattern['pattern_type']].append(pattern)
-
-        confidences = [p['confidence'] for p in patterns if p.get('confidence')]
-        confidence_stats = {
-            "avg": sum(confidences) / len(confidences) if confidences else 0,
-            "min": min(confidences) if confidences else 0,
-            "max": max(confidences) if confidences else 0,
-        }
-
-        conn.close()
-
-        return {
-            "patterns": dict(grouped), "total_patterns": len(patterns),
-            "pattern_types": list(grouped.keys()), "confidence_stats": confidence_stats,
-        }
-
-    except Exception:
-        logger.exception("patterns route error")
-        return {"patterns": {}, "total_patterns": 0, "error": "Internal server error"}

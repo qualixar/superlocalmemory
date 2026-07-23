@@ -903,13 +903,47 @@ def _action_outcomes_count(lrn_db: LearningDatabase,
         return 0
 
 
+def _compute_action_outcomes_preview(profile_id: str) -> dict:
+    """Count profile-scoped action outcomes from their canonical database."""
+    empty = {
+        "action_outcomes_rows": 0,
+        "source": "memory.db:action_outcomes",
+        "is_real": True,
+    }
+    db_path = _memory_db_path()
+    if not db_path.exists():
+        return empty
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM action_outcomes WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return empty
+    return {**empty, "action_outcomes_rows": int(row[0] or 0) if row else 0}
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 
+def _authorized_profile(request: Request, profile_id: str | None) -> str:
+    """Resolve and authorize the exact Brain profile requested by the caller."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    effective_profile = profile_id or get_active_profile()
+    require_permission(request, Permission.READ, profile=effective_profile)
+    return effective_profile
+
+
 @router.get("/brain", dependencies=[Depends(require_install_token)])
-async def get_brain(profile_id: str | None = None) -> dict:
+async def get_brain(request: Request, profile_id: str | None = None) -> dict:
     """Unified Brain endpoint — LLD-04 §3.1.
 
     Fan-out: each section is a synchronous SQLite reader. Running them
@@ -926,12 +960,12 @@ async def get_brain(profile_id: str | None = None) -> dict:
 
     # Default to the ACTIVE profile (request runtime truth), never literal
     # "default" — the Brain must reflect whichever profile is active.
-    profile_id = profile_id or get_active_profile()
+    profile_id = _authorized_profile(request, profile_id)
     lrn_db = LearningDatabase(_learning_db_path())
 
     (
         preferences, learning, usage, bandit_snap, cache,
-        cross_platform, outcomes_rows, evolution,
+        cross_platform, outcomes_preview, evolution,
     ) = await asyncio.gather(
         asyncio.to_thread(_compute_preferences, profile_id),
         asyncio.to_thread(_compute_learning_status, profile_id, lrn_db),
@@ -939,7 +973,7 @@ async def get_brain(profile_id: str | None = None) -> dict:
         asyncio.to_thread(_compute_bandit_snapshot, profile_id, lrn_db),
         asyncio.to_thread(_compute_cache_stats),
         asyncio.to_thread(_compute_cross_platform),
-        asyncio.to_thread(_action_outcomes_count, lrn_db, profile_id),
+        asyncio.to_thread(_compute_action_outcomes_preview, profile_id),
         asyncio.to_thread(
             _compute_evolution_timeseries, profile_id, lrn_db,
             days=_EVOLUTION_DEFAULT_DAYS,
@@ -977,11 +1011,11 @@ async def get_brain(profile_id: str | None = None) -> dict:
             "is_real": True, "source": "learning_signals",
             "days": _EVOLUTION_DEFAULT_DAYS, "total_signals": 0, "points": [],
         }),
-        "outcomes_preview": {
-            "action_outcomes_rows":
-                0 if isinstance(outcomes_rows, Exception) else outcomes_rows,
-            "ships_in": "3.4.22",
-        },
+        "outcomes_preview": _ok(outcomes_preview, {
+            "action_outcomes_rows": 0,
+            "source": "memory.db:action_outcomes",
+            "is_real": True,
+        }),
         # S9-defer H-22: live tile data for the Reward / Shadow /
         # Evolution-Cost dashboard tiles. Each block is a honest-empty
         # default when the underlying table is missing (fresh install
@@ -1188,6 +1222,7 @@ def _compute_evolution_cost_preview(profile_id: str) -> dict:
 @router.get("/brain/evolution-timeseries",
             dependencies=[Depends(require_install_token)])
 async def get_brain_evolution_timeseries(
+    request: Request,
     profile_id: str | None = None,
     days: int = _EVOLUTION_DEFAULT_DAYS,
 ) -> dict:
@@ -1198,7 +1233,7 @@ async def get_brain_evolution_timeseries(
     """
     import asyncio
 
-    profile_id = profile_id or get_active_profile()
+    profile_id = _authorized_profile(request, profile_id)
     lrn_db = LearningDatabase(_learning_db_path())
     result = await asyncio.to_thread(
         _compute_evolution_timeseries, profile_id, lrn_db, days=days,
@@ -1214,8 +1249,10 @@ async def get_brain_evolution_timeseries(
 
 @router.get("/learning/stats",
             dependencies=[Depends(require_install_token)])
-async def learning_stats_deprecated(profile_id: str | None = None) -> dict:
-    profile_id = profile_id or get_active_profile()
+async def learning_stats_deprecated(
+    request: Request, profile_id: str | None = None,
+) -> dict:
+    profile_id = _authorized_profile(request, profile_id)
     lrn_db = LearningDatabase(_learning_db_path())
     return {
         "deprecated": True,
@@ -1226,8 +1263,10 @@ async def learning_stats_deprecated(profile_id: str | None = None) -> dict:
 
 @router.get("/patterns",
             dependencies=[Depends(require_install_token)])
-async def patterns_deprecated(profile_id: str | None = None) -> dict:
-    profile_id = profile_id or get_active_profile()
+async def patterns_deprecated(
+    request: Request, profile_id: str | None = None,
+) -> dict:
+    profile_id = _authorized_profile(request, profile_id)
     return {
         "deprecated": True,
         "use_instead": "/api/v3/brain",
@@ -1237,8 +1276,10 @@ async def patterns_deprecated(profile_id: str | None = None) -> dict:
 
 @router.get("/behavioral",
             dependencies=[Depends(require_install_token)])
-async def behavioral_deprecated(profile_id: str | None = None) -> dict:
-    profile_id = profile_id or get_active_profile()
+async def behavioral_deprecated(
+    request: Request, profile_id: str | None = None,
+) -> dict:
+    profile_id = _authorized_profile(request, profile_id)
     return {
         "deprecated": True,
         "use_instead": "/api/v3/brain",

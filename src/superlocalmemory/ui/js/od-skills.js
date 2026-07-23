@@ -10,6 +10,7 @@
 //   GET /api/behavioral/assertions?category=skill_correlation&limit=20 → {assertions[]}
 //   GET /api/behavioral/tool-events?tool_name=Skill&limit=500 → {events[]}
 //
+// POST /api/evolution/config  — called when an engine setting is saved
 // POST /api/evolution/enable  — called when user toggles the master switch ON
 // POST /api/evolution/run     — called when user clicks "Run one evolution cycle"
 //
@@ -27,6 +28,16 @@
   // ======================================================================
   // Fetch
   // ======================================================================
+  var tokenPromise = null;
+  function getToken() {
+    if (!tokenPromise) {
+      tokenPromise = fetch('/internal/token', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (d) { return d.token || ''; });
+    }
+    return tokenPromise;
+  }
+
   function apiFetch(path) {
     return fetch(path, { credentials: 'same-origin' })
       .then(function (r) {
@@ -36,14 +47,16 @@
   }
 
   function apiPost(path, body) {
-    return fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(body || {}),
+    return getToken().then(function (token) {
+      return fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Install-Token': token },
+        credentials: 'same-origin',
+        body: JSON.stringify(body || {}),
+      });
     }).then(function (r) {
-      if (!r.ok) throw new Error(path + ' → ' + r.status);
-      return r.json();
+        if (!r.ok) throw new Error(path + ' → ' + r.status);
+        return r.json();
     });
   }
 
@@ -296,7 +309,7 @@
       return row;
     }
 
-    // Master switch — wired to POST /api/evolution/enable
+    // Master switch — wired to POST /api/evolution/enable|disable
     var sw = EL('button', {
       className: 'switch' + (evolution.enabled ? ' on' : ''),
       type: 'button',
@@ -304,13 +317,7 @@
     sw.setAttribute('aria-label', 'Toggle evolution engine');
     sw.addEventListener('click', function () {
       var enabling = !sw.classList.contains('on');
-      if (!enabling) {
-        // TODO: No /api/evolution/disable endpoint — the HTTP API only exposes enable.
-        // To disable via CLI: slm config set evolution.enabled false
-        window.alert('To disable evolution, run in your terminal:\nslm config set evolution.enabled false');
-        return;
-      }
-      apiPost('/api/evolution/enable', {})
+      apiPost(enabling ? '/api/evolution/enable' : '/api/evolution/disable', {})
         .then(function () { render(container); })
         .catch(function (err) {
           if (window.console) window.console.error('[od-skills] enable evolution:', err.message);
@@ -319,8 +326,13 @@
     });
     cb.appendChild(ctlRow('Enabled', 'Master switch (off by default)', sw));
 
-    cb.appendChild(ctlRow('Backend', 'detection: auto',
-      EL('span', { className: 'mono', text: evolution.backend || 'none' })));
+    var backend = EL('select', { 'aria-label': 'Evolution backend' });
+    ['auto', 'claude', 'ollama', 'anthropic', 'openai'].forEach(function (value) {
+      var option = EL('option', { text: value }); option.value = value;
+      if (value === (cfg.backend_setting || 'auto')) option.selected = true;
+      backend.appendChild(option);
+    });
+    cb.appendChild(ctlRow('Backend', 'detection: auto', backend));
 
     cb.appendChild(ctlRow('Max evolutions / cycle', null,
       EL('span', { className: 'mono', text: String(cfg.max_per_cycle || 3) })));
@@ -333,6 +345,21 @@
 
     cb.appendChild(ctlRow('Confirm model', 'yes/no gate',
       EL('span', { className: 'mono dim', text: cfg.confirm_model || '— (auto)' })));
+
+    var saveBtn = EL('button', { className: 'btn ghost', type: 'button', text: 'Save engine config' });
+    saveBtn.addEventListener('click', function () {
+      saveBtn.setAttribute('disabled', 'disabled');
+      apiPost('/api/evolution/config', { backend: backend.value })
+        .then(function (response) {
+          if (response.ok === false) throw new Error(response.error || 'Configuration rejected');
+          render(container);
+        })
+        .catch(function (err) {
+          saveBtn.removeAttribute('disabled');
+          if (window.console) window.console.error('[od-skills] config:', err.message);
+        });
+    });
+    cb.appendChild(saveBtn);
 
     // Run cycle button — wired to POST /api/evolution/run
     var runBtn = EL('button', {

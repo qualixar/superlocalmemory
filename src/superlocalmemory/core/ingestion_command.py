@@ -24,6 +24,7 @@ from typing import Any, Callable
 from superlocalmemory.storage.database import DatabaseManager
 
 _MATERIALIZATION_LOCKS = tuple(threading.RLock() for _ in range(64))
+_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS = 10
 
 
 def _materialization_lock(operation_id: str) -> threading.RLock:
@@ -49,6 +50,10 @@ class InvalidStateTransition(RuntimeError):
 
 class OperationInProgress(RuntimeError):
     """Another live lease owner is materializing this operation."""
+
+
+class LeaseLost(OperationInProgress):
+    """The materializer no longer owns its durable operation lease."""
 
 
 def _canonical_json(value: Any) -> str:
@@ -284,12 +289,19 @@ class IngestionOperationRepository:
             self._from_row(row)
             for row in self.db.execute(
                 "SELECT * FROM ingestion_operations "
-                "WHERE (state='queryable' AND created_at <= "
+                "WHERE attempt_count < ? AND ("
+                "(state='queryable' AND created_at <= "
                 "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) "
                 "OR (state='failed' AND next_retry_at <= ?) "
-                "OR (state='enriching' AND lease_expires_at <= ?) "
+                "OR (state='enriching' AND lease_expires_at <= ?)) "
                 "ORDER BY created_at, rowid LIMIT ?",
-                (grace_modifier, now, now, max(1, int(limit))),
+                (
+                    _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS,
+                    grace_modifier,
+                    now,
+                    now,
+                    max(1, int(limit)),
+                ),
             )
         ]
 
@@ -415,6 +427,27 @@ class IngestionOperationRepository:
         )
         return operation
 
+    def renew_enriching_lease(
+        self,
+        operation_id: str,
+        *,
+        owner: str,
+        lease_seconds: float,
+    ) -> bool:
+        """Extend a live lease only while the same owner still holds it."""
+        rows = self.db.execute(
+            "UPDATE ingestion_operations SET lease_expires_at=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+            "WHERE operation_id=? AND state='enriching' AND lease_owner=? "
+            "RETURNING operation_id",
+            (
+                time.time() + max(1.0, float(lease_seconds)),
+                operation_id,
+                owner,
+            ),
+        )
+        return bool(rows)
+
     def finish_enriching(
         self,
         operation_id: str,
@@ -469,6 +502,7 @@ class MaterializationResult:
 
     fact_ids: tuple[str, ...]
     derivation_state: dict[str, bool]
+    last_error: str = ""
 
 
 QueryableWriter = Callable[[IngestionRequest, str], list[str]]
@@ -499,6 +533,47 @@ class IngestionCommand:
         self._derivation_version = derivation_version
         self._lease_seconds = max(1.0, float(lease_seconds))
         self._owner = f"ingestion-worker:{uuid.uuid4().hex}"
+
+    def _run_with_lease_heartbeat(
+        self,
+        operation_id: str,
+        callback: Callable[[], Any],
+    ) -> Any:
+        """Run slow work while periodically renewing its owner-bound lease."""
+        stop = threading.Event()
+        lost = threading.Event()
+        interval = min(30.0, max(0.1, self._lease_seconds / 3.0))
+
+        def heartbeat() -> None:
+            while not stop.wait(interval):
+                try:
+                    renewed = self.repository.renew_enriching_lease(
+                        operation_id,
+                        owner=self._owner,
+                        lease_seconds=self._lease_seconds,
+                    )
+                except sqlite3.Error:
+                    continue
+                if not renewed:
+                    lost.set()
+                    return
+
+        thread = threading.Thread(
+            target=heartbeat,
+            name=f"ingestion-lease-heartbeat:{operation_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            result = callback()
+        finally:
+            stop.set()
+            thread.join(timeout=max(1.0, interval * 2))
+        if lost.is_set():
+            raise LeaseLost(
+                f"ingestion lease lost for operation {operation_id}"
+            )
+        return result
 
     def submit(self, request: IngestionRequest) -> IngestionOperation:
         operation, _created = self.submit_with_status(request)
@@ -548,27 +623,41 @@ class IngestionCommand:
         )
         if enriching.state is IngestionState.COMPLETE:
             return enriching
-        if enriching.final_fact_ids:
+        if (
+            enriching.final_fact_ids
+            and all(enriching.derivation_state.values())
+        ):
             return self._project_and_complete(enriching)
         try:
+            # Materialization is a durable saga, not one long SQLite
+            # transaction. Extractors, embedders, and local model calls can
+            # take minutes on a mature installation; keeping a write
+            # transaction open across that work blocks every interactive
+            # remember/update/delete and makes the dashboard appear dead.
+            #
+            # The materializer commits its relational checkpoints in short
+            # database operations. The operation lease and derivation state
+            # remain the recovery boundary, and only the final state-machine
+            # checkpoint is grouped atomically below.
+            materialized = self._run_with_lease_heartbeat(
+                operation_id,
+                lambda: self._materializer(enriching),
+            )
+            if isinstance(materialized, MaterializationResult):
+                fact_ids = tuple(materialized.fact_ids)
+                derivation_state = dict(materialized.derivation_state)
+                materialization_error = materialized.last_error
+            else:
+                fact_ids = tuple(materialized)
+                derivation_state = {"materializer": True}
+                materialization_error = ""
+            if not fact_ids:
+                raise RuntimeError("materialization produced no final facts")
+            incomplete = sorted(
+                name for name, complete in derivation_state.items()
+                if not complete
+            )
             with self.repository.db.transaction():
-                materialized = self._materializer(enriching)
-                if isinstance(materialized, MaterializationResult):
-                    fact_ids = tuple(materialized.fact_ids)
-                    derivation_state = dict(materialized.derivation_state)
-                else:
-                    fact_ids = tuple(materialized)
-                    derivation_state = {"materializer": True}
-                if not fact_ids:
-                    raise RuntimeError("materialization produced no final facts")
-                incomplete = sorted(
-                    name for name, complete in derivation_state.items()
-                    if not complete
-                )
-                if incomplete:
-                    raise RuntimeError(
-                        "incomplete derivation stages: " + ", ".join(incomplete)
-                    )
                 checkpointed = self.repository.checkpoint_enriching(
                     operation_id,
                     final_fact_ids=fact_ids,
@@ -577,6 +666,21 @@ class IngestionCommand:
                     lease_owner=self._owner,
                     lease_seconds=self._lease_seconds,
                 )
+            if materialization_error or incomplete:
+                error = materialization_error or (
+                    "incomplete derivation stages: " + ", ".join(incomplete)
+                )
+                return self.repository.finish_enriching(
+                    operation_id,
+                    owner=self._owner,
+                    target=IngestionState.FAILED,
+                    final_fact_ids=fact_ids,
+                    derivation_version=self._derivation_version,
+                    derivation_state=derivation_state,
+                    last_error=error,
+                )
+        except LeaseLost:
+            raise
         except Exception as exc:
             return self.repository.finish_enriching(
                 operation_id,
@@ -598,10 +702,13 @@ class IngestionCommand:
                 owner=self._owner,
                 lease_seconds=self._lease_seconds,
             )
-            projection_state = (
-                dict(self._projector(operation))
-                if self._projector is not None
-                else {}
+            projection_state = self._run_with_lease_heartbeat(
+                operation.operation_id,
+                lambda: (
+                    dict(self._projector(operation))
+                    if self._projector is not None
+                    else {}
+                ),
             )
             combined = {**operation.derivation_state, **projection_state}
             incomplete = sorted(
@@ -619,6 +726,8 @@ class IngestionCommand:
                 derivation_version=self._derivation_version,
                 derivation_state=combined,
             )
+        except LeaseLost:
+            raise
         except Exception as exc:
             return self.repository.finish_enriching(
                 operation.operation_id,

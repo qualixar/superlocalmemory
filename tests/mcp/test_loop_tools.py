@@ -179,12 +179,19 @@ def real_tools(tmp_path, monkeypatch):
 
 def test_ledger_persists_and_reads_back_on_real_engine(real_tools):
     engine, fns = real_tools
-    # Storing first both seeds the gate condition AND warms the embedder, so the
-    # recall gate matches on lap 1 (DONE) without a cold-start stall.
-    engine.store(
+    # The persistence contract must not depend on a local embedding model being
+    # installed or completing a cold load. Seed the real FTS/BM25 path through
+    # the same write-through API used by the loop ledger and explicitly disable
+    # semantic probing for this isolated test.
+    engine._embedder._available = False
+    engine.store_fast(
         "The quarterly build pipeline passed all integration tests today.",
-        session_id="s-build",
-        metadata={"tags": ["build"], "importance": 5, "project_name": "t"},
+        metadata={
+            "session_id": "s-build",
+            "tags": ["build"],
+            "importance": 5,
+            "project_name": "t",
+        },
     )
     run = _run(fns["slm_loop_run"](
         name="wait-real",

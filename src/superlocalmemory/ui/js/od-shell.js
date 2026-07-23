@@ -94,6 +94,32 @@
     grp.items.forEach(function (it) { NAV_MAP[it.k] = it; });
   });
 
+  // OD panes use a short in-memory stale-while-revalidate window. Navigation
+  // inside the window is a pure DOM switch; after it expires, the shell
+  // refreshes a hidden replacement pane and keeps the mounted pane visible
+  // until the replacement settles. Values can be overridden before this
+  // script loads to make the lifecycle deterministic in the Node UI harness.
+  var PANE_CACHE_TTL_MS = Number(window.SLM_PANE_CACHE_TTL_MS) || 15000;
+  var PANE_REFRESH_QUIET_MS = Number(window.SLM_PANE_REFRESH_QUIET_MS);
+  if (!Number.isFinite(PANE_REFRESH_QUIET_MS) || PANE_REFRESH_QUIET_MS < 0) {
+    PANE_REFRESH_QUIET_MS = 150;
+  }
+  var PANE_REFRESH_MAX_MS = 30000;
+  var paneLoadState = {};
+  var paneRefreshTail = Promise.resolve();
+
+  function getPaneLoadState(paneId) {
+    if (!paneLoadState[paneId]) {
+      paneLoadState[paneId] = {
+        mounted: false,
+        loadedAt: 0,
+        refreshing: false,
+        generation: 0,
+      };
+    }
+    return paneLoadState[paneId];
+  }
+
   /* ================================================================
      Brand links
   ================================================================ */
@@ -104,7 +130,6 @@
     qualixar: 'https://qualixar.com',
     author:   'https://varunpratap.com',
     license:  'https://github.com/qualixar/superlocalmemory/blob/main/LICENSE',
-    stars:    '2,431',
   };
 
   /* ================================================================
@@ -201,6 +226,14 @@
     // Show target pane
     var pane = document.getElementById(paneId);
     if (pane) pane.classList.add('show', 'active');
+    // During a stale refresh the canonical pane is rendered off-screen and
+    // the previous pane remains as the visual snapshot. Keep that snapshot in
+    // sync with navigation so returning mid-refresh never exposes a blank pane.
+    document.querySelectorAll('[data-slm-stale-for]').forEach(function (snapshot) {
+      if (snapshot.dataset.slmStaleFor === paneId) {
+        snapshot.classList.add('show', 'active');
+      }
+    });
 
     // Update sidebar active state
     document.querySelectorAll('.nav-link[data-tab]').forEach(function (link) {
@@ -216,10 +249,16 @@
       if (headEl)  headEl.textContent  = item.t;
     }
 
-    // Dispatch Bootstrap shown.bs.tab event for backward compatibility.
-    // brain.js, dashboard.js, etc. listen on the hidden tab buttons.
+    // Mount the owning renderer before dispatching any legacy event. Returning
+    // to a mounted OD pane preserves its DOM/data instead of re-querying every
+    // API and showing skeletons again.
+    var handledByShell = triggerTabLoad(paneId);
+
+    // Dispatch Bootstrap shown.bs.tab only for panes not owned by a shell
+    // loader (currently Dashboard). OD-owned panes and direct legacy fallbacks
+    // have already loaded exactly once above.
     var tabBtn = document.getElementById(paneId.replace('-pane', '-tab'));
-    if (tabBtn) {
+    if (tabBtn && !handledByShell) {
       try {
         tabBtn.dispatchEvent(new Event('shown.bs.tab', { bubbles: true }));
       } catch (e) {}
@@ -233,8 +272,6 @@
     var contentEl = document.getElementById('main-content');
     if (contentEl) contentEl.scrollTo({ top: 0, behavior: 'instant' });
 
-    // Fire lazy data loaders
-    triggerTabLoad(paneId);
     // Deferred retry ONLY if the first render produced nothing (a pane that ran
     // before it was visible/sized). Re-running unconditionally used to wipe and
     // rebuild every pane 500ms after each switch — the visible "cards reload"
@@ -257,6 +294,152 @@
   /* ================================================================
      Lazy data loaders — same mapping as ng-shell.js triggerTabLoad
   ================================================================ */
+  function queueOdPaneRefresh(tabId, fnName) {
+    var state = getPaneLoadState(tabId);
+    if (state.refreshing) return;
+    state.refreshing = true;
+    var generation = state.generation;
+
+    // Serialising the short handoff prevents nested global fetch wrappers when
+    // a user races across several stale panes. Each pane still remains usable
+    // from its mounted DOM while it waits its turn.
+    paneRefreshTail = paneRefreshTail
+      .catch(function () {})
+      .then(function () {
+        if (state.generation !== generation) return;
+        return refreshOdPane(tabId, fnName, state, generation);
+      })
+      .catch(function (err) {
+        console.error('OD background refresh failed for ' + tabId + ':', err);
+      })
+      .then(function () {
+        state.refreshing = false;
+      });
+  }
+
+  function refreshOdPane(tabId, fnName, state, generation) {
+    var oldPane = document.getElementById(tabId);
+    if (!oldPane || typeof window[fnName] !== 'function') return Promise.resolve();
+
+    var snapshotId = tabId + '--stale-' + String(generation);
+    var freshPane = oldPane.cloneNode(false);
+    var originalDisplay = freshPane.style.display;
+    oldPane.id = snapshotId;
+    oldPane.dataset.slmStaleFor = tabId;
+    freshPane.id = tabId;
+    freshPane.style.display = 'none';
+    freshPane.dataset.slmOdRenderer = fnName;
+    oldPane.parentNode.insertBefore(freshPane, oldPane);
+
+    return new Promise(function (resolve) {
+      var originalFetch = window.fetch;
+      var pending = 0;
+      var idleTimer = null;
+      var maxTimer = null;
+      var finished = false;
+      var observer = typeof MutationObserver === 'function'
+        ? new MutationObserver(scheduleIdle)
+        : null;
+
+      function restoreFetch() {
+        if (window.fetch === trackedFetch) window.fetch = originalFetch;
+      }
+
+      function restoreSnapshot() {
+        if (freshPane.parentNode) freshPane.parentNode.removeChild(freshPane);
+        oldPane.id = tabId;
+        delete oldPane.dataset.slmStaleFor;
+        // An explicit mutation/profile invalidation wins over an in-flight
+        // refresh. Preserve the visual snapshot, but leave it unmounted so the
+        // next visit cannot accidentally re-age invalid data as a cache hit.
+        if (state.generation !== generation) {
+          delete oldPane.dataset.slmOdRenderer;
+        }
+      }
+
+      function finish(commit) {
+        if (finished) return;
+        finished = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        if (maxTimer) clearTimeout(maxTimer);
+        if (observer) observer.disconnect();
+        restoreFetch();
+
+        if (commit && state.generation === generation) {
+          if (oldPane.parentNode) oldPane.parentNode.removeChild(oldPane);
+          freshPane.style.display = originalDisplay;
+          freshPane.dataset.slmOdRenderer = fnName;
+          state.mounted = true;
+          state.loadedAt = Date.now();
+        } else {
+          restoreSnapshot();
+        }
+        resolve();
+      }
+
+      function scheduleIdle() {
+        if (finished || pending > 0) return;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () { finish(true); }, PANE_REFRESH_QUIET_MS);
+      }
+
+      function trackPromise(promise) {
+        pending += 1;
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+        Promise.resolve(promise).then(settled, settled);
+        return promise;
+      }
+
+      function settled() {
+        pending = Math.max(0, pending - 1);
+        scheduleIdle();
+      }
+
+      function patchResponse(response) {
+        ['json', 'text', 'blob', 'arrayBuffer', 'formData'].forEach(function (name) {
+          if (!response || typeof response[name] !== 'function') return;
+          var bodyReader = response[name].bind(response);
+          try {
+            response[name] = function () {
+              return trackPromise(bodyReader());
+            };
+          } catch (e) {}
+        });
+        return response;
+      }
+
+      function trackedFetch() {
+        var result;
+        try {
+          result = originalFetch.apply(window, arguments);
+        } catch (err) {
+          scheduleIdle();
+          throw err;
+        }
+        var patched = Promise.resolve(result).then(patchResponse);
+        trackPromise(patched);
+        return patched;
+      }
+
+      if (observer) {
+        observer.observe(freshPane, { childList: true, subtree: true, characterData: true });
+      }
+      if (typeof originalFetch === 'function') window.fetch = trackedFetch;
+      maxTimer = setTimeout(function () { finish(false); }, PANE_REFRESH_MAX_MS);
+
+      try {
+        window[fnName](freshPane);
+        scheduleIdle();
+      } catch (err) {
+        finish(false);
+        throw err;
+      }
+    });
+  }
+
   function triggerTabLoad(tabId) {
     var pane = document.getElementById(tabId);
     // Open Design takeover: if the pane's OD render module is loaded, it OWNS
@@ -265,79 +448,113 @@
     // only when the OD module for that pane isn't present yet.
     function od(fnName) {
       if (pane && typeof window[fnName] === 'function') {
-        try { pane.innerHTML = ''; window[fnName](pane); return true; }
+        if (pane.dataset.slmOdRenderer === fnName && pane.children.length > 0) {
+          var cached = getPaneLoadState(tabId);
+          if (!cached.mounted) {
+            cached.mounted = true;
+            cached.loadedAt = Date.now();
+          } else if (Date.now() - cached.loadedAt >= PANE_CACHE_TTL_MS) {
+            queueOdPaneRefresh(tabId, fnName);
+          }
+          return true;
+        }
+        try {
+          pane.innerHTML = '';
+          window[fnName](pane);
+          pane.dataset.slmOdRenderer = fnName;
+          var mounted = getPaneLoadState(tabId);
+          mounted.mounted = true;
+          mounted.loadedAt = Date.now();
+          return true;
+        }
         catch (e) { console.error('OD render failed for ' + tabId + ':', e); }
       }
       return false;
     }
     switch (tabId) {
       case 'brain-pane':
-        if (od('odRenderBrain')) break;
+        if (od('odRenderBrain')) return true;
         if (typeof loadBrain === 'function') loadBrain();
-        break;
+        return true;
       case 'graph-pane':
-        if (od('odRenderGraph')) break;
+        if (od('odRenderGraph')) return true;
         if (typeof loadGraph === 'function') loadGraph();
         if (typeof initMemoryChat === 'function' && !document.getElementById('chat-panel')) {
           initMemoryChat();
         }
         if (typeof loadClusters === 'function') loadClusters();
-        break;
+        return true;
       case 'entities-pane':
-        if (od('odRenderEntities')) break;
+        if (od('odRenderEntities')) return true;
         if (typeof loadEntityExplorer === 'function') loadEntityExplorer();
-        break;
+        return true;
       case 'memories-pane':
-        if (od('odRenderMemories')) break;
+        if (od('odRenderMemories')) return true;
         if (typeof loadMemories === 'function') loadMemories();
         if (typeof loadTimeline === 'function') loadTimeline();
-        break;
+        return true;
       case 'health-pane':
-        if (od('odRenderHealth')) break;
+        if (od('odRenderHealth')) return true;
         if (typeof loadHealthMonitor === 'function') loadHealthMonitor();
         if (typeof initEventStream === 'function') initEventStream();
         if (typeof loadEventStats === 'function') loadEventStats();
         if (typeof loadAgents === 'function') loadAgents();
         if (typeof loadIDEStatus === 'function') loadIDEStatus();
         if (typeof loadMathHealth === 'function') loadMathHealth();
-        break;
+        return true;
       case 'operations-pane':
-        if (od('odRenderOperations')) break;
+        if (od('odRenderOperations')) return true;
         if (typeof loadIngestionStatus === 'function') loadIngestionStatus();
         if (typeof loadLifecycle === 'function') loadLifecycle();
         if (typeof loadTrustDashboard === 'function') loadTrustDashboard();
         if (typeof loadCompliance === 'function') loadCompliance();
-        break;
+        return true;
       case 'skills-pane':
-        if (od('odRenderSkills')) break;
+        if (od('odRenderSkills')) return true;
         if (typeof loadSkillEvolution === 'function') loadSkillEvolution();
-        break;
+        return true;
       case 'mesh-pane':
-        if (od('odRenderMesh')) break;
+        if (od('odRenderMesh')) return true;
         if (typeof loadMeshPeers === 'function') loadMeshPeers();
-        break;
+        return true;
       case 'settings-pane':
-        if (od('odRenderSettings')) break;
+        if (od('odRenderSettings')) return true;
         if (typeof loadSettings === 'function') loadSettings();
         if (typeof loadModeSettings === 'function') loadModeSettings();
         if (typeof loadAutoSettings === 'function') loadAutoSettings();
         if (typeof updateModeUI === 'function') updateModeUI();
-        break;
+        return true;
       case 'optimize-pane':
-        if (od('odRenderOptimize')) break;
+        if (od('odRenderOptimize')) return true;
         if (typeof initOptimizeTab === 'function') initOptimizeTab();
-        break;
+        return true;
       case 'agents-pane':
-        if (od('odRenderAgents')) break;
-        break;
+        od('odRenderAgents');
+        return true;
       case 'mcp-pane':
         od('odRenderMcp');
-        break;
+        return true;
       case 'backup-pane':
         od('odRenderBackup');
-        break;
+        return true;
     }
+    return false;
   }
+
+  // Mutating actions and profile switches can invalidate cached panes without
+  // tearing down unrelated navigation state. The next visit remounts only the
+  // affected pane; no persistent browser storage is used.
+  window.slmInvalidatePanes = function (paneIds) {
+    var ids = Array.isArray(paneIds) ? paneIds : Object.keys(NAV_MAP);
+    ids.forEach(function (id) {
+      var pane = document.getElementById(id);
+      if (pane) delete pane.dataset.slmOdRenderer;
+      var state = getPaneLoadState(id);
+      state.generation += 1;
+      state.mounted = false;
+      state.loadedAt = 0;
+    });
+  };
 
   /* ================================================================
      Hash routing: handles both pane IDs and section anchors within panes
@@ -430,8 +647,7 @@
       starLink.title       = 'Star SuperLocalMemory on GitHub';
       starLink.innerHTML   =
         svg('github', 'gh') +
-        "<span class='lbl'>Star us on GitHub</span>" +
-        "<span class='star-count'>" + svg('star') + LINKS.stars + '</span>';
+        "<span class='lbl'>Star us on GitHub</span>";
       if (themeBtn) topbar.insertBefore(starLink, themeBtn);
       else topbar.appendChild(starLink);
     }

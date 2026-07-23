@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import sys
 import threading
 import time
@@ -65,12 +66,51 @@ from superlocalmemory.infra.data_root import (
     canonical_data_root,
     state_path,
 )
+from superlocalmemory.learning.source_quality import (
+    SourceQualityRepairUnavailable,
+    enumerate_source_quality_repair_profiles,
+    repair_historical_source_quality,
+)
 
 logger = logging.getLogger("superlocalmemory.unified_daemon")
 
 _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767
 _ACTIVE_DAEMON_DESCRIPTOR: DaemonDescriptor | None = None
+_SOURCE_QUALITY_MAX_BATCH_SIZE = 250
+_SOURCE_QUALITY_PROFILE_REFRESH_SECONDS = 60.0
+_FACT_ENTITY_REPAIR_MIN_RETRY_SECONDS = 0.05
+_FACT_ENTITY_REPAIR_MAX_RETRY_SECONDS = 30.0
+# ``wait=true`` is a compatibility affordance, never permission to hold the
+# ASGI event loop hostage to a local LLM.  Normal clients omit it and receive
+# an immediate durable/queryable receipt; explicit waiters get this small
+# completion window, then the M018 materializer continues in the background.
+_REMEMBER_ENRICHMENT_WAIT_SECONDS = 0.75
+_SENSITIVE_READ_PREFIXES = (
+    "/api/memories", "/api/facts", "/api/clusters", "/api/graph",
+    "/api/v3/associations", "/api/v3/core-memory",
+    "/api/v3/soft-prompts", "/api/v3/dashboard", "/api/v3/mode",
+    "/api/v3/embedding/config", "/api/v3/scope/config",
+    "/api/v3/storage/config", "/api/v3/daemon/config",
+    "/api/v3/mesh/config", "/api/v3/trust/config",
+    "/api/v3/forgetting/config", "/api/v3/mcp/profiles",
+    "/api/learning", "/api/behavioral",
+)
+_SENSITIVE_READ_EXACT_PATHS = (
+    "/api/search", "/api/v3/recall/trace", "/api/patterns",
+    "/api/feedback/stats", "/api/stats", "/api/timeline",
+)
+
+
+def _is_sensitive_dashboard_read(method: str, path: str) -> bool:
+    return (
+        method == "GET"
+        and (
+            path.startswith(_SENSITIVE_READ_PREFIXES)
+            or path in _SENSITIVE_READ_EXACT_PATHS
+            or path.startswith("/api/v3/recall")
+        )
+    )
 
 
 def _rbac_read_gate(request, app_state):
@@ -715,6 +755,347 @@ def _warm_spreading_activation(engine, runtime) -> bool:
         return False
 
 
+def _set_source_quality_repair_status(application, **updates) -> dict:
+    current = getattr(
+        application.state, "source_quality_repair_status", {},
+    )
+    status = {**current, **updates}
+    application.state.source_quality_repair_status = status
+    return status
+
+
+def _schedule_fact_entity_association_repair(
+    application,
+    memory_db_path: Path,
+    *,
+    batch_size: int = 250,
+    tick_seconds: float = 1.0,
+) -> asyncio.Task:
+    """Schedule bounded M028 backfill only after readiness is published."""
+    from superlocalmemory.storage.migrations.M028_fact_entity_associations import (
+        get_repair_status,
+    )
+
+    durable = get_repair_status(Path(memory_db_path))
+    application.state.fact_entity_association_repair_status = {
+        **durable,
+        "source": "startup_background_repair",
+        "batch_size": batch_size,
+    }
+    task = asyncio.create_task(
+        _fact_entity_association_repair_loop(
+            application,
+            Path(memory_db_path),
+            batch_size=batch_size,
+            tick_seconds=tick_seconds,
+        ),
+        name="fact-entity-association-upgrade-repair",
+    )
+    application.state.fact_entity_association_repair_task = task
+    return task
+
+
+async def _fact_entity_association_repair_loop(
+    application,
+    memory_db_path: Path,
+    *,
+    batch_size: int,
+    tick_seconds: float,
+) -> None:
+    from superlocalmemory.storage.migrations.M028_fact_entity_associations import (
+        get_repair_status,
+        repair_fact_entity_associations,
+    )
+
+    consecutive_failures = 0
+    try:
+        while True:
+            try:
+                await asyncio.to_thread(
+                    repair_fact_entity_associations,
+                    memory_db_path,
+                    batch_size=batch_size,
+                    max_batches=1,
+                )
+                durable = await asyncio.to_thread(
+                    get_repair_status, memory_db_path,
+                )
+            except sqlite3.Error as exc:
+                consecutive_failures += 1
+                retry_delay = min(
+                    _FACT_ENTITY_REPAIR_MAX_RETRY_SECONDS,
+                    max(
+                        _FACT_ENTITY_REPAIR_MIN_RETRY_SECONDS,
+                        float(tick_seconds),
+                    ) * (2 ** min(consecutive_failures - 1, 10)),
+                )
+                try:
+                    durable = await asyncio.to_thread(
+                        get_repair_status, memory_db_path,
+                    )
+                except sqlite3.Error:
+                    durable = getattr(
+                        application.state,
+                        "fact_entity_association_repair_status",
+                        {},
+                    )
+                application.state.fact_entity_association_repair_status = {
+                    **durable,
+                    "state": "retrying",
+                    "source": "startup_background_repair",
+                    "batch_size": batch_size,
+                    "last_error": (
+                        durable.get("last_error") or type(exc).__name__
+                    ),
+                    "retry_attempt": consecutive_failures,
+                    "retry_delay_seconds": retry_delay,
+                }
+                await asyncio.sleep(retry_delay)
+                continue
+
+            consecutive_failures = 0
+            application.state.fact_entity_association_repair_status = {
+                **durable,
+                "source": "startup_background_repair",
+                "batch_size": batch_size,
+                "retry_attempt": 0,
+                "retry_delay_seconds": 0.0,
+            }
+            if durable["state"] == "complete":
+                return
+            await asyncio.sleep(max(0.0, float(tick_seconds)))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        durable = await asyncio.to_thread(get_repair_status, memory_db_path)
+        application.state.fact_entity_association_repair_status = {
+            **durable,
+            "source": "startup_background_repair",
+            "batch_size": batch_size,
+            "last_error": durable.get("last_error") or type(exc).__name__,
+        }
+
+
+async def _cancel_fact_entity_association_repair(application) -> None:
+    task = getattr(
+        application.state, "fact_entity_association_repair_task", None,
+    )
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+def _schedule_source_quality_repair(
+    application,
+    memory_db_path: Path,
+    learning_db_path: Path,
+    *,
+    batch_size: int = 25,
+    tick_seconds: float = 1.0,
+) -> asyncio.Task:
+    """Schedule post-readiness repair without awaiting historical DB work."""
+    _set_source_quality_repair_status(
+        application,
+        state="scheduled",
+        source="startup_background_repair",
+        batch_size=batch_size,
+        profiles=[],
+        completed_profiles=[],
+        profile_results={},
+        batches_completed=0,
+        scanned=0,
+        observations=0,
+        last_error=None,
+    )
+    task = asyncio.create_task(
+        _source_quality_repair_loop(
+            application,
+            Path(memory_db_path),
+            Path(learning_db_path),
+            batch_size=batch_size,
+            tick_seconds=tick_seconds,
+        ),
+        name="source-quality-upgrade-repair",
+    )
+    application.state.source_quality_repair_task = task
+    return task
+
+
+async def _repair_one_source_quality_profile(
+    memory_db_path: Path,
+    learning_db_path: Path,
+    profile_id: str,
+    batch_size: int,
+) -> dict[str, int | bool]:
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            repair_historical_source_quality,
+            memory_db_path,
+            learning_db_path,
+            profile_id,
+            batch_size=batch_size,
+            max_batches=1,
+        ),
+        name=f"source-quality-repair-batch-{profile_id}",
+    )
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        # Cancellation cannot stop a running worker thread. Await the bounded
+        # batch so SQLite writes finish before daemon teardown closes storage.
+        await worker
+        raise
+
+
+def _record_source_quality_repair_result(
+    application,
+    profile_id: str,
+    result: dict[str, int | bool],
+) -> bool:
+    current = getattr(
+        application.state, "source_quality_repair_status", {},
+    )
+    completed = set(current.get("completed_profiles", []))
+    if result["complete"]:
+        completed.add(profile_id)
+    results = {
+        **current.get("profile_results", {}),
+        profile_id: result,
+    }
+    _set_source_quality_repair_status(
+        application,
+        profile_results=results,
+        completed_profiles=sorted(completed),
+        batches_completed=int(current.get("batches_completed", 0)) + 1,
+        scanned=int(current.get("scanned", 0)) + int(result["scanned"]),
+        observations=int(current.get("observations", 0))
+        + int(result["observations"]),
+    )
+    return not bool(result["complete"])
+
+
+async def _source_quality_repair_tick(
+    application,
+    memory_db_path: Path,
+    learning_db_path: Path,
+    profiles: list[str],
+    *,
+    batch_size: int,
+) -> list[str]:
+    _set_source_quality_repair_status(
+        application,
+        state="running",
+        profiles=profiles,
+        current_batch_size=batch_size,
+        last_error=None,
+    )
+    pending = []
+    for profile_id in profiles:
+        result = await _repair_one_source_quality_profile(
+            memory_db_path, learning_db_path, profile_id, batch_size,
+        )
+        if _record_source_quality_repair_result(
+            application, profile_id, result,
+        ):
+            pending.append(profile_id)
+        await asyncio.sleep(0)
+    return pending
+
+
+async def _discover_source_quality_profiles(
+    memory_db_path: Path,
+    pending: list[str] | None,
+    completed: list[str],
+) -> list[str]:
+    discovered = await asyncio.to_thread(
+        enumerate_source_quality_repair_profiles,
+        memory_db_path,
+    )
+    return sorted(
+        (set(pending or []) | set(discovered)) - set(completed),
+    )
+
+
+async def _source_quality_repair_loop(
+    application,
+    memory_db_path: Path,
+    learning_db_path: Path,
+    *,
+    batch_size: int,
+    tick_seconds: float,
+) -> None:
+    """Run one resumable repair batch per discovered profile and tick."""
+    pending: list[str] | None = None
+    next_refresh = 0.0
+    successful_ticks = 0
+    try:
+        while True:
+            try:
+                now = time.monotonic()
+                if pending is None or now >= next_refresh:
+                    status = getattr(
+                        application.state,
+                        "source_quality_repair_status",
+                        {},
+                    )
+                    pending = await _discover_source_quality_profiles(
+                        memory_db_path,
+                        pending,
+                        status.get("completed_profiles", []),
+                    )
+                    next_refresh = (
+                        now + _SOURCE_QUALITY_PROFILE_REFRESH_SECONDS
+                    )
+                adaptive_batch = min(
+                    _SOURCE_QUALITY_MAX_BATCH_SIZE,
+                    batch_size * (2 ** min(successful_ticks, 4)),
+                )
+                pending = await _source_quality_repair_tick(
+                    application,
+                    memory_db_path,
+                    learning_db_path,
+                    pending,
+                    batch_size=adaptive_batch,
+                )
+            except (SourceQualityRepairUnavailable, sqlite3.Error):
+                _set_source_quality_repair_status(
+                    application,
+                    state="retrying",
+                    last_error="storage_temporarily_unavailable",
+                )
+            else:
+                successful_ticks += 1
+            if pending == []:
+                _set_source_quality_repair_status(application, state="complete")
+                return
+            await asyncio.sleep(max(0.0, float(tick_seconds)))
+    except asyncio.CancelledError:
+        _set_source_quality_repair_status(application, state="cancelled")
+        raise
+    except Exception as exc:
+        logger.warning("source-quality startup repair failed: %s", exc)
+        _set_source_quality_repair_status(
+            application, state="failed", last_error=type(exc).__name__,
+        )
+
+
+async def _cancel_source_quality_repair(application) -> None:
+    task = getattr(application.state, "source_quality_repair_task", None)
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -1350,7 +1731,20 @@ async def lifespan(application: FastAPI):
         application.state.daemon_descriptor = _publish_process_descriptor(
             _configured_daemon_port(), SLM_VERSION, "ready",
         )
-        yield
+        _schedule_source_quality_repair(
+            application,
+            state_path("memory.db"),
+            state_path("learning.db"),
+        )
+        _schedule_fact_entity_association_repair(
+            application,
+            state_path("memory.db"),
+        )
+        try:
+            yield
+        finally:
+            await _cancel_fact_entity_association_repair(application)
+            await _cancel_source_quality_repair(application)
 
     # Cancel the cross-platform sync loop (H-CONC-2) so adapter file I/O does
     # not outlive the daemon.
@@ -1945,19 +2339,35 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                         "error": "Remote HTTP MCP requires a configured SLM API key."
                     },
                 )
-            # v3.6.12 (csrf-1): defense-in-depth CSRF/DNS-rebinding guard on
-            # state-changing requests. A cross-origin browser Origin is rejected;
-            # loopback origins (the local dashboard) always pass, and LAN origins
-            # pass only when explicitly allowlisted in SLM_REMOTE mode. Non-browser
-            # clients (CLI/MCP/curl) send no Origin and are unaffected.
+            # Defense-in-depth CSRF/DNS-rebinding guard. A loopback hostname is
+            # not, by itself, a trusted web origin: a different local process can
+            # serve a page on another port. Credentialless browser writes must
+            # therefore originate from this daemon's exact port. A local
+            # integration on another port may still write when it presents a
+            # valid credential; require_http_mutation_actor below validates it.
+            # LAN origins remain opt-in through remote mode. Non-browser clients
+            # (CLI/MCP/curl) send no Origin and are unaffected.
             if requires_mutation_actor:
                 _origin = headers.get("origin", "") or headers.get("Origin", "")
                 if _origin:
-                    _ok_origin = any(_origin.startswith(p) for p in (
-                        "http://127.0.0.1", "https://127.0.0.1",
-                        "http://localhost", "https://localhost",
-                        "http://[::1]", "https://[::1]",
-                    ))
+                    from superlocalmemory.server.origin import (
+                        origin_is_daemon,
+                        origin_is_loopback,
+                    )
+
+                    _daemon = getattr(application.state, "daemon_descriptor", None)
+                    _daemon_port = getattr(_daemon, "port", None) or _configured_daemon_port()
+                    _ok_origin = origin_is_daemon(_origin, port=int(_daemon_port))
+                    _has_browser_credential = any(
+                        headers.get(_header)
+                        for _header in (
+                            "x-slm-daemon-capability",
+                            "x-install-token",
+                            "x-slm-api-key",
+                        )
+                    )
+                    if not _ok_origin and origin_is_loopback(_origin) and _has_browser_credential:
+                        _ok_origin = True
                     if not _ok_origin:
                         from superlocalmemory.core.remote_mode import is_remote_origin_allowed
                         _ok_origin = is_remote_origin_allowed(_origin)
@@ -2038,30 +2448,11 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             # single-operator installs are unaffected. Owner (no session) reads
             # freely unless company mode (require_login) is on; a logged-in user
             # must hold READ on the active workspace.
-            _p = request.url.path
-            _is_sensitive_read = (
-                (request.method == "GET" and _p.startswith((
-                    "/api/memories", "/api/facts", "/api/clusters", "/api/graph",
-                    "/api/v3/associations", "/api/v3/core-memory",
-                    "/api/v3/soft-prompts",
-                    # Config metadata GETs expose the install path (base_dir) and
-                    # LLM stack (provider/model/endpoint). Harmless to the loopback
-                    # owner (personal mode: gate is a no-op), but in company mode an
-                    # unauthenticated caller must not read them — same login gate as
-                    # content reads.
-                    "/api/v3/dashboard", "/api/v3/mode", "/api/v3/embedding/config",
-                    # SEC-M-02: the remaining config GETs also expose base_dir,
-                    # daemon port, and backend topology — gate them in company mode.
-                    "/api/v3/scope/config", "/api/v3/storage/config",
-                    "/api/v3/daemon/config", "/api/v3/mesh/config",
-                    "/api/v3/trust/config", "/api/v3/forgetting/config",
-                    # MCP profile metadata — reveals which tools agent clients
-                    # can invoke; consistent with other config GETs.
-                    "/api/v3/mcp/profiles")))
-                or _p in ("/api/search", "/api/v3/recall/trace")
-                or _p.startswith("/api/v3/recall")
-            )
-            if _is_sensitive_read:
+            # Config, learning, and behavioral reads expose installation,
+            # preference, workflow, source-reputation, or outcome data.
+            if _is_sensitive_dashboard_read(
+                request.method, request.url.path,
+            ):
                 _resp = _rbac_read_gate(request, application.state)
                 if _resp is not None:
                     return _resp
@@ -2370,7 +2761,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         request: Request,
         q: str = "", query: str = "", limit: int = CANONICAL_RECALL_LIMIT,
         session_id: str = "",
-        fast: bool = False,
+        fast: bool = True,
         full: bool = False,
         include_source: bool = False,
         include_global: bool | None = None,
@@ -2409,7 +2800,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # recall (reranker timeout, cold embedder) blocks ALL endpoints.
         import asyncio
         _begin_recall()
-        # v3.4.53: Full (non-fast) recalls are gated by a semaphore to
+        # v3.4.53: Opt-in deep recalls are gated by a semaphore to
         # prevent resource oversaturation. Ollama serialises concurrent
         # embedding calls and the reranker subprocess has a single lock —
         # queuing more than ~3 concurrent full recalls just adds latency.
@@ -2526,7 +2917,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             if isinstance(extra, dict):
                 meta.update(extra)
             command = build_engine_ingestion_command(engine)
-            receipt = command.submit(IngestionRequest(
+            ingestion_request = IngestionRequest(
                 content=req.content,
                 profile_id=engine._profile_id,
                 source_type="http",
@@ -2536,9 +2927,42 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 shared_with=tuple(shared_with or ()),
                 trusted_actor_id=trusted_actor_id,
                 session_id=req.session_id,
-            ))
+            )
+            # SQLite admission is usually milliseconds, but it can wait on a
+            # concurrent migration or writer.  Keep that wait out of ASGI so
+            # dashboard navigation and recall stay responsive.
+            receipt = await asyncio.to_thread(command.submit, ingestion_request)
+            result = receipt
+            wait_budget_exhausted = False
+            if wait:
+                materialization_task = asyncio.create_task(
+                    asyncio.to_thread(command.materialize, receipt.operation_id)
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(materialization_task),
+                        timeout=_REMEMBER_ENRICHMENT_WAIT_SECONDS,
+                    )
+                except TimeoutError:
+                    # The task retains the M018 lease and continues outside
+                    # this request.  Return the durable receipt honestly;
+                    # the normal materializer can also reclaim it after a
+                    # lease expiry if the request-owned worker dies.
+                    wait_budget_exhausted = True
 
-            result = command.materialize(receipt.operation_id) if wait else receipt
+                    def _log_background_materialization(task):
+                        try:
+                            task.result()
+                        except Exception as exc:
+                            logger.warning(
+                                "bounded remember enrichment failed for %s: %s",
+                                receipt.operation_id,
+                                exc,
+                            )
+
+                    materialization_task.add_done_callback(
+                        _log_background_materialization
+                    )
             fact_ids = list(result.fact_ids)
             # The queryable write is a separate durable transaction.  A cold
             # optional enrichment dependency (most often the local embedding
@@ -2581,10 +3005,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "note": (
                     "canonical ingestion complete"
                     if completed
+                    else "queryable now; enrichment continues after the wait budget"
+                    if wait_budget_exhausted
                     else "queryable now; canonical enrichment will retry"
                     if enrichment_deferred
                     else "queryable now; canonical enrichment pending"
                 ),
+                "wait_budget_exhausted": wait_budget_exhausted,
             }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))

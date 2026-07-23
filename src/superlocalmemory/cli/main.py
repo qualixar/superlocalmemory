@@ -114,12 +114,17 @@ def main() -> None:
         or any(arg in {"-h", "--help"} for arg in sys.argv[1:])
         or (len(sys.argv) == 2 and sys.argv[1] in {"-v", "--version"})
     )
+    _is_connect_dry_run = (
+        len(sys.argv) >= 2
+        and sys.argv[1] == "connect"
+        and "--dry-run" in sys.argv[2:]
+    )
 
     # WP-07: lazy first-run init — runs after hook/mcp fast-paths so stdout
     # is never polluted on those paths (CRIT-3, MCP JSON-RPC purity).
     # Guarded: any failure must not crash the CLI (AC4).
     _is_mcp_cmd = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
-    if not _is_mcp_cmd and not _is_metadata_cmd:
+    if not _is_mcp_cmd and not _is_metadata_cmd and not _is_connect_dry_run:
         try:
             from superlocalmemory.cli._lazy_init import _ensure_initialized
             _ensure_initialized()
@@ -139,7 +144,7 @@ def main() -> None:
 
     # One-time post-upgrade banner — silent for fresh installs and
     # same-version runs. Guarded against I/O errors internally.
-    if not _is_mcp_stdio and not _is_metadata_cmd:
+    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run:
         from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
         if check_and_emit_upgrade_banner(_ver):
             # First post-upgrade invocation: apply the data-dir migration if
@@ -816,8 +821,9 @@ def main() -> None:
         sys.exit(0)
 
     # V3.3.19: Auto-trigger setup wizard on first use
-    from superlocalmemory.cli.setup_wizard import check_first_use
-    check_first_use(args.command)
+    if not (args.command == "connect" and getattr(args, "dry_run", False)):
+        from superlocalmemory.cli.setup_wizard import check_first_use
+        check_first_use(args.command)
 
     # V3.4.4: Auto-start daemon for all commands that need it.
     # SLM is always-on — close laptop, reboot, crash: daemon auto-recovers.

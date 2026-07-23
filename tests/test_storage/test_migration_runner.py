@@ -801,6 +801,121 @@ def test_apply_all_creates_evolution_config_tables(
     assert cols["llm_model"][1] == "'claude-haiku-4-5'"
 
 
+def test_apply_all_repairs_missing_evolution_table_with_complete_log(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A stale complete marker must not disable Skill Evolution permanently."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute("DROP TABLE evolution_llm_cost_log")
+        logged = conn.execute(
+            "SELECT status FROM migration_log "
+            "WHERE name = 'M010_evolution_config'"
+        ).fetchone()
+        assert logged == ("complete",)
+
+    repaired = mr.apply_all(learning_db, memory_db)
+
+    assert "M010_evolution_config" in repaired["applied"]
+    assert "evolution_llm_cost_log" in _table_names(learning_db)
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "INSERT INTO evolution_llm_cost_log "
+            "(profile_id, ts, model, cycle_id) VALUES (?, ?, ?, ?)",
+            ("default", "2026-07-23T00:00:00+00:00", "cycle-start", "repair"),
+        )
+
+
+def test_completed_destructive_migration_is_never_replayed_for_index_repair(
+    fresh_dbs: tuple[Path, Path],
+) -> None:
+    """A missing M002 index must not trigger its destructive table rebuild."""
+    learning_db, memory_db = fresh_dbs
+    assert mr.apply_all(learning_db, memory_db)["failed"] == []
+    with sqlite3.connect(learning_db) as conn:
+        conn.execute(
+            "INSERT INTO learning_model_state "
+            "(profile_id, model_version, state_bytes, bytes_sha256, "
+            "trained_on_count, feature_names, metrics_json, is_active, "
+            "trained_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "preserve",
+                "sentinel-version",
+                b"sentinel-bytes",
+                "sentinel-hash",
+                73,
+                '["sentinel"]',
+                '{"sentinel": true}',
+                0,
+                "2026-07-23T00:00:00+00:00",
+                "2026-07-23T00:00:00+00:00",
+            ),
+        )
+        conn.execute("DROP INDEX idx_model_profile_time")
+
+    result = mr.apply_all(learning_db, memory_db)
+
+    assert "M002_model_state_history" in result["failed"]
+    assert "automatic replay is disabled" in result["details"][
+        "M002_model_state_history"
+    ]
+    with sqlite3.connect(learning_db) as conn:
+        row = conn.execute(
+            "SELECT model_version, state_bytes, trained_on_count, "
+            "feature_names, metrics_json, is_active "
+            "FROM learning_model_state WHERE profile_id = 'preserve'"
+        ).fetchone()
+        logged = conn.execute(
+            "SELECT status FROM migration_log "
+            "WHERE name = 'M002_model_state_history'"
+        ).fetchone()
+    assert row == (
+        "sentinel-version",
+        b"sentinel-bytes",
+        73,
+        '["sentinel"]',
+        '{"sentinel": true}',
+        0,
+    )
+    assert logged == ("complete",)
+
+
+def test_completed_m028_repairs_dropped_index_without_moving_boundary(
+    tmp_path: Path,
+) -> None:
+    """Completed M028 uses its safe repair hook rather than replaying history."""
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    _create_runtime_schema(memory_db)
+
+    mr.apply_all(learning_db, memory_db)
+    first = mr.apply_deferred(learning_db, memory_db)
+    assert "M028_fact_entity_associations" in first["applied"]
+
+    with sqlite3.connect(memory_db) as conn:
+        captured_boundary = conn.execute(
+            "SELECT target_fact_rowid FROM fact_entity_association_repair_state "
+            "WHERE repair_key='historical-backfill'"
+        ).fetchone()[0]
+        conn.execute("DROP INDEX idx_fact_entity_associations_entity")
+
+    repaired = mr.apply_deferred(learning_db, memory_db)
+
+    assert "M028_fact_entity_associations" in repaired["applied"]
+    with sqlite3.connect(memory_db) as conn:
+        repaired_boundary = conn.execute(
+            "SELECT target_fact_rowid FROM fact_entity_association_repair_state "
+            "WHERE repair_key='historical-backfill'"
+        ).fetchone()[0]
+        indexes = {row[1] for row in conn.execute(
+            "PRAGMA index_list(fact_entity_associations)"
+        )}
+    assert repaired_boundary == captured_boundary
+    assert "idx_fact_entity_associations_entity" in indexes
+
+
 def test_apply_deferred_registers_m011(
     fresh_dbs: tuple[Path, Path],
 ) -> None:

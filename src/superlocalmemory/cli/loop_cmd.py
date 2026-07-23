@@ -19,11 +19,11 @@ store rooted at the active data root (``SLM_DATA_DIR`` or
 from __future__ import annotations
 
 import json
-import os
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.loops import (
     Bounds,
     LapResult,
@@ -35,12 +35,7 @@ from superlocalmemory.loops import (
 
 
 def _data_root() -> Path:
-    value = (
-        os.environ.get("SLM_DATA_DIR")
-        or os.environ.get("SL_MEMORY_PATH")
-        or os.environ.get("SLM_HOME")
-    )
-    return Path(value).expanduser() if value else Path.home() / ".superlocalmemory"
+    return canonical_data_root()
 
 
 class _FailOpenLedger:

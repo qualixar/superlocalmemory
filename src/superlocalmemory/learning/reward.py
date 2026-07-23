@@ -73,6 +73,24 @@ _DWELL_MAX_MS: Final[int] = 3_600_000  # 1 h
 _BUSY_TIMEOUT_MS: Final[int] = 50
 
 
+def _feed_source_quality(
+    memory_db_path: Path,
+    rewards: list[tuple[str, str, list[str], float]],
+) -> None:
+    """Fail-soft provenance bridge kept outside the reward transaction."""
+    try:
+        from superlocalmemory.learning.source_quality import (
+            update_source_quality_for_reward_batch,
+        )
+        update_source_quality_for_reward_batch(
+            memory_db_path=memory_db_path,
+            learning_db_path=memory_db_path.parent / "learning.db",
+            rewards=rewards,
+        )
+    except Exception as exc:  # noqa: BLE001 - reward finalization must survive
+        logger.debug("source-quality reward feed failed (non-fatal): %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Signal contract — names match the manifest A.1 label formula.
 # ---------------------------------------------------------------------------
@@ -604,6 +622,7 @@ class EngagementRewardModel:
                 # lock-scope — SQLite rows are tied to the connection.
                 _pid = pending["profile_id"]
                 _qid = pending["recall_query_id"]
+                _facts_json = str(pending["fact_ids_json"] or "[]")
         except sqlite3.Error as exc:
             logger.debug("finalize_outcome SQLite error: %s", exc)
             return _FALLBACK_REWARD
@@ -633,6 +652,21 @@ class EngagementRewardModel:
             except Exception as exc:  # noqa: BLE001 — defence in depth
                 logger.debug("feed_recall_settled failed (non-fatal): %s", exc)
 
+        try:
+            _fact_ids = json.loads(_facts_json)
+            if not isinstance(_fact_ids, list):
+                _fact_ids = []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            _fact_ids = []
+        _feed_source_quality(
+            self._db,
+            [(
+                str(_pid),
+                str(outcome_id),
+                [str(fid) for fid in _fact_ids if fid],
+                float(reward),
+            )],
+        )
         return reward
 
     # ------------------------------------------------------------------
@@ -749,6 +783,22 @@ class EngagementRewardModel:
                     except sqlite3.Error:
                         conn.execute("ROLLBACK")
                         raise
+                reward_sources = []
+                for item in i_chunk:
+                    try:
+                        fact_ids = json.loads(str(item[2] or "[]"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        fact_ids = []
+                    reward_sources.append((
+                        str(item[1]),
+                        str(item[0]),
+                        (
+                            [str(fid) for fid in fact_ids if fid]
+                            if isinstance(fact_ids, list) else []
+                        ),
+                        float(item[4]),
+                    ))
+                _feed_source_quality(self._db, reward_sources)
         except sqlite3.Error as exc:  # pragma: no cover — defensive
             logger.debug("reap_stale SQLite error: %s", exc)
             return written

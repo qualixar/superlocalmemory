@@ -6,22 +6,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import superlocalmemory.server.routes.ratelimit as rlr
 from superlocalmemory.infra import rate_limiter as rl
 from superlocalmemory.infra.rate_limiter import RateLimiter
-
-
-class _Req:
-    def __init__(self, body: dict) -> None:
-        self._body = body
-
-    async def json(self) -> dict:
-        return self._body
 
 
 @pytest.fixture()
@@ -39,9 +32,27 @@ def managed(monkeypatch):
 
     store: dict = {}
     monkeypatch.setattr(rlr, "_read_config", lambda: dict(store))
-    monkeypatch.setattr(rlr, "_atomic_write", lambda d: store.update(d))
+
+    def update_config(mutator):
+        data = dict(store)
+        mutator(data)
+        store.clear()
+        store.update(data)
+        return data
+
+    monkeypatch.setattr(rlr, "_update_config", update_config)
     monkeypatch.setattr(rlr, "_require_admin", lambda request: None)
-    yield {"w": w, "r": r, "lbw": lbw, "lbr": lbr, "store": store}
+    monkeypatch.setattr(rlr, "_require_read", lambda request: None)
+    app = FastAPI()
+    app.include_router(rlr.router)
+    yield {
+        "w": w,
+        "r": r,
+        "lbw": lbw,
+        "lbr": lbr,
+        "store": store,
+        "client": TestClient(app),
+    }
     rl.reset_managed()
 
 
@@ -50,7 +61,7 @@ def _body(resp) -> dict:
 
 
 def test_get_returns_effective_limits(managed) -> None:
-    body = _body(rlr.get_ratelimit())
+    body = managed["client"].get("/api/v3/ratelimit").json()
     assert body["write"] == 100
     assert body["read"] == 300
     assert body["window"] == 60
@@ -58,8 +69,11 @@ def test_get_returns_effective_limits(managed) -> None:
 
 
 def test_put_applies_at_runtime_and_persists(managed) -> None:
-    resp = asyncio.run(rlr.put_ratelimit(_Req({"write": 500, "read": 1500})))
-    body = _body(resp)
+    resp = managed["client"].put(
+        "/api/v3/ratelimit",
+        json={"write": 500, "read": 1500},
+    )
+    body = resp.json()
     assert body["success"] is True
     assert body["write"] == 500
     # Runtime apply reached the live limiters.
@@ -72,18 +86,21 @@ def test_put_applies_at_runtime_and_persists(managed) -> None:
 
 
 def test_put_partial_keeps_others(managed) -> None:
-    asyncio.run(rlr.put_ratelimit(_Req({"window": 120})))
+    managed["client"].put("/api/v3/ratelimit", json={"window": 120})
     assert rl.get_limits() == {"write": 100, "read": 300, "window": 120}
 
 
 def test_put_empty_is_422(managed) -> None:
-    resp = asyncio.run(rlr.put_ratelimit(_Req({})))
+    resp = managed["client"].put("/api/v3/ratelimit", json={})
     assert resp.status_code == 422
     assert managed["w"].max_requests == 100  # unchanged
 
 
 def test_put_out_of_range_is_422(managed) -> None:
-    resp = asyncio.run(rlr.put_ratelimit(_Req({"write": 999999999})))
+    resp = managed["client"].put(
+        "/api/v3/ratelimit",
+        json={"write": 999999999},
+    )
     assert resp.status_code == 422
 
 

@@ -266,6 +266,8 @@ class TestTierEvaluation:
 
 
 def test_maintenance_scheduler_evaluates_every_profile() -> None:
+    from dataclasses import replace
+
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
     from superlocalmemory.storage.models import Mode
@@ -276,11 +278,16 @@ def test_maintenance_scheduler_evaluates_every_profile() -> None:
         {"profile_id": "default"},
         {"profile_id": "research"},
     ]
-    scheduler = MaintenanceScheduler(db, SLMConfig.for_mode(Mode.A), "default")
+    config = SLMConfig.for_mode(Mode.A)
+    config.forgetting = replace(config.forgetting, enabled=False)
+    scheduler = MaintenanceScheduler(db, config, "default")
     scheduler._running = True
 
     with (
-        patch("superlocalmemory.core.maintenance.run_maintenance", return_value={}),
+        patch(
+            "superlocalmemory.core.maintenance.run_maintenance",
+            return_value={},
+        ) as math_maintenance,
         patch("superlocalmemory.core.graph_pruner.prune_graph", return_value={
             "total_before": 0, "total_after": 0,
         }),
@@ -299,6 +306,7 @@ def test_maintenance_scheduler_evaluates_every_profile() -> None:
     assert {call.args[1] for call in evaluate.call_args_list} == {
         "default", "research",
     }
+    assert not math_maintenance.called
 
 
 class TestTierStats:

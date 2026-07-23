@@ -63,7 +63,10 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall/validation.js",
         "scripts/preuninstall.js",
     }
-    assert artifact["entryCount"] <= 650
+    # V3.8.1 adds bounded migration, runtime-control, and telemetry modules.
+    # Keep a tight file-count budget while allowing those shipped runtime
+    # surfaces; the byte budget below remains the primary package-size guard.
+    assert artifact["entryCount"] <= 660
     assert artifact["unpackedSize"] <= 10 * 1024 * 1024
 
 

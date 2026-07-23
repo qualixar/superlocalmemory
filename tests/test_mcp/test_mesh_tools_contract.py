@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 
 class _ToolCollector:
     def __init__(self) -> None:

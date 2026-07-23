@@ -29,6 +29,7 @@ export function buildHarness(containerIds, fetchStub) {
     const dom = new JSDOM(`<!DOCTYPE html><html><body>${html}</body></html>`, {
         runScripts: 'dangerously',
         resources: 'usable',
+        url: 'http://localhost:8765/',
     });
 
     const { window } = dom;

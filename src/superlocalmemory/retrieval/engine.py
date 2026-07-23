@@ -679,32 +679,47 @@ class RetrievalEngine:
         fused: list,
         ch_results: dict[str, list[tuple[str, float]]],
         effective_limit: int,
-        min_per_channel: int = 2,
     ) -> list:
-        """Ensure structure channels (entity_graph) get representation.
+        """Keep strong lexical and structure evidence visible in the result cap.
 
-        V3.4.11: entity_graph finds valid results but RRF scores them low
-        because they don't overlap with semantic/bm25 results. This interleaves
-        top entity_graph facts into positions 3-4 of the final output instead
-        of appending at the end where they'd never be seen.
+        A semantic channel with a larger weight can fill a small result limit
+        even when BM25 has an exact, high-signal hit. That broke the
+        ``queryable now`` ingestion contract: a freshly inserted FTS row could
+        exist durably but remain invisible to immediate recall. Reserve one
+        capped slot for a strong BM25 hit and two for a structure channel when
+        such candidates exist, without returning more than ``effective_limit``.
         """
-        structure_channels = ["entity_graph"]
+        channel_minimums = (
+            ("bm25", 1, 0.0),
+            ("entity_graph", 2, 0.0),
+        )
         top_ids = {fr.fact_id for fr in top}
 
         promoted = []
-        for ch_name in structure_channels:
+        for ch_name, minimum, score_floor in channel_minimums:
             ch_items = ch_results.get(ch_name, [])
             if not ch_items:
                 continue
 
-            present = sum(1 for fid, _ in ch_items if fid in top_ids)
-            if present >= min_per_channel:
+            eligible_ids = {
+                fid
+                for fid, score in ch_items
+                if (
+                    float(score) > score_floor
+                    if ch_name == "bm25"
+                    else float(score) >= score_floor
+                )
+            }
+            if not eligible_ids:
                 continue
 
-            needed = min_per_channel - present
-            ch_fids = {fid for fid, _ in ch_items}
+            present = sum(1 for fid in eligible_ids if fid in top_ids)
+            if present >= minimum:
+                continue
+
+            needed = minimum - present
             for fr in fused:
-                if fr.fact_id in ch_fids and fr.fact_id not in top_ids:
+                if fr.fact_id in eligible_ids and fr.fact_id not in top_ids:
                     promoted.append(fr)
                     top_ids.add(fr.fact_id)
                     needed -= 1
@@ -714,10 +729,15 @@ class RetrievalEngine:
         if not promoted:
             return top
 
-        # Append as safety net — with proper RRF weights (strategy.py),
-        # entity_graph facts should already rank naturally in the top-k.
-        # This only fires when they're still missing despite weight boost.
-        return list(top) + promoted
+        selected = promoted[:effective_limit]
+        result = list(top[:effective_limit])
+        free_slots = max(0, effective_limit - len(result))
+        result.extend(selected[:free_slots])
+        remaining = selected[free_slots:]
+        if remaining:
+            keep = max(0, effective_limit - len(remaining))
+            result = result[:keep] + remaining
+        return result[:effective_limit]
 
     # -- Channel execution --------------------------------------------------
 
@@ -853,14 +873,26 @@ class RetrievalEngine:
                 q_emb, profile_id, self._config.bm25_top_k,
             )
 
-        # Collect results as channels complete.
+        # Each local channel gets a strict latency budget.  A slow graph walk
+        # must not make an interactive recall wait 30 seconds; completed
+        # channels still participate in fusion and the timeout is observable.
+        channel_timeout_seconds = 1.0
+        # One shared deadline keeps parallel dispatch genuinely bounded.  A
+        # per-future timeout here would serialise the wait and turn five slow
+        # channels into five seconds of UI latency.
+        done, pending = concurrent.futures.wait(
+            futures.values(), timeout=channel_timeout_seconds,
+        )
         for name, fut in futures.items():
+            if fut in pending:
+                logger.warning("Channel %s exceeded %.1fs latency budget", name, channel_timeout_seconds)
+                continue
             try:
-                ch_name, result = fut.result(timeout=30)
+                ch_name, result = fut.result()
                 if result:
                     out[ch_name] = result
             except Exception as exc:
-                logger.warning("Channel %s timed out or failed: %s", name, exc)
+                logger.warning("Channel %s failed: %s", name, exc)
 
         # Apply registered post-retrieval filters (forgetting filter, etc.)
         if hasattr(self, '_registry') and self._registry._filters:

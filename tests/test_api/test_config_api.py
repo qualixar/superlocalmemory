@@ -283,6 +283,7 @@ class TestMeshConfigPut:
         assert resp.status_code == 200
         saved = _read_config(tmp_path)
         assert saved["mesh_enabled"] is False
+        assert resp.json()["restart_required"] is True
 
     def test_persists_enabled_true(self, tmp_path, monkeypatch):
         _write_config(tmp_path, {"mesh_enabled": False})
@@ -364,6 +365,7 @@ class TestTrustConfigPut:
         assert resp.status_code == 200
         saved = _read_config(tmp_path)
         assert saved["retrieval"]["use_trust_weighting"] is False
+        assert resp.json()["restart_required"] is True
 
     def test_persists_trust_first_party(self, tmp_path, monkeypatch):
         client = _make_app(monkeypatch, tmp_path)
@@ -479,6 +481,7 @@ class TestForgettingConfigPut:
         assert resp.status_code == 200
         saved = _read_config(tmp_path)
         assert saved["forgetting"]["enabled"] is False
+        assert resp.json()["restart_required"] is True
 
     def test_persists_thresholds(self, tmp_path, monkeypatch):
         client = _make_app(monkeypatch, tmp_path)

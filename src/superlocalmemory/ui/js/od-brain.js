@@ -4,9 +4,9 @@
 // Renders the approved design into window.odRenderBrain(container).
 // ALL data from these confirmed live endpoints (no seed / no invented data):
 //   GET /api/learning/status   → ranking_phase, stats, engagement, tech_preferences,
-//                                 workflow_patterns, source_scores
-//   GET /api/behavioral/status → total_outcomes, outcome_breakdown, patterns[],
-//                                 cross_project_transfers, recent_outcomes[]
+//                                 workflow_patterns, persisted source-quality posteriors
+//   GET /api/behavioral/status → reward_telemetry, explicit outcome counts,
+//                                 patterns[], transfers, recent_outcomes[]
 //   GET /api/behavioral/assertions?category=skill_performance&limit=50 → assertions[]
 //   GET /api/behavioral/tool-events?limit=500 → events[].{created_at,tool_name,…}
 //
@@ -189,11 +189,21 @@
     var stats = (learning && learning.stats) || {};
     var eng = (learning && learning.engagement) || {};
     var beh = behavioral || {};
-    var ML_GATE = 2000;
-    var signals = Number(stats.feedback_count || stats.total || 0);
-    var pct = Math.min(100, Math.round(signals / ML_GATE * 100));
-    var phase = (learning && learning.ranking_phase) || 'cold_start';
-    var modelActive = phase === 'ml_model';
+    var ranker = (learning && learning.ranker_phase) || {};
+    var gates = ranker.gates || {};
+    var ruleGate = Math.max(1, Number(gates.rule_based_min_signals || 1));
+    var mlGate = Math.max(ruleGate, Number(gates.ml_model_min_signals || ruleGate));
+    var signals = Number(ranker.signals != null
+      ? ranker.signals : stats.ranker_signal_count || 0);
+    var pct = Math.min(100, Math.round(signals / mlGate * 100));
+    var phase = ranker.key || (learning && learning.ranking_phase) || 'baseline';
+    var phaseNumber = Number(ranker.phase || 1);
+    var modelActive = Boolean(ranker.model_active);
+    var phaseDelta = modelActive
+      ? 'Verified active model'
+      : signals < mlGate
+        ? fmtNum(mlGate - signals) + ' to ML data gate'
+        : 'ML data gate met · verified model required';
     var healthStatus = (eng.health_status || 'INACTIVE').toUpperCase();
     var healthColor = healthStatus === 'HEALTHY' ? 'var(--ok)'
       : healthStatus === 'ACTIVE' ? 'var(--cyan)' : undefined;
@@ -203,7 +213,7 @@
     var strip = EL('div', { className: 'kpi-strip', style: 'margin-bottom:16px' });
     // Ranking phase: text label → isNumeric=false (font-size:24px to match design)
     strip.appendChild(kpiCard('skill', 'Ranking phase', phaseLabel(phase),
-      '▲ ' + fmtNum(ML_GATE - signals) + ' to ML Model phase', !modelActive, undefined, false));
+      phaseDelta, modelActive, undefined, false));
     // Feedback signals: numeric → isNumeric=true
     strip.appendChild(kpiCard('optimize', 'Feedback signals', fmtNum(signals),
       '▲ ' + fmtNum(stats.unique_queries || 0) + ' unique queries', true, undefined, true));
@@ -230,7 +240,7 @@
     var pmeta = EL('div', {
       style: 'display:flex;justify-content:space-between;font-size:12px;color:var(--fg-2);margin-bottom:8px',
     });
-    pmeta.appendChild(EL('span', { text: fmtNum(signals) + ' / ' + fmtNum(ML_GATE) + ' signals' }));
+    pmeta.appendChild(EL('span', { text: fmtNum(signals) + ' / ' + fmtNum(mlGate) + ' signals' }));
     pmeta.appendChild(EL('span', { className: 'num', text: pct + '%' }));
     pb.appendChild(pmeta);
     pb.appendChild(meter(pct));
@@ -238,9 +248,24 @@
       style: 'display:flex;justify-content:space-between;margin-top:18px;gap:12px',
     });
     [
-      { t: 'Baseline',   d: '0–20 signals',      done: true,  now: false },
-      { t: 'Rule-Based', d: '20–200+ · active',    done: false, now: !modelActive },
-      { t: 'ML Model',   d: '2000+ · ' + (modelActive ? 'active' : 'training set'), done: false, now: modelActive },
+      {
+        t: 'Baseline',
+        d: '0–' + Math.max(0, ruleGate - 1) + ' signals',
+        done: phaseNumber > 1,
+        now: phaseNumber === 1,
+      },
+      {
+        t: 'Rule-Based',
+        d: fmtNum(ruleGate) + '–' + fmtNum(Math.max(ruleGate, mlGate - 1)) + ' signals',
+        done: phaseNumber > 2,
+        now: phaseNumber === 2,
+      },
+      {
+        t: 'ML Model',
+        d: fmtNum(mlGate) + '+ · ' + (modelActive ? 'verified active' : 'verified model required'),
+        done: false,
+        now: phaseNumber === 3 && modelActive,
+      },
     ].forEach(function (phI) {
       var el = EL('div', {
         className: 'phase' + (phI.done ? ' done' : '') + (phI.now ? ' now' : ''),
@@ -264,6 +289,7 @@
       ['Learning DB size',  fmtKB(stats.db_size_kb)],
       ['Patterns learned',  String(pCount)],
       ['Models trained',    String(stats.models_trained || 0)],
+      ['Verified active models', String(stats.models_active_verified || 0)],
       ['Sources tracked',   String(stats.tracked_sources || 0)],
     ].forEach(function (row) {
       var r = EL('div', { className: 'list-row' });
@@ -282,11 +308,11 @@
     grid.appendChild(priv);
     sec.appendChild(grid);
 
-    // Heatmap card (real data from tool-events)
+    // Activity heatmap (tool events are activity, never reward labels)
     var hmc = EL('div', { className: 'card', style: 'margin-top:16px' });
     var hmh = EL('div', { className: 'card-head' });
-    hmh.appendChild(EL('h3', { text: "How I'm getting smarter" }));
-    hmh.appendChild(EL('span', { className: 'sub', text: 'reward signal · last 26 weeks' }));
+    hmh.appendChild(EL('h3', { text: 'Memory activity' }));
+    hmh.appendChild(EL('span', { className: 'sub', text: 'tool events · last 26 weeks' }));
     hmh.appendChild(EL('div', { className: 'spacer' }));
     hmh.appendChild(heatLegend());
     hmc.appendChild(hmh);
@@ -302,21 +328,30 @@
   // ======================================================================
   // Tab: REWARD SIGNAL
   // ======================================================================
-  function buildReward(behavioral, dateMap) {
+  function buildReward(behavioral) {
     var sec = EL('section', { className: 'tabpane', 'data-p': 'reward' });
     var beh = behavioral || {};
+    var reward = beh.reward_telemetry || {};
+    var timeline = reward.timeline || [];
+    var rewardDateMap = {};
+    timeline.forEach(function (point) {
+      if (point && point.date) rewardDateMap[String(point.date)] = Number(point.count || 0);
+    });
 
     // Density heatmap
     var hmcr = EL('div', { className: 'card', style: 'margin-bottom:16px' });
     var hmhr = EL('div', { className: 'card-head' });
     hmhr.appendChild(EL('h3', { text: 'Reward signal density' }));
-    hmhr.appendChild(EL('span', { className: 'sub', text: 'positive engagement per day · last 26 weeks' }));
+    hmhr.appendChild(EL('span', {
+      className: 'sub',
+      text: 'settled numeric labels per day · last ' + Number(reward.window_days || 182) + ' days',
+    }));
     hmhr.appendChild(EL('div', { className: 'spacer' }));
     hmhr.appendChild(heatLegend());
     hmcr.appendChild(hmhr);
     var hmbr = EL('div', { className: 'card-pad', style: 'overflow-x:auto' });
     var hmElR = EL('div', { className: 'heatmap', id: 'od-brain-heat2' });
-    buildHeatmap(hmElR, dateMap, 26);
+    buildHeatmap(hmElR, rewardDateMap, 26);
     hmbr.appendChild(hmElR);
     hmcr.appendChild(hmbr);
     sec.appendChild(hmcr);
@@ -324,21 +359,28 @@
     // 2-column: sparkline + outcome mix
     var grid = EL('div', { className: 'grid', style: 'grid-template-columns:1fr 1fr;align-items:start' });
 
-    // Feedback sparkline (last 30 days from dateMap)
+    // Average settled reward and real daily series
     var fbCard = EL('div', { className: 'card' });
     var fbH = EL('div', { className: 'card-head' });
-    fbH.appendChild(EL('h3', { text: 'Feedback signals over time' }));
-    fbH.appendChild(EL('span', { className: 'sub', text: 'cumulative' }));
+    fbH.appendChild(EL('h3', { text: 'Average settled reward' }));
+    fbH.appendChild(EL('span', {
+      className: 'sub',
+      text: fmtNum(reward.count || 0) + ' finalized labels',
+    }));
     fbCard.appendChild(fbH);
     var fbB = EL('div', { className: 'card-pad' });
-    var fbSp = EL('div', { id: 'od-brain-sp-fb' });
-    var today = new Date(); today.setHours(0, 0, 0, 0);
-    var sparkVals = [];
-    for (var si = 29; si >= 0; si--) {
-      var sd = new Date(today); sd.setDate(today.getDate() - si);
-      sparkVals.push((dateMap && dateMap[sd.toISOString().slice(0, 10)]) || 0);
+    if (reward.average != null) {
+      fbB.appendChild(EL('div', {
+        className: 'value num',
+        style: 'font-size:30px;margin-bottom:12px',
+        text: Number(reward.average).toFixed(3),
+      }));
     }
-    var hasSparkData = sparkVals.some(function (v) { return v > 0; });
+    var fbSp = EL('div', { id: 'od-brain-sp-fb' });
+    var sparkVals = timeline.slice(-30).map(function (point) {
+      return Number(point.average || 0);
+    });
+    var hasSparkData = sparkVals.length > 0;
     if (hasSparkData && typeof window.slmSpark === 'function') {
       fbSp.innerHTML = window.slmSpark(sparkVals, { w: 600, h: 150, color: 'var(--violet)' });
       var sv1 = fbSp.querySelector('svg'); if (sv1) sv1.style.height = '150px';
@@ -346,33 +388,33 @@
       fbSp.appendChild(EL('p', {
         className: 'muted',
         style: 'padding:32px;text-align:center;font-size:13px',
-        text: 'No signal history in the last 30 days.',
+        text: 'No settled reward history is available yet.',
       }));
     }
     fbB.appendChild(fbSp);
     fbCard.appendChild(fbB);
     grid.appendChild(fbCard);
 
-    // Outcome mix
+    // Settled reward distribution
     var outCard = EL('div', { className: 'card' });
     var outH = EL('div', { className: 'card-head' });
-    outH.appendChild(EL('h3', { text: 'Outcome mix' }));
-    outH.appendChild(EL('span', { className: 'sub', text: 'heuristic reward attribution' }));
+    outH.appendChild(EL('h3', { text: 'Reward distribution' }));
+    outH.appendChild(EL('span', { className: 'sub', text: 'engagement-derived settled labels' }));
     outCard.appendChild(outH);
     var outB = EL('div', { className: 'card-pad', id: 'od-brain-outcomes' });
-    var total = beh.total_outcomes || 0;
-    var bd = beh.outcome_breakdown || {};
+    var total = Number(reward.count || 0);
+    var bd = reward.distribution || {};
     if (total === 0) {
       outB.appendChild(EL('p', {
         className: 'muted',
         style: 'padding:16px;text-align:center;font-size:13px',
-        text: 'No outcome data yet. Report outcomes in your sessions to train the ranker.',
+        text: 'No settled reward labels yet. Recall engagement will populate this view.',
       }));
     } else {
       [
-        ['Productive (success)',        bd.success || 0, 'var(--ok)'],
-        ['Session continued (partial)', bd.partial  || 0, 'var(--cyan)'],
-        ['Failure signal',              bd.failure  || 0, 'var(--danger)'],
+        ['Positive (> 0.6)', bd.positive || 0, 'var(--ok)'],
+        ['Neutral (0.4–0.6)', bd.neutral || 0, 'var(--cyan)'],
+        ['Negative (< 0.4)', bd.negative || 0, 'var(--danger)'],
       ].forEach(function (r) {
         var p2 = Math.round(r[1] / total * 100);
         var rw = EL('div', { style: 'margin-bottom:13px' });
@@ -454,7 +496,7 @@
       wcb.appendChild(EL('p', {
         className: 'muted',
         style: 'padding:16px;text-align:center;font-size:13px',
-        text: 'Workflow patterns emerge after 50+ recall sessions.',
+        text: 'No sequence or temporal patterns recorded yet. Interest signals are not shown as workflows.',
       }));
     } else {
       wfPats.slice(0, 3).forEach(function (wf) {
@@ -482,9 +524,7 @@
     xch.appendChild(EL('span', { className: 'sub', text: 'patterns reused across projects' }));
     xc.appendChild(xch);
     var xcb = EL('div', { className: 'card-pad' });
-    var xPats = (beh.patterns || []).filter(function (p) {
-      return p.pattern_type === 'cross_project' || p.is_transferable;
-    });
+    var xPats = beh.cross_project_patterns || [];
     if (xPats.length === 0) {
       xcb.appendChild(EL('p', {
         className: 'muted',
@@ -535,9 +575,9 @@
         item.appendChild(bdg);
         item.appendChild(EL('span', {
           style: 'flex:1;font-size:13px',
-          text: String(r.context || r.description || '—'),
+          text: String(r.action_type || 'other'),
         }));
-        item.appendChild(EL('time', { text: String(r.time_ago || r.created_at || '') }));
+        item.appendChild(EL('time', { text: String(r.timestamp || '') }));
         rcb.appendChild(item);
       });
     }
@@ -614,17 +654,14 @@
     var card = EL('div', { className: 'card' });
     var ch = EL('div', { className: 'card-head' });
     ch.appendChild(EL('h3', { text: 'Source quality' }));
-    ch.appendChild(EL('span', { className: 'sub', text: 'per-tool retrieval scoring · 0.0–1.0' }));
+    ch.appendChild(EL('span', { className: 'sub', text: 'persisted source-outcome posterior · 0.0–1.0' }));
     card.appendChild(ch);
     var cb = EL('div', { className: 'card-pad' });
     if (entries.length === 0) {
-      // TODO: GET /api/learning/status → source_scores is empty until ML ranking pipeline
-      // processes sufficient interactions and runs consolidation.
       cb.appendChild(EL('p', {
         className: 'muted',
         style: 'padding:16px;text-align:center;font-size:13px',
-        text: 'Source quality scores are computed by the ML ranking pipeline. ' +
-              'No data yet — scores appear after consolidation runs.',
+        text: 'No source-quality observations yet. Recall hits alone do not establish source quality.',
       }));
     } else {
       entries.forEach(function (k) {
@@ -742,7 +779,7 @@
         head,
         buildTabRow(pCount),
         buildOverview(learning, behavioral, dateMap),
-        buildReward(behavioral, dateMap),
+        buildReward(behavioral),
         buildBehaviour(learning, behavioral),
         buildClients(dateMap),
         buildSourceQuality(learning)

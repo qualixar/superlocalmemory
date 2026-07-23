@@ -118,6 +118,23 @@ def test_foreign_origin_rejected(
     assert resp.json()["error"] == "origin not allowed"
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost.evil.example",
+        "http://127.0.0.1.attacker.example",
+        "http://localhost@evil.example",
+    ],
+)
+def test_loopback_prefix_attack_origin_rejected(
+    client: TestClient, origin: str,
+) -> None:
+    resp = client.get("/internal/token", headers={"Origin": origin})
+
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "origin not allowed"
+
+
 def test_non_loopback_rejected(
     client: TestClient,
     install_token: str,

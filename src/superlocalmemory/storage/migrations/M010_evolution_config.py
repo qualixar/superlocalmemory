@@ -50,6 +50,11 @@ def verify(conn: sqlite3.Connection) -> bool:
     return _REQUIRED_TABLES.issubset(names)
 
 
+def repair(conn: sqlite3.Connection) -> None:
+    """Restore additive Skill Evolution tables without replaying other migrations."""
+    conn.executescript(DDL)
+
+
 DDL = """
 CREATE TABLE IF NOT EXISTS evolution_config (
     profile_id        TEXT PRIMARY KEY,

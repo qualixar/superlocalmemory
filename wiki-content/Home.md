@@ -1,6 +1,8 @@
-# SuperLocalMemory V3.8.0
+# SuperLocalMemory V3.8.1
 
-> **Local-first agent memory, retrieval, cache, compression, and trusted-peer coordination in one operator-controlled runtime. V3.8.0 adds team workspaces, user roles, and GDPR-ready data governance.**
+> **The existing-install stability release for the V3.8 control plane:
+> local-first agent memory, retrieval, cache, compression, trusted-peer
+> coordination, team workspaces, roles, and governance controls.**
 
 SuperLocalMemory turns conversations, observations, and connected-source
 evidence into durable memory that can be recalled through a CLI, MCP, hooks,
@@ -60,7 +62,14 @@ Mode A does not disable model downloads, adapters, backup, proxy providers, or
 other integrations that an operator explicitly enables. Review the complete
 deployment before making a privacy or compliance determination.
 
-## What's new in V3.8.0
+## What's fixed in V3.8.1
+
+V3.8.1 hardens upgrades with bounded startup and background repair, replay-safe
+ingestion, O(1) entity associations, responsive dashboard navigation, truthful
+Brain telemetry, company-mode authorization across learning controls, and
+repair of incomplete additive schemas such as Skill Evolution's cost ledger.
+
+## What V3.8.0 added
 
 **Teams and enterprise memory**
 

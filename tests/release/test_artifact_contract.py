@@ -109,6 +109,17 @@ def test_wheel_contains_packaged_codex_skill_assets(
     assert all(any(name.endswith(suffix) for name in names) for suffix in expected_suffixes)
 
 
+def test_wheel_contains_portable_kit_agents_rules(
+    built_artifacts: BuiltArtifacts,
+) -> None:
+    """``slm connect codex`` must retain its AGENTS.md source after pip install."""
+    names = wheel_names(built_artifacts.wheel)
+    assert any(
+        name.endswith("data/share/superlocalmemory/portable-kit/rules/AGENTS.md")
+        for name in names
+    )
+
+
 def test_sdist_contains_root_and_optimize_legal_notices(
     built_artifacts: BuiltArtifacts,
 ) -> None:

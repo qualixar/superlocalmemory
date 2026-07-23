@@ -203,7 +203,7 @@ class _FilteredServer:
     """
     __slots__ = ("_server", "_allowed")
 
-    def __init__(self, real_server: FastMCP, allowed: frozenset[str]) -> None:
+    def __init__(self, real_server: SLMFastMCP, allowed: frozenset[str]) -> None:
         self._server = real_server
         self._allowed = allowed
 
@@ -265,29 +265,20 @@ from superlocalmemory.mcp.tools_loops import register_loop_tools
 register_loop_tools(_target, get_engine)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
 
 
-# V3.3.21: Eager engine warmup — start initializing BEFORE first tool call.
-# The MCP server process starts when the IDE launches. Previously, the engine
-# was lazy-loaded on first tool call → 23s cold start for the user.
-# Now: engine starts warming in a background thread immediately. By the time
-# the first tool call arrives (1-2s later), the engine is already warm.
-# This applies to ALL IDEs: Claude Code, Cursor, Antigravity, Gemini CLI, etc.
+# Keep stdio MCP processes thin until a tool truly needs a local LIGHT engine.
+# Every open IDE/task owns a stdio process; eagerly opening memory.db in all of
+# them multiplied RAM and SQLite writers on machines with many long-lived
+# sessions. The shared daemon owns model warmup and common remember/recall work.
 def _eager_warmup() -> None:
-    """Pre-warm LIGHT engine + ensure daemon is running + auto-register mesh.
+    """Ensure the shared daemon is running without opening a per-client engine.
 
-    LIGHT engine init is cheap (DB only, ~100 ms). The real reason this
-    stays in a background thread is the follow-on side effects
-    (``ensure_daemon``, ``auto_register_mesh``) which do I/O.
+    Mesh registration is intentionally lazy: a local stdio session is not a
+    remote peer, and heartbeat writes should begin only after a mesh tool is
+    actually used.
     """
-    import logging
     _logger = logging.getLogger(__name__)
-    try:
-        get_engine()
-        _logger.info("MCP engine pre-warmed successfully")
-    except Exception as exc:
-        _logger.warning("MCP engine pre-warmup failed: %s", exc)
 
-    # Measurement / test harnesses set this to skip daemon-start and
-    # mesh-register. The LIGHT engine init above still runs.
+    # Measurement / test harnesses set this to skip daemon-start.
     if _os.environ.get("SLM_DISABLE_WARMUP_SIDE_EFFECTS") == "1":
         return
 
@@ -300,22 +291,12 @@ def _eager_warmup() -> None:
     except Exception as exc:
         _logger.warning("Daemon auto-start failed: %s", exc)
 
-    # V3.4.6: Auto-register this MCP session as a mesh peer immediately.
-    # Previously, registration was lazy (only on first mesh tool call).
-    # Now every Claude session appears on the mesh from startup.
-    try:
-        from superlocalmemory.mcp.tools_mesh import auto_register_mesh
-        auto_register_mesh()
-        _logger.info("Mesh peer auto-registered at startup")
-    except Exception as exc:
-        _logger.warning("Mesh auto-register failed: %s", exc)
-
 import threading
 
 # v3.6.7: Suppress standalone-process behaviours when the MCP server is
 # imported inside the daemon (SLM_MCP_EMBEDDED=1). Three threads are safe
 # to run in a dedicated `slm mcp` subprocess but harmful inside the daemon:
-#   mcp-warmup      — creates a LIGHT engine duplicate; daemon has a FULL one.
+#   mcp-warmup      — ensures the shared daemon only; never creates an engine.
 #   parent-watchdog — calls os._exit(0) if its parent IDE quits, which would
 #                     kill the daemon along with it.
 #   stdin-eof-monitor — monitors stdin pipe; meaningless inside the daemon.

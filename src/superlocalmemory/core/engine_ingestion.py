@@ -16,8 +16,6 @@ import os
 import uuid
 from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
-
 from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
     IngestionOperation,
@@ -31,7 +29,11 @@ if TYPE_CHECKING:
     from superlocalmemory.storage.models import AtomicFact
 
 
+logger = logging.getLogger(__name__)
+
+
 _PREBUILT_FACT_KEY = "_slm_prebuilt_fact_v1"
+_DERIVATION_VERSION = "v3.7-ingestion-1"
 
 
 def _pii_redaction_enabled(engine: "MemoryEngine") -> bool:
@@ -141,7 +143,14 @@ def canonical_store(
     require_complete: bool = True,
     return_receipt: bool = False,
 ) -> list[str] | IngestionOperation:
-    """Synchronously submit and completely materialize one canonical write."""
+    """Submit canonical evidence, optionally waiting for enrichment completion.
+
+    ``require_complete=False`` is the interactive/CQRS path: it commits a
+    profile-scoped memory and FTS-queryable fact through M018, then returns the
+    durable receipt without invoking any LLM, embedding, or graph work.  The
+    daemon materializer owns that expensive, retryable enrichment.  Explicit
+    complete callers retain the historical synchronous contract.
+    """
     import time
 
     from superlocalmemory.core.ingestion_command import IngestionRequest, IngestionState
@@ -185,21 +194,16 @@ def canonical_store(
             speaker=speaker,
             role=role,
         ))
+        if not require_complete:
+            record_operation(
+                "remember",
+                client=trusted_actor_id,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+            )
+            return receipt if return_receipt else list(receipt.fact_ids)
+
         result = command.materialize(receipt.operation_id)
         if result.state is not IngestionState.COMPLETE:
-            if not require_complete and receipt.fact_ids:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Canonical operation %s remains %s and will retry: %s",
-                    result.operation_id,
-                    result.state.value,
-                    result.last_error,
-                )
-                record_operation(
-                    "remember", client=trusted_actor_id,
-                    duration_ms=(time.monotonic() - started) * 1000.0,
-                )
-                return list(receipt.fact_ids)
             raise RuntimeError(result.last_error or "canonical materialization failed")
     except Exception as exc:
         record_operation(
@@ -345,7 +349,201 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
             index_external=False,
         )
 
+    def resume_checkpoint(operation: IngestionOperation) -> MaterializationResult:
+        """Repair only stages whose writes have an idempotent natural key."""
+        state = dict(operation.derivation_state)
+        if not state.get("pipeline", False):
+            return MaterializationResult(
+                operation.final_fact_ids, state, operation.last_error,
+            )
+        facts = engine._db.get_facts_by_ids(
+            list(operation.final_fact_ids), operation.profile_id,
+        )
+        if len(facts) != len(operation.final_fact_ids):
+            state["relational"] = False
+            return MaterializationResult(
+                operation.final_fact_ids,
+                state,
+                "checkpointed relational facts are missing",
+            )
+        if state.get("provenance") is False and engine._provenance is not None:
+            provenance_complete = True
+            for fact in facts:
+                existing = engine._db.execute(
+                    "SELECT 1 FROM provenance WHERE fact_id=? AND profile_id=? "
+                    "AND source_type=? AND source_id=? AND created_by=? LIMIT 1",
+                    (
+                        fact.fact_id,
+                        operation.profile_id,
+                        operation.source_type,
+                        operation.operation_id,
+                        operation.trusted_actor_id,
+                    ),
+                )
+                if existing:
+                    continue
+                try:
+                    engine._provenance.record(
+                        fact_id=fact.fact_id,
+                        profile_id=operation.profile_id,
+                        source_type=operation.source_type,
+                        source_id=operation.operation_id,
+                        created_by=operation.trusted_actor_id,
+                    )
+                except Exception:
+                    provenance_complete = False
+            state["provenance"] = provenance_complete
+        if state.get("post_hooks") is False:
+            try:
+                engine._hooks.run_post("store", {
+                    "operation": "store",
+                    "agent_id": operation.trusted_actor_id,
+                    "profile_id": operation.profile_id,
+                    "content_preview": operation.raw_content[:100],
+                    "ingestion_operation_id": operation.operation_id,
+                    "fact_ids": list(operation.final_fact_ids),
+                    "fact_count": len(operation.final_fact_ids),
+                })
+            except Exception as exc:
+                return MaterializationResult(
+                    operation.final_fact_ids, state, str(exc),
+                )
+            state["post_hooks"] = True
+        incomplete = [name for name, complete in state.items() if not complete]
+        return MaterializationResult(
+            operation.final_fact_ids,
+            state,
+            "" if not incomplete else operation.last_error,
+        )
+
+    def resume_partial_relational(
+        operation: IngestionOperation,
+        memory_id: str,
+    ) -> MaterializationResult:
+        """Finish idempotent relational effects from facts committed before a crash.
+
+        Extraction and consolidation mutate evidence and access counters, so a
+        relational-start checkpoint is an at-most-once boundary for those
+        stages.  The facts already committed to this operation's dedicated
+        memory can safely be promoted again: they use stable fact IDs, graph
+        edge logical keys, temporal event IDs, and fact/entity association
+        keys.  Deliberately omit the other best-effort enrichers here; they
+        have no operation-scoped idempotency contract.
+        """
+        from superlocalmemory.core.store_pipeline import run_store
+
+        # Consolidation may replace a submitted projection with an existing
+        # canonical fact from another memory.  The operation checkpoint is the
+        # authoritative recovery set in that case; falling back to the source
+        # memory is only for a fault before the checkpoint captured final IDs.
+        if operation.final_fact_ids:
+            facts = engine._db.get_facts_by_ids(
+                list(operation.final_fact_ids), operation.profile_id,
+            )
+            if len(facts) != len(operation.final_fact_ids):
+                return MaterializationResult(
+                    operation.final_fact_ids,
+                    dict(operation.derivation_state),
+                    "checkpointed relational facts are missing",
+                )
+        else:
+            facts = engine._db.get_facts_by_memory_id(
+                memory_id, operation.profile_id,
+            )
+        fact_ids = tuple(fact.fact_id for fact in facts)
+        if not fact_ids:
+            return MaterializationResult(
+                (),
+                dict(operation.derivation_state),
+                "no committed facts available for relational recovery",
+            )
+
+        class _CommittedFactsExtractor:
+            @staticmethod
+            def extract_facts(**_kwargs):
+                return []
+
+        pipeline_state: dict[str, bool] = {}
+        progress: dict[str, object] = {}
+
+        def checkpoint_materialization(
+            _phase: str,
+            checkpoint_fact_ids: tuple[str, ...],
+            state: dict[str, bool],
+        ) -> None:
+            repository.checkpoint_enriching(
+                operation.operation_id,
+                final_fact_ids=checkpoint_fact_ids,
+                derivation_version=_DERIVATION_VERSION,
+                derivation_state=state,
+                lease_owner=operation.lease_owner,
+                lease_seconds=900.0,
+            )
+
+        recovered_ids = run_store(
+            operation.raw_content,
+            operation.profile_id,
+            session_id=operation.session_id,
+            session_date=operation.session_date or None,
+            speaker=operation.speaker,
+            role=operation.role,
+            metadata=dict(operation.metadata),
+            scope=operation.scope,
+            shared_with=list(operation.shared_with) or None,
+            config=engine._config,
+            db=engine._db,
+            embedder=engine._embedder,
+            fact_extractor=_CommittedFactsExtractor(),
+            entity_resolver=engine._entity_resolver,
+            temporal_parser=engine._temporal_parser,
+            type_router=None,
+            graph_builder=engine._graph_builder,
+            consolidator=None,
+            observation_builder=None,
+            scene_builder=None,
+            entropy_gate=engine._entropy_gate,
+            ann_index=None,
+            sheaf_checker=None,
+            retrieval_engine=None,
+            provenance=engine._provenance,
+            hooks=engine._hooks,
+            vector_store=None,
+            context_generator=None,
+            temporal_validator=engine._temporal_validator,
+            auto_linker=None,
+            consolidation_engine=None,
+            existing_memory_id=memory_id,
+            queryable_fact_ids=fact_ids,
+            trusted_actor_id=operation.trusted_actor_id,
+            pre_authorized=True,
+            ingestion_source_type=operation.source_type,
+            ingestion_operation_id=operation.operation_id,
+            derivation_report=pipeline_state,
+            precompleted_derivation_stages=frozenset({
+                "extraction", "consolidation",
+            }),
+            materialization_progress=progress,
+            materialization_checkpoint=checkpoint_materialization,
+        )
+        state = {
+            "pipeline_started": True,
+            "relational_started": True,
+            "pipeline": True,
+            "post_hooks": True,
+            "relational": True,
+            **pipeline_state,
+        }
+        return MaterializationResult(tuple(recovered_ids), state)
+
     def materialize(operation: IngestionOperation) -> MaterializationResult:
+        # A checkpointed relational result is an at-most-once boundary.  The
+        # extraction/consolidation pipeline mutates evidence/access counters,
+        # so replaying it is not a valid repair strategy.  Idempotent external
+        # projections are resumed by IngestionCommand after every relational
+        # stage is complete; otherwise the durable failure remains inspectable.
+        if operation.final_fact_ids and operation.derivation_state.get("pipeline", False):
+            return resume_checkpoint(operation)
+
         facts = engine._db.get_facts_by_ids(
             list(operation.queryable_fact_ids),
             operation.profile_id,
@@ -360,6 +558,23 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
         from superlocalmemory.core.store_pipeline import run_store
 
         is_prebuilt = isinstance(operation.metadata.get(_PREBUILT_FACT_KEY), dict)
+        if (
+            operation.derivation_state.get("pipeline_started", False)
+            and not operation.derivation_state.get("pipeline", False)
+            and operation.derivation_state.get("relational_started", False)
+        ):
+            return resume_partial_relational(operation, memory_id)
+        repository.checkpoint_enriching(
+            operation.operation_id,
+            final_fact_ids=(),
+            derivation_version=_DERIVATION_VERSION,
+            derivation_state={
+                "pipeline_started": True,
+                "pipeline": False,
+            },
+            lease_owner=operation.lease_owner,
+            lease_seconds=900.0,
+        )
 
         class _QueryableProjectionExtractor:
             @staticmethod
@@ -367,55 +582,122 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
                 return []
 
         pipeline_state: dict[str, bool] = {}
-        fact_ids = run_store(
-            operation.raw_content,
-            operation.profile_id,
-            session_id=operation.session_id,
-            session_date=operation.session_date or None,
-            speaker=operation.speaker,
-            role=operation.role,
-            metadata=dict(operation.metadata),
-            scope=operation.scope,
-            shared_with=list(operation.shared_with) or None,
-            config=engine._config,
-            db=engine._db,
-            embedder=engine._embedder,
-            fact_extractor=(
-                _QueryableProjectionExtractor() if is_prebuilt else engine._fact_extractor
-            ),
-            entity_resolver=engine._entity_resolver,
-            temporal_parser=engine._temporal_parser,
-            type_router=None if is_prebuilt else engine._type_router,
-            graph_builder=engine._graph_builder,
-            consolidator=None if is_prebuilt else engine._consolidator,
-            observation_builder=engine._observation_builder,
-            scene_builder=engine._scene_builder,
-            entropy_gate=engine._entropy_gate,
-            # External indexes are projected only after the relational unit of
-            # work commits; sqlite-vec uses a separate connection.
-            ann_index=None,
-            sheaf_checker=engine._sheaf_checker,
-            retrieval_engine=None,
-            provenance=engine._provenance,
-            hooks=engine._hooks,
-            vector_store=None,
-            context_generator=engine._context_generator,
-            temporal_validator=engine._temporal_validator,
-            auto_linker=engine._auto_linker,
-            consolidation_engine=engine._consolidation_engine,
-            existing_memory_id=memory_id,
-            queryable_fact_ids=operation.queryable_fact_ids,
-            trusted_actor_id=operation.trusted_actor_id,
-            pre_authorized=True,
-            ingestion_source_type=operation.source_type,
-            ingestion_operation_id=operation.operation_id,
-            derivation_report=pipeline_state,
-        )
+        progress: dict[str, object] = {}
+
+        def checkpoint_materialization(
+            _phase: str,
+            fact_ids: tuple[str, ...],
+            state: dict[str, bool],
+        ) -> None:
+            repository.checkpoint_enriching(
+                operation.operation_id,
+                final_fact_ids=fact_ids,
+                derivation_version=_DERIVATION_VERSION,
+                derivation_state=state,
+                lease_owner=operation.lease_owner,
+                lease_seconds=900.0,
+            )
+
+        try:
+            fact_ids = run_store(
+                operation.raw_content,
+                operation.profile_id,
+                session_id=operation.session_id,
+                session_date=operation.session_date or None,
+                speaker=operation.speaker,
+                role=operation.role,
+                metadata=dict(operation.metadata),
+                scope=operation.scope,
+                shared_with=list(operation.shared_with) or None,
+                config=engine._config,
+                db=engine._db,
+                embedder=engine._embedder,
+                fact_extractor=(
+                    _QueryableProjectionExtractor()
+                    if is_prebuilt else engine._fact_extractor
+                ),
+                entity_resolver=engine._entity_resolver,
+                temporal_parser=engine._temporal_parser,
+                type_router=None if is_prebuilt else engine._type_router,
+                graph_builder=engine._graph_builder,
+                consolidator=None if is_prebuilt else engine._consolidator,
+                observation_builder=engine._observation_builder,
+                scene_builder=engine._scene_builder,
+                entropy_gate=engine._entropy_gate,
+                # External indexes are projected only after the relational unit
+                # of work commits; sqlite-vec uses a separate connection.
+                ann_index=None,
+                sheaf_checker=engine._sheaf_checker,
+                retrieval_engine=None,
+                provenance=engine._provenance,
+                hooks=engine._hooks,
+                vector_store=None,
+                context_generator=engine._context_generator,
+                temporal_validator=engine._temporal_validator,
+                auto_linker=engine._auto_linker,
+                consolidation_engine=engine._consolidation_engine,
+                existing_memory_id=memory_id,
+                queryable_fact_ids=operation.queryable_fact_ids,
+                trusted_actor_id=operation.trusted_actor_id,
+                pre_authorized=True,
+                ingestion_source_type=operation.source_type,
+                ingestion_operation_id=operation.operation_id,
+                derivation_report=pipeline_state,
+                precompleted_derivation_stages=(
+                    frozenset({"extraction", "consolidation"})
+                    if is_prebuilt else frozenset()
+                ),
+                materialization_progress=progress,
+                materialization_checkpoint=checkpoint_materialization,
+            )
+        except Exception as exc:
+            # ``run_store`` checkpoints the completed relational pipeline
+            # immediately before post-hooks run.  Prefer that durable ledger
+            # over rebuilding state from local variables: a one-time hook
+            # failure must not make committed extraction/consolidation look
+            # incomplete and trigger a destructive pipeline replay on retry.
+            checkpoint = repository.get(operation.operation_id)
+            partial_ids = tuple(checkpoint.final_fact_ids)
+            failed_state = dict(checkpoint.derivation_state)
+            if not partial_ids:
+                partial_ids = tuple(progress.get("fact_ids") or ())
+            if not partial_ids:
+                partial_ids = tuple(
+                    fact.fact_id
+                    for fact in engine._db.get_facts_by_memory_id(
+                        memory_id, operation.profile_id
+                    )
+                )
+            if not failed_state:
+                relational_complete = bool(
+                    progress.get("relational_complete", False)
+                )
+                failed_state = {
+                    **{
+                        name: bool(pipeline_state.get(name, False))
+                        for name in (
+                            "extraction",
+                            "canonicalization",
+                            "consolidation",
+                            "graph",
+                            "temporal",
+                            "provenance",
+                        )
+                    },
+                    "pipeline_started": True,
+                    "relational_started": bool(
+                        progress.get("relational_started", False)
+                    ),
+                    "pipeline": relational_complete,
+                    "post_hooks": False,
+                }
+            # Reaching this exception handler means hooks did not complete.
+            # Keep this false even if a future hook implementation mutates the
+            # in-memory progress map before raising.
+            failed_state["post_hooks"] = False
+            return MaterializationResult(partial_ids, failed_state, str(exc))
         if not fact_ids:
             return MaterializationResult((), {"relational": False})
-        if is_prebuilt:
-            pipeline_state["extraction"] = True
-            pipeline_state["consolidation"] = True
 
         placeholders = ",".join("?" for _ in fact_ids)
         relational_count = engine._db.execute(
@@ -462,6 +744,10 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
             )
 
         derivation_state = {
+            "pipeline_started": True,
+            "relational_started": True,
+            "pipeline": True,
+            "post_hooks": True,
             "relational": int(dict(relational_count[0])["count"]) == len(fact_ids),
             "fts": int(dict(fts_count[0])["count"]) == len(fact_ids),
             "extraction": pipeline_state.get("extraction", False),
@@ -531,6 +817,7 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
         write_queryable=write_queryable,
         materialize=materialize,
         project=project,
+        derivation_version=_DERIVATION_VERSION,
     )
 
 

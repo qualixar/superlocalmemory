@@ -1,13 +1,26 @@
 # v3.7.9: POST /api/evolution/config — dashboard write endpoint for evolution.
 import asyncio
+import inspect
 import json
+
+import pytest
+from fastapi import FastAPI
+from starlette.requests import Request
 
 from superlocalmemory.server.routes import evolution as evo_route
 from superlocalmemory.server.routes.evolution import EvolutionConfigUpdate
 
 
 def _call(body):
-    return asyncio.run(evo_route.evolution_config(body))
+    request = Request({"type": "http", "app": FastAPI(), "headers": []})
+    result = evo_route.evolution_config(request, body)
+    return asyncio.run(result) if inspect.isawaitable(result) else result
+
+
+@pytest.fixture(autouse=True)
+def allow_manage(monkeypatch):
+    """Unit tests focus on persistence; the authorization call is tested below."""
+    monkeypatch.setattr(evo_route, "_require_manage", lambda request: None)
 
 
 def test_valid_update_persists(tmp_path, monkeypatch):
@@ -46,3 +59,15 @@ def test_partial_update_preserves_other_keys(tmp_path, monkeypatch):
     assert saved["mode"] == "b"                          # untouched
     assert saved["evolution"]["backend"] == "ollama"     # untouched
     assert saved["evolution"]["mutation_model"] == "sonnet"
+
+
+def test_post_config_requires_manage_permission(tmp_path, monkeypatch):
+    """Evolution settings are an administrative daemon mutation."""
+    monkeypatch.setattr(evo_route, "MEMORY_DIR", tmp_path)
+    calls = []
+    monkeypatch.setattr(evo_route, "_require_manage", lambda request: calls.append(request))
+
+    result = _call(EvolutionConfigUpdate(backend="auto"))
+
+    assert result["ok"] is True
+    assert len(calls) == 1

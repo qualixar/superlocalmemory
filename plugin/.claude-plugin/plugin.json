@@ -5,7 +5,6 @@
   },
   "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server. 21-tool code profile with graph intelligence.",
   "displayName": "SuperLocalMemory",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "memory",
     "mcp",
@@ -16,5 +15,5 @@
   "mcpServers": "./.mcp.json",
   "name": "superlocalmemory",
   "repository": "https://github.com/qualixar/superlocalmemory",
-  "version": "3.8.0"
+  "version": "3.8.1"
 }

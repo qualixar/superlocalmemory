@@ -8,7 +8,8 @@ V3.3.13: Periodically triggers Langevin/Ebbinghaus/Sheaf maintenance
 so users don't need to call run_maintenance manually.
 
 Configurable interval via ForgettingConfig.scheduler_interval_minutes.
-Defaults to 30 min. Disabled during benchmarks (no config.forgetting.enabled).
+Defaults to 30 min. Optional forgetting/math work follows
+``config.forgetting.enabled``; tier evaluation and bounded housekeeping do not.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 License: AGPL-3.0-or-later
@@ -79,12 +80,21 @@ class MaintenanceScheduler:
         if not self._running:
             return
         for profile_id in self._profile_ids():
-            try:
-                from superlocalmemory.core.maintenance import run_maintenance
-                counts = run_maintenance(self._db, self._config, profile_id)
-                logger.info("Scheduled maintenance complete for %s: %s", profile_id, counts)
-            except Exception as exc:
-                logger.warning("Scheduled maintenance failed for %s: %s", profile_id, exc)
+            if self._config.forgetting.enabled:
+                try:
+                    from superlocalmemory.core.maintenance import run_maintenance
+                    counts = run_maintenance(self._db, self._config, profile_id)
+                    logger.info(
+                        "Scheduled maintenance complete for %s: %s",
+                        profile_id,
+                        counts,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Scheduled maintenance failed for %s: %s",
+                        profile_id,
+                        exc,
+                    )
 
             # V3.4.11: Graph pruning (remove orphan edges)
             try:
