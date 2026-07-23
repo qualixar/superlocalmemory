@@ -74,7 +74,7 @@ Look for issues labeled:
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.11 or higher (3.11 - 3.14)
 - SQLite3 (usually pre-installed)
 - Git
 - Text editor or IDE (VS Code, PyCharm, etc.)
