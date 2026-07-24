@@ -130,9 +130,11 @@ class TestRecallTool:
         # S9-DASH-02: recall now threads session_id to pool.recall so the
         # outcome-queue producer can correlate hook signals. Default
         # session_id when the caller doesn't supply one is ``mcp:<agent_id>``.
+        # v3.8.2 client-driven agentic: the tool forwards fast=None when the
+        # caller omits it, so the daemon resolves the configured default.
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
-            fast=False, include_global=None, include_shared=None, window=None,
+            fast=None, include_global=None, include_shared=None, window=None,
         )
 
     @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
@@ -226,7 +228,7 @@ class TestRecallEdgeCases:
         # WP-02 D9: default limit is now CANONICAL_RECALL_LIMIT (20)
         from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
         pool.recall.assert_called_once_with(
-            "", limit=CANONICAL_RECALL_LIMIT, session_id="mcp:mcp_client", fast=False,
+            "", limit=CANONICAL_RECALL_LIMIT, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
         )
 
@@ -247,7 +249,7 @@ class TestRecallEdgeCases:
             asyncio.run(recall("limit test", limit=5))
 
         pool.recall.assert_called_once_with(
-            "limit test", limit=5, session_id="mcp:mcp_client", fast=False,
+            "limit test", limit=5, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
         )
 

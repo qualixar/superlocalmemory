@@ -98,7 +98,10 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
         "query": query,
         "limit": limit,
         "session_id": str(kwargs.get("session_id") or ""),
-        "fast": bool(kwargs.get("fast", False)),
+        # v3.8.2 client-driven agentic: pass ``fast`` through unchanged. None
+        # (unset) flows to the daemon/engine which resolves the configured
+        # client-driven-agentic default; an explicit bool always wins.
+        "fast": kwargs.get("fast", None),
     }
     if "include_global" in kwargs:
         _recall_kwargs["include_global"] = kwargs["include_global"]

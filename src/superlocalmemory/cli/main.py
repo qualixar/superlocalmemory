@@ -82,6 +82,8 @@ _NO_DAEMON_COMMANDS = {
     "optimize", "cache", "compress", "help-optimize",
     # Bounded loops use an in-process engine store, not the daemon.
     "loop",
+    # v3.8.2 super-help is pure text — never touch the daemon.
+    "help",
     # Lifecycle orchestration must run before any global auto-start hook.
     "serve", "restart",
 }
@@ -283,6 +285,37 @@ def main() -> None:
     db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
     db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")
 
+    db_reembed_p = db_sub.add_parser(
+        "reembed",
+        help="Backfill NULL embeddings (facts never embedded)",
+    )
+    db_reembed_p.add_argument(
+        "--missing-only",
+        action="store_true",
+        default=True,
+        dest="missing_only",
+        help="Only embed facts with NULL embedding (default and only mode)",
+    )
+    db_reembed_p.add_argument(
+        "--all-profiles",
+        action="store_true",
+        default=False,
+        dest="all_profiles",
+        help="Process all profiles (default: active profile only)",
+    )
+    db_reembed_p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum facts to embed per run (default: no limit)",
+    )
+    db_reembed_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Output structured JSON",
+    )
+
     # -- Mesh inspection (v3.7.9, M-03) --------------------------------
     mesh_p = sub.add_parser("mesh", help="Inspect the local agent mesh (status/peers)")
     mesh_p.add_argument(
@@ -327,9 +360,11 @@ def main() -> None:
     )
     recall_p.add_argument(
         "--fast", action="store_true",
-        help="Skip graph-assisted candidate expansion and remote agentic verification for a "
-             "latency-bounded response. Other configured retrieval channels still run. "
-             "Use when you need recall before a tool call (e.g. before WebSearch).",
+        help="Force-skip the internal agentic verification round (all six retrieval "
+             "channels + reranker still run). This is already the default (client-driven "
+             "agentic): SLM returns fast local results + confidence signals and lets the "
+             "calling LLM re-query on low confidence. Pass --fast to guarantee the fast "
+             "path even where the server is configured for internal agentic.",
     )
     # v3.6.15: shared memory is opt-in. Unset (None) → resolve the configured
     # default (recall_include_global/shared, both False by default). Explicit
@@ -350,6 +385,15 @@ def main() -> None:
     recall_p.add_argument(
         "--no-shared", dest="include_shared", action="store_false", default=None,
         help="Exclude shared-scope facts from retrieval",
+    )
+    # v3.8.2 client-driven agentic: agents parsing --json should ACT on the
+    # confidence signals rather than expect a server-side LLM to reformulate.
+    recall_p.epilog = (
+        "AGENT GUIDANCE (--json): recall returns fast local results plus "
+        "confidence signals. If 'no_confident_match' is true or "
+        "'answer_confidence' is low, rewrite the query into 1-3 more specific "
+        "sub-queries and call recall again before concluding nothing was found. "
+        "Confident match -> use it directly."
     )
 
     forget_p = sub.add_parser("forget", help="Delete memories matching a query (fuzzy)")
@@ -396,6 +440,21 @@ def main() -> None:
     doctor_p.add_argument(
         "--quick", action="store_true",
         help="Run only the fast checks (deps + config); skip daemon/embedding probes",
+    )
+    doctor_p.add_argument(
+        "--fix", action="store_true",
+        help="Auto-repair fixable components (re-download missing models, "
+             "install sqlite-vec) before checking, then report",
+    )
+
+    # v3.8.2 super-help — grouped overview of every command + focused topics.
+    help_p = sub.add_parser(
+        "help",
+        help="Grouped overview of all commands + topics (modes, config, self-heal)",
+    )
+    help_p.add_argument(
+        "topic", nargs="?",
+        help="Optional topic: modes | config | self-heal",
     )
 
     # LLD-06 §6.6 — `slm wrap <agent> [args...]` activates the Optimize

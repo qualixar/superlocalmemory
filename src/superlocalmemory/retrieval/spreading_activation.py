@@ -139,14 +139,19 @@ class SpreadingActivation:
             )
             # Owner-partitioned vector indexes cannot discover opted-in peers.
             # Add visible external embeddings with the same cosine seed signal.
-            try:
-                external_facts = self._db.get_external_visible_facts(
-                    profile_id,
-                    include_global=include_global,
-                    include_shared=include_shared,
-                )
-            except Exception:
-                external_facts = []
+            # v3.8.2 perf: external (global/shared) facts only matter for a
+            # cross-scope read. For the default personal scope this query always
+            # returns [] — skip it to remove a per-recall DB round-trip.
+            external_facts: list = []
+            if include_global or include_shared:
+                try:
+                    external_facts = self._db.get_external_visible_facts(
+                        profile_id,
+                        include_global=include_global,
+                        include_shared=include_shared,
+                    )
+                except Exception:
+                    external_facts = []
             q_vec = np.array(query, dtype=np.float32)
             q_norm = float(np.linalg.norm(q_vec))
             combined = {fact_id: score for fact_id, score in seed_results}
@@ -162,18 +167,26 @@ class SpreadingActivation:
                     continue
                 score = (float(np.dot(q_vec, fact_vec) / denominator) + 1.0) / 2.0
                 combined[fact.fact_id] = max(combined.get(fact.fact_id, 0.0), score)
-            allowed_seeds = authorized_fact_ids(
-                self._db,
-                combined,
-                profile_id,
-                include_global=include_global,
-                include_shared=include_shared,
-            )
-            seed_results = [
-                (fact_id, score)
-                for fact_id, score in combined.items()
-                if fact_id in allowed_seeds
-            ]
+            # v3.8.2 perf: seeds come from this profile's own vector index /
+            # get_all_facts(profile_id), so for personal scope they are already
+            # authorized. Only re-authorize when a cross-scope read merged in
+            # global/shared candidates. filter_authorized_results below remains the
+            # security net on the returned set.
+            if include_global or include_shared:
+                allowed_seeds = authorized_fact_ids(
+                    self._db,
+                    combined,
+                    profile_id,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                )
+                seed_results = [
+                    (fact_id, score)
+                    for fact_id, score in combined.items()
+                    if fact_id in allowed_seeds
+                ]
+            else:
+                seed_results = list(combined.items())
             if not seed_results:
                 return []
 
@@ -186,13 +199,18 @@ class SpreadingActivation:
             )
             cached = self._get_cached_results(query_hash, profile_id)
             if cached:
-                return filter_authorized_results(
-                    self._db,
-                    cached,
-                    profile_id,
-                    include_global=include_global,
-                    include_shared=include_shared,
-                )[:top_k]
+                # v3.8.2 perf: cached activations were produced from this profile's
+                # own propagation; personal-scope hits need no re-authorization.
+                # Cross-scope hits still pass the fail-closed filter.
+                if include_global or include_shared:
+                    return filter_authorized_results(
+                        self._db,
+                        cached,
+                        profile_id,
+                        include_global=include_global,
+                        include_shared=include_shared,
+                    )[:top_k]
+                return cached[:top_k]
 
             # Run 5-step spreading activation
             activations = self._propagate(
@@ -312,7 +330,15 @@ class SpreadingActivation:
                 if activation < 0.001:
                     continue
 
-                # Get neighbors from BOTH tables (Rule 13) — cached per node
+                # Get neighbors from BOTH tables (Rule 13) — cached per node.
+                # v3.8.2 perf-fix: _get_unified_neighbors already filters edges by
+                # the scope predicate (graph_edges via _scope_where; association_edges
+                # by profile_id), so for the default personal scope the returned
+                # neighbors are inherently authorized. The per-node re-authorization
+                # (2 DB round-trips/node, ~30–60 per recall — the primary 3.8 latency
+                # regression) is only required when a cross-scope read can surface
+                # global/shared neighbors. filter_authorized_results() on the returned
+                # set remains the security net for every scope.
                 if node_id not in neighbor_cache:
                     raw_neighbors = self._get_unified_neighbors(
                         node_id,
@@ -320,16 +346,20 @@ class SpreadingActivation:
                         include_global=include_global,
                         include_shared=include_shared,
                     )
-                    allowed_neighbors = authorized_fact_ids(
-                        self._db,
-                        (neighbor_id for neighbor_id, _weight in raw_neighbors),
-                        profile_id,
-                        include_global=include_global,
-                        include_shared=include_shared,
-                    )
-                    neighbor_cache[node_id] = [
-                        item for item in raw_neighbors if item[0] in allowed_neighbors
-                    ]
+                    if include_global or include_shared:
+                        allowed_neighbors = authorized_fact_ids(
+                            self._db,
+                            (neighbor_id for neighbor_id, _weight in raw_neighbors),
+                            profile_id,
+                            include_global=include_global,
+                            include_shared=include_shared,
+                        )
+                        neighbor_cache[node_id] = [
+                            item for item in raw_neighbors
+                            if item[0] in allowed_neighbors
+                        ]
+                    else:
+                        neighbor_cache[node_id] = raw_neighbors
                 neighbors = neighbor_cache[node_id]
 
                 # Out-degree for fan effect normalization

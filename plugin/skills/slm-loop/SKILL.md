@@ -96,4 +96,4 @@ paused, name the approval needed; when errored, quote the short detail.
 
 ---
 
-SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later

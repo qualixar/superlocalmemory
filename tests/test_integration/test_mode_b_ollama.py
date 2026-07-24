@@ -297,6 +297,11 @@ class TestModeBStoreRecall:
         self, mode_b_engine: MemoryEngine,
     ) -> None:
         """Stored fact gets a 768-dim embedding in DB."""
+        # v3.8.2 store() is queryable-first (embedding materializes async via
+        # the daemon). This direct-engine test asserts the embedding right
+        # after store, so drive the synchronous full-enrichment path for it.
+        from tests.conftest import force_sync_enrichment
+        force_sync_enrichment(mode_b_engine)
         ids = mode_b_engine.store(
             "Alice is a software engineer at Google.",
             session_id="s1", speaker="Bob",

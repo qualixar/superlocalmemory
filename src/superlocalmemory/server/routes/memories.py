@@ -507,9 +507,14 @@ async def search_memories(request: Request, body: SearchRequest):
         # a stalled connection and aborts with "signal is aborted without reason"
         # before the response arrives. Fix: run in a thread-pool executor so the
         # event loop stays alive to send keepalive frames.
-        # v3.4.64 (regression fix): fast=True skips spreading_activation + agentic
-        # LLM rounds (saves ~7s on cold graph traversal). fast=False is the SLOW
-        # path that enables both; the earlier comment had this inverted.
+        # v3.8.2: fast=True — the dashboard search BOX is a snappy retrieval
+        # list (all six local channels + reranker), never the internal agentic
+        # LLM round, which would reintroduce the multi-second hang this endpoint
+        # is regression-tested against (test_search_fast_param_and_profile_isolation).
+        # The human-facing LLM synthesis lives on separate paths that are NOT the
+        # search list: the "ask" memory-chat (/api/v3/chat/stream, Ollama Mode B)
+        # and the precomputed knowledge-cluster summaries (core.community_summary,
+        # Mode B/C). So search stays fast; synthesis is where the LLM adds value.
         import asyncio
         import time as _time
         engine = _get_engine(request)

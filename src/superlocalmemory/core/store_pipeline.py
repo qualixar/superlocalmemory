@@ -89,6 +89,48 @@ def _record_fact_entity_association(
                 "WHERE entity_id=? AND profile_id=?",
                 (entity_id, profile_id),
             )
+        elif not claimed:
+            # An empty result has TWO causes: (a) the 'historical-backfill'
+            # repair-state row is missing — M028 DDL ran but its INSERT rolled
+            # back (partial migration) — so the JOIN returned zero rows and the
+            # main INSERT produced no output; or (b) the association already
+            # exists and the ON CONFLICT update was correctly skipped (an
+            # idempotent re-run). Only (a) needs the fallback insert; (b) is a
+            # no-op. Disambiguate by probing the repair-state table directly —
+            # a DIFFERENT table, so this stays a constant-query, idempotent
+            # effect and never re-fires the insert on an already-applied row.
+            repair_ready = db.execute(
+                "SELECT 1 FROM fact_entity_association_repair_state "
+                "WHERE repair_key='historical-backfill' LIMIT 1",
+            )
+            if repair_ready:
+                # (b) idempotent skip — the association was already applied.
+                return
+            # (a) partial migration: insert with count_applied=1 (no historical-
+            # rowid check needed — all associations in this state are
+            # post-migration). ON CONFLICT DO NOTHING makes this retry-safe.
+            fallback = db.execute(
+                "INSERT INTO fact_entity_associations "
+                "(profile_id,fact_id,entity_id,first_operation_id,count_applied) "
+                "SELECT ?,?,?,?,1 "
+                "FROM canonical_entities AS entity "
+                "JOIN atomic_facts AS fact "
+                "ON fact.fact_id=? AND fact.profile_id=? "
+                "WHERE entity.entity_id=? AND entity.profile_id=? "
+                "ON CONFLICT(profile_id,fact_id,entity_id) DO NOTHING "
+                "RETURNING count_applied",
+                (
+                    profile_id, fact_id, entity_id, operation_id,
+                    fact_id, profile_id,
+                    entity_id, profile_id,
+                ),
+            )
+            if fallback:
+                db.execute(
+                    "UPDATE canonical_entities SET fact_count=fact_count+1 "
+                    "WHERE entity_id=? AND profile_id=?",
+                    (entity_id, profile_id),
+                )
 
 
 def _init_langevin_position(dim: int = 8) -> list[float]:

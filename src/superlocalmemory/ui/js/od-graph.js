@@ -93,6 +93,31 @@
           '<div class="inspector-empty"><div style="font-size:34px;margin-bottom:8px">&#9671;</div>' +
           'Loading your knowledge graph…</div>' +
         '</div>' +
+        // Quick Insight Actions — restored: 5 data-insight-action buttons + #insight-results.
+        // quick-actions.js (global, non-IIFE) defines fetchInsight(action) which calls
+        // GET /api/v3/insights/{action} and writes into #insight-results.
+        // Delegation wired in wireControls() so buttons survive re-renders.
+        '<div id="odg-insights-panel" style="border-top:1px solid var(--border);' +
+          'padding:10px 12px 8px">' +
+          '<div style="font-size:10.5px;font-weight:600;color:var(--fg-3);' +
+            'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:7px">' +
+            'Quick Insights</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px">' +
+            '<button class="chip" style="font-size:11px;padding:3px 9px;cursor:pointer" ' +
+              'data-insight-action="changed_this_week">Changed This Week</button>' +
+            '<button class="chip" style="font-size:11px;padding:3px 9px;cursor:pointer" ' +
+              'data-insight-action="opinions">Opinions</button>' +
+            '<button class="chip" style="font-size:11px;padding:3px 9px;cursor:pointer" ' +
+              'data-insight-action="contradictions">Contradictions</button>' +
+            '<button class="chip" style="font-size:11px;padding:3px 9px;cursor:pointer" ' +
+              'data-insight-action="health">Memory Health</button>' +
+            '<button class="chip" style="font-size:11px;padding:3px 9px;cursor:pointer" ' +
+              'data-insight-action="cross_project">Cross-Project</button>' +
+          '</div>' +
+          // #insight-results — quick-actions.js writes here via document.getElementById
+          '<div id="insight-results" ' +
+            'style="max-height:200px;overflow-y:auto;font-size:12px"></div>' +
+        '</div>' +
         '<div class="ask">' +
           '<div class="ask-head"><span data-ic="brain"></span> Ask your memory</div>' +
           '<div class="ask-log" id="odg-log">' +
@@ -501,6 +526,16 @@
     q('#odg-zfit').onclick = function () { fit(); redraw(); };
     q('#odg-send').onclick = sendAsk;
     q('#odg-ask').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendAsk(); });
+
+    // Quick Insight Actions — delegated on mount so buttons survive od-graph.js re-renders.
+    // quick-actions.js:fetchInsight() is global (non-IIFE); it writes into #insight-results
+    // which is mounted inside odg-insights-panel above.
+    mount.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-insight-action]');
+      if (btn && typeof fetchInsight === 'function') {
+        fetchInsight(btn.getAttribute('data-insight-action'));
+      }
+    });
 
     cv.addEventListener('mousedown', function (e) {
       var r = cv.getBoundingClientRect(), n = nodeAt(e.clientX - r.left, e.clientY - r.top);

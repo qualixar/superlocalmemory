@@ -109,6 +109,7 @@ def run_maintenance(
     db: DatabaseManager,
     config: SLMConfig,
     profile_id: str = "default",
+    embedder: object | None = None,
 ) -> dict[str, int]:
     """Run background maintenance on mathematical layers.
 
@@ -116,6 +117,11 @@ def run_maintenance(
         db: Database manager.
         config: Full SLM configuration.
         profile_id: Scope to this profile.
+        embedder: Optional embedder for self-healing NULL-embedding backfill.
+            When provided and NULL embeddings exist, up to 100 facts are
+            embedded per maintenance pass so the DB converges over time.
+            Pass ``None`` (default) to skip the backfill — existing callers
+            are unaffected.
 
     Returns:
         Dict of counts: langevin_updated, sheaf_checked, etc.
@@ -128,6 +134,7 @@ def run_maintenance(
         "entity_summaries_consolidated": 0,  # V3.4.40
         "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
         "expansion_backfilled": 0,           # T3b
+        "embeddings_backfilled": 0,          # v3.8.x NULL-embedding self-heal
     }
 
     # P1-3 (embeddings-vector-02): sweep orphaned embedding_metadata left by
@@ -137,6 +144,42 @@ def run_maintenance(
         counts["orphan_metadata_gc"] = db.gc_orphaned_embedding_metadata()
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("orphan metadata GC skipped: %s", exc)
+
+    # v3.8.x: self-healing NULL-embedding backfill.  Facts stored while the
+    # embedder was unavailable end up with NULL embedding and are invisible to
+    # semantic recall.  When an embedder is available, embed up to 100 facts
+    # per maintenance pass so the DB converges without blocking the caller.
+    if embedder is not None:
+        try:
+            from superlocalmemory.storage.embedding_migrator import (
+                backfill_missing_embeddings,
+            )
+
+            # Guard: skip entirely when nothing needs backfilling.
+            null_rows = db.execute(
+                "SELECT count(*) AS c FROM atomic_facts "
+                "WHERE embedding IS NULL AND profile_id = ?",
+                (profile_id,),
+            )
+            null_count = int(null_rows[0]["c"]) if null_rows else 0
+            if null_count > 0:
+                result = backfill_missing_embeddings(
+                    config,
+                    db,
+                    embedder,
+                    batch_size=50,
+                    limit=100,
+                )
+                counts["embeddings_backfilled"] = result["embedded"]
+                if result["embedded"] > 0:
+                    logger.info(
+                        "Maintenance embedding backfill: %d facts embedded, "
+                        "%d remaining.",
+                        result["embedded"],
+                        result["remaining_null"],
+                    )
+        except Exception as exc:
+            logger.debug("embedding backfill skipped during maintenance: %s", exc)
 
     facts = db.get_all_facts(profile_id)
     if not facts:

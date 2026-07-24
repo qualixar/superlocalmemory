@@ -5,6 +5,58 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.2] - 2026-07-24 — Self-healing upgrades & faster, consistent recall
+
+### Added
+
+- **Self-healing on startup.** After an upgrade the daemon quietly repairs its
+  own index in the background — backfilling any missing embeddings and rebuilding
+  vector indexes — with no manual steps and no interruption to recall. Progress
+  is visible in the dashboard. Upgrading is now genuinely zero-touch.
+- **Confidence-aware recall.** Every recall result now carries clear confidence
+  signals (`no_confident_match`, `answer_confidence`, `abstained`). Connected
+  assistants are guided to sharpen and re-run a query when confidence is low
+  rather than guessing — better answers, with no extra server-side wait.
+- **New `client_driven_agentic` setting** controls whether query refinement is
+  delegated to the calling assistant (default) or performed inside the server.
+- **Self-repairing components.** On startup SLM checks that the models and
+  dependencies it needs are present and quietly re-downloads or reinstalls the
+  ones it can, in the background — no commands to run. Anything it can't fix on
+  its own (for example a missing Ollama install) is reported with the exact
+  command to fix it.
+- **Dashboard “System Health” report.** A new panel in the dashboard Help area
+  shows every component as ready / missing / degraded, with copy-paste fixes and
+  a “Retry now” button.
+- **Editable memory settings in the dashboard.** A new “Recall & Memory
+  Behaviour” group lets you tune recall depth, the quality reranker, and memory
+  injection from the UI. Changes apply immediately and persist — no config files
+  to edit by hand.
+- **`slm help` and `slm doctor --fix`.** `slm help` now prints a grouped guide to
+  every command plus focused topics (`slm help modes | config | self-heal`), and
+  `slm doctor --fix` auto-repairs the components it can.
+- **Friendlier first-time setup.** `slm setup` detects a local Ollama and offers
+  Smart-Local mode in one keypress, summarizes what will download and asks before
+  the large optional compression model, can connect all your detected IDEs in one
+  step, and finishes with a health check. Skill Evolution is now off by default.
+
+### Changed
+
+- **Recall is faster and consistent across every surface.** The CLI, MCP, and
+  editor integrations now return the same fast local results (all retrieval
+  channels plus reranking) in about 1–2 seconds and behave identically. The
+  occasional multi-second tail on some queries is gone.
+- **Dashboard search stays snappy.** The search box returns a quick result list;
+  richer synthesis remains available in the memory chat and knowledge-cluster
+  summaries.
+
+### Fixed
+
+- **Large databases no longer produce an occasional multi-second recall spike**
+  (graph bridge discovery is now time-bounded).
+- **Upgrades that only relabel an embedding model no longer trigger a full
+  re-embed** of every stored memory.
+- Dashboard search now reliably reflects the active profile.
+
 ## [3.8.1] - 2026-07-23 — Existing-install stability
 
 ### Fixed

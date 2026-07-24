@@ -604,6 +604,33 @@ def apply_v2_bandit_ensemble(
 # run_recall  (was MemoryEngine.recall)
 # ---------------------------------------------------------------------------
 
+def resolve_hot_path_fast(fast: bool | None, config: "SLMConfig") -> bool:
+    """Resolve the recall ``fast`` flag when a caller leaves it unset (None).
+
+    v3.8.2 client-driven agentic: the agent hot path (CLI / MCP / plugins) is
+    consumed by a frontier LLM (Claude Code, Copilot, Codex, …) that reformulates
+    multi-hop / low-confidence queries far better than the local Ollama model.
+    So an unset ``fast`` defaults to True — skip the internal agentic round and
+    let the calling LLM drive refinement — whenever ``retrieval.client_driven_agentic``
+    is on (the ship default). An explicit ``True``/``False`` from the caller
+    always wins (the dashboard search path passes ``True`` for a snappy list;
+    a no-smart-client deployment can pass ``False``). Env override
+    ``SLM_HOT_PATH_INTERNAL_AGENTIC=1`` forces internal-agentic-on globally.
+
+    This is the single resolution point: every recall path (HTTP, MCP, CLI,
+    in-process adapter) funnels through ``run_recall`` and calls this, so the
+    client-driven default is consistent everywhere by construction.
+    """
+    if fast is not None:
+        return bool(fast)
+    import os
+    rc = getattr(config, "retrieval", None)
+    client_driven = bool(getattr(rc, "client_driven_agentic", True))
+    if os.environ.get("SLM_HOT_PATH_INTERNAL_AGENTIC") == "1":
+        client_driven = False
+    return client_driven
+
+
 def run_recall(
     query: str,
     profile_id: str,
@@ -620,7 +647,7 @@ def run_recall(
     hooks: HookRegistry,
     access_log: Any = None,
     auto_linker: Any = None,
-    fast: bool = False,
+    fast: bool | None = None,
     include_global: bool = False,
     include_shared: bool = False,
     window: str | tuple[str, str] | None = None,
@@ -632,8 +659,11 @@ def run_recall(
 
     Pipeline: retrieval -> agentic sufficiency (if configured) -> post-recall updates.
 
-    ``fast=True`` skips remote agentic verification while retaining the six
-    local retrieval channels.
+    ``fast=True`` skips the internal agentic verification round while retaining
+    the six local retrieval channels + reranker. ``fast=None`` (unset) resolves
+    to the client-driven-agentic default (see ``resolve_hot_path_fast``): the
+    agent hot path skips the internal round and delegates refinement to the
+    calling LLM. ``fast=False`` forces the internal agentic round.
     """
     # Pre-operation hooks
     hook_ctx = {
@@ -645,6 +675,12 @@ def run_recall(
     hooks.run_pre("recall", hook_ctx)
 
     m = mode or config.mode
+
+    # v3.8.2: resolve the client-driven-agentic default when a caller left
+    # ``fast`` unset (None). After this line ``fast`` is a concrete bool, so
+    # the agentic gate below (``if not fast``) behaves identically for every
+    # entry point that funnels through here.
+    fast = resolve_hot_path_fast(fast, config)
 
     # v3.5.0 diagnostic: per-stage recall timing under SLM_RECALL_TIMING=1.
     # Zero overhead when the env var is unset. Permanent observability hook.

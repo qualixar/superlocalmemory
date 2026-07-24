@@ -1060,6 +1060,126 @@ async def set_auto_recall_config(request: Request):
         return _internal_error()
 
 
+# ── Runtime behaviour config (v3.8.2 UX-1) ──────────────────
+# User-facing settings that take effect LIVE (no restart) via the
+# reconfigure_daemon_engine hot-swap path AND persist across restarts via
+# SLMConfig.save(). Scoped deliberately to fields that save() round-trips:
+# retrieval (asdict) + injection (explicit). Excludes setup-time/internal
+# knobs and any field save() doesn't persist (which would silently revert).
+_RUNTIME_CONFIG_FIELDS = (
+    # (section, field, kind, min, max)
+    ("retrieval", "top_k", "int", 1, 200),
+    ("retrieval", "use_cross_encoder", "bool", None, None),
+    ("injection", "enabled", "bool", None, None),
+    ("injection", "core_block_enabled", "bool", None, None),
+    ("injection", "core_block_max_facts", "int", 0, 50),
+)
+
+
+def _runtime_config_snapshot(config) -> dict:
+    """Current values of the exposed runtime fields, grouped by section."""
+    out: dict = {}
+    for section, field, *_ in _RUNTIME_CONFIG_FIELDS:
+        sec = getattr(config, section, None)
+        out.setdefault(section, {})[field] = (
+            getattr(sec, field, None) if sec is not None else None
+        )
+    return out
+
+
+@router.get("/runtime/config")
+async def get_runtime_config(request: Request):
+    """User-facing runtime behaviour settings.
+
+    Recall depth (top_k), reranker on/off (use_cross_encoder), and memory
+    injection (master + core-block). All apply live via the daemon hot-swap —
+    no restart — and persist across restarts.
+    """
+    try:
+        from superlocalmemory.core.config import SLMConfig
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
+        return {"success": True, "config": _runtime_config_snapshot(config)}
+    except Exception:
+        return _internal_error()
+
+
+@router.put("/runtime/config")
+async def set_runtime_config(request: Request):
+    """Validate, persist, and hot-apply runtime behaviour settings.
+
+    Body: ``{"retrieval": {"top_k": 30}, "injection": {"enabled": false}}``.
+    Only known fields are accepted; a bad type/range is rejected 400 and
+    nothing is applied (fail-fast — never let a bad value wedge the engine).
+    """
+    _require_manage(request)
+    try:
+        import dataclasses as _dc
+        from superlocalmemory.core.config import SLMConfig
+
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "body must be an object"}, status_code=400)
+
+        # Validate everything BEFORE mutating anything.
+        updates: dict[str, dict] = {}
+        for section, field, kind, lo, hi in _RUNTIME_CONFIG_FIELDS:
+            sec_in = body.get(section)
+            if not isinstance(sec_in, dict) or field not in sec_in:
+                continue
+            val = sec_in[field]
+            if kind == "bool":
+                if not isinstance(val, bool):
+                    return JSONResponse(
+                        {"error": f"{section}.{field} must be true or false"},
+                        status_code=400,
+                    )
+            elif kind == "int":
+                # bool is an int subclass — reject it explicitly.
+                if isinstance(val, bool) or not isinstance(val, int):
+                    return JSONResponse(
+                        {"error": f"{section}.{field} must be an integer"},
+                        status_code=400,
+                    )
+                if (lo is not None and val < lo) or (hi is not None and val > hi):
+                    return JSONResponse(
+                        {"error": f"{section}.{field} must be between {lo} and {hi}"},
+                        status_code=400,
+                    )
+            updates.setdefault(section, {})[field] = val
+
+        if not updates:
+            return JSONResponse(
+                {"error": "no known runtime settings in request body"},
+                status_code=400,
+            )
+
+        # These are plain behaviour flags read per-recall — NOT model/mode
+        # swaps. So we apply them the light way: swap the sub-config objects on
+        # the LIVE config the daemon+engine already hold, then persist to disk.
+        # This avoids the heavyweight engine drain+rebuild (which reloads
+        # models and can time out draining in-flight recalls) — the running
+        # engine simply reads the new values on its next recall/injection.
+        live = getattr(request.app.state, "config", None) or SLMConfig.load()
+        targets = [live]
+        engine = getattr(request.app.state, "engine", None)
+        eng_cfg = getattr(engine, "_config", None) if engine is not None else None
+        if eng_cfg is not None and eng_cfg is not live:
+            targets.append(eng_cfg)
+        for cfg in targets:
+            for section, changes in updates.items():
+                sec = getattr(cfg, section, None)
+                if sec is None:
+                    continue
+                # replace() yields a NEW sub-config (works frozen or mutable);
+                # assigning the attribute is an atomic reference swap.
+                setattr(cfg, section, _dc.replace(sec, **changes))
+        request.app.state.config = live
+        live.save(mode_change=False)  # durable across restart
+        return {"success": True, "config": _runtime_config_snapshot(live)}
+    except Exception:
+        return _internal_error()
+
+
 # ── IDE Status ───────────────────────────────────────────────
 
 @router.get("/ide/status")

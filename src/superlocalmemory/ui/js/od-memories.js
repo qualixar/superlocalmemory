@@ -147,6 +147,9 @@
           '<button class="tab" data-od-act="tab" data-tab="timeline">Creation timeline</button>' +
           '<button class="tab" data-od-act="tab" data-tab="clusters">' +
             'Knowledge clusters <span class="cnt" id="' + id + '-cnt-clusters">…</span></button>' +
+          // Recall Lab tab — restored: recall-lab.js is already loaded in index.html and uses
+          // document-level click/keydown delegation keyed on IDs below, so it survives re-renders.
+          '<button class="tab" data-od-act="tab" data-tab="recall">Recall Lab</button>' +
         '</div>' +
         '<div class="tabpane active" id="' + id + '-pane-all">' + _allScaffold(id) + '</div>' +
         '<div class="tabpane" id="' + id + '-pane-timeline">' + _tlScaffold(id) + '</div>' +
@@ -154,6 +157,40 @@
           '<div class="launch-grid" id="' + id + '-clu-grid">' +
             _loading('Loading clusters…') +
           '</div>' +
+        '</div>' +
+        // Recall Lab pane — exact IDs required by recall-lab.js:
+        //   #recall-lab-query (input), #recall-lab-search (button — click check),
+        //   #recall-lab-per-page (select, optional), #recall-lab-meta, #recall-lab-results.
+        // Backend: POST /api/v3/recall/trace
+        '<div class="tabpane" id="' + id + '-pane-recall" style="padding-top:12px">' +
+          '<div style="margin-bottom:14px">' +
+            '<p style="font-size:13px;color:var(--fg-2);margin-bottom:10px">' +
+              'Trace how a recall query is resolved — matching algorithm, scoring, and final result set.' +
+            '</p>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+              '<input id="recall-lab-query" placeholder="Enter recall query…" autocomplete="off" ' +
+                'style="flex:1;min-width:200px;padding:8px 12px;' +
+                  'border:1px solid var(--border);border-radius:6px;font-size:13px;' +
+                  'background:var(--bg-2);color:var(--fg)">' +
+              '<select id="recall-lab-per-page" ' +
+                'style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;' +
+                  'font-size:13px;background:var(--bg-2);color:var(--fg)">' +
+                '<option value="5">5</option>' +
+                '<option value="10" selected>10</option>' +
+                '<option value="20">20</option>' +
+                '<option value="50">50</option>' +
+              '</select>' +
+              '<button id="recall-lab-search" ' +
+                'style="padding:8px 18px;background:var(--accent);color:#fff;' +
+                  'border:none;border-radius:6px;font-size:13px;cursor:pointer;' +
+                  'white-space:nowrap">Run Trace</button>' +
+            '</div>' +
+          '</div>' +
+          // #recall-lab-meta — written by recall-lab.js before results (timing, count, etc.)
+          '<div id="recall-lab-meta" ' +
+            'style="font-size:12px;color:var(--fg-2);margin-bottom:8px"></div>' +
+          // #recall-lab-results — written by recall-lab.js (result cards, pagination)
+          '<div id="recall-lab-results"></div>' +
         '</div>' +
       '</div>'
     );

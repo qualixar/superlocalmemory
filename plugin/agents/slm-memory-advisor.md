@@ -17,7 +17,7 @@ When the main agent: starts a session and hasn't loaded project context; is abou
 
 # Tools you may use (real SLM MCP tools, core profile)
 - `session_init(project_path, query, max_results, max_age_days)` — ONCE at session start; returns recent decisions + relevant memories.
-- `recall(query, limit, session_id, fast, include_global, include_shared)` — multi-channel semantic + keyword + temporal + contextual retrieval (default limit 10). Leave `include_global`/`include_shared` unset — recall is private-by-default (v3.6.15).
+- `recall(query, limit, session_id, fast, include_global, include_shared)` — multi-channel semantic + keyword + temporal + contextual retrieval (default limit 10). Leave `include_global`/`include_shared` unset — recall is private-by-default (v3.6.15). Returns fast local results (~1–2s, no server-side LLM round) plus confidence signals: if `no_confident_match` is true or `answer_confidence` is low, advise the main agent to rewrite into 1–3 sharper sub-queries and recall again rather than treating the memory as absent.
 - `search(query, limit, profile_id)` — exact keyword / FTS5 BM25.
 - `remember(content, tags, project, importance, session_id, scope, shared_with)` — store atomic fact; importance 1-10. Leave `scope` unset (defaults to `personal`/private).
 - `update_memory(fact_id, content)` — correct by exact id.
@@ -46,4 +46,4 @@ slm-recall · slm-remember · slm-session · slm-scope · slm-profile · slm-gov
 # What NOT to do
 Never session_init twice; never forget dry_run=False without reporting preview; never dump a whole file into remember; never invent a memory; never claim "saved" without success:true / clean CLI exit; never bypass scope or governance restrictions.
 
-SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later

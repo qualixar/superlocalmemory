@@ -36,6 +36,12 @@ router = APIRouter()
 
 LEARNING_DB = MEMORY_DIR / "learning.db"
 
+# F10 fix: track which profiles have completed their initial cache-bypass check
+# per daemon start.  First call uses use_cache=False (tamper detection);
+# subsequent calls use use_cache=True so tab navigation does not re-deserialize
+# a LightGBM model on every dashboard request.
+_ranker_initial_check_done: set[str] = set()
+
 
 def _require_write(request: Request) -> None:
     from superlocalmemory.access.rbac import Permission
@@ -137,10 +143,14 @@ def _compute_ranker_phase(
         )
 
     try:
-        # Official train/promote/rollback paths invalidate this cache.  Reuse
-        # the verified object here so tab navigation does not deserialize a
+        # F10 fix: first call per daemon start per profile must bypass the cache
+        # so a tampered model file is detected before being served.  Subsequent
+        # calls reuse the cache so tab navigation does not re-deserialize a
         # LightGBM model on every dashboard request.
-        model = load_active(db, profile_id, use_cache=True)
+        bypass_cache = profile_id not in _ranker_initial_check_done
+        if bypass_cache:
+            _ranker_initial_check_done.add(profile_id)
+        model = load_active(db, profile_id, use_cache=not bypass_cache)
     except Exception as exc:
         logger.warning("load_active failed: %s", exc)
         model = None

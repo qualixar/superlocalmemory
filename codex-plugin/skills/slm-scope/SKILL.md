@@ -173,4 +173,4 @@ to review the impact. See `slm-remember` for the full deletion discipline.
 
 ---
 
-*SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later*

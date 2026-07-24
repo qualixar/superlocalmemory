@@ -510,6 +510,75 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
+     GROUP — Recall & Memory Behaviour (v3.8.2, live-apply, no restart)
+     PUT /api/v3/runtime/config  {retrieval:{top_k,use_cross_encoder},
+                                   injection:{enabled,core_block_enabled,
+                                              core_block_max_facts}}
+  ═══════════════════════════════════════════════════════════ */
+  function buildRuntime() {
+    var topkWrap = makeRange('rt-topk', 1, 200, 1, 20);
+    var topkInp  = topkWrap.querySelector('input');
+    var xencSw   = makeSwitch('rt-xenc', true);
+    var injSw    = makeSwitch('rt-inj', true);
+    var cbSw     = makeSwitch('rt-cb', true);
+    var cbWrap   = makeRange('rt-cbmax', 0, 50, 1, 5);
+    var cbInp    = cbWrap.querySelector('input');
+    var st = makeSt('rt');
+    function save() {
+      authPut('/api/v3/runtime/config', {
+        retrieval: {
+          top_k: Number(topkInp.value),
+          use_cross_encoder: xencSw.classList.contains('on')
+        },
+        injection: {
+          enabled: injSw.classList.contains('on'),
+          core_block_enabled: cbSw.classList.contains('on'),
+          core_block_max_facts: Number(cbInp.value)
+        }
+      }).then(function (r) { return r.json(); })
+        .then(function (d) {
+          setSt('rt', d.success !== false ? 'Applied' : esc(d.error || 'Error'), d.success !== false);
+          if (d.success !== false) loadRuntime();
+        })
+        .catch(function () { setSt('rt', 'Error', false); toast('Save failed', true); });
+    }
+    // Ranges save on release ('change'), not each drag tick ('input').
+    topkInp.addEventListener('change', save);
+    cbInp.addEventListener('change', save);
+    xencSw.addEventListener('od-toggle', save);
+    injSw.addEventListener('od-toggle', save);
+    cbSw.addEventListener('od-toggle', save);
+    return makeGrp('Recall & Memory Behaviour (auto-saves, no restart)', 'operations', [
+      makeRow('Recall depth', 'Memories each recall considers — higher is more thorough, a little slower', 'retrieval.top_k', topkWrap),
+      makeRow('Reranker', 'Re-scores results for quality (uses ~200MB RAM, adds ~200ms)', 'retrieval.use_cross_encoder', xencSw),
+      makeRow('Inject memories into prompts', 'Master switch for automatic memory injection', 'injection.enabled', injSw),
+      makeRow('Core-memory block', 'Prepend your most important facts to every prompt', 'injection.core_block_enabled', cbSw),
+      makeRow('Core-block size', 'Max facts in the core-memory block', 'injection.core_block_max_facts', cbWrap),
+      makeRow('Status', '', '', st)
+    ]);
+  }
+  function loadRuntime() {
+    fetch('/api/v3/runtime/config').then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.config) return;
+        var rt = d.config.retrieval || {}, inj = d.config.injection || {};
+        function setRange(id, val) {
+          var i = q(id); if (i == null) return;
+          i.value = val; var disp = q(id + '-disp'); if (disp) disp.textContent = val;
+        }
+        function setSw(id, on) {
+          var s = q(id); if (!s) return;
+          s.classList.toggle('on', !!on); s.setAttribute('aria-checked', String(!!on));
+        }
+        if (rt.top_k != null) setRange('rt-topk', rt.top_k);
+        setSw('rt-xenc', rt.use_cross_encoder);
+        setSw('rt-inj', inj.enabled);
+        setSw('rt-cb', inj.core_block_enabled);
+        if (inj.core_block_max_facts != null) setRange('rt-cbmax', inj.core_block_max_facts);
+      }).catch(function () {});
+  }
+
+  /* ═══════════════════════════════════════════════════════════
      GROUP 5 — Auto-Capture
   ═══════════════════════════════════════════════════════════ */
   function buildCapture() {
@@ -1026,8 +1095,8 @@
     });
   }
   function loadAll() {
-    loadMode(); loadEmb(); loadStorage(); loadScope(); loadCapture();
-    loadRecall(); loadInvoke(); loadForgetting(); loadEvolution();
+    loadMode(); loadEmb(); loadStorage(); loadScope(); loadRuntime();
+    loadCapture(); loadRecall(); loadInvoke(); loadForgetting(); loadEvolution();
     loadBackup(); loadMesh(); loadTrust(); loadRateLimit(); loadDaemon();
   }
 
@@ -1062,7 +1131,7 @@
     hub.appendChild(sWrap);
 
     var frag = document.createDocumentFragment();
-    [buildMode(), buildEmb(), buildStorage(), buildScope(),
+    [buildMode(), buildEmb(), buildStorage(), buildScope(), buildRuntime(),
      buildCapture(), buildRecall(), buildInvoke(), buildForgetting(),
      buildEvolution(), buildBackup(), buildMesh(), buildTrust(),
      buildRateLimit(), buildDaemon()

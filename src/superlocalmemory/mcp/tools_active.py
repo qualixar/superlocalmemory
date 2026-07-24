@@ -227,7 +227,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 # thread so the async MCP event loop is not stalled — same
                 # fix class as #34 mesh tools deadlock.
                 response = await asyncio.to_thread(
-                    pool_recall, search_query, limit=max_results, fast=False,
+                    pool_recall, search_query, limit=max_results, fast=None,
                 )
             except (PoolError, Exception) as exc:
                 logger.warning(

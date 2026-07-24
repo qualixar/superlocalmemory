@@ -40,7 +40,7 @@ class DaemonPoolProxy:
 
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
-        fast: bool = False,
+        fast: bool | None = None,
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str | None = None,
@@ -49,8 +49,12 @@ class DaemonPoolProxy:
             "q": query,
             "limit": limit,
             "session_id": session_id or "",
-            "fast": "true" if fast else "false",
         }
+        # v3.8.2 client-driven agentic: only send ``fast`` when the caller set it
+        # explicitly. Unset (None) lets the daemon resolve the configured
+        # client-driven-agentic default — the same way scope flags are handled.
+        if fast is not None:
+            _params["fast"] = "true" if fast else "false"
         # v3.6.15 multi-scope: only send the scope flags when explicitly set, so
         # an unset value lets the daemon resolve the configured default (shared
         # is opt-in). "None" must NOT become the string "none" on the wire.

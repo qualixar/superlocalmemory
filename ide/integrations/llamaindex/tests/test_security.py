@@ -10,6 +10,8 @@ import os
 import tempfile
 
 import pytest
+
+pytest.importorskip("llama_index.core")  # skip cleanly when LlamaIndex isn't installed
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.storage.chat_store.superlocalmemory import SuperLocalMemoryChatStore
 

@@ -100,7 +100,10 @@ def engine(db_path: Path) -> MemoryEngine:
         return_value=_MockEmbedder(768),
     ):
         eng.initialize()
-    return eng
+    # v3.8.2 queryable-first: drive synchronous enrichment for these
+    # artifact-asserting tests. See tests/conftest.force_sync_enrichment.
+    from tests.conftest import force_sync_enrichment
+    return force_sync_enrichment(eng)
 
 
 @pytest.fixture()

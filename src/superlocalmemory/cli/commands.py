@@ -36,8 +36,136 @@ def _cmd_db_dispatch(args: Namespace) -> None:
         if rc:
             sys.exit(rc)
         return
-    print("Usage: slm db migrate [--status] [--dry-run] | slm db scale <action>")
+    if sub == "reembed":
+        _cmd_db_reembed(args)
+        return
+    print(
+        "Usage: slm db migrate [--status] [--dry-run] "
+        "| slm db scale <action> "
+        "| slm db reembed [--missing-only] [--all-profiles] [--limit N]"
+    )
     sys.exit(2)
+
+
+def _cmd_db_reembed(args: Namespace) -> None:
+    """Backfill NULL embeddings on atomic_facts.
+
+    Scans for atomic_facts rows with no embedding (facts stored while the
+    embedder was unavailable) and embeds them now.  Safe to re-run — only
+    NULL rows are processed.
+
+    Usage:
+        slm db reembed --missing-only                # backfill NULLs (default)
+        slm db reembed --missing-only --limit 500    # cap per run
+        slm db reembed --missing-only --all-profiles # cover every profile
+    """
+    import time
+
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
+    from superlocalmemory.storage.embedding_migrator import backfill_missing_embeddings
+
+    use_json = getattr(args, "json", False)
+    missing_only = getattr(args, "missing_only", True)
+    all_profiles = getattr(args, "all_profiles", False)
+    limit = getattr(args, "limit", None)
+
+    if not missing_only:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "db-reembed",
+                error={
+                    "code": "NOT_IMPLEMENTED",
+                    "message": "Only --missing-only is supported. "
+                    "For full re-embed use 'slm db migrate'.",
+                },
+            )
+        else:
+            print("Only --missing-only mode is supported. "
+                  "For full re-embed use 'slm db migrate'.")
+        sys.exit(2)
+
+    try:
+        config = SLMConfig.load()
+        engine = MemoryEngine(config)
+        engine.initialize()
+    except Exception as exc:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "db-reembed",
+                error={"code": "ENGINE_INIT_ERROR", "message": str(exc)},
+            )
+        else:
+            print(f"Error initializing engine: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    embedder = getattr(engine, "_embedder", None)
+    if embedder is None:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "db-reembed",
+                error={
+                    "code": "NO_EMBEDDER",
+                    "message": "Embedder is not available. "
+                    "Start the daemon first or check embedding configuration.",
+                },
+            )
+        else:
+            print(
+                "Embedder is not available. "
+                "Start the daemon ('slm serve') or check embedding config.",
+                file=sys.stderr,
+            )
+        engine.close()
+        sys.exit(1)
+
+    t0 = time.monotonic()
+    try:
+        result = backfill_missing_embeddings(
+            config,
+            engine._db,
+            embedder,
+            batch_size=50,
+            limit=limit,
+            all_profiles=all_profiles,
+        )
+    except Exception as exc:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "db-reembed",
+                error={"code": "BACKFILL_ERROR", "message": str(exc)},
+            )
+        else:
+            print(f"Backfill error: {exc}", file=sys.stderr)
+        engine.close()
+        sys.exit(1)
+
+    elapsed = time.monotonic() - t0
+    engine.close()
+
+    if use_json:
+        from superlocalmemory.cli.json_output import json_print
+        json_print(
+            "db-reembed",
+            data={
+                "scanned": result["scanned"],
+                "embedded": result["embedded"],
+                "remaining_null": result["remaining_null"],
+                "elapsed_s": round(elapsed, 2),
+            },
+        )
+    else:
+        print(
+            f"Backfill complete — "
+            f"scanned={result['scanned']} "
+            f"embedded={result['embedded']} "
+            f"remaining_null={result['remaining_null']} "
+            f"elapsed={elapsed:.1f}s"
+        )
 
 
 def _cmd_mesh_dispatch(args: Namespace) -> None:
@@ -238,6 +366,8 @@ def dispatch(args: Namespace) -> None:
         "help-optimize": _cmd_help_optimize,
         # V3.8.0 bounded loops (gate-verified agent loops, SLM-backed ledger)
         "loop": _cmd_loop,
+        # V3.8.2 super-help — grouped overview of every command + topics
+        "help": cmd_help,
     }
     handler = handlers.get(args.command)
     if handler:
@@ -1398,7 +1528,10 @@ def cmd_recall(args: Namespace) -> None:
 
         response = engine.recall(
             args.query, limit=args.limit,
-            fast=getattr(args, "fast", False),
+            # v3.8.2: --fast → True; unset → None so engine resolves the
+            # client-driven-agentic default (parity with the daemon path, which
+            # omits the fast query param when --fast is absent).
+            fast=(True if getattr(args, "fast", False) else None),
             include_global=include_global,
             include_shared=include_shared,
             window=getattr(args, "window", "") or None,
@@ -2140,6 +2273,175 @@ def _readline_with_timeout(
     )
 
 
+# ---------------------------------------------------------------------------
+# Super-help (v3.8.2) — one place a non-technical user sees EVERYTHING.
+# Grouped so `slm help` is scannable; a drift test asserts every top-level
+# command in the parser appears here (see test_super_help).
+# ---------------------------------------------------------------------------
+
+_COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Getting started", [
+        ("setup", "Guided first-time setup (models, mode, IDEs) — start here"),
+        ("init", "Set up + wire Claude Code hooks + connect IDEs"),
+        ("reconfigure", "Re-run setup / pick a performance profile"),
+        ("mode", "Switch memory mode: a (local) / b (Ollama) / c (cloud)"),
+        ("provider", "Configure the cloud LLM provider + API key (Mode C)"),
+        ("connect", "Auto-configure detected IDEs (Cursor, VS Code, …)"),
+        ("hooks", "Install/inspect Claude Code hooks"),
+        ("codex", "Configure the Codex / OpenAI integration"),
+    ]),
+    ("Store & recall memories", [
+        ("remember", "Store a memory (--tags to label)"),
+        ("recall", "Semantic + keyword search across memories"),
+        ("search", "Exact keyword / full-text search"),
+        ("list", "Show recent memories (-n N)"),
+        ("update", "Correct an existing memory by id"),
+        ("delete", "Delete a memory by id"),
+        ("forget", "Run the decay cycle (preview first)"),
+        ("trace", "Recall with a per-channel score breakdown"),
+        ("ingest", "Ingest external observations / documents"),
+    ]),
+    ("Run SLM (daemon & dashboard)", [
+        ("serve", "Start/stop the background daemon"),
+        ("restart", "Restart the daemon (applies restart-only settings)"),
+        ("dashboard", "Open the web dashboard (localhost:8765)"),
+        ("mcp", "Start the MCP server (used by IDEs)"),
+        ("warmup", "Pre-load models so the first recall is fast"),
+        ("status", "Show daemon status + memory counts"),
+    ]),
+    ("Health & self-healing", [
+        ("doctor", "Full pre-flight check (add --fix to auto-repair)"),
+        ("health", "Quick math/retrieval layer status"),
+        ("diagnostics", "Export a local diagnostics bundle"),
+        ("evidence", "Build/inspect evidence bundles"),
+        ("rotate-token", "Rotate the local dashboard install token"),
+    ]),
+    ("Configuration", [
+        ("config", "View/set configuration (see: slm help config)"),
+        ("enable", "Enable a feature/escape hatch"),
+        ("disable", "Disable a feature/escape hatch"),
+        ("clear-cache", "Clear caches"),
+    ]),
+    ("Profiles & sessions", [
+        ("profile", "Manage workspaces/profiles (add, switch, list)"),
+        ("session", "Open/close a work session"),
+        ("session-context", "Pre-stage session context for hooks"),
+    ]),
+    ("Multi-device mesh", [
+        ("mesh", "Inspect/manage the cross-device memory mesh"),
+    ]),
+    ("Token optimization", [
+        ("optimize", "Configure the Optimize surface (cache/compress/proxy)"),
+        ("cache", "Manage the LLM response cache"),
+        ("compress", "Manage prose compression"),
+        ("proxy", "Manage the optimizing LLM proxy"),
+        ("wrap", "Run an agent (claude, codex, …) through the proxy"),
+        ("help-optimize", "Detailed help for the Optimize surface"),
+    ]),
+    ("Learning & maintenance", [
+        ("evolve", "Skill-evolution controls"),
+        ("observe", "External observation / telemetry ingestion"),
+        ("decay", "Run a forgetting/decay pass"),
+        ("consolidate", "Merge/consolidate related memories"),
+        ("quantize", "Quantize embeddings to save space"),
+        ("soft-prompts", "Manage learned soft prompts"),
+        ("reap", "Clean up stale/dead records"),
+        ("adapters", "Manage ingestion adapters"),
+        ("benchmark", "Run local benchmarks"),
+    ]),
+    ("Data & migration", [
+        ("db", "Low-level database operations"),
+        ("migrate", "Migrate the data store to the current version"),
+    ]),
+    ("Automation", [
+        ("loop", "Run gate-verified bounded agent loops"),
+    ]),
+    ("Help", [
+        ("help", "This overview. Try: slm help config | modes | self-heal"),
+    ]),
+]
+
+_HELP_TOPICS: dict[str, str] = {
+    "modes": """\
+Operating modes
+  a  Local Guardian — no model-provider call in the core memory path.
+  b  Smart Local    — uses a local Ollama LLM (auto-detected at setup).
+  c  Full Power     — uses a cloud LLM (OpenAI/Anthropic/…), needs a key.
+
+  Switch any time:  slm mode a   (or b / c)
+""",
+    "config": """\
+Configuration
+  slm config                 Show current configuration
+  slm config get <key>       Read one setting
+  slm config set <key> <val> Change a setting
+
+  Most day-to-day settings are editable live in the dashboard
+  (Settings tab) and apply without a restart. Settings that need a
+  restart show a one-click "apply & restart" banner.
+
+  Common runtime settings: recall depth (top_k), memory injection on/off,
+  stale-memory suppression, idle consolidation, PII redaction, reranker.
+""",
+    "self-heal": """\
+Self-healing (v3.8.2)
+  SLM repairs itself. On every start the daemon checks that all models
+  and dependencies are present and re-downloads/installs the fixable ones
+  in the background — you don't run anything.
+
+  See what's present/missing:
+    slm doctor                 Full report with fix commands
+    slm doctor --fix           Auto-repair everything fixable, then report
+    Dashboard → Help → System Health   Live "what's missing" report
+
+  Big or opt-in pieces (the local LLM 'Ollama', the large compression
+  model, PyTorch) are never installed without you — SLM shows the exact
+  command instead.
+""",
+}
+# Aliases so common phrasings resolve to a topic.
+_HELP_TOPICS["health"] = _HELP_TOPICS["self-heal"]
+_HELP_TOPICS["selfheal"] = _HELP_TOPICS["self-heal"]
+_HELP_TOPICS["mode"] = _HELP_TOPICS["modes"]
+
+
+def all_help_commands() -> set[str]:
+    """Every command name listed in the super-help (drift-test hook)."""
+    return {cmd for _title, rows in _COMMAND_GROUPS for cmd, _desc in rows}
+
+
+def cmd_help(args: Namespace) -> None:
+    """Super-help: a grouped overview of every command, plus focused topics.
+
+    `slm help`            → grouped command overview
+    `slm help <topic>`    → modes | config | self-heal
+    """
+    topic = getattr(args, "topic", None)
+    if topic:
+        key = topic.strip().lower()
+        text = _HELP_TOPICS.get(key)
+        if text:
+            print(text)
+        else:
+            print(f"No help topic '{topic}'. Available topics: "
+                  + ", ".join(sorted(set(_HELP_TOPICS))))
+        return
+
+    from superlocalmemory.cli.json_output import _get_version
+    print(f"SuperLocalMemory V3 ({_get_version()}) — command overview")
+    print("=" * 58)
+    print("Run any command with -h for its options, e.g.  slm recall -h\n")
+    for title, rows in _COMMAND_GROUPS:
+        print(f"{title}:")
+        for cmd, desc in rows:
+            print(f"  {cmd:<16} {desc}")
+        print()
+    print("Health at a glance:  slm doctor   (auto-repair: slm doctor --fix)")
+    print("Topics:              slm help modes | slm help config | "
+          "slm help self-heal")
+    print("Docs:                https://superlocalmemory.com")
+
+
 def cmd_doctor(args: Namespace) -> None:
     """Comprehensive pre-flight check — verify everything works.
 
@@ -2176,6 +2478,34 @@ def cmd_doctor(args: Namespace) -> None:
         print("SuperLocalMemory V3 — Doctor (Pre-flight Check)")
         print("=" * 50)
         print()
+
+    # v3.8.2 `--fix`: run the component healer (the SAME repair the daemon
+    # self-heal performs) BEFORE the checks, so the report below reflects the
+    # healed state. Re-downloads missing models / installs sqlite-vec; big or
+    # opt-in items are left as manual fixes. Fail-open — never blocks doctor.
+    if getattr(args, "fix", False):
+        try:
+            from superlocalmemory.core import component_healer
+            from superlocalmemory.core.config import SLMConfig as _FixCfg
+            try:
+                _fcfg = _FixCfg.load()
+            except Exception:
+                _fcfg = None
+            if not use_json:
+                print("Auto-repair (--fix): repairing fixable components…")
+            _fix_res = component_healer.heal_missing(
+                _fcfg,
+                on_progress=(None if use_json
+                             else (lambda k, m: print(f"  [{k}] {m}"))),
+            )
+            if not use_json:
+                print(
+                    f"  repaired {_fix_res['healed']}/{_fix_res['attempted']} "
+                    f"(failed {_fix_res['failed']})\n"
+                )
+        except Exception as _fix_exc:
+            if not use_json:
+                print(f"  auto-repair error: {_fix_exc}\n")
 
     # 1. Python version
     v = sys.version_info
@@ -2441,6 +2771,34 @@ def cmd_doctor(args: Namespace) -> None:
                 )
     except Exception:
         pass  # advisory only — never fail doctor on this check
+
+    # 12a. Component registry (v3.8.2) — models + optional vector/graph/
+    #      compression backends the older checks above did NOT cover
+    #      (embedder/reranker/compressor cache presence, sqlite-vec, lancedb,
+    #      cozo, llmlingua). Single source of truth shared with the daemon
+    #      self-heal and the dashboard "what's missing" report. Missing items
+    #      are advisory (WARN), never FAIL — the self-heal thread and
+    #      `slm doctor --fix` repair the auto-fixable ones. Runs BEFORE the
+    #      Optimize check so that check stays last (its ordering is pinned by
+    #      test_doctor_optimize).
+    try:
+        from superlocalmemory.core import component_registry as _cr
+        try:
+            from superlocalmemory.core.config import SLMConfig as _Cfg
+            _dcfg = _Cfg.load()
+        except Exception:
+            _dcfg = None
+        _already = {"python", "search_deps", "ollama"}
+        for _c in _cr.probe_all(_dcfg):
+            if _c.key in _already:
+                continue  # covered by checks 1/3/8 above — avoid duplicates
+            _status = "PASS" if _c.status == _cr.STATUS_OK else "WARN"
+            _detail = _c.detail or _c.status
+            if _c.auto_fixable:
+                _detail += " (auto-heals on daemon start)"
+            _check(f"Component: {_c.label}", _status, _detail, _c.fix_cmd)
+    except Exception as _cr_exc:
+        _check("Component registry", "WARN", f"probe failed: {_cr_exc}")
 
     # 12. Optimize (Surface B) — reads daemon-persisted metrics (≤60s stale).
     info = _gather_optimize_surface_b()

@@ -27,6 +27,7 @@ License: AGPL-3.0-or-later
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from superlocalmemory.retrieval.scope_policy import (
@@ -71,6 +72,7 @@ class BridgeDiscovery:
         *,
         include_global: bool = False,
         include_shared: bool = False,
+        time_budget_s: float = 0.4,
     ) -> list[tuple[str, float]]:
         """Find bridge facts connecting seed results.
 
@@ -110,9 +112,19 @@ class BridgeDiscovery:
 
         bridges: list[tuple[str, float]] = []
         seen = set(seed_ids)
+        # v3.8.2: bound the per-entity get_facts_by_entity fan-out. On a dense
+        # entity graph (M5: 3.3k entities / 208k edges) a single recall could
+        # issue 200+ DB round-trips here — the primary 3.8 full-mode latency
+        # spike (observed 7.6s). Bridges are a SUPPLEMENTARY post-fusion boost
+        # (score x0.8, only added if not already found), so truncating them
+        # under a wall-clock budget is quality-safe: the ranked channels have
+        # already returned the core results.
+        deadline = time.monotonic() + time_budget_s
 
         # Check consecutive pairs for entity overlap
         for i in range(len(seed_ids) - 1):
+            if time.monotonic() > deadline:
+                break
             fact_a = seed_facts.get(seed_ids[i])
             fact_b = seed_facts.get(seed_ids[i + 1])
             if not fact_a or not fact_b:
@@ -128,6 +140,8 @@ class BridgeDiscovery:
             # Strategy 1: Entity bridge (union minus intersection)
             bridge_entities = (entities_a | entities_b) - (entities_a & entities_b)
             for eid in bridge_entities:
+                if time.monotonic() > deadline:
+                    break
                 entity_facts = self._db.get_facts_by_entity(
                     eid,
                     profile_id,

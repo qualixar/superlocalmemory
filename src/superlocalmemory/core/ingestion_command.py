@@ -21,7 +21,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+import logging
+
 from superlocalmemory.storage.database import DatabaseManager
+
+logger = logging.getLogger("superlocalmemory.ingestion_command")
 
 _MATERIALIZATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS = 10
@@ -545,18 +549,31 @@ class IngestionCommand:
         interval = min(30.0, max(0.1, self._lease_seconds / 3.0))
 
         def heartbeat() -> None:
-            while not stop.wait(interval):
-                try:
-                    renewed = self.repository.renew_enriching_lease(
-                        operation_id,
-                        owner=self._owner,
-                        lease_seconds=self._lease_seconds,
-                    )
-                except sqlite3.Error:
-                    continue
-                if not renewed:
-                    lost.set()
-                    return
+            # F9 fix: outer broad catch ensures lost.set() is always called
+            # when the heartbeat thread dies for any reason (not just sqlite3.Error).
+            # Without this, an AttributeError or unexpected exception would kill
+            # the thread silently, leaving lost=False while the lease has expired.
+            try:
+                while not stop.wait(interval):
+                    try:
+                        renewed = self.repository.renew_enriching_lease(
+                            operation_id,
+                            owner=self._owner,
+                            lease_seconds=self._lease_seconds,
+                        )
+                    except sqlite3.Error:
+                        continue
+                    if not renewed:
+                        lost.set()
+                        return
+            except Exception:
+                logger.warning(
+                    "heartbeat thread died unexpectedly for operation %s — "
+                    "signalling lease lost",
+                    operation_id,
+                    exc_info=True,
+                )
+                lost.set()
 
         thread = threading.Thread(
             target=heartbeat,
@@ -569,10 +586,13 @@ class IngestionCommand:
         finally:
             stop.set()
             thread.join(timeout=max(1.0, interval * 2))
-        if lost.is_set():
-            raise LeaseLost(
-                f"ingestion lease lost for operation {operation_id}"
-            )
+            # F7 fix: check inside finally so LeaseLost wins even when callback
+            # raised.  Without this, the original exception would propagate and
+            # the LeaseLost signal would be masked.
+            if lost.is_set():
+                raise LeaseLost(
+                    f"ingestion lease lost for operation {operation_id}"
+                )
         return result
 
     def submit(self, request: IngestionRequest) -> IngestionOperation:

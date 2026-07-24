@@ -183,6 +183,20 @@
             '</tbody>' +
           '</table>' +
         '</div>' +
+      '</div>' +
+
+      // System Health — Components (v3.8.2 UX-6): what's installed vs missing,
+      // with copy-paste fix commands + a Retry-now button. The daemon
+      // auto-heals fixable items on start; this is transparency + fallback.
+      // Rendered by od-components.js → window.odRenderComponents.
+      '<div class="card" style="margin-top:16px">' +
+        '<div class="card-head">' +
+          '<h3>System Health — Components</h3>' +
+          '<span class="sub">models &amp; dependencies · self-healing</span>' +
+        '</div>' +
+        '<div class="card-pad" id="od-h-components">' +
+          '<div class="dim" style="text-align:center;padding:20px">Loading…</div>' +
+        '</div>' +
       '</div>'
     );
   }
@@ -515,6 +529,10 @@
       populateTrustSignals(trustStats);
       populateAgentSummary(agentsData, eventsStats);
       populateAgentTable(agentsData);
+      // v3.8.2 UX-6: component "what's missing" report (od-components.js).
+      if (typeof window.odRenderComponents === 'function') {
+        window.odRenderComponents(document.getElementById('od-h-components'));
+      }
 
     }).catch(function (err) {
       container.innerHTML =

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import superlocalmemory as _slm
+
 from ._harness import (
     REPO_ROOT,
     BuiltArtifacts,
@@ -14,7 +16,25 @@ from ._harness import (
     install_artifact,
 )
 
-pytestmark = pytest.mark.slow
+# When SLM is installed EDITABLE in the interpreter running the tests (a dev
+# checkout: `pip install -e .`), site-packages carries an `__editable__` .pth
+# that points at REPO_ROOT/src. The release harness builds its probe venv with
+# --system-site-packages (to reuse heavy ML deps), so that .pth leaks src/ onto
+# the probe's sys.path and this clean-install isolation check cannot hold. The
+# check is only meaningful for a non-editable/packaged install (CI), so skip it
+# under an editable dev install rather than report a false failure.
+_EDITABLE_DEV_INSTALL = Path(_slm.__file__).resolve().is_relative_to(
+    REPO_ROOT / "src"
+)
+
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        _EDITABLE_DEV_INSTALL,
+        reason="editable dev install exposes src/ via --system-site-packages; "
+               "clean-install isolation is only verifiable for a packaged install (CI)",
+    ),
+]
 
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])

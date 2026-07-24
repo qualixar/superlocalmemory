@@ -96,6 +96,9 @@
         '<button class="tab" data-od-tab="trust">Trust</button>' +
         '<button class="tab" data-od-tab="compliance">Compliance</button>' +
         '<button class="tab" data-od-tab="loops">Bounded Loops</button>' +
+        // Ingestion tab — restored: re-mounts #ingestion-overview + #ingestion-adapters
+        // so ng-ingestion.js (loaded in index.html) can populate them on call.
+        '<button class="tab" data-od-tab="ingestion">Ingestion</button>' +
       '</div>' +
 
       // ══════ LIFECYCLE TAB ══════════════════════════════════════════════
@@ -426,6 +429,31 @@
             '</table>' +
           '</div>' +
         '</div>' +
+
+      '</section>' +
+
+      // ══════ INGESTION TAB ═════════════════════════════════════════════
+      // Restoration: mounts #ingestion-overview and #ingestion-adapters so that
+      // window.loadIngestionStatus() (ng-ingestion.js) can populate them.
+      // ng-ingestion.js is loaded in index.html and defines loadIngestionStatus().
+      // Adapter action buttons use data-act-click="adapter-action" which is handled
+      // by event-delegation.js → adapterAction() defined in ng-ingestion.js.
+      // Backend: GET /api/adapters · POST /api/adapters/{enable|disable|start|stop}
+      '<section class="tabpane" data-od-pane="ingestion">' +
+
+        '<div class="page-head" style="margin-bottom:16px">' +
+          '<h2 style="font-size:20px;margin-bottom:6px">Connectors &amp; Ingestion</h2>' +
+          '<p style="font-size:13.5px">' +
+            'Gmail, Calendar, and Transcript adapters — enable to start building memory ' +
+            'from external sources. All processing is local.' +
+          '</p>' +
+        '</div>' +
+
+        // #ingestion-overview — ng-ingestion.js: 4 stat cards (Available/Enabled/Running/Privacy)
+        '<div id="ingestion-overview"></div>' +
+
+        // #ingestion-adapters — ng-ingestion.js: adapter cards (Gmail/Calendar/Transcript)
+        '<div id="ingestion-adapters" style="margin-top:16px"></div>' +
 
       '</section>'
     );
@@ -1225,6 +1253,14 @@
       // Team & access (RBAC / C3) — rendered by od-team.js
       if (typeof window.odRenderTeam === 'function') {
         window.odRenderTeam(document.getElementById('od-team-mount'));
+      }
+
+      // Ingestion (Gmail / Calendar / Transcript) — re-linked to ng-ingestion.js.
+      // #ingestion-overview and #ingestion-adapters are now in the skeleton DOM
+      // (inside the Ingestion tab section); calling loadIngestionStatus() renders them.
+      // The function is null-guarded: no-op if ng-ingestion.js failed to load.
+      if (typeof window.loadIngestionStatus === 'function') {
+        window.loadIngestionStatus();
       }
 
     }).catch(function (err) {

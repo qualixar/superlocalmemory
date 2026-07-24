@@ -12,6 +12,8 @@ import sys
 import tempfile
 
 import pytest
+
+pytest.importorskip("langchain_core")  # skip cleanly when LangChain isn't installed
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_superlocalmemory import SuperLocalMemoryChatMessageHistory
 

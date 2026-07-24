@@ -396,6 +396,17 @@
             _dateField('Last seen',  listEnt.last_seen)  +
             _dateField('Compiled',   d.last_compiled_at) +
           '</div>' +
+          // Recompile action — restored: POST /api/entity/{name}/recompile
+          // The disabled guard was removed; data-ename carries the name to _wire() handler.
+          '<div style="margin-top:16px;display:flex;align-items:center;gap:10px">' +
+            '<button data-od-act="recompile-entity" ' +
+              'data-ename="' + _esc(d.entity_name || '') + '" ' +
+              'style="padding:5px 14px;border:1px solid var(--border);border-radius:5px;' +
+                'font-size:12px;cursor:pointer;background:var(--bg-2);color:var(--fg)">' +
+              'Recompile</button>' +
+            '<span id="' + id + '-recompile-status" ' +
+              'style="font-size:12px;color:var(--fg-2)"></span>' +
+          '</div>' +
         '</div>' +
       '</div>' +
 
@@ -514,12 +525,44 @@
 
   // ── Event delegation ──────────────────────────────────────────────────────
 
+  // Recompile entity — POST /api/entity/{name}/recompile
+  // Updates button text and status span to give feedback without a page reload.
+  function _recompileEntity(id, name, btn) {
+    if (!name) return;
+    var statusEl = document.getElementById(id + '-recompile-status');
+    btn.disabled = true;
+    btn.textContent = 'Recompiling…';
+    if (statusEl) { statusEl.textContent = ''; }
+    fetch('/api/entity/' + encodeURIComponent(name) + '/recompile', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        btn.textContent = 'Recompile';
+        if (statusEl) {
+          statusEl.style.color = 'var(--accent)';
+          statusEl.textContent = data.message || 'Recompiled successfully';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Recompile';
+        if (statusEl) {
+          statusEl.style.color = 'var(--danger, #e05)';
+          statusEl.textContent = 'Recompile failed: ' + (err.message || 'unknown error');
+        }
+      });
+  }
+
   function _wire(container, id) {
     container.addEventListener('click', function (e) {
       var el = e.target.closest('[data-od-act]');
       if (!el) return;
       var act = el.dataset.odAct;
 
+      if (act === 'recompile-entity') {
+        _recompileEntity(id, el.dataset.ename, el);
+        return;
+      }
       if (act === 'type-filter') {
         _st = Object.assign({}, _st, { typeFilter: el.dataset.type, page: 0 });
         _refreshTypeChips(id, el.dataset.type);

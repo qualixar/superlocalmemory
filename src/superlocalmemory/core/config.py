@@ -273,6 +273,27 @@ class RetrievalConfig:
     agentic_max_rounds: int = 3
     agentic_confidence_threshold: float = 0.3
 
+    # v3.8.2: Client-driven agentic (the recall spine's global flag).
+    # The agent hot path (CLI / MCP / plugins) is consumed by a frontier
+    # LLM (Claude Code, Copilot, Codex, …) that reformulates multi-hop /
+    # low-confidence queries far better than the local Ollama model. So the
+    # hot path DELEGATES the agentic reformulation loop to that calling LLM:
+    # it returns fast local retrieval (all six channels + reranker) plus the
+    # confidence signals (no_confident_match / answer_confidence / abstained),
+    # and never spends an internal LLM round unless a caller asks for it.
+    #   True  (default) → hot path skips the internal agentic round
+    #                     (equivalent to fast=True) and the client drives
+    #                     refinement. Consistent ~1.5-2s recall, no LLM tail.
+    #   False           → hot path always runs the internal agentic round
+    #                     when a query looks multi-hop / low-confidence
+    #                     (equivalent to fast=False) — for deployments with
+    #                     no smart client in front of SLM.
+    # This ONLY sets the default when a caller does not pass ``fast``
+    # explicitly. The dashboard human path (search-all → cluster summary)
+    # passes fast=False directly and always keeps internal synthesis.
+    # Env kill-switch: SLM_HOT_PATH_INTERNAL_AGENTIC=1 forces internal-on.
+    client_driven_agentic: bool = True
+
     # Spreading activation
     spreading_activation_decay: float = 0.7
     spreading_activation_threshold: float = 0.1

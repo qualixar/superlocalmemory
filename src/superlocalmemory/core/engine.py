@@ -369,6 +369,7 @@ class MemoryEngine:
             from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
             self._maintenance_scheduler = MaintenanceScheduler(
                 self._db, self._config, self._profile_id,
+                embedder=self._embedder,  # v3.8.2: periodic NULL-embedding self-heal
             )
             self._maintenance_scheduler.start()
         except Exception as exc:
@@ -612,7 +613,7 @@ class MemoryEngine:
         mode: Mode | None = None, limit: int = CANONICAL_RECALL_LIMIT,
         agent_id: str = "unknown",
         session_id: str | None = None,
-        fast: bool = False,
+        fast: bool | None = None,
         *,
         include_global: bool | None = None,
         include_shared: bool | None = None,
@@ -627,10 +628,13 @@ class MemoryEngine:
         ``put_nowait`` and the actual ``pending_outcomes`` INSERT runs
         on a background worker.
 
-        ``fast=True`` is the latency-bounded path: it retains all six local
-        retrieval channels but skips remote agentic verification. Use
-        ``fast=False`` only when maximum multi-round quality matters more than
-        response time.
+        ``fast`` controls only the internal agentic verification round; all six
+        local retrieval channels + reranker run regardless. ``fast=None`` (the
+        default) resolves to the client-driven-agentic policy: the agent hot
+        path skips the internal round (equivalent to ``fast=True``) and lets the
+        calling LLM drive query refinement using the returned confidence signals.
+        Pass ``fast=False`` to force the internal agentic round when no smart
+        client sits in front of SLM. See ``recall_pipeline.resolve_hot_path_fast``.
 
         Multi-scope: ``include_global`` / ``include_shared`` control which
         scopes participate in retrieval. ``None`` (the default) means "use the

@@ -40,10 +40,16 @@ class MaintenanceScheduler:
         db: DatabaseManager,
         config: SLMConfig,
         profile_id: str = "default",
+        embedder: object | None = None,
     ) -> None:
         self._db = db
         self._config = config
         self._profile_id = profile_id
+        # v3.8.2 self-heal: when provided, periodic maintenance backfills
+        # NULL embeddings so a DB stays fully queryable over time even if
+        # facts were stored while the embedder was unavailable. Runs
+        # independently of forgetting.enabled (see _run).
+        self._embedder = embedder
         self._timer: threading.Timer | None = None
         self._running = False
         self._interval = config.forgetting.scheduler_interval_minutes * 60.0
@@ -79,6 +85,28 @@ class MaintenanceScheduler:
         """Execute maintenance + auto-backup check, then schedule next run."""
         if not self._running:
             return
+        # v3.8.2 self-heal: bounded NULL-embedding backfill runs every cycle
+        # INDEPENDENTLY of forgetting.enabled and across ALL profiles — a fact
+        # stored while the embedder was down must become queryable again without
+        # the user touching anything. Idempotent + bounded (200/pass) so it
+        # converges quietly and is a no-op once coverage is complete.
+        if self._embedder is not None:
+            try:
+                from superlocalmemory.storage.embedding_migrator import (
+                    backfill_missing_embeddings,
+                )
+                r = backfill_missing_embeddings(
+                    self._config, self._db, self._embedder,
+                    limit=50, all_profiles=True,
+                )
+                if r.get("embedded"):
+                    logger.info(
+                        "Self-heal backfill: %d embedded, %d remaining",
+                        r["embedded"], r["remaining_null"],
+                    )
+            except Exception as exc:
+                logger.debug("Self-heal backfill skipped: %s", exc)
+
         for profile_id in self._profile_ids():
             if self._config.forgetting.enabled:
                 try:

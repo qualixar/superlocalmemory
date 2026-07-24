@@ -34,6 +34,11 @@ def test_interactive_external_mutations_require_explicit_yes(monkeypatch) -> Non
     service = Mock(return_value=True)
     monkeypatch.setattr(setup_wizard, "_install_external_integrations", integrations)
     monkeypatch.setattr(setup_wizard, "_install_autostart_service", service)
+    # v3.8.2 added an optional "connect other detected IDEs" step inside
+    # _configure_external_integrations; it prompts only when IDEs are present
+    # on the host. Neutralize it here so this consent test drives a
+    # deterministic one-prompt-per-call flow regardless of the machine.
+    monkeypatch.setattr(setup_wizard, "_configure_other_ides", lambda **_k: False)
 
     replies = iter(("n", "n", "y", "yes"))
     monkeypatch.setattr(setup_wizard, "_prompt", lambda *_args: next(replies))

@@ -473,8 +473,12 @@ def get_assertions(
         query += " ORDER BY confidence DESC LIMIT ?"
         params.append(limit)
 
-        rows = conn.execute(query, tuple(params)).fetchall()
-        conn.close()
+        # F8 fix: use try/finally so conn.close() is guaranteed even when
+        # conn.execute() raises (e.g. SQLITE_BUSY under dashboard burst load).
+        try:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        finally:
+            conn.close()
 
         assertions = [dict(r) for r in rows]
         return {

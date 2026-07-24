@@ -101,7 +101,8 @@ class TestSessionInitTool:
         assert result["memory_count"] == 2
         assert len(result["memories"]) == 2
         mock_pool_recall.assert_called_once_with(
-            "project context /my/project", limit=10, fast=False,         )
+            "project context /my/project", limit=10, fast=None,
+        )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
     @patch("superlocalmemory.mcp.tools_active._register_agent")
@@ -120,7 +121,8 @@ class TestSessionInitTool:
         asyncio.run(session_init(query="what is Q-CLAW"))
 
         mock_pool_recall.assert_called_once_with(
-            "what is Q-CLAW", limit=10, fast=False,         )
+            "what is Q-CLAW", limit=10, fast=None,
+        )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
     @patch("superlocalmemory.mcp.tools_active._register_agent")
@@ -163,7 +165,8 @@ class TestSessionInitTool:
         assert result["success"] is True
         assert len(result["memories"]) == 3
         mock_pool_recall.assert_called_once_with(
-            "recent important decisions", limit=3, fast=False,         )
+            "recent important decisions", limit=3, fast=None,
+        )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
     @patch("superlocalmemory.mcp.tools_active._register_agent")

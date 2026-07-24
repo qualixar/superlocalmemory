@@ -46,6 +46,11 @@ session. `session_init` loads recent decisions and relevant memories into contex
 - **Pass session_id** when available to narrow results to the current session.
 - **Empty / low results** — broaden the query, try `search`, or fall back to `list_recent`.
   Never fabricate a memory.
+- **Refine on low confidence** — if `no_confident_match` is `true` (or `answer_confidence` is
+  low / `abstained` is `true`), rewrite the query into 1–3 more specific sub-queries (split
+  multi-hop questions; try entity names, synonyms, or broader phrasing) and call `recall` again
+  before concluding nothing was found. SLM returns fast local results (~1–2s, no server-side
+  LLM round on the hot path) — you, the calling model, drive refinement.
 
 ---
 
@@ -144,5 +149,5 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | slm-governance | Enterprise roles, retention, audit, GDPR |
 | slm-mesh | Cross-session peer coordination (full/mesh profile) |
 
-SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later
 <!-- END SuperLocalMemory -->

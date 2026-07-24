@@ -62,7 +62,9 @@ class TestPoolAdapter:
         assert resp.results[0].fact.fact_id == "f1"
         assert resp.results[0].fact.content == "first memory content"
         assert resp.results[0].score == 0.91
-        assert fake.recall_calls == [("hello", 5, "", False)]
+        # v3.8.2 client-driven agentic: pool_recall forwards fast=None when the
+        # caller omits it, so the daemon/engine resolves the configured default.
+        assert fake.recall_calls == [("hello", 5, "", None)]
 
     def test_pool_recall_forwards_session_id_and_fast(self, monkeypatch):
         from superlocalmemory.mcp import _pool_adapter
@@ -185,12 +187,14 @@ class TestToolsActiveUsesPool:
         result = asyncio.run(registered["session_init"](project_path="/tmp/p"))
 
         assert result["success"] is True
-        # v3.4.52: full recall (fast=False). Ollama is kept warm
-        # via keep_alive=-1 + eager pre-warm at daemon boot, so no cold-start
-        # penalty. FTS5 fallback only triggers when daemon is completely down.
+        # v3.8.2 client-driven agentic: session_init recalls with fast=None so
+        # the daemon resolves the configured default (client-driven → skip the
+        # internal agentic round). Session start is a hot path — it must return
+        # fast local results, not spend an Ollama reformulation round every time.
+        # FTS5 fallback only triggers when the daemon is completely down.
         assert fake_pool.recall_calls == [
-            ("project context /tmp/p", 10, "", False),
-        ], "session_init should use full recall (fast=False)"
+            ("project context /tmp/p", 10, "", None),
+        ], "session_init should recall with fast=None (client-driven default)"
 
     def test_observe_uses_pool_adapter_not_engine_store(self, monkeypatch):
         import asyncio

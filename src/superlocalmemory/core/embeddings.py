@@ -652,9 +652,22 @@ class EmbeddingService:
                 release_embedding_lock()
 
     def _reset_idle_timer(self) -> None:
-        """Reset the configurable worker-idle timer."""
+        """Reset the configurable worker-idle timer.
+
+        F5 fix: opportunistically evict the worker mid-window when memory
+        pressure is detected (``_check_memory_pressure`` returns False).
+        This prevents the idle-timeout window from holding a worker alive
+        while system memory is exhausted.
+        """
         if self._idle_timer is not None:
             self._idle_timer.cancel()
+        if not self._check_memory_pressure():
+            # Pressure detected — kill worker immediately; do not schedule a
+            # new idle timer so no further embedding work is attempted until
+            # the next explicit request reloads the worker.
+            self._kill_worker()
+            self._idle_timer = None
+            return
         self._idle_timer = threading.Timer(
             _IDLE_TIMEOUT_SECONDS, self.unload,
         )

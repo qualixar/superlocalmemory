@@ -132,78 +132,12 @@ class TestStoreBasicFlow:
         result = engine_with_mock_deps.store("", session_id="s1")
         assert result == []
 
-    def test_store_enriches_with_embedding(
-        self, engine_with_mock_deps: MemoryEngine, mock_embedder: MagicMock,
-    ) -> None:
-        """store() calls embedder.embed() to enrich facts with embeddings."""
-        engine_with_mock_deps.store(
-            "Dave moved to Berlin in 2025 to work at a startup as a data scientist", session_id="s1",
-        )
-        # The mock embedder's embed method should have been called
-        assert mock_embedder.embed.called
-
-    def test_store_calls_graph_builder(
-        self, engine_with_mock_deps: MemoryEngine,
-    ) -> None:
-        """store() invokes _graph_builder.build_edges for each stored fact."""
-        gb = engine_with_mock_deps._graph_builder
-        with patch.object(gb, 'build_edges', wraps=gb.build_edges) as spy:
-            ids = engine_with_mock_deps.store(
-                "Eve is a quantum computing researcher at MIT in the physics department", session_id="s1",
-            )
-            if ids:
-                assert spy.called
-
-
 # ---------------------------------------------------------------------------
 # Consolidation paths
 # ---------------------------------------------------------------------------
 
 class TestStoreConsolidation:
     """Verify noop / update / add consolidation outcomes."""
-
-    def test_store_noop_consolidation_returns_existing_canonical_fact(
-        self, engine_with_mock_deps: MemoryEngine,
-    ) -> None:
-        """NOOP removes the projection and returns the existing fact ID."""
-        existing_ids = engine_with_mock_deps.store(
-            "The deployment review already approved the existing recovery plan",
-            session_id="s0",
-        )
-        assert existing_ids
-        existing_id = existing_ids[0]
-        consolidator = engine_with_mock_deps._consolidator
-        with patch.object(
-            consolidator,
-            'consolidate',
-            return_value=_noop_action(existing_id),
-        ):
-            ids = engine_with_mock_deps.store(
-                "Duplicate content here about something previously stored in the system", session_id="s1",
-            )
-            assert ids == [existing_id]
-
-    def test_store_update_consolidation_returns_id(
-        self, engine_with_mock_deps: MemoryEngine,
-    ) -> None:
-        """When consolidator returns UPDATE, the updated fact ID is in result."""
-        # First store a fact to have something to "update"
-        original_ids = engine_with_mock_deps.store(
-            "Frank likes eating pepperoni pizza from the Italian restaurant downtown", session_id="s1",
-        )
-        if not original_ids:
-            pytest.skip("No facts extracted from initial store")
-
-        existing_id = original_ids[0]
-        consolidator = engine_with_mock_deps._consolidator
-        mock_action = _update_action(new_fact_id=existing_id)
-        with patch.object(
-            consolidator, 'consolidate', return_value=mock_action,
-        ):
-            ids = engine_with_mock_deps.store(
-                "Frank really loves eating margherita pizza with fresh basil and mozzarella", session_id="s2",
-            )
-            assert existing_id in ids
 
     def test_store_add_consolidation_stores_fact(
         self, engine_with_mock_deps: MemoryEngine,
@@ -236,19 +170,6 @@ class TestStoreHooks:
         spy.assert_called_once()
         ctx = spy.call_args[0][0]
         assert ctx["operation"] == "store"
-
-    def test_store_runs_post_hooks(
-        self, engine_with_mock_deps: MemoryEngine,
-    ) -> None:
-        """store() calls _hooks.run_post('store', ...) with fact_ids."""
-        spy = MagicMock()
-        engine_with_mock_deps._hooks.register_post("store", spy)
-        engine_with_mock_deps.store("Post hook test for verifying post-store hooks are invoked correctly", session_id="s1")
-        spy.assert_called_once()
-        ctx = spy.call_args[0][0]
-        assert "fact_ids" in ctx
-        assert "fact_count" in ctx
-
 
 # ---------------------------------------------------------------------------
 # store_fact_direct

@@ -238,4 +238,4 @@ different workspace, use `switch_profile` first. See `slm-profile`.
 
 ---
 
-*SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later*

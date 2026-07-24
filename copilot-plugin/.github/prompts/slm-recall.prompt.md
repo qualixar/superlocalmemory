@@ -1,7 +1,7 @@
 ---
 name: slm-recall
 description: Search and retrieve facts, decisions, and past context from SuperLocalMemory. Use when the user asks to recall, find, search, or "what did we decide/say about X". Triggers multi-channel semantic retrieval with reranking; always call before storing anything new.
-version: "3.8.1"
+version: "3.8.2"
 agent: agent
 tools:
   - recall
@@ -87,9 +87,7 @@ Real response shape (`--json` equivalent):
 }
 ```
 
-**Always check `no_confident_match`.** When `true`, no result cleared the
-evidence floor. Do not invent a memory — tell the user nothing was found and
-offer to search more broadly or store a new fact.
+**Refine on low confidence.** `recall` returns confidence signals with every result. If `no_confident_match` is `true` (or `answer_confidence` is low / `abstained` is `true`), do NOT invent a memory — rewrite the query into 1–3 more specific sub-queries (split multi-hop questions; try entity names, synonyms, or broader phrasing) and call `recall` again before concluding nothing was found. A confident match → use it directly. SLM returns fast local results (~1–2s, no server-side LLM round on the hot path) and lets you, the calling model, drive this refinement.
 
 ### 2. Passing session_id
 
@@ -196,7 +194,7 @@ Flags verified in source (main.py):
 
 ## Never fabricate a memory
 
-If `results` is empty or `no_confident_match` is `true`, report it plainly.
+After re-querying with refined sub-queries (see **Refine on low confidence** above), if `no_confident_match` is still `true` or results are empty, report it plainly.
 Never construct a response as if a memory was found when it was not. The user
 trusts that what you surface came from the store.
 
@@ -238,4 +236,4 @@ before recalling, then switch back. See `slm-profile` for workspace switching.
 
 ---
 
-*SuperLocalMemory v3.8.1 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later*

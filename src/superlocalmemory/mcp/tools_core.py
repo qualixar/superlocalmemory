@@ -282,12 +282,27 @@ def register_core_tools(server, get_engine: Callable) -> None:
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def recall(
         query: str, limit: int = CANONICAL_RECALL_LIMIT, agent_id: str = "mcp_client",
-        session_id: str = "", fast: bool = False,
+        session_id: str = "", fast: bool | None = None,
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str = "",
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
+
+        Fast local retrieval (six channels + reranker) returns in ~1-2s. This
+        tool does NOT run an internal LLM reformulation round — YOU (the calling
+        model) are the reasoner. Drive refinement using the confidence signals
+        in the response:
+          • ``no_confident_match: true`` → nothing cleared the evidence floor.
+            Do NOT invent a memory. Rewrite the query into 1-3 more specific
+            sub-queries (split multi-hop questions; try entity names, synonyms,
+            or a broader phrasing) and call ``recall`` again before concluding
+            the information is unknown.
+          • ``answer_confidence`` low / ``abstained: true`` → the top hit is
+            weak. Re-query with a sharper phrasing, or widen with
+            ``include_shared=true`` / ``include_global=true`` if appropriate.
+          • Confident match → use it directly; no second call needed.
+        One extra targeted recall is cheap and beats a wrong "not found".
 
         Optional ``session_id`` threads through to the
         engine's outcome-queue so PostToolUse / Stop hooks can attach
@@ -357,7 +372,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             # block behind a single threading.Lock. See worker_pool.py.
             result = await asyncio.to_thread(
                 pool.recall, query, limit=limit, session_id=effective_sid,
-                fast=bool(fast),
+                fast=fast,
                 include_global=include_global,
                 include_shared=include_shared,
                 window=window or None,

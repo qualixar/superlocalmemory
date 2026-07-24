@@ -100,6 +100,25 @@ def _get_ram_gb() -> float:
     return 0.0
 
 
+def _ollama_available() -> bool:
+    """True if a local Ollama server is reachable (or its binary is installed).
+
+    v3.8.2: used to RECOMMEND Mode B at setup with a single keypress. Bounded
+    and fail-safe — a slow/absent Ollama never blocks or slows the wizard.
+    """
+    try:
+        import httpx
+
+        if httpx.get("http://localhost:11434/api/tags", timeout=1.5).status_code == 200:
+            return True
+    except Exception:
+        pass
+    try:
+        return shutil.which("ollama") is not None
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Model download
 # ---------------------------------------------------------------------------
@@ -388,14 +407,23 @@ def run_wizard(auto: bool = False) -> None:
         return
 
     # -- Step 2: Mode selection --
+    # v3.8.2: pre-detect Ollama so we can recommend Mode B with one keypress.
+    # No detection → zero-config Mode A. (Non-interactive always stays A: Mode B
+    # needs a pulled model, so we never assume it without the user confirming.)
+    ollama_present = _ollama_available()
+    default_mode = "b" if ollama_present else "a"
     print()
     print("─── Step 2/10: Choose Operating Mode ───")
     print()
-    print("  [A] Local Guardian (recommended)")
+    if ollama_present:
+        print("  ✓ Ollama detected on this machine — Mode B recommended.")
+        print("    Press Enter to accept, or pick another mode.")
+        print()
+    print("  [A] Local Guardian" + ("" if ollama_present else " (recommended)"))
     print("      No model-provider call in the core memory path.")
     print("      Review optional integrations and network policy for your deployment.")
     print()
-    print("  [B] Smart Local")
+    print("  [B] Smart Local" + (" (recommended — Ollama detected)" if ollama_present else ""))
     print("      Local LLM via Ollama for enrichment.")
     print("      Data stays on your machine.")
     print()
@@ -405,10 +433,13 @@ def run_wizard(auto: bool = False) -> None:
     print()
 
     if interactive:
-        choice = _prompt("  Select mode [A/B/C] (default: A): ", "a").lower()
+        choice = _prompt(
+            f"  Select mode [A/B/C] (default: {default_mode.upper()}): ",
+            default_mode,
+        ).lower()
     else:
         choice = "a"
-        print("  Auto-selecting Mode A (non-interactive)")
+        print("  Auto-selecting Mode A (non-interactive, zero-config)")
 
     if choice not in ("a", "b", "c"):
         print(f"  Invalid choice '{choice}', using Mode A.")
@@ -496,6 +527,15 @@ def run_wizard(auto: bool = False) -> None:
     else:
         print(f"\n  ✓ CodeGraph disabled (enable later in {cg_config_path})")
 
+    # v3.8.2: up-front download summary so a large pull is never a surprise on
+    # a metered/slow link. Sizes approximate, one-time, cached locally.
+    if st_ok and not _embedding_is_remote(config):
+        print()
+        print("  Models to download (one-time, cached locally):")
+        print("    • Embedding model   ~500 MB  — required for semantic recall")
+        print("    • Reranker model    ~130 MB  — result quality")
+        print("    • Compression model ~560 MB  — optional (you'll be asked)")
+
     # -- Step 4: Download models --
     print()
     # H-06 (CVE-2025-14926): a malicious HuggingFace checkpoint can execute code
@@ -532,8 +572,25 @@ def run_wizard(auto: bool = False) -> None:
         _download_reranker(_RERANKER_MODEL)
 
     print()
-    print("─── Step 4c/10: Download Compression Model (LLMLingua-2) ───")
-    _download_compressor(_COMPRESSOR_MODEL)
+    print("─── Step 4c/10: Compression Model (LLMLingua-2, ~560MB) ───")
+    print("  Only used for aggressive prompt compression. It also downloads")
+    print("  automatically the first time you enable that feature — so skipping")
+    print("  here is safe.")
+    # v3.8.2: consent-gate the 560MB compressor (was unconditional). Skip by
+    # default; it lazy-downloads on first real use of compression.
+    if not st_ok:
+        print("  ⚠ Skipped (sentence-transformers not installed)")
+    elif interactive:
+        comp_choice = _prompt(
+            "  Download the ~560MB compression model now? [y/N] (default: N): ",
+            "n",
+        ).lower()
+        if comp_choice in ("y", "yes"):
+            _download_compressor(_COMPRESSOR_MODEL)
+        else:
+            print("  ✓ Skipped — downloads automatically when you enable compression.")
+    else:
+        print("  ✓ Skipped (non-interactive) — downloads on first use.")
 
     # -- Step 5: Daemon Configuration (v3.4.3) --
     print()
@@ -655,17 +712,21 @@ def run_wizard(auto: bool = False) -> None:
     print("  It detects degradation, generates improvements, and verifies them blindly.")
     print("  Requires an LLM backend (Claude CLI, Ollama, or API key).")
     print()
+    print("  OFF by default — when enabled it makes background LLM calls.")
     print("  [Y] Enable Skill Evolution")
-    print("  [N] Disable (can enable later: slm config set evolution.enabled true)")
+    print("  [N] Keep disabled (enable later: slm config set evolution.enabled true)")
     print()
 
+    # v3.8.2: default OFF (was Y) — consistent with the npm profiles and no
+    # surprise outbound LLM calls for a fresh user. Opt-in, not opt-out.
     if interactive:
-        evo_choice = _prompt("  Enable Skill Evolution? [Y/n] (default: Y): ", "y").lower()
+        evo_choice = _prompt("  Enable Skill Evolution? [y/N] (default: N): ", "n").lower()
     else:
-        evo_choice = "y"
-        print("  Auto-enabling Skill Evolution (non-interactive)")
+        evo_choice = "n"
+        print("  Skill Evolution stays OFF (non-interactive) — enable later with:")
+        print("    slm config set evolution.enabled true")
 
-    evolution_enabled = evo_choice in ("", "y", "yes")
+    evolution_enabled = evo_choice in ("y", "yes")
 
     # Write evolution config to config.json directly
     # (SLMConfig.save() doesn't serialize evolution)
@@ -753,6 +814,21 @@ def run_wizard(auto: bool = False) -> None:
     else:
         print("  Adapters: none (enable via: slm adapters enable gmail)")
     print()
+    # v3.8.2: surface component self-heal status so the user leaves setup
+    # KNOWING everything they need is present — or exactly what to run if not.
+    try:
+        from superlocalmemory.core import component_registry as _cr
+
+        _sum = _cr.snapshot(config)["summary"]
+        if _sum.get("healthy"):
+            print("  ✓ All components ready — models and dependencies present.")
+        else:
+            print(f"  ⚠ {_sum.get('missing', 0)} component(s) need attention.")
+            print("    SLM auto-repairs fixable ones on daemon start. To check/fix now:")
+            print("      slm doctor          (auto-fix: slm doctor --fix)")
+    except Exception:
+        pass
+    print()
     print("  Quick start:")
     print('    slm remember "your first memory"')
     print('    slm recall "search query"')
@@ -760,8 +836,8 @@ def run_wizard(auto: bool = False) -> None:
     print("    slm adapters enable gmail  → start Gmail ingestion")
     print()
     print("  Need help?")
-    print("    slm doctor     — diagnose issues")
-    print("    slm --help     — all commands")
+    print("    slm help       — every command, grouped (try: slm help self-heal)")
+    print("    slm doctor     — diagnose issues (auto-fix: slm doctor --fix)")
     print("    slm serve install — install auto-start service")
     print("    https://github.com/qualixar/superlocalmemory")
     print()
@@ -816,20 +892,70 @@ def check_first_use(command: str) -> None:
 
 
 def _configure_external_integrations(*, interactive: bool) -> bool:
-    """Request consent before editing Claude Code configuration."""
+    """Request consent before editing Claude Code configuration.
+
+    v3.8.2: after the Claude Code step, a pip user can also wire every OTHER
+    detected IDE in one step (previously only Claude Code was offered here;
+    other IDEs required a manual `slm connect <ide>` each).
+    """
     print()
     print("  Optional Claude Code integration can install the SLM plugin and hooks.")
     if not interactive:
         print("  Skipped in non-interactive setup. Run: slm connect claude-code")
         return False
+    changed = False
     choice = _prompt(
         "  Install Claude Code plugin and hooks now? [y/N] (default: N): ",
         "n",
     ).lower()
-    if choice not in ("y", "yes"):
+    if choice in ("y", "yes"):
+        changed = _install_external_integrations()
+    else:
         print("  Skipped. Run `slm connect claude-code` when ready.")
+    # v3.8.2: offer to connect all other detected IDEs (Cursor, VS Code, …).
+    changed = _configure_other_ides(interactive=interactive) or changed
+    return changed
+
+
+def _configure_other_ides(*, interactive: bool) -> bool:
+    """Consent-gated: connect all OTHER detected IDEs (Cursor, VS Code, …).
+
+    Uses the same IDEConnector the dashboard uses. Best-effort — a failure to
+    detect or connect any single IDE never blocks setup.
+    """
+    if not interactive:
         return False
-    return _install_external_integrations()
+    try:
+        from superlocalmemory.hooks.ide_connector import IDEConnector
+
+        connector = IDEConnector()
+        installed = [s for s in connector.get_status() if s.get("installed")]
+    except Exception:
+        return False
+    others = [s for s in installed if s.get("id") not in ("claude-code", "claude")]
+    if not others:
+        return False
+    names = ", ".join(s.get("name", s.get("id")) for s in others)
+    print()
+    print(f"  Detected other IDEs: {names}")
+    print("  SLM can wire them all so memory works across every editor.")
+    choice = _prompt("  Connect them now? [Y/n] (default: Y): ", "y").lower()
+    if choice not in ("", "y", "yes"):
+        print("  Skipped. Connect any later with: slm connect <ide>")
+        return False
+    changed = False
+    for s in others:
+        ide_id = s.get("id")
+        label = s.get("name", ide_id)
+        try:
+            if connector.connect(ide_id):
+                print(f"    ✓ {label}")
+                changed = True
+            else:
+                print(f"    ⚠ {label} — connect later: slm connect {ide_id}")
+        except Exception:
+            print(f"    ⚠ {label} — connect later: slm connect {ide_id}")
+    return changed
 
 
 def _install_external_integrations() -> bool:

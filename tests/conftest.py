@@ -300,6 +300,39 @@ def mode_a_config(tmp_path):
     return config
 
 
+def force_sync_enrichment(engine):
+    """Route ``engine.store`` through the SYNCHRONOUS full-enrichment path.
+
+    v3.8.2 made ``engine.store()`` queryable-first: it commits a recallable
+    fact immediately and defers enrichment (embeddings, graph edges, scenes,
+    BM25 tokens, entities, consolidation) to the daemon's background
+    materializer. Direct-engine integration tests that assert those artifacts
+    exist right after a store must instead drive the complete path
+    (``require_complete=True``) — the same full-enrichment entry
+    ``canonical_store`` uses by default — so enrichment is materialized before
+    the assertions run. Daemon-backed production still enriches via the
+    materializer; this only makes the direct-engine test path deterministic.
+    """
+    from superlocalmemory.core.engine_ingestion import (
+        canonical_store,
+        local_trusted_actor_id,
+    )
+
+    def _sync_store(content, session_id="", session_date=None, speaker="",
+                    role="user", metadata=None, *, scope="personal",
+                    shared_with=None):
+        return canonical_store(
+            engine, content, source_type="python-api",
+            trusted_actor_id=local_trusted_actor_id("python-api"),
+            metadata=metadata, scope=scope, shared_with=shared_with,
+            session_id=session_id, session_date=session_date,
+            speaker=speaker, role=role, require_complete=True,
+        )
+
+    engine.store = _sync_store
+    return engine
+
+
 @pytest.fixture
 def engine_with_mock_deps(mode_a_config, mock_embedder, tmp_path):
     """A MemoryEngine with mocked LLM and embedder for fast unit tests.

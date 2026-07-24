@@ -1068,6 +1068,21 @@ async def _source_quality_repair_loop(
                     state="retrying",
                     last_error="storage_temporarily_unavailable",
                 )
+            except Exception as exc:  # F6 fix: broad catch keeps loop alive
+                # Any unexpected exception in a single tick (e.g. malformed JSON
+                # blob, AttributeError from a half-migrated schema) must not kill
+                # the entire repair loop.  Log and continue to next iteration.
+                logger.warning(
+                    "source-quality repair tick failed unexpectedly: %s — "
+                    "loop continues",
+                    exc,
+                    exc_info=True,
+                )
+                _set_source_quality_repair_status(
+                    application,
+                    state="retrying",
+                    last_error=type(exc).__name__,
+                )
             else:
                 successful_ticks += 1
             if pending == []:
@@ -1448,9 +1463,186 @@ async def lifespan(application: FastAPI):
             except Exception as exc:
                 logger.warning("Vector store backfill failed (non-fatal): %s", exc)
 
+        def _self_heal():
+            """v3.8.2 zero-pain self-heal.
+
+            On daemon start (especially right after a pip/npm upgrade of a
+            months-old database), silently restore full retrieval capability
+            with ZERO user action:
+              1. embed facts that were never embedded (NULL embedding column),
+              2. backfill key-expansion alt-keys (BM25 recall aid) via one
+                 bounded maintenance pass per profile,
+              3. index everything (including the just-embedded facts) into the
+                 sqlite-vec store.
+            Fully non-blocking (daemon thread) — recall keeps serving throughout.
+            Every step is bounded + idempotent, so on an already-complete DB the
+            whole pass is a fast no-op. Progress is exposed at /status.self_heal
+            so the dashboard can show a plain-language "Optimizing memory…" line.
+            """
+            import time as _t
+            global _SELF_HEAL_STATUS
+            _SELF_HEAL_STATUS = {
+                "state": "checking_components", "embeddings_backfilled": 0,
+                "expansion_backfilled": 0, "null_remaining": None,
+                "components": None,
+                "started_at": _t.time(), "finished_at": None,
+            }
+            # Step 0 (v3.8.2 "whole self-healer"): repair components that
+            # silently failed to install from the internet — BEFORE waiting on
+            # the embedder, since a missing embedding model would make that wait
+            # pointless. Downloads missing HF models (embedder/reranker, only
+            # when torch is present) and pip-installs sqlite-vec when the
+            # interpreter is user-writable. Bounded, fail-open, never sudo,
+            # never auto-pulls Ollama. Manual-only items are recorded for the
+            # dashboard "what's missing" report (GET /api/v3/components), not
+            # acted on here.
+            try:
+                from superlocalmemory.core import component_healer
+                heal_res = component_healer.heal_missing(
+                    config,
+                    on_progress=lambda k, m: logger.info(
+                        "Self-heal component[%s]: %s", k, m,
+                    ),
+                )
+                _SELF_HEAL_STATUS["components"] = heal_res
+                if heal_res["attempted"]:
+                    logger.info("Self-heal components: %s", heal_res)
+            except Exception as exc:
+                logger.warning(
+                    "Self-heal component check failed (non-fatal): %s", exc,
+                )
+            _SELF_HEAL_STATUS["state"] = "waiting_embedder"
+            for _ in range(120):  # up to ~60s for the embedder to warm
+                if _embedding_warm:
+                    break
+                _t.sleep(0.5)
+            try:
+                embedder = getattr(retrieval_eng, "_embedder", None) if retrieval_eng else None
+                db = engine._db
+                if embedder is None or db is None:
+                    _SELF_HEAL_STATUS["state"] = "skipped_no_embedder"
+                    return
+                # 1) Embed never-embedded facts (all profiles, the upgrade
+                #    headline). Looped: backfill is idempotent + bounded, and the
+                #    shared embedding worker can transiently return None under
+                #    startup contention (concurrent recall-warmup). Retrying until
+                #    the NULL count stops shrinking makes the heal converge
+                #    robustly rather than abandoning on one transient miss.
+                #    Facts that never embed (e.g. a document far over the model's
+                #    token limit) are left as-is after a bounded number of no-progress
+                #    attempts. No-op when there are no NULLs.
+                _SELF_HEAL_STATUS["state"] = "backfilling_embeddings"
+                try:
+                    from superlocalmemory.storage.embedding_migrator import (
+                        backfill_missing_embeddings,
+                    )
+                    # RECALL-PRIORITY THROTTLE: the embedding worker is a single
+                    # serialized subprocess shared with foreground recall. A
+                    # continuous backfill starves interactive query-embedding and
+                    # recalls time out. So: (a) tiny batches (short worker holds),
+                    # and (b) before each batch, defer while ANY user recall is in
+                    # flight — reusing the same recall_gate the pending materializer
+                    # uses. This keeps recall responsive throughout the heal (the
+                    # zero-pain requirement); the heal just takes a little longer.
+                    from superlocalmemory.core import recall_gate
+                    total_embedded = 0
+                    no_progress = 0
+                    for _attempt in range(500):
+                        # Absolute priority to user recalls: pause the heal while
+                        # a recall is active (bounded wait so we never wedge).
+                        _waited = 0.0
+                        while recall_gate.in_flight() > 0 and _waited < 30.0:
+                            _t.sleep(0.5)
+                            _waited += 0.5
+                        r = backfill_missing_embeddings(
+                            config, db, embedder, limit=5, all_profiles=True,
+                        )
+                        got = r.get("embedded", 0)
+                        total_embedded += got
+                        _SELF_HEAL_STATUS["embeddings_backfilled"] = total_embedded
+                        _SELF_HEAL_STATUS["null_remaining"] = r.get("remaining_null", 0)
+                        if r.get("remaining_null", 0) == 0:
+                            break
+                        if got == 0:
+                            no_progress += 1
+                            if no_progress >= 5:  # transient recovery exhausted
+                                break
+                            _t.sleep(3)  # let the worker settle, then retry
+                        else:
+                            no_progress = 0
+                            _t.sleep(0.5)  # brief pause between bursts
+                    if total_embedded:
+                        logger.info(
+                            "Self-heal: embedded %d previously-unembedded facts "
+                            "(%d remaining)", total_embedded,
+                            _SELF_HEAL_STATUS["null_remaining"],
+                        )
+                except Exception as exc:
+                    logger.warning("Self-heal embedding backfill failed (non-fatal): %s", exc)
+                # 2) Math/key-expansion maintenance is intentionally NOT run here:
+                #    run_maintenance triggers a full Langevin backfill over every
+                #    fact, which on a large legacy DB takes minutes and its CPU
+                #    burst inflates foreground recall latency during the heal
+                #    window. The startup heal stays lean (embeddings + vector
+                #    index — what makes facts findable again). Langevin/Sheaf/
+                #    key-expansion continue to converge on the periodic
+                #    MaintenanceScheduler exactly as before — unchanged behavior.
+                # 3) Index everything (incl. newly-embedded) into the vector store.
+                _SELF_HEAL_STATUS["state"] = "indexing_vectors"
+                try:
+                    _backfill_vector_store()
+                except Exception as exc:
+                    logger.warning("Self-heal vector index failed (non-fatal): %s", exc)
+                _SELF_HEAL_STATUS["state"] = "complete"
+                _SELF_HEAL_STATUS["finished_at"] = _t.time()
+                logger.info("Self-heal complete: %s", _SELF_HEAL_STATUS)
+            except Exception as exc:
+                _SELF_HEAL_STATUS["state"] = "error"
+                logger.warning("Self-heal failed (non-fatal): %s", exc)
+
+        def _component_recheck_loop():
+            """Periodic component re-check (v3.8.2 "whole self-healer").
+
+            The startup heal (_self_heal Step 0) runs once. This keeps the
+            self-healer promise for a long-running daemon: it re-probes
+            components on a slow cadence and auto-repairs any that regress
+            (a cache eviction, a half-finished install). No-op on a healthy
+            machine — nothing is auto-fixable-missing, so it is just a cheap
+            probe. Disable with SLM_COMPONENT_RECHECK_SEC=0.
+            """
+            import os as _os
+            import time as _t
+            try:
+                cadence = int(_os.environ.get("SLM_COMPONENT_RECHECK_SEC", "1800"))
+            except ValueError:
+                cadence = 1800
+            if cadence <= 0:
+                return
+            # Let the startup heal + warmup settle before the first re-check.
+            _t.sleep(max(cadence, 300))
+            while True:
+                try:
+                    from superlocalmemory.core import component_healer
+                    res = component_healer.heal_missing(
+                        config,
+                        on_progress=lambda k, m: logger.info(
+                            "Component re-check[%s]: %s", k, m,
+                        ),
+                    )
+                    if res["attempted"]:
+                        logger.info("Component re-check repaired: %s", res)
+                except Exception as exc:
+                    logger.debug("Component re-check failed (non-fatal): %s", exc)
+                _t.sleep(cadence)
+
         threading.Thread(target=_warmup_embedder, daemon=True, name="embed-warmup").start()
         threading.Thread(target=_warmup_recall, daemon=True, name="recall-warmup").start()
-        threading.Thread(target=_backfill_vector_store, daemon=True, name="vs-backfill").start()
+        # v3.8.2: self-heal supersedes the bare vector-store backfill (it calls
+        # _backfill_vector_store itself, after embedding + expansion heal).
+        threading.Thread(target=_self_heal, daemon=True, name="self-heal").start()
+        threading.Thread(
+            target=_component_recheck_loop, daemon=True, name="component-recheck",
+        ).start()
 
         # v3.6.8: Runtime recall-health monitor. The three warmups above run
         # ONCE at boot; on a long-running daemon the graph page cache gets
@@ -2761,7 +2953,15 @@ def _register_daemon_routes(application: FastAPI) -> None:
         request: Request,
         q: str = "", query: str = "", limit: int = CANONICAL_RECALL_LIMIT,
         session_id: str = "",
-        fast: bool = True,
+        # v3.8.2 client-driven agentic: ``fast`` is left UNSET (None) by default
+        # so the daemon resolves the configured policy (retrieval.client_driven_agentic,
+        # ships True). The agent hot path is consumed by a frontier LLM that
+        # reformulates queries far better than the local Ollama model, so it
+        # skips the internal agentic round and returns fast local retrieval (all
+        # six channels + reranker) plus confidence signals; the client re-queries
+        # on low confidence. An explicit ?fast=true / ?fast=false always wins.
+        # See recall_pipeline.resolve_hot_path_fast.
+        fast: bool | None = None,
         full: bool = False,
         include_source: bool = False,
         include_global: bool | None = None,
@@ -2773,6 +2973,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
         engine = _get_engine_or_503()
         if not search_query:
             return {"results": [], "count": 0, "query_type": "none", "retrieval_time_ms": 0}
+        # v3.8.2: resolve the client-driven-agentic default now so the concrete
+        # bool drives BOTH the full-recall semaphore below and engine.recall().
+        from superlocalmemory.core.recall_pipeline import resolve_hot_path_fast
+        fast = resolve_hot_path_fast(fast, engine._config)
         # S9-DASH-02: session_id for the outcome-queue producer.
         # Priority: ?session_id= > X-SLM-Session-Id header > synthetic
         # "http:<ts>". Without a session_id the recall still works
@@ -3178,7 +3382,67 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "legacy_port": _LEGACY_PORT,
             "profile": profile_snapshot.profile_id,
             "profile_generation": profile_snapshot.generation,
+            # F2 fix: expose M028 backfill progress so operators can monitor
+            # the post-upgrade fact/entity association repair state.
+            "m028_backfill": getattr(
+                application.state,
+                "fact_entity_association_repair_status",
+                None,
+            ),
+            # v3.8.2: zero-pain self-heal progress (embeddings/expansion/vector
+            # index backfill after an upgrade). Dashboard renders a plain
+            # "Optimizing memory…" line from this. Defaults to idle before start.
+            "self_heal": globals().get("_SELF_HEAL_STATUS", {"state": "idle"}),
         }
+
+    @application.get("/api/v3/components")
+    async def components():
+        """Component / dependency health (v3.8.2).
+
+        Read-only snapshot from the central registry (core.component_registry)
+        — the same source the self-heal thread acts on. Powers the dashboard
+        'what's missing' report and `slm doctor`. Includes live 'retrying'
+        overlays while a background repair is in flight. Never mutates state.
+        """
+        _update_activity()
+        try:
+            from superlocalmemory.core import component_registry
+            cfg = getattr(application.state, "config", None)
+            return component_registry.snapshot(cfg)
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    @application.post("/api/v3/components/heal")
+    async def heal_components(request: Request):
+        """Trigger a component self-heal pass (dashboard 'Retry now').
+
+        Repairs auto-fixable missing components (re-download missing models,
+        install sqlite-vec). Runs in a background thread and returns
+        immediately so the HTTP request never blocks on a multi-minute
+        download; the dashboard polls GET /api/v3/components to watch the
+        'retrying' → 'ok' transition. Safe to call repeatedly (no-op when
+        healthy). Requires the dashboard write principal, like other
+        dashboard mutations.
+        """
+        _require_write_actor(request)
+        _update_activity()
+        cfg = getattr(application.state, "config", None)
+
+        def _run():
+            try:
+                from superlocalmemory.core import component_healer
+                res = component_healer.heal_missing(
+                    cfg,
+                    on_progress=lambda k, m: logger.info(
+                        "Manual heal[%s]: %s", k, m,
+                    ),
+                )
+                logger.info("Manual component heal: %s", res)
+            except Exception as exc:
+                logger.warning("Manual component heal failed (non-fatal): %s", exc)
+
+        threading.Thread(target=_run, daemon=True, name="manual-heal").start()
+        return {"status": "started"}
 
     @application.get("/list")
     async def list_facts(limit: int = 50):

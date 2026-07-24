@@ -93,7 +93,11 @@ def engine(tmp_path: Path) -> MemoryEngine:
         return_value=_MockEmbedder(768),
     ):
         eng.initialize()
-    return eng
+    # v3.8.2: store() is queryable-first (async enrichment via the daemon
+    # materializer). These tests assert enrichment artifacts synchronously,
+    # so drive the complete path. See tests/conftest.force_sync_enrichment.
+    from tests.conftest import force_sync_enrichment
+    return force_sync_enrichment(eng)
 
 
 def _query(engine: MemoryEngine, sql: str, params: tuple = ()) -> list[dict]:
