@@ -13,7 +13,12 @@
 // surfaces as a normal rejection and the UI can show a clear error.
 // ============================================================================
 
-window.SLM_FETCH_TIMEOUT_MS = 15000;
+// v3.8.3: 30s (> the server's 25s recall budget) so the browser waits for a
+// quality recall under heavy multi-agent load instead of aborting it early
+// ("signal is aborted without reason"). The server self-bounds recall and
+// falls back to keyword within its budget, so this only ever waits longer for
+// a genuinely stuck request. Per-call init.timeoutMs still overrides.
+window.SLM_FETCH_TIMEOUT_MS = 30000;
 window.SLM_INSTALL_TOKEN_KEY = 'slm_install_token';
 
 // B2 (3.7.9): the install token is kept in a private closure, never in

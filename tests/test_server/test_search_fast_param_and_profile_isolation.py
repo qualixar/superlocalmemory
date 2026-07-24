@@ -156,6 +156,70 @@ def test_search_endpoint_does_not_wait_for_spreading_activation(
     )
 
 
+def test_search_falls_back_to_keyword_when_recall_exceeds_budget(
+    engine_with_mock_deps, monkeypatch,
+) -> None:
+    """v3.8.3: if semantic recall exceeds SLM_SEARCH_RECALL_TIMEOUT_S, the
+    dashboard search route must fall back to the fast keyword search instead
+    of hanging until the browser aborts the fetch ("signal is aborted without
+    reason"). This is the fix for the live Mode-B recall hang: under a
+    concurrent maintenance pass / busy embedder, semantic recall can run tens
+    of seconds; the UI must still get results.
+    """
+    from superlocalmemory.server.unified_daemon import create_app
+    from superlocalmemory.core.engine_ingestion import (
+        canonical_store, local_trusted_actor_id,
+    )
+
+    engine = engine_with_mock_deps
+    _add_profile(engine, "default")
+    engine.profile_id = "default"
+    engine._config.active_profile = "default"
+
+    # A fact for the keyword fallback to return.
+    canonical_store(
+        engine,
+        "recall-budget-probe-5521 keyword fallback still returns results.",
+        source_type="test",
+        trusted_actor_id=local_trusted_actor_id("test"),
+    )
+
+    # Tiny budget + a recall that would block for seconds → forces the timeout.
+    monkeypatch.setenv("SLM_SEARCH_RECALL_TIMEOUT_S", "0.1")
+
+    def _blocking_recall(*_a, **_k):
+        time.sleep(5.0)
+        return []
+
+    engine.recall = _blocking_recall
+
+    app = create_app()
+    app.state.engine = engine
+    app.state.config = engine._config
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/search", json={"query": "recall-budget-probe-5521", "limit": 5}
+    )
+
+    # Behaviour assertion: when semantic recall exceeds the budget the route
+    # must serve the keyword fallback (degraded_lexical) with real results,
+    # never hang until the browser aborts. (The wall-clock bound itself is not
+    # asserted here — Starlette's TestClient drives the async handler through a
+    # blocking portal, so run_in_executor + the non-blocking poll do not
+    # interleave as they do under uvicorn. The actual sub-second latency is
+    # verified on a live daemon and by the standalone poll pattern.)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("retrieval_mode") == "degraded_lexical", (
+        f"Expected keyword fallback (degraded_lexical) on recall timeout, got: {body}"
+    )
+    contents = " ".join(r.get("content", "") for r in body.get("results", []))
+    assert "recall-budget-probe-5521" in contents, (
+        f"Keyword fallback did not return the stored fact. Body: {body}"
+    )
+
+
 # ===========================================================================
 # BUG 2 — RetrievalEngine._extra_disabled must not be a shared mutable attr
 # ===========================================================================

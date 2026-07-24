@@ -453,6 +453,61 @@ def _emit_event(
 import asyncio as _asyncio
 _recall_semaphore = _asyncio.Semaphore(3)
 
+
+def _recall_budget_s() -> float:
+    """Generous latency budget for a recall before the keyword fallback (v3.8.3).
+
+    SLM's value is quality recall under heavy multi-agent load, so semantic
+    recall is given ample time; the keyword fallback is a LAST-RESORT safety
+    net for a genuine hang (e.g. a wedged embedder), not a speed cutoff. Tune
+    with SLM_SEARCH_RECALL_TIMEOUT_S (shared with the dashboard search route).
+    """
+    import os
+    try:
+        v = float(os.environ.get("SLM_SEARCH_RECALL_TIMEOUT_S", ""))
+        return v if v > 0 else 25.0
+    except (TypeError, ValueError):
+        return 25.0
+
+
+def _recall_keyword_fallback(engine, query: str, limit: int) -> dict:
+    """Fast profile-scoped keyword (LIKE) fallback for /recall.
+
+    Used only when semantic recall exceeds its budget, so CLI/MCP callers get
+    a bounded response instead of hanging. Mirrors the dashboard /api/search
+    fallback shape (retrieval_mode=degraded_lexical).
+    """
+    results = []
+    try:
+        rows = engine._db.execute(
+            "SELECT fact_id, content, confidence FROM atomic_facts "
+            "WHERE profile_id = ? AND content LIKE ? "
+            "ORDER BY confidence DESC LIMIT ?",
+            (engine.profile_id, f"%{query}%", limit),
+        )
+        for pos, r in enumerate(rows, start=1):
+            d = dict(r)
+            results.append({
+                "fact_id": d.get("fact_id"),
+                "content": (d.get("content") or "")[:2400],
+                "score": None, "relevance_score": None, "ranking_score": None,
+                "confidence": d.get("confidence"),
+                "rank_position": pos,
+            })
+    except Exception as exc:
+        logger.warning("recall keyword fallback failed (non-fatal): %s", exc)
+    return {
+        "ok": True,
+        "query": query,
+        "query_type": "text_search",
+        "retrieval_mode": "degraded_lexical",
+        "degraded_reason": "recall_budget_exceeded",
+        "result_count": len(results),
+        "results": results,
+        "count": len(results),
+        "no_confident_match": True,
+    }
+
 # v3.4.52: Embedding model warm state. Set to True by the async pre-warm
 # thread once Ollama has loaded the embedding model. /health reports this
 # so MCP clients can wait for warm state before issuing recall calls.
@@ -3013,15 +3068,35 @@ def _register_daemon_routes(application: FastAPI) -> None:
         if not fast:
             await _recall_semaphore.acquire()
         try:
-            response = await asyncio.to_thread(
-                engine.recall,
-                search_query, limit=limit, session_id=effective_sid,
-                agent_id=recall_actor,
-                fast=fast,
-                include_global=include_global,
-                include_shared=include_shared,
-                window=window or None,
+            # v3.8.3: bound the recall so CLI/MCP callers never hang on a
+            # wedged embedder. Poll the executor future (which cannot be
+            # cancelled) without blocking the loop, and give quality recall a
+            # GENEROUS budget; only if it is exceeded do we serve the fast
+            # keyword fallback. The orphaned recall finishes in the background.
+            loop = asyncio.get_running_loop()
+            _rf = loop.run_in_executor(
+                None,
+                lambda: engine.recall(
+                    search_query, limit=limit, session_id=effective_sid,
+                    agent_id=recall_actor,
+                    fast=fast,
+                    include_global=include_global,
+                    include_shared=include_shared,
+                    window=window or None,
+                ),
             )
+            _budget = _recall_budget_s()
+            _deadline = loop.time() + _budget
+            while not _rf.done() and loop.time() < _deadline:
+                await asyncio.sleep(0.05)
+            if not _rf.done():
+                _rf.add_done_callback(lambda f: (f.cancelled() or f.exception()))
+                logger.warning(
+                    "recall: semantic recall exceeded %.0fs budget for %r — "
+                    "serving keyword fallback", _budget, (search_query or "")[:80],
+                )
+                return _recall_keyword_fallback(engine, search_query, limit)
+            response = _rf.result()
             # v3.4.26: return the same field shape as recall_worker so
             # MCP processes proxying through the daemon get recall_trace-
             # compatible data without a second round trip.

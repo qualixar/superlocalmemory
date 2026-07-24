@@ -5,6 +5,21 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.3] - 2026-07-24 — Recall stays responsive under heavy load
+
+### Fixed
+
+- **Recall no longer hangs when the system is busy.** Search and recall now
+  complete within a generous time budget even during background maintenance or
+  when many agents are querying at once. If a query can't finish in that window,
+  SLM returns keyword-matched results and marks them clearly instead of leaving
+  the request to time out. This applies everywhere recall runs — the dashboard
+  search, the CLI, and connected assistants — so results are consistent across
+  every surface.
+- **Dashboard search waits long enough for a real answer.** The dashboard now
+  allows recall the full server-side budget before giving up, so heavy-load
+  queries return results rather than an aborted-request error.
+
 ## [3.8.2] - 2026-07-24 — Self-healing upgrades & faster, consistent recall
 
 ### Added

@@ -19,6 +19,25 @@ from .helpers import (
 logger = logging.getLogger("superlocalmemory.routes.memories")
 router = APIRouter()
 
+# v3.8.3: GENEROUS latency budget for recall. SLM's value is quality recall
+# under heavy multi-agent load, so semantic recall is given ample time to
+# finish — the keyword fallback is a LAST-RESORT safety net for a genuine hang
+# (e.g. a wedged embedder), NOT an aggressive speed cutoff. Only if recall
+# exceeds this budget do we serve the fast keyword search so the caller ALWAYS
+# gets a result instead of hanging forever. Tune with SLM_SEARCH_RECALL_TIMEOUT_S.
+# The dashboard's fetch timeout is set ABOVE this so the browser waits for the
+# quality result rather than aborting early.
+_DEFAULT_RECALL_BUDGET_S = 25.0
+
+
+def _search_recall_timeout_s() -> float:
+    import os
+    try:
+        v = float(os.environ.get("SLM_SEARCH_RECALL_TIMEOUT_S", ""))
+        return v if v > 0 else _DEFAULT_RECALL_BUDGET_S
+    except (TypeError, ValueError):
+        return _DEFAULT_RECALL_BUDGET_S
+
 
 def _internal_error(detail: str = "Internal server error") -> HTTPException:
     """SEC-H-02: log the full traceback server-side; return a generic message.
@@ -526,35 +545,65 @@ async def search_memories(request: Request, body: SearchRequest):
             _window = getattr(body, "window", None) or ""
             if not _window and getattr(body, "date_from", None) and getattr(body, "date_to", None):
                 _window = f"{body.date_from}..{body.date_to}"
-            response = await loop.run_in_executor(
+            # v3.8.3: bound the synchronous recall. Under a concurrent
+            # maintenance pass or a busy embedder it can run tens of seconds
+            # and the browser aborts the fetch. If it exceeds the budget we
+            # fall through to the fast keyword search below, so the dashboard
+            # ALWAYS returns instead of failing with an abort.
+            _recall_future = loop.run_in_executor(
                 None,
                 lambda: engine.recall(
                     body.query, limit=body.limit, fast=True,
                     window=_window or None,
                 ),
             )
-            elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
-            from superlocalmemory.server.recall_serializer import (
-                recall_response_metadata,
-                serialize_recall_response,
-            )
-            results, no_confident_match = serialize_recall_response(
-                response,
-                limit=body.limit,
-                per_fact_max=300,
-                total_max=max(300, body.limit * 300),
-            )
-            return {
-                "query": body.query,
-                "results": results,
-                "total": len(results),
-                "query_type": getattr(response, "query_type", "semantic"),
-                "retrieval_time_ms": elapsed_ms,
-                "no_confident_match": no_confident_match,
-                **recall_response_metadata(response),
-            }
+            # A run_in_executor thread cannot be cancelled, and wait_for() on it
+            # blocks until the thread finishes (defeating the timeout). So poll
+            # the future without blocking the event loop and give up at the
+            # deadline — the orphaned recall completes in the background and its
+            # result is discarded. This is what bounds dashboard-search latency.
+            _budget = _search_recall_timeout_s()
+            _deadline = loop.time() + _budget
+            while not _recall_future.done() and loop.time() < _deadline:
+                await asyncio.sleep(0.05)
+            if _recall_future.done():
+                response = _recall_future.result()
+            else:
+                # Ensure the orphaned future's eventual result/exception is
+                # retrieved so asyncio doesn't log "never retrieved".
+                _recall_future.add_done_callback(
+                    lambda f: (f.cancelled() or f.exception())
+                )
+                logger.warning(
+                    "search_memories: semantic recall exceeded %.0fs budget for "
+                    "%r — serving keyword fallback",
+                    _budget, (body.query or "")[:80],
+                )
+                response = None
+            if response is not None:
+                elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
+                from superlocalmemory.server.recall_serializer import (
+                    recall_response_metadata,
+                    serialize_recall_response,
+                )
+                results, no_confident_match = serialize_recall_response(
+                    response,
+                    limit=body.limit,
+                    per_fact_max=300,
+                    total_max=max(300, body.limit * 300),
+                )
+                return {
+                    "query": body.query,
+                    "results": results,
+                    "total": len(results),
+                    "query_type": getattr(response, "query_type", "semantic"),
+                    "retrieval_time_ms": elapsed_ms,
+                    "no_confident_match": no_confident_match,
+                    **recall_response_metadata(response),
+                }
+            # recall timed out — fall through to the fast keyword search.
 
-        # Fallback: direct DB text search (engine not yet initialised)
+        # Fallback: direct DB text search (engine not ready OR recall over budget)
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()

@@ -41,4 +41,4 @@ slm-compress · slm-cache · slm-status · slm-profile
 # What NOT to do
 Never compress code-for-edit/JSON-to-parse/<500 chars; never store secrets/ccr_ids; never let optimize failure block/alter the task; never claim a specific savings %; never carry ccr_ids across profile switches.
 
-SuperLocalMemory v3.8.2 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v3.8.3 · Qualixar · AGPL-3.0-or-later
