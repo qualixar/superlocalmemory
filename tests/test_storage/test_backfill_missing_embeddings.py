@@ -5,7 +5,7 @@
 """Tests for backfill_missing_embeddings in embedding_migrator.py.
 
 Covers:
-- Basic: NULL embeddings are written, embedding_metadata upserted
+- Basic: NULL embeddings and their paired vector projections are written
 - Idempotent: re-running only touches remaining NULLs
 - Limit: only N facts are embedded per call (bounded)
 - all_profiles: spans facts across all profile_ids
@@ -29,10 +29,10 @@ from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> DatabaseManager:
@@ -46,6 +46,7 @@ def db(tmp_path: Path) -> DatabaseManager:
 def config(tmp_path: Path) -> SLMConfig:
     """Mode A SLMConfig pointing at tmp_path."""
     from superlocalmemory.storage.models import Mode
+
     cfg = SLMConfig.for_mode(Mode.A, base_dir=tmp_path)
     cfg.active_profile = "default"
     return cfg
@@ -93,9 +94,7 @@ def _seed_facts(
         for i, content in enumerate(contents):
             fid = f"fact-{profile_id[:4]}-{i:04d}"
             fact_ids.append(fid)
-            embedding = (
-                json.dumps([0.01] * 768) if with_embedding else None
-            )
+            embedding = json.dumps([0.01] * 768) if with_embedding else None
             conn.execute(
                 "INSERT OR IGNORE INTO atomic_facts"
                 " (fact_id, memory_id, profile_id, content, embedding)"
@@ -116,8 +115,8 @@ def _seed_facts(
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestBackfillMissingEmbeddings:
 
+class TestBackfillMissingEmbeddings:
     def test_null_embeddings_get_written(
         self, db: DatabaseManager, config: SLMConfig, mock_embedder: MagicMock
     ) -> None:
@@ -127,17 +126,13 @@ class TestBackfillMissingEmbeddings:
         _seed_facts(db, "default", ["fact A", "fact B", "fact C"])
 
         # PRE: 3 NULLs
-        before = db.execute(
-            "SELECT count(*) AS c FROM atomic_facts WHERE embedding IS NULL"
-        )
+        before = db.execute("SELECT count(*) AS c FROM atomic_facts WHERE embedding IS NULL")
         assert before[0]["c"] == 3
 
         result = backfill_missing_embeddings(config, db, mock_embedder)
 
         # POST: 0 NULLs
-        after = db.execute(
-            "SELECT count(*) AS c FROM atomic_facts WHERE embedding IS NULL"
-        )
+        after = db.execute("SELECT count(*) AS c FROM atomic_facts WHERE embedding IS NULL")
         assert after[0]["c"] == 0
         assert result["embedded"] == 3
         assert result["remaining_null"] == 0
@@ -145,7 +140,9 @@ class TestBackfillMissingEmbeddings:
     def test_embedding_metadata_upserted(
         self, db: DatabaseManager, config: SLMConfig, mock_embedder: MagicMock
     ) -> None:
-        """embedding_metadata rows are created for each backfilled fact."""
+        """Metadata is created only as part of a real sqlite-vec pair."""
+        import sqlite_vec
+
         from superlocalmemory.storage.embedding_migrator import backfill_missing_embeddings
 
         fact_ids = _seed_facts(db, "default", ["alpha", "beta"])
@@ -164,6 +161,17 @@ class TestBackfillMissingEmbeddings:
             tuple(fact_ids),
         )
         assert after[0]["c"] == 2
+        with sqlite3.connect(str(db.db_path)) as conn:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            paired = conn.execute(
+                "SELECT COUNT(*) FROM embedding_metadata em "
+                "JOIN fact_embeddings fe ON fe.rowid = em.vec_rowid "
+                "WHERE em.fact_id IN (?, ?)",
+                tuple(fact_ids),
+            ).fetchone()[0]
+        assert paired == 2
 
     def test_byte_compatibility_embedding_format(
         self, db: DatabaseManager, config: SLMConfig, mock_embedder: MagicMock
@@ -178,9 +186,7 @@ class TestBackfillMissingEmbeddings:
         _seed_facts(db, "default", ["content to embed"])
         backfill_missing_embeddings(config, db, mock_embedder)
 
-        rows = db.execute(
-            "SELECT embedding FROM atomic_facts WHERE profile_id = 'default'"
-        )
+        rows = db.execute("SELECT embedding FROM atomic_facts WHERE profile_id = 'default'")
         assert len(rows) == 1
         emb_json = rows[0]["embedding"]
         assert emb_json is not None
@@ -231,6 +237,29 @@ class TestBackfillMissingEmbeddings:
         assert result["scanned"] == 10  # total scanned = all NULLs
         assert result["remaining_null"] == 7
 
+    def test_embedding_runs_as_preemptible_background_work(
+        self, db: DatabaseManager, config: SLMConfig, mock_embedder: MagicMock
+    ) -> None:
+        """Startup self-heal must enter the shared foreground-priority gate."""
+        from superlocalmemory.core.recall_gate import is_background_work
+        from superlocalmemory.storage.embedding_migrator import (
+            backfill_missing_embeddings,
+        )
+
+        _seed_facts(db, "default", ["background embedding"])
+        background_states: list[bool] = []
+
+        def assert_background(texts: list[str]) -> list[list[float]]:
+            background_states.append(is_background_work())
+            return [[0.1] * 768 for _ in texts]
+
+        mock_embedder.embed_batch.side_effect = assert_background
+
+        result = backfill_missing_embeddings(config, db, mock_embedder)
+
+        assert result["embedded"] == 1
+        assert background_states == [True]
+
     def test_all_profiles_flag(
         self, db: DatabaseManager, config: SLMConfig, mock_embedder: MagicMock
     ) -> None:
@@ -241,27 +270,20 @@ class TestBackfillMissingEmbeddings:
         _seed_facts(db, "work", ["p2 fact 1"])
 
         # Scope to active_profile only (default): only 2 facts
-        result_single = backfill_missing_embeddings(
-            config, db, mock_embedder, all_profiles=False
-        )
+        result_single = backfill_missing_embeddings(config, db, mock_embedder, all_profiles=False)
         assert result_single["embedded"] == 2
 
         # Re-add NULLs for work profile by seeding again (work facts still NULL)
-        result_all = backfill_missing_embeddings(
-            config, db, mock_embedder, all_profiles=True
-        )
+        result_all = backfill_missing_embeddings(config, db, mock_embedder, all_profiles=True)
         assert result_all["embedded"] == 1  # 1 remaining work fact
 
-    def test_fail_open_bad_fact_skipped(
-        self, db: DatabaseManager, config: SLMConfig
-    ) -> None:
+    def test_fail_open_bad_fact_skipped(self, db: DatabaseManager, config: SLMConfig) -> None:
         """A fact that fails to embed is skipped; remaining facts continue."""
         from superlocalmemory.storage.embedding_migrator import backfill_missing_embeddings
 
         _seed_facts(db, "default", ["good fact 1", "bad fact", "good fact 2"])
 
         bad_embedder = MagicMock()
-        call_count = [0]
 
         def _selective_embed_batch(texts: list[str]) -> list[list[float] | None]:
             results = []
@@ -297,9 +319,7 @@ class TestBackfillMissingEmbeddings:
         # embed_batch must NOT be called at all
         mock_embedder.embed_batch.assert_not_called()
 
-    def test_no_embedder_returns_zero_counts(
-        self, db: DatabaseManager, config: SLMConfig
-    ) -> None:
+    def test_no_embedder_returns_zero_counts(self, db: DatabaseManager, config: SLMConfig) -> None:
         """When embedder=None, returns dict with scanned=0, embedded=0."""
         from superlocalmemory.storage.embedding_migrator import backfill_missing_embeddings
 

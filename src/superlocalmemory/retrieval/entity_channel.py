@@ -10,6 +10,7 @@ with decay. Handles BOTH uppercase and lowercase entity mentions.
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 License: AGPL-3.0-or-later
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,10 @@ from superlocalmemory.retrieval.scope_policy import (
     authorized_fact_ids,
     filter_authorized_results,
 )
-from superlocalmemory.storage.database import _scope_where
+from superlocalmemory.storage.database import (
+    _scope_where,
+    _unbounded_facts_ceiling,
+)
 
 if TYPE_CHECKING:
     from superlocalmemory.encoding.entity_resolver import EntityResolver
@@ -50,26 +54,126 @@ def _adj_ttl_seconds() -> float:
     except (TypeError, ValueError):
         return 3600.0
 
+
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]{1,}\b")
 
-_ENTITY_STOP: frozenset[str] = frozenset({
-    # Expanded stop list for query entity extraction
-    "what", "when", "where", "who", "which", "how", "does", "did",
-    "the", "that", "this", "there", "then", "than", "they", "them",
-    "have", "has", "had", "been", "being", "about", "after", "before",
-    "from", "into", "with", "some", "other", "would", "could", "should",
-    "will", "because", "also", "just", "like", "know", "think",
-    "feel", "want", "need", "make", "take", "give", "tell", "said",
-    "wow", "gonna", "got", "by", "thanks", "thank", "hey", "hi",
-    "hello", "bye", "good", "great", "nice", "cool", "right",
-    "let", "can", "might", "much", "many", "more", "most",
-    "something", "anything", "everything", "nothing", "someone",
-    "it", "my", "your", "our", "their", "me", "you", "we", "us",
-    "do", "if", "or", "no", "to", "at", "on", "in", "so",
-    "go", "come", "see", "look", "say", "ask", "try", "keep",
-    "yes", "yeah", "sure", "okay", "ok", "really", "actually",
-    "maybe", "well", "still", "even", "very",
-})
+_ENTITY_STOP: frozenset[str] = frozenset(
+    {
+        # Expanded stop list for query entity extraction
+        "what",
+        "when",
+        "where",
+        "who",
+        "which",
+        "how",
+        "does",
+        "did",
+        "the",
+        "that",
+        "this",
+        "there",
+        "then",
+        "than",
+        "they",
+        "them",
+        "have",
+        "has",
+        "had",
+        "been",
+        "being",
+        "about",
+        "after",
+        "before",
+        "from",
+        "into",
+        "with",
+        "some",
+        "other",
+        "would",
+        "could",
+        "should",
+        "will",
+        "because",
+        "also",
+        "just",
+        "like",
+        "know",
+        "think",
+        "feel",
+        "want",
+        "need",
+        "make",
+        "take",
+        "give",
+        "tell",
+        "said",
+        "wow",
+        "gonna",
+        "got",
+        "by",
+        "thanks",
+        "thank",
+        "hey",
+        "hi",
+        "hello",
+        "bye",
+        "good",
+        "great",
+        "nice",
+        "cool",
+        "right",
+        "let",
+        "can",
+        "might",
+        "much",
+        "many",
+        "more",
+        "most",
+        "something",
+        "anything",
+        "everything",
+        "nothing",
+        "someone",
+        "it",
+        "my",
+        "your",
+        "our",
+        "their",
+        "me",
+        "you",
+        "we",
+        "us",
+        "do",
+        "if",
+        "or",
+        "no",
+        "to",
+        "at",
+        "on",
+        "in",
+        "so",
+        "go",
+        "come",
+        "see",
+        "look",
+        "say",
+        "ask",
+        "try",
+        "keep",
+        "yes",
+        "yeah",
+        "sure",
+        "okay",
+        "ok",
+        "really",
+        "actually",
+        "maybe",
+        "well",
+        "still",
+        "even",
+        "very",
+    }
+)
 
 
 def extract_query_entities(query: str) -> list[str]:
@@ -94,10 +198,10 @@ def extract_query_entities(query: str) -> list[str]:
     for m in re.finditer(r'"([^"]+)"', query):
         _add(m.group(1).strip())
     # Also extract multi-word capitalized sequences (e.g. "New York", "San Francisco")
-    for m in re.finditer(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', query):
+    for m in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", query):
         _add(m.group(1))
     # Extract all-caps abbreviations (e.g. NYU, MIT, UCLA) — min 2 chars
-    for m in re.finditer(r'\b([A-Z]{2,})\b', query):
+    for m in re.finditer(r"\b([A-Z]{2,})\b", query):
         _add(m.group(1))
 
     return candidates
@@ -113,9 +217,11 @@ class EntityGraphChannel:
     """
 
     def __init__(
-        self, db: DatabaseManager,
+        self,
+        db: DatabaseManager,
         entity_resolver: EntityResolver | None = None,
-        decay: float = 0.7, activation_threshold: float = 0.05,
+        decay: float = 0.7,
+        activation_threshold: float = 0.05,
         max_hops: int = 4,
         graph_metrics: dict[str, dict] | None = None,
         cozo_backend: Any = None,  # v3.4.5: optional CozoDB backend
@@ -174,18 +280,19 @@ class EntityGraphChannel:
         # the graph without changing the count (e.g. store_edge MAX-merge), and a
         # count-stable window would otherwise serve a stale adjacency map.
         import time as _t_ec
+
         _now_ec = _t_ec.monotonic()
         _ttl = _adj_ttl_seconds()
         # TTL=0 disables the time-based reload entirely (count-based correctness
         # reload still applies); otherwise the cache is fresh within the TTL.
-        _fresh = _ttl <= 0.0 or (
-            (_now_ec - getattr(self, "_adj_loaded_at", 0.0)) < _ttl
-        )
-        if (self._adj_scope_key == scope_key
-                and (self._adj or self._visible_fact_ids)
-                and self._adj_edge_count == current_count
-                and self._adj_fact_count == current_fact_count
-                and _fresh):
+        _fresh = _ttl <= 0.0 or ((_now_ec - getattr(self, "_adj_loaded_at", 0.0)) < _ttl)
+        if (
+            self._adj_scope_key == scope_key
+            and (self._adj or self._visible_fact_ids)
+            and self._adj_edge_count == current_count
+            and self._adj_fact_count == current_fact_count
+            and _fresh
+        ):
             return
         adj: dict[str, list[tuple[str, float]]] = defaultdict(list)
         try:
@@ -195,8 +302,7 @@ class EntityGraphChannel:
                 include_shared=include_shared,
             )
             rows = self._db.execute(
-                "SELECT source_id, target_id, weight FROM graph_edges "
-                f"WHERE {where}",
+                f"SELECT source_id, target_id, weight FROM graph_edges WHERE {where}",
                 (*params,),
             )
         except Exception:
@@ -234,8 +340,10 @@ class EntityGraphChannel:
 
         logger.info(
             "Loaded adjacency cache: %d nodes, %d edges, %d entity mappings for profile %s",
-            len(self._adj), sum(len(v) for v in self._adj.values()) // 2,
-            len(self._entity_to_facts), profile_id,
+            len(self._adj),
+            sum(len(v) for v in self._adj.values()) // 2,
+            len(self._entity_to_facts),
+            profile_id,
         )
 
     def _get_edge_count(
@@ -272,7 +380,11 @@ class EntityGraphChannel:
         """Pre-load entity→fact and fact→entity maps into memory.
 
         Eliminates per-entity and per-fact SQL in the spreading activation loop.
-        Same data, same algorithm — zero quality change.
+        Fetch only the two columns this index consumes. Loading full AtomicFact
+        objects also deserializes every 768-d embedding and Fisher vector; on a
+        mature database that turned one new fact into a 5-second recall stall.
+        The scope predicate and configurable 50k safety ceiling are identical
+        to ``get_all_facts``; only heavyweight unused columns are omitted.
         """
         # entity_id -> [fact_id, ...]
         self._entity_to_facts: dict[str, list[str]] = defaultdict(list)
@@ -281,22 +393,41 @@ class EntityGraphChannel:
         self._visible_fact_ids = set()
 
         try:
-            facts = self._db.get_all_facts(
+            where, params = _scope_where(
                 profile_id,
                 include_global=include_global,
                 include_shared=include_shared,
             )
+            rows = self._db.execute(
+                "SELECT fact_id, canonical_entities_json "
+                f"FROM atomic_facts WHERE {where} "
+                "ORDER BY created_at DESC LIMIT ?",
+                (*params, _unbounded_facts_ceiling()),
+            )
         except Exception:
-            facts = []
-        for fact in facts:
-            self._visible_fact_ids.add(fact.fact_id)
-            for eid in fact.canonical_entities:
-                self._entity_to_facts[eid].append(fact.fact_id)
-                self._fact_to_entities[fact.fact_id].append(eid)
+            rows = []
+        for row in rows:
+            data = dict(row)
+            fact_id = str(data.get("fact_id") or "")
+            if not fact_id:
+                continue
+            self._visible_fact_ids.add(fact_id)
+            try:
+                entity_ids = json.loads(
+                    data.get("canonical_entities_json") or "[]",
+                )
+            except (TypeError, ValueError):
+                entity_ids = []
+            for entity_id in entity_ids:
+                if not isinstance(entity_id, str) or not entity_id:
+                    continue
+                self._entity_to_facts[entity_id].append(fact_id)
+                self._fact_to_entities[fact_id].append(entity_id)
 
         logger.info(
             "Loaded entity maps: %d entities, %d facts with entities",
-            len(self._entity_to_facts), len(self._fact_to_entities),
+            len(self._entity_to_facts),
+            len(self._fact_to_entities),
         )
 
     def _load_graph_metrics(self, profile_id: str) -> None:
@@ -324,7 +455,8 @@ class EntityGraphChannel:
                 }
             logger.info(
                 "Loaded graph metrics: %d facts for profile %s",
-                len(self._graph_metrics), profile_id,
+                len(self._graph_metrics),
+                profile_id,
             )
         except Exception as exc:
             logger.debug("Graph metrics load failed (graceful degradation): %s", exc)
@@ -412,7 +544,7 @@ class EntityGraphChannel:
         # Spreading activation through graph edges (all in-memory O(1) lookups)
         frontier = set(activation.keys())
         for hop in range(1, self._max_hops):
-            hop_decay = self._decay ** hop
+            hop_decay = self._decay**hop
             if hop_decay < self._threshold:
                 break
             next_frontier: set[str] = set()
@@ -448,9 +580,8 @@ class EntityGraphChannel:
                     ):
                         neighbor = edge.target_id if edge.source_id == fid else edge.source_id
                         propagated = activation[fid] * self._decay
-                        if (
-                            propagated >= self._threshold
-                            and propagated > activation.get(neighbor, 0.0)
+                        if propagated >= self._threshold and propagated > activation.get(
+                            neighbor, 0.0
                         ):
                             activation[neighbor] = propagated
                             next_frontier.add(neighbor)
@@ -490,6 +621,7 @@ class EntityGraphChannel:
         # v3.4.1 P2: Community-aware boosting
         if self._graph_metrics and use_cache:
             from collections import Counter as _Counter
+
             seed_communities: _Counter = _Counter()
             for eid in canonical_ids:
                 for fid in self._entity_to_facts.get(eid, ()):
@@ -629,7 +761,7 @@ class EntityGraphChannel:
 
         frontier = set(activation.keys())
         for hop in range(1, self._max_hops):
-            hop_decay = self._decay ** hop
+            hop_decay = self._decay**hop
             if hop_decay < self._threshold:
                 break
             next_frontier: set[str] = set()
@@ -664,6 +796,7 @@ class EntityGraphChannel:
         # Community-aware boosting (same as search)
         if self._graph_metrics and use_cache:
             from collections import Counter as _Counter
+
             seed_communities: _Counter = _Counter()
             for eid in canonical_ids:
                 for fid in self._entity_to_facts.get(eid, ()):
@@ -691,7 +824,9 @@ class EntityGraphChannel:
         return scored
 
     def _suppress_contradictions(
-        self, activation: dict[str, float], profile_id: str,
+        self,
+        activation: dict[str, float],
+        profile_id: str,
     ) -> None:
         """P3: Penalize older fact in contradiction pairs, heavy-penalize superseded.
 
@@ -783,7 +918,10 @@ class EntityGraphChannel:
         return ids
 
     def _discover_entities(
-        self, fact_ids: set[str], profile_id: str, visited: set[str],
+        self,
+        fact_ids: set[str],
+        profile_id: str,
+        visited: set[str],
     ) -> list[str]:
         """Find new canonical entity IDs referenced by a set of facts."""
         new: list[str] = []
@@ -797,7 +935,8 @@ class EntityGraphChannel:
         )
         for fid in allowed_fact_ids:
             rows = self._db.execute(
-                "SELECT canonical_entities_json FROM atomic_facts WHERE fact_id = ?", (fid,),
+                "SELECT canonical_entities_json FROM atomic_facts WHERE fact_id = ?",
+                (fid,),
             )
             if not rows:
                 continue
@@ -815,8 +954,11 @@ class EntityGraphChannel:
 
     # v3.4.5: CozoDB-backed search (Sprint 2)
     def _search_via_cozo(
-        self, query: str, raw_entities: list[str],
-        profile_id: str, top_k: int,
+        self,
+        query: str,
+        raw_entities: list[str],
+        profile_id: str,
+        top_k: int,
         *,
         include_global: bool = False,
         include_shared: bool = False,
@@ -879,7 +1021,10 @@ class EntityGraphChannel:
             return self._search_without_cozo(query, profile_id, top_k)
 
     def _search_without_cozo(
-        self, query: str, profile_id: str, top_k: int,
+        self,
+        query: str,
+        profile_id: str,
+        top_k: int,
     ) -> list[tuple[str, float]]:
         """Run canonical SQLite entity recall without recursive projection use."""
         cozo, self._cozo = self._cozo, None

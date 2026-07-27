@@ -41,9 +41,7 @@ _BACKFILL_BATCH_SIZE = 50
 #: acquisition window.  Tunable via SLM_SELFHEAL_WRITE_DELAY_S; set to 0 to
 #: disable (only do this on single-user dev databases with no concurrency).
 #: Default 5 ms is imperceptible for humans but visible to the OS scheduler.
-_SELFHEAL_WRITE_DELAY_S: float = float(
-    _os.environ.get("SLM_SELFHEAL_WRITE_DELAY_S", "0.005")
-)
+_SELFHEAL_WRITE_DELAY_S: float = float(_os.environ.get("SLM_SELFHEAL_WRITE_DELAY_S", "0.005"))
 
 #: Max characters embedded per fact during backfill. The embedding model
 #: (nomic-embed-text-v1.5) truncates at ~8192 tokens anyway, but a raw
@@ -144,13 +142,15 @@ def check_embedding_migration(config: SLMConfig) -> bool:
         _write_stored_signature(config.base_dir, current_sig)
         logger.info(
             "Embedding signature normalized (no re-embed): %s ~= %s",
-            stored_sig, current_sig,
+            stored_sig,
+            current_sig,
         )
         return False
 
     logger.warning(
         "Embedding model changed: %s -> %s. Re-indexing required.",
-        stored_sig, current_sig,
+        stored_sig,
+        current_sig,
     )
     return True
 
@@ -176,8 +176,7 @@ def run_embedding_migration(
 
     # Get all fact IDs that need re-embedding (all facts for the profile).
     rows = db.execute(
-        "SELECT fact_id, content FROM atomic_facts "
-        "WHERE profile_id = ? ORDER BY created_at",
+        "SELECT fact_id, content FROM atomic_facts WHERE profile_id = ? ORDER BY created_at",
         (profile_id,),
     )
     facts = [(dict(r)["fact_id"], dict(r)["content"]) for r in rows]
@@ -189,7 +188,9 @@ def run_embedding_migration(
 
     logger.info(
         "Re-embedding %d facts with model %s (batch_size=%d)",
-        total, current_sig, _REINDEX_BATCH_SIZE,
+        total,
+        current_sig,
+        _REINDEX_BATCH_SIZE,
     )
 
     reindexed = 0
@@ -203,7 +204,9 @@ def run_embedding_migration(
         except Exception as exc:
             logger.error(
                 "Re-embedding batch %d-%d failed: %s. Stopping migration.",
-                i, i + len(batch), exc,
+                i,
+                i + len(batch),
+                exc,
             )
             break
 
@@ -219,22 +222,23 @@ def run_embedding_migration(
                 )
                 # Update embedding_metadata with new model name.
                 db.execute(
-                    "UPDATE embedding_metadata SET model_name = ? "
-                    "WHERE fact_id = ?",
+                    "UPDATE embedding_metadata SET model_name = ? WHERE fact_id = ?",
                     (config.embedding.model_name, fid),
                 )
                 reindexed += 1
             except Exception as exc:
                 logger.warning(
                     "Failed to update embedding for fact %s: %s",
-                    fid[:16], exc,
+                    fid[:16],
+                    exc,
                 )
 
     # Update stored signature after successful migration.
     _write_stored_signature(config.base_dir, current_sig)
     logger.info(
         "Embedding migration complete: %d/%d facts re-embedded.",
-        reindexed, total,
+        reindexed,
+        total,
     )
     return reindexed
 
@@ -242,6 +246,7 @@ def run_embedding_migration(
 # ---------------------------------------------------------------------------
 # Backfill: embed facts that were NEVER embedded (embedding IS NULL)
 # ---------------------------------------------------------------------------
+
 
 def _count_null_embeddings(
     db: Any,
@@ -255,8 +260,7 @@ def _count_null_embeddings(
         )
     else:
         rows = db.execute(
-            "SELECT count(*) AS c FROM atomic_facts "
-            "WHERE embedding IS NULL AND profile_id = ?",
+            "SELECT count(*) AS c FROM atomic_facts WHERE embedding IS NULL AND profile_id = ?",
             (profile_id,),
         )
     return int(rows[0]["c"]) if rows else 0
@@ -282,7 +286,7 @@ def backfill_missing_embeddings(
 
     Writes mirror :func:`run_embedding_migration` exactly:
     * ``atomic_facts.embedding`` ← ``json.dumps(vector)``
-    * ``embedding_metadata`` ← upserted row with current model name + dimension
+    * sqlite-vec + ``embedding_metadata`` ← one atomic projection pair
 
     Args:
         config: Active SLMConfig (provides profile_id, model name, dimension).
@@ -309,9 +313,7 @@ def backfill_missing_embeddings(
     profile_id = config.active_profile
 
     if embedder is None:
-        logger.warning(
-            "backfill_missing_embeddings: no embedder available — skipping."
-        )
+        logger.warning("backfill_missing_embeddings: no embedder available — skipping.")
         return {"scanned": 0, "embedded": 0, "remaining_null": 0}
 
     # ------------------------------------------------------------------
@@ -330,8 +332,7 @@ def backfill_missing_embeddings(
         )
 
     facts: list[tuple[str, str, str]] = [
-        (dict(r)["fact_id"], dict(r)["content"], dict(r)["profile_id"])
-        for r in rows
+        (dict(r)["fact_id"], dict(r)["content"], dict(r)["profile_id"]) for r in rows
     ]
     scanned = len(facts)
 
@@ -345,6 +346,24 @@ def backfill_missing_embeddings(
     current_model = config.embedding.model_name
     current_dim = config.embedding.dimension
     embedded = 0
+    vector_store = None
+    try:
+        from superlocalmemory.retrieval.vector_store import (
+            VectorStore,
+            VectorStoreConfig,
+        )
+
+        db_path = getattr(db, "db_path", None)
+        if db_path is not None:
+            vector_store = VectorStore(
+                db_path,
+                VectorStoreConfig(
+                    dimension=current_dim,
+                    model_name=current_model,
+                ),
+            )
+    except Exception as exc:
+        logger.debug("backfill: vector store unavailable: %s", exc)
 
     # ------------------------------------------------------------------
     # 2. Batch embed and write back
@@ -357,36 +376,39 @@ def backfill_missing_embeddings(
         fact_ids = [fid for fid, _, _ in batch]
         prof_ids = [pid for _, _, pid in batch]
 
-        # Attempt batch embed; fall back to per-fact on batch failure.
-        try:
-            vectors: list[Any] = embedder.embed_batch(texts)
-        except Exception as exc:
-            logger.warning(
-                "backfill: batch embed failed for facts %d-%d: %s — "
-                "retrying per-fact.",
-                batch_start,
-                batch_start + len(batch),
-                exc,
-            )
-            vectors = []
-            for text in texts:
-                try:
-                    vec = embedder.embed(text)
-                    vectors.append(vec)
-                except Exception as per_fact_exc:
-                    logger.warning(
-                        "backfill: per-fact embed failed for '%s...': %s",
-                        text[:40],
-                        per_fact_exc,
-                    )
-                    vectors.append(None)
+        # Attempt batch embed; fall back to per-fact on batch failure. Mark the
+        # whole inference burst as background work so the shared embedding
+        # service yields between items if a recall begins after the daemon's
+        # initial in-flight check.
+        from superlocalmemory.core.recall_gate import background_work
+
+        with background_work():
+            try:
+                vectors: list[Any] = embedder.embed_batch(texts)
+            except Exception as exc:
+                logger.warning(
+                    "backfill: batch embed failed for facts %d-%d: %s — retrying per-fact.",
+                    batch_start,
+                    batch_start + len(batch),
+                    exc,
+                )
+                vectors = []
+                for text in texts:
+                    try:
+                        vec = embedder.embed(text)
+                        vectors.append(vec)
+                    except Exception as per_fact_exc:
+                        logger.warning(
+                            "backfill: per-fact embed failed for '%s...': %s",
+                            text[:40],
+                            per_fact_exc,
+                        )
+                        vectors.append(None)
 
         # Write each successfully-embedded fact back to the DB.
         for fid, vec, pid in zip(fact_ids, vectors, prof_ids):
             if vec is None:
-                logger.warning(
-                    "backfill: null vector for fact %s — skipping.", fid[:16]
-                )
+                logger.warning("backfill: null vector for fact %s — skipping.", fid[:16])
                 continue
             try:
                 embedding_json = json.dumps(vec)
@@ -395,16 +417,24 @@ def backfill_missing_embeddings(
                     "UPDATE atomic_facts SET embedding = ? WHERE fact_id = ?",
                     (embedding_json, fid),
                 )
-                # Upsert embedding_metadata.  NULL-embedding facts have no row
-                # here yet, so we INSERT; if a row somehow exists, update it.
-                db.execute(
-                    "INSERT INTO embedding_metadata"
-                    "    (fact_id, profile_id, model_name, dimension)"
-                    " VALUES (?, ?, ?, ?)"
-                    " ON CONFLICT(fact_id) DO UPDATE SET"
-                    "    model_name = excluded.model_name",
-                    (fid, pid, current_model, current_dim),
-                )
+                # Metadata is not an independent record: it is the pointer to
+                # a sqlite-vec row. Creating it before the vector payload leaves
+                # semantic recall permanently blind while reporting success.
+                # VectorStore owns the atomic pair and repairs legacy orphans.
+                if (
+                    vector_store is not None
+                    and getattr(vector_store, "available", False)
+                    and not vector_store.upsert(
+                        fid,
+                        pid,
+                        vec,
+                        model_name=current_model,
+                    )
+                ):
+                    logger.warning(
+                        "backfill: vector projection failed for fact %s",
+                        fid[:16],
+                    )
                 embedded += 1
                 # Cooperative yield: release db._lock briefly so concurrent
                 # user writes can acquire it between facts.  Without this,
@@ -414,9 +444,7 @@ def backfill_missing_embeddings(
                 if _SELFHEAL_WRITE_DELAY_S > 0:
                     time.sleep(_SELFHEAL_WRITE_DELAY_S)
             except Exception as exc:
-                logger.warning(
-                    "backfill: failed to write fact %s: %s", fid[:16], exc
-                )
+                logger.warning("backfill: failed to write fact %s: %s", fid[:16], exc)
 
     # ------------------------------------------------------------------
     # 3. Count remaining NULLs (accounts for the limit; tells caller how

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 
 def _health_route(app):
@@ -107,6 +108,34 @@ def test_health_is_live_but_warming_until_embedding_is_usable(
     assert payload["readiness"]["retrieval"] is False
 
 
+def test_health_does_not_report_stale_warm_flag_after_worker_exit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from superlocalmemory.server import unified_daemon
+
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(unified_daemon, "_embedding_warm", True)
+    app = unified_daemon.create_app()
+    app.state.engine = SimpleNamespace(
+        _embedder=SimpleNamespace(is_warm=False),
+    )
+    app.state.canonical_remember_runtime = _ready_writer()
+    app.state.migration_result = {
+        "applied": ["M018"],
+        "skipped": [],
+        "failed": [],
+        "details": {},
+    }
+
+    payload = asyncio.run(_health_route(app).endpoint())
+
+    assert payload["embedding_warm"] is False
+    assert payload["readiness"]["embedding"] is False
+    assert payload["ready"] is False
+    assert payload["runtime_state"] == "warming"
+
+
 def test_health_is_not_ready_when_the_canonical_writer_is_absent(
     tmp_path,
     monkeypatch,
@@ -197,6 +226,19 @@ def test_daemon_lifespan_does_not_block_on_reranker_warmup() -> None:
 
     source = inspect.getsource(unified_daemon.lifespan)
     assert "reranker.warmup_sync(timeout=120)" not in source
+
+
+def test_materializer_engine_is_published_after_synchronous_startup_writers() -> None:
+    """Stranded ingestion work cannot race backend startup before readiness."""
+    import inspect
+
+    from superlocalmemory.server import unified_daemon
+
+    source = inspect.getsource(unified_daemon.lifespan)
+    publish = source.index("_engine = engine")
+    assert source.index("_configure_scale_backends(engine, config)") < publish
+    assert source.index("RBAC engine ready") < publish
+    assert publish < source.index("_publish_process_descriptor")
 
 
 def test_daemon_reserves_listener_before_engine_or_migration_work() -> None:

@@ -153,7 +153,9 @@ def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
             # fast=True: a health probe must release its operation lease well
             # within the 5s profile-switch drain window (fast=False is 2-10s and
             # would make every profile switch time out while a tick is in flight).
-            resp = engine.recall(probe, limit=3, fast=True)
+            from superlocalmemory.core.recall_gate import background_work
+            with background_work():
+                resp = engine.recall(probe, limit=3, fast=True)
     except Exception as exc:
         state.healthy = False
         state.consecutive_failures += 1

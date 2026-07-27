@@ -637,7 +637,12 @@ class MemoryEngine:
             except (ValueError, TypeError):
                 _timeout_s = 0.5  # default 500 ms
             try:
-                _future = self._store_fast_embed_pool.submit(_embedder_ref.embed, fact_text)
+                def _best_effort_embed():
+                    from superlocalmemory.core.recall_gate import background_work
+                    with background_work():
+                        return _embedder_ref.embed(fact_text)
+
+                _future = self._store_fast_embed_pool.submit(_best_effort_embed)
                 try:
                     emb = _future.result(timeout=_timeout_s)
                     if emb:

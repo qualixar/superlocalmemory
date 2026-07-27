@@ -90,6 +90,8 @@ class OllamaEmbedder:
         """
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
+        from superlocalmemory.core.recall_gate import wait_for_foreground_idle
+        wait_for_foreground_idle()
 
         # V3.3.27: Check cache first
         cache_key = text.strip()
@@ -119,6 +121,9 @@ class OllamaEmbedder:
         """
         if not texts:
             raise ValueError("Cannot embed empty batch")
+        from superlocalmemory.core.recall_gate import is_background_work
+        if is_background_work():
+            return [self.embed(text) for text in texts]
 
         # V3.3.27: Split into cached and uncached
         results: list[list[float] | None] = [None] * len(texts)

@@ -1383,10 +1383,6 @@ async def lifespan(application: FastAPI):
                 application, new_config, mode_change=mode_change,
             )
         )
-        # v3.4.38: Wire module-level _engine for the pending materializer.
-        global _engine, _profile_runtime
-        _profile_runtime = profile_runtime
-        _engine = engine
         logger.info("Unified daemon: MemoryEngine initialized (mode=%s)", config.mode.value)
 
         # v3.5.0: Backend Orchestrator — CozoDB (graph) + LanceDB (vector) backends.
@@ -1631,8 +1627,13 @@ async def lifespan(application: FastAPI):
                     ]
                     if not with_emb:
                         continue
-                    if vs.count(pid) >= int(len(with_emb) * 0.98):
-                        continue  # already complete — no-op
+                    indexed_ids = vs.indexed_fact_ids(pid)
+                    missing = [
+                        item for item in with_emb
+                        if item[0] not in indexed_ids
+                    ]
+                    if not missing:
+                        continue  # every metadata pointer has a vec0 payload
                     # Fix: route each upsert through db._lock with cooperative
                     # yield between facts.  Previously called
                     # vs.rebuild_from_facts() which opens its own sqlite3
@@ -1653,8 +1654,8 @@ async def lifespan(application: FastAPI):
                     _pause = max(0.0, float(
                         _selfheal_os.environ.get("SLM_SELFHEAL_BATCH_PAUSE_S", "0.05")))
                     n = 0
-                    for _i in range(0, len(with_emb), _batch):
-                        _chunk = with_emb[_i:_i + _batch]
+                    for _i in range(0, len(missing), _batch):
+                        _chunk = missing[_i:_i + _batch]
                         with db._lock:
                             for _fact_id, _profile_id, _embedding in _chunk:
                                 try:
@@ -1670,8 +1671,8 @@ async def lifespan(application: FastAPI):
                         if _pause > 0:
                             _t.sleep(_pause)
                     logger.info(
-                        "VS backfill[%s]: indexed %d of %d embedded facts",
-                        pid, n, len(with_emb),
+                        "VS backfill[%s]: repaired %d of %d missing vectors",
+                        pid, n, len(missing),
                     )
             except Exception as exc:
                 logger.warning("Vector store backfill failed (non-fatal): %s", exc)
@@ -2131,6 +2132,15 @@ async def lifespan(application: FastAPI):
                     "MCP HTTP session manager failed to start (non-fatal, stdio still works): %s",
                     _mcp_lifespan_exc,
                 )
+
+        # Publish the resident engine to the pending materializer only after
+        # every synchronous startup writer has finished. Publishing it beside
+        # engine.initialize() allowed a stranded ingestion operation to race
+        # BackendOrchestrator status writes while the daemon was still inside
+        # lifespan, so /health could never become reachable.
+        global _engine, _profile_runtime
+        _profile_runtime = profile_runtime
+        _engine = engine
 
         # Uvicorn enters this lifespan only after it has bound the listener.
         # Publishing ``ready`` here prevents a failed competing process from
@@ -3143,6 +3153,21 @@ def _register_daemon_routes(application: FastAPI) -> None:
             recall_health = {"recall_healthy": None}
         # Non-blocking peek: report status without forcing a re-init.
         engine = getattr(application.state, "engine", None)
+        embedding_ready = bool(_embedding_warm)
+        if engine is not None:
+            embedder = getattr(engine, "_embedder", None)
+            if embedder is None:
+                retrieval_engine = getattr(engine, "_retrieval_engine", None)
+                embedder = (
+                    getattr(retrieval_engine, "_embedder", None)
+                    if retrieval_engine is not None
+                    else None
+                )
+            if embedder is not None and hasattr(embedder, "is_warm"):
+                try:
+                    embedding_ready = bool(embedder.is_warm)
+                except Exception:
+                    embedding_ready = False
         migration_result = getattr(application.state, "migration_result", None)
         migration_failures = list(
             (migration_result or {}).get("failed", []) or []
@@ -3163,7 +3188,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 writer_runtime is not None
                 and getattr(writer_runtime, "ready", False)
             ),
-            "embedding": bool(_embedding_warm),
+            "embedding": embedding_ready,
             "recall_health": recall_health.get("recall_healthy") is True,
             "migration_failures": migration_failures,
         }
@@ -3225,7 +3250,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "version": getattr(application, 'version', 'unknown'),
             # v3.4.52: clients can poll this to wait for embedding model
             # readiness before issuing recall calls.
-            "embedding_warm": _embedding_warm,
+            "embedding_warm": embedding_ready,
             # v3.6.8: True iff the semantic channel actually fired on the last
             # health probe; includes self-heal counters.
             "recall_health": recall_health,
@@ -3976,6 +4001,10 @@ _materializer_stop = threading.Event()
 _materializer_thread: threading.Thread | None = None
 
 
+class _PendingProfileMismatchError(RuntimeError):
+    """A legacy pending row no longer matches the admitted profile lease."""
+
+
 def _materializer_actor_id() -> str:
     """Return the process-owned actor identity used by background writes."""
     descriptor = _ACTIVE_DAEMON_DESCRIPTOR
@@ -3986,7 +4015,13 @@ def _materializer_actor_id() -> str:
     return f"daemon-capability:{descriptor.capability_fingerprint}"
 
 
-def _run_materializer_operation(runtime, engine_supplier, operation):
+def _run_materializer_operation(
+    runtime,
+    engine_supplier,
+    operation,
+    *,
+    expected_profile_id: str | None = None,
+):
     """Run one bounded background unit against an admitted engine snapshot.
 
     Cooperative preemption: if a profile transition is already in progress,
@@ -3997,15 +4032,36 @@ def _run_materializer_operation(runtime, engine_supplier, operation):
     """
     # Writer-priority: don't acquire a new lease when a transition is draining.
     if runtime is not None and runtime.transitioning:
+        if expected_profile_id is not None:
+            raise _PendingProfileMismatchError(
+                "pending materialization deferred during profile transition"
+            )
         return None
-    with runtime.operation():
+    with runtime.operation() as snapshot:
+        if (
+            expected_profile_id is not None
+            and snapshot.profile_id != expected_profile_id
+        ):
+            raise _PendingProfileMismatchError(
+                "pending profile changed before materializer admission"
+            )
         # Resolve the engine only after admission. A concurrent mode/provider
         # reconfiguration may have replaced the module-level engine while this
         # worker was waiting at the transition barrier.
         engine = engine_supplier()
         if engine is None:
             return None
-        return operation(engine)
+        engine_profile_id = getattr(engine, "_profile_id", None)
+        if (
+            expected_profile_id is not None
+            and engine_profile_id != expected_profile_id
+        ):
+            raise _PendingProfileMismatchError(
+                "resident engine does not match pending profile"
+            )
+        from superlocalmemory.core.recall_gate import background_work
+        with background_work():
+            return operation(engine)
 
 
 def _materialize_ingestion_one_pass(
@@ -4020,6 +4076,19 @@ def _materialize_ingestion_one_pass(
     # work so an active user recall cannot suffer priority inversion.
     if _recalls_in_flight() > 0:
         return 0, 0
+
+    # A local sentence-transformers cold start can take minutes.  Remember's
+    # queryable projection is already durable, so defer enrichment until the
+    # daemon warmup/health monitor has proved the worker ready.  This preserves
+    # every enrichment layer while preventing a background cold load from
+    # monopolizing the same worker needed by foreground recall.
+    embedder = getattr(engine, "_embedder", None)
+    if embedder is not None and hasattr(embedder, "is_warm"):
+        try:
+            if not bool(embedder.is_warm):
+                return 0, 0
+        except Exception:
+            return 0, 0
 
     from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
     from superlocalmemory.core.ingestion_command import IngestionState
@@ -4081,6 +4150,12 @@ def _materialize_legacy_pending_item(engine, item: dict) -> str:
         IngestionState,
     )
 
+    expected_profile_id = str(item.get("profile_id") or "default")
+    if getattr(engine, "_profile_id", None) != expected_profile_id:
+        raise _PendingProfileMismatchError(
+            "legacy pending item does not match resident engine profile"
+        )
+
     metadata_value = item.get("metadata") or "{}"
     try:
         metadata = (
@@ -4101,7 +4176,7 @@ def _materialize_legacy_pending_item(engine, item: dict) -> str:
     command = build_engine_ingestion_command(engine)
     receipt = command.submit(IngestionRequest(
         content=item["content"],
-        profile_id=engine._profile_id,
+        profile_id=expected_profile_id,
         source_type=source_type,
         idempotency_key=idempotency_key,
         metadata=metadata,
@@ -4185,12 +4260,16 @@ def _start_pending_materializer() -> None:
                         time.sleep(0.5)
                         waits += 1
                     try:
+                        pending_profile_id = str(
+                            item.get("profile_id") or "default"
+                        )
                         operation_id = _run_materializer_operation(
                             runtime,
                             lambda: _ud._engine,
                             lambda admitted_engine: _materialize_legacy_pending_item(
                                 admitted_engine, item,
                             ),
+                            expected_profile_id=pending_profile_id,
                         )
                         if operation_id is None:
                             raise RuntimeError("resident engine became unavailable")
@@ -4204,6 +4283,15 @@ def _start_pending_materializer() -> None:
                                 "content_preview": item["content"][:120],
                             },
                             source_agent="materializer",
+                        )
+                    except _PendingProfileMismatchError:
+                        # A profile transition committed after this row was
+                        # fetched but before it obtained an operation lease.
+                        # Leave it pending, without consuming a retry, so the
+                        # owning profile can safely drain it later.
+                        logger.debug(
+                            "Pending %d deferred after profile switch",
+                            item["id"],
                         )
                     except Exception as exc:
                         logger.warning(

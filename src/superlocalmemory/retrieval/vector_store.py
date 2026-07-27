@@ -17,9 +17,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Generator
 
 import numpy as np
 
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)  # Rule 10
 class VectorStoreConfig:
     """Configuration for VectorStore."""
+
     dimension: int = 768
     binary_quantization_threshold: int = 100_000  # L4 fix
     model_name: str = "nomic-embed-text-v1.5"
@@ -78,6 +80,7 @@ class VectorStore:
         """
         try:
             import sqlite_vec  # noqa: F401
+
             conn = self._connect()
             conn.close()
             return True
@@ -112,6 +115,26 @@ class VectorStore:
         conn.enable_load_extension(False)
         return conn
 
+    @contextmanager
+    def _managed_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Close every sqlite-vec connection, rolling back abandoned writes.
+
+        sqlite-vec can reject a commit after its virtual-table shadow rows have
+        already opened a SQLite write transaction.  A fail-soft caller must not
+        return while that connection still owns the WAL writer lock: the next
+        canonical/BM25 write would then wait behind an unreachable transaction.
+        """
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            if conn.in_transaction:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+            conn.close()
+
     # -- Table creation -----------------------------------------------------
 
     def _ensure_vec0_table(self) -> None:
@@ -134,21 +157,18 @@ class VectorStore:
             ")"
         )
         meta_idx_fact = (
-            "CREATE INDEX IF NOT EXISTS idx_embmeta_fact "
-            "ON embedding_metadata (fact_id)"
+            "CREATE INDEX IF NOT EXISTS idx_embmeta_fact ON embedding_metadata (fact_id)"
         )
         meta_idx_profile = (
-            "CREATE INDEX IF NOT EXISTS idx_embmeta_profile "
-            "ON embedding_metadata (profile_id)"
+            "CREATE INDEX IF NOT EXISTS idx_embmeta_profile ON embedding_metadata (profile_id)"
         )
         try:
-            conn = self._connect()
-            conn.execute(vec0_ddl)
-            conn.execute(meta_ddl)
-            conn.execute(meta_idx_fact)
-            conn.execute(meta_idx_profile)
-            conn.commit()
-            conn.close()
+            with self._managed_connection() as conn:
+                conn.execute(vec0_ddl)
+                conn.execute(meta_ddl)
+                conn.execute(meta_idx_fact)
+                conn.execute(meta_idx_profile)
+                conn.commit()
         except Exception as exc:
             logger.debug("vec0 table creation failed: %s", exc)
             self._available = False
@@ -180,7 +200,8 @@ class VectorStore:
         if len(embedding) != self._config.dimension:
             logger.debug(
                 "Dimension mismatch: got %d, expected %d",
-                len(embedding), self._config.dimension,
+                len(embedding),
+                self._config.dimension,
             )
             return False
 
@@ -196,46 +217,91 @@ class VectorStore:
         #   with db._lock: vs.upsert()
         # simply re-enters the RLock (same thread — always safe).
         _wl = get_write_lock(self._db_path)
-        with _wl:            # OUTER: serialises all memory.db writers
+        with _wl:  # OUTER: serialises all memory.db writers
             with self._lock:  # INNER: VectorStore per-instance state
                 try:
-                    conn = self._connect()
-                    # Check if fact_id already exists in metadata
-                    row = conn.execute(
-                        "SELECT vec_rowid FROM embedding_metadata "
-                        "WHERE fact_id = ?",
-                        (fact_id,),
-                    ).fetchone()
+                    with self._managed_connection() as conn:
+                        # Reserve SQLite's cross-process writer before reading
+                        # either side of the row-id allocator.  The Python
+                        # RLocks above coordinate threads only; BEGIN IMMEDIATE
+                        # plus the connection's bounded busy_timeout serializes
+                        # independent MCP/agent processes as well.
+                        conn.execute("BEGIN IMMEDIATE")
+                        # Check if fact_id already exists in metadata
+                        row = conn.execute(
+                            "SELECT vec_rowid, profile_id "
+                            "FROM embedding_metadata "
+                            "WHERE fact_id = ?",
+                            (fact_id,),
+                        ).fetchone()
 
-                    if row is not None:
-                        # UPDATE existing
-                        rowid = row["vec_rowid"]
-                        conn.execute(
-                            "UPDATE fact_embeddings SET embedding = ? "
-                            "WHERE rowid = ?",
-                            (vec_bytes, rowid),
-                        )
-                    else:
-                        # INSERT new
-                        conn.execute(
-                            "INSERT INTO fact_embeddings(profile_id, embedding) "
-                            "VALUES (?, ?)",
-                            (profile_id, vec_bytes),
-                        )
-                        rowid = conn.execute(
-                            "SELECT last_insert_rowid()"
-                        ).fetchone()[0]
-                        conn.execute(
-                            "INSERT INTO embedding_metadata "
-                            "(vec_rowid, fact_id, profile_id, model_name, dimension) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (rowid, fact_id, profile_id,
-                             model_name or self._config.model_name,
-                             self._config.dimension),
-                        )
+                        if row is not None:
+                            rowid = row["vec_rowid"]
+                            vector_row = conn.execute(
+                                "SELECT profile_id FROM fact_embeddings WHERE rowid = ?",
+                                (rowid,),
+                            ).fetchone()
+                            pair_matches_profile = (
+                                vector_row is not None
+                                and str(row["profile_id"]) == profile_id
+                                and str(vector_row["profile_id"]) == profile_id
+                            )
+                            if pair_matches_profile:
+                                conn.execute(
+                                    "UPDATE fact_embeddings SET embedding = ? WHERE rowid = ?",
+                                    (vec_bytes, rowid),
+                                )
+                            else:
+                                # Older self-heal code could insert metadata
+                                # before sqlite-vec, or row-id drift could point
+                                # metadata at another profile's vector.  Neither
+                                # is a valid projection pair.  Remove only the
+                                # stale pointer and rebuild at a fresh rowid;
+                                # never overwrite the other profile's payload.
+                                conn.execute(
+                                    "DELETE FROM embedding_metadata WHERE fact_id = ?",
+                                    (fact_id,),
+                                )
+                                row = None
 
-                    conn.commit()
-                    conn.close()
+                        if row is None:
+                            # Allocate from both sides of the projection pair.
+                            # Mature databases can contain orphaned vec0 rows
+                            # or metadata rows after older fail-soft releases.
+                            # sqlite-vec's implicit last_insert_rowid() only
+                            # considers the virtual table, so it can reuse a
+                            # rowid that is still owned by embedding_metadata
+                            # and make every later projection fail UNIQUE.
+                            rowid = conn.execute(
+                                "SELECT COALESCE(MAX(candidate), 0) + 1 "
+                                "FROM ("
+                                "SELECT MAX(rowid) AS candidate "
+                                "FROM fact_embeddings "
+                                "UNION ALL "
+                                "SELECT MAX(vec_rowid) AS candidate "
+                                "FROM embedding_metadata"
+                                ")"
+                            ).fetchone()[0]
+                            conn.execute(
+                                "INSERT INTO fact_embeddings"
+                                "(rowid, profile_id, embedding) "
+                                "VALUES (?, ?, ?)",
+                                (rowid, profile_id, vec_bytes),
+                            )
+                            conn.execute(
+                                "INSERT INTO embedding_metadata "
+                                "(vec_rowid, fact_id, profile_id, model_name, dimension) "
+                                "VALUES (?, ?, ?, ?, ?)",
+                                (
+                                    rowid,
+                                    fact_id,
+                                    profile_id,
+                                    model_name or self._config.model_name,
+                                    self._config.dimension,
+                                ),
+                            )
+
+                        conn.commit()
                     return True
                 except Exception as exc:
                     logger.debug("upsert failed for fact_id=%s: %s", fact_id, exc)
@@ -261,48 +327,64 @@ class VectorStore:
         vec_bytes = self._serialize_f32(query_embedding)
 
         try:
-            conn = self._connect()
+            with self._managed_connection() as conn:
+                if top_k <= 0:
+                    return []
+                if profile_id is not None:
+                    sql = (
+                        "SELECT fe.rowid, fe.distance, em.fact_id "
+                        "FROM fact_embeddings AS fe "
+                        "JOIN embedding_metadata AS em "
+                        "ON em.vec_rowid = fe.rowid "
+                        "AND em.profile_id = fe.profile_id "
+                        "WHERE fe.embedding MATCH ? "
+                        "AND fe.profile_id = ? "
+                        "AND fe.k = ?"
+                    )
+                    base_params: tuple[object, ...] = (vec_bytes, profile_id)
+                    count_sql = "SELECT COUNT(*) AS c FROM fact_embeddings WHERE profile_id = ?"
+                    count_params: tuple[object, ...] = (profile_id,)
+                else:
+                    sql = (
+                        "SELECT fe.rowid, fe.distance, em.fact_id "
+                        "FROM fact_embeddings AS fe "
+                        "JOIN embedding_metadata AS em "
+                        "ON em.vec_rowid = fe.rowid "
+                        "AND em.profile_id = fe.profile_id "
+                        "WHERE fe.embedding MATCH ? "
+                        "AND fe.k = ?"
+                    )
+                    base_params = (vec_bytes,)
+                    count_sql = "SELECT COUNT(*) AS c FROM fact_embeddings"
+                    count_params = ()
 
-            if profile_id is not None:
+                # vec0 applies k before the relational join.  A legacy orphan
+                # can therefore occupy a nearest-neighbour slot and then be
+                # discarded by the profile-safe join. Expand only when that
+                # happens, doubling until top_k valid pairs are found or the
+                # profile's vector population is exhausted.
+                search_k = top_k
                 rows = conn.execute(
-                    "SELECT rowid, distance "
-                    "FROM fact_embeddings "
-                    "WHERE embedding MATCH ? "
-                    "AND profile_id = ? "
-                    "AND k = ?",
-                    (vec_bytes, profile_id, top_k),
+                    sql,
+                    (*base_params, search_k),
                 ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT rowid, distance "
-                    "FROM fact_embeddings "
-                    "WHERE embedding MATCH ? "
-                    "AND k = ?",
-                    (vec_bytes, top_k),
-                ).fetchall()
-
-            if not rows:
-                conn.close()
-                return []
-
-            # Map rowids -> fact_ids via embedding_metadata
-            rowids = [r["rowid"] for r in rows]
-            dist_map = {r["rowid"]: r["distance"] for r in rows}
-
-            placeholders = ",".join("?" for _ in rowids)
-            meta_rows = conn.execute(
-                f"SELECT vec_rowid, fact_id FROM embedding_metadata "
-                f"WHERE vec_rowid IN ({placeholders})",
-                rowids,
-            ).fetchall()
-
-            conn.close()
+                if len(rows) < top_k:
+                    count_row = conn.execute(
+                        count_sql,
+                        count_params,
+                    ).fetchone()
+                    total_vectors = int(count_row["c"]) if count_row else 0
+                    while len(rows) < top_k and search_k < total_vectors:
+                        search_k = min(total_vectors, max(search_k + 1, search_k * 2))
+                        rows = conn.execute(
+                            sql,
+                            (*base_params, search_k),
+                        ).fetchall()
 
             results: list[tuple[str, float]] = []
-            for mr in meta_rows:
-                rid = mr["vec_rowid"]
-                fid = str(mr["fact_id"])
-                similarity = max(0.0, 1.0 - dist_map[rid])
+            for row in rows[:top_k]:
+                fid = str(row["fact_id"])
+                similarity = max(0.0, 1.0 - row["distance"])
                 results.append((fid, similarity))
 
             results.sort(key=lambda x: x[1], reverse=True)
@@ -322,38 +404,44 @@ class VectorStore:
             return False
 
         _wl = get_write_lock(self._db_path)
-        with _wl:            # OUTER: process-level write serialisation
+        with _wl:  # OUTER: process-level write serialisation
             with self._lock:  # INNER: VectorStore per-instance state
                 try:
-                    conn = self._connect()
-                    row = conn.execute(
-                        "SELECT vec_rowid FROM embedding_metadata "
-                        "WHERE fact_id = ?",
-                        (fact_id,),
-                    ).fetchone()
+                    with self._managed_connection() as conn:
+                        row = conn.execute(
+                            "SELECT vec_rowid, profile_id "
+                            "FROM embedding_metadata "
+                            "WHERE fact_id = ?",
+                            (fact_id,),
+                        ).fetchone()
 
-                    if row is None:
-                        conn.close()
-                        return False
+                        if row is None:
+                            return False
 
-                    rowid = row["vec_rowid"]
-                    conn.execute(
-                        "DELETE FROM fact_embeddings WHERE rowid = ?",
-                        (rowid,),
-                    )
-                    conn.execute(
-                        "DELETE FROM embedding_metadata WHERE vec_rowid = ?",
-                        (rowid,),
-                    )
-                    conn.commit()
-                    conn.close()
+                        rowid = row["vec_rowid"]
+                        vector_row = conn.execute(
+                            "SELECT profile_id FROM fact_embeddings WHERE rowid = ?",
+                            (rowid,),
+                        ).fetchone()
+                        if vector_row is not None and str(vector_row["profile_id"]) == str(
+                            row["profile_id"]
+                        ):
+                            conn.execute(
+                                "DELETE FROM fact_embeddings WHERE rowid = ?",
+                                (rowid,),
+                            )
+                        conn.execute(
+                            "DELETE FROM embedding_metadata WHERE vec_rowid = ?",
+                            (rowid,),
+                        )
+                        conn.commit()
                     return True
                 except Exception as exc:
                     logger.debug("delete failed for fact_id=%s: %s", fact_id, exc)
                     return False
 
     def count(self, profile_id: str | None = None) -> int:
-        """Count vectors in the store.
+        """Count complete metadata/vector pairs in the store.
 
         Returns 0 if unavailable.
         """
@@ -361,22 +449,49 @@ class VectorStore:
             return 0
 
         try:
-            conn = self._connect()
-            if profile_id is not None:
-                row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM embedding_metadata "
-                    "WHERE profile_id = ?",
-                    (profile_id,),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM embedding_metadata",
-                ).fetchone()
-            conn.close()
+            with self._managed_connection() as conn:
+                if profile_id is not None:
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS c "
+                        "FROM embedding_metadata em "
+                        "JOIN fact_embeddings fe "
+                        "ON fe.rowid = em.vec_rowid "
+                        "AND fe.profile_id = em.profile_id "
+                        "WHERE em.profile_id = ?",
+                        (profile_id,),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS c "
+                        "FROM embedding_metadata em "
+                        "JOIN fact_embeddings fe "
+                        "ON fe.rowid = em.vec_rowid "
+                        "AND fe.profile_id = em.profile_id",
+                    ).fetchone()
             return int(row["c"]) if row else 0
         except Exception as exc:
             logger.debug("count failed: %s", exc)
             return 0
+
+    def indexed_fact_ids(self, profile_id: str) -> set[str]:
+        """Return fact IDs backed by both metadata and a vec0 payload."""
+        if not self._available:
+            return set()
+        try:
+            with self._managed_connection() as conn:
+                rows = conn.execute(
+                    "SELECT em.fact_id "
+                    "FROM embedding_metadata em "
+                    "JOIN fact_embeddings fe "
+                    "ON fe.rowid = em.vec_rowid "
+                    "AND fe.profile_id = em.profile_id "
+                    "WHERE em.profile_id = ?",
+                    (profile_id,),
+                ).fetchall()
+            return {str(row["fact_id"]) for row in rows}
+        except Exception as exc:
+            logger.debug("indexed_fact_ids failed: %s", exc)
+            return set()
 
     def rebuild_from_facts(
         self,

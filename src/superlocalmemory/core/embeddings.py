@@ -220,6 +220,7 @@ class EmbeddingService:
         self._owns_worker_lock = False
         self._request_count: int = 0
         self._http_client: object | None = None
+        self._remote_ready = False
 
         # Register for atexit cleanup (prevent orphaned workers)
         ref = weakref.ref(self, _live_embedding_services.discard)
@@ -245,6 +246,31 @@ class EmbeddingService:
         if self._config.is_cloud:
             return bool(self._config.api_endpoint and self._config.api_key)
         return self._available
+
+    @property
+    def is_warm(self) -> bool:
+        """Return whether the configured backend has served a request.
+
+        ``is_available`` only means that the backend may be started.  A local
+        sentence-transformers cold start can take minutes on Apple Silicon, so
+        background enrichment must not mistake availability for readiness and
+        occupy the only worker ahead of an interactive recall.
+        """
+        config = getattr(self, "_config", None)
+        if config is not None and (
+            config.is_openai_compatible or config.is_cloud
+        ):
+            return bool(
+                getattr(self, "_remote_ready", False)
+                and self.is_available
+            )
+        proc = getattr(self, "_worker_proc", None)
+        if proc is None or getattr(self, "_request_count", 0) <= 0:
+            return False
+        try:
+            return proc.poll() is None
+        except Exception:
+            return False
 
     @property
     def dimension(self) -> int:
@@ -291,13 +317,27 @@ class EmbeddingService:
         """Embed a single text string. Returns list of floats or None."""
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
+        from superlocalmemory.core.recall_gate import wait_for_foreground_idle
+        wait_for_foreground_idle()
         if self._config.is_openai_compatible:
-            vecs = self._openai_compatible_embed_batch([text])
-            vec = vecs[0]
-            self._validate_dimension(np.asarray(vec))
-            return vec
+            try:
+                vecs = self._openai_compatible_embed_batch([text])
+                vec = vecs[0]
+                self._validate_dimension(np.asarray(vec))
+                self._remote_ready = True
+                return vec
+            except Exception:
+                self._remote_ready = False
+                raise
         if self._config.is_cloud:
-            return self._cloud_embed_single(text)
+            try:
+                vec = self._cloud_embed_single(text)
+                self._validate_dimension(np.asarray(vec))
+                self._remote_ready = True
+                return vec
+            except Exception:
+                self._remote_ready = False
+                raise
         result = self._subprocess_embed([text])
         if result is None:
             return None
@@ -309,14 +349,34 @@ class EmbeddingService:
         """Embed a batch of texts."""
         if not texts:
             raise ValueError("Cannot embed empty batch")
+        from superlocalmemory.core.recall_gate import is_background_work
+        if is_background_work():
+            # A single large background batch can own the only local inference
+            # worker for tens of seconds. Slice it so a recall arriving after
+            # this call started gets priority before the next text.
+            return [self.embed(text) for text in texts]
         if self._config.is_openai_compatible:
-            results = self._openai_compatible_embed_batch(texts)
-            for vec in results:
-                if vec is not None:
-                    self._validate_dimension(np.asarray(vec))
-            return results
+            try:
+                results = self._openai_compatible_embed_batch(texts)
+                for vec in results:
+                    if vec is not None:
+                        self._validate_dimension(np.asarray(vec))
+                self._remote_ready = any(vec is not None for vec in results)
+                return results
+            except Exception:
+                self._remote_ready = False
+                raise
         if self._config.is_cloud:
-            return self._cloud_embed_batch(texts)
+            try:
+                results = self._cloud_embed_batch(texts)
+                for vec in results:
+                    if vec is not None:
+                        self._validate_dimension(np.asarray(vec))
+                self._remote_ready = any(vec is not None for vec in results)
+                return results
+            except Exception:
+                self._remote_ready = False
+                raise
         result = self._subprocess_embed(texts)
         if result is None:
             return [None] * len(texts)
@@ -353,6 +413,8 @@ class EmbeddingService:
         Includes a timeout (_SUBPROCESS_RESPONSE_TIMEOUT seconds) so the CLI
         never hangs indefinitely on cold model loads or network issues.
         """
+        from superlocalmemory.core.recall_gate import wait_for_foreground_idle
+        wait_for_foreground_idle()
         with self._lock:
             # Only an explicit terminal disable (``False``) short-circuits. A
             # ``None`` availability is the recall-health self-heal's "re-probe"

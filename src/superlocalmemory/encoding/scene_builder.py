@@ -38,6 +38,8 @@ class SceneBuilder:
     def __init__(self, db, embedder=None) -> None:
         self._db = db
         self._embedder = embedder
+        # Key by scene ID, never theme. Themes are deliberately non-unique,
+        # while eligibility and durable anchor membership are scene-specific.
         self._scene_embeddings_cache: dict[str, list[float]] = {}
 
     def assign_to_scene(
@@ -53,8 +55,12 @@ class SceneBuilder:
         if self._embedder is None:
             return self._create_scene(new_fact, profile_id)
 
-        # Always compute fact embedding first — needed for comparisons
-        fact_emb = self._embedder.embed(new_fact.content)
+        # Canonical ingestion already embeds the fact before scene assignment.
+        # Reuse that vector so scene clustering does not issue a duplicate model
+        # request for every remembered fact.
+        fact_emb = new_fact.embedding
+        if fact_emb is None:
+            fact_emb = self._embedder.embed(new_fact.content)
 
         # v3.4.38: Defensive None guard. embedder.embed() returns None when
         # the embedding worker is unavailable (timeout, crash). Without this
@@ -69,30 +75,58 @@ class SceneBuilder:
         if not scenes:
             return self._create_scene(new_fact, profile_id)
 
+        live_scene_embeddings = self._load_live_scene_embeddings(profile_id)
+        live_scene_ids = set(live_scene_embeddings)
+        self._scene_embeddings_cache.update({
+            scene_id: embedding
+            for scene_id, embedding in live_scene_embeddings.items()
+            if embedding is not None
+        })
+        # Old consolidation/deletion paths left scene rows whose fact IDs no
+        # longer exist. They are not evidence and must not trigger thousands of
+        # replacement model calls after restart. A cache hit cannot prove that
+        # a scene still has a surviving fact, so eligibility is always derived
+        # from the current database state.
+        scenes = [
+            scene for scene in scenes if scene.scene_id in live_scene_ids
+        ]
+        if not scenes:
+            return self._create_scene(new_fact, profile_id)
+
         # Find best matching scene
         best_scene: MemoryScene | None = None
         best_sim = -1.0
 
-        # V3.3.27: Batch-embed all uncached scene themes in ONE call.
+        # A scene's theme is derived from its first (anchor) fact. On daemon
+        # restart the in-memory cache is empty, but the anchor embeddings remain
+        # durable in atomic_facts. Prime from those vectors before calling the
+        # model; otherwise a mature database re-embeds thousands of themes and
+        # repeatedly recycles the shared foreground worker.
+        # V3.3.27: Batch-embed all still-uncached scene themes in ONE call.
         # Previously: 200+ individual embed() calls per fact (30s on Mode B).
         # Now: 1 batch call for all uncached themes, then cache hits for the rest.
-        uncached_themes = [s.theme for s in scenes if s.theme not in self._scene_embeddings_cache]
-        if uncached_themes and hasattr(self._embedder, 'embed_batch'):
+        uncached_scenes = [
+            scene for scene in scenes
+            if scene.scene_id not in self._scene_embeddings_cache
+        ]
+        if uncached_scenes and hasattr(self._embedder, 'embed_batch'):
             try:
-                batch_embs = self._embedder.embed_batch(uncached_themes)
-                for theme, emb in zip(uncached_themes, batch_embs):
+                batch_embs = self._embedder.embed_batch(
+                    [scene.theme for scene in uncached_scenes]
+                )
+                for scene, emb in zip(uncached_scenes, batch_embs):
                     if emb is not None:
-                        self._scene_embeddings_cache[theme] = emb
+                        self._scene_embeddings_cache[scene.scene_id] = emb
             except Exception:
                 pass  # Fall through to individual embeds below
 
         for scene in scenes:
-            if scene.theme in self._scene_embeddings_cache:
-                theme_emb = self._scene_embeddings_cache[scene.theme]
+            if scene.scene_id in self._scene_embeddings_cache:
+                theme_emb = self._scene_embeddings_cache[scene.scene_id]
             else:
                 theme_emb = self._embedder.embed(scene.theme)
                 if theme_emb is not None:
-                    self._scene_embeddings_cache[scene.theme] = theme_emb
+                    self._scene_embeddings_cache[scene.scene_id] = theme_emb
             if theme_emb is None:
                 continue
             sim = _cosine(fact_emb, theme_emb)
@@ -130,10 +164,6 @@ class SceneBuilder:
         comparisons in assign_to_scene.
         """
         theme = fact.content[:200]
-        # Pre-compute theme embedding for future comparisons
-        if self._embedder is not None:
-            self._scene_embeddings_cache[theme] = self._embedder.embed(theme)
-
         scene = MemoryScene(
             profile_id=profile_id,
             theme=theme,
@@ -142,6 +172,14 @@ class SceneBuilder:
             created_at=datetime.now(UTC).isoformat(),
             last_updated=datetime.now(UTC).isoformat(),
         )
+        # Pre-compute theme embedding for future comparisons. The canonical fact
+        # vector represents this exact theme and avoids a duplicate model call.
+        if self._embedder is not None:
+            theme_embedding = fact.embedding
+            if theme_embedding is None:
+                theme_embedding = self._embedder.embed(theme)
+            if theme_embedding is not None:
+                self._scene_embeddings_cache[scene.scene_id] = theme_embedding
         self._save_scene(scene)
         return scene
 
@@ -170,6 +208,58 @@ class SceneBuilder:
             (profile_id,),
         )
         return [self._row_to_scene(dict(r)) for r in rows]
+
+    def _load_live_scene_embeddings(
+        self,
+        profile_id: str,
+    ) -> dict[str, list[float] | None]:
+        """Load one durable anchor embedding for every live scene.
+
+        ``json_each`` resolves the first still-existing fact in each scene, so
+        scenes whose original anchor was consolidated away can still reuse a
+        surviving member. The result also identifies fully stale scene rows,
+        which are ignored by assignment instead of being re-embedded.
+        """
+        try:
+            rows = self._db.execute(
+                """
+                WITH live_scene_facts AS (
+                    SELECT
+                        ms.scene_id,
+                        ms.theme,
+                        af.embedding,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ms.scene_id
+                            ORDER BY CAST(member.key AS INTEGER)
+                        ) AS member_rank
+                    FROM memory_scenes AS ms
+                    JOIN json_each(ms.fact_ids_json) AS member
+                    JOIN atomic_facts AS af
+                      ON af.fact_id = member.value
+                     AND af.profile_id = ms.profile_id
+                    WHERE ms.profile_id = ?
+                )
+                SELECT scene_id, embedding
+                FROM live_scene_facts
+                WHERE member_rank = 1
+                """,
+                (profile_id,),
+            )
+        except Exception:
+            return {}
+
+        result: dict[str, list[float] | None] = {}
+        for row in rows:
+            data = dict(row)
+            raw_embedding = data.get("embedding")
+            embedding = None
+            if raw_embedding:
+                try:
+                    embedding = json.loads(raw_embedding)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    embedding = None
+            result[str(data["scene_id"])] = embedding
+        return result
 
     def _save_scene(self, scene: MemoryScene) -> None:
         """Upsert scene to DB."""

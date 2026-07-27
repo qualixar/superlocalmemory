@@ -100,6 +100,45 @@ def _apply_markers_to_response(response: RecallResponse) -> None:
         r.marker = _emit_marker(r.fact.fact_id)
 
 
+def _preserve_exact_lexical_evidence(
+    response: RecallResponse,
+    query: str,
+) -> None:
+    """Keep a deterministic exact BM25 hit ahead of learned refinements.
+
+    Adaptive and bandit ranking are valuable for ambiguous candidates, but
+    they must not demote a fact containing the caller's exact query behind
+    semantically similar noise. This guard runs after every learned layer and
+    changes only ordering; it does not introduce or bypass evidence.
+    """
+    normalized_query = " ".join(query.casefold().split())
+    if len(normalized_query) < 3 or len(response.results) < 2:
+        return
+    exact = [
+        result
+        for result in response.results
+        if (
+            float((result.channel_scores or {}).get("bm25", 0.0) or 0.0) > 0.0
+            and normalized_query
+            in " ".join(result.fact.content.casefold().split())
+        )
+    ]
+    if not exact:
+        return
+    strongest = max(
+        exact,
+        key=lambda result: float(
+            (result.channel_scores or {}).get("bm25", 0.0) or 0.0,
+        ),
+    )
+    if response.results[0] is strongest:
+        return
+    response.results = [
+        strongest,
+        *(result for result in response.results if result is not strongest),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Stage 8 SB-1 — feed shadow_router from recall-settled signals.
 #
@@ -854,6 +893,7 @@ def run_recall(
     except Exception as exc:
         logger.debug("Ranking pipeline skipped: %s", exc)
 
+    _preserve_exact_lexical_evidence(response, query)
     _mark("learning+ranking")
     # Deliberately no trust, Fisher, retention, lifecycle, popularity, or graph
     # mutation here.  Those state transitions require a separately authenticated

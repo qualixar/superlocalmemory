@@ -5,6 +5,36 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.8] - 2026-07-27 — Live-database recall and vector integrity
+
+### Fixed
+- Foreground recall now retains priority while startup repair and canonical
+  remember enrichment are active. Background embedding work yields between
+  items and cannot cold-start the shared local model ahead of a user query.
+- Daemon readiness now verifies that the local embedding subprocess is
+  actually alive and has served a request instead of trusting a stale startup
+  flag.
+- Scene clustering reuses durable fact embeddings and ignores legacy scene
+  rows whose facts were already consolidated away. Mature databases no longer
+  issue thousands of redundant model requests or repeatedly recycle the
+  embedding worker after restart.
+- sqlite-vec row allocation is serialized across processes, and every metadata
+  pointer is validated against the vector payload's profile. Cross-profile
+  row-id collisions are repaired without exposing another profile's memory.
+- Vector writes roll back abandoned transactions, missing vectors are repaired
+  exactly, and semantic search expands past legacy orphan payloads.
+- Entity-cache startup reads are bounded and load only the columns used by the
+  entity channel.
+- Exact lexical evidence remains protected after learned ranking so a freshly
+  remembered exact marker cannot be displaced by a weaker semantic match.
+
+### Notes
+- Recall remains physically query-only; remember owns durable writes and
+  continues full canonical enrichment asynchronously after immediate queryable
+  admission.
+- This candidate must pass the installed wheel, installed npm tarball,
+  dashboard, MCP, CLI, and mature live-database gates before publication.
+
 ## [3.8.7] - 2026-07-27 — Existing graph-store compatibility
 
 ### Fixed

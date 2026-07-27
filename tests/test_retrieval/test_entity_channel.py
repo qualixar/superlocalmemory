@@ -33,6 +33,7 @@ from superlocalmemory.storage.models import (
 # extract_query_entities
 # ---------------------------------------------------------------------------
 
+
 class TestExtractQueryEntities:
     def test_proper_nouns_extracted(self) -> None:
         result = extract_query_entities("Did Alice meet Bob yesterday?")
@@ -83,13 +84,16 @@ class TestExtractQueryEntities:
 # EntityGraphChannel with mocks
 # ---------------------------------------------------------------------------
 
+
 def _mock_entity(entity_id: str, name: str) -> CanonicalEntity:
     return CanonicalEntity(entity_id=entity_id, canonical_name=name)
 
 
 def _mock_fact(fact_id: str, canonical_entities: list[str] | None = None) -> AtomicFact:
     return AtomicFact(
-        fact_id=fact_id, memory_id="m0", content=f"fact {fact_id}",
+        fact_id=fact_id,
+        memory_id="m0",
+        content=f"fact {fact_id}",
         canonical_entities=canonical_entities or [],
     )
 
@@ -97,21 +101,53 @@ def _mock_fact(fact_id: str, canonical_entities: list[str] | None = None) -> Ato
 def _mock_edge(source: str, target: str) -> GraphEdge:
     return GraphEdge(
         edge_id=f"e_{source}_{target}",
-        source_id=source, target_id=target,
-        edge_type=EdgeType.ENTITY, weight=1.0,
+        source_id=source,
+        target_id=target,
+        edge_type=EdgeType.ENTITY,
+        weight=1.0,
     )
 
 
 def _authorize_all_mock_candidates(db: MagicMock) -> None:
     """Model the canonical scope check for single-profile channel unit tests."""
-    db.get_facts_by_ids.side_effect = (
-        lambda fact_ids, _profile_id, **_kwargs: [
-            _mock_fact(fact_id) for fact_id in fact_ids
-        ]
-    )
+    db.get_facts_by_ids.side_effect = lambda fact_ids, _profile_id, **_kwargs: [
+        _mock_fact(fact_id) for fact_id in fact_ids
+    ]
 
 
 class TestEntityGraphChannelSearch:
+    def test_entity_map_reload_reads_only_required_columns(
+        self,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setenv("SLM_MAX_FACTS_UNBOUNDED", "123")
+        db = MagicMock()
+        db.execute.return_value = [
+            {
+                "fact_id": "f1",
+                "canonical_entities_json": json.dumps(["e_alice", "e_bob"]),
+            },
+            {
+                "fact_id": "f2",
+                "canonical_entities_json": "[]",
+            },
+        ]
+        channel = EntityGraphChannel(db)
+
+        channel._load_entity_maps("default")
+
+        sql = db.execute.call_args.args[0]
+        assert sql.startswith(
+            "SELECT fact_id, canonical_entities_json FROM atomic_facts",
+        )
+        assert "ORDER BY created_at DESC LIMIT ?" in sql
+        assert db.execute.call_args.args[1][-1] == 123
+        assert "embedding" not in sql
+        db.get_all_facts.assert_not_called()
+        assert channel._visible_fact_ids == {"f1", "f2"}
+        assert channel._entity_to_facts["e_alice"] == ["f1"]
+        assert channel._fact_to_entities["f1"] == ["e_alice", "e_bob"]
+
     def test_no_entities_returns_empty(self) -> None:
         db = MagicMock()
         ch = EntityGraphChannel(db)
@@ -218,8 +254,10 @@ class TestEntityGraphChannelSearch:
         _authorize_all_mock_candidates(db)
         db.get_entity_by_name.return_value = _mock_entity("e_alice", "Alice")
         db.get_facts_by_entity.side_effect = lambda eid, pid, **kwargs: (
-            [_mock_fact("f1", ["e_alice"])] if eid == "e_alice"
-            else [_mock_fact("f3", ["e_bob"])] if eid == "e_bob"
+            [_mock_fact("f1", ["e_alice"])]
+            if eid == "e_alice"
+            else [_mock_fact("f3", ["e_bob"])]
+            if eid == "e_bob"
             else []
         )
         db.get_edges_for_node.return_value = []

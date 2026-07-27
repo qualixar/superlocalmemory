@@ -24,7 +24,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -45,6 +45,7 @@ from superlocalmemory.core.store_pipeline import (
 from superlocalmemory.server.unified_daemon import (
     _materialize_ingestion_one_pass,
     _materialize_legacy_pending_item,
+    _PendingProfileMismatchError,
     _run_materializer_operation,
 )
 from superlocalmemory.storage.migrations import (
@@ -1005,6 +1006,59 @@ def test_materializer_operation_drains_before_profile_switch() -> None:
     assert runtime.snapshot.profile_id == "beta"
 
 
+def test_legacy_pending_admission_rejects_profile_changed_after_fetch() -> None:
+    """A queued A item must stay queued if admission occurs after switch to B."""
+    from superlocalmemory.server.profile_runtime import ProfileRuntime
+
+    runtime = ProfileRuntime("profile-a")
+    engine = SimpleNamespace(_profile_id="profile-b")
+    operation = MagicMock()
+    runtime.transition("profile-b", lambda previous, target: None)
+
+    with pytest.raises(_PendingProfileMismatchError):
+        _run_materializer_operation(
+            runtime,
+            lambda: engine,
+            operation,
+            expected_profile_id="profile-a",
+        )
+
+    operation.assert_not_called()
+
+
+def test_legacy_pending_preemption_during_switch_uses_deferred_error() -> None:
+    """An in-progress switch must defer a retained row without retry damage."""
+    from superlocalmemory.server.profile_runtime import ProfileRuntime
+
+    runtime = ProfileRuntime("profile-a")
+    transition_entered = threading.Event()
+    release_transition = threading.Event()
+
+    def commit(previous, target) -> None:
+        transition_entered.set()
+        assert release_transition.wait(2)
+
+    switch = threading.Thread(
+        target=runtime.transition,
+        args=("profile-b", commit),
+    )
+    switch.start()
+    assert transition_entered.wait(2)
+    try:
+        with pytest.raises(_PendingProfileMismatchError):
+            _run_materializer_operation(
+                runtime,
+                lambda: SimpleNamespace(_profile_id="profile-a"),
+                MagicMock(),
+                expected_profile_id="profile-a",
+            )
+    finally:
+        release_transition.set()
+        switch.join(2)
+
+    assert not switch.is_alive()
+
+
 def test_bm25_only_runtime_does_not_require_unconfigured_vector_projectors(
     engine_with_mock_deps,
 ) -> None:
@@ -1085,6 +1139,20 @@ def test_background_one_pass_yields_before_claiming_during_recall() -> None:
     build_command.assert_not_called()
 
 
+def test_background_one_pass_does_not_cold_start_local_embedding_worker() -> None:
+    """A cold model load must never occupy the foreground recall worker."""
+    cold_embedder = SimpleNamespace(is_warm=False)
+    engine = SimpleNamespace(_embedder=cold_embedder)
+
+    with patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+    ) as build_command:
+        completed, failed = _materialize_ingestion_one_pass(engine)
+
+    assert (completed, failed) == (0, 0)
+    build_command.assert_not_called()
+
+
 def test_legacy_pending_row_backfills_through_canonical_operation(
     engine_with_mock_deps,
 ) -> None:
@@ -1112,6 +1180,24 @@ def test_legacy_pending_row_backfills_through_canonical_operation(
     assert operation.idempotency_key == "mcp:stable-key"
     assert operation.scope == "shared"
     assert operation.shared_with == ("reviewer",)
+
+
+def test_legacy_pending_item_rejects_engine_from_another_profile() -> None:
+    engine = SimpleNamespace(_profile_id="profile-b")
+    item = {
+        "id": 78,
+        "profile_id": "profile-a",
+        "content": "Profile A private memory",
+        "tags": "",
+        "metadata": "{}",
+    }
+
+    with patch(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command"
+    ) as build_command, pytest.raises(_PendingProfileMismatchError):
+        _materialize_legacy_pending_item(engine, item)
+
+    build_command.assert_not_called()
 
 
 def test_engine_startup_pending_replay_uses_canonical_operation(
