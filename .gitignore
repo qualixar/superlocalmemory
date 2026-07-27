@@ -219,3 +219,4 @@ SLM_3.6.15_DRAFTS.md
 
 # Working scratchpad — internal build/audit notes, screenshots (never ship)
 scratchpad/
+.playwright-cli/

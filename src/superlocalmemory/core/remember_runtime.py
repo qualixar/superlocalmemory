@@ -41,6 +41,7 @@ from superlocalmemory.storage.admission_journal import (
     Actor,
     AdmissionEntry,
     AdmissionJournal,
+    AdmissionJournalUnavailable,
     AdmissionPayloadError,
     RememberRequest,
     TerminalAdmissionError,
@@ -257,7 +258,11 @@ class CanonicalRememberRuntime:
             raise ValueError("deadline_ms must be between 1 and 2000")
         try:
             return self._service.remember(request, actor, deadline_ms=deadline_ms)
-        except (OwnershipRequiredError, WriteCoordinatorError) as exc:
+        except (
+            AdmissionJournalUnavailable,
+            OwnershipRequiredError,
+            WriteCoordinatorError,
+        ) as exc:
             raise CanonicalRememberUnavailable(
                 "canonical remember is temporarily unavailable"
             ) from exc

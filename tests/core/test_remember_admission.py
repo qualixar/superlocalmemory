@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import pytest
@@ -17,6 +18,7 @@ from superlocalmemory.core.remember_admission import (
 from superlocalmemory.storage.admission_journal import (
     Actor,
     AdmissionJournal,
+    AdmissionJournalUnavailable,
     RememberRequest,
     TerminalAdmissionError,
 )
@@ -35,16 +37,18 @@ class _Coordinator:
     def __init__(self, result: dict[str, object]) -> None:
         self.result = result
         self.commands: list[RememberAdmissionCommand] = []
+        self.wait_ms: list[int] = []
 
     def submit(self, command: RememberAdmissionCommand, *, wait_ms: int) -> dict[str, object]:
-        assert wait_ms == 250
+        assert 0 < wait_ms <= 250
         self.commands.append(command)
+        self.wait_ms.append(wait_ms)
         return self.result
 
 
 class _TerminalCoordinator:
     def submit(self, _command, *, wait_ms: int):
-        assert wait_ms == 250
+        assert 0 < wait_ms <= 250
         raise TerminalAdmissionError("DETERMINISTIC_POLICY_REJECTED")
 
 
@@ -87,6 +91,59 @@ def test_remember_prepares_before_dispatch_and_duplicate_returns_original_receip
     assert len(coordinator.commands) == 1
     assert coordinator.commands[0].request.content == _request().content
     assert journal.get(coordinator.commands[0].journal_id).state == "committed"
+
+
+def test_coordinator_receives_only_the_remaining_end_to_end_budget(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    journal = AdmissionJournal(tmp_path / "admission_journal.db", codec=_TestCodec())
+    coordinator = _Coordinator(
+        {
+            "state": "committed",
+            "receipt": {
+                "operation_id": "op-budget",
+                "fact_ids": ["fact-budget"],
+                "state": "queryable",
+                "commit_sequence": 1,
+            },
+        }
+    )
+    original_prepare = journal.prepare
+
+    def delayed_prepare(*args, **kwargs):
+        time.sleep(0.05)
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(journal, "prepare", delayed_prepare)
+    RememberService(journal, coordinator).remember(
+        _request(),
+        _actor(),
+        deadline_ms=250,
+    )
+
+    assert len(coordinator.wait_ms) == 1
+    assert 0 < coordinator.wait_ms[0] < 225
+
+
+def test_slow_codec_cannot_rebase_deadline_and_persist_after_expiry(tmp_path) -> None:
+    class SlowCodec(_TestCodec):
+        def encrypt(self, plaintext: bytes) -> bytes:
+            time.sleep(0.06)
+            return super().encrypt(plaintext)
+
+    journal = AdmissionJournal(tmp_path / "admission_journal.db", codec=SlowCodec())
+    coordinator = _Coordinator({"state": "committed", "receipt": {}})
+
+    with pytest.raises(AdmissionJournalUnavailable, match="deadline"):
+        RememberService(journal, coordinator).remember(
+            _request(),
+            _actor(),
+            deadline_ms=50,
+        )
+
+    assert journal.count() == 0
+    assert coordinator.commands == []
 
 
 def test_rejected_dispatch_leaves_durable_rejected_record_for_diagnosis(tmp_path) -> None:

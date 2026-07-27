@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import math
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -12,6 +14,7 @@ from typing import Any, Protocol
 from superlocalmemory.storage.admission_journal import (
     Actor,
     AdmissionJournal,
+    AdmissionJournalUnavailable,
     PreparedAdmission,
     RememberRequest,
     TerminalAdmissionError,
@@ -77,35 +80,58 @@ class RememberService:
     ) -> RememberReceipt:
         if deadline_ms <= 0:
             raise ValueError("deadline_ms must be greater than zero")
-        prepared = self._journal.prepare(request, actor)
+        deadline = time.monotonic() + deadline_ms / 1_000
+        prepared = self._journal.prepare(
+            request,
+            actor,
+            deadline=deadline,
+        )
         if prepared.original_receipt is not None:
             return RememberReceipt.from_mapping(prepared.original_receipt)
         if prepared.state == "rejected":
             raise AdmissionRejected(prepared.error_code or "COMMAND_REJECTED")
 
-        command_request = self._journal.request_for(prepared)
-        dispatched = self._journal.mark_dispatched(prepared.journal_id)
+        command_request = self._journal.request_for(
+            prepared,
+            deadline=deadline,
+        )
+        dispatched = self._journal.mark_dispatched(
+            prepared.journal_id,
+            deadline=deadline,
+        )
         if dispatched.original_receipt is not None:
             return RememberReceipt.from_mapping(dispatched.original_receipt)
         try:
             result = self._coordinator.submit(
                 RememberAdmissionCommand.from_prepared(prepared, command_request),
-                wait_ms=deadline_ms,
+                wait_ms=_remaining_milliseconds(deadline),
             )
         except TerminalAdmissionError as exc:
-            self._journal.mark_rejected(prepared.journal_id, exc.error_code)
+            self._journal.mark_rejected(
+                prepared.journal_id,
+                exc.error_code,
+                deadline=deadline,
+            )
             raise AdmissionRejected(exc.error_code) from exc
         state = _result_value(result, "state")
         receipt = _result_value(result, "receipt") or {}
         if state in {"committed", "duplicate"}:
             if not isinstance(receipt, Mapping):
                 raise AdmissionRejected("COMMAND_REJECTED: canonical result had no receipt")
-            committed = self._journal.mark_committed(prepared.journal_id, receipt)
+            committed = self._journal.mark_committed(
+                prepared.journal_id,
+                receipt,
+                deadline=deadline,
+            )
             return RememberReceipt.from_mapping(committed.original_receipt or receipt)
 
         error_code = str(_result_value(result, "error_code") or "COMMAND_REJECTED")
         if state == "rejected":
-            self._journal.mark_rejected(prepared.journal_id, error_code)
+            self._journal.mark_rejected(
+                prepared.journal_id,
+                error_code,
+                deadline=deadline,
+            )
         raise AdmissionRejected(error_code, retryable=state != "rejected")
 
 
@@ -113,3 +139,14 @@ def _result_value(result: Any, key: str) -> Any:
     if isinstance(result, Mapping):
         return result.get(key)
     return getattr(result, key, None)
+
+
+def _remaining_seconds(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise AdmissionJournalUnavailable("remember admission deadline expired")
+    return remaining
+
+
+def _remaining_milliseconds(deadline: float) -> int:
+    return max(1, math.ceil(_remaining_seconds(deadline) * 1_000))

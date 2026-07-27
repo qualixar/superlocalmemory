@@ -254,7 +254,6 @@ class TestShadowCaptureRecord:
         fake_con = SimpleNamespace(
             FILE_ATTRIBUTE_NORMAL=1,
             FILE_ATTRIBUTE_REPARSE_POINT=2,
-            FILE_FLAG_OPEN_REPARSE_POINT=4,
             FILE_SHARE_DELETE=8,
             FILE_SHARE_READ=16,
             FILE_SHARE_WRITE=32,
@@ -302,7 +301,7 @@ class TestShadowCaptureRecord:
         assert len(create_calls) == 1
         assert create_calls[0][1] == 1536
         assert create_calls[0][4] == 64
-        assert create_calls[0][5] == 5
+        assert create_calls[0][5] == 0x00200001
         assert create_calls[0][3].bInheritHandle is False
         assert len(security_calls) == 1
         handle, object_type, flags, owner, group, dacl, sacl = security_calls[0]

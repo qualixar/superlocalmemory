@@ -70,7 +70,6 @@ import pytest
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -266,11 +265,6 @@ class TestFlipOnFix:
 # unified_daemon.py fix; that fix is best verified by integration tests.
 # ---------------------------------------------------------------------------
 
-_BYPASS_HOLD_S: float = 0.50          # bypass holds SQLite write lock for 500 ms
-_STARVATION_THRESHOLD_S: float = 0.35  # starvation: user waits > 350 ms
-_FAST_THRESHOLD_S: float = 0.60        # routed: user waits <= bypass_hold + margin
-
-
 @pytest.fixture()
 def fast_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DatabaseManager:
     """DatabaseManager with reduced retry timeouts so bypass tests finish fast."""
@@ -290,7 +284,7 @@ def _run_bypass_scenario(
     db: DatabaseManager,
     *,
     bypass_routed: bool,
-) -> float:
+) -> list[str]:
     """Three-thread scenario: bypass writer + backfill writer + user writer.
 
     Args:
@@ -298,17 +292,51 @@ def _run_bypass_scenario(
                        False = bypass uses independent sqlite3 connection (BUG).
 
     Returns:
-        Seconds for the user write to acquire db._lock and complete.
+        DB operations that entered while the bypass critical section was
+        active.
     """
-    user_wait: list[float] = []
+    user_completed = threading.Event()
     bypass_has_lock = threading.Event()
+    bypass_released = threading.Event()
+    contenders_ready = threading.Event()
+    execute_one_entered = threading.Event()
+    ready_count = 0
+    ready_lock = threading.Lock()
+    entered_during_bypass: list[str] = []
+    synchronization_errors: list[str] = []
+    original_execute_one = db._execute_one
+
+    def observed_execute_one(sql: str, params: tuple[Any, ...]):
+        if bypass_has_lock.is_set() and not bypass_released.is_set():
+            entered_during_bypass.append(sql)
+        # Publish entry only after its witness is durable. Otherwise the
+        # bypass thread can release between Event.set() and list.append().
+        execute_one_entered.set()
+        return original_execute_one(sql, params)
+
+    db._execute_one = observed_execute_one  # type: ignore[method-assign]
+
+    def mark_contender_ready() -> None:
+        nonlocal ready_count
+        with ready_lock:
+            ready_count += 1
+            if ready_count == 2:
+                contenders_ready.set()
 
     def bypass_writer() -> None:
         if bypass_routed:
             # FIX: hold db._lock while performing the write.
             with db._lock:
                 bypass_has_lock.set()
-                time.sleep(_BYPASS_HOLD_S)
+                if not contenders_ready.wait(timeout=3.0):
+                    synchronization_errors.append("routed contenders were not ready")
+                if execute_one_entered.is_set():
+                    synchronization_errors.append(
+                        "routed operation entered before lock release"
+                    )
+                # Set while still holding the process-wide writer lock so no
+                # routed operation can enter between release and observation.
+                bypass_released.set()
         else:
             # BUG: independent connection grabs the SQLite write lock directly,
             # bypassing db._lock entirely.
@@ -316,8 +344,14 @@ def _run_bypass_scenario(
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 bypass_has_lock.set()
-                time.sleep(_BYPASS_HOLD_S)
+                if not contenders_ready.wait(timeout=3.0):
+                    synchronization_errors.append("bypass contenders were not ready")
+                if not execute_one_entered.wait(timeout=3.0):
+                    synchronization_errors.append(
+                        "no DatabaseManager operation entered during bypass"
+                    )
                 conn.rollback()
+                bypass_released.set()
             finally:
                 conn.close()
 
@@ -328,7 +362,10 @@ def _run_bypass_scenario(
         by the bypass connection.  The busy_timeout fires multiple times,
         holding db._lock for the entire retry loop (up to retries * timeout).
         """
-        bypass_has_lock.wait(timeout=3.0)
+        if not bypass_has_lock.wait(timeout=3.0):
+            synchronization_errors.append("backfill did not observe bypass lock")
+            return
+        mark_contender_ready()
         try:
             db.execute(
                 "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",
@@ -338,8 +375,10 @@ def _run_bypass_scenario(
             pass  # SQLITE_BUSY after retries is expected in the bug path
 
     def user_writer() -> None:
-        bypass_has_lock.wait(timeout=3.0)
-        t0 = time.perf_counter()
+        if not bypass_has_lock.wait(timeout=3.0):
+            synchronization_errors.append("user did not observe bypass lock")
+            return
+        mark_contender_ready()
         try:
             db.execute(
                 "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",
@@ -347,21 +386,27 @@ def _run_bypass_scenario(
             )
         except Exception:
             pass
-        user_wait.append(time.perf_counter() - t0)
+        user_completed.set()
 
     threads = [
         threading.Thread(target=bypass_writer, daemon=True),
         threading.Thread(target=backfill_writer, daemon=True),
         threading.Thread(target=user_writer, daemon=True),
     ]
-    for t in threads:
-        t.start()
-    deadline = _BYPASS_HOLD_S + 6.0
-    for t in threads:
-        t.join(timeout=deadline)
+    try:
+        for t in threads:
+            t.start()
+        deadline = 6.0
+        for t in threads:
+            t.join(timeout=deadline)
+        alive = [t.name for t in threads if t.is_alive()]
+        assert alive == [], f"Scenario threads did not terminate: {alive}"
+    finally:
+        db._execute_one = original_execute_one  # type: ignore[method-assign]
 
-    assert user_wait, "User write thread never completed within deadline"
-    return user_wait[0]
+    assert synchronization_errors == []
+    assert user_completed.is_set(), "User write thread never completed within deadline"
+    return entered_during_bypass
 
 
 class TestBypassStarvationMechanism:
@@ -378,27 +423,34 @@ class TestBypassStarvationMechanism:
         Concurrent backfill db.execute() hits SQLITE_BUSY retry loop while
         holding db._lock — user write is starved.
 
-        With _BUSY_TIMEOUT_MS=150ms and _MAX_RETRIES=3:
-        db._lock is held for ~3 x 150ms = 450ms > 350ms threshold.
+        The deterministic witness records a DatabaseManager operation entering
+        SQLite while the independent connection still owns its write lock.
         """
-        wait = _run_bypass_scenario(tmp_path, fast_db, bypass_routed=False)
-        assert wait > _STARVATION_THRESHOLD_S, (
-            f"Expected starvation > {_STARVATION_THRESHOLD_S * 1000:.0f} ms, "
-            f"got {wait * 1000:.0f} ms.  Race may have let user through.\n"
-            "This test is probabilistic — re-run if flaky."
+        entered = _run_bypass_scenario(
+            tmp_path,
+            fast_db,
+            bypass_routed=False,
+        )
+        assert entered, (
+            "Expected a DatabaseManager operation to enter while the bypass "
+            "held SQLite's lock."
         )
 
     def test_routed_write_prevents_starvation(
         self, fast_db: DatabaseManager, tmp_path: Path
     ) -> None:
         """FIX: bypass writes routed through db._lock eliminate SQLITE_BUSY.
-        User write waits at most for bypass hold + scheduling jitter.
-        No multiplicative retry-loop delay.
+        The deterministic witness proves no DatabaseManager operation can enter
+        SQLite before the routed critical section releases its shared lock.
         """
-        wait = _run_bypass_scenario(tmp_path, fast_db, bypass_routed=True)
-        assert wait < _FAST_THRESHOLD_S, (
-            f"Routed path took {wait * 1000:.0f} ms, "
-            f"expected < {_FAST_THRESHOLD_S * 1000:.0f} ms."
+        entered = _run_bypass_scenario(
+            tmp_path,
+            fast_db,
+            bypass_routed=True,
+        )
+        assert entered == [], (
+            "A routed DatabaseManager operation entered the SQLite layer "
+            "during the protected critical section."
         )
 
 

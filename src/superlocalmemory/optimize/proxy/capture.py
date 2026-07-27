@@ -138,7 +138,10 @@ def _open_windows_capture_append(path: Path) -> int:
             security_attributes,
             win32con.OPEN_ALWAYS,
             win32con.FILE_ATTRIBUTE_NORMAL
-            | win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+            # pywin32 does not export this SDK constant from win32con on
+            # every supported Python build. Keep the Microsoft-defined value
+            # as a named fallback rather than silently following a reparse.
+            | getattr(win32con, "FILE_FLAG_OPEN_REPARSE_POINT", 0x00200000),
             None,
         )
         file_info = win32file.GetFileInformationByHandle(handle)
