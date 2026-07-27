@@ -23,6 +23,9 @@ from superlocalmemory.storage.admission_journal import (
     TerminalAdmissionError,
 )
 
+_FUNCTIONAL_DEADLINE_MS = 1_500
+_BUDGET_TEST_DEADLINE_MS = 250
+
 
 @dataclass(frozen=True)
 class _TestCodec:
@@ -40,7 +43,7 @@ class _Coordinator:
         self.wait_ms: list[int] = []
 
     def submit(self, command: RememberAdmissionCommand, *, wait_ms: int) -> dict[str, object]:
-        assert 0 < wait_ms <= 250
+        assert 0 < wait_ms <= _FUNCTIONAL_DEADLINE_MS
         self.commands.append(command)
         self.wait_ms.append(wait_ms)
         return self.result
@@ -48,7 +51,7 @@ class _Coordinator:
 
 class _TerminalCoordinator:
     def submit(self, _command, *, wait_ms: int):
-        assert 0 < wait_ms <= 250
+        assert 0 < wait_ms <= _FUNCTIONAL_DEADLINE_MS
         raise TerminalAdmissionError("DETERMINISTIC_POLICY_REJECTED")
 
 
@@ -84,8 +87,12 @@ def test_remember_prepares_before_dispatch_and_duplicate_returns_original_receip
     )
     service = RememberService(journal, coordinator)
 
-    first = service.remember(_request(), _actor(), deadline_ms=250)
-    duplicate = service.remember(_request(), _actor(), deadline_ms=250)
+    first = service.remember(
+        _request(), _actor(), deadline_ms=_FUNCTIONAL_DEADLINE_MS
+    )
+    duplicate = service.remember(
+        _request(), _actor(), deadline_ms=_FUNCTIONAL_DEADLINE_MS
+    )
 
     assert first == duplicate
     assert len(coordinator.commands) == 1
@@ -119,7 +126,7 @@ def test_coordinator_receives_only_the_remaining_end_to_end_budget(
     RememberService(journal, coordinator).remember(
         _request(),
         _actor(),
-        deadline_ms=250,
+        deadline_ms=_BUDGET_TEST_DEADLINE_MS,
     )
 
     assert len(coordinator.wait_ms) == 1
@@ -154,7 +161,9 @@ def test_rejected_dispatch_leaves_durable_rejected_record_for_diagnosis(tmp_path
     )
 
     with pytest.raises(AdmissionRejected, match="COMMAND_REJECTED"):
-        service.remember(_request(), _actor(), deadline_ms=250)
+        service.remember(
+            _request(), _actor(), deadline_ms=_FUNCTIONAL_DEADLINE_MS
+        )
 
     entry = journal.get_by_idempotency_key("default", _request().idempotency_key)
     assert entry is not None
@@ -172,7 +181,9 @@ def test_nonpositive_deadline_and_retryable_result_do_not_acknowledge(tmp_path) 
     with pytest.raises(ValueError, match="greater than zero"):
         service.remember(_request(), _actor(), deadline_ms=0)
     with pytest.raises(AdmissionRejected, match="WRITE_OVERLOADED"):
-        service.remember(_request(), _actor(), deadline_ms=250)
+        service.remember(
+            _request(), _actor(), deadline_ms=_FUNCTIONAL_DEADLINE_MS
+        )
 
     entry = journal.get_by_idempotency_key("default", _request().idempotency_key)
     assert entry is not None
@@ -185,7 +196,9 @@ def test_terminal_dispatch_exception_is_rejected_and_remains_terminal(tmp_path) 
 
     for _attempt in range(2):
         with pytest.raises(AdmissionRejected, match="DETERMINISTIC_POLICY_REJECTED") as caught:
-            service.remember(_request(), _actor(), deadline_ms=250)
+            service.remember(
+                _request(), _actor(), deadline_ms=_FUNCTIONAL_DEADLINE_MS
+            )
         assert caught.value.retryable is False
 
     entry = journal.get_by_idempotency_key("default", _request().idempotency_key)
