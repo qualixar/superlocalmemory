@@ -251,7 +251,7 @@ def test_386_session_init_has_no_registration_or_event_side_effects():
 
 
 def test_386_emergency_session_recall_opens_memory_db_read_only(tmp_path, monkeypatch):
-    """The emergency FTS fallback must use URI read-only mode plus an authorizer."""
+    """The emergency FTS fallback must use URI read-only mode without DML."""
     from superlocalmemory.mcp import tools_active
 
     db_path = tmp_path / "memory.db"
@@ -264,28 +264,41 @@ def test_386_emergency_session_recall_opens_memory_db_read_only(tmp_path, monkey
         bootstrap.execute(
             "CREATE VIRTUAL TABLE atomic_facts_fts USING fts5(fact_id, content)"
         )
+        bootstrap.execute(
+            "INSERT INTO atomic_facts "
+            "(fact_id, content, memory_id, created_at, profile_id) "
+            "VALUES ('fact-386', 'read only contract', 'memory-386', "
+            "'2026-07-27T00:00:00Z', 'default')"
+        )
+        bootstrap.execute(
+            "INSERT INTO atomic_facts_fts(fact_id, content) "
+            "VALUES ('fact-386', 'read only contract')"
+        )
         bootstrap.commit()
     finally:
         bootstrap.close()
 
     original_connect = sqlite3.connect
     opens: list[tuple[object, dict]] = []
-    denied: list[int] = []
+    mutations: list[str] = []
 
     def audited_connect(path, *args, **kwargs):
         opens.append((path, dict(kwargs)))
         conn = original_connect(path, *args, **kwargs)
 
-        def authorizer(action, _p1, _p2, _db, _source):
-            if action in {
-                sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
-                sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE,
-            }:
-                denied.append(action)
-                return sqlite3.SQLITE_DENY
-            return sqlite3.SQLITE_OK
+        def trace(statement):
+            normalized = " ".join(str(statement).upper().split())
+            if normalized.startswith(
+                ("INSERT ", "UPDATE ", "DELETE ", "REPLACE ", "CREATE ",
+                 "ALTER ", "DROP ", "VACUUM")
+            ):
+                mutations.append(normalized)
 
-        conn.set_authorizer(authorizer)
+        # SQLite's FTS5 virtual-table initialization can report SQLITE_UPDATE
+        # through the authorizer even for a MATCH on a mode=ro connection.
+        # Trace the SQL actually issued instead; mode=ro + query_only remain
+        # the independent physical guards against any mutation.
+        conn.set_trace_callback(trace)
         return conn
 
     from superlocalmemory.storage import read_connection
@@ -293,10 +306,11 @@ def test_386_emergency_session_recall_opens_memory_db_read_only(tmp_path, monkey
     monkeypatch.setattr(tools_active, "state_path", lambda name: db_path)
     monkeypatch.setattr(read_connection.sqlite3, "connect", audited_connect)
 
-    tools_active._sqlite_emergency_recall("read-only contract", limit=3)
+    response = tools_active._sqlite_emergency_recall("read-only contract", limit=3)
 
     assert opens, "session-init fallback did not open its test database"
     path, kwargs = opens[0]
     assert kwargs.get("uri") is True
     assert "mode=ro" in str(path)
-    assert denied == []
+    assert mutations == []
+    assert [item.fact.fact_id for item in response.results] == ["fact-386"]

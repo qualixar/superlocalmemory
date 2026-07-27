@@ -200,6 +200,8 @@ class TestShadowCaptureRecord:
         owner_sid = object()
         token_closed: list[bool] = []
         ace_calls: list[tuple[object, ...]] = []
+        descriptor_calls: list[tuple[object, ...]] = []
+        create_calls: list[tuple[object, ...]] = []
         security_calls: list[tuple[object, ...]] = []
 
         class FakeToken:
@@ -210,14 +212,71 @@ class TestShadowCaptureRecord:
             def AddAccessAllowedAce(self, *args: object) -> None:
                 ace_calls.append(args)
 
-        fake_msvcrt = SimpleNamespace(get_osfhandle=lambda fd: ("handle", fd))
-        fake_api = SimpleNamespace(GetCurrentProcess=lambda: "process")
-        fake_con = SimpleNamespace(TOKEN_QUERY=1, GENERIC_ALL=2)
+        class FakeSecurityDescriptor:
+            def SetSecurityDescriptorDacl(self, *args: object) -> None:
+                descriptor_calls.append(args)
+
+            def SetSecurityDescriptorControl(self, *args: object) -> None:
+                descriptor_calls.append(args)
+
+        class FakeSecurityAttributes:
+            def __init__(self) -> None:
+                self.bInheritHandle = True
+                self.SECURITY_DESCRIPTOR = FakeSecurityDescriptor()
+
+        class FakeHandle:
+            def __init__(self, fd: int) -> None:
+                self.fd = fd
+
+            def Detach(self) -> int:
+                fd = self.fd
+                self.fd = -1
+                return fd
+
+            def Close(self) -> None:
+                if self.fd >= 0:
+                    os.close(self.fd)
+                    self.fd = -1
+
+        def fake_create_file(*args: object) -> FakeHandle:
+            create_calls.append(args)
+            fd = os.open(args[0], os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+            return FakeHandle(fd)
+
+        fake_msvcrt = SimpleNamespace(
+            get_osfhandle=lambda fd: ("handle", fd),
+            open_osfhandle=lambda handle, flags: handle,
+        )
+        fake_api = SimpleNamespace(
+            CloseHandle=os.close,
+            GetCurrentProcess=lambda: "process",
+        )
+        fake_con = SimpleNamespace(
+            FILE_ATTRIBUTE_NORMAL=1,
+            FILE_ATTRIBUTE_REPARSE_POINT=2,
+            FILE_FLAG_OPEN_REPARSE_POINT=4,
+            FILE_SHARE_DELETE=8,
+            FILE_SHARE_READ=16,
+            FILE_SHARE_WRITE=32,
+            OPEN_ALWAYS=64,
+            TOKEN_QUERY=128,
+        )
+        fake_ntsecuritycon = SimpleNamespace(
+            FILE_ALL_ACCESS=256,
+            FILE_APPEND_DATA=512,
+            WRITE_DAC=1024,
+        )
+        fake_file = SimpleNamespace(
+            CreateFile=fake_create_file,
+            GetFileInformationByHandle=lambda handle: (0,),
+        )
         fake_security = SimpleNamespace(
             ACL=FakeAcl,
             ACL_REVISION=3,
             DACL_SECURITY_INFORMATION=4,
             PROTECTED_DACL_SECURITY_INFORMATION=8,
+            SECURITY_ATTRIBUTES=FakeSecurityAttributes,
+            SE_DACL_PROTECTED=16,
             SE_FILE_OBJECT=9,
             TokenUser=10,
             GetTokenInformation=lambda token, kind: (owner_sid, object()),
@@ -229,11 +288,22 @@ class TestShadowCaptureRecord:
         monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
         monkeypatch.setitem(sys.modules, "win32api", fake_api)
         monkeypatch.setitem(sys.modules, "win32con", fake_con)
+        monkeypatch.setitem(sys.modules, "win32file", fake_file)
         monkeypatch.setitem(sys.modules, "win32security", fake_security)
+        monkeypatch.setitem(sys.modules, "ntsecuritycon", fake_ntsecuritycon)
 
         assert cap.record({"x": 1}) is True
-        assert token_closed == [True]
-        assert ace_calls == [(3, 2, owner_sid)]
+        assert token_closed == [True, True]
+        assert ace_calls == [(3, 256, owner_sid), (3, 256, owner_sid)]
+        assert len(descriptor_calls) == 2
+        assert descriptor_calls[0][0::2] == (1, 0)
+        assert isinstance(descriptor_calls[0][1], FakeAcl)
+        assert descriptor_calls[1] == (16, 16)
+        assert len(create_calls) == 1
+        assert create_calls[0][1] == 1536
+        assert create_calls[0][4] == 64
+        assert create_calls[0][5] == 5
+        assert create_calls[0][3].bInheritHandle is False
         assert len(security_calls) == 1
         handle, object_type, flags, owner, group, dacl, sacl = security_calls[0]
         assert object_type == 9

@@ -70,6 +70,105 @@ def _is_link_or_reparse(info: os.stat_result) -> bool:
     return stat.S_ISLNK(info.st_mode) or bool(reparse and attributes & reparse)
 
 
+def _windows_owner_dacl(
+    win32api: Any,
+    win32con: Any,
+    win32security: Any,
+) -> Any:
+    """Build one protected owner-only DACL for a Windows capture file."""
+    import ntsecuritycon
+
+    token = win32security.OpenProcessToken(
+        win32api.GetCurrentProcess(),
+        win32con.TOKEN_QUERY,
+    )
+    try:
+        owner_sid = win32security.GetTokenInformation(
+            token,
+            win32security.TokenUser,
+        )[0]
+    finally:
+        token.Close()
+    dacl = win32security.ACL()
+    dacl.AddAccessAllowedAce(
+        win32security.ACL_REVISION,
+        ntsecuritycon.FILE_ALL_ACCESS,
+        owner_sid,
+    )
+    return dacl
+
+
+def _open_windows_capture_append(path: Path) -> int:
+    """Create/open a Windows file with append + WRITE_DAC on one handle."""
+    try:
+        import msvcrt
+
+        import ntsecuritycon
+        import win32api
+        import win32con
+        import win32file
+        import win32security
+    except ImportError as exc:
+        raise OSError("Windows capture ACL support is unavailable") from exc
+
+    handle = None
+    try:
+        # A creation-time descriptor prevents a newly created capture file from
+        # ever inheriting a broader parent DACL. For an existing file Windows
+        # ignores this descriptor; _enforce_owner_only_permissions replaces
+        # that DACL through the same WRITE_DAC-capable handle before writing.
+        dacl = _windows_owner_dacl(win32api, win32con, win32security)
+        security_attributes = win32security.SECURITY_ATTRIBUTES()
+        security_attributes.bInheritHandle = False
+        security_attributes.SECURITY_DESCRIPTOR.SetSecurityDescriptorDacl(
+            1,
+            dacl,
+            0,
+        )
+        security_attributes.SECURITY_DESCRIPTOR.SetSecurityDescriptorControl(
+            win32security.SE_DACL_PROTECTED,
+            win32security.SE_DACL_PROTECTED,
+        )
+        handle = win32file.CreateFile(
+            os.fspath(path),
+            ntsecuritycon.FILE_APPEND_DATA | ntsecuritycon.WRITE_DAC,
+            win32con.FILE_SHARE_READ
+            | win32con.FILE_SHARE_WRITE
+            | win32con.FILE_SHARE_DELETE,
+            security_attributes,
+            win32con.OPEN_ALWAYS,
+            win32con.FILE_ATTRIBUTE_NORMAL
+            | win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        file_info = win32file.GetFileInformationByHandle(handle)
+        if file_info[0] & win32con.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise OSError(
+                errno.ELOOP,
+                "capture path is a Windows reparse point",
+                path,
+            )
+
+        # Transfer the native handle to Python's CRT descriptor exactly once.
+        raw_handle = handle.Detach()
+        handle = None
+        try:
+            return msvcrt.open_osfhandle(
+                raw_handle,
+                os.O_WRONLY | os.O_APPEND | getattr(os, "O_BINARY", 0),
+            )
+        except BaseException:
+            win32api.CloseHandle(raw_handle)
+            raise
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"Windows secure capture open failed: {exc}") from exc
+    finally:
+        if handle is not None:
+            handle.Close()
+
+
 def _open_capture_append(path: Path) -> int:
     """Open one append descriptor without following or racing a link target."""
     try:
@@ -79,8 +178,11 @@ def _open_capture_append(path: Path) -> int:
     if before is not None and _is_link_or_reparse(before):
         raise OSError(errno.ELOOP, "capture path is a link or reparse point", path)
 
-    flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags, 0o600)
+    if _is_windows():
+        fd = _open_windows_capture_append(path)
+    else:
+        flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags, 0o600)
     try:
         opened = os.fstat(fd)
         current = path.lstat()
@@ -115,23 +217,7 @@ def _enforce_owner_only_permissions(fd: int) -> None:
         raise OSError("Windows capture ACL support is unavailable") from exc
 
     try:
-        token = win32security.OpenProcessToken(
-            win32api.GetCurrentProcess(),
-            win32con.TOKEN_QUERY,
-        )
-        try:
-            owner_sid = win32security.GetTokenInformation(
-                token,
-                win32security.TokenUser,
-            )[0]
-        finally:
-            token.Close()
-        dacl = win32security.ACL()
-        dacl.AddAccessAllowedAce(
-            win32security.ACL_REVISION,
-            win32con.GENERIC_ALL,
-            owner_sid,
-        )
+        dacl = _windows_owner_dacl(win32api, win32con, win32security)
         win32security.SetSecurityInfo(
             msvcrt.get_osfhandle(fd),
             win32security.SE_FILE_OBJECT,
