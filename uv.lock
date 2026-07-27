@@ -383,14 +383,13 @@ toml = [
 
 [[package]]
 name = "cozo-embedded"
-version = "0.7.6"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/17/e4a139cad601150303095532c51ab981b7b1ee9f6278188bedfe551c46e2/cozo_embedded-0.7.6-cp37-abi3-macosx_10_14_x86_64.whl", hash = "sha256:d146e76736beb5e14e0cf73dc8babefadfbbc358b325c94c64a51b6d5b0031e9", size = 9542067, upload-time = "2023-12-11T09:26:43.639Z" },
-    { url = "https://files.pythonhosted.org/packages/65/3b/92fe8c7c7b2b83974ae051c92697d92e860625326cfc06cb4c54222c2fc0/cozo_embedded-0.7.6-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:7341fa266369181bbc19ad9e68820b51900b0fe1c947318a3d860b570dca6e09", size = 8325766, upload-time = "2023-12-11T09:26:46.776Z" },
-    { url = "https://files.pythonhosted.org/packages/15/bf/19020af2645d8ea398e719bce8fcf7a91c341467aed9804c6d5f6ac878c2/cozo_embedded-0.7.6-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:80de79554138628967d4fd2636fc0a0a8dcca1c0c3bb527e638f1ee6cb763d7d", size = 10515504, upload-time = "2023-12-30T04:42:08.422Z" },
-    { url = "https://files.pythonhosted.org/packages/db/a7/3c96a4077520ee3179b5eaeba350132a854b3aca34d1168f335bfcd0038d/cozo_embedded-0.7.6-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7571f6521041c13b7e9ca8ab8809cf9c8eaad929726ed6190ffc25a5a3ab57a7", size = 11135792, upload-time = "2023-12-11T09:26:51.499Z" },
-    { url = "https://files.pythonhosted.org/packages/58/f7/5c6ec98d3983968df1d6709f1faa88a44b8c0fa7cd80994bc7f7d6b10293/cozo_embedded-0.7.6-cp37-abi3-win_amd64.whl", hash = "sha256:c945ab7b350d0b79d3e643b68ebc8343fc02d223a02ab929eb0fb8e4e0df3542", size = 9532612, upload-time = "2023-12-11T09:26:57.844Z" },
+    { url = "https://files.pythonhosted.org/packages/38/be/d6cdf495fc73ce2506c66a4078c35f28f9f340ca57e460d0af74832f7c08/cozo_embedded-0.3.0-cp37-abi3-macosx_10_14_x86_64.whl", hash = "sha256:5e8f5904ba37220daf59fec42f53880ceefb89d152c1d096229b946d0573068e", size = 5883455, upload-time = "2022-12-20T04:50:37.701Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/23/575b6fb7ed14910231668b6893d7b20ad02d4c35949332d01a52e818ea3f/cozo_embedded-0.3.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:d8a294ce0a15f89c75120ad22df9433769272a5b3bc8fb0b07254fa568bf082c", size = 5297662, upload-time = "2022-12-20T04:50:40.561Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/21/885e077de1ddcb28743594dd15e77d8c63f83bfee365140fddef115a0ad5/cozo_embedded-0.3.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:bed5802ee316d78da5f520a28d52048c5376e3de91d04e4e2dd77ba5054dea95", size = 6804152, upload-time = "2022-12-20T04:50:43.092Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/e8/82ab8677e1fb8811fcfa2dafb50f9a0e6c44a4f558365c9587694289e61b/cozo_embedded-0.3.0-cp37-abi3-win_amd64.whl", hash = "sha256:53860bfbe73897b92ecfb1a9c520b6b3a784b5bbeed0d8de29e027fd186498d6", size = 5567718, upload-time = "2022-12-20T04:50:45.799Z" },
 ]
 
 [[package]]
@@ -2013,11 +2012,11 @@ wheels = [
 
 [[package]]
 name = "pycozo"
-version = "0.7.6"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/18/dc0dd2db0f1661e2cf17a653da59b6812f30ddc976a66b7972fd5d2809bc/pycozo-0.7.6.tar.gz", hash = "sha256:e4be9a091ba71e9d4465179bbf7557d47af84c8114d4889bd5fa13c731d57a95", size = 19091, upload-time = "2023-12-11T09:27:40.435Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/5e/9e9b8b490fd69b75f969c7cfdebca172af9a82a4cd83e4b32d9e6750683f/pycozo-0.3.0.tar.gz", hash = "sha256:be5c2696c0c18e98452c06f21979ac2ca0c94c4ef313634bbd49936c77d87abb", size = 12521, upload-time = "2022-12-20T04:53:46.796Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/e9/47ccff69e94bc80388c67e12b3c25244198fcfb1d3fad96489ed436a8e3f/pycozo-0.7.6-py3-none-any.whl", hash = "sha256:8930de5f82277d6481998a585c79aa898991cfb0692e168bde8b0a4558d579cf", size = 18977, upload-time = "2023-12-11T09:27:38.171Z" },
+    { url = "https://files.pythonhosted.org/packages/01/83/d873d1b4f6a8224b4efaccfa5fbc207abaa6db03458b3bb5f46b12859f95/pycozo-0.3.0-py3-none-any.whl", hash = "sha256:f256de2f49684621c8dc1f93239d566c2045fd51b2dd74dca6c6a21b937d297d", size = 12250, upload-time = "2022-12-20T04:53:44.629Z" },
 ]
 
 [package.optional-dependencies]
@@ -3091,7 +3090,7 @@ wheels = [
 
 [[package]]
 name = "superlocalmemory"
-version = "3.8.6"
+version = "3.8.7"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -3240,9 +3239,9 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.9.0" },
     { name = "portalocker", specifier = "==3.2.0" },
     { name = "psutil", specifier = "==7.2.2" },
-    { name = "pycozo", extras = ["embedded"], specifier = "==0.7.6" },
-    { name = "pycozo", extras = ["embedded"], marker = "extra == 'cozo'", specifier = "==0.7.6" },
-    { name = "pycozo", extras = ["embedded"], marker = "extra == 'scale'", specifier = "==0.7.6" },
+    { name = "pycozo", extras = ["embedded"], specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "extra == 'cozo'", specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "extra == 'scale'", specifier = "==0.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },

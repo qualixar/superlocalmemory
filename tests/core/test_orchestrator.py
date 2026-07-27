@@ -121,6 +121,20 @@ class TestLifecycle:
                 assert orch.get_graph_backend() is None
                 assert orch.get_vector_backend() is None
 
+    def test_cozo_native_store_panic_degrades_without_crashing_daemon(self, orch):
+        """An incompatible optional projection never takes down canonical SQLite."""
+
+        class PanicException(BaseException):
+            pass
+
+        with patch(
+            "superlocalmemory.graph.cozo_backend.CozoDBGraphBackend",
+            side_effect=PanicException("Unknown storage version"),
+        ):
+            orch._init_cozo()
+
+        assert orch.get_graph_backend() is None
+
     def test_daemon_start_recovers_interrupted_promotion_without_auto_adoption(self, orch):
         """Startup recovers a journal but never mutates a legacy root by itself."""
         with patch.object(orch, "_recover_interrupted_scale_promotion") as recovery:

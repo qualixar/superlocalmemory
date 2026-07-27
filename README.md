@@ -5,15 +5,15 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V3.8.6</h1>
+<h1 align="center">SuperLocalMemory V3.8.7</h1>
 <p align="center"><strong>Enterprise-grade, local-first memory for AI agents and teams.</strong><br/>
 <em>A persistent, auditable long-term brain for your agents that runs on your own infrastructure — with multi-workspace isolation, role-based access, and GDPR + EU AI Act governance controls built in.</em></p>
-<p align="center"><code>v3.8.6</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
+<p align="center"><code>v3.8.7</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v3.8.6-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v3.8.6 — Current Release"/></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v3.8.7-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v3.8.7 — Current Release"/></a>
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
   <a href="#three-surfaces-proxy--mcp-tools--skill"><img src="https://img.shields.io/badge/Proxy_|_MCP_|_Skill-22c55e?style=for-the-badge" alt="Three Surfaces: Proxy, MCP Tools, Skill"/></a>
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>

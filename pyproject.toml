@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "3.8.6"
+version = "3.8.7"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -82,7 +82,10 @@ dependencies = [
     # until `slm db scale prepare -> verify -> promote` proves parity with
     # canonical SQLite; dependency installation never migrates user data.
     "lancedb==0.30.2",
-    "pycozo[embedded]==0.7.6",
+    # Cozo's on-disk format is not forward-compatible across these native
+    # bindings. Existing SLM graph stores were created by 0.3.0; upgrading the
+    # wheel without an export/import migration makes daemon startup panic.
+    "pycozo[embedded]==0.3.0",
     # v3.6.10: LLMLingua-2 prose compression (aggressive mode, opt-in at runtime).
     # Hard dependency so `pip install superlocalmemory` ships compression-ready;
     # the ~560MB model downloads on first setup/warmup (fail-open). Verified the
@@ -121,13 +124,13 @@ lancedb = [
     "lancedb==0.30.2",
 ]
 cozo = [
-    "pycozo[embedded]==0.7.6",
+    "pycozo[embedded]==0.3.0",
 ]
 # Backwards-compatible explicit install target for automation and docs.  The
 # packages are also base dependencies from v3.7 onward.
 scale = [
     "lancedb==0.30.2",
-    "pycozo[embedded]==0.7.6",
+    "pycozo[embedded]==0.3.0",
 ]
 ingestion = [
     "keyring>=25.0.0",

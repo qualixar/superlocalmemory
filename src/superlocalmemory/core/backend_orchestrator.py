@@ -438,7 +438,13 @@ class BackendOrchestrator:
             self._cozo = CozoDBGraphBackend(str(cozo_path / "graph"))
             self._update_status("cozo", "not_initialized")
             logger.info("CozoDB initialized at %s", cozo_path)
-        except Exception as exc:
+        except BaseException as exc:
+            # PyO3 exposes Rust panics as PanicException(BaseException), not
+            # Exception. An incompatible optional projection must never abort
+            # daemon startup or hide canonical SQLite memory. Re-raise genuine
+            # process-control exceptions; preserve the graph and degrade Cozo.
+            if not isinstance(exc, Exception) and type(exc).__name__ != "PanicException":
+                raise
             logger.warning("CozoDB init failed: %s", exc)
             self._cozo = None
 

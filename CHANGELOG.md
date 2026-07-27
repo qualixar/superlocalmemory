@@ -5,6 +5,22 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.7] - 2026-07-27 — Existing graph-store compatibility
+
+### Fixed
+- Upgrades now retain the PyCozo 0.3.0 native binding used to create existing
+  Cozo graph stores. Version 3.8.6 selected PyCozo 0.7.6, whose incompatible
+  on-disk format could stop the daemon at startup with
+  `Unknown storage version 1`.
+- A native Cozo panic is now contained at the optional projection boundary.
+  The daemon remains available on canonical SQLite and preserves the graph
+  files unchanged instead of losing access to memory.
+
+### Notes
+- Existing PyCozo 0.3.0 graphs require no rebuild or database migration.
+- All serialized-write, read-only recall, admission-journal, and dead-letter
+  fixes from 3.8.6 are unchanged.
+
 ## [3.8.6] - 2026-07-27 — Serialized writes and read-only recall
 
 ### Fixed
