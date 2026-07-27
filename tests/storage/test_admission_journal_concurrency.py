@@ -145,49 +145,58 @@ def test_concurrent_prepare_serializes_journal_write_transactions(
     assert journal.count() == 2
 
 
-def test_prepare_deadline_bounds_process_lock_wait(tmp_path) -> None:
+def test_prepare_deadline_bounds_process_lock_wait(tmp_path, monkeypatch) -> None:
     """A queued journal mutation fails with a typed error inside its budget."""
     journal = AdmissionJournal(tmp_path / "admission_journal.db", codec=_TestCodec())
     actor = Actor("daemon:test", frozenset({"default"}), frozenset({"personal"}))
-    lock_held = threading.Event()
-    release_lock = threading.Event()
+    observed_timeouts: list[float] = []
 
-    def hold_process_lock() -> None:
-        with journal._write_lock:
-            lock_held.set()
-            release_lock.wait(timeout=2.0)
+    class UnavailableRecordingLock:
+        def acquire(self, *, timeout: float = -1.0) -> bool:
+            observed_timeouts.append(timeout)
+            return False
 
-    holder = threading.Thread(target=hold_process_lock)
-    holder.start()
-    assert lock_held.wait(timeout=1.0)
-    started = time.monotonic()
-    try:
-        with pytest.raises(AdmissionJournalUnavailable, match="deadline"):
-            journal.prepare(
-                RememberRequest(
-                    content="A bounded process lock wait.",
-                    profile_id="default",
-                    source_type="test",
-                    idempotency_key="journal-deadline:process-lock",
-                ),
-                actor,
-                deadline=time.monotonic() + 0.05,
-            )
-    finally:
-        release_lock.set()
-        holder.join(timeout=1.0)
+        def release(self) -> None:
+            raise AssertionError("an unacquired journal lock must not be released")
 
-    assert time.monotonic() - started < 0.3
+    monkeypatch.setattr(journal, "_write_lock", UnavailableRecordingLock())
+
+    with pytest.raises(AdmissionJournalUnavailable, match="deadline"):
+        journal.prepare(
+            RememberRequest(
+                content="A bounded process lock wait.",
+                profile_id="default",
+                source_type="test",
+                idempotency_key="journal-deadline:process-lock",
+            ),
+            actor,
+            deadline=time.monotonic() + 0.05,
+        )
+
+    assert len(observed_timeouts) == 1
+    assert 0 < observed_timeouts[0] <= 0.05
+    assert journal.count() == 0
 
 
-def test_prepare_deadline_caps_external_sqlite_busy_wait(tmp_path) -> None:
+def test_prepare_deadline_caps_external_sqlite_busy_wait(tmp_path, monkeypatch) -> None:
     """A foreign SQLite writer cannot force remember past its journal budget."""
     path = tmp_path / "admission_journal.db"
     journal = AdmissionJournal(path, codec=_TestCodec())
     actor = Actor("daemon:test", frozenset({"default"}), frozenset({"personal"}))
     blocker = sqlite3.connect(path)
     blocker.execute("BEGIN IMMEDIATE")
-    started = time.monotonic()
+    original_connection = journal._connection
+    observed_busy_timeout_ms: list[int] = []
+
+    @contextmanager
+    def observed_connection(*, timeout: float = 1.0):
+        with original_connection(timeout=timeout) as connection:
+            observed_busy_timeout_ms.append(
+                int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+            )
+            yield connection
+
+    monkeypatch.setattr(journal, "_connection", observed_connection)
     try:
         with pytest.raises(AdmissionJournalUnavailable, match="busy"):
             journal.prepare(
@@ -204,7 +213,9 @@ def test_prepare_deadline_caps_external_sqlite_busy_wait(tmp_path) -> None:
         blocker.rollback()
         blocker.close()
 
-    assert time.monotonic() - started < 0.3
+    assert len(observed_busy_timeout_ms) == 1
+    assert 1 <= observed_busy_timeout_ms[0] <= 50
+    assert journal.count() == 0
 
 
 def test_request_read_translates_sqlite_busy_to_typed_unavailable(
