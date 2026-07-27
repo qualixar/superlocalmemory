@@ -29,7 +29,6 @@ import os
 import secrets
 import sqlite3
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -262,6 +261,33 @@ class ContextualBandit:
             play_id=play_id,
         )
 
+    def choose_readonly(self, context: dict[str, Any]) -> BanditChoice:
+        """Sample an arm from a read-only snapshot without recording a play.
+
+        Recall uses this method so the established bandit weighting and
+        ensemble quality path remain available without turning a query into a
+        ``bandit_plays`` write.  It deliberately bypasses the writer-oriented
+        thread-local connection factory: that factory configures WAL mode and
+        is not a physical read-only guarantee.
+        """
+        stratum = compute_stratum(context)
+        try:
+            posteriors = self._load_stratum_posteriors_readonly(stratum)
+        except sqlite3.Error as exc:
+            logger.warning(
+                "bandit.choose_readonly: posterior load failed stratum=%s: %s",
+                stratum,
+                exc,
+            )
+            posteriors = {}
+        arm_id = self._sample_best(posteriors)
+        return BanditChoice(
+            stratum=stratum,
+            arm_id=arm_id,
+            weights=dict(self._catalog[arm_id]),
+            play_id=None,
+        )
+
     def _sample_best(
         self,
         posteriors: dict[str, tuple[float, float]],
@@ -436,6 +462,29 @@ class ContextualBandit:
         return {
             r["arm_id"]: (float(r["alpha"]), float(r["beta"]))
             for r in rows
+        }
+
+    def _load_stratum_posteriors_readonly(
+        self,
+        stratum: str,
+    ) -> dict[str, tuple[float, float]]:
+        """Read posteriors through SQLite's URI read-only boundary."""
+        uri = f"{self._db_path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=0.25)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            conn.execute("PRAGMA busy_timeout=250")
+            rows = conn.execute(
+                "SELECT arm_id, alpha, beta FROM bandit_arms "
+                "WHERE profile_id = ? AND stratum = ?",
+                (self._profile, stratum),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            row["arm_id"]: (float(row["alpha"]), float(row["beta"]))
+            for row in rows
         }
 
     def _insert_play(

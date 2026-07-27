@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from superlocalmemory.infra.data_root import state_path
 
-from .helpers import DB_PATH
+from .helpers import DB_PATH, get_read_connection
 
 logger = logging.getLogger("superlocalmemory.routes.agents")
 router = APIRouter()
@@ -103,8 +103,7 @@ async def get_agent_memory_activity(
     total = 0
 
     if DB_PATH.exists():
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
+        conn = get_read_connection(DB_PATH)
         try:
             try:
                 rows = conn.execute(
@@ -188,8 +187,7 @@ async def get_trust_stats(request: Request):
         by_signal_type = {}
 
         if DB_PATH.exists():
-            conn = sqlite3.connect(str(DB_PATH))
-            conn.row_factory = sqlite3.Row
+            conn = get_read_connection(DB_PATH)
             try:
                 try:
                     # Count trust signals

@@ -11,18 +11,18 @@ objects. No LightGBM booster required (we drive the cold-start path).
 
 from __future__ import annotations
 
-import os
 import sqlite3
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from superlocalmemory.learning.arm_catalog import ARM_CATALOG
 from superlocalmemory.retrieval.engine import apply_channel_weights
 from superlocalmemory.storage.migration_runner import apply_all
 from superlocalmemory.storage.models import (
-    AtomicFact, Mode, RecallResponse, RetrievalResult,
+    AtomicFact,
+    Mode,
+    RecallResponse,
+    RetrievalResult,
 )
 
 
@@ -110,14 +110,14 @@ def test_apply_channel_weights_cross_encoder_bias_applied():
 # ---------------------------------------------------------------------------
 
 
-def test_recall_creates_bandit_play_row(bandit_db: Path, monkeypatch):
-    """A full recall path creates one bandit_plays row and returns response."""
+def test_explicit_bandit_signal_creates_play_row(bandit_db: Path, monkeypatch):
+    """Only an explicit learning command may create a bandit play row."""
     from superlocalmemory.core.recall_pipeline import apply_v2_bandit_ensemble
 
     response = _mk_response(5)
     out = apply_v2_bandit_ensemble(
         response, query="hello", profile_id="px",
-        query_id="qid-1", learning_db_path=bandit_db,
+        query_id="qid-1", learning_db_path=bandit_db, record_signals=True,
     )
     # Never drops candidates.
     assert len(out.results) == 5
@@ -131,6 +131,78 @@ def test_recall_creates_bandit_play_row(bandit_db: Path, monkeypatch):
     finally:
         conn.close()
     assert n == 1
+
+
+def test_readonly_bandit_uses_uri_read_connection_and_never_records_play(
+    bandit_db: Path, monkeypatch,
+):
+    """Recall weighting reads posterior state without opening a writer."""
+    from superlocalmemory.learning import bandit as bandit_module
+    from superlocalmemory.learning.bandit import ContextualBandit
+
+    original_connect = sqlite3.connect
+    opens: list[tuple[object, dict]] = []
+
+    def audited_connect(path, *args, **kwargs):
+        opens.append((path, dict(kwargs)))
+        return original_connect(path, *args, **kwargs)
+
+    monkeypatch.setattr(bandit_module.sqlite3, "connect", audited_connect)
+
+    choice = ContextualBandit(bandit_db, "readonly").choose_readonly(
+        {"query_type": "single_hop", "entity_count": 0},
+    )
+
+    assert choice.play_id is None
+    assert opens
+    assert opens[0][1]["uri"] is True
+    assert "mode=ro" in str(opens[0][0])
+
+
+def test_readonly_bandit_preserves_ensemble_reranking_without_play(
+    bandit_db: Path, monkeypatch,
+):
+    """Read-only recall keeps learned channel weighting and does not write."""
+    from superlocalmemory.core.recall_pipeline import apply_v2_bandit_ensemble
+    from superlocalmemory.learning.bandit import BanditChoice, ContextualBandit
+
+    response = _mk_response(2)
+    response.results[0].channel_scores = {"semantic": 0.1, "bm25": 0.9}
+    response.results[1].channel_scores = {"semantic": 0.9, "bm25": 0.1}
+    readonly_choice = BanditChoice(
+        stratum="single_hop|0|morning",
+        arm_id="readonly-test",
+        weights={"semantic": 2.0, "bm25": 0.0, "cross_encoder_bias": 1.0},
+        play_id=None,
+    )
+    monkeypatch.setattr(
+        ContextualBandit,
+        "choose_readonly",
+        lambda self, context: readonly_choice,
+    )
+    monkeypatch.setattr(
+        ContextualBandit,
+        "choose",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("recall opened the write-capable bandit path"),
+        ),
+    )
+
+    result = apply_v2_bandit_ensemble(
+        response,
+        query="quality witness",
+        profile_id="readonly",
+        query_id="qid-readonly",
+        learning_db_path=bandit_db,
+    )
+
+    assert result.results[1].ranking_score > result.results[0].ranking_score
+    conn = sqlite3.connect(str(bandit_db))
+    try:
+        plays = conn.execute("SELECT COUNT(*) FROM bandit_plays").fetchone()[0]
+    finally:
+        conn.close()
+    assert plays == 0
 
 
 def test_recall_bandit_disabled_env_skips(bandit_db: Path, monkeypatch):

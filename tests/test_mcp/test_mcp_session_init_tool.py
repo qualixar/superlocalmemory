@@ -80,7 +80,7 @@ def _make_response(count: int = 2) -> PoolRecallResponse:
 
 class TestSessionInitTool:
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_returns_context_and_memories_from_one_fast_recall(
@@ -105,7 +105,7 @@ class TestSessionInitTool:
         )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_uses_query_override(
@@ -125,7 +125,7 @@ class TestSessionInitTool:
         )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_returns_learning_status(
@@ -147,7 +147,7 @@ class TestSessionInitTool:
         assert learning["status"] == "learning"
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_respects_max_results(
@@ -169,7 +169,7 @@ class TestSessionInitTool:
         )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_filters_by_relevance_threshold(
@@ -190,7 +190,7 @@ class TestSessionInitTool:
 
 class TestSessionInitGating:
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     def test_session_init_disabled_by_rules(
         self, MockRulesEngine, mock_register, mock_emit,
@@ -211,7 +211,7 @@ class TestSessionInitGating:
 
 class TestSessionInitIntegration:
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_registers_agent_from_env(
@@ -228,15 +228,11 @@ class TestSessionInitIntegration:
 
         asyncio.run(session_init(project_path="/slm"))
 
-        mock_register.assert_called_once_with("codex", "varun")
-        mock_emit.assert_called_once()
-        payload = mock_emit.call_args[0][1]
-        assert payload["agent_id"] == "codex"
-        assert payload["project_path"] == "/slm"
-        assert payload["memory_count"] == 1
+        mock_register.assert_not_called()
+        mock_emit.assert_not_called()
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")
-    @patch("superlocalmemory.mcp.tools_active._register_agent")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     def test_session_init_error_returns_failure(self, mock_register, mock_emit):
         session_init, get_engine = _get_session_init_tool()
         get_engine.side_effect = RuntimeError("engine init failed")

@@ -219,8 +219,61 @@ class DatabaseManager:
         return conn
 
     @contextmanager
+    def _bind_coordinator_connection(
+        self,
+        conn: sqlite3.Connection,
+        capability: Any,
+    ) -> Generator[None, None, None]:
+        """Reuse the coordinator's sole writable connection for one handler.
+
+        This deliberately stays internal: only ``WriteCoordinator`` can issue
+        a capability, and that capability is valid only for its worker thread
+        and the exact resolved database path.  While bound, ``transaction``
+        and ``raw_connection`` become no-op ownership scopes: they may yield
+        the connection, but they must never commit, rollback, or close it.
+        The coordinator owns the enclosing ``BEGIN IMMEDIATE`` and final
+        commit/rollback together with the command receipt.
+        """
+        from superlocalmemory.storage.write_coordinator import WriteCoordinatorError
+
+        if not isinstance(conn, sqlite3.Connection):
+            raise WriteCoordinatorError("coordinator binding requires a sqlite3 connection")
+        validate = getattr(capability, "_validate", None)
+        if not callable(validate):
+            raise WriteCoordinatorError("untrusted coordinator capability")
+        try:
+            validate(self.db_path.expanduser().resolve())
+        except Exception as exc:
+            # Import lazily so the storage manager retains its legacy import
+            # surface when the coordinator is not used.
+            if isinstance(exc, WriteCoordinatorError):
+                raise
+            raise WriteCoordinatorError("untrusted coordinator capability") from exc
+
+        attached = conn.execute("PRAGMA database_list").fetchall()
+        main_path = next((row[2] for row in attached if row[1] == "main"), "")
+        expected_path = self.db_path.expanduser().resolve()
+        if not main_path or Path(main_path).expanduser().resolve() != expected_path:
+            raise WriteCoordinatorError("coordinator connection targets a different database")
+        if getattr(self._txn_state, "conn", None) is not None:
+            raise WriteCoordinatorError("database manager is already bound to a transaction")
+
+        self._txn_state.conn = conn
+        self._txn_state.coordinator_bound = True
+        try:
+            yield
+        finally:
+            self._txn_state.conn = None
+            self._txn_state.coordinator_bound = False
+
+    @contextmanager
     def transaction(self) -> Generator[None, None, None]:
         """Atomic transaction. All writes commit or rollback together."""
+        if getattr(self._txn_state, "coordinator_bound", False):
+            # The coordinator has already issued BEGIN IMMEDIATE.  Do not
+            # create a nested transaction or steal its commit/close lifecycle.
+            yield
+            return
         with self._lock:
             conn = self._connect()
             self._txn_state.conn = conn
@@ -243,6 +296,12 @@ class DatabaseManager:
         error, and always closes — mirroring transaction(). This is the public
         way to obtain a connection; there is no `.conn` attribute.
         """
+        coordinator_conn = getattr(self._txn_state, "conn", None)
+        if getattr(self._txn_state, "coordinator_bound", False):
+            if coordinator_conn is None:  # pragma: no cover - binding invariant
+                raise RuntimeError("coordinator binding has no active connection")
+            yield coordinator_conn
+            return
         with self._lock:
             conn = self._connect()
             self._txn_state.conn = conn

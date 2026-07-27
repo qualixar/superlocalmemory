@@ -42,6 +42,8 @@ def delete_fact_authorized(
     *,
     trusted_actor_id: str,
     source_agent_id: str,
+    canonical_runtime: Any | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Authorize, delete one profile-owned fact, then emit post hooks."""
     profile_id, context = _context(
@@ -51,15 +53,23 @@ def delete_fact_authorized(
         trusted_actor_id=trusted_actor_id,
         source_agent_id=source_agent_id,
     )
-    rows = engine._db.execute(
-        "SELECT content FROM atomic_facts "
-        "WHERE fact_id = ? AND profile_id = ? LIMIT 1",
-        (fact_id, profile_id),
-    )
-    if not rows:
-        return {"ok": False, "error": f"Memory {fact_id} not found"}
-    content_preview = dict(rows[0]).get("content", "")[:80]
-    engine._db.delete_fact(fact_id, profile_id=profile_id)
+    if canonical_runtime is not None:
+        result = dict(canonical_runtime.delete_fact(
+            profile_id, fact_id, idempotency_key=idempotency_key,
+        ))
+        if not result.get("ok"):
+            return {"ok": False, "error": f"Memory {fact_id} not found"}
+        content_preview = str(result.get("content_preview", ""))
+    else:
+        rows = engine._db.execute(
+            "SELECT content FROM atomic_facts "
+            "WHERE fact_id = ? AND profile_id = ? LIMIT 1",
+            (fact_id, profile_id),
+        )
+        if not rows:
+            return {"ok": False, "error": f"Memory {fact_id} not found"}
+        content_preview = dict(rows[0]).get("content", "")[:80]
+        engine._db.delete_fact(fact_id, profile_id=profile_id)
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
         orchestrator = get_orchestrator()
@@ -86,6 +96,8 @@ def update_fact_authorized(
     *,
     trusted_actor_id: str,
     source_agent_id: str,
+    canonical_runtime: Any | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Authorize a fact update and refresh semantic and lexical indexes."""
     if not content or not content.strip():
@@ -120,7 +132,17 @@ def update_fact_authorized(
                 updates["fisher_variance"] = fisher_variance
         except Exception as exc:
             logger.warning("UPDATE embedding refresh failed: %s", exc)
-    engine._db.update_fact(fact_id, updates, profile_id=profile_id)
+    if canonical_runtime is not None:
+        result = dict(canonical_runtime.update_fact(
+            profile_id,
+            fact_id,
+            updates,
+            idempotency_key=idempotency_key,
+        ))
+        if not result.get("ok"):
+            return {"ok": False, "error": f"Memory {fact_id} not found"}
+    else:
+        engine._db.update_fact(fact_id, updates, profile_id=profile_id)
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
         orchestrator = get_orchestrator()

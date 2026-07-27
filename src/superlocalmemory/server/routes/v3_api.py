@@ -11,7 +11,7 @@ import logging
 import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.server.routes.helpers import SLM_VERSION, get_read_connection
 from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 logger = logging.getLogger(__name__)
@@ -101,13 +101,12 @@ async def dashboard(request: Request):
         active_profile = get_profile_runtime(request.app.state).snapshot.profile_id
 
         # Read stats directly from SQLite (dashboard doesn't load engine)
-        import sqlite3
         memory_count = 0
         fact_count = 0
         db_path = config.base_dir / "memory.db"
         if db_path.exists():
             try:
-                conn = sqlite3.connect(str(db_path))
+                conn = get_read_connection(db_path)
                 cursor = conn.cursor()
                 try:
                     cursor.execute(
@@ -358,7 +357,10 @@ async def get_embedding_config(request: Request):
     """Return current embedding configuration."""
     try:
         from superlocalmemory.core.config import SLMConfig
-        config = SLMConfig.load()
+        # The daemon may already be running a freshly hot-swapped config while
+        # a profile update is still being persisted.  The dashboard must show
+        # that live truth, never silently replace it with disk defaults.
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
         emb = config.embedding
         return {
             "provider": emb.provider,
@@ -382,7 +384,7 @@ async def set_embedding_config(request: Request):
     try:
         body = await request.json()
         from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
-        config = SLMConfig.load()
+        config = getattr(request.app.state, "config", None) or SLMConfig.load()
 
         new_provider = body.get("provider", config.embedding.provider)
         new_model = body.get("model_name", config.embedding.model_name)
@@ -1422,7 +1424,7 @@ async def get_associations(
         if not DB_PATH.exists():
             return {"edges": [], "total": 0}
 
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = sqlite3.Row
 
         # Build query with optional type filter (parameterized)
@@ -1495,7 +1497,7 @@ async def get_association_stats(request: Request, profile: str = ""):
                 "top_connected_facts": [],
             }
 
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = sqlite3.Row
 
         # Total edges
@@ -1607,7 +1609,7 @@ async def get_consolidation_status(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return result
 
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = sqlite3.Row
 
         # Last consolidation log entry
@@ -1759,7 +1761,7 @@ async def get_core_memory(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return {"blocks": [], "total_chars": 0, "char_limit": 2000}
 
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = sqlite3.Row
 
         rows = conn.execute(
@@ -1901,7 +1903,7 @@ async def get_vector_store_status(request: Request, profile: str = ""):
         # Count vectors in embedding_metadata
         if DB_PATH.exists():
             try:
-                conn = sqlite3.connect(str(DB_PATH))
+                conn = get_read_connection(DB_PATH)
                 count = conn.execute(
                     "SELECT COUNT(*) FROM embedding_metadata WHERE profile_id = ?",
                     (pid,),
@@ -1945,7 +1947,7 @@ async def forgetting_stats(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return {"total": total, "zones": zones}
 
-        conn = _sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = _sqlite3.Row
 
         try:
@@ -2071,7 +2073,7 @@ async def quantization_stats(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return {"total": total, "tiers": tiers, "compression_ratio": compression_ratio}
 
-        conn = _sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = _sqlite3.Row
 
         try:
@@ -2130,7 +2132,7 @@ async def ccq_blocks(request: Request, profile: str = "", limit: int = 50):
         if not DB_PATH.exists():
             return {"blocks": [], "total": 0}
 
-        conn = _sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = _sqlite3.Row
 
         blocks = []
@@ -2190,7 +2192,7 @@ async def get_soft_prompts(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return {"prompts": [], "total": 0, "total_tokens": 0}
 
-        conn = _sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = _sqlite3.Row
 
         prompts = []
@@ -2298,7 +2300,7 @@ async def get_graph_communities(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return {"communities": [], "total": 0}
 
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = sqlite3.Row
 
         # Get community member counts and average pagerank
@@ -2465,7 +2467,7 @@ async def v33_overview(request: Request, profile: str = ""):
         if not DB_PATH.exists():
             return overview
 
-        conn = _sqlite3.connect(str(DB_PATH))
+        conn = get_read_connection(DB_PATH)
         conn.row_factory = _sqlite3.Row
 
         # Forgetting stats

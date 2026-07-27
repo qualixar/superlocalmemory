@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import time
 import urllib.request
@@ -126,6 +127,40 @@ def _wait_owned_exit(descriptor: dict[str, Any], timeout: float = 20.0) -> None:
             return
         time.sleep(0.1)
     raise AssertionError(f"owned daemon PID {descriptor.get('pid')} did not exit")
+
+
+def _owned_descendants(descriptor: dict[str, Any]) -> list[tuple[int, float]]:
+    process = _same_owned_process(descriptor)
+    if process is None:
+        return []
+    try:
+        return [
+            (child.pid, child.create_time())
+            for child in process.children(recursive=True)
+        ]
+    except psutil.Error:
+        return []
+
+
+def _assert_descendants_exited(
+    identities: list[tuple[int, float]],
+    timeout: float = 10.0,
+) -> None:
+    deadline = time.monotonic() + timeout
+    pending = list(identities)
+    while pending and time.monotonic() < deadline:
+        live: list[tuple[int, float]] = []
+        for pid, created_at in pending:
+            try:
+                process = psutil.Process(pid)
+                if abs(process.create_time() - created_at) <= 1.0:
+                    live.append((pid, created_at))
+            except psutil.Error:
+                continue
+        pending = live
+        if pending:
+            time.sleep(0.1)
+    assert pending == [], f"daemon-owned descendants survived stop: {pending}"
 
 
 def _terminate_owned_tree(descriptor: dict[str, Any]) -> None:
@@ -266,6 +301,27 @@ def test_installed_wheel_two_home_daemon_lifecycle_is_root_local(
             )
         ], "daemon state escaped into the process working directory"
 
+        # Queue real immediate admissions through the installed CLI/HTTP
+        # boundary. Their enrichment may still be active when restart/stop
+        # begins; canonical facts and the writer lease must nevertheless
+        # survive cleanly.
+        content_a = (
+            "installedlifecyclealpha proves a queued canonical memory survives "
+            "an active daemon restart and graceful shutdown."
+        )
+        content_b = (
+            "installedlifecyclebravo proves the second namespace remains "
+            "independent during another daemon lifecycle."
+        )
+        remember_a = _cli(
+            python, work_dir, env_a, "remember", content_a, "--json",
+        )
+        remember_b = _cli(
+            python, work_dir, env_b, "remember", content_b, "--json",
+        )
+        assert '"success": true' in remember_a.stdout.lower(), remember_a.stdout
+        assert '"success": true' in remember_b.stdout.lower(), remember_b.stdout
+
         status_a = _cli(python, work_dir, env_a, "serve", "status")
         status_b = _cli(python, work_dir, env_b, "serve", "status")
         assert f"PID {descriptor_a['pid']}" in status_a.stdout
@@ -282,6 +338,15 @@ def test_installed_wheel_two_home_daemon_lifecycle_is_root_local(
         assert restarted_a["pid"] != descriptor_a["pid"]
         assert restarted_a["instance_id"] != descriptor_a["instance_id"]
         assert '"success": true' in restart_a.stdout.lower(), restart_a.stdout
+        recalled_a = _cli(
+            python,
+            work_dir,
+            env_a,
+            "recall",
+            "installedlifecyclealpha",
+            "--json",
+        )
+        assert "installedlifecyclealpha" in recalled_a.stdout.lower()
 
         # Restarting A must not disturb B's process or namespace.
         assert _read_descriptor(root_b) == descriptor_b
@@ -289,16 +354,43 @@ def test_installed_wheel_two_home_daemon_lifecycle_is_root_local(
         status_b_after = _cli(python, work_dir, env_b, "serve", "status")
         assert f"PID {descriptor_b['pid']}" in status_b_after.stdout
 
+        descendants_a = _owned_descendants(restarted_a)
         stop_a = _cli(python, work_dir, env_a, "serve", "stop")
         assert "Daemon stopped" in stop_a.stdout, stop_a.stdout + stop_a.stderr
         _wait_owned_exit(restarted_a)
+        _assert_descendants_exited(descendants_a)
         _assert_stopped_namespace(root_a)
         assert _same_owned_process(descriptor_b) is not None
 
+        descendants_b = _owned_descendants(descriptor_b)
         stop_b = _cli(python, work_dir, env_b, "serve", "stop")
         assert "Daemon stopped" in stop_b.stdout, stop_b.stdout + stop_b.stderr
         _wait_owned_exit(descriptor_b)
+        _assert_descendants_exited(descendants_b)
         _assert_stopped_namespace(root_b)
+        for root, content in ((root_a, content_a), (root_b, content_b)):
+            conn = sqlite3.connect(
+                f"file:{(root / 'memory.db').resolve()}?mode=ro",
+                uri=True,
+            )
+            try:
+                assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM atomic_facts WHERE content=?",
+                    (content,),
+                ).fetchone()[0] >= 1
+            finally:
+                conn.close()
+            logs = "\n".join(
+                path.read_text(encoding="utf-8", errors="replace")
+                for path in (
+                    root / "logs" / "daemon.log",
+                    root / "logs" / "daemon-error.log",
+                )
+                if path.exists()
+            ).lower()
+            assert "database is locked" not in logs
+            assert "sqlite_busy" not in logs
     finally:
         # Never inspect or kill by process name. Cleanup is restricted to the
         # exact PIDs and creation times published inside these fixture roots.

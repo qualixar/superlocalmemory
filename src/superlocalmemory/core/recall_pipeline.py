@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import sqlite3
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -212,6 +214,70 @@ def _behavioral_entities(results: list[Any], limit: int = 20) -> list[str]:
 _RANKING_MODES: frozenset[str] = frozenset({"off", "v1", "v2", "v2-ensemble"})
 
 
+class _ReadOnlyLearningView:
+    """Minimal learning-model reader that cannot initialise or mutate a DB."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path.resolve()
+
+    def _connection(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            f"{self._db_path.as_uri()}?mode=ro",
+            uri=True,
+            timeout=0.25,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("PRAGMA busy_timeout=250")
+        return connection
+
+    def count_signals(self, profile_id: str) -> int:
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM learning_signals "
+                "WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+            return int(row["count"]) if row else 0
+        finally:
+            connection.close()
+
+    def count_feedback(self, profile_id: str) -> int:
+        """Count legacy feedback without running schema initialization."""
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM learning_feedback "
+                "WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+            return int(row["count"]) if row else 0
+        finally:
+            connection.close()
+
+    def load_active_model(self, profile_id: str) -> dict[str, Any] | None:
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT state_bytes, bytes_sha256, feature_names, trained_at, "
+                "model_version FROM learning_model_state "
+                "WHERE profile_id = ? AND is_active = 1 LIMIT 1",
+                (profile_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "state_bytes": bytes(row["state_bytes"]),
+                "bytes_sha256": row["bytes_sha256"],
+                "feature_names": row["feature_names"],
+                "trained_at": row["trained_at"],
+                "model_version": row["model_version"],
+            }
+        finally:
+            connection.close()
+
+
 def _resolve_ranking_mode(env: "dict[str, str] | os._Environ[str]") -> str:
     """Map the ``SLM_RANKING`` env var to a canonical mode.
 
@@ -239,6 +305,7 @@ def apply_ranking(
     *,
     config: Any = None,
     pipeline_version: str = "v2-ensemble",
+    record_signals: bool = False,
 ) -> "RecallResponse":
     """Run the ranking pipeline at the requested version.
 
@@ -273,6 +340,7 @@ def apply_ranking(
     try:
         response = apply_v2_bandit_ensemble(
             response, query, profile_id, query_id,
+            record_signals=record_signals,
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.debug("apply_ranking ensemble step skipped: %s", exc)
@@ -297,14 +365,16 @@ def apply_adaptive_ranking(
     Phase 3 (200+): LightGBM ML-based reranking.
     """
     from superlocalmemory.infra.data_root import state_path
-    from superlocalmemory.learning.feedback import FeedbackCollector
-
     learning_db = state_path("learning.db")
     if not learning_db.exists():
         return response
 
-    collector = FeedbackCollector(learning_db)
-    signal_count = collector.get_feedback_count(pid)
+    try:
+        signal_count = _ReadOnlyLearningView(learning_db).count_feedback(pid)
+    except sqlite3.Error:
+        # A pre-learning database may not have this optional table yet.
+        # Recall remains a query and cannot create it on demand.
+        return response
 
     if signal_count < 50:
         return response  # Phase 1: no change
@@ -388,7 +458,6 @@ def apply_v2_adaptive_ranking(
         from pathlib import Path as _P
 
         from superlocalmemory.infra.data_root import state_path
-        from superlocalmemory.learning.database import LearningDatabase
         from superlocalmemory.learning.model_cache import load_active
         from superlocalmemory.learning.ranker import AdaptiveRanker
 
@@ -397,7 +466,7 @@ def apply_v2_adaptive_ranking(
         if not db_path.exists():
             return response
 
-        db = LearningDatabase(db_path)
+        db = _ReadOnlyLearningView(db_path)
         signal_count = db.count_signals(profile_id)
         active = load_active(db, profile_id)
 
@@ -487,6 +556,7 @@ def apply_v2_bandit_ensemble(
     query_id: str,
     *,
     learning_db_path: Any = None,
+    record_signals: bool = False,
 ) -> RecallResponse:
     """Apply contextual bandit + optional LGBM ensemble rerank. Safe on error."""
     import os as _os
@@ -521,12 +591,14 @@ def apply_v2_bandit_ensemble(
         entity_count = 0
         # Use query_context hints if available on the engine — cheap fallback.
         bandit = ContextualBandit(db_path, profile_id)
-        choice = bandit.choose(
-            {
-                "query_type": response.query_type,
-                "entity_count": entity_count,
-            },
-            query_id,
+        context = {
+            "query_type": response.query_type,
+            "entity_count": entity_count,
+        }
+        choice = (
+            bandit.choose(context, query_id)
+            if record_signals
+            else bandit.choose_readonly(context)
         )
 
         # --- 2. apply channel weights -------------------------------------
@@ -536,9 +608,8 @@ def apply_v2_bandit_ensemble(
         active_model = None
         signal_count = 0
         try:
-            from superlocalmemory.learning.database import LearningDatabase
             from superlocalmemory.learning.model_cache import load_active
-            db = LearningDatabase(db_path)
+            db = _ReadOnlyLearningView(db_path)
             signal_count = db.count_signals(profile_id)
             active_model = load_active(db, profile_id)
         except Exception as exc:
@@ -561,28 +632,32 @@ def apply_v2_bandit_ensemble(
             logger.debug("v2 bandit ensemble_rerank skipped: %s", exc)
             final_results = weighted
 
-        # --- 5. enqueue signals (non-blocking) ----------------------------
-        try:
-            top20 = final_results[:20]
-            candidates = tuple(
-                SignalCandidate(
-                    fact_id=r.fact.fact_id,
-                    channel_scores=dict(r.channel_scores or {}),
-                    cross_encoder_score=None,
-                    result_dict={"fact_id": r.fact.fact_id,
-                                 "score": r.score},
+        # Recall is a query.  Implicit learning signals are deliberately
+        # disabled on this path: even a non-blocking enqueue eventually writes
+        # canonical/learning state and turns dashboard polling into contention.
+        # An explicit feedback command owns durable learning signals instead.
+        if record_signals:
+            try:
+                top20 = final_results[:20]
+                candidates = tuple(
+                    SignalCandidate(
+                        fact_id=r.fact.fact_id,
+                        channel_scores=dict(r.channel_scores or {}),
+                        cross_encoder_score=None,
+                        result_dict={"fact_id": r.fact.fact_id,
+                                     "score": r.score},
+                    )
+                    for r in top20
                 )
-                for r in top20
-            )
-            enqueue(SignalBatch(
-                profile_id=profile_id,
-                query_id=query_id,
-                query_text=query,
-                candidates=candidates,
-                query_context=query_context,
-            ))
-        except Exception as exc:
-            logger.debug("v2 bandit signal enqueue skipped: %s", exc)
+                enqueue(SignalBatch(
+                    profile_id=profile_id,
+                    query_id=query_id,
+                    query_text=query,
+                    candidates=candidates,
+                    query_context=query_context,
+                ))
+            except Exception as exc:
+                logger.debug("v2 bandit signal enqueue skipped: %s", exc)
 
         return RecallResponse(
             query=response.query,
@@ -665,15 +740,6 @@ def run_recall(
     agent hot path skips the internal round and delegates refinement to the
     calling LLM. ``fast=False`` forces the internal agentic round.
     """
-    # Pre-operation hooks
-    hook_ctx = {
-        "operation": "recall",
-        "agent_id": agent_id,
-        "profile_id": profile_id,
-        "query_preview": query[:100],
-    }
-    hooks.run_pre("recall", hook_ctx)
-
     m = mode or config.mode
 
     # v3.8.2: resolve the client-driven-agentic default when a caller left
@@ -772,33 +838,6 @@ def run_recall(
                 logger.debug("Agentic sufficiency skipped: %s", exc)
 
     _mark("agentic")
-    # V3.2: Log access for recalled facts (Phase 1)
-    if access_log and response.results:
-        try:
-            fact_ids = [r.fact.fact_id for r in response.results]
-            # Recall exposure logging is a durable analytics contract (tested),
-            # so it stays synchronous — it is a single batched write, cheap
-            # relative to the deferred spreading-activation cache / last_seen.
-            access_log.store_access_batch(
-                fact_ids=fact_ids,
-                profile_id=profile_id,
-                access_type="recall",
-            )
-        except Exception as exc:
-            logger.debug("Access log batch store failed: %s", exc)
-
-    # Query telemetry is permitted, but result-derived entities are not fed
-    # back as preferences.  Retrieval exposure is not positive feedback.
-    try:
-        _get_behavioral_tracker(db).record_query(
-            query=query,
-            query_type=response.query_type,
-            entities=[],
-            profile_id=profile_id,
-        )
-    except Exception as exc:
-        logger.debug("Behavioral tracking: %s", exc)
-
     # S8-ARC-04 (v3.4.22): unified ranking entry point. Single env-var
     # (SLM_RANKING=off|v1|v2|v2-ensemble) controls the pipeline. Legacy
     # SLM_V2_PIPELINE_DISABLED + SLM_BANDIT_DISABLED still honoured for
@@ -810,7 +849,7 @@ def run_recall(
         mode = _resolve_ranking_mode(_os.environ)
         response = apply_ranking(
             response, query, profile_id, query_id,
-            config=config, pipeline_version=mode,
+            config=config, pipeline_version=mode, record_signals=False,
         )
     except Exception as exc:
         logger.debug("Ranking pipeline skipped: %s", exc)
@@ -819,11 +858,6 @@ def run_recall(
     # Deliberately no trust, Fisher, retention, lifecycle, popularity, or graph
     # mutation here.  Those state transitions require a separately authenticated
     # positive/negative outcome; merely returning a result is an exposure.
-
-    # Post-operation hooks (audit, trust signal, learning)
-    hook_ctx["result_count"] = len(response.results)
-    hook_ctx["query_type"] = response.query_type
-    hooks.run_post("recall", hook_ctx)
 
     from superlocalmemory.core.score_contract import finalize_score_contract
     finalize_score_contract(response)

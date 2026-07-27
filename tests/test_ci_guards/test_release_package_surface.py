@@ -7,9 +7,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
-
 from scripts import release_registry_guard as registry_guard
-
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT / "package.json"
@@ -63,10 +61,11 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall/validation.js",
         "scripts/preuninstall.js",
     }
-    # V3.8.1 adds bounded migration, runtime-control, and telemetry modules.
-    # Keep a tight file-count budget while allowing those shipped runtime
-    # surfaces; the byte budget below remains the primary package-size guard.
-    assert artifact["entryCount"] <= 660
+    # V3.8.6 adds seven bounded canonical-writer, journal, codec, migration, and
+    # strict read-connection modules. Keep the count exact enough to catch an
+    # accidentally shipped build/test surface; the byte budget remains the
+    # primary package-size guard.
+    assert artifact["entryCount"] <= 667
     assert artifact["unpackedSize"] <= 10 * 1024 * 1024
 
 
@@ -82,7 +81,10 @@ def test_dmg_distribution_contract_is_absent_from_supported_surfaces() -> None:
 
     supported_text = [
         (ROOT / "README.md").read_text(encoding="utf-8"),
-        *(path.read_text(encoding="utf-8") for path in (ROOT / ".github" / "workflows").glob("*.yml")),
+        *(
+            path.read_text(encoding="utf-8")
+            for path in (ROOT / ".github" / "workflows").glob("*.yml")
+        ),
         *(
             path.read_text(encoding="utf-8")
             for path in (ROOT / "docs").rglob("*.md")

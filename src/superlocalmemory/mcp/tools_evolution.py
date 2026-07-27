@@ -16,13 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Callable
 
 from mcp.types import ToolAnnotations
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +144,8 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             profile_id = engine.profile_id if engine else "default"
-            db_path = str(state_path("memory.db"))
-
-            conn = sqlite3.connect(db_path, timeout=10)
-            conn.row_factory = sqlite3.Row
+            db_path = state_path("memory.db")
+            conn = ReadConnectionFactory(db_path).open()
 
             # Gather per-skill invocation stats from tool_events
             # Skills are logged as tool_name='Skill' with actual skill name in input_summary
@@ -274,9 +270,8 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
             skill_name: Specific skill name (empty = all skills)
         """
         try:
-            db_path = str(state_path("memory.db"))
-            conn = sqlite3.connect(db_path, timeout=10)
-            conn.row_factory = sqlite3.Row
+            db_path = state_path("memory.db")
+            conn = ReadConnectionFactory(db_path).open()
 
             if skill_name:
                 rows = conn.execute(

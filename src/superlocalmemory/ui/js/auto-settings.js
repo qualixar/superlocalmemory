@@ -463,7 +463,10 @@ async function saveAllSettings() {
 async function loadEmbeddingSettings() {
     try {
         var resp = await fetch('/api/v3/embedding/config');
-        if (!resp.ok) return;
+        if (!resp.ok) {
+            showEmbeddingConfigUnavailable();
+            return;
+        }
         var data = await resp.json();
 
         var provEl = document.getElementById('settings-emb-provider');
@@ -495,7 +498,17 @@ async function loadEmbeddingSettings() {
         }
     } catch (e) {
         console.log('Load embedding settings error:', e);
+        showEmbeddingConfigUnavailable();
     }
+}
+
+function showEmbeddingConfigUnavailable() {
+    var info = document.getElementById('settings-emb-info');
+    if (!info) return;
+    // Do not alter any form values here: rendering fallback values would make
+    // a transient daemon/config failure look like a valid Mode A setup.
+    info.textContent = 'Embedding configuration unavailable. Check daemon health and retry.';
+    info.className = 'text-warning small';
 }
 
 function updateEmbeddingUI() {

@@ -5,22 +5,30 @@
 
 from __future__ import annotations
 
-import time
-from types import SimpleNamespace
-from unittest.mock import patch
+from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
-from superlocalmemory.core.ingestion_command import IngestionState
 from superlocalmemory.server.unified_daemon import create_app
-from superlocalmemory.storage.migrations import M018_ingestion_operations
+from superlocalmemory.storage.migrations import (
+    M018_ingestion_operations,
+    M032_write_coordinator_admission,
+)
 
 
-def _client(engine) -> TestClient:
+@contextmanager
+def _client(engine):
+    """Inject the daemon-owned writer; TestClient does not enter lifespan."""
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+
     with engine._db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
+        M032_write_coordinator_admission.apply(conn)
     app = create_app()
     app.state.engine = engine
+    runtime = CanonicalRememberRuntime.for_engine(engine)
+    runtime.start()
+    app.state.canonical_remember_runtime = runtime
     client = TestClient(app)
     client.headers["X-SLM-Daemon-Capability"] = (
         app.state.daemon_descriptor.capability
@@ -28,7 +36,10 @@ def _client(engine) -> TestClient:
     client.headers["X-SLM-Target-Instance"] = (
         app.state.daemon_descriptor.instance_id
     )
-    return client
+    try:
+        yield client
+    finally:
+        runtime.stop()
 
 
 def test_remember_rejects_missing_or_wrong_daemon_capability(
@@ -67,23 +78,20 @@ def test_dashboard_remember_accepts_verified_install_token(
 ) -> None:
     from superlocalmemory.core.security_primitives import ensure_install_token
 
-    with engine_with_mock_deps._db.raw_connection() as conn:
-        M018_ingestion_operations.apply(conn)
-    app = create_app()
-    app.state.engine = engine_with_mock_deps
-    client = TestClient(app)
-
-    response = client.post(
-        "/remember?wait=true",
-        json={
-            "content": (
-                "The dashboard records an authenticated local reliability "
-                "decision through the canonical ingestion command."
-            ),
-            "idempotency_key": "dashboard-install-token-1",
-        },
-        headers={"X-Install-Token": ensure_install_token()},
-    )
+    with _client(engine_with_mock_deps) as client:
+        client.headers.pop("X-SLM-Daemon-Capability")
+        client.headers.pop("X-SLM-Target-Instance")
+        response = client.post(
+            "/remember?wait=true",
+            json={
+                "content": (
+                    "The dashboard records an authenticated local reliability "
+                    "decision through the canonical ingestion command."
+                ),
+                "idempotency_key": "dashboard-install-token-1",
+            },
+            headers={"X-Install-Token": ensure_install_token()},
+        )
 
     assert response.status_code == 200, response.text
     operation = dict(engine_with_mock_deps._db.execute(
@@ -97,7 +105,6 @@ def test_dashboard_remember_accepts_verified_install_token(
 def test_async_remember_returns_durable_operation_and_is_idempotent(
     engine_with_mock_deps,
 ) -> None:
-    client = _client(engine_with_mock_deps)
     body = {
         "content": (
             "Alice owns the incident review process and publishes every "
@@ -106,9 +113,9 @@ def test_async_remember_returns_durable_operation_and_is_idempotent(
         "idempotency_key": "http-session-4:turn-9",
         "metadata": {"agent_id": "caller-selected-admin"},
     }
-
-    first = client.post("/remember", json=body)
-    second = client.post("/remember", json=body)
+    with _client(engine_with_mock_deps) as client:
+        first = client.post("/remember", json=body)
+        second = client.post("/remember", json=body)
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
@@ -131,113 +138,42 @@ def test_async_remember_returns_durable_operation_and_is_idempotent(
 def test_wait_remember_completes_same_canonical_operation(
     engine_with_mock_deps,
 ) -> None:
-    client = _client(engine_with_mock_deps)
-
-    response = client.post(
-        "/remember?wait=true",
-        json={
-            "content": (
-                "Bob leads the database reliability review and records the "
-                "approved recovery decision for every production incident."
-            ),
-            "idempotency_key": "http-sync-1",
-            "session_id": "session-sync",
-        },
-    )
+    with _client(engine_with_mock_deps) as client:
+        response = client.post(
+            "/remember?wait=true",
+            json={
+                "content": (
+                    "Bob leads the database reliability review and records the "
+                    "approved recovery decision for every production incident."
+                ),
+                "idempotency_key": "http-sync-1",
+                "session_id": "session-sync",
+            },
+        )
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["materialization_state"] == "complete"
+    assert payload["materialization_state"] == "queryable"
     assert payload["fact_ids"]
+    assert payload["wait_ignored"] is True
     operation = engine_with_mock_deps._db.execute(
         "SELECT state, session_id FROM ingestion_operations "
         "WHERE operation_id=?",
         (payload["operation_id"],),
     )
     assert dict(operation[0]) == {
-        "state": "complete",
+        "state": "queryable",
         "session_id": "session-sync",
     }
 
 
-def test_wait_remember_keeps_durable_fact_queryable_when_enrichment_retries(
-    engine_with_mock_deps,
-) -> None:
-    """A cold optional embedding path must not turn an admitted fact into 500."""
-    client = _client(engine_with_mock_deps)
-    receipt = SimpleNamespace(
-        operation_id="cold-embedding-op",
-        state=IngestionState.QUERYABLE,
-        fact_ids=("fact-queryable",),
-    )
-    deferred = SimpleNamespace(
-        operation_id="cold-embedding-op",
-        state=IngestionState.FAILED,
-        fact_ids=("fact-queryable",),
-        last_error="incomplete derivation stages: embeddings",
-    )
-    command = SimpleNamespace(
-        submit=lambda _request: receipt,
-        materialize=lambda _operation_id: deferred,
-    )
-
-    with patch(
-        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
-        return_value=command,
-    ):
+def test_wait_remember_never_runs_inline_materialization(engine_with_mock_deps) -> None:
+    """The compatibility query parameter cannot make a model call inline."""
+    with _client(engine_with_mock_deps) as client:
         response = client.post(
             "/remember?wait=true",
             json={
-                "content": "A durable fact remains available while local embeddings warm.",
-                "idempotency_key": "cold-embedding-route-1",
-            },
-        )
-
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["status"] == "queryable"
-    assert payload["materialization_state"] == "failed"
-    assert payload["fact_ids"] == ["fact-queryable"]
-    assert "retry" in payload["note"]
-
-
-def test_wait_remember_returns_queryable_after_bounded_enrichment_wait(
-    engine_with_mock_deps,
-    monkeypatch,
-) -> None:
-    """A slow local model cannot pin the daemon event loop behind wait=true."""
-    client = _client(engine_with_mock_deps)
-    receipt = SimpleNamespace(
-        operation_id="bounded-wait-op",
-        state=IngestionState.QUERYABLE,
-        fact_ids=("fact-queryable",),
-    )
-
-    def slow_materialize(_operation_id):
-        time.sleep(0.05)
-        return SimpleNamespace(
-            operation_id="bounded-wait-op",
-            state=IngestionState.COMPLETE,
-            fact_ids=("fact-queryable",),
-            last_error="",
-        )
-
-    command = SimpleNamespace(
-        submit=lambda _request: receipt,
-        materialize=slow_materialize,
-    )
-    monkeypatch.setattr(
-        "superlocalmemory.server.unified_daemon._REMEMBER_ENRICHMENT_WAIT_SECONDS",
-        0.001,
-    )
-    with patch(
-        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
-        return_value=command,
-    ):
-        response = client.post(
-            "/remember?wait=true",
-            json={
-                "content": "A slow enrichment keeps the dashboard responsive.",
+                "content": "A slow enrichment stays outside the request transaction.",
                 "idempotency_key": "bounded-wait-route-1",
             },
         )
@@ -246,4 +182,167 @@ def test_wait_remember_returns_queryable_after_bounded_enrichment_wait(
     payload = response.json()
     assert payload["status"] == "queryable"
     assert payload["materialization_state"] == "queryable"
-    assert payload["wait_budget_exhausted"] is True
+    assert payload["wait_ignored"] is True
+
+
+def test_trust_rejection_occurs_before_journal_or_canonical_write(
+    engine_with_mock_deps,
+    monkeypatch,
+) -> None:
+    """A denied actor leaves neither replay work nor memory evidence behind."""
+    def reject(_operation, _payload) -> None:
+        raise PermissionError("trust policy rejected this actor")
+
+    monkeypatch.setattr(engine_with_mock_deps._hooks, "run_pre", reject)
+    with _client(engine_with_mock_deps) as client:
+        runtime = client.app.state.canonical_remember_runtime
+        response = client.post(
+            "/remember",
+            json={
+                "content": "Trust policy denial must not create durable work.",
+                "idempotency_key": "trust-rejected-route-1",
+            },
+        )
+        assert runtime.journal.count() == 0
+
+    assert response.status_code == 403
+    assert engine_with_mock_deps._db.execute("SELECT * FROM ingestion_operations") == []
+    assert engine_with_mock_deps._db.execute("SELECT * FROM atomic_facts") == []
+
+
+def test_deterministic_rejection_leaves_no_journal_or_canonical_write(
+    engine_with_mock_deps,
+) -> None:
+    """Low-information input is rejected before durable admission preparation."""
+    with _client(engine_with_mock_deps) as client:
+        runtime = client.app.state.canonical_remember_runtime
+        response = client.post(
+            "/remember",
+            json={"content": "x", "idempotency_key": "low-quality-route-1"},
+        )
+        assert runtime.journal.count() == 0
+
+    assert response.status_code == 422
+    assert engine_with_mock_deps._db.execute("SELECT * FROM ingestion_operations") == []
+    assert engine_with_mock_deps._db.execute("SELECT * FROM atomic_facts") == []
+
+
+def test_dashboard_delete_and_update_use_canonical_mutation_receipts(
+    engine_with_mock_deps,
+) -> None:
+    """Dashboard mutations share the writer and honor an HTTP retry key."""
+    with _client(engine_with_mock_deps) as client:
+        stored = client.post(
+            "/remember",
+            json={
+                "content": "Dashboard mutation receipts must remain durable.",
+                "idempotency_key": "dashboard-mutation-source",
+            },
+        )
+        fact_id = stored.json()["fact_ids"][0]
+        update = client.patch(
+            f"/api/memories/{fact_id}",
+            json={"content": "Dashboard mutation receipts remain durable after edit."},
+            headers={"X-Idempotency-Key": "dashboard-update-retry"},
+        )
+        first_delete = client.delete(
+            f"/api/memories/{fact_id}",
+            headers={"X-Idempotency-Key": "dashboard-delete-retry"},
+        )
+        second_delete = client.delete(
+            f"/api/memories/{fact_id}",
+            headers={"X-Idempotency-Key": "dashboard-delete-retry"},
+        )
+
+    assert update.status_code == 200, update.text
+    assert first_delete.status_code == 200, first_delete.text
+    assert second_delete.status_code == 200, second_delete.text
+    assert engine_with_mock_deps._db.execute(
+        "SELECT fact_id FROM atomic_facts WHERE fact_id = ?", (fact_id,)
+    ) == []
+    kinds = engine_with_mock_deps._db.execute(
+        "SELECT command_kind FROM write_commits "
+        "WHERE command_kind IN (?, ?) ORDER BY command_kind",
+        ("update_fact", "delete_fact"),
+    )
+    assert [row["command_kind"] for row in kinds] == ["delete_fact", "update_fact"]
+
+
+def test_dashboard_archive_merge_and_scope_use_canonical_mutation_commands(
+    engine_with_mock_deps,
+) -> None:
+    """Bounded dashboard lifecycle mutations never open a route-owned writer."""
+    with _client(engine_with_mock_deps) as client:
+        first = client.post(
+            "/remember",
+            json={
+                "content": "The merge loser is isolated to the default profile.",
+                "idempotency_key": "dashboard-merge-first",
+            },
+        ).json()["fact_ids"][0]
+        kept = client.post(
+            "/remember",
+            json={
+                "content": "The merge winner remains isolated to the default profile.",
+                "idempotency_key": "dashboard-merge-second",
+            },
+        ).json()["fact_ids"][0]
+        scoped = client.patch(
+            f"/api/memories/{kept}/scope",
+            json={"scope": "shared", "shared_with": ["team-alpha"]},
+        )
+        merged = client.post(f"/api/memories/{first}/merge", json={"into": kept})
+        archived = client.post(f"/api/memories/{kept}/forget")
+
+    assert scoped.status_code == 200, scoped.text
+    assert merged.status_code == 200, merged.text
+    assert archived.status_code == 200, archived.text
+    state = engine_with_mock_deps._db.execute(
+        "SELECT scope, shared_with, archive_status FROM atomic_facts WHERE fact_id = ?",
+        (kept,),
+    )
+    assert state[0]["scope"] == "shared"
+    assert state[0]["archive_status"] == "archived"
+    kinds = engine_with_mock_deps._db.execute(
+        "SELECT command_kind FROM write_commits "
+        "WHERE command_kind IN (?, ?, ?) ORDER BY command_kind",
+        ("archive_fact", "merge_fact", "set_fact_scope"),
+    )
+    assert [row["command_kind"] for row in kinds] == [
+        "archive_fact",
+        "merge_fact",
+        "set_fact_scope",
+    ]
+
+
+def test_dashboard_mutation_rejects_invalid_or_drifted_idempotency_key(
+    engine_with_mock_deps,
+) -> None:
+    """The retry boundary is bounded and never replays a different payload."""
+    with _client(engine_with_mock_deps) as client:
+        fact_id = client.post(
+            "/remember",
+            json={
+                "content": "Dashboard mutation conflicts are explicit.",
+                "idempotency_key": "dashboard-conflict-source",
+            },
+        ).json()["fact_ids"][0]
+        invalid = client.patch(
+            f"/api/memories/{fact_id}",
+            json={"content": "Invalid key is rejected."},
+            headers={"X-Idempotency-Key": "contains spaces"},
+        )
+        first = client.patch(
+            f"/api/memories/{fact_id}",
+            json={"content": "The first dashboard mutation wins."},
+            headers={"X-Idempotency-Key": "dashboard-drift-key"},
+        )
+        conflict = client.patch(
+            f"/api/memories/{fact_id}",
+            json={"content": "The retry payload is not silently accepted."},
+            headers={"X-Idempotency-Key": "dashboard-drift-key"},
+        )
+
+    assert invalid.status_code == 422
+    assert first.status_code == 200
+    assert conflict.status_code == 409

@@ -111,6 +111,8 @@ class CrossEncoderReranker:
         self._model_loaded = False  # True once worker confirms model is ready
         self._worker_loading = False  # True while background warmup in progress
         self._lock = threading.Lock()
+        self._shutdown_event = threading.Event()
+        self._warmup_thread: threading.Thread | None = None
         self._idle_timer: threading.Timer | None = None
         self._request_count: int = 0
 
@@ -126,7 +128,7 @@ class CrossEncoderReranker:
     def __del__(self) -> None:
         """Kill worker subprocess when reranker is garbage-collected."""
         try:
-            self._kill_worker()
+            self.shutdown(timeout=0.1)
         except Exception:
             pass
 
@@ -142,14 +144,14 @@ class CrossEncoderReranker:
         lock, creating a race where the warmup's readline thread could
         steal responses meant for _send_request → deadlock → timeout.
         """
-        if self._worker_loading or self._model_loaded:
+        if self._shutdown_event.is_set() or self._worker_loading or self._model_loaded:
             return
         self._worker_loading = True
 
         def _warmup() -> None:
             try:
                 for attempt in range(1, _WARMUP_MAX_ATTEMPTS + 1):
-                    if self._model_loaded:
+                    if self._shutdown_event.is_set() or self._model_loaded:
                         return
                     try:
                         self._ensure_worker()
@@ -206,7 +208,10 @@ class CrossEncoderReranker:
                         )
 
                     if attempt < _WARMUP_MAX_ATTEMPTS and not self._model_loaded:
-                        time.sleep(min(_WARMUP_RETRY_BACKOFF_S * attempt, 15.0))
+                        if self._shutdown_event.wait(
+                            min(_WARMUP_RETRY_BACKOFF_S * attempt, 15.0),
+                        ):
+                            return
 
                 if not self._model_loaded:
                     logger.warning(
@@ -231,7 +236,11 @@ class CrossEncoderReranker:
         """
         if self._model_loaded:
             return True
-        if not self._worker_loading and not self._model_loaded:
+        if (
+            not self._shutdown_event.is_set()
+            and not self._worker_loading
+            and not self._model_loaded
+        ):
             self._start_background_warmup()
         t = getattr(self, '_warmup_thread', None)
         if t is not None:
@@ -248,6 +257,8 @@ class CrossEncoderReranker:
         v3.4.13: Checks PID file before spawning — only ONE reranker worker
         can exist at a time on the machine.
         """
+        if self._shutdown_event.is_set():
+            return
         if self._worker_proc is not None and self._worker_proc.poll() is None:
             return
         self._worker_proc = None
@@ -327,6 +338,8 @@ class CrossEncoderReranker:
         falls back to fusion scores without reranking). This prevents
         concurrent recall requests from serialising on the lock.
         """
+        if self._shutdown_event.is_set():
+            return None
         effective_timeout = timeout or _SUBPROCESS_RESPONSE_TIMEOUT
 
         acquired = self._lock.acquire(blocking=block)
@@ -393,7 +406,7 @@ class CrossEncoderReranker:
             raise error_container[0]
         return result_container[0] if result_container else ""
 
-    def _kill_worker(self) -> None:
+    def _kill_worker(self, timeout: float = 3.0) -> None:
         """Terminate the worker and close every owned pipe exactly once."""
         if self._idle_timer is not None:
             self._idle_timer.cancel()
@@ -413,7 +426,7 @@ class CrossEncoderReranker:
             try:
                 proc.stdin.write('{"cmd":"quit"}\n')
                 proc.stdin.flush()
-                proc.wait(timeout=3)
+                proc.wait(timeout=max(0.0, timeout))
             except Exception:
                 try:
                     returncode = proc.poll()
@@ -422,7 +435,7 @@ class CrossEncoderReranker:
                 if returncode is None or not isinstance(returncode, int):
                     try:
                         proc.kill()
-                        proc.wait(timeout=3)
+                        proc.wait(timeout=max(0.0, timeout))
                     except Exception:
                         pass
             finally:
@@ -438,6 +451,8 @@ class CrossEncoderReranker:
 
     def _reset_idle_timer(self) -> None:
         """Reset idle timer — kills worker after 2 min inactivity."""
+        if self._shutdown_event.is_set():
+            return
         if self._idle_timer is not None:
             self._idle_timer.cancel()
         self._idle_timer = threading.Timer(
@@ -451,6 +466,16 @@ class CrossEncoderReranker:
         with self._lock:
             self._kill_worker()
             logger.info("CrossEncoderReranker: worker killed (idle timeout)")
+
+    def shutdown(self, timeout: float = 3.0) -> None:
+        """Cancel warmup, terminate the child, and join owned background work."""
+        shutdown_event = getattr(self, "_shutdown_event", None)
+        if shutdown_event is not None:
+            shutdown_event.set()
+        self._kill_worker(timeout=min(max(0.0, timeout), 1.0))
+        warmup_thread = getattr(self, "_warmup_thread", None)
+        if warmup_thread is not None and warmup_thread is not threading.current_thread():
+            warmup_thread.join(timeout=timeout)
 
     # ------------------------------------------------------------------
     # Public API
@@ -494,7 +519,7 @@ class CrossEncoderReranker:
         # this recall — it returns fallback now and full quality resumes within
         # seconds once the model is warm again.
         if not self._model_loaded:
-            if not self._worker_loading:
+            if not self._shutdown_event.is_set() and not self._worker_loading:
                 self._start_background_warmup()
             sorted_cands = sorted(candidates, key=lambda x: x[1], reverse=True)
             return sorted_cands[:top_k], False, "fallback_not_ready"
@@ -562,7 +587,7 @@ def _cleanup_all_rerankers() -> None:
         reranker = ref()
         if reranker is not None:
             try:
-                reranker._kill_worker()
+                reranker.shutdown()
             except Exception:
                 pass
     _live_rerankers.clear()

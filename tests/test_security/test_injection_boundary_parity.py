@@ -169,8 +169,6 @@ def test_session_init_bounds_context_and_marks_structured_memory_untrusted() -> 
             "superlocalmemory.mcp._pool_adapter.pool_recall",
             return_value=response,
         ),
-        patch("superlocalmemory.mcp.tools_active._register_agent"),
-        patch("superlocalmemory.mcp.tools_active._emit_event"),
     ):
         result = asyncio.run(server.tools["session_init"](query="release"))
 

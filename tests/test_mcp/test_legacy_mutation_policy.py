@@ -111,9 +111,9 @@ def test_active_core_pin_is_rejected_before_database_mutation() -> None:
     engine._db.set_pinned.assert_not_called()
 
 
-def test_session_agent_registration_is_rejected_before_registry_write() -> None:
-    from superlocalmemory.mcp.tools_active import register_active_tools
+def test_session_init_is_pure_read_even_when_mutation_policy_rejects() -> None:
     from superlocalmemory.mcp._pool_adapter import PoolRecallResponse
+    from superlocalmemory.mcp.tools_active import register_active_tools
 
     engine = _engine()
     engine._adaptive_learner.get_feedback_count.return_value = 0
@@ -129,10 +129,9 @@ def test_session_agent_registration_is_rejected_before_registry_write() -> None:
             "superlocalmemory.mcp._pool_adapter.pool_recall",
             return_value=PoolRecallResponse(),
         ),
-        patch("superlocalmemory.core.registry.AgentRegistry") as registry,
-        patch("superlocalmemory.mcp.tools_active._emit_event"),
     ):
         result = asyncio.run(tool(project_path="/project"))
 
-    assert result["success"] is False
-    registry.return_value.register_agent.assert_not_called()
+    assert result["success"] is True
+    engine._hooks.run_pre.assert_not_called()
+    engine._hooks.run_post.assert_not_called()

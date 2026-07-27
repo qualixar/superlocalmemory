@@ -20,6 +20,41 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+class _RememberRuntime:
+    """Small canonical writer double for HTTP authorization contracts."""
+
+    def __init__(self) -> None:
+        self.calls = []
+        self.scope_calls = []
+        self.ready = True
+
+    def remember(self, admission, actor, *, deadline_ms):
+        from superlocalmemory.core.remember_admission import RememberReceipt
+
+        self.calls.append((admission, actor, deadline_ms))
+        return RememberReceipt({
+            "operation_id": "rbac-remember-operation",
+            "pending_id": "rbac-remember-operation",
+            "fact_ids": ["rbac-remember-fact"],
+            "materialization_state": "queryable",
+            "commit_sequence": 1,
+        })
+
+    def set_fact_scope(
+        self,
+        profile_id,
+        fact_id,
+        scope,
+        shared_with,
+        *,
+        idempotency_key,
+    ):
+        self.scope_calls.append(
+            (profile_id, fact_id, scope, shared_with, idempotency_key)
+        )
+        return {"ok": True}
+
+
 def _daemon_headers(app) -> dict[str, str]:
     d = app.state.daemon_descriptor
     return {
@@ -147,6 +182,174 @@ def test_require_login_blocks_owner_data_but_not_manage(client):
     # ...but owner can STILL administer (MANAGE) — no dashboard lockout.
     ru = tc.get("/api/rbac/users", headers=h)
     assert ru.status_code == 200, ru.text
+
+
+def test_remember_requires_write_before_hook_or_journal(client, monkeypatch):
+    """A viewer cannot enter /remember's hook or durable write path."""
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "remember-viewer", "password": "password-1234",
+              "role": "viewer"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {
+        user["username"]: user["user_id"] for user in rbac.list_users()
+    }["remember-viewer"]
+    runtime = _RememberRuntime()
+    tc.app.state.canonical_remember_runtime = runtime
+    pre_hooks = []
+    monkeypatch.setattr(
+        tc.app.state.engine._hooks,
+        "run_pre",
+        lambda *args, **kwargs: pre_hooks.append((args, kwargs)),
+    )
+
+    response = tc.post(
+        "/remember",
+        json={"content": "viewer must not write"},
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+
+    assert response.status_code == 403, response.text
+    assert pre_hooks == []
+    assert runtime.calls == []
+
+
+def test_remember_requires_login_but_allows_authorized_write(client):
+    """Company mode requires a session; an authorized member can remember."""
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "remember-member", "password": "password-1234",
+              "role": "member"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {
+        user["username"]: user["user_id"] for user in rbac.list_users()
+    }["remember-member"]
+    runtime = _RememberRuntime()
+    tc.app.state.canonical_remember_runtime = runtime
+    rbac.set_require_login(True)
+
+    unauthenticated = tc.post(
+        "/remember", json={"content": "company mode requires login"}, headers=h,
+    )
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert runtime.calls == []
+
+    authorized = tc.post(
+        "/remember",
+        json={"content": "member write is authorized"},
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+    assert authorized.status_code == 200, authorized.text
+    assert len(runtime.calls) == 1
+
+
+def test_remember_shared_scope_requires_share_permission(client, monkeypatch):
+    """Cross-profile visibility cannot be created by a write-only principal."""
+    from superlocalmemory.access.rbac import Permission
+
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={"username": "write-only-member", "password": "password-1234",
+              "role": "member"},
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {
+        user["username"]: user["user_id"] for user in rbac.list_users()
+    }["write-only-member"]
+    runtime = _RememberRuntime()
+    tc.app.state.canonical_remember_runtime = runtime
+    monkeypatch.setattr(
+        rbac,
+        "has_permission",
+        lambda _user_id, _profile_id, permission: permission == Permission.WRITE,
+    )
+
+    response = tc.post(
+        "/remember",
+        json={
+            "content": "write-only principal cannot share",
+            "scope": "shared",
+            "shared_with": ["another-profile"],
+        },
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+
+    assert response.status_code == 403, response.text
+    assert runtime.calls == []
+
+
+@pytest.mark.parametrize(
+    ("scope", "shared_with"),
+    (("shared", ["another-profile"]), ("global", [])),
+)
+def test_scope_update_requires_share_before_hook_or_write(
+    client,
+    monkeypatch,
+    scope,
+    shared_with,
+):
+    """WRITE alone cannot expand an existing fact's visibility."""
+    from superlocalmemory.access.rbac import Permission
+
+    tc, h = client
+    tc.post(
+        "/api/rbac/users",
+        json={
+            "username": f"scope-{scope}-writer",
+            "password": "password-1234",
+            "role": "member",
+        },
+        headers=h,
+    )
+    rbac = tc.app.state.rbac
+    user_id = {
+        user["username"]: user["user_id"] for user in rbac.list_users()
+    }[f"scope-{scope}-writer"]
+    runtime = _RememberRuntime()
+    tc.app.state.canonical_remember_runtime = runtime
+    pre_hooks = []
+    monkeypatch.setattr(
+        rbac,
+        "has_permission",
+        lambda _user_id, _profile_id, permission: permission == Permission.WRITE,
+    )
+    monkeypatch.setattr(
+        tc.app.state.engine._hooks,
+        "run_pre",
+        lambda *args, **kwargs: pre_hooks.append((args, kwargs)),
+    )
+
+    response = tc.patch(
+        "/api/memories/existing-fact/scope",
+        json={"scope": scope, "shared_with": shared_with},
+        headers={**h, "X-SLM-User-Session": rbac.create_session(user_id)},
+    )
+
+    assert response.status_code == 403, response.text
+    assert pre_hooks == []
+    assert runtime.scope_calls == []
+
+
+def test_remember_keeps_personal_mode_owner_write(client):
+    """The daemon capability remains sufficient for a local personal install."""
+    tc, h = client
+    runtime = _RememberRuntime()
+    tc.app.state.canonical_remember_runtime = runtime
+
+    response = tc.post(
+        "/remember", json={"content": "personal mode owner write"}, headers=h,
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(runtime.calls) == 1
 
 
 @pytest.mark.parametrize(

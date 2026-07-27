@@ -9,8 +9,9 @@ and pass after implementation (GREEN).
 
 from __future__ import annotations
 
-import pytest
+from types import SimpleNamespace
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Parametrized unit tests for is_loopback
@@ -75,8 +76,29 @@ def test_is_loopback_rejects_none() -> None:
     assert is_loopback(None) is False  # type: ignore[arg-type]
 
 
-def test_import_time_assertion_fires() -> None:
-    """The module must export is_loopback and import without error."""
+def test_is_loopback_normalizes_mapped_ipv4_when_stdlib_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mapped IPv4 loopback remains local on Python versions that misreport it.
+
+    Some supported CPython builds report ``False`` for the IPv6 address's
+    ``is_loopback`` property even though its embedded IPv4 address is in
+    127.0.0.0/8.  The application contract, rather than that implementation
+    detail, decides whether a peer is local.
+    """
+    from superlocalmemory.server import loopback as lb
+
+    mapped = SimpleNamespace(
+        is_loopback=False,
+        ipv4_mapped=SimpleNamespace(is_loopback=True),
+    )
+    monkeypatch.setattr(lb._ipa, "ip_address", lambda _host: mapped)
+
+    assert lb.is_loopback("::ffff:127.0.0.1") is True
+
+
+def test_module_exports_loopback_predicate() -> None:
+    """The module exports a callable loopback predicate without import-time guards."""
     from superlocalmemory.server import loopback as lb
 
     assert hasattr(lb, "is_loopback"), "is_loopback must be exported"

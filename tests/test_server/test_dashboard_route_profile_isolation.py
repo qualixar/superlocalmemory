@@ -25,6 +25,24 @@ from fastapi.testclient import TestClient
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+_CANONICAL_RUNTIMES = []
+
+
+def _attach_canonical_runtime(app, engine) -> None:
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+    from superlocalmemory.storage.migrations import (
+        M018_ingestion_operations,
+        M032_write_coordinator_admission,
+    )
+
+    with engine._db.raw_connection() as conn:
+        M018_ingestion_operations.apply(conn)
+        M032_write_coordinator_admission.apply(conn)
+    runtime = CanonicalRememberRuntime.for_engine(engine)
+    runtime.start()
+    app.state.canonical_remember_runtime = runtime
+    _CANONICAL_RUNTIMES.append(runtime)
+
 
 @pytest.fixture(autouse=True)
 def _fresh_worker_pool_mock(monkeypatch):
@@ -43,7 +61,9 @@ def _fresh_worker_pool_mock(monkeypatch):
     fresh = MagicMock()
     fresh.recall.return_value = {"ok": True, "results": [], "count": 0}
     monkeypatch.setattr(WorkerPool, "shared", staticmethod(lambda: fresh))
-    return fresh
+    yield fresh
+    while _CANONICAL_RUNTIMES:
+        _CANONICAL_RUNTIMES.pop().stop()
 
 
 def _add_profile(engine, profile_id: str) -> None:
@@ -90,6 +110,7 @@ def test_chat_recall_isolates_across_profile_switch(
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     client = TestClient(app)
     headers = _daemon_headers(app)
 
@@ -208,6 +229,7 @@ def test_memory_facts_route_isolates_across_profile_switch(
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     client = TestClient(app)
     headers = _daemon_headers(app)
 

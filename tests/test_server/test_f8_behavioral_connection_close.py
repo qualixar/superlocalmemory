@@ -17,8 +17,6 @@ from __future__ import annotations
 import sqlite3
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from superlocalmemory.server.routes import behavioral
 
 
@@ -32,7 +30,10 @@ def test_f8_connection_closed_after_execute_raises() -> None:
 
     with patch("superlocalmemory.server.routes.behavioral.get_active_profile",
                return_value="work"), \
-         patch("sqlite3.connect", return_value=mock_conn):
+         patch(
+             "superlocalmemory.server.routes.behavioral.ReadConnectionFactory.open",
+             return_value=mock_conn,
+         ):
         result = behavioral.get_assertions()
 
     assert closed, (
@@ -61,7 +62,10 @@ def test_f8_connection_closed_on_success() -> None:
 
     with patch("superlocalmemory.server.routes.behavioral.get_active_profile",
                return_value="work"), \
-         patch("sqlite3.connect", return_value=mock_conn):
+         patch(
+             "superlocalmemory.server.routes.behavioral.ReadConnectionFactory.open",
+             return_value=mock_conn,
+         ):
         result = behavioral.get_assertions()
 
     assert closed, (

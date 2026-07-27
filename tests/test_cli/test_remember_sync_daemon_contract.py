@@ -61,5 +61,5 @@ def test_sync_remember_timeout_never_falls_back_to_unbounded_local_engine(
 
     assert stopped.value.code == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["error"]["code"] == "SYNC_TIMEOUT"
-
+    assert payload["error"]["code"] == "DAEMON_UNAVAILABLE"
+    assert payload["error"]["retryable"] is True

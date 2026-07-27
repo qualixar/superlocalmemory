@@ -12,7 +12,6 @@ Uses V3 learning modules: FeedbackCollector, EngagementTracker, AdaptiveLearner.
 import logging
 import shutil
 import sqlite3
-from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +29,7 @@ from .learning_telemetry import (
 from .learning_telemetry import (
     sqlite_status as _sqlite_status,
 )
+from superlocalmemory.storage.memory_write import memory_read
 
 logger = logging.getLogger("superlocalmemory.routes.learning")
 router = APIRouter()
@@ -667,12 +667,9 @@ def get_patterns():
 
     # Graph intelligence contribution to learning (v3.4.1)
     try:
-        import sqlite3 as _sqlite3
-
         from superlocalmemory.server.routes.helpers import DB_PATH
         if DB_PATH.exists():
-            with closing(_sqlite3.connect(str(DB_PATH))) as conn:
-                conn.row_factory = _sqlite3.Row
+            with memory_read(DB_PATH) as conn:
                 row = conn.execute(
                     "SELECT COUNT(*) AS cnt, "
                     "COUNT(DISTINCT community_id) AS communities, "

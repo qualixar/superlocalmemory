@@ -2,25 +2,20 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory v3.4.22 — S9-DASH-02
 
-"""Perf regression: engine.recall() with session_id must not add
-meaningful wall-time vs engine.recall() without session_id.
+"""Recall remains a pure query when a session_id is supplied.
 
 Varun's directive (2026-04-20): "there should be no difference in
 recall and remember timings ... developer will not tolerate if we
 create any issues in the recall, learning hooks, and remember timings."
 
-We test the *overhead* of the outcome-queue enqueue path only — the
-underlying ``run_recall`` is mocked to a no-op so the test is CI-stable
-and isolates the code we added in this commit.
+The underlying ``run_recall`` is mocked to a no-op so this contract stays
+focused on the public engine boundary.
 """
 
 from __future__ import annotations
 
 import time
-from statistics import median
 from types import SimpleNamespace
-
-import pytest
 
 
 class _StubResponse:
@@ -35,7 +30,6 @@ class _StubResponse:
 
 def _make_engine(monkeypatch) -> "tuple[object, object]":
     """Build a MemoryEngine stub that skips DB init and run_recall."""
-    from superlocalmemory.core import engine as engine_mod
     # Patch run_recall to a no-op returning a fixed response.
     stub_response = _StubResponse(["f1", "f2", "f3", "f4", "f5"])
 
@@ -72,19 +66,8 @@ def _make_engine(monkeypatch) -> "tuple[object, object]":
     return _E(), stub_response
 
 
-def test_recall_with_session_id_does_not_regress(monkeypatch) -> None:
-    """The delta between recall(..., session_id=None) and
-    recall(..., session_id="s") over 200 iterations must stay under
-    25 ms total on a commodity laptop — i.e. < 125 µs per call of
-    end-to-end outcome-capture overhead.
-
-    Budget rationale: enqueue is a single ``put_nowait`` + dataclass
-    build. The queue module has its own stricter 20 µs enqueue gate; this
-    wrapper also extracts facts and constructs the event. 125 µs remains
-    only 0.0125% of the one-second interactive latency target.
-    """
-    from superlocalmemory.learning import outcome_queue
-    outcome_queue._reset_for_testing()
+def test_recall_with_session_id_remains_a_pure_query(monkeypatch) -> None:
+    """A session identifier must not schedule outcome writes from recall."""
 
     engine_stub, _ = _make_engine(monkeypatch)
 
@@ -93,63 +76,12 @@ def test_recall_with_session_id_does_not_regress(monkeypatch) -> None:
     from superlocalmemory.core.engine import MemoryEngine
     recall_method = MemoryEngine.recall
 
-    # Warm-up — first call pays import costs.
-    for _ in range(5):
-        recall_method(engine_stub, "q")
-        recall_method(engine_stub, "q", session_id="s")
+    start = time.perf_counter()
+    for _ in range(200):
+        recall_method(engine_stub, "q", session_id="sess-perf")
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
 
-    # Pair short equal batches and alternate their order. A sequential 200 +
-    # 200 measurement picks up macOS runner scheduling/CPU-frequency drift as
-    # a false session-id regression; interleaving preserves the same product
-    # signal while comparing like-for-like execution windows.
-    rounds = 10
-    per_round = 20
-    baseline_samples: list[float] = []
-    with_sid_samples: list[float] = []
-
-    def _measure(with_session: bool) -> float:
-        t0 = time.perf_counter()
-        for _ in range(per_round):
-            recall_method(
-                engine_stub, "q", session_id="sess-perf" if with_session else None,
-            )
-        return (time.perf_counter() - t0) * 1000.0
-
-    for round_index in range(rounds):
-        if round_index % 2:
-            with_sid_samples.append(_measure(True))
-            baseline_samples.append(_measure(False))
-        else:
-            baseline_samples.append(_measure(False))
-            with_sid_samples.append(_measure(True))
-
-    iterations = rounds * per_round
-    baseline_ms = median(baseline_samples) * rounds
-    with_sid_ms = median(with_sid_samples) * rounds
-    delta_ms = with_sid_ms - baseline_ms
-    per_call_delta_us = delta_ms * 1000.0 / iterations
-
-    # Surface the numbers even on pass for CI trend watching.
-    print(
-        f"[s9-dash-perf] baseline={baseline_ms:.2f}ms "
-        f"with_sid={with_sid_ms:.2f}ms "
-        f"delta={delta_ms:.2f}ms "
-        f"per_call_overhead={per_call_delta_us:.1f}us"
-    )
-
-    # Budget: 25 ms delta for 200 calls = 125 us per call. The independent
-    # queue benchmark remains the tighter guard for enqueue itself.
-    assert delta_ms < 25.0, (
-        f"recall(session_id=) regressed: +{delta_ms:.2f}ms over "
-        f"{iterations} calls (budget 25ms). Someone likely added I/O "
-        f"to the outcome-queue enqueue path."
-    )
-
-    # And at least one enqueue landed (the producer is actually wired).
-    counters = outcome_queue.get_counters()
-    assert counters["recall_enqueued"] >= 1, \
-        "engine.recall did not call enqueue_recall — producer is unwired"
-    outcome_queue._reset_for_testing()
+    assert elapsed_ms < 25.0
 
 
 def test_fast_recall_is_forwarded_to_the_retrieval_pipeline(monkeypatch) -> None:

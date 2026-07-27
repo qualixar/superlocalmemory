@@ -139,6 +139,11 @@ def pytest_sessionfinish(session, exitstatus):
         _cleanup_all_rerankers()
     except Exception:
         pass
+    try:
+        from superlocalmemory.storage.deferred_writes import shutdown_deferred_writes
+        shutdown_deferred_writes()
+    except Exception:
+        pass
     # Join any SLM daemon threads to prevent Windows KeyboardInterrupt on exit
     import threading
     for t in threading.enumerate():
@@ -244,6 +249,11 @@ def cleanup_slm_workers_between_tests():
     try:
         from superlocalmemory.retrieval.reranker import _cleanup_all_rerankers
         _cleanup_all_rerankers()
+    except Exception:
+        pass
+    try:
+        from superlocalmemory.storage.deferred_writes import shutdown_deferred_writes
+        shutdown_deferred_writes()
     except Exception:
         pass
 

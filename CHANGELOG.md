@@ -5,6 +5,40 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.6] - 2026-07-27 — Serialized writes and read-only recall
+
+### Fixed
+- Remember requests and dashboard fact mutations now enter one bounded,
+  priority-aware coordinator. Durable idempotency receipts make retries safe,
+  while accepted admissions survive daemon interruption and replay once.
+- Recall paths now use query-only SQLite connections and no longer update
+  diagnostics, bandit state, access counters, or other canonical tables.
+- Dashboard, CLI, and MCP mutations use the running daemon instead of opening
+  competing writable engines. When the daemon is unavailable, writes fail
+  explicitly instead of silently switching to another database path.
+- Mode and profile changes rebind the canonical writer before the new runtime
+  is exposed, and roll back cleanly when persistence fails.
+- Stuck background enrichment work is moved to a bounded failed/dead-letter
+  state instead of retrying forever (#77).
+- Daemon shutdown now closes deferred writers and terminates embedding and
+  reranker workers within bounded time, including Mode B container deployments
+  (#91).
+- CozoDB now installs on Linux ARM64 by using the current embedded wheel series.
+
+### Added
+- A separate authenticated admission journal protects accepted remember
+  requests before canonical SQLite work begins.
+- Runtime readiness now distinguishes full retrieval readiness from degraded
+  or warming operation without breaking existing status clients.
+- Concurrency regression coverage for duplicate remember requests, foreground
+  priority, read-only recall, legacy writer coexistence, mode/profile isolation,
+  and bounded child-process shutdown.
+
+### Notes
+- Upgrades apply automatically on daemon start; no manual migration is needed.
+- Existing memory databases are preserved. The new coordinator ledger and
+  admission journal are additive.
+
 ## [3.8.5] - 2026-07-26 — Reliable, full-quality recall
 
 ### Fixed

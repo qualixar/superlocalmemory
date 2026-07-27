@@ -73,10 +73,8 @@ def test_daemon_fallback_logs_warning_on_exception(caplog) -> None:
             "superlocalmemory.server.recall_serializer.recall_response_metadata",
             return_value={"results": [], "no_confident_match": True},
         ):
-            try:
+            with pytest.raises(SystemExit):
                 cmd_recall(_minimal_args())
-            except Exception:
-                pass  # We only care about the log, not the exit path
 
     warning_records = [
         r for r in caplog.records
@@ -113,10 +111,8 @@ def test_daemon_fallback_includes_exception_text(caplog) -> None:
             "superlocalmemory.server.recall_serializer.recall_response_metadata",
             return_value={"results": [], "no_confident_match": True},
         ):
-            try:
+            with pytest.raises(SystemExit):
                 cmd_recall(_minimal_args())
-            except Exception:
-                pass
 
     all_messages = " ".join(r.message for r in caplog.records)
     assert sentinel in all_messages, (

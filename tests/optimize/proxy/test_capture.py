@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,33 @@ from superlocalmemory.optimize.proxy.capture import (
 )
 from superlocalmemory.optimize.proxy.lifecycle import HookChain
 from superlocalmemory.optimize.proxy.server import ProxyApp, _load_hooks, build_proxy_router
+
+
+def _assert_capture_file_owner_only(path: Path) -> None:
+    """Assert the platform's actual owner-only capture-file contract."""
+    if os.name != "nt":
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o600
+        return
+
+    owner = subprocess.run(
+        ["whoami"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    acl = subprocess.run(
+        ["icacls", os.fspath(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    # The implementation removes inherited ACEs and grants full control only
+    # to the current Windows identity.  ``os.stat`` permission bits do not
+    # represent NTFS DACLs, so inspect the live ACL rather than pretending it
+    # is POSIX mode 0600.
+    assert owner.casefold() in acl.casefold()
+    assert "(I)" not in acl
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +101,10 @@ class TestExtractUsage:
         assert extract_usage("openai", body) == (7, 3, "gpt-x")
 
     def test_gemini(self) -> None:
-        body = b'{"modelVersion":"gemini-2","usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4}}'
+        body = (
+            b'{"modelVersion":"gemini-2",'
+            b'"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4}}'
+        )
         assert extract_usage("gemini", body) == (9, 4, "gemini-2")
 
     def test_gemini_openai_compat_uses_openai_fields(self) -> None:
@@ -119,9 +150,8 @@ class TestShadowCaptureRecord:
 
     def test_file_created_0600(self, tmp_path: Path) -> None:
         cap = ShadowCapture(path=tmp_path / "cap.jsonl")
-        cap.record({"x": 1})
-        mode = stat.S_IMODE(os.stat(tmp_path / "cap.jsonl").st_mode)
-        assert mode == 0o600
+        assert cap.record({"x": 1}) is True
+        _assert_capture_file_owner_only(tmp_path / "cap.jsonl")
 
     def test_creates_parent_dir(self, tmp_path: Path) -> None:
         cap = ShadowCapture(path=tmp_path / "nested" / "deep" / "cap.jsonl")
@@ -158,8 +188,29 @@ class TestShadowCaptureRecord:
         cap.record({"a": 1})
         cap.record({"b": 2})
         cap.record({"c": 3})
-        mode = stat.S_IMODE(os.stat(tmp_path / "cap.jsonl").st_mode)
-        assert mode == 0o600
+        _assert_capture_file_owner_only(tmp_path / "cap.jsonl")
+
+    def test_windows_capture_applies_owner_only_dacl_before_writing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The Windows path issues an explicit non-inheriting owner ACL."""
+        cap = ShadowCapture(path=tmp_path / "cap.jsonl")
+        calls: list[list[str]] = []
+
+        def _run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(command)
+            stdout = "DOMAIN\\capture-user\n" if command[0] == "whoami" else ""
+            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(capture_mod, "_is_windows", lambda: True)
+        monkeypatch.setattr(capture_mod.subprocess, "run", _run)
+
+        assert cap.record({"x": 1}) is True
+        assert calls[0] == ["whoami"]
+        assert calls[1] == [
+            "icacls", os.fspath(cap.path), "/inheritance:r", "/grant:r",
+            "DOMAIN\\capture-user:(F)",
+        ]
 
     def test_symlink_at_path_is_refused(self, tmp_path: Path) -> None:
         # Audit fix LOW-2: O_NOFOLLOW refuses a pre-placed symlink (symlink-append).

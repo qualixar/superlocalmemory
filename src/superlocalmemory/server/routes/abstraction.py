@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
+from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile, get_read_connection
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +45,7 @@ class _ReadDB:
 def _conn() -> sqlite3.Connection | None:
     if not DB_PATH.exists():
         return None
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_read_connection(DB_PATH)
 
 
 @router.get("/persona")

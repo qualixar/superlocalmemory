@@ -383,6 +383,18 @@ def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> No
         new_engine.close()
         raise
 
+    canonical_remember = getattr(
+        application.state,
+        "canonical_remember_runtime",
+        None,
+    )
+    if canonical_remember is not None:
+        try:
+            canonical_remember.rebind_engine(new_engine)
+        except BaseException:
+            new_engine.close()
+            raise
+
     # The profile transition barrier is exclusive here. Publish every
     # long-lived reference before closing the former engine.
     application.state.engine = new_engine
@@ -1205,6 +1217,25 @@ async def _cancel_source_quality_repair(application) -> None:
         pass
 
 
+def _release_canonical_remember_runtime(application, runtime=None) -> bool:
+    """Release the writer lease without discarding a still-running runtime."""
+    runtime = (
+        runtime
+        if runtime is not None
+        else getattr(application.state, "canonical_remember_runtime", None)
+    )
+    if runtime is None:
+        return True
+    try:
+        runtime.stop()
+    except Exception as exc:  # pragma: no cover - cleanup must continue
+        logger.warning("canonical remember writer shutdown failed: %s", exc)
+        return False
+    if getattr(application.state, "canonical_remember_runtime", None) is runtime:
+        application.state.canonical_remember_runtime = None
+    return True
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -1212,6 +1243,7 @@ async def lifespan(application: FastAPI):
 
     engine = None
     config = None
+    canonical_remember_runtime = None
 
     # The local dashboard obtains its short-lived browser credential from
     # ``/internal/token`` before its first write or token-gated read.  A
@@ -1326,6 +1358,17 @@ async def lifespan(application: FastAPI):
         config = SLMConfig.load()
         engine = MemoryEngine(config)
         engine.initialize()
+
+        # 3.8.6 canonical remember boundary. Migrations have already created
+        # the immutable receipt ledger and engine init has created the runtime
+        # tables. Claim the daemon's writer lease, install the typed admission
+        # handler, and replay crash-surviving journal entries *before* any
+        # background writer or ready descriptor is published.
+        from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+
+        canonical_remember_runtime = CanonicalRememberRuntime.for_engine(engine)
+        canonical_remember_runtime.start()
+        application.state.canonical_remember_runtime = canonical_remember_runtime
 
         # WAL is already established at DB creation (DatabaseManager._enable_wal
         # / schema init). Re-asserting PRAGMA journal_mode=WAL here is a
@@ -1872,6 +1915,9 @@ async def lifespan(application: FastAPI):
 
     except Exception:
         logger.exception("Engine init failed")  # auto-includes traceback
+        _release_canonical_remember_runtime(
+            application, canonical_remember_runtime,
+        )
         application.state.engine = None
         application.state.config = None
 
@@ -2292,9 +2338,10 @@ async def lifespan(application: FastAPI):
         logger.warning("perf_log flush failed: %s", exc)
 
     materializer_stopped = _stop_pending_materializer()
+    canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None
     _engine = None
-    if engine is not None and materializer_stopped:
+    if engine is not None and materializer_stopped and canonical_writer_stopped:
         try:
             engine.close()
         except Exception:
@@ -2304,7 +2351,8 @@ async def lifespan(application: FastAPI):
         # object still owned by an admitted background operation; OS process
         # teardown is safer than racing that writer with engine.close().
         logger.warning(
-            "Engine close deferred because pending materializer is still active"
+            "Engine close deferred because a write-capable background component "
+            "is still active"
         )
     _cleanup_process_descriptor(
         getattr(application.state, "daemon_descriptor", None),
@@ -3087,6 +3135,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
     @application.get("/health")
     async def health(request: Request = None):
         _update_activity()
+        try:
+            from superlocalmemory.server.recall_health import get_recall_health
+
+            recall_health = get_recall_health()
+        except Exception:
+            recall_health = {"recall_healthy": None}
         # Non-blocking peek: report status without forcing a re-init.
         engine = getattr(application.state, "engine", None)
         migration_result = getattr(application.state, "migration_result", None)
@@ -3097,24 +3151,40 @@ def _register_daemon_routes(application: FastAPI) -> None:
         migrations_ready = bool(migration_result) and not migration_failures
         if migration_details.get("_crash"):
             migrations_ready = False
+        writer_runtime = getattr(
+            application.state,
+            "canonical_remember_runtime",
+            None,
+        )
         readiness = {
             "engine": engine is not None,
             "migrations": migrations_ready,
-            "retrieval": bool(_embedding_warm),
+            "writer": bool(
+                writer_runtime is not None
+                and getattr(writer_runtime, "ready", False)
+            ),
+            "embedding": bool(_embedding_warm),
+            "recall_health": recall_health.get("recall_healthy") is True,
             "migration_failures": migration_failures,
         }
-        base_ready = all((readiness["engine"], readiness["migrations"]))
-        fully_ready = base_ready and readiness["retrieval"]
-        runtime_state = (
-            "ready" if fully_ready else "warming" if base_ready else "not_ready"
+        readiness["retrieval"] = bool(
+            readiness["embedding"] and readiness["recall_health"]
         )
-        # v3.6.8: surface the recall-health verdict so a silently-degraded
-        # recall path (warm-but-broken embedder) is VISIBLE, never silent.
-        try:
-            from superlocalmemory.server.recall_health import get_recall_health
-            _recall_health = get_recall_health()
-        except Exception:
-            _recall_health = {"recall_healthy": None}
+        base_ready = all((
+            readiness["engine"],
+            readiness["migrations"],
+            readiness["writer"],
+        ))
+        fully_ready = base_ready and readiness["retrieval"]
+        if fully_ready:
+            runtime_state = "serving_full"
+        elif base_ready and readiness["embedding"]:
+            runtime_state = "serving_degraded"
+        elif base_ready:
+            runtime_state = "warming"
+        else:
+            runtime_state = "not_ready"
+        lifecycle_state = "ready" if base_ready else "starting"
         identity = getattr(application.state, "daemon_descriptor", None)
         from superlocalmemory.server.profile_runtime import get_profile_runtime
 
@@ -3129,7 +3199,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "ready": fully_ready,
             # Runtime readiness is more precise than descriptor lifecycle.
             # A process can be alive and identity-valid while retrieval warms.
-            "state": runtime_state,
+            "state": lifecycle_state,
+            "runtime_state": runtime_state,
             "version": getattr(application, 'version', 'unknown'),
         }
         # request is None only for direct internal/test calls (no HTTP client),
@@ -3157,12 +3228,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "embedding_warm": _embedding_warm,
             # v3.6.8: True iff the semantic channel actually fired on the last
             # health probe; includes self-heal counters.
-            "recall_health": _recall_health,
+            "recall_health": recall_health,
             **(identity.public_health_fields() if identity is not None else {}),
-            # runtime_state must come AFTER the identity spread so the live
-            # readiness state wins over the descriptor's last-known lifecycle
-            # value (which can be "starting").
-            "state": runtime_state,
+            # Lifecycle state remains backward compatible for daemon
+            # discovery; channel degradation is exposed separately.
+            "state": lifecycle_state,
+            "runtime_state": runtime_state,
             "active_profile": profile_snapshot.profile_id,
             "profile_generation": profile_snapshot.generation,
         }
@@ -3327,11 +3398,11 @@ def _register_daemon_routes(application: FastAPI) -> None:
         request: Request,
         wait: bool = False,
     ):
-        """Persist through the durable canonical ingestion state machine.
+        """Journal and commit a bounded, immediately-queryable receipt.
 
-        The default path returns after the relational/FTS projection is
-        queryable.  ``wait=true`` materializes the same operation inline; the
-        background worker handles all other queryable operations.
+        ``wait`` remains accepted for compatibility, but never permits inline
+        enrichment on this path. The daemon materializer owns all model, graph,
+        vector, and post-hook work after this response.
         """
         trusted_actor_id = _require_write_actor(request)
         _update_activity()
@@ -3344,14 +3415,29 @@ def _register_daemon_routes(application: FastAPI) -> None:
         scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
         shared_with = req.shared_with
 
+        # Keep the daemon compatibility route behind the exact RBAC/session
+        # boundary used by dashboard mutations. Machine authentication proves
+        # the caller may reach this daemon; WRITE permission proves the
+        # authenticated dashboard user may mutate this profile. This must run
+        # before either the trust pre-hook or the durable admission journal.
+        from superlocalmemory.access.rbac import Permission
+        from superlocalmemory.server.rbac_enforce import require_permission
+
+        require_permission(request, Permission.WRITE, profile=engine._profile_id)
+        if scope in {"shared", "global"}:
+            require_permission(request, Permission.SHARE, profile=engine._profile_id)
+        runtime = getattr(application.state, "canonical_remember_runtime", None)
+        if runtime is None:
+            raise HTTPException(
+                503,
+                detail="canonical remember writer is not ready; retry shortly",
+            )
+
         try:
-            from superlocalmemory.core.engine_ingestion import (
-                build_engine_ingestion_command,
+            from superlocalmemory.core.remember_runtime import (
+                validate_deterministic_admission,
             )
-            from superlocalmemory.core.ingestion_command import (
-                IngestionRequest,
-                IngestionState,
-            )
+            from superlocalmemory.storage.admission_journal import Actor, RememberRequest
 
             meta = {}
             if req.tags:
@@ -3359,8 +3445,32 @@ def _register_daemon_routes(application: FastAPI) -> None:
             extra = getattr(req, "metadata", None)
             if isinstance(extra, dict):
                 meta.update(extra)
-            command = build_engine_ingestion_command(engine)
-            ingestion_request = IngestionRequest(
+
+            store_config = getattr(engine._config, "store", None)
+            validate_deterministic_admission(
+                req.content,
+                max_verbatim_chars=getattr(
+                    store_config,
+                    "max_verbatim_chars",
+                    24_000,
+                ),
+                max_ingest_bytes=getattr(
+                    store_config,
+                    "max_ingest_bytes",
+                    1_048_576,
+                ),
+            )
+
+            # Trust policy is intentionally outside both the journal and the
+            # coordinator transaction. It can reject or audit a caller, but
+            # cannot hold SQLite's sole writer while hooks do their work.
+            engine._hooks.run_pre("store", {
+                "operation": "store",
+                "agent_id": trusted_actor_id,
+                "profile_id": engine._profile_id,
+                "content_preview": req.content[:100],
+            })
+            admission = RememberRequest(
                 content=req.content,
                 profile_id=engine._profile_id,
                 source_type="http",
@@ -3371,93 +3481,63 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 trusted_actor_id=trusted_actor_id,
                 session_id=req.session_id,
             )
-            # SQLite admission is usually milliseconds, but it can wait on a
-            # concurrent migration or writer.  Keep that wait out of ASGI so
-            # dashboard navigation and recall stay responsive.
-            receipt = await asyncio.to_thread(command.submit, ingestion_request)
-            result = receipt
-            wait_budget_exhausted = False
-            if wait:
-                materialization_task = asyncio.create_task(
-                    asyncio.to_thread(command.materialize, receipt.operation_id)
-                )
-                try:
-                    result = await asyncio.wait_for(
-                        asyncio.shield(materialization_task),
-                        timeout=_REMEMBER_ENRICHMENT_WAIT_SECONDS,
-                    )
-                except TimeoutError:
-                    # The task retains the M018 lease and continues outside
-                    # this request.  Return the durable receipt honestly;
-                    # the normal materializer can also reclaim it after a
-                    # lease expiry if the request-owned worker dies.
-                    wait_budget_exhausted = True
-
-                    def _log_background_materialization(task):
-                        try:
-                            task.result()
-                        except Exception as exc:
-                            logger.warning(
-                                "bounded remember enrichment failed for %s: %s",
-                                receipt.operation_id,
-                                exc,
-                            )
-
-                    materialization_task.add_done_callback(
-                        _log_background_materialization
-                    )
-            fact_ids = list(result.fact_ids)
-            # The queryable write is a separate durable transaction.  A cold
-            # optional enrichment dependency (most often the local embedding
-            # worker) may need its bounded retry window, but must not turn an
-            # already-admitted fact into an HTTP 500.  Keep the operation's
-            # failed state truthful so the daemon materializer retries it; the
-            # response communicates that the fact is queryable, not complete.
-            enrichment_deferred = (
-                result.state is IngestionState.FAILED and bool(fact_ids)
+            actor = Actor(
+                principal_id=trusted_actor_id,
+                allowed_profiles=frozenset({engine._profile_id}),
+                allowed_scopes=frozenset({scope}),
             )
-            if result.state is IngestionState.FAILED and not enrichment_deferred:
-                raise RuntimeError(result.last_error or "materialization failed")
-            completed = result.state is IngestionState.COMPLETE
-            _emit_event(
-                "memory.stored" if completed else "memory.queued",
-                payload={
-                    "operation_id": result.operation_id,
-                    "fact_ids": fact_ids,
-                    "tags": req.tags or "",
-                    "content_preview": req.content[:120],
-                    "path": (
-                        "remember_sync"
-                        if completed
-                        else "remember_sync_deferred"
-                        if enrichment_deferred
-                        else "remember_queryable"
-                    ),
-                },
+            receipt = await asyncio.to_thread(
+                runtime.remember,
+                admission,
+                actor,
+                deadline_ms=2_000,
             )
+            payload = dict(receipt.payload)
+            fact_ids = list(payload.get("fact_ids") or [])
             return {
                 "ok": True,
                 "fact_ids": fact_ids,
                 "count": len(fact_ids),
-                "operation_id": result.operation_id,
+                "operation_id": payload["operation_id"],
                 # One-release compatibility alias. The durable operation ID is
                 # opaque and replaces the integer pending.db row identifier.
-                "pending_id": result.operation_id,
-                "status": "stored" if completed else "queryable",
-                "materialization_state": result.state.value,
-                "note": (
-                    "canonical ingestion complete"
-                    if completed
-                    else "queryable now; enrichment continues after the wait budget"
-                    if wait_budget_exhausted
-                    else "queryable now; canonical enrichment will retry"
-                    if enrichment_deferred
-                    else "queryable now; canonical enrichment pending"
-                ),
-                "wait_budget_exhausted": wait_budget_exhausted,
+                "pending_id": payload["pending_id"],
+                "status": "queryable",
+                "materialization_state": payload["materialization_state"],
+                "commit_sequence": payload.get("commit_sequence"),
+                "note": "queryable now; canonical enrichment continues in the background",
+                "wait_ignored": bool(wait),
             }
         except Exception as exc:
-            raise HTTPException(500, detail=str(exc))
+            from superlocalmemory.core.remember_admission import AdmissionRejected
+            from superlocalmemory.core.remember_runtime import CanonicalRememberUnavailable
+            from superlocalmemory.storage.admission_journal import (
+                AdmissionAuthorizationError,
+                AdmissionPayloadError,
+                IdempotencyConflict,
+            )
+
+            if isinstance(exc, CanonicalRememberUnavailable) or (
+                isinstance(exc, AdmissionRejected) and exc.retryable
+            ):
+                raise HTTPException(
+                    503,
+                    detail="canonical remember is temporarily unavailable; retry shortly",
+                ) from exc
+            if isinstance(exc, AdmissionRejected):
+                raise HTTPException(
+                    422,
+                    detail="remember admission was rejected by deterministic policy",
+                ) from exc
+            if isinstance(exc, (AdmissionAuthorizationError, PermissionError)):
+                raise HTTPException(403, detail="remember admission is not authorized") from exc
+            if isinstance(
+                exc,
+                (AdmissionPayloadError, IdempotencyConflict),
+            ):
+                raise HTTPException(422, detail=str(exc)) from exc
+            logger.exception("canonical remember admission failed")
+            raise HTTPException(500, detail="canonical remember admission failed") from exc
 
     @application.post("/observe")
     async def observe(req: ObserveRequest, request: Request):
@@ -3945,6 +4025,17 @@ def _materialize_ingestion_one_pass(
     from superlocalmemory.core.ingestion_command import IngestionState
 
     command = build_engine_ingestion_command(engine)
+    reap = getattr(command.repository, "reap_stuck_enriching", None)
+    try:
+        reaped = reap() if callable(reap) else []
+    except Exception as exc:
+        logger.warning("ingestion reaper failed; materializer pass continues: %s", exc)
+        reaped = []
+    if reaped:
+        logger.warning(
+            "Materializer terminalized %d exhausted ingestion operation(s)",
+            len(reaped),
+        )
     completed = failed = 0
     for operation in command.repository.list_materializable(
         limit=limit,

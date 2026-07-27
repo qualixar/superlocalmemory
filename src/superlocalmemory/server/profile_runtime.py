@@ -361,6 +361,13 @@ def commit_daemon_profile_switch(
         # Rebind the in-memory engine first, then make compatibility files the
         # final commit step so they can never lead daemon runtime truth.
         engine.profile_id = target_profile
+        canonical_remember = getattr(
+            app_state,
+            "canonical_remember_runtime",
+            None,
+        )
+        if canonical_remember is not None:
+            canonical_remember.rebind_engine(engine)
         if app_config is not None:
             app_config.active_profile = target_profile
         if engine_config is not None:
@@ -368,6 +375,13 @@ def commit_daemon_profile_switch(
         persistence = persist_active_profile(target_profile)
     except BaseException:
         engine.profile_id = previous.profile_id
+        canonical_remember = getattr(
+            app_state,
+            "canonical_remember_runtime",
+            None,
+        )
+        if canonical_remember is not None:
+            canonical_remember.rebind_engine(engine)
         if app_config is not None:
             app_config.active_profile = previous.profile_id
         if engine_config is not None:

@@ -153,7 +153,8 @@ class TestDaemonPoolProxy:
         proxy = DaemonPoolProxy(port=9999)
         out = proxy.recall("x")
         assert out["ok"] is False
-        assert "daemon closed" in out["error"]
+        assert out["code"] == "DAEMON_UNAVAILABLE"
+        assert out["retryable"] is True
 
     def test_store_returns_ok_false_on_http_error(self, monkeypatch):
         def _fake_urlopen(req, timeout=30):
@@ -182,20 +183,22 @@ class TestChoosePool:
         assert isinstance(pool, DaemonPoolProxy)
         assert pool._port == 9999
 
-    def test_falls_back_to_worker_pool_when_daemon_absent(self, monkeypatch):
+    def test_returns_retryable_proxy_when_daemon_absent(self, monkeypatch):
         import superlocalmemory.mcp._daemon_proxy as mod
-        from superlocalmemory.core.worker_pool import WorkerPool
-        monkeypatch.setattr(WorkerPool, "_instance", None)
         monkeypatch.setattr(
             "superlocalmemory.cli.daemon.is_daemon_running",
             lambda: False,
         )
+        monkeypatch.setattr(
+            "superlocalmemory.cli.daemon.ensure_daemon",
+            lambda: False,
+        )
         pool = mod.choose_pool()
-        assert not isinstance(pool, DaemonPoolProxy)
-    def test_falls_back_on_probe_exception(self, monkeypatch):
+        assert isinstance(pool, DaemonPoolProxy)
+        assert pool.store("x")["code"] == "DAEMON_UNAVAILABLE"
+
+    def test_returns_retryable_proxy_on_probe_exception(self, monkeypatch):
         import superlocalmemory.mcp._daemon_proxy as mod
-        from superlocalmemory.core.worker_pool import WorkerPool
-        monkeypatch.setattr(WorkerPool, "_instance", None)
 
         def _boom():
             raise RuntimeError("psutil exploded")
@@ -204,7 +207,8 @@ class TestChoosePool:
             _boom,
         )
         pool = mod.choose_pool()
-        assert not isinstance(pool, DaemonPoolProxy)
+        assert isinstance(pool, DaemonPoolProxy)
+        assert pool.store("x")["code"] == "DAEMON_UNAVAILABLE"
 
 
 # ---------------------------------------------------------------------------

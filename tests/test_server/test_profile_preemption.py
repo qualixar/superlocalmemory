@@ -54,7 +54,6 @@ from contextlib import contextmanager
 
 import pytest
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -64,6 +63,7 @@ def _add_profile(engine, profile_id: str) -> None:
         (profile_id, profile_id),
     )
     from superlocalmemory.server.routes.helpers import ensure_profile_in_json
+
     ensure_profile_in_json(profile_id)
 
 
@@ -76,9 +76,34 @@ def _daemon_headers(app) -> dict[str, str]:
 
 
 @contextmanager
+def _client_with_canonical_runtime(app, engine):
+    """Direct TestClient does not run lifespan, so own the writer explicitly."""
+    from fastapi.testclient import TestClient
+
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+    from superlocalmemory.storage.migrations import (
+        M018_ingestion_operations,
+        M032_write_coordinator_admission,
+    )
+
+    with engine._db.raw_connection() as conn:
+        M018_ingestion_operations.apply(conn)
+        M032_write_coordinator_admission.apply(conn)
+    canonical_runtime = CanonicalRememberRuntime.for_engine(engine)
+    canonical_runtime.start()
+    app.state.canonical_remember_runtime = canonical_runtime
+    try:
+        yield TestClient(app)
+    finally:
+        canonical_runtime.stop()
+        app.state.canonical_remember_runtime = None
+
+
+@contextmanager
 def _short_drain_timeout(secs: float = 0.3):
     """Temporarily shrink _DRAIN_TIMEOUT_SECS so timeout-path tests run fast."""
     import superlocalmemory.server.profile_runtime as _prt
+
     original = _prt._DRAIN_TIMEOUT_SECS
     _prt._DRAIN_TIMEOUT_SECS = secs
     try:
@@ -150,12 +175,9 @@ def test_operation_nowait_yields_none_when_transition_is_pending() -> None:
     with runtime.operation_nowait() as snap:
         elapsed = time.monotonic() - t0
         assert snap is None, (
-            f"Expected operation_nowait() to yield None when transitioning, "
-            f"got {snap!r}"
+            f"Expected operation_nowait() to yield None when transitioning, got {snap!r}"
         )
-        assert elapsed < 0.1, (
-            f"operation_nowait() took {elapsed:.3f}s — it must return immediately"
-        )
+        assert elapsed < 0.1, f"operation_nowait() took {elapsed:.3f}s — it must return immediately"
 
     # Clean up.
     release.set()
@@ -223,7 +245,6 @@ def test_cooperative_background_op_yields_and_switch_succeeds(
     GREEN: operation_nowait() is added → background op detects _transitioning
            and releases the lease → switch commits in <2.5s.
     """
-    from fastapi.testclient import TestClient
     from superlocalmemory.server.profile_runtime import bind_profile_runtime
     from superlocalmemory.server.unified_daemon import create_app
 
@@ -237,88 +258,90 @@ def test_cooperative_background_op_yields_and_switch_succeeds(
     app.state.engine = engine
     app.state.config = engine._config
     runtime = bind_profile_runtime(app.state, engine, engine._config)
-    client = TestClient(app)
-    headers = _daemon_headers(app)
+    with _client_with_canonical_runtime(app, engine) as client:
+        headers = _daemon_headers(app)
 
-    # Write a memory to the SOURCE profile so data isolation is verifiable.
-    stored = client.post(
-        "/remember?wait=true",
-        json={"content": "preemption-test-source-marker-6491"},
-        headers=headers,
-    )
-    assert stored.status_code == 200, stored.text
-    source_count = client.get("/status").json()["fact_count"]
-    assert source_count >= 1, "Source profile must have stored facts"
+        # Write a memory to the SOURCE profile so data isolation is verifiable.
+        stored = client.post(
+            "/remember?wait=true",
+            json={"content": "preemption-test-source-marker-6491"},
+            headers=headers,
+        )
+        assert stored.status_code == 200, stored.text
+        source_count = client.get("/status").json()["fact_count"]
+        assert source_count >= 1, "Source profile must have stored facts"
 
-    # --- Simulate a background maintenance op (health tick / warmup style) ---
-    # It acquires an operation_nowait() lease and does "expensive" work in a
-    # tight loop.  With cooperative preemption it detects _transitioning and
-    # exits the lease early.  Without operation_nowait() the lease would be
-    # held for up to 10s — exceeding the 5s drain timeout and producing 503.
-    op_lease_acquired = threading.Event()
-    op_yielded_early = threading.Event()
+        # --- Simulate a background maintenance op (health tick / warmup style) ---
+        # It acquires an operation_nowait() lease and does "expensive" work in a
+        # tight loop.  With cooperative preemption it detects _transitioning and
+        # exits the lease early.  Without operation_nowait() the lease would be
+        # held for up to 10s — exceeding the 5s drain timeout and producing 503.
+        op_lease_acquired = threading.Event()
+        op_yielded_early = threading.Event()
 
-    def _simulated_maintenance_op() -> None:
-        with runtime.operation_nowait() as snap:
-            if snap is None:
-                # Already transitioning before we could even start — this is
-                # the "don't acquire new leases" path; not the focus of this
-                # test but still correct behaviour.
-                return
-            op_lease_acquired.set()
-            # Inner work loop — each iteration simulates ~50ms of CPU/IO work.
-            # Without preemption, this would hold the lease for 200 * 0.05 = 10s.
-            for _ in range(200):
-                if runtime.transitioning:
-                    # Cooperative preemption: transition is pending.
-                    # Exit the context manager to release the lease promptly.
-                    op_yielded_early.set()
+        def _simulated_maintenance_op() -> None:
+            with runtime.operation_nowait() as snap:
+                if snap is None:
+                    # Already transitioning before we could even start — this is
+                    # the "don't acquire new leases" path; not the focus of this
+                    # test but still correct behaviour.
                     return
-                time.sleep(0.05)
-        # Natural completion — op ran to end without a pending transition.
-        op_yielded_early.set()
+                op_lease_acquired.set()
+                # Inner work loop — each iteration simulates ~50ms of CPU/IO work.
+                # Without preemption, this would hold the lease for 200 * 0.05 = 10s.
+                for _ in range(200):
+                    if runtime.transitioning:
+                        # Cooperative preemption: transition is pending.
+                        # Exit the context manager to release the lease promptly.
+                        op_yielded_early.set()
+                        return
+                    time.sleep(0.05)
+            # Natural completion — op ran to end without a pending transition.
+            op_yielded_early.set()
 
-    bg_thread = threading.Thread(
-        target=_simulated_maintenance_op, daemon=True, name="test-bg-op",
-    )
-    bg_thread.start()
-    assert op_lease_acquired.wait(2.0), "Background op did not acquire its lease"
+        bg_thread = threading.Thread(
+            target=_simulated_maintenance_op,
+            daemon=True,
+            name="test-bg-op",
+        )
+        bg_thread.start()
+        assert op_lease_acquired.wait(2.0), "Background op did not acquire its lease"
 
-    # Issue the profile switch.  Because the background op will yield via the
-    # transitioning check, the drain completes and this returns 200.
-    t0 = time.monotonic()
-    switch_resp = client.post("/api/profiles/work/switch", headers=headers)
-    elapsed = time.monotonic() - t0
+        # Issue the profile switch.  Because the background op will yield via the
+        # transitioning check, the drain completes and this returns 200.
+        t0 = time.monotonic()
+        switch_resp = client.post("/api/profiles/work/switch", headers=headers)
+        elapsed = time.monotonic() - t0
 
-    assert switch_resp.status_code == 200, (
-        f"Expected HTTP 200 from profile switch (cooperative preemption), "
-        f"got {switch_resp.status_code}.  Body: {switch_resp.text[:300]}"
-    )
-    assert elapsed < 2.5, (
-        f"Profile switch took {elapsed:.2f}s — cooperative preemption should "
-        f"allow the drain to complete well within the 5s window."
-    )
+        assert switch_resp.status_code == 200, (
+            f"Expected HTTP 200 from profile switch (cooperative preemption), "
+            f"got {switch_resp.status_code}.  Body: {switch_resp.text[:300]}"
+        )
+        assert elapsed < 2.5, (
+            f"Profile switch took {elapsed:.2f}s — cooperative preemption should "
+            f"allow the drain to complete well within the 5s window."
+        )
 
-    bg_thread.join(2.0)
-    assert op_yielded_early.is_set(), (
-        "Background op did not signal early yield — preemption mechanism missing."
-    )
+        bg_thread.join(2.0)
+        assert op_yielded_early.is_set(), (
+            "Background op did not signal early yield — preemption mechanism missing."
+        )
 
-    # --- Data isolation: target profile must be empty -------------------------
-    payload = switch_resp.json()
-    assert payload["active_profile"] == "work", (
-        f"Switch payload reports wrong profile: {payload}"
-    )
-    assert payload["generation"] >= 1
+        # --- Data isolation: target profile must be empty -------------------------
+        payload = switch_resp.json()
+        assert payload["active_profile"] == "work", (
+            f"Switch payload reports wrong profile: {payload}"
+        )
+        assert payload["generation"] >= 1
 
-    status_after = client.get("/status").json()
-    assert status_after["profile"] == "work", (
-        f"Daemon still reports 'default' after switch: {status_after}"
-    )
-    assert status_after["fact_count"] == 0, (
-        f"Target profile 'work' should have 0 facts after switch (isolation), "
-        f"got {status_after['fact_count']}."
-    )
+        status_after = client.get("/status").json()
+        assert status_after["profile"] == "work", (
+            f"Daemon still reports 'default' after switch: {status_after}"
+        )
+        assert status_after["fact_count"] == 0, (
+            f"Target profile 'work' should have 0 facts after switch (isolation), "
+            f"got {status_after['fact_count']}."
+        )
 
 
 # ── regression: 5s timeout safety still fires for non-cooperative ops ────────
@@ -341,7 +364,7 @@ def test_drain_timeout_still_fires_for_uncooperative_ops() -> None:
     release_lease = threading.Event()
 
     def _stubborn_op() -> None:
-        with runtime.operation():   # Regular operation — no preemption
+        with runtime.operation():  # Regular operation — no preemption
             lease_held.set()
             release_lease.wait(timeout=10.0)
 

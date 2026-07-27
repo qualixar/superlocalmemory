@@ -43,8 +43,10 @@ def _seed_fact(engine, profile_id: str, fid: str) -> None:
 
 @pytest.fixture
 def client(engine_with_mock_deps):
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
     from superlocalmemory.server.profile_runtime import bind_profile_runtime
     from superlocalmemory.server.unified_daemon import create_app
+    from superlocalmemory.storage.migrations import M032_write_coordinator_admission
 
     engine = engine_with_mock_deps
     engine.profile_id = "default"
@@ -57,12 +59,25 @@ def client(engine_with_mock_deps):
     )
     _seed_fact(engine, "default", "f_mine")
     _seed_fact(engine, "other", "f_theirs")
+    with engine._db.raw_connection() as conn:
+        M032_write_coordinator_admission.apply(conn)
+    runtime = CanonicalRememberRuntime(
+        db=engine._db,
+        profile_id="default",
+        writer=lambda _request, _operation_id: ["unused"],
+        journal_path=engine._config.base_dir / "scope-test-admission.db",
+    )
+    runtime.start()
 
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    app.state.canonical_remember_runtime = runtime
     bind_profile_runtime(app.state, engine, engine._config)
-    return TestClient(app), _daemon_headers(app)
+    try:
+        yield TestClient(app), _daemon_headers(app)
+    finally:
+        runtime.stop()
 
 
 def test_set_shared_stores_json_array(client):

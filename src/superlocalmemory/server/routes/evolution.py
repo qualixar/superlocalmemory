@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from superlocalmemory.server.config_file import read_config, update_config
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
 from .helpers import MEMORY_DIR, get_active_profile
 
@@ -261,12 +262,9 @@ def evolution_lineage(request: Request, skill_name: str = ""):
     _require_read(request)
     conn = None
     try:
-        import sqlite3 as _sqlite3
-
-        db_path = str(MEMORY_DIR / "memory.db")
+        db_path = MEMORY_DIR / "memory.db"
         profile_id = get_active_profile()
-        conn = _sqlite3.connect(db_path, timeout=10)
-        conn.row_factory = _sqlite3.Row
+        conn = ReadConnectionFactory(db_path).open()
 
         if skill_name:
             rows = conn.execute(

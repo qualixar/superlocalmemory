@@ -7,13 +7,12 @@
 Routes: /api/lifecycle/status, /api/lifecycle/compact
 Uses V3 compliance.lifecycle.LifecycleManager.
 """
-import json
 import logging
 import sqlite3
 
 from fastapi import APIRouter, Request
 
-from .helpers import get_active_profile, get_engine_lazy, MEMORY_DIR, DB_PATH
+from .helpers import DB_PATH, get_active_profile, get_engine_lazy, get_read_connection
 from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 logger = logging.getLogger("superlocalmemory.routes.lifecycle")
@@ -36,8 +35,7 @@ async def lifecycle_status():
 
     try:
         profile = get_active_profile()
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
+        conn = get_read_connection(DB_PATH)
 
         # V3.3: Use fact_retention.lifecycle_zone (Ebbinghaus-driven, authoritative)
         # Falls back to atomic_facts.lifecycle for pre-3.3 databases

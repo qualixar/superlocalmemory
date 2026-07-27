@@ -10,7 +10,33 @@ from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
+
+_CANONICAL_RUNTIMES = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_canonical_test_runtimes():
+    yield
+    while _CANONICAL_RUNTIMES:
+        _CANONICAL_RUNTIMES.pop().stop()
+
+
+def _attach_canonical_runtime(app, engine) -> None:
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+    from superlocalmemory.storage.migrations import (
+        M018_ingestion_operations,
+        M032_write_coordinator_admission,
+    )
+
+    with engine._db.raw_connection() as conn:
+        M018_ingestion_operations.apply(conn)
+        M032_write_coordinator_admission.apply(conn)
+    runtime = CanonicalRememberRuntime.for_engine(engine)
+    runtime.start()
+    app.state.canonical_remember_runtime = runtime
+    _CANONICAL_RUNTIMES.append(runtime)
 
 
 class _ToolCollector:
@@ -410,6 +436,7 @@ def test_public_api_switch_rebinds_resident_engine(engine_with_mock_deps) -> Non
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     response = TestClient(app).post("/api/profiles/beta/switch")
 
     assert response.status_code == 200, response.text
@@ -434,6 +461,7 @@ def test_daemon_profile_switch_isolates_write_status_and_recall(
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     client = TestClient(app)
     headers = _daemon_headers(app)
     engine_identity = id(engine)
@@ -496,6 +524,7 @@ def test_default_recall_scope_stays_personal_after_profile_switch(
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     client = TestClient(app)
     headers = _daemon_headers(app)
     token = "global-scope-opt-in-token-991"
@@ -538,6 +567,7 @@ def test_write_arriving_during_switch_waits_and_lands_in_new_profile(
     app = create_app()
     app.state.engine = engine
     app.state.config = engine._config
+    _attach_canonical_runtime(app, engine)
     headers = _daemon_headers(app)
     commit_entered = threading.Event()
     allow_commit = threading.Event()

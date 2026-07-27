@@ -904,13 +904,18 @@ class RetrievalEngine:
 
         return out
 
-    def close(self) -> None:
-        """Release the channel workers owned by this retrieval engine."""
+    def close(self, *, wait: bool = False) -> None:
+        """Release owned channel workers without blocking daemon shutdown.
+
+        Active channel calls have their own response deadline.  Waiting here
+        can still deadlock shutdown when an extension ignores that deadline,
+        so the daemon uses the executor's non-blocking cancellation path.
+        """
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
-        self._channel_executor.shutdown(wait=True, cancel_futures=True)
+        self._channel_executor.shutdown(wait=wait, cancel_futures=True)
 
     # -- Fact loading -------------------------------------------------------
 

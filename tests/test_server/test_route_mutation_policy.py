@@ -107,6 +107,28 @@ def test_fact_delete_and_edit_delegate_to_canonical_mutation_service() -> None:
     assert "UPDATE atomic_facts SET content" not in edit_block
 
 
+def test_dashboard_lifecycle_mutations_have_no_route_owned_writer() -> None:
+    """Delete, archive, merge, update, and scope share the daemon coordinator."""
+    source = Path("src/superlocalmemory/server/routes/memories.py").read_text(
+        encoding="utf-8"
+    )
+    for function_name in (
+        "delete_memory",
+        "forget_memory",
+        "merge_memory",
+        "edit_memory",
+        "set_memory_scope",
+    ):
+        block = _function_block(source, function_name)
+        assert (
+            "_canonical_mutation_runtime" in block
+            or "_mutation_runtime_or_missing_fact" in block
+        )
+        assert "memory_write(" not in block
+        assert "engine._db.update_fact" not in block
+        assert "engine._db.delete_fact" not in block
+
+
 def test_daemon_maintenance_and_session_writes_cross_policy_boundary() -> None:
     source = Path(
         "src/superlocalmemory/server/unified_daemon.py"

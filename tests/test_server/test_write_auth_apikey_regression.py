@@ -19,6 +19,7 @@ write, while a wrong/absent credential is still rejected.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,10 @@ from superlocalmemory.infra.auth_middleware import (
     SLM_REQUIRE_API_KEY_LOOPBACK_ENV,
 )
 from superlocalmemory.server.unified_daemon import create_app
-from superlocalmemory.storage.migrations import M018_ingestion_operations
+from superlocalmemory.storage.migrations import (
+    M018_ingestion_operations,
+    M032_write_coordinator_admission,
+)
 
 _API_KEY = "secret-key-123"
 
@@ -40,12 +44,24 @@ def _write_api_key_file() -> None:
     Path(API_KEY_FILE).write_text(_API_KEY + "\n", encoding="utf-8")
 
 
-def _app(engine):
+@contextmanager
+def _client(engine):
+    """Attach the real daemon writer; direct TestClient skips lifespan."""
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+
     with engine._db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
+        M032_write_coordinator_admission.apply(conn)
     app = create_app()
     app.state.engine = engine
-    return app
+    runtime = CanonicalRememberRuntime.for_engine(engine)
+    runtime.start()
+    app.state.canonical_remember_runtime = runtime
+    try:
+        yield TestClient(app)
+    finally:
+        runtime.stop()
+        app.state.canonical_remember_runtime = None
 
 
 def _body(key: str) -> dict:
@@ -63,17 +79,16 @@ def test_capability_write_through_succeeds_with_api_key_file(
 ) -> None:
     """#71: a daemon-capability write must not be 401'd by the api_key gate."""
     _write_api_key_file()
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/remember?wait=true",
-        json=_body("capability-with-apikey-file"),
-        headers={
-            "X-SLM-Daemon-Capability": app.state.daemon_descriptor.capability,
-            "X-SLM-Target-Instance": app.state.daemon_descriptor.instance_id,
-            # Deliberately NO X-SLM-API-Key — the capability is the credential.
-        },
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/remember?wait=true",
+            json=_body("capability-with-apikey-file"),
+            headers={
+                "X-SLM-Daemon-Capability": client.app.state.daemon_descriptor.capability,
+                "X-SLM-Target-Instance": client.app.state.daemon_descriptor.instance_id,
+                # Deliberately NO X-SLM-API-Key — the capability is the credential.
+            },
+        )
     assert resp.status_code == 200, resp.text
 
 
@@ -82,26 +97,24 @@ def test_install_token_write_succeeds_with_api_key_file(
 ) -> None:
     """#73/#74: install-token dashboard writes must survive an api_key file."""
     _write_api_key_file()
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/remember?wait=true",
-        json=_body("install-token-with-apikey-file"),
-        headers={"X-Install-Token": ensure_install_token()},
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/remember?wait=true",
+            json=_body("install-token-with-apikey-file"),
+            headers={"X-Install-Token": ensure_install_token()},
+        )
     assert resp.status_code == 200, resp.text
 
 
 def test_matching_api_key_write_succeeds(engine_with_mock_deps) -> None:
     """The api_key path itself still authorizes a write when it matches."""
     _write_api_key_file()
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/remember?wait=true",
-        json=_body("correct-apikey"),
-        headers={"X-SLM-API-Key": _API_KEY},
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/remember?wait=true",
+            json=_body("correct-apikey"),
+            headers={"X-SLM-API-Key": _API_KEY},
+        )
     assert resp.status_code == 200, resp.text
 
 
@@ -110,13 +123,12 @@ def test_wrong_api_key_credential_is_still_rejected(
 ) -> None:
     """Security intact: presenting only a wrong credential fails closed."""
     _write_api_key_file()
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/remember?wait=true",
-        json=_body("wrong-apikey"),
-        headers={"X-SLM-API-Key": "not-the-configured-key"},
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/remember?wait=true",
+            json=_body("wrong-apikey"),
+            headers={"X-SLM-API-Key": "not-the-configured-key"},
+        )
     assert resp.status_code == 403, resp.text
 
 
@@ -155,12 +167,11 @@ def test_loopback_write_with_no_credential_succeeds_by_default(
     force uncredentialed loopback writes to present a credential -- the
     v3.7.6 local-first fix (#71/#73/#74) stays the default behavior."""
     _write_api_key_file()
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/ingest",
-        json=_ingest_body("loopback-no-credential-flag-off"),
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/ingest",
+            json=_ingest_body("loopback-no-credential-flag-off"),
+        )
     assert resp.status_code == 200, resp.text
 
 
@@ -172,12 +183,11 @@ def test_loopback_write_with_no_credential_rejected_when_strict_flag_set(
     rejected."""
     _write_api_key_file()
     os.environ[SLM_REQUIRE_API_KEY_LOOPBACK_ENV] = "1"
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/ingest",
-        json=_ingest_body("loopback-no-credential-flag-on"),
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/ingest",
+            json=_ingest_body("loopback-no-credential-flag-on"),
+        )
     assert resp.status_code in (401, 403), resp.text
 
 
@@ -189,11 +199,10 @@ def test_loopback_write_with_matching_api_key_succeeds_under_strict_flag(
     remove the existing api_key escape hatch."""
     _write_api_key_file()
     os.environ[SLM_REQUIRE_API_KEY_LOOPBACK_ENV] = "1"
-    app = _app(engine_with_mock_deps)
-    client = TestClient(app)
-    resp = client.post(
-        "/ingest",
-        json=_ingest_body("loopback-matching-key-flag-on"),
-        headers={"X-SLM-API-Key": _API_KEY},
-    )
+    with _client(engine_with_mock_deps) as client:
+        resp = client.post(
+            "/ingest",
+            json=_ingest_body("loopback-matching-key-flag-on"),
+            headers={"X-SLM-API-Key": _API_KEY},
+        )
     assert resp.status_code == 200, resp.text

@@ -13,11 +13,10 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
-from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
+from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile, get_read_connection
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +64,7 @@ async def get_timeline(
     if not DB_PATH.exists():
         return {"range": range, "group_by": group_by, "count": 0, "events": [], "total_available": 0, "offset": 0}
 
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    conn = get_read_connection(DB_PATH)
 
     try:
         start_date = conn.execute("SELECT datetime('now', ?)", (modifier,)).fetchone()[0]

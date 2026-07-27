@@ -22,7 +22,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
-from superlocalmemory.storage.memory_write import memory_write
+from superlocalmemory.storage.memory_write import memory_read, memory_write
 
 
 _engine_logger = logging.getLogger("superlocalmemory.engine")
@@ -217,24 +217,48 @@ def log_mode_change(
     )
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Get database connection with busy_timeout set.
+class _RouteReadConnection:
+    """Compatibility wrapper for legacy route callers that close manually.
 
-    Used for READ-heavy callers. Writers should use ``memory_write(DB_PATH)``
-    instead to also acquire the process write lock.  This connection still gets
-    ``PRAGMA busy_timeout`` so a cross-process writer (hook / CLI) doing a short
-    write does not cause an immediate SQLITE_BUSY here.
+    New routes should prefer ``with memory_read(path)``.  A few shared route
+    callers still expect ``get_db_connection()`` to return a connection they
+    can close themselves, so this wrapper preserves that contract without
+    reopening canonical ``memory.db`` in writable mode.
     """
-    if not DB_PATH.exists():
+
+    def __init__(self, db_path: Path) -> None:
+        object.__setattr__(self, "_snapshot", memory_read(db_path))
+        object.__setattr__(self, "_connection", self._snapshot.__enter__())
+        object.__setattr__(self, "_closed", False)
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._connection, name, value)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._snapshot.__exit__(None, None, None)
+            object.__setattr__(self, "_closed", True)
+
+
+def get_read_connection(db_path: Path = DB_PATH) -> _RouteReadConnection:
+    """Return a legacy-compatible, physically read-only canonical connection."""
+    if not db_path.exists():
         raise HTTPException(
             status_code=500,
-            detail="Memory database not found. Run 'slm init' to initialize."
+            detail="Memory database not found. Run 'slm init' to initialize.",
         )
-    import os as _os
-    _ms = max(0, int(_os.environ.get("SLM_DB_BUSY_TIMEOUT_MS", "10000")))
-    conn = sqlite3.connect(str(DB_PATH), timeout=_ms / 1000.0)
-    conn.execute(f"PRAGMA busy_timeout={_ms}")
-    return conn
+    return _RouteReadConnection(db_path)
+
+
+def get_db_connection() -> _RouteReadConnection:
+    """Return the shared dashboard read connection for canonical ``memory.db``."""
+    return get_read_connection(DB_PATH)
 
 
 def dict_factory(cursor: sqlite3.Cursor, row: tuple) -> dict:
@@ -380,18 +404,15 @@ def _get_db_profiles() -> list[dict]:
     """Read all profiles from SQLite."""
     if not DB_PATH.exists():
         return []
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            "SELECT profile_id, name, description, created_at, last_used "
-            "FROM profiles ORDER BY name"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with memory_read(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT profile_id, name, description, created_at, last_used "
+                "FROM profiles ORDER BY name"
+            ).fetchall()
+            return [dict(r) for r in rows]
     except sqlite3.OperationalError:
         return []
-    finally:
-        conn.close()
 
 
 def _load_profiles_json() -> dict:

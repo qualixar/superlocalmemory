@@ -17,14 +17,11 @@ import asyncio
 import os
 import sqlite3
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ===========================================================================
 # FIX-1: /health handler must not raise NameError for _TEST_ISOLATION_ALLOWED
@@ -157,15 +154,19 @@ class TestFix2EmbedPoolRace:
         )
 
     def test_lock_attribute_exists_on_engine(self, tmp_path: Path) -> None:
-        """The lock must be present on the engine so the guard can function."""
+        """The pool guard is a non-reentrant lock that protects first init."""
         engine = self._make_engine(tmp_path)
         assert hasattr(engine, "_store_fast_embed_pool_lock"), (
             "MemoryEngine must have _store_fast_embed_pool_lock"
         )
-        import threading as _threading
-        assert isinstance(engine._store_fast_embed_pool_lock, _threading.Lock), (
-            "_store_fast_embed_pool_lock must be a threading.Lock"
-        )
+        lock = engine._store_fast_embed_pool_lock
+        # ``threading.Lock`` is a factory on supported CPython versions, not a
+        # class suitable for ``isinstance``.  Test the safety property instead.
+        assert lock.acquire(blocking=False)
+        try:
+            assert lock.acquire(blocking=False) is False
+        finally:
+            lock.release()
 
 
 # ===========================================================================
@@ -228,8 +229,8 @@ class TestFix3PruneEventsBounded:
         """With rows matching all three prune conditions, stats must be non-zero."""
         db_path = tmp_path / "events.db"
 
-        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.infra.event_bus import EventBus
+        from superlocalmemory.storage.database import DatabaseManager
 
         EventBus.reset_instance(db_path)
         bus = EventBus.get_instance(db_path)
@@ -275,8 +276,8 @@ class TestFix3PruneEventsBounded:
         """Empty table → stats must be all zeros (no KeyError, no crash)."""
         db_path = tmp_path / "events_empty.db"
 
-        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.infra.event_bus import EventBus
+        from superlocalmemory.storage.database import DatabaseManager
 
         # Create bus (creates schema), don't seed any rows
         EventBus.reset_instance(db_path)
@@ -419,7 +420,7 @@ class TestFix5MeshLoopbackDisplay:
         """Confirm the fix: _LOOPBACK_HOSTS literal set is NOT used for
         classification (it would miss ::ffff:127.0.0.1). The presence of
         ::ffff:127.0.0.1 in local proves is_loopback() is being called."""
-        from superlocalmemory.server.routes.mesh import _mesh_read_model, _LOOPBACK_HOSTS
+        from superlocalmemory.server.routes.mesh import _LOOPBACK_HOSTS, _mesh_read_model
 
         # Confirm the literal set does NOT contain the mapped form
         assert "::ffff:127.0.0.1" not in _LOOPBACK_HOSTS, (

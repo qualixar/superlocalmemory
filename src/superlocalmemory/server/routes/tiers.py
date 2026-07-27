@@ -10,7 +10,6 @@ All connections use WAL mode + busy_timeout for concurrency safety.
 """
 
 import logging
-import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -20,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from superlocalmemory.server.route_mutations import authorize_route_mutation
-from superlocalmemory.storage.memory_write import memory_write
+from superlocalmemory.storage.memory_write import memory_read, memory_write
 
 from .helpers import DB_PATH, get_active_profile
 
@@ -36,29 +35,11 @@ class PinRequest(BaseModel):
     reason: str = Field(default="", max_length=_MAX_REASON_LENGTH)
 
 
-def _busy_ms() -> int:
-    try:
-        return max(0, int(os.environ.get("SLM_DB_BUSY_TIMEOUT_MS", "10000")))
-    except (TypeError, ValueError):
-        return 10000
-
-
 @contextmanager
 def _db():
-    """Context-managed DB connection with WAL + busy_timeout (READ paths only).
-
-    Write paths (pin, unpin) use ``memory_write()`` directly to also acquire
-    the process write lock and prevent in-process SQLITE_BUSY races.
-    """
-    ms = _busy_ms()
-    conn = sqlite3.connect(str(DB_PATH), timeout=ms / 1000.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(f"PRAGMA busy_timeout={ms}")
-    conn.row_factory = sqlite3.Row
-    try:
+    """Yield a short-lived query-only snapshot for tier dashboard reads."""
+    with memory_read(DB_PATH) as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 def _validate_profile(profile_id: str) -> str:

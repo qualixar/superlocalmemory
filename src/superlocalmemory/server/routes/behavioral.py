@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from .helpers import MEMORY_DIR, get_active_profile
 from superlocalmemory.storage.memory_write import memory_write
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
 logger = logging.getLogger("superlocalmemory.routes.behavioral")
 router = APIRouter()
@@ -146,8 +147,7 @@ def _load_action_outcomes(profile_id: str) -> dict:
     if not db_path.exists():
         return empty
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
-        conn.row_factory = sqlite3.Row
+        conn = ReadConnectionFactory(db_path).open()
         try:
             columns = {
                 str(row["name"])
@@ -369,7 +369,6 @@ def report_outcome(request: Request, data: ReportOutcomeRequest):
     action_type = data.action_type
     context_note = data.context
 
-    import sqlite3
     import uuid
     from datetime import datetime, timezone
 
@@ -451,10 +450,8 @@ def get_assertions(
 ):
     """Get learned behavioral assertions for dashboard display."""
     try:
-        import sqlite3 as _sqlite3
         profile = get_active_profile()
-        conn = _sqlite3.connect(str(MEMORY_DIR / "memory.db"))
-        conn.row_factory = _sqlite3.Row
+        conn = ReadConnectionFactory(MEMORY_DIR / "memory.db").open()
 
         query = (
             "SELECT id, trigger_condition, action, category, confidence, "
@@ -495,10 +492,8 @@ def get_tool_events(
 ):
     """Get recent tool events for dashboard display."""
     try:
-        import sqlite3 as _sqlite3
         profile = get_active_profile()
-        conn = _sqlite3.connect(str(MEMORY_DIR / "memory.db"))
-        conn.row_factory = _sqlite3.Row
+        conn = ReadConnectionFactory(MEMORY_DIR / "memory.db").open()
 
         query = (
             "SELECT id, tool_name, event_type, input_summary, output_summary, "
@@ -528,10 +523,8 @@ def get_soft_prompts(request: Request):
     """Get active soft prompt templates for dashboard display."""
     _require_read(request)
     try:
-        import sqlite3 as _sqlite3
         profile = get_active_profile()
-        conn = _sqlite3.connect(str(MEMORY_DIR / "memory.db"))
-        conn.row_factory = _sqlite3.Row
+        conn = ReadConnectionFactory(MEMORY_DIR / "memory.db").open()
         rows = conn.execute(
             "SELECT prompt_id, category, content, confidence, effectiveness, "
             "token_count, active, version, created_at "
@@ -570,7 +563,6 @@ def log_tool_event_api(request: Request, data: dict):
     _require_write(request)
     try:
         import os
-        import sqlite3 as _sqlite3
         from datetime import datetime, timezone
 
         tool_name = data.get("tool_name", "unknown")

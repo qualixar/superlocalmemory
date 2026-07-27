@@ -21,6 +21,25 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _daemon_unavailable(command: str, use_json: bool) -> None:
+    """Exit a mutation client without opening a process-local writer."""
+    error = {
+        "code": "DAEMON_UNAVAILABLE",
+        "message": "Owned daemon is unavailable; retry later.",
+        "retryable": True,
+    }
+    if use_json:
+        from superlocalmemory.cli.json_output import json_print
+
+        json_print(command, error=error)
+    else:
+        print(
+            "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
+
+
 def _cmd_db_dispatch(args: Namespace) -> None:
     """Route ``slm db ...`` subcommands. LLD-06 §7.2."""
     sub = getattr(args, "db_command", None)
@@ -654,14 +673,14 @@ def cmd_restart(args: Namespace) -> None:
 
     # Step 5: Database integrity check
     try:
-        import sqlite3
+        from superlocalmemory.storage.memory_write import memory_read
+
         db_path = slm_dir / "memory.db"
         if db_path.exists():
-            conn = sqlite3.connect(str(db_path))
-            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-            fact_count = conn.execute("SELECT COUNT(*) FROM atomic_facts").fetchone()[0]
-            entity_count = conn.execute("SELECT COUNT(*) FROM canonical_entities").fetchone()[0]
-            conn.close()
+            with memory_read(db_path) as conn:
+                integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+                fact_count = conn.execute("SELECT COUNT(*) FROM atomic_facts").fetchone()[0]
+                entity_count = conn.execute("SELECT COUNT(*) FROM canonical_entities").fetchone()[0]
             _log(5, "Database integrity", "ok" if integrity == "ok" else "fail",
                  f"integrity={integrity}, {fact_count} facts, {entity_count} entities")
         else:
@@ -1339,8 +1358,7 @@ def cmd_list(args: Namespace) -> None:
 
 
 def cmd_remember(args: Namespace) -> None:
-    """Store a memory via the engine."""
-    from superlocalmemory.core.config import SLMConfig
+    """Store a memory through the owned daemon."""
 
     use_json = getattr(args, 'json', False)
     sync_mode = getattr(args, 'sync_mode', False)
@@ -1358,128 +1376,43 @@ def cmd_remember(args: Namespace) -> None:
         if isinstance(_sw_raw, str) and _sw_raw.strip() else _sw_raw
     )
 
-    # Both paths use the one owned daemon.  A second local engine for --sync
-    # duplicates heavyweight workers and can block for minutes on cold models.
-    daemon_owned = False
     try:
         from superlocalmemory.cli.daemon import (
             daemon_request, ensure_daemon, is_daemon_running,
         )
-        daemon_owned = is_daemon_running() or ensure_daemon()
-        if daemon_owned:
-            path = "/remember?wait=true" if sync_mode else "/remember"
-            result = daemon_request(
-                "POST", path, {
-                    "content": args.content,
-                    "tags": args.tags or "",
-                    "scope": scope,
-                    "shared_with": shared_with,
-                },
-                timeout_seconds=30,
-            )
-            if result and "fact_ids" in result:
-                if use_json:
-                    from superlocalmemory.cli.json_output import json_print
-                    json_print("remember", data=result)
-                else:
-                    state = result.get("materialization_state", "queryable")
-                    operation_id = result.get("operation_id", "unknown")
-                    print(
-                        f"{state.capitalize()} \u2713 {result['count']} facts "
-                        f"(operation={operation_id})."
-                    )
-                return
-            if sync_mode:
-                if use_json:
-                    from superlocalmemory.cli.json_output import json_print
-                    json_print("remember", error={
-                        "code": "SYNC_TIMEOUT",
-                        "message": (
-                            "Canonical ingestion did not complete within 30s; "
-                            "the durable operation remains available for retry."
-                        ),
-                    })
-                else:
-                    print(
-                        "Synchronous ingestion did not complete within 30s; "
-                        "the durable operation remains queued.",
-                        file=sys.stderr,
-                    )
-                sys.exit(1)
-    except SystemExit:
-        raise
-    except Exception:
-        if sync_mode and daemon_owned:
+        if not (is_daemon_running() or ensure_daemon()):
+            _daemon_unavailable("remember", use_json)
+        path = "/remember?wait=true" if sync_mode else "/remember"
+        result = daemon_request(
+            "POST", path, {
+                "content": args.content,
+                "tags": args.tags or "",
+                "scope": scope,
+                "shared_with": shared_with,
+            },
+            timeout_seconds=30,
+        )
+        if result and "fact_ids" in result:
             if use_json:
                 from superlocalmemory.cli.json_output import json_print
-                json_print("remember", error={
-                    "code": "SYNC_TIMEOUT",
-                    "message": "Owned daemon request failed before completion.",
-                })
-            sys.exit(1)
-        # Receipt-first writes may use the authenticated local fallback when
-        # no owned daemon exists.
-
-    from superlocalmemory.core.engine import MemoryEngine
-
-    try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-
-        # v3.6.15: resolve an unset scope to the configured default_scope.
-        _scope = scope or getattr(getattr(config, "scope", None), "default_scope", "personal")
-        from superlocalmemory.core.engine_ingestion import (
-            canonical_store,
-            local_trusted_actor_id,
-        )
-
-        metadata = {"tags": args.tags} if args.tags else {}
-        operation = canonical_store(
-            engine,
-            args.content,
-            source_type="cli-sync" if sync_mode else "cli-offline-canonical",
-            trusted_actor_id=local_trusted_actor_id("cli"),
-            metadata=metadata,
-            scope=_scope,
-            shared_with=shared_with,
-            return_receipt=True,
-        )
-    except Exception as exc:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("remember", error={"code": "STORE_ERROR", "message": str(exc)})
-            sys.exit(1)
+                json_print("remember", data=result)
+            else:
+                state = result.get("materialization_state", "queryable")
+                operation_id = result.get("operation_id", "unknown")
+                print(
+                    f"{state.capitalize()} \u2713 {result['count']} facts "
+                    f"(operation={operation_id})."
+                )
+            return
+    except SystemExit:
         raise
-
-    fact_ids = list(operation.fact_ids) if hasattr(operation, "fact_ids") else list(operation)
-    operation_data = {
-        "fact_ids": fact_ids,
-        "count": len(fact_ids),
-        "materialization_state": getattr(
-            getattr(operation, "state", None), "value", "complete"
-        ),
-    }
-    if getattr(operation, "operation_id", None):
-        operation_data["operation_id"] = operation.operation_id
-
-    if use_json:
-        from superlocalmemory.cli.json_output import json_print
-        json_print("remember", data=operation_data,
-                   next_actions=[
-                       {"command": "slm recall '<query>' --json", "description": "Search your memories"},
-                       {"command": "slm list --json -n 5", "description": "See recent memories"},
-                   ])
-        return
-
-    print(
-        f"Complete \u2713 {len(fact_ids)} facts "
-        f"(operation={operation_data.get('operation_id', 'none')})."
-    )
+    except Exception as exc:
+        logger.warning("owned daemon remember request failed: %s", exc)
+    _daemon_unavailable("remember", use_json)
 
 
 def cmd_recall(args: Namespace) -> None:
-    """Search memories via the engine — routes through daemon if available."""
+    """Search memories through the owned daemon without a local engine."""
     use_json = getattr(args, 'json', False)
     # v3.6.15: None = "not specified" → daemon/engine resolves the configured
     # default (shared-off). Only an explicit --include-global / --no-global
@@ -1488,7 +1421,6 @@ def cmd_recall(args: Namespace) -> None:
     include_shared = getattr(args, 'include_shared', None)
 
     # V3.3.21: Route through daemon for instant response (no cold start).
-    # Falls back to direct engine if daemon not running.
     # S9-DASH-02: pass a stable session_id derived from the shell's
     # parent PID so a sequence of CLI recalls in one terminal can be
     # grouped. The Stop hook on session end won't fire for CLI, so
@@ -1534,76 +1466,10 @@ def cmd_recall(args: Namespace) -> None:
                 return
     except Exception as _exc:  # noqa: BLE001
         logger.warning(
-            "Daemon recall failed, falling back to direct engine: %s", _exc
+            "owned daemon recall request failed: %s", _exc
         )
 
-    from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.core.engine import MemoryEngine
-
-    try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-
-        response = engine.recall(
-            args.query, limit=args.limit,
-            # v3.8.2: --fast → True; unset → None so engine resolves the
-            # client-driven-agentic default (parity with the daemon path, which
-            # omits the fast query param when --fast is absent).
-            fast=(True if getattr(args, "fast", False) else None),
-            include_global=include_global,
-            include_shared=include_shared,
-            window=getattr(args, "window", "") or None,
-        )
-    except Exception as exc:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("recall", error={"code": "RECALL_ERROR", "message": str(exc)})
-            sys.exit(1)
-        raise
-
-    # v3.6.6: route the direct-fallback path through the SAME shared
-    # serializer the daemon uses, so CLI-without-daemon output is identical
-    # to CLI/MCP-with-daemon (budget + source discipline + no_confident_match).
-    from superlocalmemory.server.recall_serializer import (
-        recall_response_metadata,
-        serialize_recall_response,
-    )
-    _rc = getattr(config, "retrieval", None)
-    _ser, _no_match = serialize_recall_response(
-        response,
-        limit=args.limit,
-        per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
-        total_max=getattr(_rc, "recall_total_max_chars", 12000),
-        full=getattr(args, "full", False),
-    )
-
-    if use_json:
-        from superlocalmemory.cli.json_output import json_print
-        items = []
-        for d in _ser:
-            items.append(dict(d))
-        json_print("recall", data={
-            "results": items, "count": len(items),
-            "query_type": getattr(response, "query_type", "unknown"),
-            "no_confident_match": _no_match,
-            **recall_response_metadata(response),
-        }, next_actions=[
-            {"command": "slm list --json", "description": "List recent memories"},
-        ])
-        return
-
-    # Record learning signals (CLI path — works without MCP)
-    try:
-        _cli_record_signals(config, args.query, response.results)
-    except Exception:
-        pass
-
-    if not _ser:
-        print("No confident match." if _no_match else "No memories found.")
-        return
-    for i, d in enumerate(_ser, 1):
-        print(f"  {i}. [relevance {d['relevance_score']:.2f}] {d['content']}")
+    _daemon_unavailable("recall", use_json)
 
 
 def _cli_record_signals(config, query, results):
@@ -1633,9 +1499,14 @@ def _cli_record_signals(config, query, results):
 
 
 def cmd_forget(args: Namespace) -> None:
-    """Delete memories matching a query."""
-    from superlocalmemory.core.engine import MemoryEngine
-    from superlocalmemory.core.config import SLMConfig
+    """Delete daemon-queried memories matching a query."""
+    import urllib.parse
+
+    from superlocalmemory.cli.daemon import (
+        daemon_request,
+        ensure_daemon,
+        is_daemon_running,
+    )
 
     use_json = getattr(args, 'json', False)
     dry_run = getattr(args, 'dry_run', False)
@@ -1659,38 +1530,45 @@ def cmd_forget(args: Namespace) -> None:
     query_lower = "" if raw_query is None else raw_query.lower()
     query_label = raw_query if raw_query is not None else "*all*"
 
-    try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-        facts = engine._db.get_all_facts(engine.profile_id)
-        matches = [f for f in facts if query_lower in f.content.lower()]
-    except Exception as exc:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("forget", error={"code": "ENGINE_ERROR", "message": str(exc)})
-            sys.exit(1)
-        raise
+    if not (is_daemon_running() or ensure_daemon()):
+        _daemon_unavailable("forget", use_json)
 
-    def delete_fact_authorized_for_cli(fact_id: str) -> None:
-        from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
-        from superlocalmemory.core.mutations import delete_fact_authorized
+    memories: list[dict[str, object]] = []
+    offset = 0
+    while True:
+        page = daemon_request("GET", f"/api/memories?limit=200&offset={offset}")
+        rows = page.get("memories") if isinstance(page, dict) else None
+        if not isinstance(rows, list):
+            _daemon_unavailable("forget", use_json)
+        memories.extend(row for row in rows if isinstance(row, dict))
+        if not page.get("has_more"):
+            break
+        offset += len(rows)
+        if not rows:
+            _daemon_unavailable("forget", use_json)
 
-        result = delete_fact_authorized(
-            engine,
-            fact_id,
-            trusted_actor_id=local_trusted_actor_id("cli"),
-            source_agent_id="cli",
+    matches = [
+        fact for fact in memories
+        if query_lower in str(fact.get("content", "")).lower()
+    ]
+
+    def delete_from_daemon(fact_id: str) -> None:
+        result = daemon_request(
+            "DELETE",
+            "/api/memories/" + urllib.parse.quote(fact_id, safe=""),
         )
-        if not result.get("ok"):
-            raise RuntimeError(result.get("error", "delete failed"))
+        if not isinstance(result, dict) or not result.get("success"):
+            _daemon_unavailable("forget", use_json)
 
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         if not matches:
             json_print("forget", data={"matched_count": 0, "deleted_count": 0, "matches": []})
             return
-        match_items = [{"fact_id": f.fact_id, "content": f.content[:120]} for f in matches[:20]]
+        match_items = [
+            {"fact_id": f["id"], "content": str(f.get("content", ""))[:120]}
+            for f in matches[:20]
+        ]
         if dry_run:
             json_print("forget", data={
                 "matched_count": len(matches), "deleted_count": 0,
@@ -1699,10 +1577,10 @@ def cmd_forget(args: Namespace) -> None:
             return
         if getattr(args, 'yes', False):
             for f in matches:
-                delete_fact_authorized_for_cli(f.fact_id)
+                delete_from_daemon(str(f["id"]))
             json_print("forget", data={
                 "matched_count": len(matches), "deleted_count": len(matches),
-                "deleted": [f.fact_id for f in matches],
+                "deleted": [f["id"] for f in matches],
             }, next_actions=[
                 {"command": "slm list --json", "description": "Verify remaining memories"},
             ])
@@ -1712,7 +1590,10 @@ def cmd_forget(args: Namespace) -> None:
                 "matches": match_items,
                 "hint": "Add --yes to confirm deletion",
             }, next_actions=[
-                {"command": f"slm forget '{query_label}' --json --yes", "description": "Confirm deletion"},
+                {
+                    "command": f"slm forget '{query_label}' --json --yes",
+                    "description": "Confirm deletion",
+                },
             ])
         return
 
@@ -1721,19 +1602,19 @@ def cmd_forget(args: Namespace) -> None:
         return
     print(f"Found {len(matches)} matching memories:")
     for f in matches[:10]:
-        print(f"  - {f.fact_id[:8]}... {f.content[:80]}")
+        print(f"  - {str(f['id'])[:8]}... {str(f.get('content', ''))[:80]}")
     if dry_run:
         print(f"(dry run — {len(matches)} would be deleted)")
         return
     if getattr(args, 'yes', False):
         for f in matches:
-            delete_fact_authorized_for_cli(f.fact_id)
+            delete_from_daemon(str(f["id"]))
         print(f"Deleted {len(matches)} memories.")
         return
     confirm = input(f"Delete {len(matches)} memories? [y/N] ").strip().lower()
     if confirm in ("y", "yes"):
         for f in matches:
-            delete_fact_authorized_for_cli(f.fact_id)
+            delete_from_daemon(str(f["id"]))
         print(f"Deleted {len(matches)} memories.")
     else:
         print("Cancelled.")
@@ -1743,13 +1624,15 @@ def cmd_delete(args: Namespace) -> None:
     """Delete a specific memory by exact fact ID."""
     import urllib.parse
 
-    from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
-    from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.core.engine import MemoryEngine
+    from superlocalmemory.cli.daemon import (
+        daemon_request,
+        ensure_daemon,
+        is_daemon_running,
+    )
 
     use_json = getattr(args, 'json', False)
     fact_id = args.fact_id.strip()
-    if is_daemon_running():
+    if is_daemon_running() or ensure_daemon():
         path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
         confirmed = getattr(args, "yes", False)
         content = ""
@@ -1759,14 +1642,7 @@ def cmd_delete(args: Namespace) -> None:
                 "/api/facts/" + urllib.parse.quote(fact_id, safe=""),
             )
             if not isinstance(detail, dict):
-                if use_json:
-                    from superlocalmemory.cli.json_output import json_print
-                    json_print("delete", error={
-                        "code": "DAEMON_MUTATION_FAILED",
-                        "message": "Resident daemon could not resolve the memory.",
-                    })
-                    sys.exit(1)
-                raise RuntimeError("Resident daemon could not resolve the memory.")
+                _daemon_unavailable("delete", use_json)
             content = str(detail.get("content") or "")
             if use_json:
                 from superlocalmemory.cli.json_output import json_print
@@ -1792,14 +1668,7 @@ def cmd_delete(args: Namespace) -> None:
 
         result = daemon_request("DELETE", path)
         if not isinstance(result, dict) or not result.get("success"):
-            if use_json:
-                from superlocalmemory.cli.json_output import json_print
-                json_print("delete", error={
-                    "code": "DAEMON_MUTATION_FAILED",
-                    "message": "Resident daemon rejected the delete operation.",
-                })
-                sys.exit(1)
-            raise RuntimeError("Resident daemon rejected the delete operation.")
+            _daemon_unavailable("delete", use_json)
         if use_json:
             from superlocalmemory.cli.json_output import json_print
             json_print(
@@ -1815,86 +1684,18 @@ def cmd_delete(args: Namespace) -> None:
         else:
             print(f"Deleted: {fact_id}")
         return
-
-    try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-
-        rows = engine._db.execute(
-            "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, engine.profile_id),
-        )
-    except Exception as exc:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("delete", error={"code": "ENGINE_ERROR", "message": str(exc)})
-            sys.exit(1)
-        raise
-
-    if use_json:
-        from superlocalmemory.cli.json_output import json_print
-        if not rows:
-            json_print("delete", error={
-                "code": "NOT_FOUND", "message": f"Memory not found: {fact_id}",
-            })
-            sys.exit(1)
-        content = dict(rows[0]).get("content", "")
-        if getattr(args, "yes", False):
-            from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
-            from superlocalmemory.core.mutations import delete_fact_authorized
-
-            delete_fact_authorized(
-                engine,
-                fact_id,
-                trusted_actor_id=local_trusted_actor_id("cli"),
-                source_agent_id="cli",
-            )
-            json_print("delete", data={"deleted": fact_id, "content": content[:120]},
-                       next_actions=[
-                           {"command": "slm list --json", "description": "Verify remaining memories"},
-                       ])
-        else:
-            json_print("delete", data={
-                "fact_id": fact_id, "content": content[:120], "deleted": False,
-                "hint": "Add --yes to confirm deletion",
-            }, next_actions=[
-                {"command": f"slm delete {fact_id} --json --yes", "description": "Confirm deletion"},
-            ])
-        return
-
-    if not rows:
-        print(f"Memory not found: {fact_id}")
-        return
-
-    content_preview = dict(rows[0]).get("content", "")[:120]
-    print(f"Memory: {content_preview}")
-
-    if not getattr(args, "yes", False):
-        confirm = input("Delete this memory? [y/N] ").strip().lower()
-        if confirm not in ("y", "yes"):
-            print("Cancelled.")
-            return
-
-    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
-    from superlocalmemory.core.mutations import delete_fact_authorized
-
-    delete_fact_authorized(
-        engine,
-        fact_id,
-        trusted_actor_id=local_trusted_actor_id("cli"),
-        source_agent_id="cli",
-    )
-    print(f"Deleted: {fact_id}")
+    _daemon_unavailable("delete", use_json)
 
 
 def cmd_update(args: Namespace) -> None:
     """Update the content of a specific memory by exact fact ID."""
     import urllib.parse
 
-    from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
-    from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.core.engine import MemoryEngine
+    from superlocalmemory.cli.daemon import (
+        daemon_request,
+        ensure_daemon,
+        is_daemon_running,
+    )
 
     use_json = getattr(args, 'json', False)
     fact_id = args.fact_id.strip()
@@ -1908,18 +1709,11 @@ def cmd_update(args: Namespace) -> None:
         print("Error: content cannot be empty")
         return
 
-    if is_daemon_running():
+    if is_daemon_running() or ensure_daemon():
         path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
         result = daemon_request("PATCH", path, {"content": new_content})
         if not isinstance(result, dict) or not result.get("success"):
-            if use_json:
-                from superlocalmemory.cli.json_output import json_print
-                json_print("update", error={
-                    "code": "DAEMON_MUTATION_FAILED",
-                    "message": "Resident daemon rejected the update operation.",
-                })
-                sys.exit(1)
-            raise RuntimeError("Resident daemon rejected the update operation.")
+            _daemon_unavailable("update", use_json)
         if use_json:
             from superlocalmemory.cli.json_output import json_print
             json_print("update", data={
@@ -1935,59 +1729,7 @@ def cmd_update(args: Namespace) -> None:
             print(f"New: {new_content[:100]}")
             print(f"Updated: {fact_id}")
         return
-
-    try:
-        config = SLMConfig.load()
-        engine = MemoryEngine(config)
-        engine.initialize()
-
-        rows = engine._db.execute(
-            "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, engine.profile_id),
-        )
-    except Exception as exc:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("update", error={"code": "ENGINE_ERROR", "message": str(exc)})
-            sys.exit(1)
-        raise
-
-    if not rows:
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("update", error={
-                "code": "NOT_FOUND", "message": f"Memory not found: {fact_id}",
-            })
-            sys.exit(1)
-        print(f"Memory not found: {fact_id}")
-        return
-
-    old_content = dict(rows[0]).get("content", "")
-    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
-    from superlocalmemory.core.mutations import update_fact_authorized
-
-    update_fact_authorized(
-        engine,
-        fact_id,
-        new_content,
-        trusted_actor_id=local_trusted_actor_id("cli"),
-        source_agent_id="cli",
-    )
-
-    if use_json:
-        from superlocalmemory.cli.json_output import json_print
-        json_print("update", data={
-            "fact_id": fact_id,
-            "old_content": old_content[:120],
-            "new_content": new_content[:120],
-        }, next_actions=[
-            {"command": "slm list --json", "description": "List recent memories"},
-        ])
-        return
-
-    print(f"Old: {old_content[:100]}")
-    print(f"New: {new_content[:100]}")
-    print(f"Updated: {fact_id}")
+    _daemon_unavailable("update", use_json)
 
 
 # -- Diagnostics (all support --json) -------------------------------------
@@ -2150,12 +1892,10 @@ def cmd_health(args: Namespace) -> None:
             # second MemoryEngine re-runs schema initialization and can lock
             # the user's database. Health only needs aggregate counts, so use
             # a read-only snapshot connection instead.
-            import sqlite3
+            from superlocalmemory.storage.memory_write import memory_read
+
             db_path = config.db_path
-            conn = sqlite3.connect(
-                f"file:{db_path}?mode=ro", uri=True, timeout=5,
-            )
-            try:
+            with memory_read(db_path) as conn:
                 row = conn.execute(
                     "SELECT COUNT(*), "
                     "SUM(CASE WHEN fisher_mean IS NOT NULL THEN 1 ELSE 0 END), "
@@ -2164,8 +1904,6 @@ def cmd_health(args: Namespace) -> None:
                     (config.active_profile,),
                 ).fetchone()
                 total_facts, fisher_count, langevin_count = row or (0, 0, 0)
-            finally:
-                conn.close()
             facts = [None] * int(total_facts or 0)
             fisher_count = int(fisher_count or 0)
             langevin_count = int(langevin_count or 0)
@@ -2750,10 +2488,10 @@ def cmd_doctor(args: Namespace) -> None:
     db_path = slm_home / "memory.db"
     if db_path.exists():
         try:
-            import sqlite3
-            conn = sqlite3.connect(str(db_path))
-            result = conn.execute("PRAGMA integrity_check").fetchone()
-            conn.close()
+            from superlocalmemory.storage.memory_write import memory_read
+
+            with memory_read(db_path) as conn:
+                result = conn.execute("PRAGMA integrity_check").fetchone()
             if result and result[0] == "ok":
                 size_mb = db_path.stat().st_size / (1024 * 1024)
                 _check("Database", "PASS", f"OK ({size_mb:.2f} MB)")
@@ -3620,7 +3358,6 @@ def cmd_session_context(args: Namespace) -> None:
     output across MCP and CLI surfaces. --json flag returns structured JSON.
     """
     import sqlite3
-    from pathlib import Path
     from superlocalmemory.core.config import SLMConfig
 
     use_json = getattr(args, "json", False)
@@ -3663,8 +3400,11 @@ def cmd_session_context(args: Namespace) -> None:
             return
 
         pid = config.active_profile
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+        from superlocalmemory.storage.memory_write import memory_read
+
+        def _read_rows(query: str, params: tuple[object, ...]) -> list[sqlite3.Row]:
+            with memory_read(db_path) as conn:
+                return conn.execute(query, params).fetchall()
 
         # Collect facts for injection — same queries as pre-v3.4.65 but
         # mapped into InjectableMemory for the shared formatter.
@@ -3672,11 +3412,11 @@ def cmd_session_context(args: Namespace) -> None:
 
         # Core Memory blocks (compiled high-value context)
         try:
-            cm_rows = conn.execute(
+            cm_rows = _read_rows(
                 "SELECT block_type, content FROM core_memory_blocks "
                 "WHERE profile_id = ? ORDER BY block_type",
                 (pid,),
-            ).fetchall()
+            )
             for r in cm_rows:
                 content = f"[{r['block_type']}] {r['content']}"
                 inj_mems.append(InjectableMemory(
@@ -3694,14 +3434,14 @@ def cmd_session_context(args: Namespace) -> None:
             if max_age > 0 else ""
         )
         try:
-            fact_rows = conn.execute(
+            fact_rows = _read_rows(
                 "SELECT fact_id, content, importance, access_count, fact_type FROM atomic_facts "
                 "WHERE profile_id = ? "
                 f"{age_clause}"
                 "AND lifecycle = 'active' "
                 "ORDER BY importance DESC, created_at DESC LIMIT 10",
                 (pid,),
-            ).fetchall()
+            )
             for r in fact_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -3715,12 +3455,12 @@ def cmd_session_context(args: Namespace) -> None:
 
         # Session markers (last session summary)
         try:
-            sess_rows = conn.execute(
+            sess_rows = _read_rows(
                 "SELECT fact_id, content, importance, access_count FROM atomic_facts "
                 "WHERE profile_id = ? AND content LIKE 'Session%' "
                 "ORDER BY created_at DESC LIMIT 3",
                 (pid,),
-            ).fetchall()
+            )
             for r in sess_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -3732,22 +3472,17 @@ def cmd_session_context(args: Namespace) -> None:
         except sqlite3.OperationalError:
             pass
 
-        conn.close()
-
         if not inj_mems:
             return
 
         # V3.3 Soft prompts (auto-learned patterns) — append as high-importance
         try:
-            conn2 = sqlite3.connect(str(db_path))
-            conn2.row_factory = sqlite3.Row
-            sp_rows = conn2.execute(
+            sp_rows = _read_rows(
                 "SELECT category, content FROM soft_prompt_templates "
                 "WHERE profile_id = ? AND active = 1 "
                 "ORDER BY confidence DESC LIMIT 5",
                 (pid,),
-            ).fetchall()
-            conn2.close()
+            )
             for r in sp_rows:
                 inj_mems.append(InjectableMemory(
                     content=f"[{r['category']}] {r['content']}",

@@ -8,9 +8,8 @@ Covers:
     - Success path: recall returns results list
     - Failure path: pool error propagated
     - choose_pool().recall() called with query + limit + fast
-    - Event emission on success
-    - Implicit feedback recording (_record_recall_hits)
-    - Edge cases: empty query, limit forwarded, feedback failure non-blocking
+    - Recall has no post-query persistence side effects
+    - Edge cases: empty query and limit forwarding
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
@@ -69,9 +68,7 @@ def _get_recall_tool():
 class TestRecallTool:
     """Core behavior of the recall MCP tool."""
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_success_returns_results(self, mock_emit, mock_record):
+    def test_recall_success_returns_results(self):
         """Successful recall returns success=True with results list."""
         pool = MagicMock()
         pool.recall.return_value = {
@@ -93,9 +90,7 @@ class TestRecallTool:
         assert result["count"] == 1
         assert result["query_type"] == "semantic"
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_failure_returns_error(self, mock_emit, mock_record):
+    def test_recall_failure_returns_error(self):
         """When pool.recall returns ok=False, tool returns success=False."""
         pool = MagicMock()
         pool.recall.return_value = {"ok": False, "error": "Index corrupted"}
@@ -108,9 +103,7 @@ class TestRecallTool:
         assert result["success"] is False
         assert "Index corrupted" in result["error"]
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_calls_pool_recall(self, mock_emit, mock_record):
+    def test_recall_calls_pool_recall(self):
         """pool.recall() is called with the query and limit."""
         pool = MagicMock()
         pool.recall.return_value = {
@@ -127,9 +120,8 @@ class TestRecallTool:
              patch("superlocalmemory.hooks.session_registry.most_recent_active", return_value=None):
             asyncio.run(recall("architecture patterns", limit=5))
 
-        # S9-DASH-02: recall now threads session_id to pool.recall so the
-        # outcome-queue producer can correlate hook signals. Default
-        # session_id when the caller doesn't supply one is ``mcp:<agent_id>``.
+        # The response shape preserves session_id forwarding for transport
+        # compatibility, but recall itself no longer schedules outcomes.
         # v3.8.2 client-driven agentic: the tool forwards fast=None when the
         # caller omits it, so the daemon resolves the configured default.
         pool.recall.assert_called_once_with(
@@ -137,9 +129,7 @@ class TestRecallTool:
             fast=None, include_global=None, include_shared=None, window=None,
         )
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_forwards_fast_flag(self, mock_emit, mock_record):
+    def test_recall_forwards_fast_flag(self):
         """fast=True is forwarded to the selected pool implementation."""
         pool = MagicMock()
         pool.recall.return_value = {
@@ -158,10 +148,8 @@ class TestRecallTool:
             fast=True, include_global=None, include_shared=None, window=None,
         )
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_emits_memory_recalled_event(self, mock_emit, mock_record):
-        """On success, _emit_event('memory.recalled', ...) is called."""
+    def test_recall_emits_no_persistent_event(self):
+        """CQS: a successful recall cannot persist an event."""
         pool = MagicMock()
         pool.recall.return_value = {
             "ok": True, "results": [], "result_count": 0, "query_type": "fts",
@@ -169,20 +157,14 @@ class TestRecallTool:
 
         recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
+        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool), \
+             patch("superlocalmemory.mcp.tools_core._emit_event") as mock_emit:
             asyncio.run(recall("event check"))
 
-        mock_emit.assert_called_once()
-        args = mock_emit.call_args
-        assert args[0][0] == "memory.recalled"
-        payload = args[0][1]
-        assert "query" in payload
-        assert payload["result_count"] == 0
-        assert payload["query_type"] == "fts"
+        mock_emit.assert_not_called()
 
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_records_implicit_feedback(self, mock_emit):
-        """_record_recall_hits is called with get_engine, query, and results."""
+    def test_recall_has_no_implicit_feedback_writer(self):
+        """CQS: learning occurs only through explicit feedback commands."""
         pool = MagicMock()
         results_data = [{"fact_id": "f-10", "content": "x", "score": 0.8}]
         pool.recall.return_value = {
@@ -190,14 +172,14 @@ class TestRecallTool:
             "query_type": "semantic",
         }
 
-        recall, get_engine = _get_recall_tool()
+        recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool), \
-             patch("superlocalmemory.mcp.tools_core._record_recall_hits") as mock_record:
+        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
             asyncio.run(recall("feedback query"))
 
-        mock_record.assert_called_once_with(
-            get_engine, "feedback query", results_data, profile_id="",
+        assert not hasattr(
+            __import__("superlocalmemory.mcp.tools_core", fromlist=["*"]),
+            "_record_recall_hits",
         )
 
 
@@ -208,9 +190,7 @@ class TestRecallTool:
 class TestRecallEdgeCases:
     """Edge case handling for the recall tool."""
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_empty_query_handled(self, mock_emit, mock_record):
+    def test_recall_empty_query_handled(self):
         """Empty string query does not crash the tool."""
         pool = MagicMock()
         pool.recall.return_value = {
@@ -232,9 +212,7 @@ class TestRecallEdgeCases:
             include_global=None, include_shared=None, window=None,
         )
 
-    @patch("superlocalmemory.mcp.tools_core._record_recall_hits")
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_limit_forwarded(self, mock_emit, mock_record):
+    def test_recall_limit_forwarded(self):
         """Custom limit=5 is forwarded to pool.recall()."""
         pool = MagicMock()
         pool.recall.return_value = {
@@ -253,9 +231,8 @@ class TestRecallEdgeCases:
             include_global=None, include_shared=None, window=None,
         )
 
-    @patch("superlocalmemory.mcp.tools_core._emit_event")
-    def test_recall_feedback_failure_non_blocking(self, mock_emit):
-        """If _record_recall_hits raises, recall still returns successfully."""
+    def test_recall_returns_even_when_no_implicit_feedback_exists(self):
+        """No best-effort memory write is attached to recall success."""
         pool = MagicMock()
         pool.recall.return_value = {
             "ok": True,
@@ -266,13 +243,8 @@ class TestRecallEdgeCases:
 
         recall, _ = _get_recall_tool()
 
-        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool), \
-             patch(
-                 "superlocalmemory.mcp.tools_core._record_recall_hits",
-                 side_effect=RuntimeError("feedback DB broken"),
-             ):
+        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
             result = asyncio.run(recall("should still work"))
 
-        # Recall must succeed even when feedback recording fails
         assert result["success"] is True
         assert result["count"] == 1

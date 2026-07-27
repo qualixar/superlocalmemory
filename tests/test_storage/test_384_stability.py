@@ -26,8 +26,8 @@ from typing import Any
 
 import pytest
 
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage import schema as real_schema
+from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.migrations import M018_ingestion_operations as M018
 
 # ---------------------------------------------------------------------------
@@ -255,9 +255,9 @@ class TestPendingDeadLetterCap:
         self, tmp_path: Path
     ) -> None:
         from superlocalmemory.cli.pending_store import (
-            store_pending,
-            mark_failed,
             _MAX_RETRY_COUNT,  # type: ignore[attr-defined]  # added by Fix F
+            mark_failed,
+            store_pending,
         )
 
         row_id = store_pending(
@@ -291,10 +291,10 @@ class TestPendingDeadLetterCap:
         self, tmp_path: Path
     ) -> None:
         from superlocalmemory.cli.pending_store import (
-            store_pending,
-            mark_failed,
-            get_pending,
             _MAX_RETRY_COUNT,  # type: ignore[attr-defined]
+            get_pending,
+            mark_failed,
+            store_pending,
         )
 
         row_id = store_pending("will be dead-lettered", base_dir=tmp_path)
@@ -333,10 +333,10 @@ class TestM018DeadLetterTable:
         self, tmp_path: Path
     ) -> None:
         from superlocalmemory.core.ingestion_command import (
-            IngestionCommand,
-            IngestionRequest,
-            IngestionOperationRepository,
             _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS,
+            IngestionCommand,
+            IngestionOperationRepository,
+            IngestionRequest,
         )
 
         db = self._make_db(tmp_path)
@@ -365,13 +365,30 @@ class TestM018DeadLetterTable:
         operation = cmd.submit(request)
         op_id = operation.operation_id
 
-        # Drive the materializer _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS times —
-        # each run claims, fails, and transitions to FAILED
-        for attempt in range(_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS):
+        # The first nine real claims remain retryable and must be recorded as
+        # nine, not ten. claim_enriching(), not finish_enriching(), owns the
+        # single attempt-count increment.
+        for attempt in range(_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS - 1):
             try:
                 cmd.materialize(op_id)
             except Exception:
                 pass  # materialize errors are expected
+
+        before_boundary = dict(db.execute(
+            "SELECT attempt_count FROM ingestion_operations WHERE operation_id = ?",
+            (op_id,),
+        )[0])
+        assert (
+            before_boundary["attempt_count"]
+            == _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS - 1
+        )
+        assert db.execute(
+            "SELECT 1 FROM dead_letter_operations WHERE original_op_id = ?",
+            (op_id,),
+        ) == []
+
+        # The tenth claim is the exact dead-letter boundary.
+        cmd.materialize(op_id)
 
         # Verify NOT in the materializable work queue
         materializable = repo.list_materializable(limit=100)

@@ -26,7 +26,6 @@ from typing import Any
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT, SLMConfig
 from superlocalmemory.core.engine_capabilities import Capabilities, CapabilityError
 from superlocalmemory.core.modes import get_capabilities
-from superlocalmemory.learning.outcome_queue import RecallEvent, enqueue_recall
 from superlocalmemory.storage.models import (
     AtomicFact, FactType, MemoryRecord, Mode, RecallResponse,
 )
@@ -755,43 +754,11 @@ class MemoryEngine:
                 include_shared=include_shared,
                 window=window,
             )
-        except Exception as exc:
-            from superlocalmemory.infra.local_diagnostics import record_operation
-
-            record_operation("recall", client=agent_id, error=exc)
+        except Exception:
+            # Diagnostics are intentionally not recorded here.  A recall is a
+            # read command; diagnostics, outcomes, and implicit feedback must
+            # be submitted through explicit write commands.
             raise
-
-        from superlocalmemory.infra.local_diagnostics import record_recall
-
-        record_recall(self._db, response, client=agent_id)
-
-        # S9-DASH-02: enqueue for pending_outcomes. Non-blocking; errors
-        # swallowed because signal capture is never load-bearing on
-        # recall correctness (LLD-02 §4.9, LLD-08 §4.1).
-        if session_id:
-            try:
-                fact_ids = tuple(
-                    getattr(r.fact, "fact_id", "") or ""
-                    for r in getattr(response, "results", [])
-                    if getattr(r, "fact", None) is not None
-                )
-                fact_ids = tuple(f for f in fact_ids if f)
-                if fact_ids:
-                    enqueue_recall(RecallEvent(
-                        session_id=session_id,
-                        profile_id=pid,
-                        query=query,
-                        fact_ids=fact_ids,
-                        query_id=getattr(response, "query_id", "") or "",
-                    ))
-            except Exception as _outcome_exc:
-                # Engagement-signal enqueue is non-blocking; recall
-                # correctness does not depend on it. Log so the failure
-                # is visible instead of silently losing learning signals.
-                logger.warning(
-                    "outcome-queue enqueue failed (engagement signal lost): %s",
-                    _outcome_exc,
-                )
 
         return response
 
@@ -820,25 +787,103 @@ class MemoryEngine:
     # -- Lifecycle ----------------------------------------------------------
 
     def close(self) -> None:
-        if self._maintenance_scheduler is not None:
-            self._maintenance_scheduler.stop()
-        if self._retrieval_engine is not None:
+        """Release engine-owned resources without waiting for model workers.
+
+        Daemon shutdown must be a bounded operation.  In particular, a
+        ``store_fast`` embed submitted just before shutdown may be blocked in a
+        model runtime forever; waiting for its executor here used to make the
+        service manager SIGKILL the daemon and leave its children behind.
+        References are cleared before invoking each cleanup hook, so a second
+        close is safe even when one optional cleanup hook fails.
+        """
+        scheduler = getattr(self, "_maintenance_scheduler", None)
+        self._maintenance_scheduler = None
+        if scheduler is not None:
             try:
-                self._retrieval_engine.close()
+                scheduler.stop()
             except Exception:
-                pass
-        if self._db is not None:
+                logger.warning("engine cleanup: maintenance scheduler stop failed", exc_info=True)
+
+        embed_pool = getattr(self, "_store_fast_embed_pool", None)
+        embed_pool_lock = getattr(self, "_store_fast_embed_pool_lock", None)
+        if embed_pool_lock is not None:
+            with embed_pool_lock:
+                embed_pool, self._store_fast_embed_pool = self._store_fast_embed_pool, None
+        else:
+            self._store_fast_embed_pool = None
+        if embed_pool is not None:
             try:
-                from superlocalmemory.core.recall_pipeline import (
-                    release_recall_resources,
+                embed_pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                logger.warning(
+                    "engine cleanup: store-fast embed pool shutdown failed",
+                    exc_info=True,
                 )
-                release_recall_resources(self._db)
-            except Exception:
-                pass
+
+        retrieval = getattr(self, "_retrieval_engine", None)
+        self._retrieval_engine = None
+        if retrieval is not None:
+            reranker = getattr(retrieval, "_reranker", None)
             try:
-                self._db.close()
+                if reranker is not None:
+                    shutdown = getattr(reranker, "shutdown", None)
+                    if callable(shutdown):
+                        shutdown(timeout=1.0)
+                    else:
+                        unload = getattr(reranker, "unload", None)
+                        if callable(unload):
+                            unload()
             except Exception:
-                pass
+                logger.warning("engine cleanup: reranker shutdown failed", exc_info=True)
+            try:
+                retrieval.close(wait=False)
+            except TypeError:
+                # Compatibility for plugins with the legacy no-argument
+                # close hook.  Built-in RetrievalEngine accepts ``wait``.
+                try:
+                    retrieval.close()
+                except Exception:
+                    logger.warning(
+                        "engine cleanup: legacy retrieval shutdown failed",
+                        exc_info=True,
+                    )
+            except Exception:
+                logger.warning("engine cleanup: retrieval executor shutdown failed", exc_info=True)
+
+        embedder = getattr(self, "_embedder", None)
+        self._embedder = None
+        if embedder is not None:
+            try:
+                shutdown = getattr(embedder, "shutdown", None)
+                if callable(shutdown):
+                    shutdown(timeout=1.0)
+                else:
+                    unload = getattr(embedder, "unload", None)
+                    if not callable(unload):
+                        unload = None
+                if not callable(shutdown) and callable(unload):
+                    try:
+                        unload(timeout=1.0)
+                    except TypeError:
+                        # Ollama and third-party embedders may still expose
+                        # the legacy no-argument unload hook.
+                        unload()
+            except Exception:
+                logger.warning("engine cleanup: embedder unload failed", exc_info=True)
+
+        db = getattr(self, "_db", None)
+        self._db = None
+        if db is not None:
+            try:
+                from superlocalmemory.core.recall_pipeline import release_recall_resources
+
+                release_recall_resources(db)
+            except Exception:
+                logger.warning("engine cleanup: recall resources release failed", exc_info=True)
+            try:
+                db.close()
+            except Exception:
+                logger.warning("engine cleanup: database close failed", exc_info=True)
         self._initialized = False
 
     @property

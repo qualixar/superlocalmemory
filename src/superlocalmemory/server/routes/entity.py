@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .helpers import get_active_profile, require_engine
+from .helpers import get_active_profile, get_read_connection, require_engine
 
 router = APIRouter(prefix="/api/entity", tags=["entity"])
 
@@ -82,9 +82,7 @@ def list_entities(
     profile = profile or get_active_profile()
     _require_read(request, profile)
 
-    import sqlite3
-    conn = sqlite3.connect(str(engine._config.db_path))
-    conn.row_factory = sqlite3.Row
+    conn = get_read_connection(engine._config.db_path)
     try:
         where = ["ce.profile_id = ?"]
         params: list[object] = [profile]
@@ -158,9 +156,7 @@ def get_entity(
     _require_read(request, profile)
 
     import json
-    import sqlite3
-    conn = sqlite3.connect(str(engine._config.db_path))
-    conn.row_factory = sqlite3.Row
+    conn = get_read_connection(engine._config.db_path)
     try:
         # Search by canonical_name (case-insensitive)
         row = conn.execute("""

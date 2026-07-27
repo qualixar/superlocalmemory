@@ -39,15 +39,6 @@ from __future__ import annotations
 import ipaddress as _ipa
 
 
-# CRIT-2 guard: detect a future CPython regression where IPv4-mapped loopback
-# is no longer reported as .is_loopback. Fails at daemon startup (import time),
-# not silently at request time.
-assert _ipa.ip_address("::ffff:127.0.0.1").is_loopback, (
-    "Python ipaddress regression: ::ffff:127.0.0.1 no longer reports as "
-    "loopback. Update superlocalmemory/server/loopback.py. (Issue #90)"
-)
-
-
 def is_loopback(host: str) -> bool:
     """Return ``True`` iff ``host`` is a loopback address in any standard form.
 
@@ -82,10 +73,13 @@ def is_loopback(host: str) -> bool:
         ip = _ipa.ip_address(host)
     except ValueError:
         return False
-    # Python's .is_loopback already handles 127.0.0.0/8, ::1, and
-    # IPv4-mapped loopback (::ffff:127.x.x.x). No manual ipv4_mapped
-    # normalization needed — the stdlib does the right thing.
-    return ip.is_loopback
+    if ip.is_loopback:
+        return True
+    # CPython's handling of IPv4-mapped IPv6 changed across supported
+    # runtimes. Normalize through the embedded IPv4 address so a dual-stack
+    # socket reporting ::ffff:127.x.x.x retains the equivalent IPv4 decision.
+    mapped_ipv4 = getattr(ip, "ipv4_mapped", None)
+    return bool(mapped_ipv4 is not None and mapped_ipv4.is_loopback)
 
 
 __all__ = ("is_loopback",)

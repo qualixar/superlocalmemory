@@ -14,16 +14,13 @@ Covers:
   - Recall exposure does not reinforce trust or ranking state
   - Adaptive ranking phase 1: no reranking when < 50 signals
   - Adaptive ranking: skips gracefully when learning DB missing
-  - Pre-hooks invoked before recall
-  - Post-hooks invoked after recall with result_count
+  - Recall does not invoke arbitrary lifecycle hooks
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from superlocalmemory.core.engine import MemoryEngine
 from superlocalmemory.storage.models import (
@@ -32,7 +29,6 @@ from superlocalmemory.storage.models import (
     RecallResponse,
     RetrievalResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -227,28 +223,23 @@ class TestRecallAdaptiveRanking:
 # Hooks
 # ---------------------------------------------------------------------------
 
-class TestRecallHooks:
-    """Verify pre/post hook invocation during recall()."""
+class TestRecallHookIsolation:
+    """A recall cannot invoke arbitrary hooks that may mutate state."""
 
-    def test_recall_runs_pre_hooks(
+    def test_recall_does_not_run_pre_hooks(
         self, engine_with_mock_deps: MemoryEngine,
     ) -> None:
-        """recall() calls _hooks.run_pre('recall', ...) before retrieval."""
+        """Read commands do not execute arbitrary pre-hook callbacks."""
         spy = MagicMock()
         engine_with_mock_deps._hooks.register_pre("recall", spy)
         engine_with_mock_deps.recall("hook pre test")
-        spy.assert_called_once()
-        ctx = spy.call_args[0][0]
-        assert ctx["operation"] == "recall"
+        spy.assert_not_called()
 
-    def test_recall_runs_post_hooks(
+    def test_recall_does_not_run_post_hooks(
         self, engine_with_mock_deps: MemoryEngine,
     ) -> None:
-        """recall() calls _hooks.run_post('recall', ...) with result_count."""
+        """Read commands do not execute arbitrary post-hook callbacks."""
         spy = MagicMock()
         engine_with_mock_deps._hooks.register_post("recall", spy)
         engine_with_mock_deps.recall("hook post test")
-        spy.assert_called_once()
-        ctx = spy.call_args[0][0]
-        assert "result_count" in ctx
-        assert "query_type" in ctx
+        spy.assert_not_called()

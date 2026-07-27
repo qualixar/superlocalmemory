@@ -368,9 +368,12 @@
     ]);
   }
   function loadEmb() {
-    fetch('/api/v3/embedding/config').then(function (r) { return r.ok ? r.json() : null; })
+    fetch('/api/v3/embedding/config').then(function (r) {
+      if (!r.ok) throw new Error('embedding config unavailable');
+      return r.json();
+    })
       .then(function (d) {
-        if (!d) return;
+        if (!d) throw new Error('embedding config unavailable');
         var p = q('emb-prov');
         if (p) { p.value = d.is_openai_compatible ? 'openai' : 'default'; p.dispatchEvent(new Event('change')); }
         var m = q('emb-model'); if (m) m.value = d.model_name || '';
@@ -378,7 +381,10 @@
         var ep = q('emb-endpoint'); if (ep) ep.value = d.api_endpoint || '';
         var inf = q('emb-info');
         if (inf) inf.textContent = 'Current: ' + (d.model_name || 'nomic-embed-text') + ' (' + (d.dimension || 768) + 'd)';
-      }).catch(function () {});
+      }).catch(function () {
+        var inf = q('emb-info');
+        if (inf) inf.textContent = 'Embedding configuration unavailable. Check daemon health and retry.';
+      });
   }
   function saveEmb() {
     setSt('emb', 'Saving…', null);

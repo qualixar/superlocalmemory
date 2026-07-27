@@ -21,13 +21,13 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from superlocalmemory.retrieval.reranker import CrossEncoderReranker
 from superlocalmemory.storage.models import AtomicFact
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,12 +102,46 @@ def _clean_reranker_module_state():
     affected tests.
     """
     import importlib
+
     from superlocalmemory.retrieval import reranker as _r
     importlib.reload(_r)
     yield _r
 
 
 class TestWorkerManagement:
+    def test_shutdown_cancels_and_joins_background_warmup(self) -> None:
+        """Explicit shutdown leaves no warmup thread attached to a reranker."""
+        warmup_started = threading.Event()
+
+        def _ensure_worker(reranker: CrossEncoderReranker) -> None:
+            reranker._worker_proc = object()
+
+        def _wait_for_shutdown(reranker: CrossEncoderReranker, *_args, **_kwargs):
+            warmup_started.set()
+            reranker._shutdown_event.wait(timeout=5)
+            return None
+
+        with patch.object(CrossEncoderReranker, "_ensure_worker", _ensure_worker), patch.object(
+            CrossEncoderReranker, "_send_request", _wait_for_shutdown,
+        ):
+            reranker = CrossEncoderReranker(model_name="fake-model")
+            assert warmup_started.wait(timeout=1)
+
+            reranker.shutdown(timeout=1)
+
+        assert reranker._shutdown_event.is_set()
+        assert not reranker._warmup_thread.is_alive()
+
+    def test_shutdown_prevents_future_background_warmup(self) -> None:
+        """A closed reranker must stay closed when fallback scoring is used."""
+        reranker = _make_reranker(model_name="fake-model")
+        reranker.shutdown()
+
+        with patch.object(reranker, "_start_background_warmup") as warmup:
+            reranker.rerank("query", _make_candidates())
+
+        warmup.assert_not_called()
+
     @pytest.mark.skip(
         reason=(
             "Pre-existing suite-order pollution: passes in isolation, "

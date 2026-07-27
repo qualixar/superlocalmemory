@@ -21,7 +21,6 @@ import pytest
 from superlocalmemory.core import component_healer as ch
 from superlocalmemory.core import component_registry as cr
 
-
 # --------------------------------------------------------------------------
 # Component value object
 # --------------------------------------------------------------------------
@@ -122,17 +121,40 @@ def test_embedder_auto_fix_requires_torch(monkeypatch):
     assert cr.probe_embedder_model(None).auto_fixable is True
 
 
-def test_reranker_absent_but_disabled_is_ok():
+def test_reranker_absent_but_disabled_is_ok(monkeypatch: pytest.MonkeyPatch):
     class _RT:
         use_cross_encoder = False
 
     class _Cfg:
         retrieval = _RT()
 
+    # The test must not inherit a developer or CI worker's HuggingFace cache.
+    monkeypatch.setattr(cr, "_hf_model_cached", lambda _repo: False)
+
     comp = cr.probe_reranker_model(_Cfg())
     # Disabled → its absence is expected, reported OK not missing.
     assert comp.status == cr.STATUS_OK
     assert "disabled" in comp.detail
+
+
+def test_reranker_cached_but_disabled_reports_actual_disabled_state(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A cached model is not active when cross-encoder retrieval is disabled."""
+    class _RT:
+        use_cross_encoder = False
+
+    class _Cfg:
+        retrieval = _RT()
+
+    monkeypatch.setattr(cr, "_hf_model_cached", lambda _repo: True)
+
+    comp = cr.probe_reranker_model(_Cfg())
+
+    assert comp.status == cr.STATUS_OK
+    assert "disabled" in comp.detail
+    assert comp.fix_cmd == ""
+    assert comp.auto_fixable is False
 
 
 # --------------------------------------------------------------------------

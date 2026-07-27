@@ -7,18 +7,23 @@ Uses V3 MemoryEngine for store/recall. Falls back to direct DB for list/graph.
 """
 import json
 import logging
+import re
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .helpers import (
-    get_db_connection, dict_factory, get_active_profile, get_engine_lazy,
-    SearchRequest, DB_PATH, MEMORY_DIR,
+    SearchRequest,
+    dict_factory,
+    get_active_profile,
+    get_db_connection,
+    get_engine_lazy,
 )
-from superlocalmemory.storage.memory_write import memory_write
 
 logger = logging.getLogger("superlocalmemory.routes.memories")
 router = APIRouter()
+_IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 
 # v3.8.3: GENEROUS latency budget for recall. SLM's value is quality recall
 # under heavy multi-agent load, so semantic recall is given ample time to
@@ -55,6 +60,58 @@ def _internal_error(detail: str = "Internal server error") -> HTTPException:
 def _get_engine(request: Request):
     """Get V3 engine from app state, initializing lazily on first call."""
     return get_engine_lazy(request.app.state)
+
+
+def _canonical_mutation_runtime(request: Request):
+    """Return the daemon-owned mutation boundary or fail before queueing work."""
+    runtime = getattr(request.app.state, "canonical_remember_runtime", None)
+    if runtime is None or not runtime.ready:
+        raise HTTPException(503, detail="canonical mutation writer is not ready; retry shortly")
+    return runtime
+
+
+def _mutation_idempotency_key(request: Request) -> str:
+    """Accept a client retry key without making one mandatory for the dashboard."""
+    key = request.headers.get("X-Idempotency-Key", "").strip() or str(uuid.uuid4())
+    if not _IDEMPOTENCY_KEY.fullmatch(key):
+        raise HTTPException(
+            422,
+            detail="X-Idempotency-Key must contain 1-256 safe characters",
+        )
+    return key
+
+
+def _canonical_mutation_error(exc: Exception, detail: str) -> HTTPException:
+    """Map typed mutation failures without leaking SQLite or filesystem detail."""
+    from superlocalmemory.core.remember_runtime import (
+        CanonicalMutationConflict,
+        CanonicalRememberUnavailable,
+    )
+
+    if isinstance(exc, CanonicalMutationConflict):
+        return HTTPException(409, detail=str(exc))
+    if isinstance(exc, CanonicalRememberUnavailable):
+        return HTTPException(
+            503,
+            detail="canonical mutation writer is temporarily unavailable",
+        )
+    return _internal_error(detail)
+
+
+def _mutation_runtime_or_missing_fact(
+    request: Request, engine, profile_id: str, fact_id: str,
+):
+    """Retain the public 404 for a missing fact without creating a local writer."""
+    runtime = getattr(request.app.state, "canonical_remember_runtime", None)
+    if runtime is not None and runtime.ready:
+        return runtime
+    rows = engine._db.execute(
+        "SELECT 1 FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+        (fact_id, profile_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    raise HTTPException(503, detail="canonical mutation writer is not ready; retry shortly")
 
 
 def _authorize_memory_mutation(
@@ -726,13 +783,21 @@ async def get_clusters(request: Request):
                 unclustered = 0
 
         conn.close()
-        return {"clusters": clusters, "total_clusters": len(clusters), "unclustered_count": unclustered}
+        return {
+            "clusters": clusters,
+            "total_clusters": len(clusters),
+            "unclustered_count": unclustered,
+        }
     except Exception:
         raise _internal_error("Cluster error")
 
 
 @router.get("/api/clusters/{cluster_id}")
-async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Query(50, ge=1, le=200)):
+async def get_cluster_detail(
+    request: Request,
+    cluster_id: str,
+    limit: int = Query(50, ge=1, le=200),
+):
     """Get detailed view of a specific cluster (scene)."""
     try:
         conn = get_db_connection()
@@ -974,14 +1039,18 @@ async def delete_memory(request: Request, fact_id: str):
             fact_id,
             trusted_actor_id=hook_context["agent_id"],
             source_agent_id="dashboard",
+            canonical_runtime=_mutation_runtime_or_missing_fact(
+                request, engine, _active_profile, fact_id,
+            ),
+            idempotency_key=_mutation_idempotency_key(request),
         )
         if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
         return {"success": True, "deleted": fact_id}
     except HTTPException:
         raise
-    except Exception:
-        raise _internal_error("Delete error")
+    except Exception as exc:
+        raise _canonical_mutation_error(exc, "Delete error")
 
 
 @router.post("/api/memories/{fact_id}/forget")
@@ -993,54 +1062,25 @@ async def forget_memory(request: Request, fact_id: str):
     The fact's payload is ALSO copied into ``memory_archive`` so a
     future ``slm restore`` can bring it back.
     """
-    import json as _json
     engine, active_profile, hook_context = _authorize_memory_mutation(
         request, "delete", fact_id,
+        run_pre_hook=False,
     )
     try:
-        from datetime import datetime, timezone
-        import uuid as _uuid
-        archived_at = datetime.now(timezone.utc).isoformat()
-        archive_id = str(_uuid.uuid4())
-        # memory_write: write lock (in-process) + busy_timeout (cross-process).
-        # SELECT + INSERT + UPDATE are atomic inside the same connection.
-        with memory_write(DB_PATH) as conn:
-            conn.row_factory = dict_factory
-            row = conn.execute(
-                "SELECT fact_id, content, importance, confidence, "
-                "       canonical_entities_json, embedding, created_at "
-                "FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-                (fact_id, active_profile),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Memory not found")
-            # Archive copy — payload_json small enough for the canonical row.
-            payload = {
-                "fact_id": row["fact_id"],
-                "content": row["content"],
-                "canonical_entities_json": row.get("canonical_entities_json"),
-                "importance": row.get("importance"),
-                "confidence": row.get("confidence"),
-                "created_at": row.get("created_at"),
-            }
-            conn.execute(
-                "INSERT INTO memory_archive "
-                "(archive_id, fact_id, profile_id, payload_json, archived_at, reason) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (archive_id, fact_id, active_profile,
-                 _json.dumps(payload), archived_at, "user_forget_dashboard"),
-            )
-            conn.execute(
-                "UPDATE atomic_facts SET archive_status = 'archived' "
-                "WHERE fact_id = ?",
-                (fact_id,),
-            )
+        engine._hooks.run_pre("delete", hook_context)
+        result = _canonical_mutation_runtime(request).archive_fact(
+            active_profile,
+            fact_id,
+            idempotency_key=_mutation_idempotency_key(request),
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=404, detail="Memory not found")
         engine._hooks.run_post("delete", hook_context)
-        return {"success": True, "fact_id": fact_id, "archived_at": archived_at}
+        return {"success": True, "fact_id": fact_id, "archived_at": result["archived_at"]}
     except HTTPException:
         raise
-    except Exception:
-        raise _internal_error("Forget error")
+    except Exception as exc:
+        raise _canonical_mutation_error(exc, "Forget error")
 
 
 @router.post("/api/memories/{fact_id}/merge")
@@ -1055,6 +1095,7 @@ async def merge_memory(request: Request, fact_id: str):
     """
     engine, active_profile, hook_context = _authorize_memory_mutation(
         request, "delete", fact_id,
+        run_pre_hook=False,
     )
     try:
         body = await request.json()
@@ -1066,50 +1107,26 @@ async def merge_memory(request: Request, fact_id: str):
             raise HTTPException(400, "'into' exceeds 200-char limit")
         if kept == fact_id:
             raise HTTPException(400, "Cannot merge a fact into itself")
-        from datetime import datetime, timezone
-        merged_at = datetime.now(timezone.utc).isoformat()
-        # memory_write: write lock (in-process) + busy_timeout (cross-process).
-        # SELECT + INSERT + UPDATE are atomic inside the same connection.
-        with memory_write(DB_PATH) as conn:
-            conn.row_factory = dict_factory
-            # Both must belong to the active profile.
-            found = {
-                r["fact_id"]
-                for r in conn.execute(
-                    "SELECT fact_id FROM atomic_facts "
-                    "WHERE fact_id IN (?, ?) AND profile_id = ?",
-                    (fact_id, kept, active_profile),
-                ).fetchall()
-            }
-            if fact_id not in found or kept not in found:
-                raise HTTPException(
-                    404,
-                    "Both fact_ids must exist in the active profile",
-                )
-            conn.execute(
-                "INSERT INTO memory_merge_log "
-                "(kept_fact_id, merged_fact_id, profile_id, reason, merged_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (kept, fact_id, active_profile,
-                 "user_merge_dashboard", merged_at),
-            )
-            conn.execute(
-                "UPDATE atomic_facts "
-                "SET merged_into = ?, archive_status = 'archived' "
-                "WHERE fact_id = ?",
-                (kept, fact_id),
-            )
+        engine._hooks.run_pre("delete", hook_context)
+        result = _canonical_mutation_runtime(request).merge_fact(
+            active_profile,
+            fact_id,
+            kept,
+            idempotency_key=_mutation_idempotency_key(request),
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, "Both fact_ids must exist in the active profile")
         engine._hooks.run_post("delete", hook_context)
         return {
             "success": True,
             "merged": fact_id,
             "into": kept,
-            "merged_at": merged_at,
+            "merged_at": result["merged_at"],
         }
     except HTTPException:
         raise
-    except Exception:
-        raise _internal_error("Merge error")
+    except Exception as exc:
+        raise _canonical_mutation_error(exc, "Merge error")
 
 
 @router.patch("/api/memories/{fact_id}")
@@ -1135,14 +1152,16 @@ async def edit_memory(request: Request, fact_id: str):
             new_content,
             trusted_actor_id=hook_context["agent_id"],
             source_agent_id="dashboard",
+            canonical_runtime=_canonical_mutation_runtime(request),
+            idempotency_key=_mutation_idempotency_key(request),
         )
         if not result.get("ok"):
             raise HTTPException(status_code=404, detail="Memory not found")
         return {"success": True, "fact_id": fact_id, "content": new_content}
     except HTTPException:
         raise
-    except Exception:
-        raise _internal_error("Edit error")
+    except Exception as exc:
+        raise _canonical_mutation_error(exc, "Edit error")
 
 
 _VALID_SCOPES = ("personal", "shared", "global")
@@ -1158,7 +1177,6 @@ async def set_memory_scope(request: Request, fact_id: str):
     belong to the active profile (a caller cannot re-scope another profile's
     fact). This is the write side of multi-scope sharing from the dashboard.
     """
-    import json as _json
     try:
         body = await request.json()
         scope = (body.get("scope") or "").strip().lower()
@@ -1179,26 +1197,30 @@ async def set_memory_scope(request: Request, fact_id: str):
         if scope != "shared":
             shared_list = []
 
-        engine, active_profile, _ctx = _authorize_memory_mutation(
+        engine, active_profile, hook_context = _authorize_memory_mutation(
             request, "update", fact_id, run_pre_hook=False,
         )
-        # Ownership check: the fact must belong to the active profile.
-        rows = engine._db.execute(
-            "SELECT 1 FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-            (fact_id, active_profile),
-        )
-        if not rows:
-            raise HTTPException(404, detail="Memory not found in this profile")
+        if scope in {"shared", "global"}:
+            from superlocalmemory.access.rbac import Permission
+            from superlocalmemory.server.rbac_enforce import require_permission
 
-        engine._db.update_fact(fact_id, {
-            "scope": scope,
-            "shared_with": _json.dumps(shared_list),
-        }, profile_id=active_profile)
+            require_permission(request, Permission.SHARE, profile=active_profile)
+        engine._hooks.run_pre("update", hook_context)
+        result = _canonical_mutation_runtime(request).set_fact_scope(
+            active_profile,
+            fact_id,
+            scope,
+            shared_list,
+            idempotency_key=_mutation_idempotency_key(request),
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, detail="Memory not found in this profile")
+        engine._hooks.run_post("update", hook_context)
         return {
             "success": True, "fact_id": fact_id, "scope": scope,
             "shared_with": shared_list, "active_profile": active_profile,
         }
     except HTTPException:
         raise
-    except Exception:
-        raise _internal_error("Scope update error")
+    except Exception as exc:
+        raise _canonical_mutation_error(exc, "Scope update error")

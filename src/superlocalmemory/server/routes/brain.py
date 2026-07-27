@@ -60,6 +60,7 @@ from superlocalmemory.core.security_primitives import (
 from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.features import FEATURE_DIM
 from superlocalmemory.infra.data_root import canonical_data_root
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 from .helpers import get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.brain")
@@ -554,7 +555,7 @@ def _compute_cache_stats() -> dict:
     size = db.stat().st_size
     entry_count = 0
     try:
-        conn = sqlite3.connect(str(db), timeout=5.0)
+        conn = ReadConnectionFactory(db).open()
         try:
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM atomic_facts",
@@ -579,14 +580,11 @@ def _adapter_last_sync_ago(adapter_name: str) -> int | None:
     honest empty rather than a fabricated number.
     """
     try:
-        import sqlite3 as _sqlite3
         from datetime import datetime as _dt, timezone as _tz
         memory_db = _memory_dir() / "memory.db"
         if not memory_db.exists():
             return None
-        conn = _sqlite3.connect(
-            f"file:{memory_db}?mode=ro", uri=True, timeout=1.0,
-        )
+        conn = ReadConnectionFactory(memory_db).open()
         try:
             cur = conn.execute(
                 "SELECT last_sync_at FROM cross_platform_sync_log "
@@ -914,7 +912,7 @@ def _compute_action_outcomes_preview(profile_id: str) -> dict:
     if not db_path.exists():
         return empty
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        conn = ReadConnectionFactory(db_path).open()
         try:
             row = conn.execute(
                 "SELECT COUNT(*) FROM action_outcomes WHERE profile_id = ?",
@@ -1036,7 +1034,6 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
     ``pending_outcomes`` so the operator can see the closed loop is
     actually flowing: recall → enqueue → persist → finalize.
     """
-    import sqlite3
     try:
         from superlocalmemory.learning.outcome_queue import (
             get_counters, queue_size,
@@ -1050,7 +1047,7 @@ def _compute_outcome_queue_stats(profile_id: str) -> dict:
     pending_now = 0
     if db.exists():
         try:
-            conn = sqlite3.connect(str(db), timeout=1.0)
+            conn = ReadConnectionFactory(db).open()
             try:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM pending_outcomes "
@@ -1089,7 +1086,7 @@ def _compute_reward_preview(profile_id: str) -> dict:
     if not db.exists():
         return default
     try:
-        conn = sqlite3.connect(str(db), timeout=1.0)
+        conn = ReadConnectionFactory(db).open()
         try:
             row = conn.execute(
                 "SELECT COUNT(*) AS c, AVG(reward) AS m "

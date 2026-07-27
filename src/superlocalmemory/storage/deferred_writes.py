@@ -21,6 +21,7 @@ single-writer queue (see WRITE-QUEUE-PLAN.md).
 """
 from __future__ import annotations
 
+import atexit
 import queue
 import threading
 
@@ -40,11 +41,16 @@ _BG_MAXSIZE = 20000
 _bg_queue: "queue.Queue" = queue.Queue(maxsize=_BG_MAXSIZE)
 _bg_started = False
 _bg_start_lock = threading.Lock()
+_bg_stop = threading.Event()
+_bg_thread: threading.Thread | None = None
 
 
-def _bg_run() -> None:
-    while True:
-        fn = _bg_queue.get()
+def _bg_run(work_queue: "queue.Queue", stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            fn = work_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
         try:
             fn()
         except Exception:
@@ -55,15 +61,21 @@ def _bg_run() -> None:
 
 
 def _ensure_bg_thread() -> None:
-    global _bg_started
-    if _bg_started:
+    global _bg_queue, _bg_started, _bg_stop, _bg_thread
+    if _bg_thread is not None and _bg_thread.is_alive():
         return
     with _bg_start_lock:
-        if _bg_started:
+        if _bg_thread is not None and _bg_thread.is_alive():
             return
-        threading.Thread(
-            target=_bg_run, name="slm-bg-writer", daemon=True
-        ).start()
+        _bg_queue = queue.Queue(maxsize=_BG_MAXSIZE)
+        _bg_stop = threading.Event()
+        _bg_thread = threading.Thread(
+            target=_bg_run,
+            args=(_bg_queue, _bg_stop),
+            name="slm-bg-writer",
+            daemon=True,
+        )
+        _bg_thread.start()
         _bg_started = True
 
 
@@ -81,6 +93,23 @@ def submit_background(fn) -> None:
         pass
 
 
+def _shutdown_background_writer(timeout: float) -> None:
+    """Stop the shared bookkeeping worker and wait for its thread to exit."""
+    global _bg_started, _bg_thread
+    with _bg_start_lock:
+        thread = _bg_thread
+        if thread is None:
+            return
+        _bg_stop.set()
+    if thread is not threading.current_thread():
+        thread.join(timeout=timeout)
+    if not thread.is_alive():
+        with _bg_start_lock:
+            if _bg_thread is thread:
+                _bg_thread = None
+                _bg_started = False
+
+
 class DeferredLastSeen:
     """Coalescing background flusher for canonical_entities.last_seen."""
 
@@ -90,6 +119,7 @@ class DeferredLastSeen:
         self._pending: dict[tuple[str, str], str] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._stopped = False
         self._thread = threading.Thread(
             target=self._run, name="slm-deferred-lastseen", daemon=True
         )
@@ -126,9 +156,17 @@ class DeferredLastSeen:
         while not self._stop.wait(self._interval):
             self.flush()
 
-    def stop(self) -> None:
+    @property
+    def is_stopped(self) -> bool:
+        return self._stopped
+
+    def stop(self, timeout: float = 3.0) -> None:
+        """Flush then join the owner thread so it cannot outlive its database."""
         self._stop.set()
         self.flush()
+        if self._thread is not threading.current_thread():
+            self._thread.join(timeout=timeout)
+        self._stopped = not self._thread.is_alive()
 
 
 _registry: dict[int, DeferredLastSeen] = {}
@@ -140,14 +178,32 @@ def get_deferred_last_seen(db) -> DeferredLastSeen:
     key = id(db)
     with _registry_lock:
         writer = _registry.get(key)
-        if writer is None:
+        if writer is None or writer.is_stopped:
             writer = DeferredLastSeen(db)
             _registry[key] = writer
         return writer
 
 
+def shutdown_deferred_writes(timeout: float = 3.0) -> None:
+    """Stop every deferred-write worker owned by this process.
+
+    This is intentionally idempotent: service shutdown and pytest cleanup can
+    both call it, and a later caller can lazily create fresh workers.
+    """
+    with _registry_lock:
+        writers = list(_registry.values())
+        _registry.clear()
+    for writer in writers:
+        writer.stop(timeout=timeout)
+    _shutdown_background_writer(timeout)
+
+
+atexit.register(shutdown_deferred_writes)
+
+
 __all__ = [
     "DeferredLastSeen",
     "get_deferred_last_seen",
+    "shutdown_deferred_writes",
     "submit_background",
 ]

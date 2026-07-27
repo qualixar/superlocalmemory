@@ -250,11 +250,38 @@ class EmbeddingService:
     def dimension(self) -> int:
         return self._config.dimension
 
-    def unload(self) -> None:
-        """Kill the worker subprocess to free all memory."""
-        with self._lock:
+    def unload(self, timeout: float = 1.0) -> bool:
+        """Release the worker without blocking daemon shutdown on an embed call.
+
+        An in-flight request owns ``_lock`` while it waits for the worker's
+        response.  Shutdown must not wait behind a wedged response: callers
+        can continue teardown and the worker process will be handled by the
+        process supervisor if necessary.
+        """
+        if not self._lock.acquire(timeout=max(0.0, timeout)):
+            logger.warning("EmbeddingService: unload skipped; embed worker is busy")
+            return False
+        try:
             self._kill_worker()
             logger.info("EmbeddingService: worker killed (idle timeout)")
+            return True
+        finally:
+            self._lock.release()
+
+    def shutdown(self, timeout: float = 1.0) -> None:
+        """Force bounded process teardown even when an embed call owns the lock.
+
+        Shutdown is stronger than the idle-time ``unload`` operation.  Once
+        the engine is closing, no new request may use this service, so it is
+        safe to detach and terminate a wedged child without waiting behind the
+        request lock.
+        """
+        acquired = self._lock.acquire(timeout=max(0.0, timeout))
+        try:
+            self._kill_worker(timeout=min(max(0.0, timeout), 1.0))
+        finally:
+            if acquired:
+                self._lock.release()
 
     # ------------------------------------------------------------------
     # Public API
@@ -596,7 +623,7 @@ class EmbeddingService:
             self._available = False
             self._worker_proc = None
 
-    def _kill_worker(self) -> None:
+    def _kill_worker(self, timeout: float = 3.0) -> None:
         """Terminate the worker and close every owned pipe exactly once."""
         if self._idle_timer is not None:
             self._idle_timer.cancel()
@@ -610,7 +637,7 @@ class EmbeddingService:
             try:
                 proc.stdin.write('{"cmd":"quit"}\n')
                 proc.stdin.flush()
-                proc.wait(timeout=3)
+                proc.wait(timeout=max(0.0, timeout))
             except Exception:
                 try:
                     returncode = proc.poll()
@@ -621,7 +648,7 @@ class EmbeddingService:
                 if returncode is None or not isinstance(returncode, int):
                     try:
                         proc.kill()
-                        proc.wait(timeout=3)
+                        proc.wait(timeout=max(0.0, timeout))
                     except Exception:
                         pass
             finally:

@@ -125,6 +125,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M031_dead_letter_operations as _M031,
 )
+from superlocalmemory.storage.migrations import (
+    M032_write_coordinator_admission as _M032,
+)
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
 # that lets the runner detect "already applied" state when an idempotent
@@ -160,6 +163,7 @@ _MODULES = {
     _M029.NAME: _M029,
     _M030.NAME: _M030,
     _M031.NAME: _M031,
+    _M032.NAME: _M032,
 }
 
 logger = logging.getLogger(__name__)
@@ -172,6 +176,12 @@ _KNOWN_EQUIVALENT_DDL_HASHES: dict[str, frozenset[str]] = {
         "347eeb2ec8aac89f7cbf373da49ac9446be9ed150e6105c382c656cd22426d4b",
         # v3.4.22 model_version-default variant shipped through 3.6.x.
         "d28666fa1dfa66e6514efd288e6748363513da2255a4cee95d80f233e6728ae7",
+    }),
+    _M032.NAME: frozenset({
+        # Provisional 3.8.6 development ledger: global idempotency_key and
+        # operation_id uniqueness. Its standalone table is safely rebuilt by
+        # M032.repair() into the profile-scoped receipt contract.
+        "e45df41becba3d0c3342eca5ec3bd83aa899eef76943c819d2da73b4ca1625a7",
     }),
 }
 
@@ -223,6 +233,9 @@ MIGRATIONS: list[Migration] = [
     # M031 creates dead_letter_operations — standalone table, no FK to engine-
     # bootstrapped tables, so it can run during apply_all (before engine init).
     Migration(name=_M031.NAME, db_target="memory", ddl=_M031.DDL),
+    # M032 is standalone and must precede daemon readiness: typed writes use
+    # this append-only receipt ledger for durable idempotency.
+    Migration(name=_M032.NAME, db_target="memory", ddl=_M032.DDL),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 
@@ -422,6 +435,30 @@ def _apply_single(
                             )
                     except sqlite3.Error:  # pragma: no cover
                         pass
+                    if dry_run:
+                        return (
+                            "skipped",
+                            "dry-run: would repair allowlisted historical schema",
+                        )
+                    repair_fn = getattr(mod, "repair", None) if mod is not None else None
+                    if callable(repair_fn):
+                        try:
+                            repair_fn(conn)
+                            if not bool(verify_fn(conn)):
+                                return (
+                                    "failed",
+                                    f"safe repair did not restore {migration.name}",
+                                )
+                            _upsert_log(conn, migration.name, ddl_hash, "complete")
+                            return (
+                                "applied",
+                                "allowlisted historical schema repaired safely",
+                            )
+                        except sqlite3.Error as exc:
+                            return (
+                                "failed",
+                                f"safe repair failed for {migration.name}: {exc}",
+                            )
                 detail = (
                     f"DDL drift detected for {migration.name}: "
                     f"logged={logged_hash[:8]}... current={ddl_hash[:8]}..."

@@ -265,8 +265,10 @@ def probe_reranker_model(config: Any = None) -> Component:
         auto_fixable=enabled,
         fix_cmd="slm doctor --fix",
     )
-    if not enabled and comp.status == STATUS_MISSING:
-        # Not enabled → absent is expected, not a problem.
+    if not enabled:
+        # A cached reranker is still inactive when the operator disabled the
+        # channel. The dashboard must describe configured runtime state, not
+        # machine-specific HuggingFace-cache state.
         return replace(comp, status=STATUS_OK,
                        detail="disabled (retrieval.use_cross_encoder=false)",
                        fix_cmd="", auto_fixable=False)

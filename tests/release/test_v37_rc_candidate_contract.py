@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-_FINAL_RELEASE = "3.8.5"
-_FINAL_RELEASE_DATE = "2026-07-26"
+_FINAL_RELEASE = "3.8.6"
+_FINAL_RELEASE_DATE = "2026-07-27"
 
 
 def test_v37_release_source_has_final_package_version() -> None:

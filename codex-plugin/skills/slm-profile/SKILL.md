@@ -145,4 +145,4 @@ Name them differently in your MCP config (e.g. `superlocalmemory-personal` and
 
 ---
 
-*SuperLocalMemory v3.8.4 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v3.8.6 · Qualixar · AGPL-3.0-or-later*

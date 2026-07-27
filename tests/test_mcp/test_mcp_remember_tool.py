@@ -74,9 +74,7 @@ class TestRememberTool:
     """Core behavior of the remember MCP tool."""
 
     @patch("superlocalmemory.mcp.tools_core._emit_event")
-    @patch("superlocalmemory.mcp.tools_core.WorkerPool", create=True)
-    @patch("superlocalmemory.core.worker_pool.WorkerPool")
-    def test_remember_success_returns_fact_ids(self, mock_wp_mod, _wp_create, mock_emit):
+    def test_remember_success_returns_fact_ids(self, mock_emit):
         """Successful store returns success=True with fact_ids list."""
         pool = MagicMock()
         pool.store.return_value = {
@@ -84,11 +82,11 @@ class TestRememberTool:
             "fact_ids": ["f-001", "f-002"],
             "count": 2,
         }
-        mock_wp_mod.shared.return_value = pool
-
         remember = _get_remember_tool()
 
-        with patch("superlocalmemory.core.worker_pool.WorkerPool.shared", return_value=pool):
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool,
+        ):
             result = asyncio.run(remember("Test content about Python"))
 
         assert result["success"] is True
@@ -220,18 +218,21 @@ class TestRememberEdgeCases:
             result = asyncio.run(remember(""))
         assert result["success"] is True
 
-    def test_remember_worker_pool_exception_fails_without_raw_persistence(self):
-        """Worker failure is explicit; it cannot bypass write authorization."""
+    def test_remember_daemon_proxy_exception_fails_closed(self):
+        """A daemon-proxy failure is retryable and cannot bypass ownership."""
         remember = _get_remember_tool()
+        pool = MagicMock()
+        pool.store.side_effect = RuntimeError("daemon proxy crashed")
 
         with patch(
-            "superlocalmemory.core.worker_pool.WorkerPool.shared",
-            side_effect=RuntimeError("worker crashed"),
+            "superlocalmemory.mcp._daemon_proxy.choose_pool",
+            return_value=pool,
         ):
             result = asyncio.run(remember("boom"))
 
         assert result["success"] is False
-        assert "worker crashed" in result["error"]
+        assert result["code"] == "DAEMON_UNAVAILABLE"
+        assert result["retryable"] is True
 
     def test_remember_agent_id_is_untrusted_worker_metadata(self):
         """Caller agent ID is audit metadata, not the trusted actor."""

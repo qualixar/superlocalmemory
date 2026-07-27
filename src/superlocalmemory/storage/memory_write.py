@@ -40,8 +40,9 @@ each commit quickly.
 Reads
 -----
 Use :func:`memory_read` for read-only access.  WAL allows concurrent readers
-without blocking the writer, so reads do NOT take the write lock — but they
-still get ``busy_timeout`` for robustness during the brief checkpoint window.
+without blocking the writer, so reads do NOT take the write lock.  The helper
+opens SQLite with ``mode=ro`` and ``PRAGMA query_only=ON``; it uses the
+3.8.6 read-path budget of at most 250ms during a brief checkpoint window.
 """
 from __future__ import annotations
 
@@ -51,6 +52,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 from superlocalmemory.storage.write_lock import get_write_lock
 
 
@@ -100,20 +102,14 @@ def memory_write(db_path: str | Path) -> Generator[sqlite3.Connection, None, Non
 
 @contextmanager
 def memory_read(db_path: str | Path) -> Generator[sqlite3.Connection, None, None]:
-    """Yield a read-only-usage connection with ``busy_timeout`` (no write lock).
+    """Yield a physically read-only connection with no write lock.
 
     WAL permits concurrent readers, so this deliberately does NOT take the
-    write lock.  ``busy_timeout`` still applies so a read issued during the
-    brief WAL checkpoint window waits rather than erroring.
+    write lock.  A 250ms bounded wait protects the query path from a brief
+    checkpoint without converting a dashboard recall into a long hang.
     """
-    ms = _busy_timeout_ms()
-    conn = sqlite3.connect(str(db_path), timeout=ms / 1000.0)
-    try:
-        conn.execute(f"PRAGMA busy_timeout={ms}")
-        conn.row_factory = sqlite3.Row
+    with ReadConnectionFactory(db_path, timeout_ms=min(_busy_timeout_ms(), 250)).snapshot() as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 __all__ = ["memory_write", "memory_read"]

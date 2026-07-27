@@ -19,12 +19,12 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-import sqlite3
 import uuid
 from typing import TYPE_CHECKING, Callable
 
-from superlocalmemory.infra.data_root import canonical_data_root, state_path
+from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
+from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
 if TYPE_CHECKING:
     from superlocalmemory.mcp._pool_adapter import PoolRecallResponse
@@ -67,7 +67,8 @@ def _sqlite_emergency_recall(
             f"AND f.created_at >= datetime('now', '-{int(max_age_days)} days') "
             if max_age_days > 0 else ""
         )
-        conn = sqlite3.connect(str(state_path("memory.db")), timeout=5.0)
+        memory_db = state_path("memory.db").resolve()
+        conn = ReadConnectionFactory(memory_db, timeout_ms=250).open()
         try:
             rows = conn.execute(
                 f"""SELECT f.fact_id, f.content, f.memory_id, f.created_at,
@@ -137,21 +138,6 @@ def _emit_event(event_type: str, payload: dict | None = None,
                  source_protocol="mcp")
     except Exception as exc:
         logger.warning("event emit failed: type=%s err=%s", event_type, exc)
-
-
-def _register_agent(agent_id: str, profile_id: str) -> bool:
-    """Register an agent in the AgentRegistry (best-effort)."""
-    try:
-        from superlocalmemory.core.registry import AgentRegistry
-        registry_path = canonical_data_root() / "agents.json"
-        registry = AgentRegistry(persist_path=registry_path)
-        registry.register_agent(agent_id, profile_id)
-        return True
-    except Exception as exc:
-        logger.warning(
-            "agent registry write failed: agent=%s err=%s", agent_id, exc,
-        )
-        return False
 
 
 def register_active_tools(server, get_engine: Callable) -> None:
@@ -400,29 +386,6 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 f"slm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d}"
                 f"-{uuid.uuid4().hex[:8]}"
             )
-
-            # Register agent + emit event (v3.4.39: SLM_AGENT_ID env support)
-            agent_id = _get_agent_id()
-            if hasattr(engine, "_hooks"):
-                registration_auth = authorize_mcp_mutation(
-                    engine,
-                    "update",
-                    mutation_source="mcp-agent-registration",
-                    profile_id=pid,
-                )
-                if _register_agent(agent_id, pid):
-                    registration_auth.complete()
-            else:
-                # A LIGHT client without the policy registry is read-capable,
-                # but must not fall back to an unauthorised registry write.
-                logger.info(
-                    "agent registration skipped: policy hooks unavailable"
-                )
-            _emit_event("agent.connected", {
-                "agent_id": agent_id,
-                "project_path": project_path,
-                "memory_count": len(memories),
-            })
 
             return {
                 "success": True,

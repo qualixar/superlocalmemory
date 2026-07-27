@@ -34,9 +34,26 @@ class DaemonPoolProxy:
     envelopes — the adapter is responsible for surfacing those.
     """
 
-    def __init__(self, port: int, *, timeout_s: float = 30.0) -> None:  # v3.4.59: 8s→30s — observed recall takes 13.4s on dense graph (2.1M edges); 8s always timed out → degraded mode
+    def __init__(
+        self,
+        port: int | None,
+        *,
+        timeout_s: float = 30.0,
+        unavailable: bool = False,
+    ) -> None:
+        # v3.4.59: 8s→30s — dense graph recall can exceed the old timeout.
         self._port = port
         self._timeout = timeout_s
+        self._unavailable = unavailable
+
+    @staticmethod
+    def _unavailable_response() -> dict[str, Any]:
+        return {
+            "ok": False,
+            "code": "DAEMON_UNAVAILABLE",
+            "retryable": True,
+            "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+        }
 
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
@@ -45,6 +62,8 @@ class DaemonPoolProxy:
         include_shared: bool | None = None,
         window: str | None = None,
     ) -> dict[str, Any]:
+        if self._unavailable:
+            return self._unavailable_response()
         _params: dict[str, Any] = {
             "q": query,
             "limit": limit,
@@ -75,15 +94,17 @@ class DaemonPoolProxy:
             )
         except Exception as exc:
             logger.warning("daemon /recall failed: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return self._unavailable_response()
         if not isinstance(data, dict):
-            return {"ok": False, "error": "owned daemon unavailable"}
+            return self._unavailable_response()
         data.setdefault("ok", True)
         return data
 
     def store(
         self, content: str, metadata: dict | None = None,
     ) -> dict[str, Any]:
+        if self._unavailable:
+            return self._unavailable_response()
         body = {
             "content": content,
             "tags": (metadata or {}).get("tags", ""),
@@ -101,9 +122,9 @@ class DaemonPoolProxy:
             data = daemon_request("POST", "/remember", body)
         except Exception as exc:
             logger.warning("daemon /remember failed: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return self._unavailable_response()
         if not isinstance(data, dict):
-            return {"ok": False, "error": "owned daemon unavailable"}
+            return self._unavailable_response()
         data.setdefault("ok", True)
         return data
 
@@ -111,17 +132,19 @@ class DaemonPoolProxy:
 def choose_pool() -> Any:
     """Return the best available pool for this MCP process.
 
-    Preference order:
-      1. Running daemon — use HTTP proxy (keeps ONNX in ONE process)
-      2. No daemon — fall back to ``WorkerPool.shared()`` (spawns a
-         local subprocess with a FULL engine). This keeps single-user
-         / first-launch scenarios working.
+    The daemon is the sole canonical writer. A bounded daemon auto-start is
+    attempted for first use; if it cannot become healthy, return a facade that
+    reports a retryable ``DAEMON_UNAVAILABLE`` envelope. Never construct a
+    process-local ``WorkerPool`` from an MCP client.
     """
     try:
-        from superlocalmemory.cli.daemon import _get_port, is_daemon_running
-        if is_daemon_running():
+        from superlocalmemory.cli.daemon import (
+            _get_port,
+            ensure_daemon,
+            is_daemon_running,
+        )
+        if is_daemon_running() or ensure_daemon():
             return DaemonPoolProxy(port=_get_port())
     except Exception as exc:
-        logger.warning("daemon probe failed — falling back to subprocess pool: %s", exc)
-    from superlocalmemory.core.worker_pool import WorkerPool
-    return WorkerPool.shared()
+        logger.warning("daemon probe or bounded start failed: %s", exc)
+    return DaemonPoolProxy(port=None, unavailable=True)

@@ -9,7 +9,8 @@ Activation: set ``SLM_OPTIMIZE_CAPTURE=1`` in the daemon's environment. When on:
     at load time (see server._load_hooks), so capture never observes a mutated
     request or a cache hit; every line is a genuine upstream exchange.
   * each completed exchange is appended as one JSON line to
-    ``~/.superlocalmemory/optimize_capture.jsonl`` (0600, gitignored).
+    ``~/.superlocalmemory/optimize_capture.jsonl`` (owner-only: POSIX 0600 or
+    Windows owner DACL, gitignored).
 
 ISOLATION GUARANTEE: this module writes ONLY to optimize_capture.jsonl. It never
 opens memory.db, llmcache.db, or any SLM memory store. (Plan §9 hard rule.)
@@ -24,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,7 @@ _MAX_CAPTURE_BODY_BYTES = 1 * 1024 * 1024  # 1 MB per side
 # Providers whose response bodies follow the OpenAI usage schema
 # ({"usage": {"prompt_tokens", "completion_tokens"}, "model"}).
 _OPENAI_FORMAT_PROVIDERS = frozenset({"openai", "gemini-openai-compat"})
+_WINDOWS_ACL_TIMEOUT_SECONDS = 5
 
 
 def capture_enabled() -> bool:
@@ -53,6 +56,49 @@ def capture_enabled() -> bool:
 
 def _capture_path() -> Path:
     return state_path(_CAPTURE_FILENAME)
+
+
+def _is_windows() -> bool:
+    """Return whether the running platform uses Windows DACLs."""
+    return os.name == "nt"
+
+
+def _enforce_owner_only_permissions(path: Path) -> None:
+    """Apply the platform's owner-only access control to a capture file.
+
+    Windows does not represent NTFS DACLs through POSIX-style mode bits. Its
+    explicit DACL is reset on each append: inherited grants are removed and
+    only the process identity receives full control. The helper raises on
+    failure so optional capture is dropped rather than retain proxy traffic
+    with an unverifiable access policy.
+    """
+    if not _is_windows():
+        os.chmod(path, 0o600)
+        return
+
+    owner_result = subprocess.run(
+        ["whoami"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
+    )
+    owner = owner_result.stdout.strip()
+    if not owner:
+        raise OSError("cannot determine Windows capture-file owner")
+    subprocess.run(
+        [
+            "icacls",
+            os.fspath(path),
+            "/inheritance:r",
+            "/grant:r",
+            f"{owner}:(F)",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
+    )
 
 
 class ShadowCapture:
@@ -112,10 +158,12 @@ class ShadowCapture:
                 flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
                 fd = os.open(self._path, flags, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                    # Enforce the platform ACL before proxy data is appended.
+                    _enforce_owner_only_permissions(self._path)
                     fh.write(line + "\n")
                 self._count += 1
             return True
-        except OSError as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             # PermissionError / symlink-refusal (ELOOP) are security-relevant —
             # surface the errno but still fail open so the request is never blocked.
             logger.warning("capture: write failed (fail-open): %r", exc)

@@ -20,7 +20,7 @@ from typing import Callable
 from mcp.types import ToolAnnotations
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
-from superlocalmemory.infra.data_root import canonical_data_root, state_path
+from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
@@ -54,67 +54,6 @@ def _emit_event(event_type: str, payload: dict | None = None,
         bus = EventBus.get_instance(str(state_path("memory.db")))
         bus.emit(event_type, payload=payload, source_agent=source_agent,
                  source_protocol="mcp")
-    except Exception:
-        pass
-
-
-def _record_recall_hits(
-    get_engine: Callable,
-    query: str,
-    results: list[dict],
-    *,
-    profile_id: str = "",
-    query_id: str = "",
-    fact_ids_candidates: list[str] | None = None,
-) -> None:
-    """Record honest shown-state signals (LLD-02 §4.9).
-
-    v3.4.22: No more fake positives. For every candidate we enqueue a
-    ``shown`` / ``not_shown`` flip based on whether it was returned in the
-    top-K presented to the user. Outcome/reward arrives in v3.4.22 via the
-    action-outcomes pipeline.
-
-    Non-blocking: all work funnels through ``signals.enqueue_shown_flip``
-    (module-level queue + background drain). Failures are swallowed —
-    signal quality is never load-bearing on recall correctness.
-    """
-    try:
-        from superlocalmemory.learning.signals import (
-            LearningSignals,
-            enqueue_shown_flip,
-        )
-
-        pid = profile_id
-        if not pid:
-            pid = get_engine().profile_id
-        slm_dir = canonical_data_root()
-
-        shown_ids = [r.get("fact_id", "") for r in results[:10]
-                     if r.get("fact_id")]
-        candidates = (fact_ids_candidates
-                      if fact_ids_candidates is not None
-                      else shown_ids)
-        if not candidates:
-            return
-
-        # Shown-flip enqueue per §4.9. No synthetic positives.
-        shown_set = set(shown_ids)
-        if query_id:
-            for fid in candidates:
-                enqueue_shown_flip(query_id, fid, shown=(fid in shown_set))
-
-        # Legacy zero-cost signals — unchanged (co-retrieval + confidence).
-        try:
-            signals = LearningSignals(slm_dir / "learning.db")
-            signals.record_co_retrieval(pid, shown_ids)
-        except Exception:
-            pass
-        try:
-            mem_db = str(slm_dir / "memory.db")
-            for fid in shown_ids[:5]:
-                LearningSignals.boost_confidence(mem_db, fid)
-        except Exception:
-            pass
     except Exception:
         pass
 
@@ -212,10 +151,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
                         await _asyncio.sleep(0.05 * (attempt + 1))
                 return {
                     "success": False,
+                    "code": "DAEMON_UNAVAILABLE",
                     "retryable": True,
                     "error": (
-                        "Canonical daemon is temporarily unavailable; retry the "
-                        "same remember operation without starting a second writer."
+                        "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later."
                     ),
                 }
         except Exception as dexc:
@@ -241,11 +180,22 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 worker_meta,
             )
             if not isinstance(stored, dict) or not stored.get("ok"):
-                raise RuntimeError(
-                    (stored or {}).get("error", "canonical worker store failed")
-                    if isinstance(stored, dict)
-                    else "canonical worker returned an invalid response"
-                )
+                if isinstance(stored, dict) and stored.get("code") == "DAEMON_UNAVAILABLE":
+                    return {
+                        "success": False,
+                        "code": "DAEMON_UNAVAILABLE",
+                        "retryable": True,
+                        "error": stored.get(
+                            "error",
+                            "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+                        ),
+                    }
+                return {
+                    "success": False,
+                    "code": "DAEMON_UNAVAILABLE",
+                    "retryable": True,
+                    "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+                }
             fact_ids = list(stored.get("fact_ids") or [])
             materialization_state = str(
                 stored.get("materialization_state") or "complete"
@@ -275,9 +225,14 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     else "Queryable now; canonical enrichment is still running."
                 ),
             }
-        except Exception as exc:
+        except Exception:
             logger.exception("remember failed")
-            return {"success": False, "error": str(exc)}
+            return {
+                "success": False,
+                "code": "DAEMON_UNAVAILABLE",
+                "retryable": True,
+                "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+            }
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def recall(
@@ -378,22 +333,6 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 window=window or None,
             )
             if result.get("ok"):
-                # Record implicit feedback: every returned result is a recall_hit
-                try:
-                    _record_recall_hits(
-                        get_engine,
-                        query,
-                        result.get("results", []),
-                        profile_id=str(result.get("profile", "")),
-                    )
-                except Exception:
-                    pass  # Feedback is non-critical, never block recall
-                _emit_event("memory.recalled", {
-                    "query": query[:80],
-                    "result_count": result.get("result_count", 0),
-                    "query_type": result.get("query_type", "unknown"),
-                    "agent_id": agent_id,
-                }, source_agent=agent_id)
                 return {
                     "success": True,
                     "results": result.get("results", []),

@@ -75,12 +75,12 @@ class _CozoResult:
 
 
 class _CozoClientAdapter:
-    """Bridge PyCozo 0.3 embedded bindings and later client conveniences.
+    """Bridge legacy PyCozo responses and the pinned 0.7.6 client surface.
 
-    PyCozo 0.3 is the last client compatible with the published macOS native
-    binding. It returns dictionaries and exposes ``import_relations`` rather
-    than ``put``; later clients return dataframe-like values and add ``put``.
-    SLM only needs relation upserts and row results, so normalize those here.
+    PyCozo 0.7.6 publishes embedded wheels for macOS, Linux x86_64/aarch64,
+    and Windows. Older installations can still return dictionaries and expose
+    ``import_relations`` rather than ``put``. SLM only needs relation upserts
+    and row results, so normalize both forms here.
     """
 
     def __init__(self, client: Any) -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -21,14 +22,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-import logging
-
 from superlocalmemory.storage.database import DatabaseManager
 
 logger = logging.getLogger("superlocalmemory.ingestion_command")
 
 _MATERIALIZATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS = 10
+_NEVER_RETRY_AT = 9_999_999_999.0
 
 
 def _materialization_lock(operation_id: str) -> threading.RLock:
@@ -46,6 +46,10 @@ class IngestionState(str, Enum):
 
 class IdempotencyConflict(ValueError):
     """The same idempotency key was reused for different immutable evidence."""
+
+
+class IngestionRejectedError(RuntimeError):
+    """Deterministic evidence policy produced no queryable projection."""
 
 
 class InvalidStateTransition(RuntimeError):
@@ -481,13 +485,14 @@ class IngestionOperationRepository:
         if target not in {IngestionState.COMPLETE, IngestionState.FAILED}:
             raise InvalidStateTransition(f"enriching -> {target.value}")
         current = self.get(operation_id)
-        # Attempt count AFTER this transition = current + 1 (the UPDATE adds
-        # the delta via attempt_count+delta but here we compare the pre-update
-        # value + 1 to the cap).
-        next_attempt_count = current.attempt_count + 1
+        # claim_enriching() already increments attempt_count before the
+        # materializer runs.  finish_enriching() records that claimed attempt;
+        # incrementing again here would dead-letter after only nine real tries
+        # while claiming that ten had run.
+        attempt_count = current.attempt_count
         is_exhausted = (
             target is IngestionState.FAILED
-            and next_attempt_count >= _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS
+            and attempt_count >= _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS
         )
         # Fix E: exhausted → far-future retry_at so list_materializable's
         # `next_retry_at <= now` clause never matches, excluding the
@@ -547,7 +552,7 @@ class IngestionOperationRepository:
                             json.dumps(current.metadata, separators=(",", ":"))
                             if current.metadata else None,
                             last_error or current.last_error,
-                            next_attempt_count,
+                            attempt_count,
                             operation_id,
                             current.profile_id,
                         ),
@@ -556,7 +561,7 @@ class IngestionOperationRepository:
                         "Operation %s exhausted %d attempts — moved to dead-letter. "
                         "Last error: %s",
                         operation_id,
-                        next_attempt_count,
+                        attempt_count,
                         last_error or current.last_error,
                     )
         except InvalidStateTransition:
@@ -600,6 +605,106 @@ class IngestionOperationRepository:
                 ) from exc
         return self._from_row(rows[0])
 
+    def reap_stuck_enriching(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = 100,
+    ) -> list[str]:
+        """Terminalize expired enrichment leases that exhausted automatic retries.
+
+        ``list_materializable`` intentionally excludes operations at the retry
+        cap.  If a worker dies while such an operation is still ``enriching``,
+        it otherwise becomes a permanent phantom: no worker can reclaim it and
+        it never reaches a terminal state.  Queryable facts are already durable,
+        so reaping abandons only optional derivation work.
+
+        Each candidate is transitioned with a compare-and-swap update in its
+        own bounded transaction.  A dead-letter record is supplemental; an
+        older database without M031 is still terminalized safely.
+        """
+        cutoff = time.time() if now is None else float(now)
+        batch_limit = max(1, min(int(limit), 500))
+        candidates = self.db.execute(
+            "SELECT operation_id, attempt_count, last_error, raw_content, "
+            "raw_metadata_json, profile_id FROM ingestion_operations "
+            "WHERE state='enriching' AND lease_expires_at <= ? "
+            "AND attempt_count >= ? ORDER BY updated_at, operation_id LIMIT ?",
+            (
+                cutoff,
+                _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS,
+                batch_limit,
+            ),
+        )
+        reaped: list[str] = []
+        for row in candidates:
+            data = dict(row)
+            operation_id = str(data["operation_id"])
+            terminal_error = (
+                data["last_error"]
+                or "reaped: enrichment exhausted automatic attempts"
+            )
+            try:
+                with self.db.transaction():
+                    updated = self.db.execute(
+                        "UPDATE ingestion_operations SET state='failed', "
+                        "lease_owner='', lease_expires_at=0, next_retry_at=?, "
+                        "last_error=?, "
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE operation_id=? AND state='enriching' "
+                        "AND lease_expires_at <= ? AND attempt_count >= ? "
+                        "RETURNING operation_id",
+                        (
+                            _NEVER_RETRY_AT,
+                            terminal_error,
+                            operation_id,
+                            cutoff,
+                            _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS,
+                        ),
+                    )
+                    if not updated:
+                        continue
+                    try:
+                        self.db.execute(
+                            "INSERT INTO dead_letter_operations "
+                            "(original_op_id, operation_type, content, "
+                            "metadata_json, error, attempt_count, "
+                            "first_attempt_at, profile_id) "
+                            "VALUES (?, 'M018', ?, ?, ?, ?, "
+                            "(SELECT unixepoch(created_at) "
+                            "FROM ingestion_operations WHERE operation_id=?), ?)",
+                            (
+                                operation_id,
+                                data["raw_content"],
+                                data["raw_metadata_json"] or None,
+                                terminal_error,
+                                int(data["attempt_count"]),
+                                operation_id,
+                                data["profile_id"],
+                            ),
+                        )
+                    except sqlite3.OperationalError as exc:
+                        if "no such table" not in str(exc).lower():
+                            raise
+                        logger.info(
+                            "Dead-letter table unavailable while reaping %s; "
+                            "terminal transition preserved",
+                            operation_id,
+                        )
+            except Exception:
+                logger.exception(
+                    "Failed to reap exhausted ingestion operation %s",
+                    operation_id,
+                )
+                continue
+            reaped.append(operation_id)
+            logger.warning(
+                "Reaped exhausted ingestion operation %s at attempt %d",
+                operation_id,
+                int(data["attempt_count"]),
+            )
+        return reaped
+
 
 @dataclass(frozen=True, slots=True)
 class MaterializationResult:
@@ -611,6 +716,7 @@ class MaterializationResult:
 
 
 QueryableWriter = Callable[[IngestionRequest, str], list[str]]
+AdmissionValidator = Callable[[IngestionRequest], None]
 Materializer = Callable[
     [IngestionOperation],
     list[str] | tuple[str, ...] | MaterializationResult,
@@ -627,6 +733,7 @@ class IngestionCommand:
         *,
         write_queryable: QueryableWriter,
         materialize: Materializer,
+        validate_admission: AdmissionValidator | None = None,
         project: Projector | None = None,
         derivation_version: str = "v3.7-ingestion-1",
         lease_seconds: float = 900.0,
@@ -634,6 +741,7 @@ class IngestionCommand:
         self.repository = repository
         self._write_queryable = write_queryable
         self._materializer = materialize
+        self._validate_admission = validate_admission
         self._projector = project
         self._derivation_version = derivation_version
         self._lease_seconds = max(1.0, float(lease_seconds))
@@ -704,13 +812,18 @@ class IngestionCommand:
         self, request: IngestionRequest,
     ) -> tuple[IngestionOperation, bool]:
         """Submit once and report whether this call created the operation."""
+        # Trust/authentication and deterministic policy checks belong before
+        # the durable transaction.  They may reject, log, or consult policy,
+        # but must never extend SQLite's writer critical section.
+        if self._validate_admission is not None:
+            self._validate_admission(request)
         with self.repository.db.transaction():
             operation, created = self.repository.create_with_status(request)
             if operation.state is not IngestionState.RAW:
                 return operation, created
             fact_ids = tuple(self._write_queryable(request, operation.operation_id))
             if not fact_ids:
-                raise RuntimeError("ingestion produced no queryable facts")
+                raise IngestionRejectedError("ingestion produced no queryable facts")
             receipt = self.repository.transition(
                 operation.operation_id,
                 expected=IngestionState.RAW,
@@ -735,19 +848,16 @@ class IngestionCommand:
         if operation.state is IngestionState.COMPLETE:
             return operation
         # Fix E: guard against re-attempting exhausted (dead-lettered) operations.
-        # attempt_count is incremented by claim_enriching BEFORE this method sees
-        # the new value, so the cap check uses the CURRENT (pre-claim) count.
-        # After the (cap-1)th attempt is claimed, attempt_count reaches cap-1;
-        # finish_enriching sees current.attempt_count=cap-1, next_attempt_count=cap
-        # and inserts the dead-letter row.  Any subsequent materialize() call
-        # (attempt_count already at cap-1 in FAILED state) would re-claim and
-        # insert a second dead-letter row — this guard prevents that.
+        # claim_enriching increments the count before each real attempt, and
+        # finish_enriching dead-letters the failure whose count reaches the
+        # cap. A subsequent materialize() call sees count==cap and must not
+        # re-claim or insert another dead-letter row.
         # ``force=True`` is the operator escape hatch used by retry() — it bypasses
         # this guard so an admin can manually re-enqueue a dead-lettered operation.
         if (
             not force
             and operation.state is IngestionState.FAILED
-            and operation.attempt_count >= _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS - 1
+            and operation.attempt_count >= _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS
         ):
             # Already dead-lettered — return FAILED without re-claiming.
             return operation

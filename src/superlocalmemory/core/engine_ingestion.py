@@ -14,7 +14,7 @@ import hashlib
 import logging
 import os
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
@@ -26,7 +26,7 @@ from superlocalmemory.core.ingestion_command import (
 
 if TYPE_CHECKING:
     from superlocalmemory.core.engine import MemoryEngine
-    from superlocalmemory.storage.models import AtomicFact
+    from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 _PREBUILT_FACT_KEY = "_slm_prebuilt_fact_v1"
 _DERIVATION_VERSION = "v3.7-ingestion-1"
+
+
+class _ImmediateAdmissionDatabase(Protocol):
+    """The deliberately tiny persistence surface used by receipt admission.
+
+    The coordinator will bind this to its sole writer connection.  Keeping the
+    seam this narrow prevents the immediate path from accidentally acquiring a
+    model, hook, graph, or secondary-store dependency while it owns SQLite's
+    write transaction.
+    """
+
+    def store_memory(self, record: "MemoryRecord") -> str: ...
+
+    def store_fact(self, fact: "AtomicFact") -> str: ...
+
+    def execute(self, sql: str, params: tuple = ()) -> list: ...
 
 
 def _pii_redaction_enabled(engine: "MemoryEngine") -> bool:
@@ -104,6 +120,124 @@ def _prebuilt_fact_from_payload(payload: dict):
         values.get("signal_type", SignalType.FACTUAL.value)
     )
     return AtomicFact(**values)
+
+
+def build_immediate_admission_handler(
+    db: _ImmediateAdmissionDatabase,
+    *,
+    profile_id: str,
+    max_verbatim_chars: int = 24_000,
+    max_ingest_bytes: int = 1_048_576,
+):
+    """Build the deterministic queryable projection for one engine profile.
+
+    ``IngestionCommand`` wraps this callback with operation creation and the
+    RAW -> QUERYABLE receipt transition in one transaction.  This function is
+    intentionally restricted to constructing a raw ``MemoryRecord`` and one
+    embedding-free ``AtomicFact`` then persisting those two records.  All
+    authorization hooks, embedding, extraction, FTS-adjacent enrichment,
+    graph, provenance, and external index work run only after this receipt has
+    committed through the durable materializer.
+    """
+    def write_queryable(request: IngestionRequest, operation_id: str) -> list[str]:
+        if request.profile_id != profile_id:
+            raise ValueError("ingestion request profile does not match engine")
+        if not request.trusted_actor_id:
+            raise ValueError("trusted actor identity is required")
+        if not content_passes_admission(request.content):
+            return []
+
+        import re
+        from datetime import UTC, datetime
+
+        from superlocalmemory.core.ingest_gate import apply_ingest_gate
+        from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
+
+        metadata = dict(request.metadata)
+        metadata["ingestion_operation_id"] = operation_id
+        if request.session_id:
+            metadata.setdefault("session_id", request.session_id)
+        gate = apply_ingest_gate(
+            request.content,
+            max_verbatim_chars=max_verbatim_chars,
+            max_ingest_bytes=max_ingest_bytes,
+        )
+        if gate.rejected:
+            return []
+        fact_content = gate.fact_content
+        now = datetime.now(UTC).isoformat()
+        observation_date = request.session_date or now[:10]
+
+        prebuilt_payload = metadata.get(_PREBUILT_FACT_KEY)
+        if isinstance(prebuilt_payload, dict):
+            fact = _prebuilt_fact_from_payload(prebuilt_payload)
+            fact.profile_id = request.profile_id
+            fact.scope = request.scope
+            fact.shared_with = list(request.shared_with) or None
+            fact.session_id = request.session_id or fact.session_id
+            if request.session_date:
+                fact.observation_date = request.session_date
+        else:
+            entities = sorted(
+                {match.group(1) for match in re.finditer(
+                    r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b", fact_content,
+                )}
+                | {match.group(1) for match in re.finditer(
+                    r"\b([A-Z]{2,})\b", fact_content,
+                )}
+            )
+            fact = AtomicFact(
+                fact_id=uuid.uuid4().hex[:16],
+                profile_id=request.profile_id,
+                scope=request.scope,
+                shared_with=list(request.shared_with) or None,
+                content=fact_content,
+                fact_type=FactType.EPISODIC,
+                entities=entities,
+                observation_date=observation_date,
+                session_id=request.session_id,
+                confidence=0.7,
+                importance=0.5,
+                created_at=now,
+            )
+
+        # A receipt is queryable through FTS immediately, but model-derived
+        # values cannot participate in its write transaction.  The materializer
+        # owns their later, retryable population.
+        fact.embedding = None
+        fact.fisher_mean = None
+        fact.fisher_variance = None
+        memory_id = fact.memory_id or uuid.uuid4().hex
+        existing = db.execute(
+            "SELECT profile_id FROM memories WHERE memory_id = ?",
+            (memory_id,),
+        )
+        if existing:
+            existing_profile = str(existing[0]["profile_id"])
+            if existing_profile != request.profile_id:
+                raise ValueError("prebuilt fact memory belongs to a different profile")
+            # Reuse the existing source row. DatabaseManager.store_memory uses
+            # INSERT OR REPLACE; calling it here would delete every child fact
+            # through the memory_id foreign-key cascade before recreating the
+            # parent.
+            fact.memory_id = memory_id
+        else:
+            record = MemoryRecord(
+                memory_id=memory_id,
+                profile_id=request.profile_id,
+                content=request.content,
+                session_id=request.session_id,
+                session_date=observation_date,
+                speaker=request.speaker,
+                role=request.role,
+                metadata=metadata,
+                scope=request.scope,
+                shared_with=list(request.shared_with) or None,
+            )
+            fact.memory_id = db.store_memory(record)
+        return [db.store_fact(fact)]
+
+    return write_queryable
 
 
 def local_trusted_actor_id(actor_kind: str) -> str:
@@ -283,71 +417,22 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
     engine._require_full("canonical_ingestion")
     engine._ensure_init()
     repository = IngestionOperationRepository(engine._db)
+    store_config = getattr(engine._config, "store", None)
+    write_queryable = build_immediate_admission_handler(
+        engine._db,
+        profile_id=engine._profile_id,
+        max_verbatim_chars=getattr(store_config, "max_verbatim_chars", 24_000),
+        max_ingest_bytes=getattr(store_config, "max_ingest_bytes", 1_048_576),
+    )
 
-    def write_queryable(request: IngestionRequest, operation_id: str) -> list[str]:
-        if request.profile_id != engine._profile_id:
-            raise ValueError("ingestion request profile does not match engine")
-        if not request.trusted_actor_id:
-            raise ValueError("trusted actor identity is required")
-        hook_context = {
+    def validate_admission(request: IngestionRequest) -> None:
+        """Apply trust policy before the journal or canonical transaction."""
+        engine._hooks.run_pre("store", {
             "operation": "store",
-            "agent_id": request.trusted_actor_id or "unknown",
+            "agent_id": request.trusted_actor_id,
             "profile_id": request.profile_id,
             "content_preview": request.content[:100],
-            "ingestion_operation_id": operation_id,
-        }
-        # Authorization and trust policy must run before raw evidence reaches
-        # durable storage.  Materialization reuses this authorization decision.
-        engine._hooks.run_pre("store", hook_context)
-        metadata = dict(request.metadata)
-        metadata["ingestion_operation_id"] = operation_id
-        if request.session_id:
-            metadata.setdefault("session_id", request.session_id)
-        prebuilt_payload = metadata.get(_PREBUILT_FACT_KEY)
-        if isinstance(prebuilt_payload, dict):
-            from superlocalmemory.storage.models import MemoryRecord
-
-            fact = _prebuilt_fact_from_payload(prebuilt_payload)
-            fact.profile_id = request.profile_id
-            fact.scope = request.scope
-            fact.shared_with = list(request.shared_with) or None
-            fact.session_id = request.session_id or fact.session_id
-            if request.session_date:
-                fact.observation_date = request.session_date
-            memory_id = fact.memory_id
-            memory_rows = (
-                engine._db.execute(
-                    "SELECT memory_id FROM memories WHERE memory_id=? AND profile_id=?",
-                    (memory_id, request.profile_id),
-                )
-                if memory_id else []
-            )
-            if not memory_rows:
-                record = MemoryRecord(
-                    memory_id=memory_id or uuid.uuid4().hex,
-                    profile_id=request.profile_id,
-                    content=request.content,
-                    session_id=request.session_id,
-                    session_date=request.session_date,
-                    metadata=metadata,
-                    scope=request.scope,
-                    shared_with=list(request.shared_with) or None,
-                )
-                engine._db.store_memory(record)
-                memory_id = record.memory_id
-            fact.memory_id = memory_id
-            engine._db.store_fact(fact)
-            return [fact.fact_id]
-        return engine.store_fast(
-            request.content,
-            metadata=metadata,
-            scope=request.scope,
-            shared_with=list(request.shared_with) or None,
-            session_date=request.session_date or None,
-            speaker=request.speaker,
-            role=request.role,
-            index_external=False,
-        )
+        })
 
     def resume_checkpoint(operation: IngestionOperation) -> MaterializationResult:
         """Repair only stages whose writes have an idempotent natural key."""
@@ -816,12 +901,14 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
         repository,
         write_queryable=write_queryable,
         materialize=materialize,
+        validate_admission=validate_admission,
         project=project,
         derivation_version=_DERIVATION_VERSION,
     )
 
 
 __all__ = [
+    "build_immediate_admission_handler",
     "build_engine_ingestion_command",
     "canonical_store",
     "canonical_store_fn",
