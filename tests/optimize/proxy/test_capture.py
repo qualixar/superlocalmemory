@@ -203,6 +203,7 @@ class TestShadowCaptureRecord:
         descriptor_calls: list[tuple[object, ...]] = []
         create_calls: list[tuple[object, ...]] = []
         security_calls: list[tuple[object, ...]] = []
+        security_order: list[str] = []
 
         class FakeToken:
             def Close(self) -> None:
@@ -229,6 +230,7 @@ class TestShadowCaptureRecord:
                 self.fd = fd
 
             def Detach(self) -> int:
+                security_order.append("detach")
                 fd = self.fd
                 self.fd = -1
                 return fd
@@ -243,9 +245,13 @@ class TestShadowCaptureRecord:
             fd = os.open(args[0], os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
             return FakeHandle(fd)
 
+        def fake_open_osfhandle(handle: int, _flags: int) -> int:
+            security_order.append("crt")
+            return handle
+
         fake_msvcrt = SimpleNamespace(
             get_osfhandle=lambda fd: ("handle", fd),
-            open_osfhandle=lambda handle, flags: handle,
+            open_osfhandle=fake_open_osfhandle,
         )
         fake_api = SimpleNamespace(
             CloseHandle=os.close,
@@ -280,7 +286,10 @@ class TestShadowCaptureRecord:
             TokenUser=10,
             GetTokenInformation=lambda token, kind: (owner_sid, object()),
             OpenProcessToken=lambda process, access: FakeToken(),
-            SetSecurityInfo=lambda *args: security_calls.append(args),
+            SetSecurityInfo=lambda *args: (
+                security_order.append("acl"),
+                security_calls.append(args),
+            )[-1],
         )
 
         monkeypatch.setattr(capture_mod, "_is_windows", lambda: True)
@@ -292,8 +301,8 @@ class TestShadowCaptureRecord:
         monkeypatch.setitem(sys.modules, "ntsecuritycon", fake_ntsecuritycon)
 
         assert cap.record({"x": 1}) is True
-        assert token_closed == [True, True]
-        assert ace_calls == [(3, 256, owner_sid), (3, 256, owner_sid)]
+        assert token_closed == [True]
+        assert ace_calls == [(3, 256, owner_sid)]
         assert len(descriptor_calls) == 2
         assert descriptor_calls[0][0::2] == (1, 0)
         assert isinstance(descriptor_calls[0][1], FakeAcl)
@@ -309,9 +318,8 @@ class TestShadowCaptureRecord:
         assert flags == 12
         assert owner is None and group is None and sacl is None
         assert isinstance(dacl, FakeAcl)
-        assert handle[0] == "handle"
-        with pytest.raises(OSError):
-            os.fstat(handle[1])
+        assert security_order == ["acl", "detach", "crt"]
+        assert handle.fd == -1
 
     def test_windows_acl_failure_closes_descriptor_and_drops_entry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

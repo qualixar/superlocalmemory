@@ -151,6 +151,25 @@ def _open_windows_capture_append(path: Path) -> int:
                 "capture path is a Windows reparse point",
                 path,
             )
+        try:
+            # Enforce the DACL while this is still the original CreateFile
+            # handle carrying WRITE_DAC. Transferring it into Python's CRT
+            # first can lose the authority SetSecurityInfo needs on Windows.
+            win32security.SetSecurityInfo(
+                handle,
+                win32security.SE_FILE_OBJECT,
+                win32security.DACL_SECURITY_INFORMATION
+                | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                dacl,
+                None,
+            )
+        except Exception as exc:
+            raise OSError(
+                "Windows capture ACL could not be enforced "
+                f"({type(exc).__name__}: {exc})"
+            ) from exc
 
         # Transfer the native handle to Python's CRT descriptor exactly once.
         raw_handle = handle.Detach()
@@ -209,35 +228,8 @@ def _enforce_owner_only_permissions(fd: int) -> None:
     if not _is_windows():
         os.fchmod(fd, 0o600)
         return
-
-    try:
-        import msvcrt
-
-        import win32api
-        import win32con
-        import win32security
-    except ImportError as exc:
-        raise OSError("Windows capture ACL support is unavailable") from exc
-
-    try:
-        dacl = _windows_owner_dacl(win32api, win32con, win32security)
-        win32security.SetSecurityInfo(
-            msvcrt.get_osfhandle(fd),
-            win32security.SE_FILE_OBJECT,
-            win32security.DACL_SECURITY_INFORMATION
-            | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            dacl,
-            None,
-        )
-    except Exception as exc:
-        # pywin32 raises native error types that are not guaranteed to inherit
-        # OSError. Normalize them so record() preserves its fail-open contract.
-        raise OSError(
-            "Windows capture ACL could not be enforced "
-            f"({type(exc).__name__}: {exc})"
-        ) from exc
+    # _open_windows_capture_append applies the protected DACL on the original
+    # WRITE_DAC-capable CreateFile handle before CRT descriptor transfer.
 
 
 class ShadowCapture:
