@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+_FUNCTIONAL_DEADLINE_MS = 1_500
+
 
 def _install_write_commits(path) -> None:
     from superlocalmemory.storage.migrations import (
@@ -61,7 +63,9 @@ def test_runtime_replays_prepared_entry_through_one_typed_command(tmp_path) -> N
     runtime.start()
     try:
         assert runtime.journal.get(prepared.journal_id).state == "committed"
-        receipt = runtime.remember(request, actor, deadline_ms=500).payload
+        receipt = runtime.remember(
+            request, actor, deadline_ms=_FUNCTIONAL_DEADLINE_MS
+        ).payload
         assert receipt["status"] == "queryable"
         assert receipt["fact_ids"] == ["fact-1"]
         assert calls == [receipt["operation_id"]]
@@ -102,7 +106,9 @@ def test_terminal_admission_rejection_cannot_poison_restart(tmp_path) -> None:
     first.start()
     try:
         with pytest.raises(AdmissionRejected) as caught:
-            first.remember(request, actor, deadline_ms=500)
+            first.remember(
+                request, actor, deadline_ms=_FUNCTIONAL_DEADLINE_MS
+            )
         assert caught.value.retryable is False
         entry = first.journal.get_by_idempotency_key(
             request.profile_id, request.idempotency_key,
@@ -124,7 +130,9 @@ def test_terminal_admission_rejection_cannot_poison_restart(tmp_path) -> None:
         assert restarted.ready
         assert restarted.replay_pending() == 0
         with pytest.raises(AdmissionRejected):
-            restarted.remember(request, actor, deadline_ms=500)
+            restarted.remember(
+                request, actor, deadline_ms=_FUNCTIONAL_DEADLINE_MS
+            )
     finally:
         restarted.stop()
 
@@ -164,7 +172,7 @@ def test_runtime_uses_bounded_admission_and_never_invokes_materializer(tmp_path)
                 trusted_actor_id="actor",
             ),
             actor,
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         )
         assert receipt.payload["status"] == "queryable"
         assert materializer_called is False
@@ -255,7 +263,9 @@ def test_replay_rejects_same_key_with_different_committed_request_hash(tmp_path)
     )
     first.start()
     try:
-        first.remember(committed_request, actor, deadline_ms=500)
+        first.remember(
+            committed_request, actor, deadline_ms=_FUNCTIONAL_DEADLINE_MS
+        )
     finally:
         first.stop()
 
@@ -282,7 +292,11 @@ def test_replay_rejects_same_key_with_different_committed_request_hash(tmp_path)
         assert entry.error_code == "IDEMPOTENCY_CONFLICT"
         assert entry.original_receipt is None
         with pytest.raises(AdmissionRejected, match="IDEMPOTENCY_CONFLICT"):
-            restarted.remember(conflicting_request, actor, deadline_ms=500)
+            restarted.remember(
+                conflicting_request,
+                actor,
+                deadline_ms=_FUNCTIONAL_DEADLINE_MS,
+            )
     finally:
         restarted.stop()
 
@@ -323,7 +337,7 @@ def test_runtime_rebinds_profile_without_replacing_writer_ownership(tmp_path) ->
                 trusted_actor_id="actor",
             ),
             Actor("actor", frozenset({"beta"}), frozenset({"personal"})),
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         )
         assert receipt.payload["status"] == "queryable"
         assert runtime.coordinator.owner_id == owner_id

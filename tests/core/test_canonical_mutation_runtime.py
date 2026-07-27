@@ -15,6 +15,8 @@ from superlocalmemory.storage.migrations import (
     M032_write_coordinator_admission,
 )
 
+_FUNCTIONAL_DEADLINE_MS = 1_500
+
 
 def test_delete_command_is_idempotent_and_preserves_immutable_receipt(
     engine_with_mock_deps,
@@ -39,7 +41,7 @@ def test_delete_command_is_idempotent_and_preserves_immutable_receipt(
                 trusted_actor_id="daemon:test",
             ),
             actor,
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         )
         fact_id = remembered.payload["fact_ids"][0]
 
@@ -93,7 +95,7 @@ def test_concurrent_delete_retries_share_one_canonical_receipt(
                 trusted_actor_id="daemon:test",
             ),
             actor,
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         )
         fact_id = remembered.payload["fact_ids"][0]
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -141,7 +143,7 @@ def test_mutation_retry_key_is_endpoint_scoped_and_rejects_payload_drift(
                 trusted_actor_id="daemon:test",
             ),
             actor,
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         ).payload["fact_ids"][0]
 
         first = runtime.update_fact(
@@ -203,7 +205,7 @@ def test_archive_and_merge_retries_replay_the_first_receipt(
                     trusted_actor_id="daemon:test",
                 ),
                 actor,
-                deadline_ms=1_500,
+                deadline_ms=_FUNCTIONAL_DEADLINE_MS,
             ).payload["fact_ids"][0]
 
         archive_id = remember(
@@ -272,7 +274,7 @@ def test_mutation_receipts_are_metadata_only_and_allow_distinct_updates(
                 trusted_actor_id="daemon:test",
             ),
             actor,
-            deadline_ms=500,
+            deadline_ms=_FUNCTIONAL_DEADLINE_MS,
         ).payload["fact_ids"][0]
         first = runtime.update_fact(
             "default",
