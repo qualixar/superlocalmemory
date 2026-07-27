@@ -29,6 +29,32 @@ if not defined CLAUDE_PLUGIN_DATA (
 )
 
 :: ---------------------------------------------------------------------------
+:: Skip venv bootstrap if a system SLM daemon is already running, or if
+:: SLM_LAUNCHER indicates the plugin venv won't be used. Mirrors the same
+:: check in ensure-venv.sh (POSIX): a live daemon.pid means slm-launch will
+:: never touch this venv, so the Python >=3.11 guard below would otherwise
+:: fire needlessly (e.g. system Python 3.9 with SLM running from elsewhere).
+:: ---------------------------------------------------------------------------
+if defined SLM_DATA_DIR (
+    set "_SLM_DATA=%SLM_DATA_DIR%"
+) else (
+    set "_SLM_DATA=%USERPROFILE%\.superlocalmemory"
+)
+
+set "_DAEMON_RUNNING=0"
+if exist "%_SLM_DATA%\daemon.pid" (
+    set "_DAEMON_PID="
+    set /p _DAEMON_PID=<"%_SLM_DATA%\daemon.pid"
+    if defined _DAEMON_PID (
+        tasklist /FI "PID eq !_DAEMON_PID!" 2>nul | findstr /I "!_DAEMON_PID!" >nul
+        if not errorlevel 1 set "_DAEMON_RUNNING=1"
+    )
+)
+
+if "!_DAEMON_RUNNING!"=="1" exit /b 0
+if defined SLM_LAUNCHER if not "%SLM_LAUNCHER%"=="plugin" exit /b 0
+
+:: ---------------------------------------------------------------------------
 :: Python >= 3.11 guard
 :: ---------------------------------------------------------------------------
 python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>nul

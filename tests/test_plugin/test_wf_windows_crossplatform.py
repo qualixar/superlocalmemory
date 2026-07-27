@@ -16,6 +16,9 @@ Asserts:
        on Windows → ensure-venv.bat (or a platform-aware wrapper).
   (vi) The built plugin/ contains a Windows-resolvable slm path reference
        (Scripts/slm.exe or a launcher that resolves per-OS).
+  (vii) ensure-venv.bat skips venv bootstrap when a system SLM daemon is
+        already running (daemon.pid) or SLM_LAUNCHER != plugin — Windows
+        parity with the equivalent ensure-venv.sh (POSIX) early-exit.
 
 NOTE: These tests check file existence and content; they do NOT run Windows
 binaries (tests run on macOS/Linux CI). All assertions are structural.
@@ -218,4 +221,56 @@ class TestHooksJsonCrossPlatform:
                     all_commands.append(h.get("command", ""))
         assert any("ensure-venv.sh" in cmd for cmd in all_commands), (
             f"SessionStart must still call ensure-venv.sh for POSIX. Commands: {all_commands}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# (vii) ensure-venv.bat: daemon/launcher skip-check parity with ensure-venv.sh
+# ---------------------------------------------------------------------------
+class TestEnsureVenvBatSkipsWhenDaemonOrLauncherNotPlugin:
+    """ensure-venv.sh exits 0 early when a system SLM daemon is already
+    running or SLM_LAUNCHER != plugin, avoiding a needless Python >=3.11
+    guard failure on Windows hosts where the plugin venv is never used.
+    ensure-venv.bat must carry the same behaviour."""
+
+    def _bat_content(self, path: Path) -> str:
+        assert path.exists(), f"{path} not found"
+        return path.read_text(encoding="utf-8")
+
+    def test_plugin_src_bat_checks_daemon_pid(self) -> None:
+        content = self._bat_content(PLUGIN_SRC_SCRIPTS / "ensure-venv.bat")
+        assert "daemon.pid" in content, (
+            "ensure-venv.bat must check for a live daemon.pid before bootstrapping, "
+            "mirroring the ensure-venv.sh early-exit"
+        )
+
+    def test_plugin_src_bat_checks_slm_launcher(self) -> None:
+        content = self._bat_content(PLUGIN_SRC_SCRIPTS / "ensure-venv.bat")
+        assert "SLM_LAUNCHER" in content, (
+            "ensure-venv.bat must check SLM_LAUNCHER and skip bootstrap when != plugin"
+        )
+
+    def test_plugin_src_bat_exits_zero_on_skip(self) -> None:
+        content = self._bat_content(PLUGIN_SRC_SCRIPTS / "ensure-venv.bat")
+        assert "exit /b 0" in content, (
+            "ensure-venv.bat skip path must exit /b 0 (success), not fail loud"
+        )
+
+    def test_built_bat_matches_source_after_skip_check(self) -> None:
+        src = PLUGIN_SRC_SCRIPTS / "ensure-venv.bat"
+        out = PLUGIN_SCRIPTS / "ensure-venv.bat"
+        assert src.read_text(encoding="utf-8") == out.read_text(encoding="utf-8"), (
+            "plugin/scripts/ensure-venv.bat must match plugin-src/scripts/ensure-venv.bat "
+            "byte-for-byte, including the daemon/launcher skip-check"
+        )
+
+    def test_skip_check_precedes_python_guard(self) -> None:
+        """The skip-check must run BEFORE the Python >=3.11 guard, otherwise
+        the guard still fires needlessly when a system daemon is running."""
+        content = self._bat_content(PLUGIN_SRC_SCRIPTS / "ensure-venv.bat")
+        daemon_check_pos = content.find("daemon.pid")
+        python_guard_pos = content.find("Python >= 3.11 guard")
+        assert daemon_check_pos != -1 and python_guard_pos != -1
+        assert daemon_check_pos < python_guard_pos, (
+            "daemon.pid skip-check must appear before the Python >=3.11 guard in ensure-venv.bat"
         )
