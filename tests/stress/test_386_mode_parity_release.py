@@ -96,6 +96,12 @@ def _pure_fts_recall(db_path: Path, profile_id: str, token: str) -> list[str]:
 
     writes: list[int] = []
     with ReadConnectionFactory(db_path, timeout_ms=250).snapshot() as conn:
+        # Construct the FTS5 virtual table before installing the diagnostic
+        # authorizer. Some Linux SQLite builds perform internal schema work
+        # during the first vtable access and report only "vtable constructor
+        # failed" when an authorizer is already present. The connection is
+        # physically mode=ro and query_only throughout this warm-up.
+        conn.execute("SELECT fact_id FROM atomic_facts_fts LIMIT 0").fetchall()
         conn.set_authorizer(
             lambda action, _arg1, _arg2, _db, _source: (
                 writes.append(action) or sqlite3.SQLITE_DENY

@@ -123,6 +123,9 @@ def _make_legacy_projection(lifecycle: ScaleEngineManager) -> tuple[Path, Path]:
 @pytest.fixture
 def manager(tmp_path):
     db = sqlite3.connect(tmp_path / "memory.db")
+    if not hasattr(db, "enable_load_extension"):
+        db.close()
+        pytest.skip("runner SQLite does not expose loadable-extension support")
     db.enable_load_extension(True)
     sqlite_vec.load(db)
     db.enable_load_extension(False)

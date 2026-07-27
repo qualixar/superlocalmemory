@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -17,6 +18,8 @@ _KEY_BYTES = 32
 _NONCE_BYTES = 12
 _FORMAT_VERSION = b"\x01"
 _ASSOCIATED_DATA = b"superlocalmemory:remember-admission:v1"
+_KEY_READ_ATTEMPTS = 100
+_KEY_READ_RETRY_SECONDS = 0.005
 
 
 class AdmissionKeyError(RuntimeError):
@@ -61,7 +64,14 @@ def _load_or_create_key(path: Path) -> bytes:
         os.chmod(path.parent, 0o700)
 
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(
+            path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
     except FileExistsError:
         fd = -1
     else:
@@ -84,20 +94,26 @@ def _load_or_create_key(path: Path) -> bytes:
         finally:
             os.close(fd)
 
-    try:
-        info = path.lstat()
-    except OSError as exc:
-        raise AdmissionKeyError("admission key is unavailable") from exc
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise AdmissionKeyError("admission key path must be a regular file")
-    if os.name != "nt":
-        if info.st_uid != os.getuid():
-            raise AdmissionKeyError("admission key is not owned by the current user")
-        os.chmod(path, 0o600)
-    try:
-        key = path.read_bytes()
-    except OSError as exc:
-        raise AdmissionKeyError("admission key cannot be read") from exc
-    if len(key) != _KEY_BYTES:
-        raise AdmissionKeyError("admission key has an invalid length")
-    return key
+    for attempt in range(_KEY_READ_ATTEMPTS):
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise AdmissionKeyError("admission key is unavailable") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise AdmissionKeyError("admission key path must be a regular file")
+        if os.name != "nt":
+            if info.st_uid != os.getuid():
+                raise AdmissionKeyError("admission key is not owned by the current user")
+            os.chmod(path, 0o600)
+        try:
+            key = path.read_bytes()
+        except OSError as exc:
+            raise AdmissionKeyError("admission key cannot be read") from exc
+        if len(key) == _KEY_BYTES:
+            return key
+        # A process that lost O_EXCL may observe the winning creator between
+        # file creation and its final fsync/close. Wait only for that bounded
+        # window; a persistently truncated or oversized key still fails closed.
+        if attempt + 1 < _KEY_READ_ATTEMPTS:
+            time.sleep(_KEY_READ_RETRY_SECONDS)
+    raise AdmissionKeyError("admission key has an invalid length")
