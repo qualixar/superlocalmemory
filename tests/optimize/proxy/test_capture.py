@@ -274,6 +274,32 @@ class TestShadowCaptureRecord:
         with pytest.raises(OSError):
             os.fstat(opened[0])
 
+    def test_fdopen_failure_closes_verified_descriptor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Descriptor ownership stays local until fdopen succeeds."""
+        cap = ShadowCapture(path=tmp_path / "cap.jsonl")
+        opened: list[int] = []
+        real_open = capture_mod._open_capture_append
+
+        def _tracked_open(path: Path) -> int:
+            fd = real_open(path)
+            opened.append(fd)
+            return fd
+
+        def _fdopen_failure(*_args: object, **_kwargs: object) -> None:
+            raise OSError("fdopen failed")
+
+        monkeypatch.setattr(capture_mod, "_open_capture_append", _tracked_open)
+        monkeypatch.setattr(capture_mod.os, "fdopen", _fdopen_failure)
+
+        assert cap.record({"secret": "must not be written"}) is False
+        assert cap.count == 0
+        assert (tmp_path / "cap.jsonl").read_bytes() == b""
+        assert len(opened) == 1
+        with pytest.raises(OSError):
+            os.fstat(opened[0])
+
     def test_symlink_at_path_is_refused(self, tmp_path: Path) -> None:
         # Audit fix LOW-2: O_NOFOLLOW refuses a pre-placed symlink (symlink-append).
         target = tmp_path / "secret.txt"

@@ -207,10 +207,15 @@ class ShadowCapture:
                     # Enforce the ACL through the verified descriptor so a
                     # pathname swap cannot redirect chmod/icacls elsewhere.
                     _enforce_owner_only_permissions(fd)
+                    # fdopen transfers descriptor ownership only after it
+                    # returns successfully. Keep this conversion inside the
+                    # explicit-close boundary so an allocation/codec failure
+                    # cannot leak one descriptor per captured request.
+                    fh = os.fdopen(fd, "a", encoding="utf-8")
                 except BaseException:
                     os.close(fd)
                     raise
-                with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                with fh:
                     fh.write(line + "\n")
                 self._count += 1
             return True
