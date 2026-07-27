@@ -234,7 +234,10 @@ def _enforce_owner_only_permissions(fd: int) -> None:
     except Exception as exc:
         # pywin32 raises native error types that are not guaranteed to inherit
         # OSError. Normalize them so record() preserves its fail-open contract.
-        raise OSError("Windows capture ACL could not be enforced") from exc
+        raise OSError(
+            "Windows capture ACL could not be enforced "
+            f"({type(exc).__name__}: {exc})"
+        ) from exc
 
 
 class ShadowCapture:
