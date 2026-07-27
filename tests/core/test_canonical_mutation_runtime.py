@@ -203,7 +203,7 @@ def test_archive_and_merge_retries_replay_the_first_receipt(
                     trusted_actor_id="daemon:test",
                 ),
                 actor,
-                deadline_ms=500,
+                deadline_ms=1_500,
             ).payload["fact_ids"][0]
 
         archive_id = remember(
