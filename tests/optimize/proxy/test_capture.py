@@ -21,7 +21,9 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -193,24 +195,84 @@ class TestShadowCaptureRecord:
     def test_windows_capture_applies_owner_only_dacl_before_writing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The Windows path issues an explicit non-inheriting owner ACL."""
+        """The Windows path secures the verified open handle, never its path."""
         cap = ShadowCapture(path=tmp_path / "cap.jsonl")
-        calls: list[list[str]] = []
+        owner_sid = object()
+        token_closed: list[bool] = []
+        ace_calls: list[tuple[object, ...]] = []
+        security_calls: list[tuple[object, ...]] = []
 
-        def _run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-            calls.append(command)
-            stdout = "DOMAIN\\capture-user\n" if command[0] == "whoami" else ""
-            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+        class FakeToken:
+            def Close(self) -> None:
+                token_closed.append(True)
+
+        class FakeAcl:
+            def AddAccessAllowedAce(self, *args: object) -> None:
+                ace_calls.append(args)
+
+        fake_msvcrt = SimpleNamespace(get_osfhandle=lambda fd: ("handle", fd))
+        fake_api = SimpleNamespace(GetCurrentProcess=lambda: "process")
+        fake_con = SimpleNamespace(TOKEN_QUERY=1, GENERIC_ALL=2)
+        fake_security = SimpleNamespace(
+            ACL=FakeAcl,
+            ACL_REVISION=3,
+            DACL_SECURITY_INFORMATION=4,
+            PROTECTED_DACL_SECURITY_INFORMATION=8,
+            SE_FILE_OBJECT=9,
+            TokenUser=10,
+            GetTokenInformation=lambda token, kind: (owner_sid, object()),
+            OpenProcessToken=lambda process, access: FakeToken(),
+            SetSecurityInfo=lambda *args: security_calls.append(args),
+        )
 
         monkeypatch.setattr(capture_mod, "_is_windows", lambda: True)
-        monkeypatch.setattr(capture_mod.subprocess, "run", _run)
+        monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+        monkeypatch.setitem(sys.modules, "win32api", fake_api)
+        monkeypatch.setitem(sys.modules, "win32con", fake_con)
+        monkeypatch.setitem(sys.modules, "win32security", fake_security)
 
         assert cap.record({"x": 1}) is True
-        assert calls[0] == ["whoami"]
-        assert calls[1] == [
-            "icacls", os.fspath(cap.path), "/inheritance:r", "/grant:r",
-            "DOMAIN\\capture-user:(F)",
-        ]
+        assert token_closed == [True]
+        assert ace_calls == [(3, 2, owner_sid)]
+        assert len(security_calls) == 1
+        handle, object_type, flags, owner, group, dacl, sacl = security_calls[0]
+        assert object_type == 9
+        assert flags == 12
+        assert owner is None and group is None and sacl is None
+        assert isinstance(dacl, FakeAcl)
+        assert handle[0] == "handle"
+        with pytest.raises(OSError):
+            os.fstat(handle[1])
+
+    def test_windows_acl_failure_closes_descriptor_and_drops_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A native ACL failure is fail-open and never leaves proxy data behind."""
+        cap = ShadowCapture(path=tmp_path / "cap.jsonl")
+        opened: list[int] = []
+        real_open = capture_mod._open_capture_append
+
+        def _tracked_open(path: Path) -> int:
+            fd = real_open(path)
+            opened.append(fd)
+            return fd
+
+        def _acl_failure(_fd: int) -> None:
+            raise OSError("native ACL failure")
+
+        monkeypatch.setattr(capture_mod, "_open_capture_append", _tracked_open)
+        monkeypatch.setattr(
+            capture_mod,
+            "_enforce_owner_only_permissions",
+            _acl_failure,
+        )
+
+        assert cap.record({"secret": "must not be written"}) is False
+        assert cap.count == 0
+        assert (tmp_path / "cap.jsonl").read_bytes() == b""
+        assert len(opened) == 1
+        with pytest.raises(OSError):
+            os.fstat(opened[0])
 
     def test_symlink_at_path_is_refused(self, tmp_path: Path) -> None:
         # Audit fix LOW-2: O_NOFOLLOW refuses a pre-placed symlink (symlink-append).

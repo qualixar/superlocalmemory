@@ -542,10 +542,10 @@ class IngestionOperationRepository:
                         "INSERT INTO dead_letter_operations "
                         "(original_op_id, operation_type, content, "
                         " metadata_json, error, attempt_count, "
-                        " first_attempt_at, profile_id) "
+                        " first_attempt_at, dead_lettered_at, profile_id) "
                         "VALUES (?, 'M018', ?, ?, ?, ?, "
-                        " (SELECT unixepoch(created_at) FROM ingestion_operations "
-                        "  WHERE operation_id=?), ?)",
+                        " (SELECT CAST(strftime('%s', created_at) AS REAL) "
+                        "  FROM ingestion_operations WHERE operation_id=?), ?, ?)",
                         (
                             operation_id,
                             current.raw_content,
@@ -554,6 +554,7 @@ class IngestionOperationRepository:
                             last_error or current.last_error,
                             attempt_count,
                             operation_id,
+                            time.time(),
                             current.profile_id,
                         ),
                     )
@@ -669,10 +670,10 @@ class IngestionOperationRepository:
                             "INSERT INTO dead_letter_operations "
                             "(original_op_id, operation_type, content, "
                             "metadata_json, error, attempt_count, "
-                            "first_attempt_at, profile_id) "
+                            "first_attempt_at, dead_lettered_at, profile_id) "
                             "VALUES (?, 'M018', ?, ?, ?, ?, "
-                            "(SELECT unixepoch(created_at) "
-                            "FROM ingestion_operations WHERE operation_id=?), ?)",
+                            "(SELECT CAST(strftime('%s', created_at) AS REAL) "
+                            "FROM ingestion_operations WHERE operation_id=?), ?, ?)",
                             (
                                 operation_id,
                                 data["raw_content"],
@@ -680,6 +681,7 @@ class IngestionOperationRepository:
                                 terminal_error,
                                 int(data["attempt_count"]),
                                 operation_id,
+                                time.time(),
                                 data["profile_id"],
                             ),
                         )

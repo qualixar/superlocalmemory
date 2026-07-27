@@ -22,10 +22,11 @@ swallowed — it MUST NOT break the proxied request the user is waiting on.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import os
-import subprocess
+import stat
 import threading
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,6 @@ _MAX_CAPTURE_BODY_BYTES = 1 * 1024 * 1024  # 1 MB per side
 # Providers whose response bodies follow the OpenAI usage schema
 # ({"usage": {"prompt_tokens", "completion_tokens"}, "model"}).
 _OPENAI_FORMAT_PROVIDERS = frozenset({"openai", "gemini-openai-compat"})
-_WINDOWS_ACL_TIMEOUT_SECONDS = 5
 
 
 def capture_enabled() -> bool:
@@ -63,42 +63,89 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _enforce_owner_only_permissions(path: Path) -> None:
-    """Apply the platform's owner-only access control to a capture file.
+def _is_link_or_reparse(info: os.stat_result) -> bool:
+    """Reject POSIX symlinks and Windows reparse points before capture."""
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(info, "st_file_attributes", 0)
+    return stat.S_ISLNK(info.st_mode) or bool(reparse and attributes & reparse)
 
-    Windows does not represent NTFS DACLs through POSIX-style mode bits. Its
-    explicit DACL is reset on each append: inherited grants are removed and
-    only the process identity receives full control. The helper raises on
-    failure so optional capture is dropped rather than retain proxy traffic
-    with an unverifiable access policy.
-    """
+
+def _open_capture_append(path: Path) -> int:
+    """Open one append descriptor without following or racing a link target."""
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        before = None
+    if before is not None and _is_link_or_reparse(before):
+        raise OSError(errno.ELOOP, "capture path is a link or reparse point", path)
+
+    flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        opened = os.fstat(fd)
+        current = path.lstat()
+        if (
+            _is_link_or_reparse(current)
+            or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise OSError(
+                errno.ELOOP,
+                "capture path changed during secure open",
+                path,
+            )
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _enforce_owner_only_permissions(fd: int) -> None:
+    """Apply owner-only access control through the already-verified handle."""
     if not _is_windows():
-        os.chmod(path, 0o600)
+        os.fchmod(fd, 0o600)
         return
 
-    owner_result = subprocess.run(
-        ["whoami"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
-    )
-    owner = owner_result.stdout.strip()
-    if not owner:
-        raise OSError("cannot determine Windows capture-file owner")
-    subprocess.run(
-        [
-            "icacls",
-            os.fspath(path),
-            "/inheritance:r",
-            "/grant:r",
-            f"{owner}:(F)",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
-    )
+    try:
+        import msvcrt
+
+        import win32api
+        import win32con
+        import win32security
+    except ImportError as exc:
+        raise OSError("Windows capture ACL support is unavailable") from exc
+
+    try:
+        token = win32security.OpenProcessToken(
+            win32api.GetCurrentProcess(),
+            win32con.TOKEN_QUERY,
+        )
+        try:
+            owner_sid = win32security.GetTokenInformation(
+                token,
+                win32security.TokenUser,
+            )[0]
+        finally:
+            token.Close()
+        dacl = win32security.ACL()
+        dacl.AddAccessAllowedAce(
+            win32security.ACL_REVISION,
+            win32con.GENERIC_ALL,
+            owner_sid,
+        )
+        win32security.SetSecurityInfo(
+            msvcrt.get_osfhandle(fd),
+            win32security.SE_FILE_OBJECT,
+            win32security.DACL_SECURITY_INFORMATION
+            | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            dacl,
+            None,
+        )
+    except Exception as exc:
+        # pywin32 raises native error types that are not guaranteed to inherit
+        # OSError. Normalize them so record() preserves its fail-open contract.
+        raise OSError("Windows capture ACL could not be enforced") from exc
 
 
 class ShadowCapture:
@@ -141,10 +188,10 @@ class ShadowCapture:
         Fail-open: any error is logged and False is returned; never raised.
 
         Security: opens with a single ``os.open`` carrying ``O_CREAT |
-        O_APPEND | O_NOFOLLOW`` and mode ``0o600`` on EVERY write. O_NOFOLLOW
-        refuses a symlink pre-placed at the path (symlink-append attack), and
-        the unconditional 0600-on-create removes the stat/exists TOCTOU that
-        could otherwise drop the file to the process umask.
+        O_APPEND`` and mode ``0o600`` on every write. POSIX adds O_NOFOLLOW;
+        all platforms reject link/reparse metadata and verify that the opened
+        descriptor still identifies the current path. Permissions are then
+        enforced through that verified descriptor before any data is written.
         """
         try:
             line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
@@ -155,15 +202,19 @@ class ShadowCapture:
         try:
             with self._write_lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
-                fd = os.open(self._path, flags, 0o600)
+                fd = _open_capture_append(self._path)
+                try:
+                    # Enforce the ACL through the verified descriptor so a
+                    # pathname swap cannot redirect chmod/icacls elsewhere.
+                    _enforce_owner_only_permissions(fd)
+                except BaseException:
+                    os.close(fd)
+                    raise
                 with os.fdopen(fd, "a", encoding="utf-8") as fh:
-                    # Enforce the platform ACL before proxy data is appended.
-                    _enforce_owner_only_permissions(self._path)
                     fh.write(line + "\n")
                 self._count += 1
             return True
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
             # PermissionError / symlink-refusal (ELOOP) are security-relevant —
             # surface the errno but still fail open so the request is never blocked.
             logger.warning("capture: write failed (fail-open): %r", exc)

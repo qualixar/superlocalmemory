@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS source_quality_repair_state (
 _MAX_FACTS_PER_OUTCOME = 100
 _MAX_SOURCES_PER_OUTCOME = 100
 _PROVENANCE_QUERY_CHUNK = 500
+_SCHEMA_INIT_LOCK = threading.RLock()
 
 
 class SourceQualityRepairUnavailable(RuntimeError):
@@ -114,45 +115,47 @@ class SourceQualityScorer:
     # ------------------------------------------------------------------
 
     def _ensure_schema(self) -> None:
-        conn = self._connect()
-        try:
-            # Separate scorer instances can be constructed concurrently during
-            # first startup (background history repair + outcome settlement).
-            # Serialize the read/ALTER sequence at SQLite's transaction
-            # boundary so two processes cannot both observe a legacy column as
-            # missing and race into ``duplicate column name``.
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(_CREATE_TABLE)
-            conn.execute(_CREATE_UNIQUE)
-            conn.execute(_CREATE_OBSERVATIONS)
-            conn.execute(_CREATE_REPAIR_STATE)
-            repair_columns = {
-                str(row["name"])
-                for row in conn.execute(
-                    "PRAGMA table_info(source_quality_repair_state)"
-                ).fetchall()
-            }
-            if "last_settled_at" not in repair_columns:
-                conn.execute(
-                    "ALTER TABLE source_quality_repair_state "
-                    "ADD COLUMN last_settled_at TEXT NOT NULL DEFAULT ''"
-                )
-            if "last_outcome_id" not in repair_columns:
-                conn.execute(
-                    "ALTER TABLE source_quality_repair_state "
-                    "ADD COLUMN last_outcome_id TEXT NOT NULL DEFAULT ''"
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        # Serialize scorer instances in this process before asking SQLite for
+        # its cross-process BEGIN IMMEDIATE lease. This prevents two startup
+        # threads from racing the journal-mode/schema bootstrap while SQLite's
+        # busy timeout protects the equivalent multi-process boundary.
+        with _SCHEMA_INIT_LOCK:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(_CREATE_TABLE)
+                conn.execute(_CREATE_UNIQUE)
+                conn.execute(_CREATE_OBSERVATIONS)
+                conn.execute(_CREATE_REPAIR_STATE)
+                repair_columns = {
+                    str(row["name"])
+                    for row in conn.execute(
+                        "PRAGMA table_info(source_quality_repair_state)"
+                    ).fetchall()
+                }
+                if "last_settled_at" not in repair_columns:
+                    conn.execute(
+                        "ALTER TABLE source_quality_repair_state "
+                        "ADD COLUMN last_settled_at TEXT NOT NULL DEFAULT ''"
+                    )
+                if "last_outcome_id" not in repair_columns:
+                    conn.execute(
+                        "ALTER TABLE source_quality_repair_state "
+                        "ADD COLUMN last_outcome_id TEXT NOT NULL DEFAULT ''"
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path), timeout=10)
+        # Install the busy handler before journal negotiation. On a fresh
+        # database, PRAGMA journal_mode itself may contend with another scorer.
+        conn.execute("PRAGMA busy_timeout=10000")
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         return conn
 
