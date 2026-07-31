@@ -14,7 +14,9 @@ Note: is_daemon_running / daemon_request / ensure_daemon are imported
 from __future__ import annotations
 
 import logging
+import sys
 from argparse import Namespace
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -118,3 +120,70 @@ def test_daemon_fallback_includes_exception_text(caplog) -> None:
     assert sentinel in all_messages, (
         f"Exception text '{sentinel}' missing from log output: {all_messages!r}"
     )
+
+
+def test_cmd_recall_handles_null_retrieval_time_ms(capsys) -> None:
+    """Regression: result with retrieval_time_ms=None must not raise
+    TypeError: unsupported format string passed to NoneType.__format__.
+
+    dict.get(key, default) falls back to default only when the key is absent.
+    When the key is present with value None, the default is ignored and
+    f"{None:.0f}" raises the TypeError.  The fix uses `or 0` to guard
+    both the absent-key and the None-value cases.
+    """
+    from superlocalmemory.cli.commands import cmd_recall
+
+    with (
+        patch("superlocalmemory.cli.daemon.is_daemon_running", return_value=True),
+        patch("superlocalmemory.cli.daemon.ensure_daemon", return_value=True),
+        patch(
+            "superlocalmemory.cli.daemon.daemon_request",
+            return_value={
+                "results": [
+                    {"score": 0.91, "content": "memory content here"},
+                ],
+                "retrieval_time_ms": None,
+            },
+        ),
+    ):
+        # Must not raise TypeError — the old code raised:
+        #   TypeError: unsupported format string passed to NoneType.__format__
+        cmd_recall(_minimal_args())
+
+    captured = capsys.readouterr()
+    # Verify the success line was printed despite retrieval_time_ms being null
+    assert "SpreadingActivation.search completed via daemon" in captured.out
+    assert "SpreadingActivation.search completed via daemon (0ms)" in captured.out
+
+
+def test_cmd_recall_via_keyword_fallback_has_retrieval_time(capsys) -> None:
+    """Keyword fallback path (budget exceeded) always includes retrieval_time_ms.
+
+    When semantic recall exceeds its budget, _recall_keyword_fallback() serves
+    a degraded lexical response.  The return dict must include retrieval_time_ms
+    so CLI formatting (f"{time:.0f}ms") does not crash on a missing key.
+    """
+    from superlocalmemory.cli.commands import cmd_recall
+
+    with (
+        patch("superlocalmemory.cli.daemon.is_daemon_running", return_value=True),
+        patch("superlocalmemory.cli.daemon.ensure_daemon", return_value=True),
+        patch(
+            "superlocalmemory.cli.daemon.daemon_request",
+            return_value={
+                "results": [
+                    {"score": None, "content": "fallback result"},
+                ],
+                "query_type": "text_search",
+                "retrieval_mode": "degraded_lexical",
+                "degraded_reason": "recall_budget_exceeded",
+                # Note: no retrieval_time_ms key — simulating the old bug
+            },
+        ),
+    ):
+        # Must not raise KeyError on missing retrieval_time_ms
+        cmd_recall(_minimal_args())
+
+    captured = capsys.readouterr()
+    assert "SpreadingActivation.search completed via daemon" in captured.out
+    assert "SpreadingActivation.search completed via daemon (0ms)" in captured.out

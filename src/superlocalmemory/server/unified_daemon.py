@@ -534,6 +534,7 @@ def _recall_keyword_fallback(engine, query: str, limit: int) -> dict:
         "results": results,
         "count": len(results),
         "no_confident_match": True,
+        "retrieval_time_ms": 0,
     }
 
 # v3.4.52: Embedding model warm state. Set to True by the async pre-warm

@@ -1460,9 +1460,10 @@ def cmd_recall(args: Namespace) -> None:
                           else "No matching memories found.")
                     return
                 # Text output
-                print(f"SpreadingActivation.search completed via daemon ({result.get('retrieval_time_ms', 0):.0f}ms)")
+                print(f"SpreadingActivation.search completed via daemon ({(result.get('retrieval_time_ms') or 0):.0f}ms)")
                 for i, r in enumerate(result["results"], 1):
-                    print(f"  {i}. [{r['score']:.2f}] {r['content']}")
+                    score = r.get('score') or 0
+                    print(f"  {i}. [{score:.2f}] {r['content']}")
                 return
     except Exception as _exc:  # noqa: BLE001
         logger.warning(
