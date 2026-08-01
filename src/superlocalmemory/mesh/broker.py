@@ -24,6 +24,11 @@ from typing import Any, Callable, TypeVar
 logger = logging.getLogger("superlocalmemory.mesh")
 import os as _os
 
+from .broker_security import (  # noqa: E501
+    apply_security_schema, check_cross_profile_sender,
+    ensure_db_healthy, reject_secret_state, validate_lock_fence_query,
+)
+
 # Remote sync support (optional, try/except to avoid import issues)
 try:
     from .remote_sync import RemoteSyncClient
@@ -50,13 +55,7 @@ _WRITE_BUSY_TIMEOUT_MS = 2000
 
 
 class MeshBroker:
-    """Lightweight mesh broker for SLM's unified daemon.
-
-    Provides peer management, messaging, state, locks, and events.
-    v3.4.6: broadcast, project-based routing, offline message queue.
-    All methods are synchronous (called from FastAPI via run_in_executor
-    or directly for quick operations).
-    """
+    """Lightweight mesh broker — peer lifecycle, messaging, state, locks, events."""
 
     def __init__(self, db_path: str | Path):
         self._db_path = str(db_path)
@@ -72,11 +71,15 @@ class MeshBroker:
         self._remote_peers_lock = threading.RLock()
         self._peer_url: str | None = _os.environ.get("SLM_MESH_PEER_URL", "") or None
         self._sync_client: Any = None
+        self._degraded: bool = False
+        self._fencing_lock = threading.Lock()
+        self._fencing_counter: int = 0
         if self._is_remote and not self._shared_secret:
             raise RuntimeError(
                 "SLM_MESH_SHARED_SECRET is required when SLM_MESH_HOST is not localhost"
             )
-
+        self._ensure_db_healthy()
+        self._apply_schema_updates()
 
     # -- Remote / Multi-Machine support (v3.4.47) --
 
@@ -128,13 +131,31 @@ class MeshBroker:
         if self._sync_client:
             self._sync_client.stop()
 
+    # -- Startup safety helpers --
+
+    def _ensure_db_healthy(self) -> None:
+        """Quarantine a corrupt DB; set _degraded if recovery was needed."""
+        self._degraded = ensure_db_healthy(self._db_path)
+
+    def _apply_schema_updates(self) -> None:
+        """Apply idempotent schema additions (delegated to broker_security)."""
+        conn = self._conn()
+        try:
+            apply_security_schema(conn)
+        except sqlite3.Error as exc:
+            logger.debug("mesh schema update skipped: %s", exc)
+        finally:
+            conn.close()
+
+    def _next_fencing_token(self) -> int:
+        """Return the next monotonically-increasing fencing token."""
+        with self._fencing_lock:
+            self._fencing_counter += 1
+            return self._fencing_counter
+
     # -- Connection helper --
 
     def _conn(self) -> sqlite3.Connection:
-        # WAL is configured during database initialization and persists with the
-        # database. Reissuing journal_mode=WAL for every short-lived mesh
-        # connection is itself a schema-level write that can contend with the
-        # daemon. Mesh writes below use bounded whole-transaction retries.
         conn = sqlite3.connect(
             self._db_path,
             timeout=_WRITE_BUSY_TIMEOUT_MS / 1000,
@@ -148,17 +169,8 @@ class MeshBroker:
         message = str(exc).lower()
         return "database is locked" in message or "database is busy" in message
 
-    def _write_with_retry(
-        self,
-        operation: Callable[[sqlite3.Connection], _T],
-    ) -> _T:
-        """Run one idempotent mesh mutation with a bounded SQLite retry budget.
-
-        SQLite WAL lets reads continue while a write is in progress, but it
-        still permits a single writer. Retrying the entire short transaction on
-        a fresh connection avoids leaking a transient writer collision to an
-        agent heartbeat or mesh command.
-        """
+    def _write_with_retry(self, operation: Callable[[sqlite3.Connection], _T]) -> _T:
+        """Run one idempotent mesh mutation with a bounded SQLite retry budget."""
         last_error: sqlite3.OperationalError | None = None
         for attempt in range(_WRITE_RETRY_ATTEMPTS):
             conn = self._conn()
@@ -290,7 +302,8 @@ class MeshBroker:
 
     def send_message(self, from_peer: str, to_peer: str, content: str,
                      msg_type: str = "text", project_path: str = "",
-                     profile_id: str = "default") -> dict:
+                     profile_id: str = "default",
+                     operation_id: str | None = None) -> dict:
         # Guard: 4KB message size cap
         if len(content) > MAX_MESSAGE_SIZE:
             return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
@@ -325,6 +338,20 @@ class MeshBroker:
             _project_path = project_path
             now = datetime.now(timezone.utc).isoformat()
             expires_at = self._compute_expires(now)
+
+            # Idempotency: return original result for a repeated operation_id.
+            if operation_id:
+                op = conn.execute(
+                    "SELECT message_id FROM mesh_sent_ops WHERE operation_id=?", (operation_id,)
+                ).fetchone()
+                if op:
+                    return {"ok": True, "id": op["message_id"],
+                            "idempotent": True, "operation_id": operation_id}
+
+            # Identity binding: cross-profile impersonation guard.
+            cross_profile_err = check_cross_profile_sender(conn, from_peer, profile_id)
+            if cross_profile_err is not None:
+                return cross_profile_err
 
             # Determine target type
             if _to_peer == "broadcast":
@@ -368,11 +395,16 @@ class MeshBroker:
                 (from_peer, _to_peer, msg_type, content, now, expires_at,
                  target_type, _project_path, profile_id),
             )
-            self._log_event(conn, "message_sent", from_peer, {
+            msg_id = cursor.lastrowid
+
+            if operation_id:
+                conn.execute("INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)", (operation_id, msg_id, now))
+
+            self._log_event(conn, "message_sent", from_peer or "system", {
                 "to": _to_peer, "target_type": target_type, "project": _project_path,
             }, profile_id=profile_id)
             conn.commit()
-            return {"ok": True, "id": cursor.lastrowid, "target_type": target_type,
+            return {"ok": True, "id": msg_id, "target_type": target_type,
                     "expires_at": expires_at}
 
         return self._write_with_retry(_send)
@@ -487,14 +519,30 @@ class MeshBroker:
             conn.close()
 
     def set_state(self, key: str, value: str, set_by: str,
-                  profile_id: str = "default") -> dict:
+                  profile_id: str = "default",
+                  expected_revision: int | None = None) -> dict:
+        """Set coordination state; rejects secrets and enforces optimistic revision."""
+        secret_err = reject_secret_state(key, value)
+        if secret_err is not None:
+            return secret_err
+
         def _set_state(conn: sqlite3.Connection) -> dict:
             now = datetime.now(timezone.utc).isoformat()
+            if expected_revision is not None:
+                row = conn.execute(
+                    "SELECT revision FROM mesh_state WHERE profile_id=? AND key=?",
+                    (profile_id, key),
+                ).fetchone()
+                current = row["revision"] if row else 0
+                if current != expected_revision:
+                    return {"ok": False,
+                            "error": f"revision mismatch: expected {expected_revision}, current {current}"}
             conn.execute(
-                "INSERT INTO mesh_state (profile_id, key, value, set_by, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(profile_id, key) DO UPDATE SET value=excluded.value, "
-                "set_by=excluded.set_by, updated_at=excluded.updated_at",
+                "INSERT INTO mesh_state (profile_id, key, value, set_by, updated_at, revision)"
+                " VALUES (?, ?, ?, ?, ?, 1)"
+                " ON CONFLICT(profile_id, key) DO UPDATE SET value=excluded.value,"
+                " set_by=excluded.set_by, updated_at=excluded.updated_at,"
+                " revision=COALESCE(mesh_state.revision, 0) + 1",
                 (profile_id, key, value, set_by, now),
             )
             conn.commit()
@@ -506,8 +554,9 @@ class MeshBroker:
         conn = self._conn()
         try:
             row = conn.execute(
-                "SELECT key, value, set_by, updated_at FROM mesh_state "
-                "WHERE profile_id=? AND key=?",
+                "SELECT key, value, set_by, updated_at, "
+                "COALESCE(revision, 0) AS revision "
+                "FROM mesh_state WHERE profile_id=? AND key=?",
                 (profile_id, key),
             ).fetchone()
             return dict(row) if row else None
@@ -522,12 +571,13 @@ class MeshBroker:
             conn = self._conn()
             try:
                 row = conn.execute(
-                    "SELECT locked_by, locked_at FROM mesh_locks "
-                    "WHERE profile_id=? AND file_path=?",
+                    "SELECT locked_by, locked_at, COALESCE(fencing_token, 0) AS fencing_token"
+                    " FROM mesh_locks WHERE profile_id=? AND file_path=?",
                     (profile_id, file_path),
                 ).fetchone()
                 if row:
-                    return {"locked": True, "by": row["locked_by"], "since": row["locked_at"]}
+                    return {"locked": True, "by": row["locked_by"],
+                            "since": row["locked_at"], "fencing_token": row["fencing_token"]}
                 return {"locked": False}
             finally:
                 conn.close()
@@ -557,15 +607,18 @@ class MeshBroker:
                 lock_expires = (
                     datetime.fromisoformat(now) + timedelta(hours=LOCK_TTL_HOURS)
                 ).isoformat()
+                token = self._next_fencing_token()
                 conn.execute(
-                    "INSERT INTO mesh_locks (profile_id, file_path, locked_by, locked_at, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT(profile_id, file_path) DO UPDATE SET locked_by=excluded.locked_by, "
-                    "locked_at=excluded.locked_at, expires_at=excluded.expires_at",
-                    (profile_id, file_path, locked_by, now, lock_expires),
+                    "INSERT INTO mesh_locks (profile_id, file_path, locked_by, locked_at,"
+                    " expires_at, fencing_token) VALUES (?, ?, ?, ?, ?, ?)"
+                    " ON CONFLICT(profile_id, file_path) DO UPDATE SET locked_by=excluded.locked_by,"
+                    " locked_at=excluded.locked_at, expires_at=excluded.expires_at,"
+                    " fencing_token=excluded.fencing_token",
+                    (profile_id, file_path, locked_by, now, lock_expires, token),
                 )
                 conn.commit()
-                return {"ok": True, "action": "acquired", "expires_at": lock_expires}
+                return {"ok": True, "action": "acquired",
+                        "expires_at": lock_expires, "fencing_token": token}
 
             elif action == "release":
                 # v3.6.12 (mesh-2): report whether we actually released. The
@@ -584,6 +637,15 @@ class MeshBroker:
             raise AssertionError("validated action was not handled")
 
         return self._write_with_retry(_lock_action)
+
+    def validate_lock_fence(self, file_path: str, fencing_token: int,
+                            profile_id: str = "default") -> dict:
+        """Reject a stale fencing token; allow the current one."""
+        conn = self._conn()
+        try:
+            return validate_lock_fence_query(conn, file_path, fencing_token, profile_id)
+        finally:
+            conn.close()
 
     # -- Helpers (v3.4.6) --
 

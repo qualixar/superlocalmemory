@@ -28,6 +28,19 @@ import httpx
 
 logger = logging.getLogger("superlocalmemory.mesh.remote_sync")
 
+_PRODUCTION_TRUTHY = frozenset({"1", "true", "yes", "on", "production", "prod"})
+
+
+def _is_production_mode() -> bool:
+    """True when SLM_MESH_PRODUCTION signals a hardened deployment."""
+    return os.environ.get("SLM_MESH_PRODUCTION", "").strip().lower() in _PRODUCTION_TRUTHY
+
+
+def _is_plaintext_url(url: str) -> bool:
+    """True for http:// and ws:// URLs (not TLS-protected)."""
+    lower = url.strip().lower()
+    return lower.startswith("http://") or lower.startswith("ws://")
+
 
 def _service_ip_addresses(info: Any) -> list[str]:
     """Return validated textual IPs from current and older Zeroconf APIs."""
@@ -118,7 +131,20 @@ class RemoteSyncClient:
         self._last_peers: dict[str, dict] = {}
 
     def start(self) -> None:
-        """Start background sync and discovery threads."""
+        """Start background sync and discovery threads.
+
+        In production mode (SLM_MESH_PRODUCTION=1), plaintext peer URLs
+        (http:// or ws://) are rejected so credentials cannot be sent in
+        the clear and traffic cannot be intercepted.
+        """
+        if self._peer_url and _is_production_mode() and _is_plaintext_url(self._peer_url):
+            raise ValueError(
+                f"Production mesh requires TLS transport (https:// or wss://); "
+                f"got plaintext peer URL: {self._peer_url!r}. "
+                "Set SLM_MESH_PEER_URL to an https:// endpoint or "
+                "unset SLM_MESH_PRODUCTION to allow plaintext in dev/local mode."
+            )
+
         if not self._peer_url and not self._discovery_enabled:
             logger.debug(
                 "RemoteSyncClient: no peer URL and discovery disabled, skipping"
