@@ -158,6 +158,7 @@ ALLOWED_LLM_MODELS: frozenset[str] = frozenset({
     "claude-sonnet-4-6",
     "ollama:llama3",
     "ollama:qwen2.5",
+    "openai:gpt-4o-mini",
 })
 
 FORBIDDEN_MODEL_SUBSTRINGS: tuple[str, ...] = ("opus", "gpt-4-turbo")
@@ -301,6 +302,43 @@ def _call_claude_api_backend(
         return ""
 
 
+def _call_openai_api_backend(
+    prompt: str, *, model: str, max_tokens: int,
+) -> str:
+    """Call the OpenAI Chat Completions API directly.
+
+    The API model id is derived from the allow-listed name by stripping
+    the ``"openai:"`` prefix — e.g. ``"openai:gpt-4o-mini"`` → ``"gpt-4o-mini"``.
+    Requires ``OPENAI_API_KEY`` in the environment. Returns empty string on
+    any transport or SDK failure (fail-closed).
+    """
+    openai_model = model.split(":", 1)[1] if model.startswith("openai:") else model
+    try:
+        import openai as _openai  # type: ignore[import-not-found]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("openai sdk unavailable: %s", exc)
+        return ""
+
+    try:
+        client = _openai.OpenAI()
+        completion = client.chat.completions.create(
+            model=openai_model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        choices = getattr(completion, "choices", None)
+        if choices and len(choices) > 0:
+            msg = getattr(choices[0], "message", None)
+            if msg:
+                content = getattr(msg, "content", None)
+                if isinstance(content, str):
+                    return content
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OpenAI API backend failed: %s", exc)
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Backend registry — dispatches by (allow-listed) model id
 # ---------------------------------------------------------------------------
@@ -337,6 +375,8 @@ def _pick_backend(model: str) -> Callable[..., str]:
     """
     if model.startswith("ollama:"):
         return _call_ollama_backend
+    if model.startswith("openai:"):
+        return _call_openai_api_backend
     if model.startswith("claude-"):
         # Claude CLI path is an alternative — selected when an explicit
         # env flag is set. Default path is the Anthropic API backend.

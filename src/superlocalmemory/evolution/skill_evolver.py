@@ -54,7 +54,7 @@ from superlocalmemory.evolution.model_selection import (
 
 logger = logging.getLogger(__name__)
 
-EVOLVED_SKILLS_DIR = Path.home() / ".claude" / "skills" / "evolved"
+EVOLVED_SKILLS_DIR = Path.home() / ".superlocalmemory" / "quarantine" / "skills"
 
 # Model aliasing + per-step selection live in ``model_selection`` — a single
 # source of truth shared with the config layer. ``_MODEL_ALIASES`` and
@@ -620,7 +620,7 @@ class SkillEvolver:
         content: str,
         record_id: str,
     ) -> Path:
-        """Write evolved SKILL.md to ~/.claude/skills/evolved/."""
+        """Write evolved SKILL.md to the quarantine directory for review."""
         EVOLVED_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
         # Build directory name. skill_name derives from a behavioral-assertion

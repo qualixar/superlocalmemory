@@ -39,6 +39,7 @@ CHEAPEST_CLAUDE = "claude-haiku-4-5"
 QUALITY_CLAUDE = "claude-sonnet-4-6"
 CHEAPEST_OLLAMA = "ollama:llama3"
 ALT_OLLAMA = "ollama:qwen2.5"
+CHEAPEST_OPENAI = "openai:gpt-4o-mini"
 
 # Short-name → allow-listed model id. Single source of truth for aliasing;
 # ``skill_evolver`` re-exports these for backward compatibility.
@@ -48,6 +49,8 @@ _MODEL_ALIASES: dict[str, str] = {
     "ollama": CHEAPEST_OLLAMA,
     "ollama:llama3": CHEAPEST_OLLAMA,
     "ollama:qwen2.5": ALT_OLLAMA,
+    "openai": CHEAPEST_OPENAI,
+    "openai:gpt-4o-mini": CHEAPEST_OPENAI,
     CHEAPEST_CLAUDE: CHEAPEST_CLAUDE,
     QUALITY_CLAUDE: QUALITY_CLAUDE,
 }
@@ -78,11 +81,18 @@ class ResolvedModels:
 
 
 def _cheapest_for_backend(backend: str) -> str:
-    """Lowest-cost allow-listed model for a detected backend."""
+    """Lowest-cost allow-listed model for a detected backend.
+
+    The configured backend is authoritative: when the caller explicitly
+    names a provider, models are drawn from that provider only —
+    never silently downgraded to a different vendor's offering.
+    """
     if backend == "ollama":
         return CHEAPEST_OLLAMA
-    # claude CLI, anthropic API, and any non-Ollama backend evolution can
-    # actually dispatch route through the cheapest Claude model.
+    if backend == "openai":
+        return CHEAPEST_OPENAI
+    # claude CLI, anthropic API, and any non-Ollama/non-OpenAI backend
+    # route through the cheapest Claude model.
     return CHEAPEST_CLAUDE
 
 
@@ -106,6 +116,8 @@ def _independent_verifier(
     """Pick a cheap verifier that differs from the generator when possible.
 
     - Ollama generator → the *other* local model (both free, distinct).
+    - OpenAI generator → same OpenAI model (single-provider constraint;
+      independence flag will be False — caller logs the condition).
     - Claude generator + local Ollama up → free local verifier.
     - Claude generator, no Ollama → the cheapest *different* Claude tier if
       the generator was a premium model; otherwise reuse the cheapest model
@@ -114,6 +126,9 @@ def _independent_verifier(
     """
     if mutation.startswith("ollama:"):
         return ALT_OLLAMA if mutation != ALT_OLLAMA else CHEAPEST_OLLAMA
+    if mutation.startswith("openai:"):
+        # Honor the configured provider: stay within OpenAI models.
+        return CHEAPEST_OPENAI
     if ollama_available:
         return CHEAPEST_OLLAMA
     if mutation != CHEAPEST_CLAUDE:

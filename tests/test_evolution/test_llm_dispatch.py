@@ -316,12 +316,20 @@ def test_dispatch_llm_registry_covers_all_allowed_models(
         seen.append(f"ollama:{model}")
         return "ok-ollama"
 
+    def _spy_openai_api(prompt: str, *, model: str, max_tokens: int) -> str:
+        seen.append(f"openai:{model}")
+        return "ok-openai"
+
     monkeypatch.setattr(
         llm_dispatch, "_call_claude_api_backend", _spy_claude_api,
         raising=False,
     )
     monkeypatch.setattr(
         llm_dispatch, "_call_ollama_backend", _spy_ollama,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        llm_dispatch, "_call_openai_api_backend", _spy_openai_api,
         raising=False,
     )
 
@@ -335,11 +343,13 @@ def test_dispatch_llm_registry_covers_all_allowed_models(
 
     # One dispatch per allowed model.
     assert len(seen) == len(ALLOWED_LLM_MODELS)
-    # Ollama models route to ollama backend; others to claude-api backend.
+    # Each model prefix routes to its dedicated backend.
     ollama_count = sum(1 for m in ALLOWED_LLM_MODELS if m.startswith("ollama:"))
-    api_count = len(ALLOWED_LLM_MODELS) - ollama_count
+    openai_count = sum(1 for m in ALLOWED_LLM_MODELS if m.startswith("openai:"))
+    claude_count = len(ALLOWED_LLM_MODELS) - ollama_count - openai_count
     assert sum(1 for s in seen if s.startswith("ollama:")) == ollama_count
-    assert sum(1 for s in seen if s.startswith("api:")) == api_count
+    assert sum(1 for s in seen if s.startswith("openai:")) == openai_count
+    assert sum(1 for s in seen if s.startswith("api:")) == claude_count
 
 
 def test_dispatch_llm_registry_rejects_unknown_model(

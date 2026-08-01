@@ -97,6 +97,9 @@ _SKILL_DENY_PATTERNS: tuple[str, ...] = (
     "os.environ", "subprocess", "exec(", "eval(", "__import__", "import os",
     "import subprocess", "pickle.loads", "curl ", "wget ", "rm -rf",
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_SECRET", "/.ssh/", ".install_token",
+    # Semantic exfiltration patterns — skills must not instruct unauthorized
+    # data transfer or bypass of user consent.
+    "without consent", "exfiltrat",
 )
 
 

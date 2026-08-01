@@ -98,13 +98,20 @@ def parse_verification_response(response: str) -> VerificationResult:
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    # Fallback: keyword detection
+    # Fallback: keyword detection.
+    # Negative keywords are checked first so that negating phrases such as
+    # "cannot approve" or "not approved" are never mistakenly matched by the
+    # positive keyword "approve".
     lower = response.lower()
+    if any(kw in lower for kw in (
+        "\"passed\": false", "passed: false",
+        "reject", "fail",
+        "cannot approve", "not approve",
+    )):
+        return VerificationResult(passed=False, confidence=0.6, reasoning="keyword match")
+
     if any(kw in lower for kw in ("\"passed\": true", "passed: true", "approve", "looks good")):
         return VerificationResult(passed=True, confidence=0.6, reasoning="keyword match")
-
-    if any(kw in lower for kw in ("\"passed\": false", "passed: false", "reject", "fail")):
-        return VerificationResult(passed=False, confidence=0.6, reasoning="keyword match")
 
     # Default: reject if can't parse (conservative)
     return VerificationResult(
