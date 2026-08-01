@@ -1290,6 +1290,14 @@ class SLMConfig:
                     "Ignoring invalid scope config (%s) — using shared-off defaults", exc
                 )
 
+        # Preserve the raw loaded dict so save() can return every key that was
+        # present in the file, including unknown forward-compat keys and nested
+        # sections whose subkeys this version does not model.  The attribute is
+        # intentionally private (leading underscore) and is not a declared field,
+        # so dataclasses.asdict() and dataclasses.replace() ignore it — callers
+        # that clone a config via replace() will lose unknown-key preservation,
+        # which is acceptable: the primary contract is load→save round-trip.
+        config._raw_preserved: dict = dict(data)  # type: ignore[attr-defined]
         return config
 
     def save(
@@ -1406,6 +1414,29 @@ class SLMConfig:
             "min_edge_weight": self.graph_pruning.min_edge_weight,
             "enabled": self.graph_pruning.enabled,
         }
+
+        # Daemon, entity-compilation, and mesh scalar settings were loaded by
+        # load() but omitted from earlier versions of this method. Write them
+        # explicitly so a load-then-save is lossless for these fields.
+        data["daemon_idle_timeout"] = self.daemon_idle_timeout
+        data["daemon_port"] = self.daemon_port
+        data["daemon_legacy_port"] = self.daemon_legacy_port
+        data["daemon_enable_legacy_port"] = self.daemon_enable_legacy_port
+        data["entity_compilation_enabled"] = self.entity_compilation_enabled
+        data["entity_compilation_retrieval_boost"] = self.entity_compilation_retrieval_boost
+        data["mesh_enabled"] = self.mesh_enabled
+
+        # Merge any keys from the last load() that are not covered by the
+        # explicit serialization above.  This includes unknown forward-compat
+        # top-level keys and nested sections whose subkeys this version does
+        # not model (e.g. a "health" dict that carries vendor-extension fields).
+        # Explicitly serialized keys always take precedence; preserved keys are
+        # only written when the slot is vacant in the output dict.
+        _raw = getattr(self, "_raw_preserved", None)
+        if _raw:
+            for _k, _v in _raw.items():
+                if _k not in data:
+                    data[_k] = _v
 
         # Preserve existing V3.3 config sections that aren't in for_mode()
         for key in ("forgetting", "quantization", "sagq", "embedding_signature", "auto_invoke"):
