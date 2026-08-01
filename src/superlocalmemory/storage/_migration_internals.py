@@ -448,6 +448,11 @@ def _apply_single(
         if callable(_apply_fn):
             _apply_fn(conn)
         else:
+            # Atomicity is opt-in per migration: a migration that must be all-or-
+            # nothing wraps its own BEGIN/COMMIT (or ships a custom apply()); a
+            # bare DDL script is deliberately best-effort so a non-essential
+            # trailing statement (e.g. a perf index over a table that may not
+            # exist yet) can fail without discarding the essential leading DDL.
             conn.executescript(migration.ddl)
     except sqlite3.Error as exc:
         # Best-effort rollback.

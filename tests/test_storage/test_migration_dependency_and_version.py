@@ -1,0 +1,72 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+# Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
+"""Migration runner: downgrade guard on the deferred pass + dependency gating.
+
+The deferred pass runs after engine init and writes DDL, so it must refuse a
+database stamped by a newer build exactly as the up-front pass does. And a
+migration whose declared dependency did not complete must be held back rather
+than run against a base schema it assumes is present.
+"""
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+import superlocalmemory.storage.migration_runner as mr
+from superlocalmemory.storage._migration_internals import Migration
+from superlocalmemory.storage._schema_version import (
+    SUPPORTED_SCHEMA_VERSION,
+    SchemaVersionError,
+    ensure_schema_version_table,
+    write_schema_version,
+)
+
+
+def test_apply_deferred_refuses_newer_schema(tmp_path: Path) -> None:
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    sqlite3.connect(learning_db).close()
+    with sqlite3.connect(memory_db) as conn:
+        ensure_schema_version_table(conn)
+        write_schema_version(conn, SUPPORTED_SCHEMA_VERSION + 5)
+
+    with pytest.raises(SchemaVersionError):
+        mr.apply_deferred(learning_db, memory_db)
+
+
+def test_dependent_migration_skipped_when_dependency_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    sqlite3.connect(learning_db).close()
+    sqlite3.connect(memory_db).close()
+
+    dep = Migration(
+        name="ZZZ_dep_fails", db_target="memory", ddl="THIS IS NOT VALID SQL;"
+    )
+    child = Migration(
+        name="ZZZ_child",
+        db_target="memory",
+        ddl="CREATE TABLE zzz_child (id INTEGER);",
+        dependencies=("ZZZ_dep_fails",),
+    )
+    monkeypatch.setattr(mr, "MIGRATIONS", [dep, child])
+
+    stats = mr.apply_all(learning_db, memory_db)
+
+    assert "ZZZ_dep_fails" in stats["failed"]
+    assert "ZZZ_child" in stats["skipped"]
+    assert "dependency not satisfied" in stats["details"]["ZZZ_child"]
+    # The dependent's DDL must not have run.
+    with sqlite3.connect(memory_db) as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "zzz_child" not in tables

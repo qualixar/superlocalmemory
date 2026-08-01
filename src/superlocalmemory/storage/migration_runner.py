@@ -361,7 +361,17 @@ def apply_all(
     failed.extend(bs_failed)
     details.update(bs_details)
 
+    blocked: set[str] = set()
     for migration in MIGRATIONS:
+        # A migration whose declared dependency did not complete must not run
+        # against a base schema that is missing that dependency's changes.
+        unmet = [d for d in migration.dependencies if d in failed or d in blocked]
+        if unmet:
+            skipped.append(migration.name)
+            blocked.add(migration.name)
+            details[migration.name] = "dependency not satisfied: " + ", ".join(unmet)
+            continue
+
         db_path = _db_for(migration.db_target, learning_db, memory_db)
         try:
             conn = _connect(db_path)
@@ -429,13 +439,32 @@ def apply_deferred(
     table is still missing, the underlying DDL raises ``no such table`` and
     the migration is recorded as ``failed`` — safe, the trainer already
     falls back to the position proxy when M006 hasn't completed.
+
+    Raises SchemaVersionError before touching any data when either managed
+    database reports a schema_version newer than SUPPORTED_SCHEMA_VERSION. This
+    path runs after engine init, so it must fail closed on a downgrade exactly
+    as ``apply_all`` does rather than write DDL an older build cannot interpret.
     """
+    # Non-mutating downgrade guard: must run before any write, mirroring
+    # apply_all. Both managed databases are validated so a newer stamp on
+    # either store halts the deferred pass.
+    _check_version_or_raise(learning_db)
+    _check_version_or_raise(memory_db)
+
     applied: list[str] = []
     skipped: list[str] = []
     failed: list[str] = []
     details: dict[str, str] = {}
 
+    blocked: set[str] = set()
     for migration in DEFERRED_MIGRATIONS:
+        unmet = [d for d in migration.dependencies if d in failed or d in blocked]
+        if unmet:
+            skipped.append(migration.name)
+            blocked.add(migration.name)
+            details[migration.name] = "dependency not satisfied: " + ", ".join(unmet)
+            continue
+
         db_path = _db_for(migration.db_target, learning_db, memory_db)
         try:
             conn = _connect(db_path)
