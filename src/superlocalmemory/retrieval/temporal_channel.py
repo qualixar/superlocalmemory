@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from dateutil.parser import ParserError, parse as dateutil_parse
@@ -30,6 +30,18 @@ logger = logging.getLogger(__name__)
 _MAX_PROXIMITY_DAYS: float = 365.0
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Coerce a datetime to timezone-aware UTC (naive values are assumed UTC).
+
+    Keeps proximity and interval comparisons from mixing naive and aware values.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _parse_iso(s: str | None) -> datetime | None:
     if not s:
         return None
@@ -39,11 +51,11 @@ def _parse_iso(s: str | None) -> datetime | None:
     # across thousands of events — that was ~2.6s of the recall. dateutil is
     # now only the fallback for non-ISO strings.
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return _as_utc(datetime.fromisoformat(s.replace("Z", "+00:00")))
     except (ValueError, TypeError):
         pass
     try:
-        return dateutil_parse(s)
+        return _as_utc(dateutil_parse(s))
     except (ParserError, ValueError, OverflowError, TypeError):
         return None
 
@@ -95,6 +107,7 @@ class TemporalChannel:
         query_dt = _parse_iso(dates.get("referenced_date"))
         if query_dt is None:
             query_dt = self._try_parse(query)
+        query_dt = _as_utc(query_dt)
 
         # Strategy 1: Entity-temporal metadata search
         # "When did Alice...?" → find all temporal events for Alice

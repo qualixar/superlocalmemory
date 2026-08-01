@@ -173,6 +173,10 @@ class TemporalParser:
             return None
         try:
             dt = dateutil_parse(raw_date, fuzzy=True)
+            # Normalize any explicit offset to UTC so stored session dates are
+            # comparable without mixing offsets, keeping the explicit +00:00.
+            if dt.tzinfo is not None:
+                return dt.astimezone(UTC).isoformat()
             return _safe_iso(dt)
         except (ParserError, ValueError, OverflowError):
             logger.debug("Could not parse session_date: %r", raw_date)
