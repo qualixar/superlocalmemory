@@ -15,6 +15,7 @@ License: AGPL-3.0-or-later
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -137,8 +138,50 @@ class VectorStore:
 
     # -- Table creation -----------------------------------------------------
 
+    @staticmethod
+    def _read_stored_dimension(conn: sqlite3.Connection) -> int | None:
+        """Return the embedding dimension of the existing vec0 table, or None.
+
+        Reads the CREATE VIRTUAL TABLE DDL from sqlite_master and extracts the
+        float[N] declaration.  Falls back to embedding_metadata.dimension if
+        the DDL is absent or unparseable.  Returns None when the table does not
+        yet exist, which means no rebuild is needed.
+        """
+        try:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'fact_embeddings'"
+            ).fetchone()
+            if row is not None:
+                sql = row["sql"] or row[0]
+                if sql:
+                    m = re.search(r'float\[(\d+)\]', sql, re.IGNORECASE)
+                    if m:
+                        return int(m.group(1))
+        except Exception:
+            pass
+
+        # Fallback: read dimension from the most recent metadata row.
+        try:
+            row = conn.execute(
+                "SELECT dimension FROM embedding_metadata LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                return int(row["dimension"])
+        except sqlite3.OperationalError:
+            pass  # metadata table does not exist yet
+
+        return None
+
     def _ensure_vec0_table(self) -> None:
-        """Create the vec0 virtual table and embedding_metadata if not exist."""
+        """Create or rebuild the vec0 virtual table and embedding_metadata.
+
+        If the existing vec0 table was built at a different embedding dimension
+        than self._config.dimension, both tables are dropped and recreated at
+        the new dimension.  Old embeddings are lost; callers that want to
+        re-populate should call rebuild_from_facts() afterward.
+
+        Same-dimension opens are a no-op (IF NOT EXISTS guard).
+        """
         dim = self._config.dimension
         vec0_ddl = (
             f"CREATE VIRTUAL TABLE IF NOT EXISTS fact_embeddings USING vec0("
@@ -164,6 +207,21 @@ class VectorStore:
         )
         try:
             with self._managed_connection() as conn:
+                stored_dim = self._read_stored_dimension(conn)
+                if stored_dim is not None and stored_dim != dim:
+                    logger.info(
+                        "Embedding dimension changed %d→%d: rebuilding vector index",
+                        stored_dim,
+                        dim,
+                    )
+                    # Drop metadata first (no FK enforcement, but cleaner ordering).
+                    # Indexes on embedding_metadata are dropped automatically.
+                    conn.execute("DROP TABLE IF EXISTS embedding_metadata")
+                    conn.execute("DROP TABLE IF EXISTS fact_embeddings")
+                    # Commit the drops before recreating so that the virtual-table
+                    # shadow tables are fully removed before the new CREATE runs.
+                    conn.commit()
+
                 conn.execute(vec0_ddl)
                 conn.execute(meta_ddl)
                 conn.execute(meta_idx_fact)

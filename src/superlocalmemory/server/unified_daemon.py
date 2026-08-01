@@ -432,6 +432,14 @@ def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> No
     old_engine = getattr(application.state, "engine", None)
     new_engine = MemoryEngine(new_config)
     try:
+        if mode_change:
+            # A mode switch may change the embedding dimension.  VectorStore
+            # detects the mismatch on init and rebuilds the vec0 table at the
+            # new dimension automatically (see VectorStore._ensure_vec0_table).
+            logger.info(
+                "Mode change detected: vector index will be rebuilt at new "
+                "embedding dimension if dimension changed."
+            )
         new_engine.initialize()
         new_config.save(mode_change=mode_change)
     except BaseException:
