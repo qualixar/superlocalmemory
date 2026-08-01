@@ -79,28 +79,34 @@ def _invalidate_context_cache_for_fact(
 def _sync_vector_ann(
     retrieval: Any,
     fact_id: str,
+    profile_id: str,
     embedding: list[float] | None,
     *,
     operation: str,
 ) -> None:
-    """Call the vector store and ANN index for an update or delete.
+    """Replace or remove a fact's entry in the vector store and ANN index.
 
     ``operation`` is either ``"update"`` or ``"delete"``. For updates,
-    ``embedding`` must be provided. Fail-open: errors are logged and ignored.
+    ``embedding`` must be provided; the semantic representations are replaced
+    in place so a correction is reflected by every semantic query. Fail-open:
+    errors are logged and ignored so a projection hiccup never blocks the
+    authoritative write.
     """
     vector_store = getattr(retrieval, "_vector_store", None)
     ann_index = getattr(retrieval, "_ann_index", None)
     if operation == "update" and embedding:
         if vector_store is not None:
             try:
-                vector_store.update(fact_id, embedding)
+                # upsert replaces the stored vector for an existing fact_id.
+                vector_store.upsert(fact_id, profile_id, embedding)
             except Exception as exc:
-                logger.warning("vector_store.update failed for %s: %s", fact_id[:16], exc)
+                logger.warning("vector_store upsert failed for %s: %s", fact_id[:16], exc)
         if ann_index is not None:
             try:
-                ann_index.update(fact_id, embedding)
+                # add() is upsert-semantic: it overwrites an existing entry.
+                ann_index.add(fact_id, embedding)
             except Exception as exc:
-                logger.warning("ann_index.update failed for %s: %s", fact_id[:16], exc)
+                logger.warning("ann_index add failed for %s: %s", fact_id[:16], exc)
     elif operation == "delete":
         if vector_store is not None:
             try:
@@ -156,7 +162,7 @@ def _converge_update_projections(
 
     # Vector store + ANN index
     if retrieval is not None:
-        _sync_vector_ann(retrieval, fact_id, embedding, operation="update")
+        _sync_vector_ann(retrieval, fact_id, profile_id, embedding, operation="update")
 
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
@@ -216,7 +222,7 @@ def _purge_delete_projections(
 
     # Vector store + ANN index
     if retrieval is not None:
-        _sync_vector_ann(retrieval, fact_id, None, operation="delete")
+        _sync_vector_ann(retrieval, fact_id, profile_id, None, operation="delete")
 
     try:
         from superlocalmemory.core.backend_orchestrator import get_orchestrator
