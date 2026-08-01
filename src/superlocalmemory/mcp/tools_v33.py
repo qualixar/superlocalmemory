@@ -76,7 +76,6 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     @server.tool(annotations=ToolAnnotations(destructiveHint=True))
     async def forget(
-        profile_id: str = "",
         dry_run: bool = True,
     ) -> dict:
         """Run Ebbinghaus forgetting decay cycle.
@@ -88,12 +87,11 @@ def register_v33_tools(server, get_engine: Callable) -> None:
         Run with dry_run=True first to preview changes.
 
         Args:
-            profile_id: Profile to process (default: active profile).
             dry_run: If True, compute stats but don't apply transitions.
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             from superlocalmemory.math.ebbinghaus import EbbinghausCurve
             from superlocalmemory.learning.forgetting_scheduler import (
@@ -148,7 +146,6 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     @server.tool()
     async def quantize(
-        profile_id: str = "",
         dry_run: bool = True,
     ) -> dict:
         """Run EAP quantization cycle.
@@ -160,12 +157,11 @@ def register_v33_tools(server, get_engine: Callable) -> None:
         Run with dry_run=True first to preview changes.
 
         Args:
-            profile_id: Profile to process (default: active profile).
             dry_run: If True, compute stats but don't apply changes.
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             from superlocalmemory.math.ebbinghaus import EbbinghausCurve
             from superlocalmemory.math.polar_quant import PolarQuantEncoder
@@ -218,21 +214,16 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 3. consolidate_cognitive — CCQ cognitive consolidation
     # ------------------------------------------------------------------
     @server.tool()
-    async def consolidate_cognitive(
-        profile_id: str = "",
-    ) -> dict:
+    async def consolidate_cognitive() -> dict:
         """Run CCQ cognitive consolidation pipeline.
 
         Extracts patterns from cold/archive memories by clustering
         related facts, generating gist summaries, and compressing
         source embeddings. Like sleep-time memory consolidation.
-
-        Args:
-            profile_id: Profile to process (default: active profile).
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             # v3.4.26: prefer the daemon's /consolidate/cognitive endpoint
             # so the heavy CognitiveConsolidator import stays out of the
@@ -292,21 +283,16 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 4. get_soft_prompts — Retrieve active soft prompts
     # ------------------------------------------------------------------
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
-    async def get_soft_prompts(
-        profile_id: str = "",
-    ) -> dict:
+    async def get_soft_prompts() -> dict:
         """Get active soft prompts (auto-learned user patterns).
 
         Returns soft prompt templates generated from behavioral
         patterns. These are injected into conversation context to
         personalize AI responses.
-
-        Args:
-            profile_id: Profile to query (default: active profile).
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             rows = engine._db.execute(
                 "SELECT prompt_id, category, content, confidence, "
@@ -395,21 +381,16 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 6. get_retention_stats — Memory retention zone distribution
     # ------------------------------------------------------------------
     @server.tool()
-    async def get_retention_stats(
-        profile_id: str = "",
-    ) -> dict:
+    async def get_retention_stats() -> dict:
         """Get memory retention statistics (zone distribution, decay rates).
 
         Queries the fact_retention table for zone counts and average
         retention scores per zone. Shows how memories are distributed
         across the Ebbinghaus decay lifecycle.
-
-        Args:
-            profile_id: Profile to query (default: active profile).
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             # Zone distribution counts
             rows = engine._db.execute(
@@ -451,19 +432,16 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 7. run_maintenance — V3.3.12: Combined periodic maintenance cycle
     # ------------------------------------------------------------------
     @server.tool()
-    async def run_maintenance(profile_id: str = "") -> dict:
+    async def run_maintenance() -> dict:
         """Run all periodic maintenance tasks in a single call.
 
         Combines Langevin dynamics stepping, Ebbinghaus forgetting decay,
         and behavioral pattern mining into one convenient maintenance cycle.
         Clients should call this periodically (e.g., at session end).
-
-        Args:
-            profile_id: Profile to maintain (default: active profile).
         """
         try:
             engine = get_engine()
-            pid = profile_id or engine.profile_id
+            pid = engine.profile_id
 
             # v3.4.26: prefer the daemon so ForgettingScheduler /
             # ConsolidationWorker / EbbinghausCurve don't load inside

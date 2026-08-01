@@ -375,11 +375,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
-    async def search(query: str, limit: int = 10, profile_id: str = "") -> dict:
+    async def search(query: str, limit: int = 10) -> dict:
         """Full-text search across memories using FTS5 with BM25 ranking."""
         try:
             engine = get_engine()
-            pid = await _runtime_profile(get_engine, profile_id)
+            pid = await _runtime_profile(get_engine)
             facts = engine._db.search_facts_fts(query, pid, limit=limit)
             items = []
             for f in facts:
@@ -423,11 +423,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
-    async def list_recent(limit: int = 20, profile_id: str = "") -> dict:
+    async def list_recent(limit: int = 20) -> dict:
         """List most recently stored memories, newest first."""
         try:
             engine = get_engine()
-            pid = await _runtime_profile(get_engine, profile_id)
+            pid = await _runtime_profile(get_engine)
             # v3.6.12 (search-2): push the limit into the query — was loading the
             # ENTIRE facts table (deserializing every 768-float embedding) just
             # to return the top N. get_all_facts preserves created_at DESC order.
@@ -521,11 +521,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
-    async def build_graph(profile_id: str = "") -> dict:
+    async def build_graph() -> dict:
         """Rebuild knowledge graph edges for all facts in the active profile."""
         try:
             engine = get_engine()
-            pid = await _runtime_profile(get_engine, profile_id)
+            pid = await _runtime_profile(get_engine)
             authorization = authorize_mcp_mutation(
                 engine,
                 "update",

@@ -224,8 +224,8 @@ class TestForgetTool:
         assert result["dry_run_zones"]["warm"] == 20
         assert result["dry_run_zones"]["cold"] == 10
 
-    def test_forget_with_profile(self):
-        """forget tool uses provided profile_id."""
+    def test_forget_uses_engine_profile(self):
+        """forget tool uses the engine's server-side profile, not a caller-supplied one."""
         tool, engine = self._get_tool()
 
         mock_result = {
@@ -245,11 +245,11 @@ class TestForgetTool:
             patch("superlocalmemory.math.ebbinghaus.EbbinghausCurve"),
         ):
             MockSched.return_value.run_decay_cycle.return_value = mock_result
-            result = _run(tool(profile_id="custom-profile", dry_run=False))
+            result = _run(tool(dry_run=False))
 
         assert result["success"] is True
         MockSched.return_value.run_decay_cycle.assert_called_once_with(
-            "custom-profile",
+            "test-profile",
             force=True,
         )
 
@@ -595,18 +595,18 @@ class TestGetRetentionStatsTool:
         assert result["success"] is False
         assert "db error" in result["error"]
 
-    def test_uses_custom_profile(self):
-        """get_retention_stats uses provided profile_id."""
+    def test_uses_engine_profile(self):
+        """get_retention_stats uses the engine's server-side profile, not a caller-supplied one."""
         tool, engine = self._get_tool()
         engine._db.execute.return_value = []
 
-        result = _run(tool(profile_id="custom"))
+        result = _run(tool())
 
         assert result["success"] is True
-        assert result["profile"] == "custom"
-        # Verify query used custom profile
+        assert result["profile"] == "test-profile"
+        # Verify query used the engine's profile, not a caller-supplied value
         call_args = engine._db.execute.call_args
-        assert call_args[0][1] == ("custom",)
+        assert call_args[0][1] == ("test-profile",)
 
 
 # ---------------------------------------------------------------------------
