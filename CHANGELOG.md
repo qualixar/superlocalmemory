@@ -5,6 +5,47 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-08-01 — Verifiable memory transactions
+
+Version 4.0 hardens the full lifecycle of a memory operation — admission,
+canonical commit, projection to every store, migration, backup, and erasure —
+so each step is authorized, atomic, and verifiable. Existing memories and
+configuration are preserved; no manual migration is required.
+
+### Added
+- A unified admission gateway resolves one authenticated actor, active profile,
+  and policy decision for every write across the CLI, MCP, HTTP, WebSocket, and
+  hook surfaces.
+- Every completed operation carries a durable receipt and a hash-verifiable
+  completion manifest spanning all representations.
+- Backups are captured as a coherent, checksum-verified set and restored
+  atomically, rolling the live set back if any store fails mid-restore.
+
+### Security
+- Outbound provider requests are validated against server-side request forgery,
+  blocking internal metadata endpoints and unresolved hosts.
+- Secrets are scrubbed from content before it is persisted or indexed, on both
+  the canonical write path and import.
+- Profile erasure removes every representation — main store, projections,
+  full-text and semantic indexes, and the context cache — and reports each count.
+- Mesh peers receive server-assigned identities bound to tenant and project;
+  production remote transport rejects plaintext, and shared state rejects
+  secret-looking values.
+
+### Fixed
+- A corrected fact is re-indexed everywhere, so semantic and keyword recall
+  reflect the new content instead of a stale copy.
+- Archived facts are excluded from every read path, including keyword search
+  and direct fetch.
+- Schema migrations refuse to run against a database written by a newer build,
+  and a migration whose dependency did not complete is held back.
+- In-memory configuration changes are preserved across a save, and unknown or
+  externally tuned settings survive a load/save cycle.
+
+### Notes
+- Existing memories and configuration are preserved. No database migration is
+  required.
+
 ## [3.8.10] - 2026-07-29 — Reliable startup and MCP writes
 
 ### Fixed

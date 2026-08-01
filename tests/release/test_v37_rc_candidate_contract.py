@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later
-"""The V3.7 release source must carry final publishable metadata."""
+"""The current release source must carry final publishable metadata."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-_FINAL_RELEASE = "3.8.10"
-_FINAL_RELEASE_DATE = "2026-07-29"
+_FINAL_RELEASE = "4.0.0"
+_FINAL_RELEASE_DATE = "2026-08-01"
 
 
 def test_v37_release_source_has_final_package_version() -> None:
