@@ -156,6 +156,74 @@ class GDPRCompliance:
             except Exception as exc:  # pragma: no cover
                 logger.warning("GDPR erase: count %s failed: %s", table, exc)
                 counts[table] = 0
+
+        # Purge context-cache entries BEFORE main-DB row deletions.
+        #
+        # Crash-recovery rationale: the cache and the main DB live in separate
+        # SQLite files — they cannot share one ACID transaction.  Ordering the
+        # cache purge first ensures that any crash between the two steps leaves
+        # the profile record still present in the main DB, so a retry of
+        # forget_profile re-runs the full sequence and completes safely.  The
+        # reverse order (cache after main delete) would orphan cache PII in a
+        # state that no retry can reach.
+        #
+        # The cache DB lives under the data root (same directory as the main DB)
+        # or in an immediate subdirectory.  Scan both levels to cover the default
+        # layout and any explicitly-namespaced cache dirs.
+        #
+        # Limitation: when the DB wrapper exposes no db_path AND the
+        # DEFAULT_BASE_DIR fallback points to a different directory than the
+        # actual cache (e.g. a fully custom data-root path), the purge may miss
+        # that custom cache.  Operators should ensure db_path is accessible on
+        # any custom DB wrapper.
+        try:
+            from pathlib import Path as _Path
+            from superlocalmemory.core.context_cache import purge_profile_from_cache_db
+            data_root = getattr(self._db, "db_path", None)
+            if data_root is not None:
+                data_root = _Path(data_root).parent
+            else:
+                # The DB wrapper does not expose db_path.  Attempt to resolve
+                # the data root via the canonical path used elsewhere in this
+                # module (same source as the learning-db reset below).
+                try:
+                    from superlocalmemory.core.config import DEFAULT_BASE_DIR
+                    data_root = _Path(DEFAULT_BASE_DIR)
+                except Exception:
+                    data_root = None
+
+                if data_root is None:
+                    logger.warning(
+                        "GDPR erase: context-cache purge skipped for profile %r — "
+                        "data root could not be resolved (DB wrapper exposes no "
+                        "db_path and canonical root lookup failed).",
+                        profile_id,
+                    )
+                else:
+                    logger.warning(
+                        "GDPR erase: DB wrapper exposes no db_path for profile %r; "
+                        "context-cache purge will use resolved data root %s — "
+                        "verify coverage if a custom cache path is in use.",
+                        profile_id, data_root,
+                    )
+
+            if data_root is not None:
+                cache_name = "active_brain_cache.db"
+                candidates: list = [data_root / cache_name]
+                try:
+                    for child in data_root.iterdir():
+                        if child.is_dir():
+                            candidates.append(child / cache_name)
+                except Exception:
+                    pass
+                cache_purged = 0
+                for candidate in candidates:
+                    cache_purged += purge_profile_from_cache_db(candidate, profile_id)
+                if cache_purged:
+                    counts["context_cache"] = cache_purged
+        except Exception as exc:
+            logger.warning("GDPR erase: context-cache purge failed: %s", exc)
+
         # Pass 2 — full-tenant wipe with FK enforcement OFF so table order is
         # irrelevant (every profile row in every table goes). FTS shadow rows
         # are still removed by the base-table delete triggers.
@@ -179,31 +247,6 @@ class GDPRCompliance:
                 self._db.execute("PRAGMA foreign_keys=ON")
             except Exception:
                 pass
-
-        # Purge context-cache entries for the erased profile.
-        # The cache DB lives under the data root (same directory as the main DB)
-        # or in an immediate subdirectory of that root.  Scan both levels so the
-        # default layout and any explicitly-namespaced cache dirs are covered.
-        try:
-            from superlocalmemory.core.context_cache import purge_profile_from_cache_db
-            data_root = getattr(self._db, "db_path", None)
-            if data_root is not None:
-                data_root = data_root.parent
-                cache_name = "active_brain_cache.db"
-                candidates: list = [data_root / cache_name]
-                try:
-                    for child in data_root.iterdir():
-                        if child.is_dir():
-                            candidates.append(child / cache_name)
-                except Exception:
-                    pass
-                cache_purged = 0
-                for candidate in candidates:
-                    cache_purged += purge_profile_from_cache_db(candidate, profile_id)
-                if cache_purged:
-                    counts["context_cache"] = cache_purged
-        except Exception as exc:
-            logger.warning("GDPR erase: context-cache purge failed: %s", exc)
 
         # Erase learning database (separate DB file)
         try:
