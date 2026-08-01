@@ -90,13 +90,25 @@ def register_core_tools(server, get_engine: Callable) -> None:
             "session_id": session_id,
         }
         effective_idempotency_key = idempotency_key
-        if not effective_idempotency_key and session_id:
-            material = (
-                f"{agent_id}\0{session_id}\0{scope or ''}\0{shared_with}\0{content}"
-            )
-            effective_idempotency_key = "mcp:" + hashlib.sha256(
-                material.encode("utf-8")
-            ).hexdigest()
+        if not effective_idempotency_key:
+            # Derive a stable key before the first attempt so every retry of
+            # the same logical call carries the same key.  When a session token
+            # is present it is included in the material to keep per-session
+            # stores separate.  Without a session token the key is derived from
+            # the remaining call parameters so repeated observations with the
+            # same content, agent, and scope are deduplicated across retries.
+            if session_id:
+                material = (
+                    f"{agent_id}\0{session_id}\0{scope or ''}\0{shared_with}\0{content}"
+                )
+                effective_idempotency_key = "mcp:" + hashlib.sha256(
+                    material.encode("utf-8")
+                ).hexdigest()
+            else:
+                material = f"{agent_id}\0{scope or ''}\0{shared_with}\0{content}"
+                effective_idempotency_key = "mcp-req:" + hashlib.sha256(
+                    material.encode("utf-8")
+                ).hexdigest()
         # Parse shared_with from comma-separated string
         _shared_list = [s.strip() for s in shared_with.split(",") if s.strip()] if shared_with else None
         # v3.5.5 WRITE-THROUGH: route through the daemon's /remember, which does
@@ -679,7 +691,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             from superlocalmemory.infra.backup import BackupManager
-            bm = BackupManager(engine._config.base_dir, engine._db.db_path)
+            bm = BackupManager(
+                db_path=engine._db.db_path,
+                base_dir=engine._config.base_dir,
+            )
             return {"success": True, **bm.get_status()}
         except Exception as exc:
             logger.exception("backup_status failed")

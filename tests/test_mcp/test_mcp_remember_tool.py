@@ -166,7 +166,7 @@ class TestRememberTool:
         assert call_args.args[0] == "important fact"
         assert call_args.args[1]["tags"] == "python"
         assert call_args.args[1]["project"] == "slm"
-        assert call_args.args[1]["idempotency_key"].startswith("mcp:")
+        assert call_args.args[1]["idempotency_key"].startswith("mcp")
         assert result["success"] is True
         assert result["pending"] is False
         assert result["pending_id"] is None
