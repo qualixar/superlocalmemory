@@ -128,6 +128,13 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M032_write_coordinator_admission as _M032,
 )
+from superlocalmemory.storage._schema_version import (
+    SUPPORTED_SCHEMA_VERSION,
+    SchemaVersionError,
+    check_version_or_raise as _check_version_or_raise,
+    ensure_schema_version_table as _ensure_schema_version_table,
+    write_schema_version as _write_schema_version,
+)
 
 # Map migration name → module (used for the optional ``verify(conn)`` hook
 # that lets the runner detect "already applied" state when an idempotent
@@ -696,7 +703,14 @@ def apply_all(
 
     Idempotent: already-applied migrations are skipped. Non-fatal: any
     migration that fails is recorded in ``failed`` and the runner moves on.
+
+    Raises SchemaVersionError before touching any data when the learning DB
+    reports a schema_version that exceeds SUPPORTED_SCHEMA_VERSION.  This
+    prevents silent data corruption when downgrading to an older build.
     """
+    # Non-mutating version check: must run before any write.
+    _check_version_or_raise(learning_db)
+
     applied: list[str] = []
     skipped: list[str] = []
     failed: list[str] = []
@@ -743,6 +757,22 @@ def apply_all(
                 conn.close()
             except sqlite3.Error:  # pragma: no cover
                 pass
+
+    # Monotonic schema_version stamp: advance only on a zero-failure run so
+    # the stored version accurately reflects what was fully applied.
+    if not failed and not dry_run:
+        try:
+            _stamp_conn = _connect(learning_db)
+            try:
+                _ensure_schema_version_table(_stamp_conn)
+                _write_schema_version(_stamp_conn, SUPPORTED_SCHEMA_VERSION)
+            finally:
+                try:
+                    _stamp_conn.close()
+                except sqlite3.Error:  # pragma: no cover
+                    pass
+        except sqlite3.Error as exc:  # pragma: no cover — best-effort stamp
+            logger.warning("schema_version stamp failed: %s", exc)
 
     return {
         "applied": applied,
@@ -864,6 +894,8 @@ __all__ = (
     "Migration",
     "MIGRATIONS",
     "DEFERRED_MIGRATIONS",
+    "SUPPORTED_SCHEMA_VERSION",
+    "SchemaVersionError",
     "apply_all",
     "apply_deferred",
     "status",

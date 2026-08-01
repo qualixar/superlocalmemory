@@ -26,6 +26,46 @@ _REQUIRED_COLS = frozenset({
     "shadow_results_json", "promoted_at", "rollback_reason",
 })
 
+# Column definitions in application order: name → SQLite type fragment.
+_COLUMN_ADDITIONS: tuple[tuple[str, str], ...] = (
+    ("is_previous",         "INTEGER DEFAULT 0"),
+    ("is_rollback",         "INTEGER DEFAULT 0"),
+    ("is_candidate",        "INTEGER DEFAULT 0"),
+    ("shadow_results_json", "TEXT"),
+    ("promoted_at",         "TEXT"),
+    ("rollback_reason",     "TEXT"),
+)
+
+
+def apply(conn: sqlite3.Connection) -> None:
+    """Idempotent, column-by-column ALTER for crash-safe recovery.
+
+    Each column is only added when absent, so any committed prefix from a
+    prior interrupted run is handled transparently.  Indexes use the standard
+    IF NOT EXISTS guard.  Callers must not call commit/rollback — the runner
+    owns the transaction boundary.
+    """
+    existing_cols: set[str] = {
+        r[1]
+        for r in conn.execute(
+            "PRAGMA table_info(learning_model_state)"
+        ).fetchall()
+    }
+    for col_name, col_def in _COLUMN_ADDITIONS:
+        if col_name not in existing_cols:
+            conn.execute(
+                f"ALTER TABLE learning_model_state ADD COLUMN {col_name} {col_def}"
+            )
+    # Partial-index creation: IF NOT EXISTS guards idempotency.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_active_one "
+        "ON learning_model_state(profile_id) WHERE is_active=1"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_candidate_one "
+        "ON learning_model_state(profile_id) WHERE is_candidate=1"
+    )
+
 
 def verify(conn: sqlite3.Connection) -> bool:
     try:
