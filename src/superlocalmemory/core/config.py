@@ -1485,19 +1485,26 @@ class SLMConfig:
         data["entity_compilation_retrieval_boost"] = self.entity_compilation_retrieval_boost
         data["mesh_enabled"] = self.mesh_enabled
 
-        # Typed in-memory config sections — serialized from the current attribute
-        # values so any in-memory mutation survives a round-trip.  All four are
-        # real dataclasses on self; dataclasses.asdict() recurses into nested
-        # dataclasses (quantization.polar, quantization.qjl).
-        # Unknown forward-compat subkeys within these sections are intentionally
-        # not preserved: the in-memory dataclass fields are the authoritative source.
+        # Typed in-memory config sections.  Preserve any on-disk subkeys this
+        # version does not model (forward-compat or externally-tuned fields such
+        # as forgetting.half_life_days), then overlay the current in-memory
+        # dataclass values so a programmatic mutation still survives a
+        # save/load cycle while unmodeled subkeys are never dropped.
+        # dataclasses.asdict() recurses into nested dataclasses
+        # (quantization.polar, quantization.qjl).
         #
         # embedding_signature: has no typed in-memory model — it is an opaque blob
         # written by external tooling (see below).
-        data["forgetting"] = asdict(self.forgetting)
-        data["quantization"] = asdict(self.quantization)
-        data["sagq"] = asdict(self.sagq)
-        data["auto_invoke"] = asdict(self.auto_invoke)
+        for _section, _obj in (
+            ("forgetting", self.forgetting),
+            ("quantization", self.quantization),
+            ("sagq", self.sagq),
+            ("auto_invoke", self.auto_invoke),
+        ):
+            _base = existing.get(_section)
+            _merged = dict(_base) if isinstance(_base, dict) else {}
+            _merged.update(asdict(_obj))
+            data[_section] = _merged
 
         # Merge any keys from the last load() that are not covered by the
         # explicit serialization above.  This includes unknown forward-compat
