@@ -139,11 +139,17 @@ class BackupCoordinator:
           1. Identify which stores exist on disk.
           2. Create a staging directory.
           3. Fence SQLite writers (BEGIN IMMEDIATE) then copy every store and
-             record per-file SHA-256 checksums (Phase 3).
+             record per-file SHA-256 checksums (Phase 3). If a ``lance/``
+             directory exists under the base dir, copy it into staging as well.
           4. Re-read every staging file and compare to Phase-3 hashes.
              Mismatch → staging removed, BackupVerificationError raised.
           5. Build the manifest from the verified checksums.
           6. Atomically rename staging → final directory and write manifest.json.
+
+        The ``lance/`` directory (LanceDB vector index) is treated as an
+        out-of-manifest companion: it is copied recursively into the backup set
+        and restored alongside the SQLite stores. Its presence is noted in the
+        server log. If absent, the step is silently skipped.
 
         Returns:
             BackupSetManifest with verified=True.
@@ -174,6 +180,17 @@ class BackupCoordinator:
                 self._sqlite_backup(src, dest)
                 sha = self._compute_entry_sha256(dest)
                 staging_records.append((db_name, dest, dest.stat().st_size, sha))
+
+            # Copy the LanceDB vector directory if present.
+            lance_src = self._base_dir / "lance"
+            if lance_src.is_dir():
+                lance_staging = staging_dir / "lance"
+                shutil.copytree(str(lance_src), str(lance_staging))
+                logger.info(
+                    "Backup set %s: captured lance/ directory (%d items)",
+                    set_id,
+                    sum(1 for _ in lance_staging.rglob("*") if _.is_file()),
+                )
 
         # Phase 4: re-verify every staging copy
         for db_name, staging_path, _size, expected_sha in staging_records:
@@ -216,18 +233,39 @@ class BackupCoordinator:
     def restore_from_manifest(self, manifest: BackupSetManifest) -> None:
         """Restore all stores from a verified manifest.
 
-        Verifies the manifest hash and every backup file's checksum before
-        writing to disk.  Raises BackupRestoreError if:
-        - the manifest is unverified,
-        - the manifest hash does not match the store checksums (incoherent set),
-        - any backup file is missing, or
-        - any backup file fails its per-store checksum.
-        No files are written to the live directory until all checks pass.
+        The restore proceeds in three phases to guarantee cross-store atomicity:
+
+        Phase A — Verify:
+            Re-derive the manifest hash and verify every backup file's checksum.
+            No live files are touched until all checks pass. Raises
+            BackupRestoreError on any failure.
+
+        Phase B — Pre-restore snapshot:
+            Copy the current live version of every store being restored into a
+            ``<store>.pre_restore`` sibling file, and the current ``lance/``
+            directory (if present) to ``lance.pre_restore/``. These snapshots
+            allow a full rollback if the write phase is interrupted.
+
+        Phase C — Staged write:
+            Copy each backup file to a ``<store>.restore_staging`` temporary,
+            then rename it into place. If any step raises, all pre-restore
+            snapshots are copied back to their live locations before the error
+            is re-raised, returning the live set to its original coherent state.
+            On full success, all snapshot files are removed.
+
+        The ``lance/`` directory companion is handled with the same snapshot and
+        rollback discipline: if the backup set contains a ``lance/`` subdirectory
+        it is restored recursively; absence is silently skipped on both sides.
+
+        Raises:
+            BackupRestoreError: on unverified manifest, hash mismatch, missing
+                or corrupted backup files, or if the staged write phase fails
+                and the rollback itself encounters an error.
         """
         if not manifest.verified:
             raise BackupRestoreError("Cannot restore from an unverified manifest")
 
-        # Re-derive manifest_hash from the store entries and compare.
+        # Phase A-1: Re-derive manifest_hash from the store entries and compare.
         # This detects tampering of manifest.json where an attacker changes a
         # store's sha256 entry without recalculating manifest_hash.
         computed_hash = self._compute_manifest_hash(manifest.stores)
@@ -236,6 +274,7 @@ class BackupCoordinator:
                 "Manifest hash mismatch: backup set is incoherent or has been tampered"
             )
 
+        # Phase A-2: Verify every backup file exists and matches its checksum.
         for entry in manifest.stores:
             src = Path(entry.file_path)
             if not src.exists():
@@ -246,12 +285,107 @@ class BackupCoordinator:
                     f"Corrupted backup file (checksum mismatch): {entry.store_name}"
                 )
 
-        # All checks passed — write to live locations
-        for entry in manifest.stores:
-            target = self._base_dir / entry.store_name
-            staging = target.with_suffix(".restore_staging")
-            shutil.copy2(entry.file_path, str(staging))
-            staging.rename(target)
+        # Determine the backup set directory.
+        # Primary: derive from the first store's file_path (most reliable).
+        # Fallback for empty-store manifests: reconstruct from the backup_dir +
+        # set_id, which is how create_backup_set names the final directory.
+        if manifest.stores:
+            backup_set_dir: Optional[Path] = Path(manifest.stores[0].file_path).parent
+        else:
+            candidate = self._backup_dir / f"backup_{manifest.set_id}"
+            backup_set_dir = candidate if candidate.is_dir() else None
+
+        lance_backup: Optional[Path] = (
+            backup_set_dir / "lance"
+            if backup_set_dir is not None and (backup_set_dir / "lance").is_dir()
+            else None
+        )
+
+        # Phase B: Snapshot the current live copies so we can roll back.
+        # pre_restore_map: live_target -> pre_restore_snapshot_path
+        pre_restore_map: dict[Path, Path] = {}
+        pre_restore_lance: Optional[Path] = None
+        try:
+            for entry in manifest.stores:
+                target = self._base_dir / entry.store_name
+                snapshot = target.parent / f"{entry.store_name}.pre_restore"
+                if target.exists():
+                    shutil.copy2(str(target), str(snapshot))
+                pre_restore_map[target] = snapshot
+
+            live_lance = self._base_dir / "lance"
+            if lance_backup is not None and live_lance.is_dir():
+                pre_restore_lance = self._base_dir / "lance.pre_restore"
+                if pre_restore_lance.exists():
+                    shutil.rmtree(str(pre_restore_lance))
+                shutil.copytree(str(live_lance), str(pre_restore_lance))
+
+        except Exception as exc:
+            # Snapshot creation failed — clean up any partial snapshots and abort
+            # before touching any live files.
+            self._cleanup_pre_restore_snapshots(pre_restore_map, pre_restore_lance)
+            raise BackupRestoreError(
+                f"Pre-restore snapshot failed, no live files were modified: {exc}"
+            ) from exc
+
+        # Phase C: Write restored files into the live directory.
+        try:
+            for entry in manifest.stores:
+                target = self._base_dir / entry.store_name
+                staging = target.parent / f"{entry.store_name}.restore_staging"
+                shutil.copy2(entry.file_path, str(staging))
+                staging.rename(target)
+
+            if lance_backup is not None:
+                live_lance = self._base_dir / "lance"
+                lance_staging = self._base_dir / "lance.restore_staging"
+                if lance_staging.exists():
+                    shutil.rmtree(str(lance_staging))
+                shutil.copytree(str(lance_backup), str(lance_staging))
+                if live_lance.exists():
+                    shutil.rmtree(str(live_lance))
+                lance_staging.rename(live_lance)
+                logger.info("Restore: lance/ directory restored from backup set")
+
+        except Exception as exc:
+            # Staged write failed — roll back all live files from pre-restore
+            # snapshots so the live set returns to its original coherent state.
+            logger.error(
+                "Restore write phase failed (%s); rolling back live files to "
+                "pre-restore state.",
+                exc,
+            )
+            rollback_errors: list[str] = []
+            for target, snapshot in pre_restore_map.items():
+                if snapshot.exists():
+                    try:
+                        shutil.copy2(str(snapshot), str(target))
+                    except Exception as rb_exc:
+                        rollback_errors.append(f"{target.name}: {rb_exc}")
+            # Roll back the lance/ directory if a snapshot was taken.
+            if pre_restore_lance is not None and pre_restore_lance.exists():
+                try:
+                    live_lance = self._base_dir / "lance"
+                    if live_lance.exists():
+                        shutil.rmtree(str(live_lance))
+                    shutil.copytree(str(pre_restore_lance), str(live_lance))
+                except Exception as rb_exc:
+                    rollback_errors.append(f"lance/: {rb_exc}")
+
+            self._cleanup_pre_restore_snapshots(pre_restore_map, pre_restore_lance)
+
+            if rollback_errors:
+                raise BackupRestoreError(
+                    f"Restore failed and rollback encountered errors: "
+                    f"{'; '.join(rollback_errors)}. Original error: {exc}"
+                ) from exc
+            raise BackupRestoreError(
+                f"Restore write phase failed; live files rolled back to "
+                f"pre-restore state: {exc}"
+            ) from exc
+
+        # Phase C succeeded — remove pre-restore snapshots.
+        self._cleanup_pre_restore_snapshots(pre_restore_map, pre_restore_lance)
 
     # ------------------------------------------------------------------
     # Internal helpers (factored out for subclass testability)
@@ -305,6 +439,34 @@ class BackupCoordinator:
             dst_conn.close()
             src_conn.close()
 
+    @staticmethod
+    def _cleanup_pre_restore_snapshots(
+        snapshot_map: dict[Path, Path],
+        lance_snapshot: Optional[Path],
+    ) -> None:
+        """Remove pre-restore snapshot files and directories.
+
+        Called after a successful restore to tidy up, and on the error path
+        after rollback completes. Best-effort: individual removal failures are
+        logged but do not raise.
+        """
+        for snapshot_path in snapshot_map.values():
+            if snapshot_path.exists():
+                try:
+                    snapshot_path.unlink()
+                except OSError as exc:
+                    logger.warning(
+                        "Could not remove pre-restore snapshot %s: %s",
+                        snapshot_path.name, exc,
+                    )
+        if lance_snapshot is not None and lance_snapshot.exists():
+            try:
+                shutil.rmtree(str(lance_snapshot))
+            except OSError as exc:
+                logger.warning(
+                    "Could not remove lance pre-restore snapshot %s: %s",
+                    lance_snapshot, exc,
+                )
 
 # ---------------------------------------------------------------------------
 # Legacy per-file backup manager (preserved for backward compatibility)
