@@ -1685,7 +1685,8 @@ class DatabaseManager:
                 f"         tv.valid_from, f.created_at) AS event_time "
                 f"FROM atomic_facts f "
                 f"LEFT JOIN fact_temporal_validity tv ON f.fact_id = tv.fact_id "
-                f"WHERE f.fact_id IN ({placeholders}) AND f.profile_id = ?",
+                f"WHERE f.fact_id IN ({placeholders}) "
+                f"AND (f.profile_id = ? OR f.scope = 'global')",
                 (*batch, profile_id),
             )
             for r in rows:
