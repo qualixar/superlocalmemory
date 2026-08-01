@@ -12,12 +12,18 @@ Provides:
 V3 change: base directory is ``~/.superlocalmemory/`` (was ``~/.claude-memory/``).
 """
 
+import hashlib
 import json
 import logging
+import shutil
 import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional
 
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 
@@ -55,6 +61,241 @@ MANAGED_DATABASES: tuple[str, ...] = (
     "pending.db",       # Pending operations queue
     "audit.db",         # Legacy audit (pre-v3.4)
 )
+
+
+# ---------------------------------------------------------------------------
+# Coherent multi-store backup set
+# ---------------------------------------------------------------------------
+
+
+class BackupVerificationError(Exception):
+    """Raised when a backup set fails checksum re-verification."""
+
+
+class BackupRestoreError(Exception):
+    """Raised when a restore cannot be safely completed."""
+
+
+@dataclass(frozen=True)
+class StoreEntry:
+    """Describes one database file within a backup set."""
+
+    store_name: str   # filename, e.g. "memory.db"
+    file_path: str    # absolute path inside the final backup directory
+    size_bytes: int
+    sha256: str       # SHA-256 hex digest of the backup copy
+
+
+@dataclass(frozen=True)
+class BackupSetManifest:
+    """Describes a coherent snapshot of all managed databases.
+
+    All stores share a single epoch so callers can detect sets assembled
+    from different points in time and reject them. Checksums allow
+    independent verification of every backup file before restore.
+    """
+
+    set_id: str                       # unique identifier for this backup set
+    epoch: int                        # Unix timestamp when the set was created
+    stores: tuple[StoreEntry, ...]    # one entry per backed-up store
+    manifest_hash: str                # SHA-256 over sorted store checksums
+    verified: bool                    # True only after Phase-4 re-verification
+    created_at: str = ""              # ISO-8601 UTC creation timestamp
+    product_version: str = ""         # reserved for version tracking
+
+
+class BackupCoordinator:
+    """Creates and verifies coherent backup sets spanning all managed databases.
+
+    A backup set groups every managed store under a single epoch and publishes
+    an atomic manifest only when all per-store checksums pass re-verification.
+    Any mismatch detected during re-verification causes the entire staging
+    directory to be removed without publication.
+
+    Args:
+        managed_databases: Ordered tuple of DB filenames to include.
+        base_dir: Directory where the live databases reside.
+        backup_dir: Directory where backup sets are written.
+    """
+
+    def __init__(
+        self,
+        managed_databases: tuple[str, ...],
+        base_dir: Path,
+        backup_dir: Path,
+    ) -> None:
+        self._managed_databases = managed_databases
+        self._base_dir = Path(base_dir)
+        self._backup_dir = Path(backup_dir)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def create_backup_set(self) -> BackupSetManifest:
+        """Copy all existing managed stores and publish a verified manifest.
+
+        The algorithm has six phases:
+          1. Identify which stores exist on disk.
+          2. Create a staging directory.
+          3. Fence SQLite writers (BEGIN IMMEDIATE) then copy every store and
+             record per-file SHA-256 checksums (Phase 3).
+          4. Re-read every staging file and compare to Phase-3 hashes.
+             Mismatch → staging removed, BackupVerificationError raised.
+          5. Build the manifest from the verified checksums.
+          6. Atomically rename staging → final directory and write manifest.json.
+
+        Returns:
+            BackupSetManifest with verified=True.
+
+        Raises:
+            BackupVerificationError: if any staging file's content changed
+                between Phase 3 and Phase 4.
+        """
+        set_id = uuid.uuid4().hex[:16]
+        epoch = int(time.time())
+        staging_dir = self._backup_dir / f".staging_{set_id}"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+
+        existing_dbs = [
+            db for db in self._managed_databases
+            if (self._base_dir / db).exists()
+        ]
+        sqlite_paths = [self._base_dir / db for db in existing_dbs]
+
+        # staging_records: (db_name, staging_path, size_bytes, phase3_sha256)
+        staging_records: list[tuple[str, Path, int, str]] = []
+
+        # Phases 2–3: fence writers, copy, hash
+        with self._writer_fence(sqlite_paths):
+            for db_name in existing_dbs:
+                src = self._base_dir / db_name
+                dest = staging_dir / db_name
+                self._sqlite_backup(src, dest)
+                sha = self._compute_entry_sha256(dest)
+                staging_records.append((db_name, dest, dest.stat().st_size, sha))
+
+        # Phase 4: re-verify every staging copy
+        for db_name, staging_path, _size, expected_sha in staging_records:
+            actual_sha = self._compute_entry_sha256(staging_path)
+            if actual_sha != expected_sha:
+                shutil.rmtree(str(staging_dir), ignore_errors=True)
+                raise BackupVerificationError(
+                    f"Checksum mismatch for {db_name}: "
+                    f"expected {expected_sha}, got {actual_sha}"
+                )
+
+        # Phase 5: build manifest (file_path points to where files will land)
+        final_dir = self._backup_dir / f"backup_{set_id}"
+        entries = tuple(
+            StoreEntry(
+                store_name=db_name,
+                file_path=str(final_dir / db_name),
+                size_bytes=size,
+                sha256=sha,
+            )
+            for db_name, _sp, size, sha in staging_records
+        )
+        manifest = BackupSetManifest(
+            set_id=set_id,
+            epoch=epoch,
+            stores=entries,
+            manifest_hash=self._compute_manifest_hash(entries),
+            verified=True,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+        # Phase 6: atomic publish
+        staging_dir.rename(final_dir)
+        (final_dir / "manifest.json").write_text(
+            json.dumps(asdict(manifest), indent=2)
+        )
+
+        return manifest
+
+    def restore_from_manifest(self, manifest: BackupSetManifest) -> None:
+        """Restore all stores from a verified manifest.
+
+        Verifies every backup file's checksum before writing to disk.
+        Raises BackupRestoreError if the manifest is unverified or any
+        file is missing or has a wrong checksum.
+        """
+        if not manifest.verified:
+            raise BackupRestoreError("Cannot restore from an unverified manifest")
+
+        for entry in manifest.stores:
+            src = Path(entry.file_path)
+            if not src.exists():
+                raise BackupRestoreError(f"Backup file missing: {entry.file_path}")
+            actual_sha = self._compute_entry_sha256(src)
+            if actual_sha != entry.sha256:
+                raise BackupRestoreError(
+                    f"Corrupted backup file (checksum mismatch): {entry.store_name}"
+                )
+
+        # All checksums verified — write to live locations
+        for entry in manifest.stores:
+            target = self._base_dir / entry.store_name
+            staging = target.with_suffix(".restore_staging")
+            shutil.copy2(entry.file_path, str(staging))
+            staging.rename(target)
+
+    # ------------------------------------------------------------------
+    # Internal helpers (factored out for subclass testability)
+    # ------------------------------------------------------------------
+
+    def _compute_entry_sha256(self, path: Path) -> str:
+        """Return the SHA-256 hex digest of a file's raw bytes."""
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _compute_manifest_hash(
+        self, entries: tuple[StoreEntry, ...]
+    ) -> str:
+        """Deterministic hash of all store checksums (sorted for stability)."""
+        sorted_checksums = sorted(e.sha256 for e in entries)
+        payload = "|".join(sorted_checksums).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @contextmanager
+    def _writer_fence(
+        self, db_paths: list[Path]
+    ) -> Generator[None, None, None]:
+        """Hold BEGIN IMMEDIATE on every live SQLite DB during the copy window.
+
+        This blocks concurrent writers for the duration of the copy loop,
+        ensuring the source files do not change while being read by
+        sqlite3.backup(). Connections are rolled back and closed on exit.
+        """
+        conns: list[sqlite3.Connection] = []
+        for path in db_paths:
+            if path.exists():
+                conn = sqlite3.connect(str(path))
+                conn.execute("BEGIN IMMEDIATE")
+                conns.append(conn)
+        try:
+            yield
+        finally:
+            for conn in conns:
+                try:
+                    conn.rollback()
+                    conn.close()
+                except Exception:  # pragma: no cover – cleanup best-effort
+                    pass
+
+    def _sqlite_backup(self, src: Path, dest: Path) -> None:
+        """Copy a SQLite database using the Online Backup API (hot copy)."""
+        src_conn = sqlite3.connect(str(src))
+        dst_conn = sqlite3.connect(str(dest))
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Legacy per-file backup manager (preserved for backward compatibility)
+# ---------------------------------------------------------------------------
 
 
 class BackupManager:
