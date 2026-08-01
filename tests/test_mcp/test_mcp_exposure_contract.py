@@ -44,7 +44,10 @@ class _SandboxPool:
 
     def store(self, content: str, metadata: dict) -> dict:
         assert content
-        assert metadata["idempotency_key"].startswith("mcp:")
+        # A sessionless remember (this sandbox passes no session id) derives its
+        # key under the "mcp:req:" sub-namespace; pin the exact prefix so a
+        # regression to a different namespace is caught, not just any "mcp:".
+        assert metadata["idempotency_key"].startswith("mcp:req:")
         return {
             "ok": True,
             "fact_ids": ["fact-sandbox"],

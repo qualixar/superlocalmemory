@@ -65,6 +65,36 @@ def test_correction_replaces_vector_store_embedding(tmp_path: Path) -> None:
     assert hits[0][1] > 0.99
 
 
+class _RaisingBackend:
+    """A backend whose every write raises, to exercise the fail-open path."""
+
+    def upsert(self, *args: object, **kwargs: object) -> bool:
+        raise RuntimeError("simulated backend I/O error")
+
+    def add(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated backend I/O error")
+
+    def delete(self, *args: object, **kwargs: object) -> bool:
+        raise RuntimeError("simulated backend I/O error")
+
+    def remove(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated backend I/O error")
+
+
+def test_sync_is_fail_open_and_warns_on_backend_error(caplog) -> None:
+    import logging
+
+    retrieval = _Retrieval(vector_store=_RaisingBackend(), ann_index=_RaisingBackend())
+    with caplog.at_level(logging.WARNING):
+        # A projection-backend error must never propagate out of the sync — the
+        # authoritative write already landed — but it must be logged so an
+        # operator can detect a divergence rather than lose it silently.
+        _sync_vector_ann(
+            retrieval, "f1", "default", [0.1, 0.2, 0.3, 0.4], operation="update"
+        )
+    assert any("failed" in record.message.lower() for record in caplog.records)
+
+
 def test_delete_removes_from_both_backends(tmp_path: Path) -> None:
     ann = ANNIndex(dimension=4)
     ann.add("f1", [1.0, 0.0, 0.0, 0.0])
