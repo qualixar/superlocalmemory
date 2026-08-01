@@ -95,22 +95,19 @@
     if (id === 'opt-compress-mode') {
       var mode = e.target.value;
       if (mode === 'aggressive') {
-        // M-03: Bootstrap modal replaces browser confirm() for aggressive warning
-        var modalEl = document.getElementById('optimizeAggressiveModal');
-        if (modalEl && typeof bootstrap !== 'undefined') {
-          var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-          modal.show();
-          var confirmBtn = document.getElementById('optimize-aggressive-confirm');
-          var cancelBtn = document.getElementById('optimize-aggressive-cancel');
-          if (confirmBtn) confirmBtn.onclick = function() { modal.hide(); _putConfig({compress_mode: 'aggressive'}); };
-          if (cancelBtn) cancelBtn.onclick = function() { modal.hide(); e.target.value = 'safe'; };
-          return;
-        }
-        // Fallback for environments without Bootstrap
-        if (!confirm('WARNING: Aggressive mode may reduce output fidelity.\n\nDo NOT use for: code generation, legal text, exact-output tasks, math.\nSafe for: summarization, brainstorming, open-ended chat.\n\nContinue?')) {
-          e.target.value = 'safe';
-          return;
-        }
+        confirmDestructive({
+          title: 'Enable aggressive compression',
+          target: 'Compression mode',
+          consequence: 'May reduce output fidelity. Not safe for code, legal text, or math tasks.',
+          confirmLabel: 'Enable',
+        }).then(function(confirmed) {
+          if (confirmed) {
+            _putConfig({compress_mode: 'aggressive'});
+          } else {
+            e.target.value = 'safe';
+          }
+        });
+        return;
       }
       _putConfig({compress_mode: mode});
       return;

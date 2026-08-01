@@ -261,9 +261,13 @@ function openMemoryDetail(mem, source) {
         forgetBtn.className = 'btn btn-outline-warning btn-sm';
         forgetBtn.innerHTML = '<i class="bi bi-archive"></i> Forget';
         forgetBtn.title = 'Archive this memory — hidden from recall but recoverable';
-        forgetBtn.onclick = function() {
-            if (!confirm('Forget this memory? It will be archived '
-                + '(hidden from recall but recoverable).')) return;
+        forgetBtn.onclick = async function() {
+            var confirmed = await confirmDestructive({
+                title: 'Forget memory',
+                target: mem.content ? mem.content.slice(0, 80) : 'Memory #' + mem.id,
+                consequence: 'Archived — hidden from recall but recoverable.',
+            });
+            if (!confirmed) return;
             forgetBtn.disabled = true;
             fetch('/api/memories/' + encodeURIComponent(mem.id) + '/forget',
                 {method: 'POST'})
@@ -328,8 +332,14 @@ function openMemoryDetail(mem, source) {
         deleteBtn.className = 'btn btn-outline-danger btn-sm';
         deleteBtn.innerHTML = '<i class="bi bi-trash"></i> Delete';
         deleteBtn.title = 'Permanently delete (cannot be undone) — prefer Forget';
-        deleteBtn.onclick = function() {
-            if (!confirm('Delete this memory? This cannot be undone.')) return;
+        deleteBtn.onclick = async function() {
+            var confirmed = await confirmDestructive({
+                title: 'Delete memory',
+                target: mem.content ? mem.content.slice(0, 80) : 'Memory #' + mem.id,
+                consequence: 'Permanently deleted — this cannot be undone.',
+                confirmLabel: 'Delete',
+            });
+            if (!confirmed) return;
             fetch('/api/memories/' + encodeURIComponent(mem.id), {method: 'DELETE'})
                 .then(function(r) { return r.json(); })
                 .then(function(d) {
@@ -430,6 +440,95 @@ function addDetailTagsRow(parent, label, tags) {
         });
     }
     parent.appendChild(dd);
+}
+
+/**
+ * Show a shared confirmation modal for destructive dashboard actions.
+ * Creates the modal element on first call; reuses it on subsequent calls.
+ *
+ * @param {object} opts
+ * @param {string} opts.title          Short header, e.g. "Delete profile"
+ * @param {string} opts.target         Exact item being acted on, e.g. "my-project"
+ * @param {string} opts.consequence    What happens, e.g. "Memories moved to default profile"
+ * @param {string} [opts.confirmLabel] Confirm button text (default: "Confirm")
+ * @returns {Promise<boolean>} Resolves true when confirmed, false when cancelled
+ */
+function confirmDestructive(opts) {
+    return new Promise(function(resolve) {
+        var settled = false;
+        var MODAL_ID = 'slm-confirm-destructive-modal';
+        var modalEl = document.getElementById(MODAL_ID);
+
+        if (!modalEl) {
+            modalEl = document.createElement('div');
+            modalEl.id = MODAL_ID;
+            modalEl.className = 'modal fade';
+            modalEl.setAttribute('tabindex', '-1');
+            modalEl.setAttribute('aria-modal', 'true');
+            modalEl.setAttribute('role', 'dialog');
+            modalEl.innerHTML =
+                '<div class="modal-dialog modal-dialog-centered">' +
+                '<div class="modal-content">' +
+                '<div class="modal-header border-0 pb-1">' +
+                '<h5 class="modal-title slm-cd-title text-danger"></h5>' +
+                '<button type="button" class="btn-close"' +
+                ' data-slm-cd-action="cancel" aria-label="Close"></button>' +
+                '</div>' +
+                '<div class="modal-body pt-1">' +
+                '<p class="slm-cd-target fw-semibold mb-1"></p>' +
+                '<p class="slm-cd-consequence text-muted small mb-0"></p>' +
+                '</div>' +
+                '<div class="modal-footer border-0 pt-0">' +
+                '<button type="button" class="btn btn-secondary btn-sm"' +
+                ' data-slm-cd-action="cancel">Cancel</button>' +
+                '<button type="button" class="btn btn-danger btn-sm"' +
+                ' data-slm-cd-action="confirm">Confirm</button>' +
+                '</div>' +
+                '</div>' +
+                '</div>';
+            document.body.appendChild(modalEl);
+        }
+
+        var titleEl = modalEl.querySelector('.slm-cd-title');
+        var targetEl = modalEl.querySelector('.slm-cd-target');
+        var consequenceEl = modalEl.querySelector('.slm-cd-consequence');
+        var confirmBtn = modalEl.querySelector('[data-slm-cd-action="confirm"]');
+
+        if (titleEl) titleEl.textContent = opts.title || 'Confirm action';
+        if (targetEl) targetEl.textContent = opts.target || '';
+        if (consequenceEl) consequenceEl.textContent = opts.consequence || '';
+        if (confirmBtn) confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+
+        var bsModal = null;
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        }
+
+        function settle(result) {
+            if (settled) return;
+            settled = true;
+            modalEl.removeEventListener('click', onAction);
+            if (bsModal) {
+                modalEl.removeEventListener('hidden.bs.modal', onHide);
+                bsModal.hide();
+            }
+            resolve(result);
+        }
+
+        function onAction(e) {
+            var actionEl = e.target.closest('[data-slm-cd-action]');
+            if (!actionEl) return;
+            settle(actionEl.getAttribute('data-slm-cd-action') === 'confirm');
+        }
+
+        function onHide() { settle(false); }
+
+        modalEl.addEventListener('click', onAction);
+        if (bsModal) {
+            modalEl.addEventListener('hidden.bs.modal', onHide, { once: true });
+            bsModal.show();
+        }
+    });
 }
 
 function copyMemoryToClipboard() {

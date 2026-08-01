@@ -312,8 +312,14 @@ function showPrivacyDetails() {
 /**
  * Reset all learning data.
  */
-function resetLearningData() {
-    if (!confirm('Reset all learning data? Your memories will be preserved.')) return;
+async function resetLearningData() {
+    var confirmed = await confirmDestructive({
+        title: 'Reset learning data',
+        target: 'All learned patterns and ranking signals',
+        consequence: 'Your memories will be preserved.',
+        confirmLabel: 'Reset',
+    });
+    if (!confirmed) return;
 
     fetch('/api/learning/reset', {method: 'POST'})
     .then(function(r) { return r.json(); })

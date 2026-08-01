@@ -1066,10 +1066,12 @@
       'aria-live': 'polite',
     });
     btn.addEventListener('click', async () => {
-      const ok = window.confirm(
-        'Reset all learning data? Memories will be preserved, '
-        + 'but learned patterns and ranking signals will be deleted.',
-      );
+      const ok = await window.confirmDestructive({
+        title: 'Reset learning data',
+        target: 'All learned patterns and ranking signals',
+        consequence: 'Memories will be preserved, but learned patterns and ranking signals will be deleted.',
+        confirmLabel: 'Reset',
+      });
       if (!ok) return;
       status.textContent = 'Resetting…';
       try {

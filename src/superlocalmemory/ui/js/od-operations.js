@@ -675,8 +675,14 @@
 
     if (applyBtn) {
       applyBtn.addEventListener('click', function () {
-        if (!window.confirm('This will transition memories to lower lifecycle states. Continue?')) return;
-        applyBtn.disabled = true;
+        window.confirmDestructive({
+          title: 'Apply compaction',
+          target: 'All eligible memories',
+          consequence: 'Transitions memories to lower lifecycle states.',
+          confirmLabel: 'Apply',
+        }).then(function(confirmed) {
+          if (!confirmed) return;
+          applyBtn.disabled = true;
         applyBtn.textContent = 'Running…';
 
         fetch('/api/lifecycle/compact', {
@@ -708,6 +714,7 @@
             applyBtn.disabled = false;
             applyBtn.textContent = 'Apply compaction';
           });
+        });
       });
     }
   }
@@ -722,10 +729,14 @@
     var summary = document.getElementById('od-restart-summary');
     if (!btn) return;
     btn.addEventListener('click', function () {
-      if (!window.confirm(
-        'Restart the memory daemon now? It will be unavailable for a few ' +
-        'seconds. Your memories are not affected.')) return;
-      btn.disabled = true;
+      window.confirmDestructive({
+        title: 'Restart memory daemon',
+        target: 'Memory daemon',
+        consequence: 'Will be unavailable for a few seconds. Your memories are not affected.',
+        confirmLabel: 'Restart',
+      }).then(function(confirmed) {
+        if (!confirmed) return;
+        btn.disabled = true;
       btn.textContent = 'Restarting…';
       if (summary) summary.textContent = 'Restart requested — waiting for the daemon to come back…';
 
@@ -782,6 +793,7 @@
             if (tries > 30) { clearInterval(poll); btn.disabled = false; btn.textContent = 'Restart daemon'; }
           }, 1000);
         });
+      });
     });
   }
 

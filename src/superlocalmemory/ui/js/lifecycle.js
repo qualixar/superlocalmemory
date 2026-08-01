@@ -299,7 +299,13 @@ async function compactDryRun() {
 }
 
 async function compactExecute() {
-    if (!confirm('This will transition memories to lower lifecycle states. Continue?')) return;
+    var confirmed = await confirmDestructive({
+        title: 'Apply compaction',
+        target: 'All eligible memories',
+        consequence: 'Transitions memories to lower lifecycle states.',
+        confirmLabel: 'Apply',
+    });
+    if (!confirmed) return;
     try {
         var response = await fetch('/api/lifecycle/compact', {
             method: 'POST',

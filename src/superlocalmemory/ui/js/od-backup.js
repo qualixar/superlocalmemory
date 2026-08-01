@@ -642,14 +642,21 @@
   }
 
   function doDisconnect(root, destId) {
-    if (!window.confirm('Disconnect this cloud destination? Existing backups are not deleted.')) return;
-    authMutation('/api/backup/disconnect/' + encodeURIComponent(destId), 'DELETE')
+    window.confirmDestructive({
+      title: 'Disconnect cloud destination',
+      target: destId,
+      consequence: 'Existing backups are not deleted.',
+      confirmLabel: 'Disconnect',
+    }).then(function(confirmed) {
+      if (!confirmed) return;
+      authMutation('/api/backup/disconnect/' + encodeURIComponent(destId), 'DELETE')
       .then(function (r) { return r.json(); })
       .then(function (d) {
         toast(d.success ? 'Disconnected' : 'Disconnect failed: ' + esc(d.error || ''), !d.success);
         loadDestinations(root);
       })
       .catch(function () { toast('Disconnect failed', true); });
+    });
   }
 
   function openOAuth(root, oauthPath, providerLabel) {

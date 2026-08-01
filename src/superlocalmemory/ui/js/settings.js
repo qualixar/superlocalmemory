@@ -474,7 +474,13 @@ async function connectGoogleDrive() {
 }
 
 async function disconnectDestination(destId) {
-    if (!confirm('Disconnect this backup destination? Your backups on the cloud will remain.')) return;
+    var confirmed = await confirmDestructive({
+        title: 'Disconnect backup destination',
+        target: destId,
+        consequence: 'Your backups on the cloud will remain.',
+        confirmLabel: 'Disconnect',
+    });
+    if (!confirmed) return;
 
     try {
         var response = await fetch('/api/backup/disconnect/' + destId, { method: 'DELETE' });

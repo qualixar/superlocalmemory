@@ -232,8 +232,15 @@
       btn.addEventListener('click', function () {
         var uid = btn.getAttribute('data-uid');
         var uname = btn.getAttribute('data-uname');
-        if (!window.confirm('Remove user "' + uname + '"? This deletes their account and access.')) return;
-        postJSON('/api/rbac/users/' + encodeURIComponent(uid), {}, 'DELETE').then(reload);
+        window.confirmDestructive({
+          title: 'Remove user',
+          target: '"' + uname + '"',
+          consequence: 'This deletes their account and access.',
+          confirmLabel: 'Remove',
+        }).then(function(confirmed) {
+          if (!confirmed) return;
+          postJSON('/api/rbac/users/' + encodeURIComponent(uid), {}, 'DELETE').then(reload);
+        });
       });
     });
 

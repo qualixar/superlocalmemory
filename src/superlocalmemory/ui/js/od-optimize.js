@@ -656,12 +656,19 @@
         if (!btn) return;
         var mode = btn.getAttribute('data-mode');
         if (mode === 'aggressive') {
-          if (!window.confirm(
-            'WARNING: Aggressive mode may reduce output fidelity.\n\n' +
-            'Do NOT use for: code generation, legal text, exact-output tasks, math.\n' +
-            'Safe for: summarization, brainstorming, open-ended chat.\n\n' +
-            'Continue?'
-          )) return;
+          window.confirmDestructive({
+            title: 'Enable aggressive compression',
+            target: 'Compression mode',
+            consequence: 'May reduce output fidelity. Not safe for code, legal text, or math tasks.',
+            confirmLabel: 'Enable',
+          }).then(function(confirmed) {
+            if (!confirmed) return;
+            seg.querySelectorAll('button[data-mode]').forEach(function (b) {
+              b.classList.toggle('active', b === btn);
+            });
+            putConfig({ compress_mode: 'aggressive' });
+          });
+          return;
         }
         seg.querySelectorAll('button[data-mode]').forEach(function (b) {
           b.classList.toggle('active', b === btn);
@@ -674,21 +681,28 @@
     var clearBtn = container.querySelector('#od-opt-clear-cache');
     if (clearBtn) {
       clearBtn.addEventListener('click', function () {
-        if (!window.confirm('Clear all cache entries from llmcache.db?')) return;
-        fetch('/api/optimize/cache/clear', { method: 'DELETE' })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            var msgEl = document.getElementById('od-opt-clear-msg');
-            if (msgEl) {
-              msgEl.textContent = 'Cleared ' + fmtNum(d.deleted || 0) + ' entries.';
-              msgEl.style.display = '';
-              setTimeout(function () {
-                msgEl.style.display = 'none';
-                loadSavings();
-              }, 3000);
-            }
-          })
-          .catch(function () {});
+        window.confirmDestructive({
+          title: 'Clear LLM cache',
+          target: 'All entries in llmcache.db',
+          consequence: 'All cached responses will be cleared.',
+          confirmLabel: 'Clear',
+        }).then(function(confirmed) {
+          if (!confirmed) return;
+          fetch('/api/optimize/cache/clear', { method: 'DELETE' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var msgEl = document.getElementById('od-opt-clear-msg');
+              if (msgEl) {
+                msgEl.textContent = 'Cleared ' + fmtNum(d.deleted || 0) + ' entries.';
+                msgEl.style.display = '';
+                setTimeout(function () {
+                  msgEl.style.display = 'none';
+                  loadSavings();
+                }, 3000);
+              }
+            })
+            .catch(function () {});
+        });
       });
     }
 

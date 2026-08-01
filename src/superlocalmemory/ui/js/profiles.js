@@ -211,9 +211,13 @@ async function deleteProfile(name) {
         showToast('Cannot delete the default profile');
         return;
     }
-    if (!confirm('Delete profile "' + name + '"?\nIts memories will be moved to the default profile.')) {
-        return;
-    }
+    var confirmed = await confirmDestructive({
+        title: 'Delete profile',
+        target: '"' + name + '"',
+        consequence: 'Its memories will be moved to the default profile.',
+        confirmLabel: 'Delete',
+    });
+    if (!confirmed) return;
     try {
         var response = await fetch('/api/profiles/' + encodeURIComponent(name), {
             method: 'DELETE'
