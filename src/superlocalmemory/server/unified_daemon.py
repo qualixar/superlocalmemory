@@ -111,6 +111,10 @@ _SENSITIVE_READ_PREFIXES = (
     "/api/v3/mesh/config", "/api/v3/trust/config",
     "/api/v3/forgetting/config", "/api/v3/mcp/profiles",
     "/api/learning", "/api/behavioral",
+    # Event stream, agent activity, trust signals, and v3 profiling data
+    # expose cross-agent coordination signals and behavioral profiles.
+    "/events", "/api/events", "/api/agents", "/api/trust/",
+    "/api/v3/abstraction", "/api/v3/insights",
 )
 _SENSITIVE_READ_EXACT_PATHS = (
     "/api/search", "/api/v3/recall/trace", "/api/patterns",
@@ -159,6 +163,57 @@ def _rbac_read_gate(request, app_state):
         return None
     return JSONResponse(status_code=403,
                         content={"error": "Your role cannot read this workspace."})
+
+
+# Adapter process-control routes that change running state (start/stop) or
+# persistence state (enable/disable). These require WRITE permission.
+_ADAPTER_CONTROL_PREFIXES = (
+    "/api/adapters/enable",
+    "/api/adapters/disable",
+    "/api/adapters/start",
+    "/api/adapters/stop",
+)
+
+
+def _is_adapter_control_mutation(method: str, path: str) -> bool:
+    return (
+        method in ("POST", "PUT", "PATCH", "DELETE")
+        and path.startswith(_ADAPTER_CONTROL_PREFIXES)
+    )
+
+
+def _rbac_write_gate(request, app_state):
+    """RBAC gate for state-changing dashboard mutations. Returns a JSONResponse
+    to reject, or None to allow. No-op unless RBAC is active (>=1 user).
+
+    Mirror of _rbac_read_gate but checks WRITE instead of READ permission.
+    Fails closed on RBAC errors (503), consistent with _rbac_read_gate.
+    """
+    from fastapi.responses import JSONResponse
+    rbac = getattr(app_state, "rbac", None)
+    if rbac is None:
+        return None
+    try:
+        active = rbac.user_count() > 0
+    except Exception:
+        return JSONResponse(status_code=503,
+                            content={"error": "authorization temporarily unavailable"})
+    if not active:
+        return None  # single-operator install — mutations are open
+    token = (request.headers.get("x-slm-user-session", "")
+             or (request.cookies.get("slm_session", "") if request.cookies else ""))
+    user = rbac.resolve_session(token) if token else None
+    if user is None:
+        if rbac.require_login():
+            return JSONResponse(status_code=401,
+                                content={"error": "Login required to perform this action."})
+        return None  # owner/operator, personal mode
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import get_active_profile
+    if rbac.has_permission(user["user_id"], get_active_profile(), Permission.WRITE):
+        return None
+    return JSONResponse(status_code=403,
+                        content={"error": "Your role cannot modify this workspace."})
 
 
 def _configured_daemon_port() -> int:
@@ -2913,6 +2968,17 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                 request.method, request.url.path,
             ):
                 _resp = _rbac_read_gate(request, application.state)
+                if _resp is not None:
+                    return _resp
+            # RBAC write gate: adapter process-control and similar
+            # state-changing dashboard routes require WRITE permission.
+            # Checked after the mutation-actor boundary above, which already
+            # validated the machine-level credential; this layer checks the
+            # user-level role within the workspace.
+            if _is_adapter_control_mutation(
+                request.method, request.url.path,
+            ):
+                _resp = _rbac_write_gate(request, application.state)
                 if _resp is not None:
                     return _resp
             return await call_next(request)
