@@ -635,7 +635,6 @@ def register_active_tools(server, get_engine: Callable) -> None:
     async def core_memory(
         action: str,
         fact_id: str = "",
-        profile_id: str = "default",
     ) -> dict:
         """Manage the explicit Core Memory pin set (v3.4.65).
 

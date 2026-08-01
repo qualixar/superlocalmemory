@@ -270,6 +270,8 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
             skill_name: Specific skill name (empty = all skills)
         """
         try:
+            engine = get_engine()
+            profile_id = engine.profile_id if engine else "default"
             db_path = state_path("memory.db")
             conn = ReadConnectionFactory(db_path).open()
 
@@ -279,9 +281,9 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
                     "trigger_type, generation, status, mutation_summary, "
                     "blind_verified, created_at, completed_at "
                     "FROM skill_evolution_log "
-                    "WHERE skill_name = ? OR parent_skill_id = ? "
+                    "WHERE profile_id = ? AND (skill_name = ? OR parent_skill_id = ?) "
                     "ORDER BY created_at ASC",
-                    (skill_name, skill_name),
+                    (profile_id, skill_name, skill_name),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -289,7 +291,9 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
                     "trigger_type, generation, status, mutation_summary, "
                     "blind_verified, created_at, completed_at "
                     "FROM skill_evolution_log "
+                    "WHERE profile_id = ? "
                     "ORDER BY created_at DESC LIMIT 100",
+                    (profile_id,),
                 ).fetchall()
 
             conn.close()

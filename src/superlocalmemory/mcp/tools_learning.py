@@ -164,6 +164,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             )
             result = _update_assertion_confidence(
                 engine._db, assertion_id, reinforce=True,
+                profile_id=engine.profile_id,
             )
             if result.get("success"):
                 authorization.complete()
@@ -192,6 +193,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             )
             result = _update_assertion_confidence(
                 engine._db, assertion_id, reinforce=False,
+                profile_id=engine.profile_id,
             )
             if result.get("success"):
                 authorization.complete()
@@ -200,14 +202,16 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
 
-def _update_assertion_confidence(db, assertion_id: str, reinforce: bool) -> dict:
-    """Bayesian confidence update for behavioral assertions."""
+def _update_assertion_confidence(
+    db, assertion_id: str, reinforce: bool, profile_id: str,
+) -> dict:
+    """Bayesian confidence update for behavioral assertions, scoped to one profile."""
     now = datetime.now(timezone.utc).isoformat()
     try:
         row = db.execute(
             "SELECT confidence, reinforcement_count, contradiction_count "
-            "FROM behavioral_assertions WHERE id = ?",
-            (assertion_id,),
+            "FROM behavioral_assertions WHERE id = ? AND profile_id = ?",
+            (assertion_id, profile_id),
         )
         rows = list(row)
         if not rows:
@@ -221,22 +225,24 @@ def _update_assertion_confidence(db, assertion_id: str, reinforce: bool) -> dict
             db.execute(
                 "UPDATE behavioral_assertions SET confidence = ?, "
                 "reinforcement_count = reinforcement_count + 1, "
-                "last_reinforced_at = ?, updated_at = ? WHERE id = ?",
-                (round(new_conf, 4), now, now, assertion_id),
+                "last_reinforced_at = ?, updated_at = ? "
+                "WHERE id = ? AND profile_id = ?",
+                (round(new_conf, 4), now, now, assertion_id, profile_id),
             )
         else:
             new_conf = old_conf * 0.7  # 30% decay
             db.execute(
                 "UPDATE behavioral_assertions SET confidence = ?, "
                 "contradiction_count = contradiction_count + 1, "
-                "last_contradicted_at = ?, updated_at = ? WHERE id = ?",
-                (round(new_conf, 4), now, now, assertion_id),
+                "last_contradicted_at = ?, updated_at = ? "
+                "WHERE id = ? AND profile_id = ?",
+                (round(new_conf, 4), now, now, assertion_id, profile_id),
             )
             # Auto-delete if confidence drops below 0.2
             if new_conf < 0.2:
                 db.execute(
-                    "DELETE FROM behavioral_assertions WHERE id = ?",
-                    (assertion_id,),
+                    "DELETE FROM behavioral_assertions WHERE id = ? AND profile_id = ?",
+                    (assertion_id, profile_id),
                 )
                 return {
                     "success": True, "action": "deleted",
