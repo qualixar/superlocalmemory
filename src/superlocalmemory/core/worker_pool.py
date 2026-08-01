@@ -84,10 +84,12 @@ class WorkerPool:
         so the worker-side engine resolves the configured default — shared
         memory is opt-in.
         """
-        msg = {
+        msg: dict = {
             "cmd": "recall", "query": query, "limit": limit,
-            "session_id": session_id or "", "fast": bool(fast),
+            "session_id": session_id or "",
         }
+        if fast is not None:
+            msg["fast"] = bool(fast)
         if include_global is not None:
             msg["include_global"] = bool(include_global)
         if include_shared is not None:
