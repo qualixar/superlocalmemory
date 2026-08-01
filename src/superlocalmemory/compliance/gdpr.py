@@ -180,6 +180,31 @@ class GDPRCompliance:
             except Exception:
                 pass
 
+        # Purge context-cache entries for the erased profile.
+        # The cache DB lives under the data root (same directory as the main DB)
+        # or in an immediate subdirectory of that root.  Scan both levels so the
+        # default layout and any explicitly-namespaced cache dirs are covered.
+        try:
+            from superlocalmemory.core.context_cache import purge_profile_from_cache_db
+            data_root = getattr(self._db, "db_path", None)
+            if data_root is not None:
+                data_root = data_root.parent
+                cache_name = "active_brain_cache.db"
+                candidates: list = [data_root / cache_name]
+                try:
+                    for child in data_root.iterdir():
+                        if child.is_dir():
+                            candidates.append(child / cache_name)
+                except Exception:
+                    pass
+                cache_purged = 0
+                for candidate in candidates:
+                    cache_purged += purge_profile_from_cache_db(candidate, profile_id)
+                if cache_purged:
+                    counts["context_cache"] = cache_purged
+        except Exception as exc:
+            logger.warning("GDPR erase: context-cache purge failed: %s", exc)
+
         # Erase learning database (separate DB file)
         try:
             from superlocalmemory.learning.database import LearningDatabase

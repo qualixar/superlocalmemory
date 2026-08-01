@@ -478,6 +478,33 @@ def read_entry_fast(
         return None
 
 
+def purge_profile_from_cache_db(db_path: Path, profile_id: str) -> int:
+    """Delete all ``context_entries`` rows for *profile_id* from a cache DB file.
+
+    Opens the file with a direct write connection (no URI, no read-only flag)
+    so it works even when the daemon is not running. Returns the number of rows
+    deleted. Never raises — any error returns 0 so callers can remain
+    fail-open.
+    """
+    try:
+        if not Path(db_path).exists():
+            return 0
+        conn = sqlite3.connect(str(db_path), isolation_level=None, timeout=2.0)
+        try:
+            cur = conn.execute(
+                "DELETE FROM context_entries WHERE profile_id = ?",
+                (profile_id,),
+            )
+            return cur.rowcount
+        finally:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+    except Exception:
+        return 0
+
+
 __all__ = (
     "CACHE_DB_DEFAULT",
     "CLEANUP_HORIZON_SECONDS",
@@ -487,5 +514,6 @@ __all__ = (
     "MAX_CONTENT_CHARS",
     "SCHEMA_VERSION",
     "TTL_SECONDS",
+    "purge_profile_from_cache_db",
     "read_entry_fast",
 )
