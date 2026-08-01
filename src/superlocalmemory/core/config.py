@@ -1174,6 +1174,65 @@ class SLMConfig:
                 if k in ForgettingConfig.__dataclass_fields__
             })
 
+        # quantization: nested PolarQuantConfig + QJLConfig are reconstructed
+        # from their serialized dicts; scalar fields are passed through directly.
+        # Unknown subkeys are filtered out for forward-compat safety.
+        qt_raw = data.get("quantization", {})
+        if qt_raw:
+            try:
+                polar_raw = qt_raw.get("polar", {})
+                qjl_raw = qt_raw.get("qjl", {})
+                polar = PolarQuantConfig(**{
+                    k: v for k, v in polar_raw.items()
+                    if k in PolarQuantConfig.__dataclass_fields__
+                })
+                qjl = QJLConfig(**{
+                    k: v for k, v in qjl_raw.items()
+                    if k in QJLConfig.__dataclass_fields__
+                })
+                qt_scalars = {
+                    k: v for k, v in qt_raw.items()
+                    if k in QuantizationConfig.__dataclass_fields__
+                    and k not in ("polar", "qjl")
+                }
+                config.quantization = QuantizationConfig(polar=polar, qjl=qjl, **qt_scalars)
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid quantization config (%s) — using defaults", exc
+                )
+
+        # sagq: valid_bit_widths is serialized as a list by dataclasses.asdict()
+        # and must be coerced back to a tuple to satisfy the field annotation and
+        # preserve identity through a round-trip.
+        sq_raw = data.get("sagq", {})
+        if sq_raw:
+            try:
+                sq_kwargs = {
+                    k: v for k, v in sq_raw.items()
+                    if k in SAGQConfig.__dataclass_fields__
+                }
+                if "valid_bit_widths" in sq_kwargs:
+                    sq_kwargs["valid_bit_widths"] = tuple(sq_kwargs["valid_bit_widths"])
+                config.sagq = SAGQConfig(**sq_kwargs)
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid sagq config (%s) — using defaults", exc
+                )
+
+        # auto_invoke: dict fields (weights, act_r_weights, mode_a_weights) are
+        # preserved as-is by asdict(); no special reconstruction required.
+        ai_raw = data.get("auto_invoke", {})
+        if ai_raw:
+            try:
+                config.auto_invoke = AutoInvokeConfig(**{
+                    k: v for k, v in ai_raw.items()
+                    if k in AutoInvokeConfig.__dataclass_fields__
+                })
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid auto_invoke config (%s) — using defaults", exc
+                )
+
         rt = data.get("retrieval", {})
         if rt:
             # V3.3.2 migration: add ONNX cross-encoder backend field.
@@ -1426,6 +1485,20 @@ class SLMConfig:
         data["entity_compilation_retrieval_boost"] = self.entity_compilation_retrieval_boost
         data["mesh_enabled"] = self.mesh_enabled
 
+        # Typed in-memory config sections — serialized from the current attribute
+        # values so any in-memory mutation survives a round-trip.  All four are
+        # real dataclasses on self; dataclasses.asdict() recurses into nested
+        # dataclasses (quantization.polar, quantization.qjl).
+        # Unknown forward-compat subkeys within these sections are intentionally
+        # not preserved: the in-memory dataclass fields are the authoritative source.
+        #
+        # embedding_signature: has no typed in-memory model — it is an opaque blob
+        # written by external tooling (see below).
+        data["forgetting"] = asdict(self.forgetting)
+        data["quantization"] = asdict(self.quantization)
+        data["sagq"] = asdict(self.sagq)
+        data["auto_invoke"] = asdict(self.auto_invoke)
+
         # Merge any keys from the last load() that are not covered by the
         # explicit serialization above.  This includes unknown forward-compat
         # top-level keys and nested sections whose subkeys this version does
@@ -1438,10 +1511,11 @@ class SLMConfig:
                 if _k not in data:
                     data[_k] = _v
 
-        # Preserve existing V3.3 config sections that aren't in for_mode()
-        for key in ("forgetting", "quantization", "sagq", "embedding_signature", "auto_invoke"):
-            if key in existing:
-                data[key] = existing[key]
+        # embedding_signature has no typed in-memory model — it is an opaque blob
+        # written by external tooling.  Preserve the on-disk value verbatim so a
+        # load→save cycle does not erase externally written metadata.
+        if "embedding_signature" in existing:
+            data["embedding_signature"] = existing["embedding_signature"]
 
         # Atomic write: a crash mid-write must NOT leave a truncated/corrupt
         # config.json (which would make every subsequent `slm` call fail to load).

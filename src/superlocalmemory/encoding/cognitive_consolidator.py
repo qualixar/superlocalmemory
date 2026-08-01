@@ -724,66 +724,80 @@ class CognitiveConsolidator:
         """
         block_id = _new_id()
 
-        # Generate gist embedding (full float32 precision — HR-05)
+        # Generate gist embedding BEFORE the transaction.  Embedding generation
+        # is a pure CPU/ML computation with no DB side effects; running it outside
+        # the transaction avoids holding a write lock during a potentially slow
+        # model forward pass.  If generation fails, we abort before any write.
+        # Note: gist_embedding_rowid is currently always None because vec0
+        # insertion requires VectorStore integration (future work).  When that
+        # integration lands, the rowid write must move INSIDE the transaction
+        # below so a rollback removes the embedding row together with the block.
         gist_embedding_rowid: int | None = None
         if self._embedder is not None:
             try:
                 self._embedder.encode(gist.gist_text)
-                # Note: storing in vec0 requires VectorStore integration.
-                # For now, the embedding is generated and the block records
-                # that an embedder was available.
             except Exception as exc:
                 logger.warning("Gist embedding generation failed: %s", exc)
 
-        # --- Store replacement fact FIRST (ordering guarantee) ---
-        # The gist is persisted as a live atomic fact so it is immediately
-        # recallable.  Source archival happens only after this write lands.
         from superlocalmemory.storage.models import AtomicFact, MemoryRecord
-        self._db.store_memory(
-            MemoryRecord(
-                memory_id=block_id,
-                profile_id=profile_id,
-                content=gist.gist_text,
-                session_id="ccq",
-            )
-        )
-        self._db.store_fact(
-            AtomicFact(
-                memory_id=block_id,
-                profile_id=profile_id,
-                content=gist.gist_text,
-                canonical_entities=list(gist.key_entities),
-                importance=0.8,
-                confidence=1.0,
-                session_id="ccq",
-            )
-        )
-
-        # Store the consolidated block
-        self._db.store_ccq_block(
-            block_id=block_id,
-            profile_id=profile_id,
-            content=gist.gist_text,
-            source_fact_ids=json.dumps(list(cluster.fact_ids)),
-            gist_embedding_rowid=gist_embedding_rowid,
-            char_count=len(gist.gist_text),
-            cluster_id=cluster.cluster_id,
-        )
-
-        # Archive source facts AFTER replacement is committed (HR-04: soft-archive, never delete)
         from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
-        set_fact_lifecycle_zone(
-            self._db, cluster.fact_ids, "archive", profile_id=profile_id,
-        )
-        for fact_id in cluster.fact_ids:
-            # Log access event
-            self._db.execute(
-                "INSERT INTO fact_access_log "
-                "(log_id, fact_id, profile_id, accessed_at, "
-                " access_type, session_id) "
-                "VALUES (?, ?, ?, datetime('now'), 'consolidation', 'ccq')",
-                (_new_id(), fact_id, profile_id),
+
+        # All four writes are wrapped in a single transaction so a mid-write
+        # failure (e.g. store_ccq_block raising) cannot leave an orphan gist
+        # AtomicFact with no corresponding ccq_consolidated_blocks row.
+        # set_fact_lifecycle_zone is transaction-aware and reuses the active
+        # connection rather than opening a nested one.
+        with self._db.transaction():
+            # --- Store replacement fact FIRST (ordering guarantee) ---
+            # The gist is persisted as a live atomic fact so it is immediately
+            # recallable.  Source archival happens only after this write lands.
+            self._db.store_memory(
+                MemoryRecord(
+                    memory_id=block_id,
+                    profile_id=profile_id,
+                    content=gist.gist_text,
+                    session_id="ccq",
+                )
             )
+            self._db.store_fact(
+                AtomicFact(
+                    memory_id=block_id,
+                    profile_id=profile_id,
+                    content=gist.gist_text,
+                    canonical_entities=list(gist.key_entities),
+                    importance=0.8,
+                    confidence=1.0,
+                    session_id="ccq",
+                )
+            )
+
+            # Store the consolidated block — must follow the gist fact INSERT so
+            # the step-1 identify filter (NOT IN ccq_consolidated_blocks) sees the
+            # correct state on any immediate re-run.
+            self._db.store_ccq_block(
+                block_id=block_id,
+                profile_id=profile_id,
+                content=gist.gist_text,
+                source_fact_ids=json.dumps(list(cluster.fact_ids)),
+                gist_embedding_rowid=gist_embedding_rowid,
+                char_count=len(gist.gist_text),
+                cluster_id=cluster.cluster_id,
+            )
+
+            # Archive source facts AFTER replacement is committed (HR-04: soft-archive, never delete)
+            set_fact_lifecycle_zone(
+                self._db, cluster.fact_ids, "archive", profile_id=profile_id,
+            )
+            for fact_id in cluster.fact_ids:
+                # Log access event
+                self._db.execute(
+                    "INSERT INTO fact_access_log "
+                    "(log_id, fact_id, profile_id, accessed_at, "
+                    " access_type, session_id) "
+                    "VALUES (?, ?, ?, datetime('now'), 'consolidation', 'ccq')",
+                    (_new_id(), fact_id, profile_id),
+                )
+
         return block_id
 
     # ------------------------------------------------------------------
