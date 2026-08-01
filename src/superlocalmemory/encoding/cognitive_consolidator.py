@@ -716,6 +716,11 @@ class CognitiveConsolidator:
 
         Source facts are SOFT-ARCHIVED (HR-04), never deleted.
         Gist embedding stored at float32 (HR-05).
+
+        Ordering guarantee: the gist replacement is committed as a live
+        atomic fact BEFORE source facts are archived.  This ensures there
+        is never a window where neither the sources nor the replacement
+        are recallable.
         """
         block_id = _new_id()
 
@@ -730,6 +735,30 @@ class CognitiveConsolidator:
             except Exception as exc:
                 logger.warning("Gist embedding generation failed: %s", exc)
 
+        # --- Store replacement fact FIRST (ordering guarantee) ---
+        # The gist is persisted as a live atomic fact so it is immediately
+        # recallable.  Source archival happens only after this write lands.
+        from superlocalmemory.storage.models import AtomicFact, MemoryRecord
+        self._db.store_memory(
+            MemoryRecord(
+                memory_id=block_id,
+                profile_id=profile_id,
+                content=gist.gist_text,
+                session_id="ccq",
+            )
+        )
+        self._db.store_fact(
+            AtomicFact(
+                memory_id=block_id,
+                profile_id=profile_id,
+                content=gist.gist_text,
+                canonical_entities=list(gist.key_entities),
+                importance=0.8,
+                confidence=1.0,
+                session_id="ccq",
+            )
+        )
+
         # Store the consolidated block
         self._db.store_ccq_block(
             block_id=block_id,
@@ -741,8 +770,7 @@ class CognitiveConsolidator:
             cluster_id=cluster.cluster_id,
         )
 
-        # Archive source facts (HR-04: soft-archive, never delete) through the
-        # lifecycle invariant writer.
+        # Archive source facts AFTER replacement is committed (HR-04: soft-archive, never delete)
         from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
         set_fact_lifecycle_zone(
             self._db, cluster.fact_ids, "archive", profile_id=profile_id,
