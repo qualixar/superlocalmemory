@@ -336,6 +336,45 @@ class BM25Channel:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
+    def update_fact(self, fact_id: str, new_content: str, profile_id: str) -> None:
+        """Replace a fact's representation in the live index and persist new tokens.
+
+        Removes any existing in-memory entry for the fact_id first so the index
+        holds each fact exactly once after the call. Delegates to remove_fact +
+        add so the two operations stay in sync.
+
+        Args:
+            fact_id: Fact whose content has changed.
+            new_content: Updated text to index.
+            profile_id: Owner profile (used for DB token persistence).
+        """
+        self.remove_fact(fact_id)
+        self.add(fact_id, new_content, profile_id)
+
+    def remove_fact(self, fact_id: str) -> None:
+        """Remove a fact from the live in-memory index.
+
+        Idempotent: a no-op when the fact is not in the index. Does NOT touch
+        the persistent ``bm25_tokens`` DB table — the caller is responsible for
+        that (so a delete path can clean up storage independently).
+
+        Args:
+            fact_id: Fact to evict from the in-memory corpus.
+        """
+        if fact_id not in self._fact_id_set:
+            return
+        try:
+            idx = self._fact_ids.index(fact_id)
+            del self._corpus[idx]
+            del self._fact_ids[idx]
+            raw_texts = getattr(self, "_raw_texts", [])
+            if idx < len(raw_texts):
+                del raw_texts[idx]
+            self._fact_id_set.discard(fact_id)
+            self._dirty = True
+        except (ValueError, IndexError):
+            self._fact_id_set.discard(fact_id)
+
     def clear(self) -> None:
         """Clear the in-memory index (does NOT delete DB tokens)."""
         self._corpus = []

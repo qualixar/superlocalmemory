@@ -1754,6 +1754,108 @@ class DatabaseManager:
         except Exception as exc:  # pragma: no cover — legacy/missing FTS table
             logger.debug("upsert_fact_expansion skipped for %s: %s", fact_id, exc)
 
+    def reset_fact_expansion(self, fact_id: str, alt_keys: str = "") -> None:
+        """Replace the expansion row unconditionally, keeping it alive with new alt_keys.
+
+        Unlike ``upsert_fact_expansion``, this always inserts (even when
+        ``alt_keys`` is empty) so the row survives as a cleared placeholder.
+        Used by update paths that must guarantee the expansion entry exists but
+        holds no stale tokens. Fail-soft: a missing FTS table is a no-op.
+        """
+        try:
+            self.execute(
+                "DELETE FROM fact_expansion_fts WHERE fact_id = ?", (fact_id,)
+            )
+            self.execute(
+                "INSERT INTO fact_expansion_fts (fact_id, alt_keys) VALUES (?, ?)",
+                (fact_id, alt_keys),
+            )
+        except Exception as exc:
+            logger.debug("reset_fact_expansion skipped for %s: %s", fact_id, exc)
+
+    def update_temporal_event_description(
+        self, fact_id: str, description: str
+    ) -> None:
+        """Update the description column in ``temporal_events`` for a fact.
+
+        Fail-soft: absent table (pre-migration DB) is silently skipped.
+        """
+        try:
+            self.execute(
+                "UPDATE temporal_events SET description = ? WHERE fact_id = ?",
+                (description, fact_id),
+            )
+        except Exception as exc:
+            logger.debug(
+                "update_temporal_event_description skipped for %s: %s", fact_id, exc
+            )
+
+    def delete_bm25_tokens_for_fact(self, fact_id: str) -> None:
+        """Delete persisted BM25 tokens for a fact from the ``bm25_tokens`` table."""
+        try:
+            self.execute(
+                "DELETE FROM bm25_tokens WHERE fact_id = ?", (fact_id,)
+            )
+        except Exception as exc:
+            logger.debug("delete_bm25_tokens_for_fact skipped for %s: %s", fact_id, exc)
+
+    def delete_graph_edges_for_fact(self, fact_id: str) -> None:
+        """Delete all graph edges where this fact is the source or the target."""
+        try:
+            self.execute(
+                "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?",
+                (fact_id, fact_id),
+            )
+        except Exception as exc:
+            logger.debug("delete_graph_edges_for_fact skipped for %s: %s", fact_id, exc)
+
+    def remove_fact_from_scenes(self, fact_id: str, profile_id: str) -> None:
+        """Remove a fact_id from every ``memory_scenes`` JSON array in the profile.
+
+        Scenes that become empty after removal are deleted entirely.
+        Fail-soft: any exception is logged and ignored.
+        """
+        try:
+            scenes = self.get_scenes_for_fact(fact_id, profile_id)
+            for scene in scenes:
+                new_ids = [fid for fid in (scene.fact_ids or []) if fid != fact_id]
+                if new_ids:
+                    self.execute(
+                        "UPDATE memory_scenes SET fact_ids_json = ? "
+                        "WHERE scene_id = ?",
+                        (json.dumps(new_ids), scene.scene_id),
+                    )
+                else:
+                    self.execute(
+                        "DELETE FROM memory_scenes WHERE scene_id = ?",
+                        (scene.scene_id,),
+                    )
+        except Exception as exc:
+            logger.debug("remove_fact_from_scenes skipped for %s: %s", fact_id, exc)
+
+    def delete_memory_for_fact(self, fact_id: str, profile_id: str) -> None:
+        """Delete the raw ``memories`` record that sourced this fact.
+
+        Reads the ``memory_id`` from ``atomic_facts`` before the fact row is
+        gone, then deletes the memory. Fail-soft: any exception is logged.
+        """
+        try:
+            rows = self.execute(
+                "SELECT memory_id FROM atomic_facts "
+                "WHERE fact_id = ? AND profile_id = ? LIMIT 1",
+                (fact_id, profile_id),
+            )
+            if rows:
+                memory_id = dict(rows[0]).get("memory_id") or ""
+                if memory_id:
+                    self.execute(
+                        "DELETE FROM memories "
+                        "WHERE memory_id = ? AND profile_id = ?",
+                        (memory_id, profile_id),
+                    )
+        except Exception as exc:
+            logger.debug("delete_memory_for_fact skipped for %s: %s", fact_id, exc)
+
     # ------------------------------------------------------------------
     # Phase 5: Core Memory Blocks CRUD (Rule 15)
     # ------------------------------------------------------------------

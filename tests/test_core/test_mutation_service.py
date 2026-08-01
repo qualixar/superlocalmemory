@@ -53,5 +53,5 @@ def test_authorized_update_refreshes_indexes_after_trust_gate() -> None:
     engine._db.update_fact.assert_called_once_with(
         "fact-1", {"content": "new content"}, profile_id="default"
     )
-    bm25.add.assert_called_once_with("fact-1", "new content", "default")
+    bm25.update_fact.assert_called_once_with("fact-1", "new content", "default")
     engine._hooks.run_post.assert_called_once()
