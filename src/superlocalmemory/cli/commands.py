@@ -2928,7 +2928,7 @@ def cmd_dashboard(args: Namespace) -> None:
     print("  SuperLocalMemory V3 — Web Dashboard")
     print(f"  Starting daemon if needed...")
 
-    if not ensure_daemon():
+    if not ensure_daemon(port=port):
         print("  ✗ Could not start daemon. Run `slm doctor` to diagnose.")
         sys.exit(1)
 

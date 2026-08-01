@@ -437,8 +437,12 @@ def _start_daemon_subprocess() -> bool:
     return _wait_for_daemon(timeout=60)
 
 
-def ensure_daemon() -> bool:
+def ensure_daemon(*, port: int | None = None) -> bool:
     """Start daemon if not running. Returns True if daemon is ready.
+
+    ``port`` — when supplied, the daemon is started (or verified) on this port
+    instead of the configured default.  The dashboard passes its own ``--port``
+    here so the bind authority matches the URL shown to the user.
 
     v3.4.4 BULLETPROOF:
       1. If PID alive → return True immediately (even if warming up)
