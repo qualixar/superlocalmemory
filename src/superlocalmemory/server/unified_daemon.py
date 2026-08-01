@@ -1415,6 +1415,17 @@ async def lifespan(application: FastAPI):
         engine = MemoryEngine(config)
         engine.initialize()
 
+        # Refresh migration state now that the engine is initialised.  Any
+        # schema work the engine's own bootstrap may have applied (e.g.
+        # runtime-table creation) is captured here so the dashboard and
+        # health endpoints see a current, consistent picture.  Non-fatal:
+        # a runner crash here is logged but must not block the startup path.
+        try:
+            _result = apply_all(_learning_db, _memory_db)
+            application.state.migration_result = _result
+        except Exception as _ref_exc:  # pragma: no cover — defensive
+            logger.debug("migration state refresh failed (non-fatal): %s", _ref_exc)
+
         # 3.8.6 canonical remember boundary. Migrations have already created
         # the immutable receipt ledger and engine init has created the runtime
         # tables. Claim the daemon's writer lease, install the typed admission
