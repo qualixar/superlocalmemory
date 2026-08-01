@@ -634,9 +634,14 @@ class DatabaseManager:
             include_global=include_global,
             include_shared=include_shared,
         )
+        archive_clause = (
+            " AND COALESCE(archive_status, 'live') != 'archived'"
+            if self._has_archive_status()
+            else ""
+        )
         rows = self.execute(
-            f"SELECT * FROM atomic_facts WHERE {where} AND profile_id != ? "
-            "ORDER BY created_at DESC",
+            f"SELECT * FROM atomic_facts WHERE {where} AND profile_id != ?"
+            f"{archive_clause} ORDER BY created_at DESC",
             (*params, profile_id),
         )
         return [self._row_to_fact(r) for r in rows]
@@ -1134,10 +1139,15 @@ class DatabaseManager:
             include_global=include_global,
             include_shared=include_shared,
         )
+        archive_clause = (
+            " AND COALESCE(archive_status, 'live') != 'archived'"
+            if self._has_archive_status()
+            else ""
+        )
         placeholders = ",".join("?" for _ in fact_ids)
         rows = self.execute(
             f"SELECT * FROM atomic_facts WHERE fact_id IN ({placeholders}) "
-            f"AND {where} ORDER BY created_at DESC",
+            f"AND {where}{archive_clause} ORDER BY created_at DESC",
             (*fact_ids, *params),
         )
         return [self._row_to_fact(r) for r in rows]

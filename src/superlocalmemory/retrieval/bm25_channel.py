@@ -221,11 +221,19 @@ class BM25Channel:
             include_shared=include_shared,
             prefix="af",
         )
+        # Archived facts are not live; never surface them in keyword recall.
+        # Guarded on column presence: the archive column is added by a deferred
+        # migration and may be absent on an unmigrated database.
+        archive_clause = (
+            " AND COALESCE(af.archive_status, 'live') != 'archived'"
+            if self._db._has_archive_status()
+            else ""
+        )
         sql = (
             "SELECT af.fact_id AS fact_id, bm25(atomic_facts_fts) AS rank "
             "FROM atomic_facts_fts "
             "JOIN atomic_facts af ON af.rowid = atomic_facts_fts.rowid "
-            f"WHERE atomic_facts_fts MATCH ? AND {where} "
+            f"WHERE atomic_facts_fts MATCH ? AND {where}{archive_clause} "
             "ORDER BY rank LIMIT ?"
         )
         rows = self._db.execute(sql, (match_expr, *params, int(top_k)))
@@ -248,7 +256,7 @@ class BM25Channel:
                 "SELECT af.fact_id AS fact_id, bm25(fact_expansion_fts) AS rank "
                 "FROM fact_expansion_fts "
                 "JOIN atomic_facts af ON af.fact_id = fact_expansion_fts.fact_id "
-                f"WHERE fact_expansion_fts MATCH ? AND {where} "
+                f"WHERE fact_expansion_fts MATCH ? AND {where}{archive_clause} "
                 "ORDER BY rank LIMIT ?"
             )
             for r in self._db.execute(exp_sql, (match_expr, *params, int(top_k))):
