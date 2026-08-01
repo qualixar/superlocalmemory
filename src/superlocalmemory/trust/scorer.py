@@ -73,10 +73,34 @@ class TrustScorer:
         return self._compute_trust(alpha, beta)
 
     def get_fact_trust(self, fact_id: str, profile_id: str) -> float:
-        """Get trust for a fact. Inherits source agent trust, modified by
-        any contradiction evidence recorded directly against the fact."""
-        alpha, beta = self._get_beta_params("fact", fact_id, profile_id)
-        return self._compute_trust(alpha, beta)
+        """Get trust for a fact.
+
+        When a direct trust record exists for the fact, use it.
+        Otherwise inherit the trust of the agent that created the fact,
+        as recorded in the provenance table.
+        """
+        rows = self._db.execute(
+            "SELECT trust_score, evidence_count FROM trust_scores "
+            "WHERE target_type = ? AND target_id = ? AND profile_id = ?",
+            ("fact", fact_id, profile_id),
+        )
+        if rows:
+            d = dict(rows[0])
+            alpha, beta = self._decode_beta(d["trust_score"], d["evidence_count"])
+            return self._compute_trust(alpha, beta)
+
+        # No direct record — inherit from the provenance source agent.
+        prov = self._db.execute(
+            "SELECT created_by FROM provenance "
+            "WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, profile_id),
+        )
+        if prov:
+            agent_id = dict(prov[0]).get("created_by", "")
+            if agent_id:
+                return self.get_agent_trust(agent_id, profile_id)
+
+        return _DEFAULT_TRUST
 
     def get_entity_trust(self, entity_id: str, profile_id: str) -> float:
         """Convenience: get trust for an entity."""
