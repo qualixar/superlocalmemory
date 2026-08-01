@@ -224,6 +224,35 @@ def _configured_daemon_port() -> int:
         return _DEFAULT_PORT
 
 
+# Paths that must remain reachable when required schema migrations have failed.
+# All other paths are feature routes subject to the readiness gate.
+_MIGRATION_EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
+    "/health",
+    "/status",
+    "/api/v3/health",
+    "/api/health",
+    "/api/status",
+    "/api/v3/components",    # component status/heal endpoints
+    "/api/v3/repair",
+    "/api/repair",
+    "/api/version",          # version probe (non-schema-dependent)
+    "/static",               # UI assets (served regardless of schema state)
+)
+
+
+def _is_migration_exempt_path(path: str) -> bool:
+    """Return True for health, status, and repair paths that must stay reachable
+    even when the daemon reports a schema migration failure.
+
+    All other paths are considered feature routes whose correctness depends on
+    the schema being fully applied.
+    """
+    return any(
+        path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "?")
+        for prefix in _MIGRATION_EXEMPT_PATH_PREFIXES
+    )
+
+
 def _process_descriptor(port: int, version: str, state: str) -> DaemonDescriptor:
     """Return this process's stable namespace/instance identity."""
     global _ACTIVE_DAEMON_DESCRIPTOR
@@ -3072,6 +3101,29 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                     content={"error": "Auth subsystem unavailable; writes disabled."},
                 )
             return await call_next(request)
+
+    # Migration-readiness gate — outermost middleware; runs before auth and
+    # rate-limiting.  When required schema migrations are in a failed state every
+    # feature route receives a 503 so callers see one consistent "not ready"
+    # signal instead of route-specific errors that vary by which schema element
+    # is missing.  Health, status, and repair paths are always reachable so that
+    # operators can monitor and recover the daemon without waiting for migrations.
+    @application.middleware("http")
+    async def _migration_readiness_gate(request, call_next):
+        migration_result = getattr(application.state, "migration_result", None)
+        if migration_result and migration_result.get("failed"):
+            if not _is_migration_exempt_path(request.url.path):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": (
+                            "Service unavailable: required schema migrations have "
+                            "not completed. Check /health for details."
+                        )
+                    },
+                )
+        return await call_next(request)
 
     # Static files — UI_DIR is already the effective path (data-dir or source
     # fallback) set by the D-04 copy block above; mkdir is a no-op for
