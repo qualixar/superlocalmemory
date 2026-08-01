@@ -1575,19 +1575,46 @@ class DatabaseManager:
         self, fact_id: str, invalidated_by: str,
         invalidation_reason: str,
     ) -> None:
-        """Set valid_until and system_expired_at for a fact.
+        """Mark a fact as invalidated, preserving bi-temporal independence.
 
-        BOTH timestamps set atomically (BI-TEMPORAL INTEGRITY).
-        Never deletes the fact (Rule 17: immutability).
+        - valid_until (event-time): when the fact ceased to be true in the
+          real world.  Sourced from the fact's referenced_date so the
+          real-world boundary is preserved, not overwritten with wall-clock time.
+        - system_expired_at (transaction-time): when the system learned the
+          fact was invalid — always set to now.
+
+        The two dimensions must remain independent: a fact can be true until
+        2020-06-30 in the real world (valid_until) while the system only
+        discovers this in 2024 (system_expired_at).
+
+        Never deletes the fact (immutability).
         """
         from datetime import UTC, datetime as _dt
         now = _dt.now(UTC).isoformat()
+
+        # Resolve the event-time boundary from the fact's referenced_date.
+        # Falls back to the current valid_until (which may already be set),
+        # and ultimately to now if neither is available.
+        fact_rows = self.execute(
+            "SELECT referenced_date FROM atomic_facts WHERE fact_id = ?",
+            (fact_id,),
+        )
+        referenced_date = dict(fact_rows[0]).get("referenced_date") if fact_rows else None
+
+        tv_rows = self.execute(
+            "SELECT valid_until FROM fact_temporal_validity WHERE fact_id = ?",
+            (fact_id,),
+        )
+        existing_valid_until = dict(tv_rows[0]).get("valid_until") if tv_rows else None
+
+        valid_until = referenced_date or existing_valid_until or now
+
         self.execute(
             "UPDATE fact_temporal_validity "
             "SET valid_until = ?, system_expired_at = ?, "
             "    invalidated_by = ?, invalidation_reason = ? "
             "WHERE fact_id = ?",
-            (now, now, invalidated_by, invalidation_reason, fact_id),
+            (valid_until, now, invalidated_by, invalidation_reason, fact_id),
         )
 
     def get_valid_facts(self, profile_id: str) -> list[str]:
