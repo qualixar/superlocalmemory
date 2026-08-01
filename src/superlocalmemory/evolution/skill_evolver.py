@@ -54,7 +54,9 @@ from superlocalmemory.evolution.model_selection import (
 
 logger = logging.getLogger(__name__)
 
-EVOLVED_SKILLS_DIR = Path.home() / ".superlocalmemory" / "quarantine" / "skills"
+# Resolve the quarantine location under the selected runtime data root so a
+# custom SLM_DATA_DIR is honored rather than always writing under the home dir.
+EVOLVED_SKILLS_DIR = canonical_data_root() / "quarantine" / "skills"
 
 # Model aliasing + per-step selection live in ``model_selection`` — a single
 # source of truth shared with the config layer. ``_MODEL_ALIASES`` and
