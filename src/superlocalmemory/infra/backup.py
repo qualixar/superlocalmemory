@@ -216,12 +216,25 @@ class BackupCoordinator:
     def restore_from_manifest(self, manifest: BackupSetManifest) -> None:
         """Restore all stores from a verified manifest.
 
-        Verifies every backup file's checksum before writing to disk.
-        Raises BackupRestoreError if the manifest is unverified or any
-        file is missing or has a wrong checksum.
+        Verifies the manifest hash and every backup file's checksum before
+        writing to disk.  Raises BackupRestoreError if:
+        - the manifest is unverified,
+        - the manifest hash does not match the store checksums (incoherent set),
+        - any backup file is missing, or
+        - any backup file fails its per-store checksum.
+        No files are written to the live directory until all checks pass.
         """
         if not manifest.verified:
             raise BackupRestoreError("Cannot restore from an unverified manifest")
+
+        # Re-derive manifest_hash from the store entries and compare.
+        # This detects tampering of manifest.json where an attacker changes a
+        # store's sha256 entry without recalculating manifest_hash.
+        computed_hash = self._compute_manifest_hash(manifest.stores)
+        if computed_hash != manifest.manifest_hash:
+            raise BackupRestoreError(
+                "Manifest hash mismatch: backup set is incoherent or has been tampered"
+            )
 
         for entry in manifest.stores:
             src = Path(entry.file_path)
@@ -233,7 +246,7 @@ class BackupCoordinator:
                     f"Corrupted backup file (checksum mismatch): {entry.store_name}"
                 )
 
-        # All checksums verified — write to live locations
+        # All checks passed — write to live locations
         for entry in manifest.stores:
             target = self._base_dir / entry.store_name
             staging = target.with_suffix(".restore_staging")
@@ -523,14 +536,25 @@ class BackupManager:
             logger.error("Backup not found: %s", filename)
             return False
 
+        # Derive the target database from the backup filename stem.
+        # Backup files are named "{stem}-{timestamp}.db", where stem is the
+        # database name without extension (e.g., "audit_chain" for audit_chain.db).
+        stem_map = {Path(db).stem: db for db in MANAGED_DATABASES}
+        file_stem = filename.split("-", 1)[0]
+        target_name = stem_map.get(file_stem)
+        if target_name is None:
+            logger.error(
+                "Restore rejected: unrecognised database stem %r in %r; "
+                "expected one of %s",
+                file_stem,
+                filename,
+                list(stem_map),
+            )
+            return False
+        target = self.db_path.parent / target_name
+
         try:
             self.create_backup(label="pre-restore")
-
-            target = (
-                self.db_path.parent / "learning.db"
-                if filename.startswith("learning-")
-                else self.db_path
-            )
 
             src = sqlite3.connect(str(backup_path))
             dst = sqlite3.connect(str(target))
