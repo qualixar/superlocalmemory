@@ -34,6 +34,11 @@ except ImportError:
 _sse_queues: Set = set()
 _sse_queues_lock = threading.Lock()
 
+# Maximum concurrent SSE connections. Connections beyond this limit are
+# rejected immediately with an SSE error frame so the server cannot be
+# exhausted by many idle clients.
+_MAX_SSE_CONNECTIONS = 64
+
 
 def _event_to_sse_bridge(event: dict):
     """EventBus listener that pushes events to all SSE client queues."""
@@ -78,6 +83,16 @@ async def event_stream(
 
     client_queue = _queue.Queue(maxsize=100)
     with _sse_queues_lock:
+        if len(_sse_queues) >= _MAX_SSE_CONNECTIONS:
+            return StreamingResponse(
+                iter(['data: {"error": "SSE connection limit reached"}\n\n']),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "close",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         _sse_queues.add(client_queue)
 
     async def generate():
