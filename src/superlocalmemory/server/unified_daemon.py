@@ -1291,6 +1291,26 @@ def _release_canonical_remember_runtime(application, runtime=None) -> bool:
     return True
 
 
+def _apply_readiness_gate(runtime, application) -> None:
+    """Abort startup when the writer lease is held but the runtime is not serving.
+
+    A swallowed exception in a critical startup step can leave the coordinator
+    worker dead while the file lock remains held. Continuing to yield in that
+    state keeps the lease on an unusable runtime, blocking any recovery process.
+    This gate detects the broken state, releases the lease, and raises so the
+    daemon exits cleanly and ownership transfers to the next start attempt.
+
+    Calling this with a ready or absent runtime is a no-op.
+    """
+    if runtime is None or runtime.ready:
+        return
+    _release_canonical_remember_runtime(application, runtime)
+    raise RuntimeError(
+        "daemon writer runtime is not ready after startup — "
+        "releasing writer lease so a recovery process can start"
+    )
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -1997,6 +2017,12 @@ async def lifespan(application: FastAPI):
 
     application.state.observe_buffer = _observe_buffer
 
+    # Readiness gate: if the writer lease was claimed but the coordinator is not
+    # serving (e.g., a swallowed exception in a critical startup step killed the
+    # worker thread), release the lease and abort startup.  A living process that
+    # holds an unusable lease blocks any recovery daemon from starting.
+    _apply_readiness_gate(canonical_remember_runtime, application)
+
     # Phase B: Start health monitor
     try:
         from superlocalmemory.core.health_monitor import HealthMonitor
@@ -2194,6 +2220,15 @@ async def lifespan(application: FastAPI):
     # or tool-level cancellation inside a session manager task group cannot
     # propagate out and trigger uvicorn's graceful-shutdown handler.
     async with AsyncExitStack() as _mcp_stack:
+        # Belt-and-suspenders: if an unexpected error occurs between here and
+        # yield, the stack's __aexit__ ensures the lease is released even when
+        # the normal teardown path (after yield) is bypassed.  The explicit
+        # _release_canonical_remember_runtime call in teardown is idempotent.
+        if canonical_remember_runtime is not None:
+            _mcp_stack.callback(
+                _release_canonical_remember_runtime, application, canonical_remember_runtime
+            )
+
         if _mcp_app is not None:
             try:
                 await _mcp_stack.enter_async_context(
