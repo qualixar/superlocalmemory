@@ -106,7 +106,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 ).hexdigest()
             else:
                 material = f"{agent_id}\0{scope or ''}\0{shared_with}\0{content}"
-                effective_idempotency_key = "mcp-req:" + hashlib.sha256(
+                effective_idempotency_key = "mcp:req:" + hashlib.sha256(
                     material.encode("utf-8")
                 ).hexdigest()
         # Parse shared_with from comma-separated string
