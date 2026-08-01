@@ -6,6 +6,7 @@
 
 Routes: /api/export, /api/import
 """
+import asyncio
 import io
 import gzip
 import hashlib
@@ -210,6 +211,12 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                     "category": memory.get('category'),
                     "tags": memory.get('tags', ''),
                 }
+                for _field in (
+                    "fact_type", "confidence", "importance", "entities",
+                    "canonical_entities", "referenced_date", "pinned",
+                ):
+                    if _field in memory:
+                        metadata[_field] = memory[_field]
                 receipt, created = command.submit_with_status(IngestionRequest(
                     content=memory_content,
                     profile_id=engine._profile_id,
@@ -224,7 +231,7 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                     speaker=memory.get('speaker') or "",
                     role=memory.get('role') or "user",
                 ))
-                completed = command.materialize(receipt.operation_id)
+                completed = await asyncio.to_thread(command.materialize, receipt.operation_id)
                 if completed.state is not IngestionState.COMPLETE:
                     raise RuntimeError(
                         completed.last_error or "canonical import failed"
