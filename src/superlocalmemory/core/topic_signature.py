@@ -119,6 +119,25 @@ def compute_topic_signature(
     words = _WORD.findall(lowered)
     content_words = [w for w in words if w not in _STOPWORDS and len(w) >= 3]
 
+    # LLD-13 Track C.1 — merge entity names into content_words before
+    # computing bigrams.  An entity ID of the form "category-name" (e.g.
+    # "entity-qualixar") contributes its *name* part ("qualixar"); an ID
+    # without a hyphen (e.g. "e001") contributes the whole ID.  Words
+    # already present in content_words are silently deduplicated, so a
+    # prewarm caller and the UserPromptSubmit hook produce byte-identical
+    # signatures when the entity is already named in the prompt text.
+    # Backward-compatible: when entity_hits is empty/None the output is
+    # unchanged from the pre-LLD-13 signature.
+    if entity_hits:
+        _seen = set(content_words)
+        for _eid in entity_hits:
+            _eid_str = str(_eid)
+            _name = _eid_str.split("-", 1)[1] if "-" in _eid_str else _eid_str
+            _name_lc = _name.lower()
+            if _name_lc not in _seen and len(_name_lc) >= 3:
+                content_words.append(_name_lc)
+                _seen.add(_name_lc)
+
     # 5. Bigrams from the ORIGINAL token stream order. Preserves "foo bar"
     # vs "bar foo" distinction and resists stopword-only differentiation.
     bigrams = [f"{a}_{b}" for a, b in zip(content_words, content_words[1:])]
@@ -132,10 +151,6 @@ def compute_topic_signature(
         _canon(content_words),
         _canon(bigrams),
     ]
-    # LLD-13: append entity-hits group ONLY when non-empty. Empty/missing
-    # preserves the byte-identical v3.4.22 pre-Living-Brain signature.
-    if entity_hits:
-        groups.append(_canon([str(e) for e in entity_hits]))
     material = "\0\0".join(groups)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:_SIG_LEN]
 
