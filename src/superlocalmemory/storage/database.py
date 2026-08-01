@@ -559,6 +559,24 @@ class DatabaseManager:
         )
         return [self._row_to_fact(r) for r in rows]
 
+    def _has_archive_status(self) -> bool:
+        """Whether atomic_facts carries the M011 ``archive_status`` column.
+
+        M011 is a DEFERRED migration, so the column is absent until it runs;
+        callers must not filter on a column that may not exist. Cached once True
+        (a column never disappears); re-checked while absent so a later deferred
+        migration is picked up.
+        """
+        if getattr(self, "_archive_col_present", False):
+            return True
+        present = any(
+            dict(row).get("name") == "archive_status"
+            for row in self.execute("PRAGMA table_info(atomic_facts)")
+        )
+        if present:
+            self._archive_col_present = True
+        return present
+
     def get_all_facts(
         self, profile_id: str, limit: int | None = None,
         *,
@@ -581,8 +599,14 @@ class DatabaseManager:
         # hard, env-tunable ceiling even when the caller passes limit=None.
         if limit is None:
             limit = _unbounded_facts_ceiling()
+        # Archived facts are not live; never surface them in direct reads.
+        archive_clause = (
+            " AND COALESCE(archive_status, 'live') != 'archived'"
+            if self._has_archive_status()
+            else ""
+        )
         rows = self.execute(
-            f"SELECT * FROM atomic_facts WHERE {where} "
+            f"SELECT * FROM atomic_facts WHERE {where}{archive_clause} "
             "ORDER BY created_at DESC LIMIT ?",
             (*params, int(limit)),
         )
@@ -1039,10 +1063,16 @@ class DatabaseManager:
             include_shared=include_shared,
             prefix="f",
         )
+        # Archived facts must not surface via full-text search either.
+        archive_clause = (
+            " AND COALESCE(f.archive_status, 'live') != 'archived'"
+            if self._has_archive_status()
+            else ""
+        )
         rows = self.execute(
             f"""SELECT f.* FROM atomic_facts_fts AS fts
                JOIN atomic_facts AS f ON f.fact_id = fts.fact_id
-               WHERE fts.atomic_facts_fts MATCH ? AND {where}
+               WHERE fts.atomic_facts_fts MATCH ? AND {where}{archive_clause}
                ORDER BY fts.rank LIMIT ?""",
             (match_expr, *params, limit),
         )
