@@ -28,6 +28,13 @@ from .helpers import (
 
 logger = logging.getLogger("superlocalmemory.routes.data_io")
 
+# Hard cap on the total decompressed byte count for gzip imports.
+# Bounding the compressed upload size alone does not prevent a decompression
+# bomb: a few kilobytes of input can expand to gigabytes.  This cap is checked
+# incrementally during streaming decompression so the full expanded content is
+# never materialized before the guard fires.
+_MAX_DECOMPRESSED_BYTES: int = 200 * 1024 * 1024  # 200 MB
+
 
 def _internal_error(detail: str = "Internal server error") -> HTTPException:
     """SEC-H-02: log full traceback server-side; return a generic message to the client."""
@@ -159,7 +166,27 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
             raise HTTPException(status_code=413,
                                 detail="Import file exceeds the 50 MB limit")
         if file.filename and file.filename.endswith('.gz'):
-            content = gzip.decompress(content)
+            # Stream-decompress with an incremental byte counter so the full
+            # expanded payload is never allocated before the guard fires.
+            _chunk_size = 65_536
+            chunks: list[bytes] = []
+            total_decompressed = 0
+            with gzip.GzipFile(fileobj=io.BytesIO(content)) as _gz:
+                while True:
+                    chunk = _gz.read(_chunk_size)
+                    if not chunk:
+                        break
+                    total_decompressed += len(chunk)
+                    if total_decompressed > _MAX_DECOMPRESSED_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=(
+                                f"Decompressed content exceeds the "
+                                f"{_MAX_DECOMPRESSED_BYTES // (1024 * 1024)} MB limit"
+                            ),
+                        )
+                    chunks.append(chunk)
+            content = b"".join(chunks)
 
         try:
             data = json.loads(content)
