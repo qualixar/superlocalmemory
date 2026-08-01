@@ -139,6 +139,16 @@ def run_bounded_loop(
         budget.spend(result.tokens)
         lap_changes.append(result.changed)
 
+        # 4b. The budget is a HARD ceiling and takes precedence over the gate.
+        # Token spend and elapsed wall-clock are only knowable AFTER the lap
+        # runs, so re-check here: an overshooting lap must HALT even when its own
+        # gate would pass. ``lap`` (not lap+1) keeps the iteration cap from
+        # tripping while we are still within the allowed iteration count.
+        tripped, why = budget.exceeded(lap, bounds)
+        if tripped:
+            emit("halt", Verdict(False, why), result)
+            return Outcome(Status.HALT, why, lap, run_id)
+
         # 5. Independent gate — agent's own claim is never consulted here.
         try:
             verdict = gate(lap)
