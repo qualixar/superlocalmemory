@@ -3766,6 +3766,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
     async def consolidate_cognitive_endpoint(body: dict, request: Request):
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.access.rbac import Permission
+        from superlocalmemory.server.rbac_enforce import require_permission
+        require_permission(request, Permission.WRITE, profile=engine._profile_id)
         from superlocalmemory.server.route_mutations import (
             authorize_route_mutation,
         )
@@ -3773,10 +3776,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
             request,
             operation="update",
             source_agent_id="http-cognitive-consolidation",
-            profile_id=body.get("profile_id") or engine.profile_id,
+            profile_id=engine.profile_id,
         )
         try:
-            pid = body.get("profile_id") or engine.profile_id
+            pid = engine.profile_id
             from superlocalmemory.encoding.cognitive_consolidator import (
                 CognitiveConsolidator,
             )
@@ -3800,6 +3803,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
     async def run_maintenance_endpoint(body: dict, request: Request):
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.access.rbac import Permission
+        from superlocalmemory.server.rbac_enforce import require_permission
+        require_permission(request, Permission.WRITE, profile=engine._profile_id)
         from superlocalmemory.server.route_mutations import (
             authorize_route_mutation,
         )
@@ -3807,10 +3813,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
             request,
             operation="update",
             source_agent_id="http-maintenance",
-            profile_id=body.get("profile_id") or engine.profile_id,
+            profile_id=engine.profile_id,
         )
         try:
-            pid = body.get("profile_id") or engine.profile_id
+            pid = engine.profile_id
             results: dict = {}
             try:
                 from superlocalmemory.core.maintenance import run_maintenance as _run_maint
@@ -4084,6 +4090,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         """
         _update_activity()
         engine = _get_engine_or_503()
+        from superlocalmemory.access.rbac import Permission
+        from superlocalmemory.server.rbac_enforce import require_permission
+        require_permission(request, Permission.WRITE, profile=engine._profile_id)
         from superlocalmemory.server.route_mutations import (
             authorize_route_mutation,
         )

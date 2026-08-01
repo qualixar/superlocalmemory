@@ -232,6 +232,13 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 if not memory_content:
                     errors.append(f"Memory {idx}: missing 'content' field")
                     continue
+                # Imported content is untrusted: scrub secrets before it reaches
+                # any durable or queryable store, exactly as the canonical
+                # ingest path does.
+                from superlocalmemory.core.ingest_policy import scrub_secrets_for_ingest
+                _scrub = scrub_secrets_for_ingest(memory_content)
+                if _scrub.redacted:
+                    memory_content = _scrub.content
 
                 metadata = {
                     "project_name": memory.get('project_name'),

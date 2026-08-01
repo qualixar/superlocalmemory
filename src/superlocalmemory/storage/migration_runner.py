@@ -332,8 +332,11 @@ def apply_all(
     reports a schema_version that exceeds SUPPORTED_SCHEMA_VERSION.  This
     prevents silent data corruption when downgrading to an older build.
     """
-    # Non-mutating version check: must run before any write.
+    # Non-mutating version check: must run before any write. Both managed
+    # databases are validated so a downgrade is detectable regardless of which
+    # store carries the newer stamp.
     _check_version_or_raise(learning_db)
+    _check_version_or_raise(memory_db)
 
     applied: list[str] = []
     skipped: list[str] = []
@@ -385,18 +388,21 @@ def apply_all(
     # Monotonic schema_version stamp: advance only on a zero-failure run so
     # the stored version accurately reflects what was fully applied.
     if not failed and not dry_run:
-        try:
-            _stamp_conn = _connect(learning_db)
+        for _stamp_db in (learning_db, memory_db):
             try:
-                _ensure_schema_version_table(_stamp_conn)
-                _write_schema_version(_stamp_conn, SUPPORTED_SCHEMA_VERSION)
-            finally:
+                _stamp_conn = _connect(_stamp_db)
                 try:
-                    _stamp_conn.close()
-                except sqlite3.Error:  # pragma: no cover
-                    pass
-        except sqlite3.Error as exc:  # pragma: no cover — best-effort stamp
-            logger.warning("schema_version stamp failed: %s", exc)
+                    _ensure_schema_version_table(_stamp_conn)
+                    _write_schema_version(_stamp_conn, SUPPORTED_SCHEMA_VERSION)
+                finally:
+                    try:
+                        _stamp_conn.close()
+                    except sqlite3.Error:  # pragma: no cover
+                        pass
+            except sqlite3.Error as exc:  # pragma: no cover — best-effort stamp
+                logger.warning(
+                    "schema_version stamp failed for %s: %s", _stamp_db, exc
+                )
 
     return {
         "applied": applied,
