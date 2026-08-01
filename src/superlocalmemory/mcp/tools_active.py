@@ -178,7 +178,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
             from superlocalmemory.mcp._pool_adapter import pool_recall
 
             engine = get_engine()
-            rules = RulesEngine()
+            rules = RulesEngine(config_path=state_path("config.json"))
 
             if not rules.should_recall("session_start"):
                 return {
@@ -452,7 +452,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
             from superlocalmemory.hooks.rules_engine import RulesEngine
             from superlocalmemory.mcp._pool_adapter import pool_store
 
-            rules = RulesEngine()
+            rules = RulesEngine(config_path=state_path("config.json"))
 
             auto = AutoCapture(
                 store_fn=pool_store,
