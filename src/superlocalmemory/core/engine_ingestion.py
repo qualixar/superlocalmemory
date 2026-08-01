@@ -302,6 +302,15 @@ def canonical_store(
             error=ValueError("content rejected by local admission policy"),
         )
         return []
+    # Secrets are ALWAYS scrubbed pre-admission (not opt-in): a credential must
+    # never persist verbatim in any durable or queryable representation
+    # (facts, receipts, journal, exports, backups, mesh).
+    from superlocalmemory.core.ingest_policy import scrub_secrets_for_ingest
+
+    _secret_scrub = scrub_secrets_for_ingest(content)
+    if _secret_scrub.redacted:
+        content = _secret_scrub.content
+        logger.info("secret scrub: redacted credential material on ingest")
     # C4: opt-in PII redaction. When enabled (config.pii_redaction or
     # SLM_PII_REDACTION), scrub personal identifiers BEFORE the content is
     # extracted, embedded, or persisted — nothing sensitive ever reaches disk.
