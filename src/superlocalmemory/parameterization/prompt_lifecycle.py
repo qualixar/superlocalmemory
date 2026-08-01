@@ -45,12 +45,13 @@ class PromptLifecycleManager:
     def __init__(
         self,
         db: DatabaseManager,
-        ebbinghaus: EbbinghausCurve,
         config: ParameterizationConfig,
+        *,
+        ebbinghaus: EbbinghausCurve | None = None,
     ) -> None:
         self._db = db
-        self._ebbinghaus = ebbinghaus
         self._config = config
+        self._ebbinghaus = ebbinghaus
 
     # ------------------------------------------------------------------
     # Effectiveness tracking
@@ -156,6 +157,11 @@ class PromptLifecycleManager:
         # Prompt strength: effectiveness * version proxy
         s_raw = 2.0 * effectiveness * version
         s_prompt = max(_PROMPT_STRENGTH_FLOOR, s_raw)
+
+        if self._ebbinghaus is None:
+            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+            from superlocalmemory.core.config import ForgettingConfig
+            self._ebbinghaus = EbbinghausCurve(ForgettingConfig())
 
         retention = self._ebbinghaus.retention(hours, s_prompt)
         return retention

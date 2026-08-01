@@ -132,13 +132,13 @@ class ConsolidationEngine:
         ccq_worker: CCQWorker | None = None,
     ) -> None:
         self._db = db
-        self._config = config
+        self._consolidation_config = config
         self._summarizer = summarizer
         self._behavioral = behavioral_store
         self._auto_linker = auto_linker
         self._graph_analyzer = graph_analyzer
         self._temporal_validator = temporal_validator
-        self._slm_config = slm_config
+        self._config = slm_config
         self._ccq_worker = ccq_worker
         self._mode = slm_config.mode.value if slm_config else "a"
         self._store_count: int = 0  # For step-count trigger (L7)
@@ -213,7 +213,7 @@ class ConsolidationEngine:
                             def mine(self, *a, **kw): return []
                     from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
                     from superlocalmemory.core.config import ParameterizationConfig
-                    p_config = getattr(self._slm_config, "parameterization", ParameterizationConfig())
+                    p_config = getattr(self._config, "parameterization", ParameterizationConfig())
                     from superlocalmemory.infra.data_root import state_path
                     learning_db = str(state_path("learning.db"))
                     beh_store = BehavioralPatternStore(learning_db)
@@ -246,7 +246,7 @@ class ConsolidationEngine:
                 # Never on recall/remember hot path. Budget: max 3 per cycle.
                 try:
                     from superlocalmemory.evolution.skill_evolver import SkillEvolver
-                    evolver = SkillEvolver(self._db.db_path)
+                    evolver = SkillEvolver(self._db.db_path, self._config)
                     results["skill_evolution"] = evolver.run_consolidation_cycle(profile_id)
                 except Exception as exc:
                     logger.debug("Skill evolution (non-fatal): %s", exc)
@@ -286,11 +286,11 @@ class ConsolidationEngine:
 
         Returns True if lightweight consolidation was triggered.
         """
-        if not self._config.enabled:
+        if not self._consolidation_config.enabled:
             return False
 
         self._store_count += 1
-        if self._store_count >= self._config.step_count_trigger:
+        if self._store_count >= self._consolidation_config.step_count_trigger:
             self._store_count = 0
             self.consolidate(profile_id, lightweight=True)
             # V3.4.2: Queue graph analysis in background (non-blocking)
@@ -388,7 +388,7 @@ class ConsolidationEngine:
           - learned_preferences: opinion facts with confidence >= threshold
         """
         blocks_compiled = 0
-        block_limit = self._config.block_char_limit
+        block_limit = self._consolidation_config.block_char_limit
 
         # 1. user_profile: top semantic/opinion facts by access
         user_facts = self._get_top_facts(
@@ -439,7 +439,7 @@ class ConsolidationEngine:
             "GROUP BY f.fact_id "
             "HAVING COUNT(a.log_id) >= ? "
             "ORDER BY COUNT(a.log_id) DESC LIMIT 5",
-            (profile_id, self._config.promotion_min_access),
+            (profile_id, self._consolidation_config.promotion_min_access),
         )
         self._store_core_block(
             profile_id, "active_decisions",
@@ -454,7 +454,7 @@ class ConsolidationEngine:
             "WHERE profile_id = ? AND fact_type = 'opinion' "
             "AND confidence >= ? AND lifecycle = 'active' "
             "ORDER BY confidence DESC LIMIT 5",
-            (profile_id, self._config.promotion_min_trust),
+            (profile_id, self._consolidation_config.promotion_min_trust),
         )
         self._store_core_block(
             profile_id, "learned_preferences",
@@ -491,7 +491,7 @@ class ConsolidationEngine:
                     summary = self._summarizer.summarize_cluster(fact_dicts)
                     self._store_core_block(
                         profile_id, block_type,
-                        summary[:self._config.block_char_limit],
+                        summary[:self._consolidation_config.block_char_limit],
                         [f["fact_id"] for f in facts],
                         compiled_by="llm",
                     )
@@ -524,7 +524,7 @@ class ConsolidationEngine:
             "WHERE f.profile_id = ? AND f.lifecycle = 'active' "
             "GROUP BY f.fact_id "
             "HAVING COUNT(a.log_id) >= ?",
-            (profile_id, self._config.promotion_min_access),
+            (profile_id, self._consolidation_config.promotion_min_access),
         )
 
         promoted = 0
@@ -537,7 +537,7 @@ class ConsolidationEngine:
                 continue
 
             # Trust check
-            if d.get("confidence", 0) < self._config.promotion_min_trust:
+            if d.get("confidence", 0) < self._consolidation_config.promotion_min_trust:
                 continue
 
             # Promote: active -> warm (lifecycle transition)
@@ -606,7 +606,7 @@ class ConsolidationEngine:
             return {"decayed": 0}
         try:
             decayed = self._auto_linker.decay_unused(
-                profile_id, days_threshold=self._config.decay_days_threshold,
+                profile_id, days_threshold=self._consolidation_config.decay_days_threshold,
             )
             return {"decayed": decayed}
         except Exception as exc:
