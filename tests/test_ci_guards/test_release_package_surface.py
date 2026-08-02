@@ -61,12 +61,14 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall/validation.js",
         "scripts/preuninstall.js",
     }
-    # V3.8.6 adds seven bounded canonical-writer, journal, codec, migration, and
-    # strict read-connection modules; V3.8.9 adds materialization_control.py.
-    # Keep the count exact enough to catch an accidentally shipped build/test
-    # surface; the byte budget remains the primary package-size guard.
-    assert artifact["entryCount"] <= 668
-    assert artifact["unpackedSize"] <= 10 * 1024 * 1024
+    # The package intentionally bundles the Python runtime (src/superlocalmemory/)
+    # for a network-free install; the 4.0 module set brings the shipped tree to
+    # ~1.25k files / ~16 MB. These ceilings sit just above that so they still
+    # catch an accidentally shipped build/test surface while allowing the bundled
+    # runtime. The excluded-surface assertions above remain the primary guard
+    # against shipping tests, caches, or build tooling.
+    assert artifact["entryCount"] <= 1350
+    assert artifact["unpackedSize"] <= 18 * 1024 * 1024
 
 
 def test_dmg_distribution_contract_is_absent_from_supported_surfaces() -> None:
