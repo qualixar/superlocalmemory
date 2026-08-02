@@ -36,9 +36,8 @@ import sys
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager, AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -527,7 +526,11 @@ def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> No
 
 from superlocalmemory.core.recall_gate import (
     begin_recall as _begin_recall,
+)
+from superlocalmemory.core.recall_gate import (
     end_recall as _end_recall,
+)
+from superlocalmemory.core.recall_gate import (
     in_flight as _recalls_in_flight,
 )
 
@@ -571,6 +574,7 @@ def _emit_event(
 # lock queues, and total wall time is N × single-recall-time. 3 concurrent
 # full recalls gives parallelism benefit without resource oversaturation.
 import asyncio as _asyncio
+
 _recall_semaphore = _asyncio.Semaphore(3)
 
 
@@ -707,11 +711,11 @@ class ObserveBuffer:
             }
 
         try:
-            from superlocalmemory.hooks.auto_capture import AutoCapture
             from superlocalmemory.core.engine_ingestion import (
                 build_engine_ingestion_command,
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
+            from superlocalmemory.hooks.auto_capture import AutoCapture
 
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
@@ -1728,7 +1732,8 @@ async def lifespan(application: FastAPI):
                 _t.sleep(0.5)
             try:
                 from superlocalmemory.retrieval.vector_store import (
-                    VectorStore, VectorStoreConfig,
+                    VectorStore,
+                    VectorStoreConfig,
                 )
                 db = engine._db
                 db_path = getattr(db, "db_path", None) or getattr(db, "_db_path", None)
@@ -1871,9 +1876,6 @@ async def lifespan(application: FastAPI):
                 #    attempts. No-op when there are no NULLs.
                 _SELF_HEAL_STATUS["state"] = "backfilling_embeddings"
                 try:
-                    from superlocalmemory.storage.embedding_migrator import (
-                        backfill_missing_embeddings,
-                    )
                     # RECALL-PRIORITY THROTTLE: the embedding worker is a single
                     # serialized subprocess shared with foreground recall. A
                     # continuous backfill starves interactive query-embedding and
@@ -1883,6 +1885,9 @@ async def lifespan(application: FastAPI):
                     # uses. This keeps recall responsive throughout the heal (the
                     # zero-pain requirement); the heal just takes a little longer.
                     from superlocalmemory.core import recall_gate
+                    from superlocalmemory.storage.embedding_migrator import (
+                        backfill_missing_embeddings,
+                    )
                     total_embedded = 0
                     no_progress = 0
                     for _attempt in range(500):
@@ -2214,10 +2219,10 @@ async def lifespan(application: FastAPI):
 
     # V3.6: Mount optimize API routes + restore persisted metrics + start flush loop
     try:
-        from superlocalmemory.server.routes.optimize import router as optimize_router
         from superlocalmemory.optimize.metrics.counters import MetricsCollector
         from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
         from superlocalmemory.optimize.storage.db import CacheDB
+        from superlocalmemory.server.routes.optimize import router as optimize_router
         application.include_router(optimize_router)
 
         # Restore persisted metrics counters on startup.
@@ -2333,8 +2338,8 @@ async def lifespan(application: FastAPI):
                 pass
         # Final flush to persist the last window (H-04: use singleton)
         try:
-            from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
             from superlocalmemory.optimize.metrics.counters import MetricsCollector
+            from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
             from superlocalmemory.optimize.storage.db import CacheDB as _FinalCacheDB
             MetricsPersistence().flush(
                 MetricsCollector.get_instance(),
@@ -2609,11 +2614,11 @@ def create_app() -> FastAPI:
 
     # -- Brain route (LLD-04 v2: /api/v3/brain + deprecated shims) --
     try:
-        from superlocalmemory.server.routes.brain import (
-            router as brain_router,
-        )
         from superlocalmemory.server.middleware.security_headers import (
             SecurityHeadersMiddleware as StrictSecurityHeadersMiddleware,
+        )
+        from superlocalmemory.server.routes.brain import (
+            router as brain_router,
         )
         application.include_router(brain_router)
         # Strict CSP / XFO / XCTO / Referrer-Policy — applies to every
@@ -2796,14 +2801,14 @@ def _register_dashboard_routes(application: FastAPI) -> None:
 
     Extracted from api.py's create_app() to avoid duplicate MemoryEngine.
     """
-    from superlocalmemory.server.api import UI_DIR as _source_ui_dir
-
     # D-04: Copy UI assets to the data dir at daemon startup to avoid macOS
     # xattr/TCC PermissionError on source-tree files in editable installs.
     # The data dir has no quarantine attributes; the copy is idempotent (same
     # content from the same package) so concurrent daemon starts are safe.
     # Falls back to the source path with a WARNING — never crashes the daemon.
     import shutil as _shutil
+
+    from superlocalmemory.server.api import UI_DIR as _source_ui_dir
     _data_ui_dir = state_path("ui")
     try:
         _data_ui_dir.mkdir(parents=True, exist_ok=True)
@@ -2826,11 +2831,11 @@ def _register_dashboard_routes(application: FastAPI) -> None:
 
     # Rate limiting (graceful)
     try:
-        from superlocalmemory.infra.rate_limiter import RateLimiter
         from superlocalmemory.core.remote_mode import (
-            rate_limit_config,
             is_rate_limit_exempt,
+            rate_limit_config,
         )
+        from superlocalmemory.infra.rate_limiter import RateLimiter
         # v3.6.12 (issue #40): thresholds are env-tunable (SLM_RATE_LIMIT_WRITE/
         # READ/WINDOW) so distributed/LAN operators can raise them. Defaults
         # unchanged (30 writes / 120 reads per 60s) for the local case.
@@ -2854,7 +2859,10 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         # apply any persisted override from config.json.
         try:
             from superlocalmemory.infra.rate_limiter import (
-                register_managed as _reg_rl, reset_managed as _reset_rl,
+                register_managed as _reg_rl,
+            )
+            from superlocalmemory.infra.rate_limiter import (
+                reset_managed as _reset_rl,
             )
             _reset_rl()
             _reg_rl("write", _write_limiter)
@@ -3136,16 +3144,17 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     application.mount("/static", StaticFiles(directory=str(UI_DIR)), name="static")
 
     # Route modules
-    from superlocalmemory.server.routes.memories import router as memories_router
-    from superlocalmemory.server.routes.stats import router as stats_router
-    from superlocalmemory.server.routes.profiles import router as profiles_router
+    from superlocalmemory.server.routes.adapters import router as adapters_router
+    from superlocalmemory.server.routes.agents import router as agents_router
     from superlocalmemory.server.routes.backup import router as backup_router
     from superlocalmemory.server.routes.data_io import router as data_io_router
     from superlocalmemory.server.routes.events import router as events_router
-    from superlocalmemory.server.routes.agents import router as agents_router
-    from superlocalmemory.server.routes.ws import router as ws_router, manager as ws_manager
+    from superlocalmemory.server.routes.memories import router as memories_router
+    from superlocalmemory.server.routes.profiles import router as profiles_router
+    from superlocalmemory.server.routes.stats import router as stats_router
     from superlocalmemory.server.routes.v3_api import router as v3_router
-    from superlocalmemory.server.routes.adapters import router as adapters_router
+    from superlocalmemory.server.routes.ws import manager as ws_manager
+    from superlocalmemory.server.routes.ws import router as ws_router
 
     application.include_router(memories_router)
     application.include_router(stats_router)
@@ -3207,8 +3216,8 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             pass
 
     # Wire WebSocket manager
-    import superlocalmemory.server.routes.profiles as _profiles_mod
     import superlocalmemory.server.routes.data_io as _data_io_mod
+    import superlocalmemory.server.routes.profiles as _profiles_mod
     _profiles_mod.ws_manager = ws_manager
     _data_io_mod.ws_manager = ws_manager
 
@@ -3674,6 +3683,68 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "profile_id": engine._profile_id,
                 "content_preview": req.content[:100],
             })
+
+            # V4 Phase 4: OperationPolicyRegistry evaluation.
+            # ActorContext is server-derived — principal_id from _require_write_actor,
+            # client_host from ASGI request, session_token_hash from server headers.
+            # NONE of these values come from the request body (RememberRequest).
+            # This block runs BEFORE the durable admission journal is written.
+            from superlocalmemory.core.actor_context import (
+                ActorContext as _ActorContext,
+            )
+            from superlocalmemory.core.actor_context import (
+                ActorRole as _ActorRole,
+            )
+            from superlocalmemory.core.actor_context import (
+                Transport as _Transport,
+            )
+            from superlocalmemory.core.operation_policy_registry import (
+                _DEFAULT_REGISTRY as _policy_registry,
+            )
+            from superlocalmemory.core.operation_request import OperationKind as _OpKind
+
+            _client_host = (
+                request.client.host if request.client is not None else ""
+            ) or ""
+            _token_raw = (
+                request.headers.get("x-slm-user-session", "")
+                or (request.cookies.get("slm_session", "") if request.cookies else "")
+            ) or ""
+            _token_hash = (
+                hashlib.sha256(_token_raw.encode()).hexdigest()[:16]
+                if _token_raw else ""
+            )
+            # Detect single-user vs. company mode from the RBAC engine (server-side
+            # state). Fail-open if the RBAC state cannot be read — a 503 from RBAC
+            # already blocks the request via _rbac_write_gate. Here we only need the
+            # mode string for unknown-kind fallback; REMEMBER is always a known kind.
+            _rbac_state = getattr(application.state, "rbac", None)
+            try:
+                _is_company = bool(
+                    _rbac_state is not None and _rbac_state.user_count() > 0
+                )
+            except Exception:
+                _is_company = False
+            _policy_mode = "company" if _is_company else "local"
+
+            _http_actor = _ActorContext(
+                principal_id=trusted_actor_id,
+                roles=frozenset({_ActorRole.OWNER}),
+                active_profile_id=engine._profile_id,
+                transport=_Transport.HTTP,
+                client_host=_client_host,
+                session_token_hash=_token_hash,
+            )
+            _policy_decision = _policy_registry.evaluate(
+                _OpKind.REMEMBER, _http_actor, _policy_mode,
+            )
+            if not _policy_decision.allowed:
+                # Map to PermissionError: the except block below converts this
+                # to HTTP 403 — consistent with AdmissionAuthorizationError.
+                raise PermissionError(
+                    f"operation policy denied REMEMBER: {_policy_decision.reason}"
+                )
+
             admission = RememberRequest(
                 content=req.content,
                 profile_id=engine._profile_id,
@@ -3822,20 +3893,20 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 from superlocalmemory.core.maintenance import run_maintenance as _run_maint
                 maint_result = _run_maint(engine._db, engine._config, pid)
                 results["langevin"] = {"updated": maint_result.get("updated", 0)}
-            except Exception as exc:
+            except Exception:
                 logger.exception("maintenance langevin step failed")
                 results["langevin"] = {"error": "internal error"}
             try:
-                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
                 from superlocalmemory.learning.forgetting_scheduler import (
                     ForgettingScheduler,
                 )
+                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
                 ebb = EbbinghausCurve(engine._config.forgetting)
                 sched = ForgettingScheduler(
                     engine._db, ebb, engine._config.forgetting,
                 )
                 results["forgetting"] = sched.run_decay_cycle(pid, force=False)
-            except Exception as exc:
+            except Exception:
                 logger.exception("maintenance forgetting step failed")
                 results["forgetting"] = {"error": "internal error"}
             try:
@@ -3848,7 +3919,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 )
                 count = cw._generate_patterns(pid, False)
                 results["behavioral"] = {"patterns_mined": count}
-            except Exception as exc:
+            except Exception:
                 logger.exception("maintenance behavioral step failed")
                 results["behavioral"] = {"error": "internal error"}
             authorization.complete()
@@ -4017,6 +4088,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _require_write_actor(request)
         import subprocess
         import sys as _sys
+
         from superlocalmemory.core.platform_utils import popen_platform_kwargs
 
         logger.info("Daemon restart requested via API")
@@ -4543,7 +4615,9 @@ def _start_pending_materializer() -> None:
 
     def _loop():
         from superlocalmemory.cli.pending_store import (
-            get_pending, mark_done, mark_failed,
+            get_pending,
+            mark_done,
+            mark_failed,
         )
         # v3.4.38: log first engine acquisition so we know materializer is alive
         _engine_logged = False
@@ -4671,6 +4745,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     global _start_time
     assert_no_durable_root_conflict()
     import socket
+
     import uvicorn
 
     # Bind before any migration or engine work.  A process which cannot own
@@ -4736,7 +4811,10 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
 
     try:
         from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
-            is_ready as _is_ready, migrate as _migrate,
+            is_ready as _is_ready,
+        )
+        from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+            migrate as _migrate,
         )
         _data = canonical_data_root()
         if not _is_ready(_data):

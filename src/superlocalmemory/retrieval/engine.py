@@ -27,12 +27,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
+from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.retrieval.time_window import (
     in_window,
     infer_window_from_query,
     parse_window,
 )
-from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
 from superlocalmemory.storage.models import (
     AtomicFact,
     Mode,
@@ -155,6 +155,7 @@ class RetrievalEngine:
         include_global: bool = False,
         include_shared: bool = False,
         window: str | tuple[str, str] | None = None,
+        as_of: str | None = None,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
 
@@ -165,6 +166,11 @@ class RetrievalEngine:
         V3.4.40 (2026-05-09): ``extra_disabled_channels`` allows callers to
         skip specific channels for a single recall (e.g. SpreadingActivation
         for the ``--fast`` CLI flag) without mutating shared config.
+
+        ``as_of``: Optional ISO 8601 datetime string. When set, the bi-temporal
+        validity filter treats facts as seen from that point in time —
+        not-yet-valid and already-expired facts are demoted. Default ``None``
+        leaves all existing behaviour unchanged.
         """
         t0 = time.monotonic()
         # NOTE: extra_disabled_channels is passed as an explicit local argument
@@ -212,6 +218,7 @@ class RetrievalEngine:
             query, profile_id, strat,
             extra_disabled_channels=extra_disabled_channels,
             include_global=include_global, include_shared=include_shared,
+            as_of=as_of,
         )
         _em("run_channels")
         if profile_hits:
@@ -765,6 +772,7 @@ class RetrievalEngine:
         extra_disabled_channels: set[str] | None = None,
         include_global: bool = False,
         include_shared: bool = False,
+        as_of: str | None = None,
     ) -> dict[str, list[tuple[str, float]]]:
         """Run active retrieval channels.
 
@@ -885,7 +893,10 @@ class RetrievalEngine:
         )
         for name, fut in futures.items():
             if fut in pending:
-                logger.warning("Channel %s exceeded %.1fs latency budget", name, channel_timeout_seconds)
+                logger.warning(
+                    "Channel %s exceeded %.1fs latency budget",
+                    name, channel_timeout_seconds,
+                )
                 continue
             try:
                 ch_name, result = fut.result()
@@ -894,11 +905,15 @@ class RetrievalEngine:
             except Exception as exc:
                 logger.warning("Channel %s failed: %s", name, exc)
 
-        # Apply registered post-retrieval filters (forgetting filter, etc.)
+        # Apply registered post-retrieval filters (forgetting filter, etc.).
+        # Pass as_of in context dict when set so the bi-temporal validity filter
+        # can perform point-in-time demotion. None context preserves the existing
+        # behaviour for all callers that don't use time-travel recall.
+        _filter_context = {"as_of": as_of} if as_of is not None else None
         if hasattr(self, '_registry') and self._registry._filters:
             for fn in self._registry._filters:
                 try:
-                    out = fn(out, profile_id, None)
+                    out = fn(out, profile_id, _filter_context)
                 except Exception as exc:
                     logger.warning("Post-retrieval filter failed: %s", exc)
 

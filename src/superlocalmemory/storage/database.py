@@ -12,19 +12,34 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
 from __future__ import annotations
 
-import json, logging, os, sqlite3, threading, time
+import json
+import logging
+import os
+import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Generator
 
-from superlocalmemory.storage.write_lock import get_write_lock
 from superlocalmemory.storage.models import (
-    AtomicFact, CanonicalEntity, ConsolidationAction, ConsolidationActionType,
-    EdgeType, EntityAlias, EntityProfile, FactType, GraphEdge,
-    MemoryLifecycle, MemoryRecord, MemoryScene, SignalType, TemporalEvent,
+    AtomicFact,
+    CanonicalEntity,
+    ConsolidationAction,
+    EdgeType,
+    EntityAlias,
+    EntityProfile,
+    FactType,
+    GraphEdge,
+    MemoryLifecycle,
+    MemoryRecord,
+    MemoryScene,
+    SignalType,
+    TemporalEvent,
     TrustScore,
 )
+from superlocalmemory.storage.write_lock import get_write_lock
 
 logger = logging.getLogger(__name__)
 
@@ -1599,7 +1614,8 @@ class DatabaseManager:
 
         Never deletes the fact (immutability).
         """
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
         now = _dt.now(UTC).isoformat()
 
         # Resolve the event-time boundary from the fact's referenced_date.
@@ -1692,6 +1708,92 @@ class DatabaseManager:
             for r in rows:
                 invalid.add(dict(r)["fact_id"])
         return invalid
+
+    def get_event_time_expired_fact_ids(
+        self,
+        fact_ids: list[str],
+        profile_id: str,
+        as_of: str | None = None,
+    ) -> set[str]:
+        """Return the subset of ``fact_ids`` that are event-time out-of-range.
+
+        Returns fact_ids whose event-time validity window does not encompass
+        ``as_of`` (or the current wall-clock time when ``as_of`` is None):
+
+        1. **Already expired** — ``valid_until IS NOT NULL AND valid_until < ref``
+           where ``ref`` is ``as_of`` when provided or the current UTC time.
+        2. **Not yet valid** — ``valid_from IS NOT NULL AND valid_from > as_of``
+           (only when ``as_of`` is provided for explicit point-in-time recall).
+
+        Zero-regression guarantee: facts with ``valid_until = NULL`` are
+        assumed open-ended (still valid) and are NEVER returned. Facts with no
+        temporal record at all are NEVER returned (assumed valid). Because almost
+        all existing facts have ``valid_until = NULL``, the default path
+        (``as_of=None``) returns an empty set and causes no demotion.
+
+        Bounded + indexed: only the supplied candidate ids are queried (never a
+        full-table scan), keyed on the ``fact_id`` PK. Chunked to stay under
+        SQLite's ~999 bound-parameter limit (chunk size 900). The
+        ``idx_temporal_valid(profile_id, valid_until)`` index assists the
+        ``valid_until <`` range predicate after the PK IN-lookup. The
+        ``valid_from > as_of`` branch operates on the same bounded PK row set
+        (≤ 900 rows per chunk) — no full-table scan occurs.
+
+        Fail-open: any DB error logs a warning and returns an empty set so
+        retrieval can never break because of a validity lookup failure.
+
+        Args:
+            fact_ids: Candidate fact IDs to check (bounded retrieval pool).
+            profile_id: Current profile — scopes the lookup to one tenant.
+            as_of: Optional ISO 8601 datetime string for point-in-time recall.
+                When set, facts not yet valid at this time are also returned.
+                When None (default), only facts past their ``valid_until`` are
+                returned — the standard current-time path.
+
+        Note:
+            ``as_of`` must be in the same ISO 8601 format as the stored
+            ``valid_until`` / ``valid_from`` values so SQLite's lexicographic
+            string comparison correctly orders the timestamps.
+        """
+        if not fact_ids:
+            return set()
+        expired: set[str] = set()
+        try:
+            chunk = 900
+            for start in range(0, len(fact_ids), chunk):
+                batch = fact_ids[start:start + chunk]
+                placeholders = ",".join("?" for _ in batch)
+                if as_of is not None:
+                    # Time-travel: expired-before-as_of OR not-yet-started-at-as_of.
+                    rows = self.execute(
+                        f"SELECT fact_id FROM fact_temporal_validity "
+                        f"WHERE fact_id IN ({placeholders}) "
+                        f"  AND profile_id = ? "
+                        f"  AND ("
+                        f"    (valid_until IS NOT NULL AND valid_until < ?) "
+                        f"    OR (valid_from IS NOT NULL AND valid_from > ?)"
+                        f"  )",
+                        (*batch, profile_id, as_of, as_of),
+                    )
+                else:
+                    # Default path: only facts whose valid_until has passed.
+                    # idx_temporal_valid(profile_id, valid_until) assists range scan.
+                    rows = self.execute(
+                        f"SELECT fact_id FROM fact_temporal_validity "
+                        f"WHERE fact_id IN ({placeholders}) "
+                        f"  AND profile_id = ? "
+                        f"  AND valid_until IS NOT NULL "
+                        f"  AND valid_until < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+                        (*batch, profile_id),
+                    )
+                for r in rows:
+                    expired.add(dict(r)["fact_id"])
+        except Exception as exc:
+            logger.warning(
+                "Event-time expiry lookup failed (fail-open): %s", exc,
+            )
+            return set()
+        return expired
 
     def get_fact_event_times(
         self, fact_ids: list[str], profile_id: str,

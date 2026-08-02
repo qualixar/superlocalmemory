@@ -435,13 +435,54 @@ def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
     )
 
     def validate_admission(request: IngestionRequest) -> None:
-        """Apply trust policy before the journal or canonical transaction."""
+        """Apply trust policy before the journal or canonical transaction.
+
+        V4 Phase 4 addition: evaluate the OperationPolicyRegistry AFTER the
+        trust hook and BEFORE the coordinator transaction. This evaluation is
+        CPU-only (dict lookup + frozenset operations, no I/O) and runs in the
+        validate_admission slot which is already outside the SQLite writer.
+
+        The default registry allows every REMEMBER from an OWNER via the
+        INTERNAL transport in local mode — zero new rejections on the current
+        happy path. A denial raises ValueError, which propagates through
+        IngestionCommand.submit() to the caller exactly as existing slot
+        violations do.
+        """
         engine._hooks.run_pre("store", {
             "operation": "store",
             "agent_id": request.trusted_actor_id,
             "profile_id": request.profile_id,
             "content_preview": request.content[:100],
         })
+
+        # Phase 4: additive policy check — runs after the trust hook.
+        # Imports are lazy to avoid import-order coupling at module init.
+        from superlocalmemory.core.actor_context import ActorContext, ActorRole, Transport
+        from superlocalmemory.core.operation_policy_registry import _DEFAULT_REGISTRY
+        from superlocalmemory.core.operation_request import OperationKind
+
+        # A missing actor is rejected by the existing admission check with its
+        # canonical message; the policy layer is strictly additive and must not
+        # preempt that rejection, so it only evaluates when an actor is present.
+        if request.trusted_actor_id:
+            _actor = ActorContext(
+                # trusted_actor_id is already server-validated by the caller;
+                # it is NEVER taken from the request body here.
+                principal_id=request.trusted_actor_id,
+                roles=frozenset({ActorRole.OWNER}),
+                active_profile_id=request.profile_id,
+                transport=Transport.INTERNAL,
+                client_host="",   # in-process: always local
+            )
+            _decision = _DEFAULT_REGISTRY.evaluate(
+                OperationKind.REMEMBER,
+                _actor,
+                "local",  # internal Python-API path is always local/single-user
+            )
+            if not _decision.allowed:
+                raise ValueError(
+                    f"operation policy denied REMEMBER: {_decision.reason}"
+                )
 
     def resume_checkpoint(operation: IngestionOperation) -> MaterializationResult:
         """Repair only stages whose writes have an idempotent natural key."""

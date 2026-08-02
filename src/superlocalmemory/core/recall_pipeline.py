@@ -765,6 +765,7 @@ def run_recall(
     include_global: bool = False,
     include_shared: bool = False,
     window: str | tuple[str, str] | None = None,
+    as_of: str | None = None,
 ) -> RecallResponse:
     """Recall relevant facts for a query.
 
@@ -778,6 +779,11 @@ def run_recall(
     to the client-driven-agentic default (see ``resolve_hot_path_fast``): the
     agent hot path skips the internal round and delegates refinement to the
     calling LLM. ``fast=False`` forces the internal agentic round.
+
+    ``as_of``: Optional ISO 8601 datetime string for point-in-time time-travel
+    recall. When set, the bi-temporal validity filter demotes facts that were
+    not yet valid or had already expired at that point. Default ``None`` leaves
+    all existing behaviour unchanged.
     """
     m = mode or config.mode
 
@@ -808,6 +814,7 @@ def run_recall(
         include_global=include_global,
         include_shared=include_shared,
         window=window,
+        as_of=as_of,
     )
     _mark("retrieval(chan+rerank)")
 

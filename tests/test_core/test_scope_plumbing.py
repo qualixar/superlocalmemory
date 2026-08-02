@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import threading
 
-import pytest
-
 from superlocalmemory.cli import pending_store
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
@@ -192,6 +190,7 @@ class TestConcurrentRecallScopeIsolation:
             extra_disabled_channels=None,
             include_global=False,
             include_shared=False,
+            as_of=None,
         ):
             # v3.7.9: flags now travel as explicit kwargs rather than being set
             # as attributes on shared channel instances. Capture the kwargs
@@ -206,6 +205,7 @@ class TestConcurrentRecallScopeIsolation:
                 query, profile_id, strat,
                 extra_disabled_channels=extra_disabled_channels,
                 include_global=include_global, include_shared=include_shared,
+                as_of=as_of,
             )
 
         re._run_channels = _spy
