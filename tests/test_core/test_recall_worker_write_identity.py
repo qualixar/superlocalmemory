@@ -16,7 +16,21 @@ def _engine() -> MagicMock:
     engine._profile_id = "default"
     engine._embedder = None
     engine._retrieval_engine = None
-    engine._db.execute.return_value = [{"content": "old content"}]
+    # No projection backends: delete proves erasure across stores, and a bare
+    # MagicMock store would fabricate residue. None means "nothing to prove".
+    engine._vector_store = None
+    engine._ann_index = None
+    engine._db.db_path = "/nonexistent/memory.db"
+
+    def _execute(sql, params=()):
+        text = " ".join(str(sql).split()).lower()
+        # The fact-content read returns the row; every erasure presence/existence
+        # probe returns empty so a delete verifies as "nothing remains".
+        if text.startswith("select content") and "from atomic_facts" in text:
+            return [{"content": "old content", "memory_id": None}]
+        return []
+
+    engine._db.execute.side_effect = _execute
     return engine
 
 

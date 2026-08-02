@@ -58,6 +58,11 @@ class ANNIndex:
         """Embedding dimension this index was created for."""
         return self._dim
 
+    def contains(self, fact_id: str) -> bool:
+        """Return True if the index currently holds this fact."""
+        with self._lock:
+            return fact_id in self._id_to_idx
+
     # ------------------------------------------------------------------
     # Mutation
     # ------------------------------------------------------------------

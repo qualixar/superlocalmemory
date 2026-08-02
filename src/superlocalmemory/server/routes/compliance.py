@@ -8,16 +8,16 @@ Routes: /api/compliance/status, /api/compliance/audit,
         /api/compliance/retention-policy
 Uses V3 compliance modules: ABACEngine, AuditChain, RetentionEngine.
 """
-import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from .helpers import get_active_profile, get_engine_lazy, MEMORY_DIR, DB_PATH
 from superlocalmemory.server.route_mutations import authorize_route_mutation
 from superlocalmemory.storage.memory_write import memory_write
+
+from .helpers import DB_PATH, MEMORY_DIR, get_active_profile, get_engine_lazy
 
 logger = logging.getLogger("superlocalmemory.routes.compliance")
 router = APIRouter()
@@ -31,10 +31,10 @@ AUDIT_DB = MEMORY_DIR / "audit_chain.db"
 # Feature detection
 COMPLIANCE_AVAILABLE = False
 try:
-    from superlocalmemory.compliance.audit import AuditChain
-    from superlocalmemory.compliance.retention import RetentionEngine
     from superlocalmemory.compliance.abac import ABACEngine
+    from superlocalmemory.compliance.audit import AuditChain
     from superlocalmemory.compliance.gdpr import GDPRCompliance
+    from superlocalmemory.compliance.retention import RetentionEngine
     COMPLIANCE_AVAILABLE = True
 except ImportError:
     logger.info("V3 compliance engine not available")
@@ -239,8 +239,8 @@ async def gdpr_export(request: Request):
     # remote uncredentialed fails closed) AND require MANAGE — in company mode
     # a session cookie flows on navigation, so a non-admin user is still denied;
     # the machine owner keeps MANAGE.
-    from superlocalmemory.server.write_identity import require_http_mutation_actor
     from superlocalmemory.server.rbac_enforce import require_manage
+    from superlocalmemory.server.write_identity import require_http_mutation_actor
     require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
                                 actor_kind="gdpr-export")
     require_manage(request)
@@ -299,9 +299,17 @@ async def gdpr_erase(request: Request, data: dict = {}):
             source_agent_id="http-gdpr-erase",
             profile_id=profile,
         )
-        result = GDPRCompliance(engine._db).forget_profile(profile)
+        result = GDPRCompliance(engine._db, engine=engine).forget_profile(profile)
         authorization.complete()
-        return {"success": True, "active_profile": profile, **(result or {})}
+        result = result or {}
+        failure_markers = (
+            "vector_store_failures",
+            "audit_completion_failed",
+            "audit_request_failed",
+            "receipt_persist_failed",
+        )
+        success = not any(result.get(marker) for marker in failure_markers)
+        return {"success": success, "active_profile": profile, **result}
     except Exception:
         logger.exception("gdpr_erase error")
         return {"success": False, "error": "Internal server error"}

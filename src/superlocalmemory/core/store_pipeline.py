@@ -271,6 +271,87 @@ def _upsert_fact_vectors(fact, profile_id, ann_index, vector_store, embedder=Non
         )
 
 
+class _TombstoneReadError(Exception):
+    pass
+
+
+def _fact_is_tombstoned(db: DatabaseManager, profile_id: str, fact_id: str) -> bool:
+    try:
+        rows = db.execute(
+            "SELECT 1 FROM projection_tombstones "
+            "WHERE profile_id = ? AND fact_id = ? LIMIT 1",
+            (profile_id, fact_id),
+        )
+        return bool(rows)
+    except Exception as exc:
+        raise _TombstoneReadError(
+            f"tombstone check failed for {fact_id[:16]}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _vector_residue_present(db: DatabaseManager, fact_id: str) -> bool:
+    try:
+        em = db.execute(
+            "SELECT 1 FROM embedding_metadata WHERE fact_id = ? LIMIT 1", (fact_id,)
+        )
+        if em:
+            return True
+    except Exception:
+        pass
+    try:
+        vrm = db.execute(
+            "SELECT 1 FROM vector_row_map WHERE fact_id = ? LIMIT 1", (fact_id,)
+        )
+        if vrm:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _drop_resurrected_facts(
+    db: DatabaseManager,
+    profile_id: str,
+    stored_ids: list[str],
+    vector_store: Any,
+    ann_index: Any,
+    retrieval_engine: Any,
+) -> list[str]:
+    survivors: list[str] = []
+    for fid in stored_ids:
+        try:
+            tombstoned = _fact_is_tombstoned(db, profile_id, fid)
+        except _TombstoneReadError as exc:
+            logger.error(
+                "Tombstone read error in drop_resurrected for %s, deferring: %s",
+                fid[:16], exc,
+            )
+            continue
+        if not tombstoned:
+            survivors.append(fid)
+            continue
+        vec_store_ok = vector_store is not None and getattr(vector_store, "available", False)
+        try:
+            if vec_store_ok:
+                vector_store.delete(fid)
+            if ann_index is not None and hasattr(ann_index, "remove"):
+                ann_index.remove(fid)
+            bm25 = getattr(retrieval_engine, "_bm25", None) if retrieval_engine else None
+            if bm25 is not None and hasattr(bm25, "remove_fact"):
+                bm25.remove_fact(fid)
+            db.delete_bm25_tokens_for_fact(fid)
+            db.delete_fact(fid, profile_id=profile_id)
+        except Exception as exc:
+            logger.warning("resurrection undo failed for %s: %s", fid[:16], exc)
+        if _vector_residue_present(db, fid):
+            logger.error(
+                "resurrection undo incomplete for %s: vector residue remains "
+                "(vec_store_available=%s); tombstone preserved",
+                fid[:16], vec_store_ok,
+            )
+    return survivors
+
+
 # ---------------------------------------------------------------------------
 # run_store  (was MemoryEngine.store)
 # ---------------------------------------------------------------------------
@@ -533,6 +614,15 @@ def run_store(
 
     stored_ids: list[str] = []
     for fact in facts:
+        try:
+            if _fact_is_tombstoned(db, profile_id, fact.fact_id):
+                continue
+        except _TombstoneReadError as _tse:
+            logger.error(
+                "Tombstone read error for %s, deferring ingestion: %s",
+                fact.fact_id[:16], _tse,
+            )
+            continue
         fact = enrich_fact(
             fact, record, profile_id,
             embedder=embedder,
@@ -851,6 +941,10 @@ def run_store(
                 )
             except Exception:
                 provenance_complete = False
+
+    stored_ids = _drop_resurrected_facts(
+        db, profile_id, stored_ids, vector_store, ann_index, retrieval_engine,
+    )
 
     logger.info("Stored %d facts (session=%s)", len(stored_ids), session_id)
 

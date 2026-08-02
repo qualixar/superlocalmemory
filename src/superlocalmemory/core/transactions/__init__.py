@@ -3,6 +3,19 @@
 
 from __future__ import annotations
 
+from superlocalmemory.core.transactions.erasure import (
+    ErasureProofRecord,
+    ErasureReceipt,
+    ErasureService,
+    ErasureState,
+    RemoveResult,
+    compute_erasure_hash,
+    fetch_receipt,
+    is_tombstoned,
+    tombstone_memory_id,
+    verify_receipt,
+    write_tombstones,
+)
 from superlocalmemory.core.transactions.manifest import (
     CompletionManifest,
     ManifestState,
@@ -32,6 +45,10 @@ from superlocalmemory.core.transactions.service import MemoryTransactionService
 
 __all__ = [
     "CompletionManifest",
+    "ErasureProofRecord",
+    "ErasureReceipt",
+    "ErasureService",
+    "ErasureState",
     "ManifestState",
     "MemoryTransactionService",
     "Obligation",
@@ -46,9 +63,16 @@ __all__ = [
     "OwnerResult",
     "ProjectionOwner",
     "Reconciler",
+    "RemoveResult",
     "build_evidence",
     "compute_envelope_hash",
+    "compute_erasure_hash",
     "derive_state",
+    "fetch_receipt",
     "hash_envelope_fields",
     "is_terminal_success",
+    "is_tombstoned",
+    "tombstone_memory_id",
+    "verify_receipt",
+    "write_tombstones",
 ]

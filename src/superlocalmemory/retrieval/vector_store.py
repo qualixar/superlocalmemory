@@ -205,6 +205,17 @@ class VectorStore:
         meta_idx_profile = (
             "CREATE INDEX IF NOT EXISTS idx_embmeta_profile ON embedding_metadata (profile_id)"
         )
+        row_map_ddl = (
+            "CREATE TABLE IF NOT EXISTS vector_row_map ("
+            "fact_id TEXT NOT NULL PRIMARY KEY, "
+            "profile_id TEXT NOT NULL, "
+            "vec_rowid INTEGER NOT NULL"
+            ")"
+        )
+        row_map_idx = (
+            "CREATE INDEX IF NOT EXISTS idx_vector_row_map_profile "
+            "ON vector_row_map (profile_id)"
+        )
         try:
             with self._managed_connection() as conn:
                 stored_dim = self._read_stored_dimension(conn)
@@ -217,6 +228,7 @@ class VectorStore:
                     # Drop metadata first (no FK enforcement, but cleaner ordering).
                     # Indexes on embedding_metadata are dropped automatically.
                     conn.execute("DROP TABLE IF EXISTS embedding_metadata")
+                    conn.execute("DROP TABLE IF EXISTS vector_row_map")
                     conn.execute("DROP TABLE IF EXISTS fact_embeddings")
                     # Commit the drops before recreating so that the virtual-table
                     # shadow tables are fully removed before the new CREATE runs.
@@ -226,6 +238,8 @@ class VectorStore:
                 conn.execute(meta_ddl)
                 conn.execute(meta_idx_fact)
                 conn.execute(meta_idx_profile)
+                conn.execute(row_map_ddl)
+                conn.execute(row_map_idx)
                 conn.commit()
         except Exception as exc:
             logger.debug("vec0 table creation failed: %s", exc)
@@ -313,11 +327,28 @@ class VectorStore:
                                 # Older self-heal code could insert metadata
                                 # before sqlite-vec, or row-id drift could point
                                 # metadata at another profile's vector.  Neither
-                                # is a valid projection pair.  Remove only the
-                                # stale pointer and rebuild at a fresh rowid;
-                                # never overwrite the other profile's payload.
+                                # is a valid projection pair.  Remove the stale
+                                # pointer and rebuild at a fresh rowid; never
+                                # overwrite the other profile's payload.
                                 conn.execute(
                                     "DELETE FROM embedding_metadata WHERE fact_id = ?",
+                                    (fact_id,),
+                                )
+                                # The old vec0 row is orphaned unless another
+                                # projection pair still references it. Reclaim it
+                                # so drift-repair never abandons raw payload.
+                                still_referenced = conn.execute(
+                                    "SELECT 1 FROM embedding_metadata "
+                                    "WHERE vec_rowid = ? LIMIT 1",
+                                    (rowid,),
+                                ).fetchone()
+                                if still_referenced is None:
+                                    conn.execute(
+                                        "DELETE FROM fact_embeddings WHERE rowid = ?",
+                                        (rowid,),
+                                    )
+                                conn.execute(
+                                    "DELETE FROM vector_row_map WHERE fact_id = ?",
                                     (fact_id,),
                                 )
                                 row = None
@@ -359,6 +390,14 @@ class VectorStore:
                                 ),
                             )
 
+                        conn.execute(
+                            "INSERT INTO vector_row_map (fact_id, profile_id, vec_rowid) "
+                            "VALUES (?, ?, ?) "
+                            "ON CONFLICT(fact_id) DO UPDATE SET "
+                            "profile_id = excluded.profile_id, "
+                            "vec_rowid = excluded.vec_rowid",
+                            (fact_id, profile_id, rowid),
+                        )
                         conn.commit()
                     return True
                 except Exception as exc:
@@ -492,11 +531,53 @@ class VectorStore:
                             "DELETE FROM embedding_metadata WHERE vec_rowid = ?",
                             (rowid,),
                         )
+                        conn.execute(
+                            "DELETE FROM vector_row_map WHERE fact_id = ?",
+                            (fact_id,),
+                        )
                         conn.commit()
                     return True
                 except Exception as exc:
                     logger.debug("delete failed for fact_id=%s: %s", fact_id, exc)
                     return False
+
+    def raw_vector_present(self, fact_id: str) -> bool:
+        if not self._available:
+            try:
+                conn = sqlite3.connect(str(self._db_path))
+                try:
+                    row = conn.execute(
+                        "SELECT 1 FROM vector_row_map WHERE fact_id = ? LIMIT 1",
+                        (fact_id,),
+                    ).fetchone()
+                    return row is not None
+                finally:
+                    conn.close()
+            except Exception:
+                return False
+        try:
+            with self._managed_connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM vector_row_map vrm "
+                    "WHERE vrm.fact_id = ? "
+                    "AND EXISTS (SELECT 1 FROM fact_embeddings fe "
+                    "WHERE fe.rowid = vrm.vec_rowid)",
+                    (fact_id,),
+                ).fetchone()
+                return row is not None
+        except Exception:
+            try:
+                conn2 = sqlite3.connect(str(self._db_path))
+                try:
+                    row = conn2.execute(
+                        "SELECT 1 FROM vector_row_map WHERE fact_id = ? LIMIT 1",
+                        (fact_id,),
+                    ).fetchone()
+                    return row is not None
+                finally:
+                    conn2.close()
+            except Exception:
+                return False
 
     def count(self, profile_id: str | None = None) -> int:
         """Count complete metadata/vector pairs in the store.

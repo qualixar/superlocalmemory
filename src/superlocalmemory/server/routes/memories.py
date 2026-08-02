@@ -1045,8 +1045,18 @@ async def delete_memory(request: Request, fact_id: str):
             idempotency_key=_mutation_idempotency_key(request),
         )
         if not result.get("ok"):
+            if result.get("retryable"):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Erasure incomplete (projection residue); retry shortly",
+                )
             raise HTTPException(status_code=404, detail="Memory not found")
-        return {"success": True, "deleted": fact_id}
+        return {
+            "success": True,
+            "deleted": fact_id,
+            "erasure_verified": bool(result.get("erasure_verified", False)),
+            "erasure_state": result.get("erasure_state", "FAILED"),
+        }
     except HTTPException:
         raise
     except Exception as exc:

@@ -44,8 +44,206 @@ class GDPRCompliance:
     # separately, deleted last).
     _NON_MEMORY_SCOPED = frozenset({"profiles"})
 
-    def __init__(self, db) -> None:
+    def __init__(self, db, *, engine=None) -> None:
         self._db = db
+        self._engine = engine
+
+    def _memory_has_siblings(self, memory_id: str, profile_id: str) -> bool:
+        try:
+            return bool(self._db.execute(
+                "SELECT 1 FROM atomic_facts "
+                "WHERE memory_id = ? AND profile_id = ? LIMIT 1",
+                (memory_id, profile_id),
+            ))
+        except Exception:
+            return True
+
+    def _tombstone(self, fact_id: str, profile_id: str, memory_id: str | None) -> None:
+        try:
+            import time
+            import uuid
+
+            from superlocalmemory.core.transactions.erasure import write_tombstones
+
+            write_tombstones(
+                self._db, profile_id, (fact_id,), uuid.uuid4().hex,
+                time.time(), memory_id,
+            )
+        except Exception:
+            pass
+
+    def _purge_fact_projections(self, fact_id: str, profile_id: str) -> None:
+        try:
+            self._db.delete_bm25_tokens_for_fact(fact_id)
+        except Exception:
+            pass
+        engine = self._engine
+        if engine is None:
+            return
+        store = getattr(engine, "_vector_store", None)
+        ann = getattr(engine, "_ann_index", None)
+        if store is not None and getattr(store, "available", False):
+            try:
+                store.delete(fact_id)
+            except Exception:
+                pass
+        if ann is not None and hasattr(ann, "remove"):
+            try:
+                ann.remove(fact_id)
+            except Exception:
+                pass
+
+    def _purge_vector_and_ann(self, profile_id: str) -> tuple[int, int]:
+        engine = self._engine
+        if engine is None:
+            return 0, 0
+        store = getattr(engine, "_vector_store", None)
+        ann = getattr(engine, "_ann_index", None)
+
+        purged = 0
+        failures = 0
+
+        try:
+            db_fact_ids = [
+                dict(r)["fact_id"]
+                for r in self._db.execute(
+                    "SELECT fact_id FROM atomic_facts WHERE profile_id = ?",
+                    (profile_id,),
+                )
+            ]
+        except Exception as exc:
+            logger.warning("GDPR erase: fact_id enumeration failed: %s", exc)
+            db_fact_ids = []
+            failures += 1
+
+        store_available = store is not None and getattr(store, "available", False)
+        store_fact_ids: list[str] = []
+        if store_available:
+            try:
+                store_fact_ids = list(store.indexed_fact_ids(profile_id))
+            except Exception as exc:
+                logger.warning("GDPR erase: vector enumeration failed: %s", exc)
+                failures += 1
+                store_fact_ids = list(db_fact_ids)
+            for fid in store_fact_ids:
+                try:
+                    if store.delete(fid):
+                        purged += 1
+                    else:
+                        failures += 1
+                except Exception as exc:
+                    logger.warning("GDPR erase: vector delete failed for %s: %s", fid, exc)
+                    failures += 1
+        else:
+            # No usable vector backend: raw vec0/map payload cannot be removed.
+            # Count residual raw vectors as failures so the receipt cannot claim
+            # a complete erasure while physical vectors survive.
+            residue = self._count_vector_residue(profile_id)
+            if residue:
+                failures += residue
+
+        if ann is not None and hasattr(ann, "remove"):
+            all_to_purge = set(store_fact_ids) | set(db_fact_ids)
+            for fid in all_to_purge:
+                try:
+                    ann.remove(fid)
+                except Exception as exc:
+                    logger.warning("GDPR erase: ANN remove failed for %s: %s", fid, exc)
+
+        return purged, failures
+
+    def _count_vector_residue(self, profile_id: str) -> int:
+        total = 0
+        for table in ("vector_row_map", "embedding_metadata"):
+            try:
+                rows = self._db.execute(
+                    f"SELECT COUNT(*) AS c FROM {table} WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                total = max(total, int(dict(rows[0])["c"]) if rows else 0)
+            except Exception:
+                continue
+        return total
+
+    def _fact_vector_residue(self, profile_id: str, fact_ids: list[str]) -> int:
+        if not fact_ids:
+            return 0
+        residue: set[str] = set()
+        placeholders = ",".join("?" for _ in fact_ids)
+        for table in ("vector_row_map", "embedding_metadata"):
+            try:
+                rows = self._db.execute(
+                    f"SELECT fact_id FROM {table} "
+                    f"WHERE profile_id = ? AND fact_id IN ({placeholders})",
+                    (profile_id, *fact_ids),
+                )
+                residue |= {dict(r)["fact_id"] for r in rows}
+            except Exception:
+                continue
+        return len(residue)
+
+    def _write_entity_erasure_receipt(
+        self,
+        profile_id: str,
+        entity_name: str,
+        fact_ids: list[str],
+        requested_at: float,
+        *,
+        all_erased: bool = True,
+    ) -> bool:
+        import time
+        import uuid
+
+        from superlocalmemory.core.transactions.erasure import (
+            ErasureState,
+            compute_erasure_hash,
+        )
+        erasure_id = uuid.uuid4().hex
+        completed_at = time.time()
+        evidence_json = json.dumps(
+            {"fact_ids": sorted(fact_ids), "proofs": []},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        fact_count = len(fact_ids)
+        state = ErasureState.COMPLETE if all_erased else ErasureState.FAILED
+        audit_hash = compute_erasure_hash(
+            erasure_id=erasure_id,
+            profile_id=profile_id,
+            subject_type="entity",
+            subject_id=entity_name,
+            requested_by="gdpr",
+            fact_count=fact_count,
+            state=state,
+            all_erased=all_erased,
+            evidence_json=evidence_json,
+            requested_at=requested_at,
+            completed_at=completed_at,
+        )
+        try:
+            with self._db.raw_connection() as conn:
+                tbl_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erasure_receipts'",
+                ).fetchone()
+                if tbl_exists is None:
+                    return False
+                conn.execute(
+                    "INSERT INTO erasure_receipts "
+                    "(erasure_id, profile_id, subject_type, subject_id, "
+                    "requested_by, fact_count, state, all_erased, "
+                    "owner_evidence_json, audit_hash, requested_at, completed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(erasure_id) DO NOTHING",
+                    (
+                        erasure_id, profile_id, "entity", entity_name,
+                        "gdpr", fact_count, state, 1 if all_erased else 0,
+                        evidence_json, audit_hash, requested_at, completed_at,
+                    ),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.warning("GDPR entity erase: receipt persist failed: %s", exc)
+            return False
 
     def _profile_scoped_tables(self) -> list[str]:
         """Every table carrying a ``profile_id`` column — discovered live from
@@ -129,6 +327,8 @@ class GDPRCompliance:
             raise ValueError("Cannot delete the default profile via GDPR erasure. "
                              "Use profile deletion instead.")
 
+        counts: dict[str, int] = {}
+
         # 1) Durable, tamper-evident record FIRST — survives the erasure.
         try:
             from superlocalmemory.compliance.audit import AuditChain
@@ -139,9 +339,8 @@ class GDPRCompliance:
             )
         except Exception as exc:
             logger.warning("GDPR erase: audit-chain log failed: %s", exc)
+            counts["audit_request_failed"] = 1
         self._audit("delete", "profile", profile_id, "GDPR erasure request")
-
-        counts: dict[str, int] = {}
         tables = self._profile_scoped_tables()
         # Pass 1 — count every table BEFORE any deletion, so a CASCADE that
         # removes a child (e.g. atomic_facts via memories) does not zero the
@@ -178,6 +377,7 @@ class GDPRCompliance:
         # any custom DB wrapper.
         try:
             from pathlib import Path as _Path
+
             from superlocalmemory.core.context_cache import purge_profile_from_cache_db
             data_root = getattr(self._db, "db_path", None)
             if data_root is not None:
@@ -224,6 +424,14 @@ class GDPRCompliance:
         except Exception as exc:
             logger.warning("GDPR erase: context-cache purge failed: %s", exc)
 
+        try:
+            vector_purged, vector_failures = self._purge_vector_and_ann(profile_id)
+            counts["vector_store"] = vector_purged
+            if vector_failures:
+                counts["vector_store_failures"] = vector_failures
+        except Exception as exc:
+            logger.warning("GDPR erase: vector purge failed: %s", exc)
+
         # Pass 2 — full-tenant wipe with FK enforcement OFF so table order is
         # irrelevant (every profile row in every table goes). FTS shadow rows
         # are still removed by the base-table delete triggers.
@@ -250,8 +458,8 @@ class GDPRCompliance:
 
         # Erase learning database (separate DB file)
         try:
-            from superlocalmemory.learning.database import LearningDatabase
             from superlocalmemory.core.config import DEFAULT_BASE_DIR
+            from superlocalmemory.learning.database import LearningDatabase
             learning_db = LearningDatabase(DEFAULT_BASE_DIR / "learning.db")
             learning_db.reset(profile_id)
             counts["learning_db"] = 1
@@ -264,6 +472,21 @@ class GDPRCompliance:
         except Exception:
             pass
 
+        try:
+            from superlocalmemory.compliance.audit import AuditChain
+            from superlocalmemory.infra.data_root import state_path
+            AuditChain(str(state_path("audit_chain.db"))).log(
+                "gdpr_erase_complete", agent_id="gdpr", profile_id=profile_id,
+                metadata={
+                    "basis": "GDPR Art.17 right-to-erasure",
+                    "tables_erased": len(tables),
+                    "vector_store_failures": counts.get("vector_store_failures", 0),
+                },
+            )
+        except Exception as exc:
+            logger.error("GDPR erase: completion audit-chain log failed: %s", exc)
+            counts["audit_completion_failed"] = 1
+
         logger.info("GDPR erasure for '%s': %d tables, %s", profile_id, len(tables), counts)
         return counts
 
@@ -273,27 +496,56 @@ class GDPRCompliance:
         Removes facts mentioning the entity, edges, temporal events,
         and the entity itself. For targeted erasure requests.
         """
+        import time
+        requested_at = time.time()
+        audit_request_ok = True
+        try:
+            from superlocalmemory.compliance.audit import AuditChain
+            from superlocalmemory.infra.data_root import state_path
+            AuditChain(str(state_path("audit_chain.db"))).log(
+                "gdpr_erase_entity", agent_id="gdpr", profile_id=profile_id,
+                metadata={
+                    "basis": "GDPR Art.17 right-to-erasure",
+                    "entity": entity_name,
+                },
+            )
+        except Exception as exc:
+            logger.warning("GDPR entity erase: audit-chain log failed: %s", exc)
+            audit_request_ok = False
         self._audit("delete", "entity", entity_name,
                      f"GDPR entity erasure in profile {profile_id}",
                      profile_id=profile_id)
 
         entity = self._db.get_entity_by_name(entity_name, profile_id)
         if entity is None:
-            return {"deleted": 0, "entity": entity_name, "found": False}
+            result: dict[str, object] = {"deleted": 0, "entity": entity_name, "found": False}
+            if not audit_request_ok:
+                result["audit_request_failed"] = 1
+            return result
 
         eid = entity.entity_id
         counts: dict[str, int] = {}
 
         # Delete facts mentioning this entity
         rows = self._db.execute(
-            "SELECT fact_id FROM atomic_facts WHERE profile_id = ? "
+            "SELECT fact_id, memory_id FROM atomic_facts WHERE profile_id = ? "
             "AND canonical_entities_json LIKE ?",
             (profile_id, f'%"{eid}"%'),
         )
-        fact_ids = [dict(r)["fact_id"] for r in rows]
-        for fid in fact_ids:
+        targets = [(dict(r)["fact_id"], dict(r).get("memory_id")) for r in rows]
+        for fid, mid in targets:
+            self._tombstone(fid, profile_id, mid)
+            self._purge_fact_projections(fid, profile_id)
             self._db.delete_fact(fid)
-        counts["facts"] = len(fact_ids)
+            if mid and not self._memory_has_siblings(mid, profile_id):
+                try:
+                    self._db.execute(
+                        "DELETE FROM memories WHERE memory_id = ? AND profile_id = ?",
+                        (mid, profile_id),
+                    )
+                except Exception:
+                    pass
+        counts["facts"] = len(targets)
 
         # Delete temporal events
         self._db.execute(
@@ -316,6 +568,20 @@ class GDPRCompliance:
             "DELETE FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
             (eid, profile_id))
         counts["entity"] = 1
+
+        target_fact_ids = [fid for fid, _ in targets]
+        vector_residue = self._fact_vector_residue(profile_id, target_fact_ids)
+        if vector_residue:
+            counts["vector_store_failures"] = vector_residue
+        if targets:
+            receipt_ok = self._write_entity_erasure_receipt(
+                profile_id, entity_name, target_fact_ids, requested_at,
+                all_erased=vector_residue == 0,
+            )
+            if not receipt_ok:
+                counts["receipt_persist_failed"] = 1
+        if not audit_request_ok:
+            counts["audit_request_failed"] = 1
 
         logger.info("Entity erasure '%s' in '%s': %s", entity_name, profile_id, counts)
         return counts
