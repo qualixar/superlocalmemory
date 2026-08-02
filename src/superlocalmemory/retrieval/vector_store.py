@@ -512,16 +512,33 @@ class VectorStore:
                             (fact_id,),
                         ).fetchone()
 
-                        if row is None:
+                        rowid = None
+                        owner_profile = None
+                        if row is not None:
+                            rowid = row["vec_rowid"]
+                            owner_profile = str(row["profile_id"])
+                        else:
+                            # Metadata-less orphan: resolve the rowid via the
+                            # fact-addressable map so the raw vec0 row is still
+                            # removable by fact_id.
+                            mrow = conn.execute(
+                                "SELECT vec_rowid, profile_id "
+                                "FROM vector_row_map WHERE fact_id = ?",
+                                (fact_id,),
+                            ).fetchone()
+                            if mrow is not None:
+                                rowid = mrow["vec_rowid"]
+                                owner_profile = str(mrow["profile_id"])
+
+                        if rowid is None:
                             return False
 
-                        rowid = row["vec_rowid"]
                         vector_row = conn.execute(
                             "SELECT profile_id FROM fact_embeddings WHERE rowid = ?",
                             (rowid,),
                         ).fetchone()
-                        if vector_row is not None and str(vector_row["profile_id"]) == str(
-                            row["profile_id"]
+                        if vector_row is not None and (
+                            str(vector_row["profile_id"]) == owner_profile
                         ):
                             conn.execute(
                                 "DELETE FROM fact_embeddings WHERE rowid = ?",
@@ -631,6 +648,56 @@ class VectorStore:
         except Exception as exc:
             logger.debug("indexed_fact_ids failed: %s", exc)
             return set()
+
+    def gc_orphaned_vectors(self, profile_id: str | None = None) -> int:
+        """Physically remove vec0 rows not referenced by any fact-addressable
+        mapping (neither embedding_metadata nor vector_row_map).
+
+        Such rows are unreachable by fact_id and would otherwise persist forever.
+        Returns the count removed. No-op when the vector backend is unavailable.
+        """
+        if not self._available:
+            return 0
+
+        _wl = get_write_lock(self._db_path)
+        with _wl:
+            with self._lock:
+                try:
+                    with self._managed_connection() as conn:
+                        conn.execute("BEGIN IMMEDIATE")
+                        orphans = self._orphan_rowids(conn, profile_id)
+                        for rowid in orphans:
+                            conn.execute(
+                                "DELETE FROM fact_embeddings WHERE rowid = ?",
+                                (rowid,),
+                            )
+                        conn.commit()
+                    return len(orphans)
+                except Exception as exc:
+                    logger.debug("gc_orphaned_vectors failed: %s", exc)
+                    return 0
+
+    @staticmethod
+    def _orphan_rowids(conn: sqlite3.Connection, profile_id: str | None) -> set[int]:
+        """vec0 rowids not referenced by embedding_metadata or vector_row_map."""
+        if profile_id is not None:
+            all_rowids = {r[0] for r in conn.execute(
+                "SELECT rowid FROM fact_embeddings WHERE profile_id = ?",
+                (profile_id,)).fetchall()}
+            ref_meta = {r[0] for r in conn.execute(
+                "SELECT vec_rowid FROM embedding_metadata WHERE profile_id = ?",
+                (profile_id,)).fetchall()}
+            ref_map = {r[0] for r in conn.execute(
+                "SELECT vec_rowid FROM vector_row_map WHERE profile_id = ?",
+                (profile_id,)).fetchall()}
+        else:
+            all_rowids = {r[0] for r in conn.execute(
+                "SELECT rowid FROM fact_embeddings").fetchall()}
+            ref_meta = {r[0] for r in conn.execute(
+                "SELECT vec_rowid FROM embedding_metadata").fetchall()}
+            ref_map = {r[0] for r in conn.execute(
+                "SELECT vec_rowid FROM vector_row_map").fetchall()}
+        return all_rowids - ref_meta - ref_map
 
     def rebuild_from_facts(
         self,

@@ -296,6 +296,34 @@ def test_delete_missing_fact_reports_not_found(engine_with_mock_deps):
     assert "erasure_id" not in result
 
 
+def test_delete_marks_erasure_fence_across_purge_window(stored_fact, monkeypatch):
+    from superlocalmemory.core import mutations
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import delete_fact_authorized
+    from superlocalmemory.storage import erasure_fence
+
+    engine, fid = stored_fact
+    pid = engine._profile_id
+    seen: dict = {}
+    real_purge = mutations._purge_delete_projections
+
+    def spy_purge(engine_, fact_id_, profile_id_, *, memory_id=None):
+        seen["fenced"] = erasure_fence.is_erasing(profile_id_, fact_id_)
+        return real_purge(engine_, fact_id_, profile_id_, memory_id=memory_id)
+
+    monkeypatch.setattr(mutations, "_purge_delete_projections", spy_purge)
+
+    result = delete_fact_authorized(
+        engine, fid,
+        trusted_actor_id=local_trusted_actor_id("python-api"),
+        source_agent_id="python-api",
+    )
+    assert result["ok"] is True
+    # The fence is held while projections are being purged, then cleared.
+    assert seen.get("fenced") is True
+    assert erasure_fence.is_erasing(pid, fid) is False
+
+
 def test_tombstone_provenance_conflict_retains_canonical(stored_fact):
     from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
     from superlocalmemory.core.mutations import delete_fact_authorized

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from superlocalmemory.core.hooks import HookRegistry
     from superlocalmemory.storage.database import DatabaseManager
 
+from superlocalmemory.storage.erasure_fence import is_erasing
 from superlocalmemory.storage.models import (
     AtomicFact,
     FactType,
@@ -289,24 +290,43 @@ def _fact_is_tombstoned(db: DatabaseManager, profile_id: str, fact_id: str) -> b
         ) from exc
 
 
+def _residue_table_exists(db: DatabaseManager, name: str) -> bool:
+    try:
+        return bool(db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+            (name,),
+        ))
+    except Exception:
+        # Cannot determine existence: treat as present so the residue probe runs
+        # and fails closed rather than silently reporting "no residue".
+        return True
+
+
+def _read_tombstoned_with_retry(
+    db: DatabaseManager, profile_id: str, fact_id: str, attempts: int = 3,
+) -> bool:
+    last: _TombstoneReadError | None = None
+    for _ in range(max(1, attempts)):
+        try:
+            return _fact_is_tombstoned(db, profile_id, fact_id)
+        except _TombstoneReadError as exc:
+            last = exc
+    raise last if last is not None else _TombstoneReadError("tombstone read failed")
+
+
 def _vector_residue_present(db: DatabaseManager, fact_id: str) -> bool:
-    try:
-        em = db.execute(
-            "SELECT 1 FROM embedding_metadata WHERE fact_id = ? LIMIT 1", (fact_id,)
-        )
-        if em:
-            return True
-    except Exception:
-        pass
-    try:
-        vrm = db.execute(
-            "SELECT 1 FROM vector_row_map WHERE fact_id = ? LIMIT 1", (fact_id,)
-        )
-        if vrm:
-            return True
-    except Exception:
-        pass
-    return False
+    uncertain = False
+    for table in ("embedding_metadata", "vector_row_map"):
+        if not _residue_table_exists(db, table):
+            continue
+        try:
+            if db.execute(
+                f"SELECT 1 FROM {table} WHERE fact_id = ? LIMIT 1", (fact_id,)
+            ):
+                return True
+        except Exception:
+            uncertain = True
+    return uncertain
 
 
 def _drop_resurrected_facts(
@@ -320,13 +340,18 @@ def _drop_resurrected_facts(
     survivors: list[str] = []
     for fid in stored_ids:
         try:
-            tombstoned = _fact_is_tombstoned(db, profile_id, fid)
+            tombstoned = _read_tombstoned_with_retry(db, profile_id, fid)
         except _TombstoneReadError as exc:
-            logger.error(
-                "Tombstone read error in drop_resurrected for %s, deferring: %s",
-                fid[:16], exc,
-            )
-            continue
+            if is_erasing(profile_id, fid):
+                # Tombstone unreadable but the in-process fence confirms an
+                # erasure is in flight — clean up rather than leave residue.
+                tombstoned = True
+            else:
+                logger.error(
+                    "Tombstone read error in drop_resurrected for %s, deferring: %s",
+                    fid[:16], exc,
+                )
+                continue
         if not tombstoned:
             survivors.append(fid)
             continue
@@ -622,6 +647,8 @@ def run_store(
                 "Tombstone read error for %s, deferring ingestion: %s",
                 fact.fact_id[:16], _tse,
             )
+            continue
+        if is_erasing(profile_id, fact.fact_id):
             continue
         fact = enrich_fact(
             fact, record, profile_id,

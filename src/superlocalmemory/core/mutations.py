@@ -361,6 +361,7 @@ def delete_fact_authorized(
         is_tombstoned,
         tombstone_memory_id,
     )
+    from superlocalmemory.storage.erasure_fence import clear_erasing, mark_erasing
 
     profile_id, context = _context(
         engine,
@@ -427,56 +428,64 @@ def delete_fact_authorized(
                 **erasure,
             }
 
-    if exists:
-        if canonical_runtime is not None:
-            result = dict(canonical_runtime.delete_fact(
-                profile_id, fact_id, idempotency_key=idempotency_key,
-            ))
-            if not result.get("ok"):
-                return {"ok": False, "error": f"Memory {fact_id} not found"}
-            if not content_preview:
-                content_preview = str(result.get("content_preview", ""))
+    # Fence the fact for the purge window so a concurrent materializer cannot
+    # re-write its projections after the durable tombstone is committed. The
+    # tombstone remains the cross-process signal; this is the in-process guard.
+    mark_erasing(profile_id, fact_id)
+    try:
+        if exists:
+            if canonical_runtime is not None:
+                result = dict(canonical_runtime.delete_fact(
+                    profile_id, fact_id, idempotency_key=idempotency_key,
+                ))
+                if not result.get("ok"):
+                    return {"ok": False, "error": f"Memory {fact_id} not found"}
+                if not content_preview:
+                    content_preview = str(result.get("content_preview", ""))
+            else:
+                engine._db.delete_fact(fact_id, profile_id=profile_id)
+
+        # Purge projections for a fresh delete and re-run (idempotently) for a
+        # resumed cleanup so an orphaned source memory is reclaimed on retry.
+        _purge_delete_projections(engine, fact_id, profile_id, memory_id=memory_id)
+
+        if exists:
+            tombstoned = bool(remove_result and remove_result.tombstoned)
         else:
-            engine._db.delete_fact(fact_id, profile_id=profile_id)
+            with engine._db.raw_connection() as _conn:
+                tombstoned = is_tombstoned(_conn, profile_id, fact_id)
 
-    # Purge projections for a fresh delete and re-run (idempotently) for a
-    # resumed cleanup so an orphaned source memory is reclaimed on retry.
-    _purge_delete_projections(engine, fact_id, profile_id, memory_id=memory_id)
-
-    if exists:
-        tombstoned = bool(remove_result and remove_result.tombstoned)
-    else:
-        with engine._db.raw_connection() as _conn:
-            tombstoned = is_tombstoned(_conn, profile_id, fact_id)
-
-    erasure = _finalize_erasure(
-        engine, service, op_ctx, fact_id, profile_id, memory_id, erasure_id,
-        requested_at, requested_by=trusted_actor_id, tombstoned=tombstoned,
-    )
-
-    engine._hooks.run_post("delete", context)
-    logger.info(
-        "DELETE fact_id=%s actor=%s source_agent=%s content=%s",
-        fact_id[:16], trusted_actor_id, source_agent_id, content_preview,
-    )
-    erasure_verified = bool(erasure.get("erasure_verified", False))
-    if not erasure_verified:
-        logger.error(
-            "Erasure unverified for %s — returning retryable failure", fact_id[:16],
+        erasure = _finalize_erasure(
+            engine, service, op_ctx, fact_id, profile_id, memory_id, erasure_id,
+            requested_at, requested_by=trusted_actor_id, tombstoned=tombstoned,
         )
+
+        engine._hooks.run_post("delete", context)
+        logger.info(
+            "DELETE fact_id=%s actor=%s source_agent=%s content=%s",
+            fact_id[:16], trusted_actor_id, source_agent_id, content_preview,
+        )
+        erasure_verified = bool(erasure.get("erasure_verified", False))
+        if not erasure_verified:
+            logger.error(
+                "Erasure unverified for %s — returning retryable failure",
+                fact_id[:16],
+            )
+            return {
+                "ok": False,
+                "retryable": True,
+                "deleted": fact_id,
+                "content_preview": content_preview,
+                **erasure,
+            }
         return {
-            "ok": False,
-            "retryable": True,
+            "ok": True,
             "deleted": fact_id,
             "content_preview": content_preview,
             **erasure,
         }
-    return {
-        "ok": True,
-        "deleted": fact_id,
-        "content_preview": content_preview,
-        **erasure,
-    }
+    finally:
+        clear_erasing(profile_id, fact_id)
 
 
 def update_fact_authorized(
