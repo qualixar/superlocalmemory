@@ -10,11 +10,9 @@ async function loadCompliance() {
     var filterValue = filterEl ? filterEl.value : '';
 
     try {
-        var url = '/api/compliance/status';
-        if (filterValue) url += '?event_type=' + encodeURIComponent(filterValue);
-        var response = await fetch(url);
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        var data = await response.json();
+        var statusResp = await fetch('/api/compliance/status');
+        if (!statusResp.ok) throw new Error('HTTP ' + statusResp.status);
+        var data = await statusResp.json();
         _complianceData = data;
 
         if (!data.available) {
@@ -24,20 +22,37 @@ async function loadCompliance() {
 
         renderComplianceStats(data);
         renderCompliancePolicies(data);
-        renderComplianceAudit(data);
+
+        // Task C: fetch real audit trail from dedicated endpoint with filters
+        var auditUrl = '/api/compliance/audit?limit=100';
+        if (filterValue) auditUrl += '&event_type=' + encodeURIComponent(filterValue);
+        var auditResp = await fetch(auditUrl);
+        var auditData = auditResp.ok ? await auditResp.json() : null;
+        renderComplianceAudit(auditData || data);
 
         var badge = document.getElementById('compliance-profile-badge');
         if (badge) badge.textContent = data.active_profile || 'default';
+
+        // Task C: show chain-integrity indicator
+        var chainEl = document.getElementById('cp-chain-integrity');
+        if (chainEl && auditData) {
+            var ok = auditData.chain_verified !== false;
+            chainEl.innerHTML = ok
+                ? '<span class="badge bg-success"><i class="bi bi-shield-check"></i> Chain verified</span>'
+                : '<span class="badge bg-danger"><i class="bi bi-shield-x"></i> Chain integrity issue</span>';
+        }
     } catch (error) {
         console.error('Error loading compliance:', error);
     }
 }
 
+// Task D: Fix KPI field reads — /api/compliance/status returns top-level fields,
+// NOT a nested .stats object. audit_events_count, retention_policies (array),
+// abac_policies_count are all top-level.
 function renderComplianceStats(data) {
-    var stats = data.stats || {};
-    animateCounter('cp-audit-count', stats.audit_count || 0);
-    animateCounter('cp-retention-count', stats.retention_count || 0);
-    animateCounter('cp-abac-count', stats.abac_count || 0);
+    animateCounter('cp-audit-count', data.audit_events_count || 0);
+    animateCounter('cp-retention-count', (data.retention_policies || []).length);
+    animateCounter('cp-abac-count', data.abac_policies_count || 0);
 }
 
 function renderCompliancePolicies(data) {
@@ -58,7 +73,7 @@ function renderCompliancePolicies(data) {
     table.className = 'table table-sm table-hover mb-0';
     var thead = document.createElement('thead');
     var headRow = document.createElement('tr');
-    ['Policy Name', 'Retention (days)', 'Category', 'Action', 'Created'].forEach(function(h) {
+    ['Policy Name', 'Retention (days)', 'Category', 'Action', 'Created', ''].forEach(function(h) {
         var th = document.createElement('th');
         th.textContent = h;
         headRow.appendChild(th);
@@ -106,16 +121,55 @@ function renderCompliancePolicies(data) {
         dateCell.textContent = formatDate(pol.created_at || '');
         row.appendChild(dateCell);
 
+        // Task E: Delete button per row — calls DELETE /api/compliance/retention-policy?name=
+        var actCell = document.createElement('td');
+        var delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-sm btn-outline-danger';
+        delBtn.textContent = 'Delete';
+        delBtn.addEventListener('click', (function(policyName) {
+            return async function() {
+                var confirmed = await confirmDestructive({
+                    title: 'Delete retention policy',
+                    target: policyName,
+                    consequence: 'This policy will stop applying to all memories.',
+                    confirmLabel: 'Delete',
+                });
+                if (!confirmed) return;
+                delBtn.disabled = true;
+                try {
+                    var r = await fetch(
+                        '/api/compliance/retention-policy?name=' + encodeURIComponent(policyName),
+                        { method: 'DELETE' }
+                    );
+                    var d = await r.json().catch(function() { return {}; });
+                    if (d.success !== false) {
+                        showToast('Policy deleted.');
+                        loadCompliance();
+                    } else {
+                        showToast((d.error || 'Delete failed.'));
+                        delBtn.disabled = false;
+                    }
+                } catch (e) {
+                    showToast('Network error deleting policy.');
+                    delBtn.disabled = false;
+                }
+            };
+        }(pol.name || '')));
+        actCell.appendChild(delBtn);
+        row.appendChild(actCell);
+
         tbody.appendChild(row);
     }
     table.appendChild(tbody);
     container.appendChild(table);
 }
 
+// Task C: renderComplianceAudit accepts data from either the status endpoint
+// (recent_audit_events) or the dedicated audit endpoint (events). Tries both.
 function renderComplianceAudit(data) {
     var container = document.getElementById('compliance-audit-content');
     if (!container) return;
-    var events = data.audit_events || [];
+    var events = data.events || data.recent_audit_events || data.audit_events || [];
     container.textContent = '';
 
     if (events.length === 0) {

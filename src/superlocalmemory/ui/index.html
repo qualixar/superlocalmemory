@@ -973,7 +973,10 @@
                     <h6 class="mb-2">Active retention policies</h6>
                     <div class="mb-3" id="compliance-policies-content"><span class="text-muted">Loading...</span></div>
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="mb-0">Audit trail</h6>
+                        <div class="d-flex align-items-center gap-2">
+                            <h6 class="mb-0">Audit trail</h6>
+                            <span id="cp-chain-integrity"></span>
+                        </div>
                         <select class="form-select form-select-sm" id="cp-audit-filter" style="width: auto;" data-act-change="load-compliance">
                             <option value="">All events</option>
                             <option value="recall">Recall</option>
@@ -1569,6 +1572,7 @@
     <script src="static/js/od-components.js?v=382"></script>
     <script src="static/js/od-health.js?v=382"></script>
     <script src="static/js/od-operations.js?v=380"></script>
+    <script src="static/js/od-compliance-ext.js?v=100"></script>
     <script src="static/js/od-team.js?v=379"></script>
     <script src="static/js/od-graph.js?v=379"></script>
     <script src="static/js/od-memories.js?v=379"></script>

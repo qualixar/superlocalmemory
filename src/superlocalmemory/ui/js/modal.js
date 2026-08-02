@@ -327,6 +327,134 @@ function openMemoryDetail(mem, source) {
         };
         actionsDiv.appendChild(mergeBtn);
 
+        // Task F: Set Scope — PATCH /api/memories/{fact_id}/scope
+        // Lets the user change personal → shared → global visibility.
+        var scopeBtn = document.createElement('button');
+        scopeBtn.className = 'btn btn-outline-secondary btn-sm';
+        scopeBtn.innerHTML = '<i class="bi bi-globe"></i> Set Scope…';
+        scopeBtn.title = 'Change memory visibility: personal, shared, or global';
+        (function() {
+            var scopeFormEl = null;
+            scopeBtn.addEventListener('click', function() {
+                // Toggle the inline scope form
+                if (scopeFormEl) {
+                    scopeFormEl.remove();
+                    scopeFormEl = null;
+                    return;
+                }
+                scopeFormEl = document.createElement('div');
+                scopeFormEl.className = 'mt-2 p-2 border rounded';
+                scopeFormEl.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;width:100%';
+                var scopeSel = document.createElement('select');
+                scopeSel.className = 'form-select form-select-sm';
+                scopeSel.style.width = 'auto';
+                ['personal', 'shared', 'global'].forEach(function(s) {
+                    var opt = document.createElement('option');
+                    opt.value = s;
+                    opt.textContent = s;
+                    if (s === (mem.scope || 'personal')) opt.selected = true;
+                    scopeSel.appendChild(opt);
+                });
+                var sharedInput = document.createElement('input');
+                sharedInput.className = 'form-control form-control-sm';
+                sharedInput.placeholder = 'shared_with (profile1,profile2)';
+                sharedInput.style.flex = '1';
+                sharedInput.style.display = scopeSel.value === 'shared' ? '' : 'none';
+                if (mem.shared_with) {
+                    try {
+                        var sw = typeof mem.shared_with === 'string'
+                            ? JSON.parse(mem.shared_with) : mem.shared_with;
+                        sharedInput.value = Array.isArray(sw) ? sw.join(',') : String(sw);
+                    } catch(e) { sharedInput.value = String(mem.shared_with || ''); }
+                }
+                scopeSel.addEventListener('change', function() {
+                    sharedInput.style.display = scopeSel.value === 'shared' ? '' : 'none';
+                });
+                var saveBtn = document.createElement('button');
+                saveBtn.className = 'btn btn-sm btn-primary';
+                saveBtn.textContent = 'Save';
+                saveBtn.addEventListener('click', function() {
+                    var scope = scopeSel.value;
+                    var sharedWith = scope === 'shared' ? sharedInput.value : '';
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = 'Saving…';
+                    fetch('/api/memories/' + encodeURIComponent(mem.fact_id || mem.id) + '/scope', {
+                        method: 'PATCH',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({scope: scope, shared_with: sharedWith}),
+                    }).then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d.success) {
+                            mem.scope = scope;
+                            if (typeof showToast === 'function') showToast('Scope set to ' + scope);
+                            scopeFormEl.remove(); scopeFormEl = null;
+                            if (typeof loadMemories === 'function') setTimeout(loadMemories, 300);
+                        } else {
+                            if (typeof showToast === 'function') showToast('Scope update failed: ' + (d.detail || d.error || 'unknown'));
+                            saveBtn.disabled = false; saveBtn.textContent = 'Save';
+                        }
+                    }).catch(function() {
+                        if (typeof showToast === 'function') showToast('Network error setting scope.');
+                        saveBtn.disabled = false; saveBtn.textContent = 'Save';
+                    });
+                });
+                scopeFormEl.appendChild(scopeSel);
+                scopeFormEl.appendChild(sharedInput);
+                scopeFormEl.appendChild(saveBtn);
+                actionsDiv.insertAdjacentElement('afterend', scopeFormEl);
+            });
+        }());
+        actionsDiv.appendChild(scopeBtn);
+
+        // Task G: Pin — POST /api/tiers/pin — keep this fact in the active tier forever
+        var factIdForTier = mem.fact_id || mem.id;
+        var pinBtn = document.createElement('button');
+        pinBtn.className = 'btn btn-outline-success btn-sm';
+        pinBtn.innerHTML = '<i class="bi bi-pin-fill"></i> Pin';
+        pinBtn.title = 'Pin to active tier — this fact will not be demoted by lifecycle';
+        pinBtn.addEventListener('click', function() {
+            pinBtn.disabled = true;
+            fetch('/api/tiers/pin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fact_id: factIdForTier, reason: 'pinned from dashboard'}),
+            }).then(function(r) { return r.json(); })
+            .then(function(d) {
+                pinBtn.disabled = false;
+                if (typeof showToast === 'function') {
+                    showToast(d && d.success ? 'Fact pinned to active tier.' : 'Pin failed: ' + (d && (d.detail || d.error) || 'unknown'));
+                }
+            }).catch(function() {
+                pinBtn.disabled = false;
+                if (typeof showToast === 'function') showToast('Network error pinning fact.');
+            });
+        });
+        actionsDiv.appendChild(pinBtn);
+
+        // Task G: Unpin — POST /api/tiers/unpin — allows normal tier demotion again
+        var unpinBtn = document.createElement('button');
+        unpinBtn.className = 'btn btn-outline-warning btn-sm';
+        unpinBtn.innerHTML = '<i class="bi bi-pin-angle"></i> Unpin';
+        unpinBtn.title = 'Unpin — allow normal lifecycle tier demotion';
+        unpinBtn.addEventListener('click', function() {
+            unpinBtn.disabled = true;
+            fetch('/api/tiers/unpin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fact_id: factIdForTier, reason: ''}),
+            }).then(function(r) { return r.json(); })
+            .then(function(d) {
+                unpinBtn.disabled = false;
+                if (typeof showToast === 'function') {
+                    showToast(d && d.success ? 'Fact unpinned — will age normally.' : 'Unpin failed: ' + (d && (d.detail || d.error) || 'unknown'));
+                }
+            }).catch(function() {
+                unpinBtn.disabled = false;
+                if (typeof showToast === 'function') showToast('Network error unpinning fact.');
+            });
+        });
+        actionsDiv.appendChild(unpinBtn);
+
         // Delete button — always available (hard delete, irreversible)
         var deleteBtn = document.createElement('button');
         deleteBtn.className = 'btn btn-outline-danger btn-sm';

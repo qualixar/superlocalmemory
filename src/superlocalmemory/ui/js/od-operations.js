@@ -403,11 +403,24 @@
           '</div>' +
         '</div>' +
 
-        // Audit trail with All/Denied segment filter
+        // Audit trail with All/Denied segment filter + event-type API filter
         '<div class="card" style="margin-top:16px">' +
           '<div class="card-head">' +
             '<h3>Audit trail</h3>' +
+            // Task C: chain-integrity badge
+            '<span id="od-audit-chain-status"></span>' +
             '<div class="spacer"></div>' +
+            // Task C: event-type filter select (calls API)
+            '<select id="od-audit-evt-filter" style="padding:4px 8px;border-radius:6px;' +
+              'border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12px">' +
+              '<option value="">All types</option>' +
+              '<option value="recall">recall</option>' +
+              '<option value="remember">remember</option>' +
+              '<option value="delete">delete</option>' +
+              '<option value="lifecycle_transition">lifecycle</option>' +
+              '<option value="access_denied">access_denied</option>' +
+              '<option value="retention_enforced">retention</option>' +
+            '</select>' +
             '<div class="seg" id="od-audit-filter">' +
               '<button class="active" data-filter="all">All</button>' +
               '<button data-filter="denied">Denied</button>' +
@@ -915,38 +928,79 @@
 
     var ACTION_CLS = { archive: 'neutral', tombstone: 'danger', notify: 'warn' };
 
+    // Build rows then wire delete buttons post-inject (avoids inline onclick — CSP safe)
     retTbody.innerHTML = policies.map(function (p) {
       var ac = ACTION_CLS[p.action] || 'neutral';
-      // CRIT(c): name, category, action through esc()
       return (
         '<tr>' +
           '<td><b>' + esc(p.name || '') + '</b></td>' +
           '<td class="num">' + esc(String(p.retention_days || '—')) + '</td>' +
           '<td><span class="badge neutral">' + esc(p.category || 'all') + '</span></td>' +
           '<td><span class="badge ' + ac + '">' + esc(p.action || '') + '</span></td>' +
+          // Task E: per-row delete — data-pol-name used by wireRetentionDeleteBtns()
           '<td style="text-align:right">' +
-            '<button class="btn sm ghost" disabled>Edit</button>' +
-            // TODO: wire edit button to /api/compliance/retention-policy PATCH when available
+            '<button class="btn sm danger" data-pol-name="' + esc(p.name || '') + '">' +
+              'Delete' +
+            '</button>' +
           '</td>' +
         '</tr>'
       );
     }).join('');
+
+    // Task E: wire delete buttons (CSP-safe addEventListener after innerHTML set)
+    wireRetentionDeleteBtns(retTbody);
   }
 
   // Cache of all audit rows (for client-side All/Denied filter)
   var _allAuditRows = [];
   /**
-   * Populate the audit trail table.
+   * Task C: Populate the audit trail table.
+   * auditFull: response from /api/compliance/audit (preferred, up to 100 events).
+   * comp: response from /api/compliance/status (fallback, recent_audit_events).
    * CRIT(c): actor, action, target, result all through esc().
    */
-  function populateAuditTrail(comp) {
+  function populateAuditTrail(comp, auditFull) {
     var auditTbody = document.getElementById('od-audit-body');
     if (!auditTbody) return;
 
-    var events = (comp && comp.recent_audit_events) || [];
+    // Prefer full audit endpoint data; fall back to status data
+    var events = (auditFull && auditFull.events) || (comp && comp.recent_audit_events) || [];
     _allAuditRows = events;
 
     renderAuditRows(auditTbody, events);
+  }
+
+  /**
+   * Task C: Render the chain-integrity badge inside the audit trail card header.
+   * Appended to #od-audit-chain-status if it exists.
+   */
+  function showAuditChainStatus(auditFull) {
+    var el = document.getElementById('od-audit-chain-status');
+    if (!el || !auditFull) return;
+    var ok = auditFull.chain_verified !== false;
+    el.innerHTML = ok
+      ? '<span class="badge ok" style="margin-left:8px">Chain verified</span>'
+      : '<span class="badge danger" style="margin-left:8px">Chain integrity issue</span>';
+  }
+
+  /** Task C: re-fetch audit trail from API with a specific event_type filter. */
+  function fetchAndRenderAudit(eventType) {
+    var auditTbody = document.getElementById('od-audit-body');
+    if (!auditTbody) return;
+    auditTbody.innerHTML = '<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">Loading…</td></tr>';
+    var url = '/api/compliance/audit?limit=100';
+    if (eventType && eventType !== 'all') url += '&event_type=' + encodeURIComponent(eventType);
+    fetch(url)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        _allAuditRows = d.events || [];
+        renderAuditRows(auditTbody, _allAuditRows);
+        showAuditChainStatus(d);
+      })
+      .catch(function () {
+        if (auditTbody) auditTbody.innerHTML = '<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">Failed to load audit trail.</td></tr>';
+      });
   }
 
   /** Render audit table rows into tbody, filtering by mode ('all' or 'denied'). */
@@ -986,14 +1040,16 @@
     }).join('');
   }
   /**
-   * Wire the All/Denied segment filter in the audit trail header.
-   * Client-side filter over already-fetched data — no extra network call.
+   * Task C: Wire audit filters.
+   * - All/Denied segment: client-side filter (fast).
+   * - Event-type select (#od-audit-evt-filter): calls API to get filtered results.
    */
-  function wireAuditFilter() {
+  function wireAuditFilter(auditFull) {
     var filterEl = document.getElementById('od-audit-filter');
     var tbody    = document.getElementById('od-audit-body');
     if (!filterEl || !tbody) return;
 
+    // All / Denied segment buttons — client-side
     filterEl.querySelectorAll('button').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var mode = btn.getAttribute('data-filter');
@@ -1010,6 +1066,54 @@
           : _allAuditRows;
 
         renderAuditRows(tbody, rows);
+      });
+    });
+
+    // Task C: Event-type select — re-fetches from API
+    var evtSelect = document.getElementById('od-audit-evt-filter');
+    if (evtSelect) {
+      evtSelect.addEventListener('change', function () {
+        fetchAndRenderAudit(evtSelect.value);
+      });
+    }
+  }
+
+  /**
+   * Task E: Wire delete buttons injected by populateRetentionPolicies.
+   * Data attribute data-pol-name carries the policy name (already esc'd in innerHTML).
+   * Uses confirmDestructive before calling DELETE /api/compliance/retention-policy?name=.
+   */
+  function wireRetentionDeleteBtns(tbody) {
+    tbody.querySelectorAll('[data-pol-name]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var policyName = btn.getAttribute('data-pol-name');
+        window.confirmDestructive({
+          title: 'Delete retention policy',
+          target: policyName,
+          consequence: 'This policy will no longer be enforced on any memory.',
+          confirmLabel: 'Delete',
+        }).then(function (confirmed) {
+          if (!confirmed) return;
+          btn.disabled = true;
+          fetch('/api/compliance/retention-policy?name=' + encodeURIComponent(policyName), {
+            method: 'DELETE',
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.success !== false) {
+                var pane = document.getElementById('operations-pane');
+                if (pane && typeof window.odRenderOperations === 'function') {
+                  window.odRenderOperations(pane);
+                }
+              } else {
+                btn.disabled = false;
+                if (typeof console !== 'undefined') {
+                  console.error('[od-ops] retention delete failed:', d && d.error);
+                }
+              }
+            })
+            .catch(function () { btn.disabled = false; });
+        });
       });
     });
   }
@@ -1055,11 +1159,18 @@
         })
           .then(function (r) { return r.json(); })
           .then(function (d) {
-            if (summary) {
-              summary.textContent = d && d.success
-                ? ('Retention applied — archived ' + (d.archived || 0) +
-                   ', tombstoned ' + (d.tombstoned || 0) + ', flagged ' + (d.notified || 0) + '.')
-                : ('Retention failed: ' + ((d && d.error) || 'unknown'));
+            if (!summary) return;
+            // Task E: surface all returned counts from the enforce response
+            if (d && d.success) {
+              var parts = [];
+              if (d.archived != null)    parts.push('archived ' + fmtNum(d.archived));
+              if (d.tombstoned != null)  parts.push('tombstoned ' + fmtNum(d.tombstoned));
+              if (d.notified != null)    parts.push('flagged ' + fmtNum(d.notified));
+              if (d.evaluated != null)   parts.push('evaluated ' + fmtNum(d.evaluated));
+              if (d.policies_run != null) parts.push('policies run: ' + fmtNum(d.policies_run));
+              summary.textContent = 'Retention applied — ' + (parts.join(', ') || 'no changes needed') + '.';
+            } else {
+              summary.textContent = 'Retention failed: ' + ((d && d.error) || 'unknown');
             }
           })
           .catch(function () { if (summary) summary.textContent = 'Retention run failed. Check console.'; })
@@ -1228,10 +1339,13 @@
       fetch('/api/lifecycle/status').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
       fetch('/api/trust/stats').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
       fetch('/api/compliance/status').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      // Task C: wire the full audit trail endpoint (up to 100 events, chain_verified)
+      fetch('/api/compliance/audit?limit=100').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
     ]).then(function (results) {
       var lc         = results[0];
       var trustStats = results[1];
       var comp       = results[2];
+      var auditFull  = results[3]; // {available, events, chain_verified, ...}
 
       // Inject .ctl class styles (used by Trust section control rows)
       injectCtlStyle();
@@ -1255,10 +1369,15 @@
       // Populate compliance
       populateComplianceKpi(comp);
       populateRetentionPolicies(comp);
-      populateAuditTrail(comp);
+      // Task C: prefer the full audit trail from the dedicated endpoint;
+      // fall back to the status endpoint's recent_audit_events on failure.
+      populateAuditTrail(comp, auditFull);
+
+      // Task C: show chain-integrity indicator
+      showAuditChainStatus(auditFull);
 
       // Wire audit filter and new-policy button (listeners on injected DOM)
-      wireAuditFilter();
+      wireAuditFilter(auditFull);
       wireNewPolicyBtn();
       wireGdprBtns();
 
