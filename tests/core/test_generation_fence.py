@@ -57,15 +57,22 @@ class TestFenceModule:
         gf.record_admission_epoch("p", "k", 0)
         assert gf.admitted_epoch("p", "k") == 0
 
-    def test_first_writer_wins_for_concurrent_same_key(self) -> None:
-        # A concurrent admit captured after a binding transition must not relax
-        # the epoch a prior in-flight admit is checked against.
+    def test_conflicting_epochs_fail_closed(self) -> None:
+        # Two concurrent admits recording DIFFERENT epochs for one key must not
+        # let either satisfy the fence: the stored epoch becomes a sentinel that
+        # can never equal a real generation, so both are rejected and retry.
         gf.record_admission_epoch("p", "k", 0)
         gf.record_admission_epoch("p", "k", 5)
-        assert gf.admitted_epoch("p", "k") == 0
+        assert gf.admitted_epoch("p", "k") == gf._CONFLICT_EPOCH
+        assert gf.admitted_epoch("p", "k") not in (0, 5)
         gf.clear_admission_epoch("p", "k")
         gf.record_admission_epoch("p", "k", 5)
         assert gf.admitted_epoch("p", "k") == 5
+
+    def test_same_epoch_recorded_twice_is_stable(self) -> None:
+        gf.record_admission_epoch("p", "k", 3)
+        gf.record_admission_epoch("p", "k", 3)
+        assert gf.admitted_epoch("p", "k") == 3
 
     def test_expired_entry_is_pruned_on_read(self, monkeypatch) -> None:
         gf.record_admission_epoch("p", "k", 5)

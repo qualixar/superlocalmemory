@@ -128,11 +128,16 @@ def resolve_actor_roles(request: Request, *, profile: str | None = None):
     if principal.get("kind") == "owner":
         return frozenset({ActorRole.OWNER})
     rbac = get_rbac_engine(request.app.state)
-    role = (
-        rbac.get_role(principal["user_id"], profile or _active_profile())
-        if rbac is not None
-        else None
-    )
+    role = None
+    if rbac is not None:
+        try:
+            role = rbac.get_role(principal["user_id"], profile or _active_profile())
+        except Exception:
+            # The caller already passed require_permission for this operation, so
+            # a transient role lookup must not surface as a 500. Fall back to the
+            # least-privileged write-capable role rather than deny an authorized
+            # write.
+            return frozenset({ActorRole.MEMBER})
     mapped = {
         Role.ADMIN: ActorRole.ADMIN,
         Role.MEMBER: ActorRole.MEMBER,
