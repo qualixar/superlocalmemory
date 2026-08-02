@@ -1,0 +1,300 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+
+from __future__ import annotations
+
+import hashlib
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from superlocalmemory.core.transactions import (
+    ManifestState,
+    MemoryTransactionService,
+    ObligationKind,
+    ObligationLedger,
+    ObligationState,
+    OperationContext,
+    OwnerErasureProof,
+    OwnerHealth,
+    OwnerResult,
+    Reconciler,
+)
+from superlocalmemory.storage.migrations import (
+    M003_migration_log as m003,
+)
+from superlocalmemory.storage.migrations import (
+    M033_projection_transactions as m033,
+)
+
+
+@pytest.fixture
+def conn(tmp_path: Path) -> sqlite3.Connection:
+    path = tmp_path / "memory.db"
+    connection = sqlite3.connect(path, isolation_level=None)
+    connection.executescript(m003.DDL)
+    m033.apply(connection)
+    connection.executescript(
+        "CREATE TABLE read_model ("
+        "operation_id TEXT NOT NULL, owner TEXT NOT NULL, subject_id TEXT NOT NULL, "
+        "PRIMARY KEY (operation_id, owner))"
+    )
+    return connection
+
+
+class _ReadModelOwner:
+    def __init__(self, name: str, connection: sqlite3.Connection) -> None:
+        self._name = name
+        self._conn = connection
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def apply(self, context: OperationContext) -> OwnerResult:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO read_model (operation_id, owner, subject_id) "
+            "VALUES (?, ?, ?)",
+            (context.operation_id, self._name, context.subject_id),
+        )
+        return OwnerResult(owner=self._name, ok=True, checksum=self._checksum(context))
+
+    def verify(self, context: OperationContext) -> OwnerResult:
+        row = self._conn.execute(
+            "SELECT subject_id FROM read_model WHERE operation_id = ? AND owner = ?",
+            (context.operation_id, self._name),
+        ).fetchone()
+        ok = row is not None and row[0] == context.subject_id
+        return OwnerResult(
+            owner=self._name,
+            ok=ok,
+            checksum=self._checksum(context) if ok else None,
+            detail={} if ok else {"error": "projection row absent"},
+        )
+
+    def compensate(self, context: OperationContext) -> OwnerResult:
+        self._conn.execute(
+            "DELETE FROM read_model WHERE operation_id = ? AND owner = ?",
+            (context.operation_id, self._name),
+        )
+        return OwnerResult(owner=self._name, ok=True)
+
+    def erase(self, context: OperationContext) -> OwnerErasureProof:
+        self._conn.execute(
+            "DELETE FROM read_model WHERE operation_id = ? AND owner = ?",
+            (context.operation_id, self._name),
+        )
+        remaining = self._conn.execute(
+            "SELECT COUNT(*) FROM read_model WHERE operation_id = ? AND owner = ?",
+            (context.operation_id, self._name),
+        ).fetchone()[0]
+        return OwnerErasureProof(
+            owner=self._name,
+            erased=remaining == 0,
+            checksum=hashlib.sha256(b"erased").hexdigest(),
+        )
+
+    def health(self) -> OwnerHealth:
+        return OwnerHealth(owner=self._name, healthy=True)
+
+    def _checksum(self, context: OperationContext) -> str:
+        return hashlib.sha256(
+            f"{self._name}:{context.subject_id}".encode("utf-8")
+        ).hexdigest()
+
+
+class _ExplodingOwner:
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def apply(self, context: OperationContext) -> OwnerResult:
+        raise RuntimeError("projection backend unavailable")
+
+    def verify(self, context: OperationContext) -> OwnerResult:
+        return OwnerResult(owner=self._name, ok=False)
+
+    def compensate(self, context: OperationContext) -> OwnerResult:
+        return OwnerResult(owner=self._name, ok=True)
+
+    def erase(self, context: OperationContext) -> OwnerErasureProof:
+        return OwnerErasureProof(owner=self._name, erased=True)
+
+    def health(self) -> OwnerHealth:
+        return OwnerHealth(owner=self._name, healthy=False, detail="backend down")
+
+
+def _ctx(operation_id: str = "op-1", subject: str = "fact-1") -> OperationContext:
+    return OperationContext(
+        operation_id=operation_id,
+        profile_id="profile-a",
+        subject_id=subject,
+    )
+
+
+def test_operation_context_requires_identifiers() -> None:
+    with pytest.raises(ValueError):
+        OperationContext(operation_id="", profile_id="p", subject_id="s")
+    with pytest.raises(ValueError):
+        OperationContext(operation_id="o", profile_id="", subject_id="s")
+    with pytest.raises(ValueError):
+        OperationContext(operation_id="o", profile_id="p", subject_id="")
+
+
+def test_ledger_record_is_idempotent(conn: sqlite3.Connection) -> None:
+    ledger = ObligationLedger()
+    ctx = _ctx()
+    ledger.record(conn, ctx, "vector", ObligationKind.APPLY)
+    ledger.record(conn, ctx, "vector", ObligationKind.APPLY)
+    obligations = ledger.fetch(conn, ctx.operation_id)
+    assert len(obligations) == 1
+    assert obligations[0].state is ObligationState.PENDING
+
+
+def test_ledger_mark_transitions_state(conn: sqlite3.Connection) -> None:
+    ledger = ObligationLedger()
+    ctx = _ctx()
+    ledger.record(conn, ctx, "vector", ObligationKind.APPLY)
+    ledger.mark(
+        conn, ctx.operation_id, "vector", ObligationKind.APPLY,
+        ObligationState.VERIFIED, checksum="abc", bump_attempts=True,
+    )
+    obligation = ledger.fetch(conn, ctx.operation_id)[0]
+    assert obligation.state is ObligationState.VERIFIED
+    assert obligation.checksum == "abc"
+    assert obligation.attempts == 1
+
+
+def test_reconcile_complete_when_all_verified(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({
+        "vector": _ReadModelOwner("vector", conn),
+        "bm25": _ReadModelOwner("bm25", conn),
+    })
+    ctx = _ctx()
+    service.record(conn, ctx)
+    manifest = service.run(conn, ctx)
+    assert manifest.state is ManifestState.COMPLETE
+    assert manifest.all_met is True
+    assert manifest.obligation_count == 2
+    assert len(manifest.manifest_hash) == 64
+
+
+def test_injected_projection_failure_degrades_manifest(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({
+        "vector": _ReadModelOwner("vector", conn),
+        "graph": _ExplodingOwner("graph"),
+    })
+    ctx = _ctx()
+    service.record(conn, ctx)
+    manifest = service.run(conn, ctx)
+    assert manifest.state is ManifestState.DEGRADED
+    assert manifest.all_met is False
+    ledger = ObligationLedger()
+    by_owner = {o.owner: o for o in ledger.fetch(conn, ctx.operation_id)}
+    assert by_owner["vector"].state is ObligationState.VERIFIED
+    assert by_owner["graph"].state is ObligationState.FAILED
+    row = conn.execute(
+        "SELECT subject_id FROM read_model WHERE owner = 'vector'"
+    ).fetchone()
+    assert row is not None and row[0] == ctx.subject_id
+
+
+def test_reconcile_failed_when_canonical_not_committed(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({"vector": _ReadModelOwner("vector", conn)})
+    ctx = _ctx()
+    service.record(conn, ctx)
+    service.apply(conn, ctx)
+    manifest = service.reconcile(
+        conn, ctx.operation_id, ctx.profile_id, canonical_committed=False,
+    )
+    assert manifest.state is ManifestState.FAILED
+    assert manifest.all_met is False
+
+
+def test_apply_is_idempotent_replay(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({"vector": _ReadModelOwner("vector", conn)})
+    ctx = _ctx()
+    service.record(conn, ctx)
+    first = service.run(conn, ctx)
+    second = service.run(conn, ctx)
+    assert first.state is ManifestState.COMPLETE
+    assert second.state is ManifestState.COMPLETE
+    assert first.manifest_hash == second.manifest_hash
+    ledger = ObligationLedger()
+    obligation = ledger.fetch(conn, ctx.operation_id)[0]
+    assert obligation.attempts == 1
+
+
+def test_manifest_hash_detects_tampering(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({"vector": _ReadModelOwner("vector", conn)})
+    ctx = _ctx()
+    service.record(conn, ctx)
+    service.run(conn, ctx)
+    assert service.verify_manifest(conn, ctx.operation_id) is True
+    conn.execute(
+        "UPDATE projection_obligations SET checksum = 'tampered' "
+        "WHERE operation_id = ? AND owner = 'vector'",
+        (ctx.operation_id,),
+    )
+    assert service.verify_manifest(conn, ctx.operation_id) is False
+
+
+def test_compensate_marks_compensated(conn: sqlite3.Connection) -> None:
+    owner = _ReadModelOwner("vector", conn)
+    service = MemoryTransactionService({"vector": owner})
+    ctx = _ctx()
+    service.record(conn, ctx)
+    service.run(conn, ctx)
+    service.compensate(conn, ctx, "vector")
+    ledger = ObligationLedger()
+    obligation = ledger.fetch(conn, ctx.operation_id)[0]
+    assert obligation.state is ObligationState.COMPENSATED
+    assert conn.execute("SELECT COUNT(*) FROM read_model").fetchone()[0] == 0
+
+
+def test_erase_marks_erased(conn: sqlite3.Connection) -> None:
+    owner = _ReadModelOwner("vector", conn)
+    service = MemoryTransactionService({"vector": owner})
+    ctx = _ctx()
+    owner.apply(ctx)
+    service.record(conn, ctx, kind=ObligationKind.ERASE)
+    service.erase(conn, ctx)
+    manifest = service.reconcile(conn, ctx.operation_id, ctx.profile_id)
+    assert manifest.state is ManifestState.COMPLETE
+    ledger = ObligationLedger()
+    obligation = ledger.fetch(conn, ctx.operation_id)[0]
+    assert obligation.state is ObligationState.ERASED
+    assert conn.execute("SELECT COUNT(*) FROM read_model").fetchone()[0] == 0
+
+
+def test_reconciler_standalone_degraded(conn: sqlite3.Connection) -> None:
+    ledger = ObligationLedger()
+    reconciler = Reconciler(ledger)
+    ctx = _ctx()
+    ledger.record(conn, ctx, "vector", ObligationKind.APPLY)
+    ledger.mark(
+        conn, ctx.operation_id, "vector", ObligationKind.APPLY,
+        ObligationState.FAILED,
+    )
+    manifest = reconciler.reconcile(conn, ctx.operation_id, ctx.profile_id)
+    assert manifest.state is ManifestState.DEGRADED
+    fetched = reconciler.fetch_manifest(conn, ctx.operation_id)
+    assert fetched is not None
+    assert fetched.manifest_hash == manifest.manifest_hash
+
+
+def test_unregistered_owner_obligation_fails(conn: sqlite3.Connection) -> None:
+    service = MemoryTransactionService({"vector": _ReadModelOwner("vector", conn)})
+    ctx = _ctx()
+    ledger = ObligationLedger()
+    ledger.record(conn, ctx, "vector", ObligationKind.APPLY)
+    ledger.record(conn, ctx, "phantom", ObligationKind.APPLY)
+    manifest = service.run(conn, ctx)
+    assert manifest.state is ManifestState.DEGRADED
+    by_owner = {o.owner: o for o in ledger.fetch(conn, ctx.operation_id)}
+    assert by_owner["phantom"].state is ObligationState.FAILED
+    assert by_owner["vector"].state is ObligationState.VERIFIED

@@ -130,6 +130,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M032_write_coordinator_admission as _M032,
 )
+from superlocalmemory.storage.migrations import (
+    M033_projection_transactions as _M033,
+)
 from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
@@ -191,6 +194,7 @@ MIGRATIONS: list[Migration] = [
     # M032 is standalone and must precede daemon readiness: typed writes use
     # this append-only receipt ledger for durable idempotency.
     Migration(name=_M032.NAME, db_target="memory", ddl=_M032.DDL),
+    Migration(name=_M033.NAME, db_target="memory", ddl=_M033.DDL),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 
