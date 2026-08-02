@@ -1441,10 +1441,12 @@ def cmd_recall(args: Namespace) -> None:
                 scope_qs += f"&include_shared={str(include_shared).lower()}"
             _window = getattr(args, "window", "") or ""
             window_qs = f"&window={quote(_window)}" if _window else ""
+            _as_of = getattr(args, "as_of", "") or ""
+            as_of_qs = f"&as_of={quote(_as_of)}" if _as_of else ""
             result = daemon_request(
                 "GET",
                 f"/recall?q={quote(args.query)}&limit={args.limit}"
-                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}",
+                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}{as_of_qs}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response

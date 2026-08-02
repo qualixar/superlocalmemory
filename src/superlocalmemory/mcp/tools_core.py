@@ -120,6 +120,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         daemon_owned = False
         try:
             import asyncio as _asyncio
+
             from superlocalmemory.cli.daemon import daemon_request, is_daemon_running
             # is_daemon_running() and daemon_request() both use blocking urllib
             # against the same uvicorn server — run in threads so the MCP
@@ -184,6 +185,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
         try:
             import asyncio as _asyncio
+
             from superlocalmemory.mcp._daemon_proxy import choose_pool
 
             worker_meta = {
@@ -264,6 +266,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str = "",
+        as_of: str | None = None,
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
@@ -297,6 +300,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
         range. Accepts a relative span (``"24h"``, ``"7d"``, ``"30d"``,
         ``"1y"``) or an explicit range (``"2026-07-01..2026-07-31"``). Empty =
         no time filter.
+
+        Point-in-time: optional ``as_of`` (ISO-8601 string, e.g.
+        ``"2026-01-01T00:00:00+00:00"``) pins recall to a temporal snapshot;
+        omit or pass ``None`` for current-state recall.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -359,6 +366,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     query, limit=limit, session_id=effective_sid,
                     fast=fast, include_global=include_global,
                     include_shared=include_shared, window=window or None,
+                    as_of=as_of,
                 )
 
             result = await asyncio.to_thread(

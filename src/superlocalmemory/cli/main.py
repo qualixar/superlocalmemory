@@ -389,6 +389,12 @@ def main() -> None:
              "Default: no time filter.",
     )
     recall_p.add_argument(
+        "--as-of", dest="as_of", default="",
+        help="Point-in-time recall: an ISO-8601 timestamp "
+             "(2026-01-01T00:00:00+00:00) that pins retrieval to a temporal "
+             "snapshot. Default: current-state recall.",
+    )
+    recall_p.add_argument(
         "--fast", action="store_true",
         help="Force-skip the internal agentic verification round (all six retrieval "
              "channels + reranker still run). This is already the default (client-driven "

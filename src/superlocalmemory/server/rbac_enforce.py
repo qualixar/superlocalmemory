@@ -114,6 +114,33 @@ def require_manage(request: Request, *, profile: str | None = None) -> dict:
     return require_permission(request, Permission.MANAGE, profile=profile)
 
 
+def resolve_actor_roles(request: Request, *, profile: str | None = None):
+    """Resolve the caller to concrete ActorContext roles (server-derived).
+
+    The machine operator (owner) is root. A logged-in user is mapped from their
+    persisted RBAC role on ``profile``. This must be called only after
+    ``require_permission`` has already authorized the operation, so the returned
+    role always includes the permission the caller was admitted with.
+    """
+    from superlocalmemory.core.actor_context import ActorRole
+
+    principal = resolve_principal(request)
+    if principal.get("kind") == "owner":
+        return frozenset({ActorRole.OWNER})
+    rbac = get_rbac_engine(request.app.state)
+    role = (
+        rbac.get_role(principal["user_id"], profile or _active_profile())
+        if rbac is not None
+        else None
+    )
+    mapped = {
+        Role.ADMIN: ActorRole.ADMIN,
+        Role.MEMBER: ActorRole.MEMBER,
+        Role.VIEWER: ActorRole.VIEWER,
+    }.get(role)
+    return frozenset({mapped}) if mapped is not None else frozenset({ActorRole.ANONYMOUS})
+
+
 def principal_info(request: Request) -> dict:
     """Rich identity for /whoami: principal + role + effective permissions on
     the active profile. Never raises — used by the dashboard to render UI."""

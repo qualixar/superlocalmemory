@@ -710,6 +710,11 @@ class TemporalValidatorConfig:
     # Include expired facts in historical queries
     include_expired_in_history: bool = True
 
+    # Event-time (valid_until) demotion factor, applied like
+    # superseded_demotion_factor but for facts whose stated validity window has
+    # elapsed. Default matches the prior hardcoded constant (0.5).
+    event_time_demotion_factor: float = 0.5
+
 
 @dataclass(frozen=True)
 class EvolutionConfig:

@@ -703,6 +703,7 @@ class MemoryEngine:
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str | tuple[str, str] | None = None,
+        as_of: str | None = None,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -758,6 +759,7 @@ class MemoryEngine:
                 include_global=include_global,
                 include_shared=include_shared,
                 window=window,
+                as_of=as_of,
             )
         except Exception:
             # Diagnostics are intentionally not recorded here.  A recall is a

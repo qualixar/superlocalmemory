@@ -56,6 +56,11 @@ from superlocalmemory.storage.admission_journal import (
     TerminalAdmissionError,
 )
 from superlocalmemory.storage.database import DatabaseManager
+from superlocalmemory.storage.generation_fence import (
+    admitted_epoch,
+    clear_admission_epoch,
+    record_admission_epoch,
+)
 from superlocalmemory.storage.write_coordinator import (
     CommandConflictError,
     CommandKind,
@@ -174,6 +179,7 @@ class CanonicalRememberRuntime:
         self._writer = writer
         self._materialize = materialize or _materialization_is_not_available
         self._binding_lock = threading.RLock()
+        self._generation = 0
         self.coordinator = WriteCoordinator(db.db_path, owner_id=owner_id)
         self.journal = AdmissionJournal(
             journal_path,
@@ -264,11 +270,13 @@ class CanonicalRememberRuntime:
             self._db = db
             self._profile_id = profile_id
             self._writer = writer
+            self._generation += 1
         try:
             self.replay_pending()
         except BaseException:
             with self._binding_lock:
                 self._db, self._profile_id, self._writer = previous
+                self._generation -= 1
             raise
 
     def remember(
@@ -279,6 +287,9 @@ class CanonicalRememberRuntime:
             raise CanonicalRememberUnavailable("canonical remember writer is not ready")
         if deadline_ms < 1 or deadline_ms > 2_000:
             raise ValueError("deadline_ms must be between 1 and 2000")
+        with self._binding_lock:
+            admitted = self._generation
+        record_admission_epoch(request.profile_id, request.idempotency_key, admitted)
         try:
             return self._service.remember(request, actor, deadline_ms=deadline_ms)
         except (
@@ -289,6 +300,8 @@ class CanonicalRememberRuntime:
             raise CanonicalRememberUnavailable(
                 "canonical remember is temporarily unavailable"
             ) from exc
+        finally:
+            clear_admission_epoch(request.profile_id, request.idempotency_key)
 
     def replay_pending(self) -> int:
         """Finish prepared/dispatched journal entries before publishing readiness."""
@@ -465,6 +478,9 @@ class CanonicalRememberRuntime:
             db = self._db
             if request.profile_id != self._profile_id:
                 raise ValueError("admission command targets a different profile")
+            expected = admitted_epoch(request.profile_id, request.idempotency_key)
+            if expected is not None and expected != self._generation:
+                raise ValueError("admission command epoch is stale")
             ingestion_request = IngestionRequest(
                 content=request.content,
                 profile_id=request.profile_id,

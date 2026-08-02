@@ -3470,6 +3470,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str = "",
+        as_of: str = "",
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -3531,6 +3532,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     include_global=include_global,
                     include_shared=include_shared,
                     window=window or None,
+                    as_of=as_of or None,
                 ),
             )
             _budget = _recall_budget_s()
@@ -3634,7 +3636,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # authenticated dashboard user may mutate this profile. This must run
         # before either the trust pre-hook or the durable admission journal.
         from superlocalmemory.access.rbac import Permission
-        from superlocalmemory.server.rbac_enforce import require_permission
+        from superlocalmemory.server.rbac_enforce import (
+            require_permission,
+            resolve_actor_roles,
+        )
 
         require_permission(request, Permission.WRITE, profile=engine._profile_id)
         if scope in {"shared", "global"}:
@@ -3693,9 +3698,6 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 ActorContext as _ActorContext,
             )
             from superlocalmemory.core.actor_context import (
-                ActorRole as _ActorRole,
-            )
-            from superlocalmemory.core.actor_context import (
                 Transport as _Transport,
             )
             from superlocalmemory.core.operation_policy_registry import (
@@ -3729,7 +3731,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
             _http_actor = _ActorContext(
                 principal_id=trusted_actor_id,
-                roles=frozenset({_ActorRole.OWNER}),
+                roles=resolve_actor_roles(request, profile=engine._profile_id),
                 active_profile_id=engine._profile_id,
                 transport=_Transport.HTTP,
                 client_host=_client_host,
