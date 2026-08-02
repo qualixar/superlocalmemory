@@ -69,25 +69,66 @@ def build_evidence(obligations: Iterable[Obligation]) -> tuple[OwnerEvidence, ..
     return tuple(evidence)
 
 
-def compute_manifest_hash(evidence: Iterable[OwnerEvidence]) -> str:
-    ordered = sorted(
+def _sorted_evidence_dicts(evidence: Iterable[OwnerEvidence]) -> list[dict[str, object]]:
+    return sorted(
         (e.as_dict() for e in evidence),
         key=lambda d: (d["owner"], d["kind"], d["revision"]),
     )
+
+
+def evidence_json(evidence: Iterable[OwnerEvidence]) -> str:
+    return json.dumps(
+        _sorted_evidence_dicts(evidence),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def compute_envelope_hash(
+    *,
+    operation_id: str,
+    profile_id: str,
+    state: ManifestState,
+    all_met: bool,
+    obligation_count: int,
+    evidence: Iterable[OwnerEvidence],
+) -> str:
+    envelope = {
+        "operation_id": operation_id,
+        "profile_id": profile_id,
+        "state": str(state),
+        "all_met": bool(all_met),
+        "obligation_count": obligation_count,
+        "evidence": _sorted_evidence_dicts(evidence),
+    }
     canonical = json.dumps(
-        ordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def evidence_json(evidence: Iterable[OwnerEvidence]) -> str:
-    ordered = sorted(
-        (e.as_dict() for e in evidence),
-        key=lambda d: (d["owner"], d["kind"], d["revision"]),
+def hash_envelope_fields(
+    *,
+    operation_id: str,
+    profile_id: str,
+    state: str,
+    all_met: bool,
+    obligation_count: int,
+    evidence_dicts: list[dict[str, object]],
+) -> str:
+    envelope = {
+        "operation_id": operation_id,
+        "profile_id": profile_id,
+        "state": state,
+        "all_met": bool(all_met),
+        "obligation_count": obligation_count,
+        "evidence": evidence_dicts,
+    }
+    canonical = json.dumps(
+        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
-    return json.dumps(
-        ordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def derive_state(
@@ -96,7 +137,7 @@ def derive_state(
     if not canonical_committed:
         return ManifestState.FAILED, False
     if not obligations:
-        return ManifestState.COMPLETE, True
+        return ManifestState.FAILED, False
     all_met = all(is_terminal_success(o.state) for o in obligations)
     if all_met:
         return ManifestState.COMPLETE, True
@@ -108,7 +149,8 @@ __all__ = [
     "ManifestState",
     "OwnerEvidence",
     "build_evidence",
-    "compute_manifest_hash",
+    "compute_envelope_hash",
     "derive_state",
     "evidence_json",
+    "hash_envelope_fields",
 ]

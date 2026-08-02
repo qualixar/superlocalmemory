@@ -126,6 +126,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M033_projection_transactions as _M033,
 )
+from superlocalmemory.storage.migrations import (
+    M034_obligation_integrity as _M034,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -167,6 +170,7 @@ _MODULES = {
     _M031.NAME: _M031,
     _M032.NAME: _M032,
     _M033.NAME: _M033,
+    _M034.NAME: _M034,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

@@ -8,11 +8,13 @@ from superlocalmemory.core.transactions.manifest import (
     ManifestState,
     OwnerEvidence,
     build_evidence,
-    compute_manifest_hash,
+    compute_envelope_hash,
     derive_state,
+    hash_envelope_fields,
 )
 from superlocalmemory.core.transactions.obligations import (
     Obligation,
+    ObligationConflictError,
     ObligationLedger,
 )
 from superlocalmemory.core.transactions.owners import (
@@ -33,6 +35,7 @@ __all__ = [
     "ManifestState",
     "MemoryTransactionService",
     "Obligation",
+    "ObligationConflictError",
     "ObligationKind",
     "ObligationLedger",
     "ObligationState",
@@ -44,7 +47,8 @@ __all__ = [
     "ProjectionOwner",
     "Reconciler",
     "build_evidence",
-    "compute_manifest_hash",
+    "compute_envelope_hash",
     "derive_state",
+    "hash_envelope_fields",
     "is_terminal_success",
 ]

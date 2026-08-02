@@ -4254,6 +4254,151 @@ def _run_materializer_operation(
             return operation(engine)
 
 
+def _reconcile_projection_manifest(
+    engine, operation_id: str, profile_id: str, fact_ids,
+) -> None:
+    try:
+        from superlocalmemory.core.transactions.concrete_owners import (
+            REQUIRED_ADMISSION_OWNERS,
+            build_transaction_service,
+        )
+        from superlocalmemory.core.transactions.owners import ObligationKind
+
+        if not profile_id:
+            return
+        context = _context_for_operation(engine, operation_id)
+        if context is None:
+            _terminalize_orphan_operation(engine, operation_id)
+            return
+        service = build_transaction_service(engine)
+        with engine._db.raw_connection() as conn:
+            service.record(
+                conn, context,
+                owners=REQUIRED_ADMISSION_OWNERS,
+                kind=ObligationKind.APPLY,
+            )
+        service.reconcile_operation(engine._db, context)
+    except Exception as exc:
+        logger.warning(
+            "projection reconciliation skipped for %s: %s", operation_id, exc,
+        )
+
+
+def _context_for_operation(engine, operation_id: str):
+    import json as _json
+
+    from superlocalmemory.core.transactions.owners import OperationContext
+
+    db = getattr(engine, "_db", None)
+    if db is None:
+        return None
+    rows = db.execute(
+        "SELECT profile_id, final_fact_ids_json, queryable_fact_ids_json "
+        "FROM ingestion_operations WHERE operation_id = ?",
+        (operation_id,),
+    )
+    if not rows:
+        return None
+    row = dict(rows[0])
+    if row.get("profile_id") != getattr(engine, "_profile_id", None):
+        return None
+    try:
+        fact_ids = _json.loads(row.get("final_fact_ids_json") or "[]") or _json.loads(
+            row.get("queryable_fact_ids_json") or "[]"
+        )
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(fact_ids, list) or not fact_ids:
+        return None
+    fact_ids = [str(fid) for fid in fact_ids]
+    return OperationContext(
+        operation_id=operation_id,
+        profile_id=row["profile_id"],
+        subject_id=operation_id,
+        fact_ids=tuple(fact_ids),
+    )
+
+
+_REDRIVE_INTERVAL_S = 30.0
+_last_redrive_ts = 0.0
+
+
+def _reconcile_pending_projections(
+    engine, *, limit: int = 20, force: bool = False,
+) -> int:
+    global _last_redrive_ts
+    now = time.monotonic()
+    if not force and now - _last_redrive_ts < _REDRIVE_INTERVAL_S:
+        return 0
+    _last_redrive_ts = now
+    try:
+        from superlocalmemory.core.transactions.concrete_owners import (
+            build_transaction_service,
+        )
+        from superlocalmemory.core.transactions.obligations import ObligationLedger
+
+        db = getattr(engine, "_db", None)
+        profile_id = getattr(engine, "_profile_id", None)
+        if db is None or not profile_id:
+            return 0
+        ledger = ObligationLedger()
+        with db.raw_connection() as conn:
+            op_ids = set(
+                ledger.pending_operation_ids(conn, profile_id=profile_id, limit=limit)
+            )
+            op_ids.update(
+                ledger.operations_missing_manifest(
+                    conn, profile_id=profile_id, limit=limit,
+                )
+            )
+        if not op_ids:
+            return 0
+        service = build_transaction_service(engine)
+        done = 0
+        for operation_id in sorted(op_ids):
+            try:
+                context = _context_for_operation(engine, operation_id)
+                if context is None:
+                    _terminalize_orphan_operation(engine, operation_id)
+                    continue
+                service.reconcile_operation(db, context)
+                done += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "projection redrive failed for %s: %s", operation_id, exc,
+                )
+        return done
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("projection redrive pass skipped: %s", exc)
+        return 0
+
+
+def _terminalize_orphan_operation(engine, operation_id: str) -> None:
+    from superlocalmemory.core.transactions.obligations import ObligationLedger
+    from superlocalmemory.core.transactions.owners import ObligationState
+    from superlocalmemory.core.transactions.reconciler import Reconciler
+    from superlocalmemory.core.transactions.service import MAX_APPLY_ATTEMPTS
+
+    db = getattr(engine, "_db", None)
+    profile_id = getattr(engine, "_profile_id", None)
+    if db is None or not profile_id:
+        return
+    ledger = ObligationLedger()
+    with db.raw_connection() as conn:
+        for obligation in ledger.fetch(conn, operation_id):
+            if obligation.attempts >= MAX_APPLY_ATTEMPTS:
+                continue
+            ledger.mark(
+                conn, operation_id, obligation.owner, obligation.kind,
+                ObligationState.FAILED,
+                detail={"phase": "orphan", "error": "canonical record missing"},
+                bump_attempts=True,
+            )
+        Reconciler(ledger).reconcile(
+            conn, operation_id, profile_id, canonical_committed=False,
+        )
+
+
 def _materialize_ingestion_one_pass(
     engine,
     *,
@@ -4312,6 +4457,12 @@ def _materialize_ingestion_one_pass(
             continue
         if result.state is IngestionState.COMPLETE:
             completed += 1
+            _reconcile_projection_manifest(
+                engine,
+                result.operation_id,
+                getattr(operation, "profile_id", ""),
+                result.fact_ids,
+            )
             _emit_event(
                 "memory.stored",
                 payload={
@@ -4329,6 +4480,7 @@ def _materialize_ingestion_one_pass(
                 result.operation_id,
                 result.last_error,
             )
+    _reconcile_pending_projections(engine)
     return completed, failed
 
 

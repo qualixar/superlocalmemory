@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import uuid
@@ -35,6 +36,14 @@ from superlocalmemory.core.remember_admission import (
     RememberAdmissionCommand,
     RememberReceipt,
     RememberService,
+)
+from superlocalmemory.core.transactions.concrete_owners import (
+    REQUIRED_ADMISSION_OWNERS,
+)
+from superlocalmemory.core.transactions.obligations import ObligationLedger
+from superlocalmemory.core.transactions.owners import (
+    ObligationKind,
+    OperationContext,
 )
 from superlocalmemory.storage.admission_codec import MachineKeyCommandCodec
 from superlocalmemory.storage.admission_journal import (
@@ -63,6 +72,19 @@ Materializer = Callable[
     [IngestionOperation],
     list[str] | tuple[str, ...] | MaterializationResult,
 ]
+
+logger = logging.getLogger("superlocalmemory.core.remember_runtime")
+_OBLIGATION_LEDGER = ObligationLedger()
+
+
+def _obligation_schema_present(conn) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='projection_obligations'"
+    ).fetchone()
+    if row is None:
+        return False
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(projection_obligations)")}
+    return "context_digest" in columns
 
 
 class CanonicalRememberUnavailable(RuntimeError):
@@ -159,6 +181,7 @@ class CanonicalRememberRuntime:
         )
         self._service = RememberService(self.journal, _CoordinatorAdapter(self.coordinator))
         self._started = False
+        self._obligation_schema_ok: bool | None = None
 
     @classmethod
     def for_engine(cls, engine: Any) -> "CanonicalRememberRuntime":
@@ -469,6 +492,7 @@ class CanonicalRememberRuntime:
                     receipt = command_impl.submit(ingestion_request)
                 except IngestionRejectedError as exc:
                     raise CommandRejectedError() from exc
+                self._record_projection_obligations(conn, request, receipt)
         return WriteResult.from_receipt(
             command,
             {
@@ -479,6 +503,24 @@ class CanonicalRememberRuntime:
                 "status": "queryable",
                 "materialization_state": receipt.state.value,
             },
+        )
+
+    def _record_projection_obligations(self, conn, request, receipt) -> None:
+        fact_ids = tuple(getattr(receipt, "fact_ids", ()) or ())
+        if not fact_ids:
+            return
+        if self._obligation_schema_ok is None:
+            self._obligation_schema_ok = _obligation_schema_present(conn)
+        if not self._obligation_schema_ok:
+            return
+        context = OperationContext(
+            operation_id=receipt.operation_id,
+            profile_id=request.profile_id,
+            subject_id=receipt.operation_id,
+            fact_ids=fact_ids,
+        )
+        _OBLIGATION_LEDGER.record_many(
+            conn, context, REQUIRED_ADMISSION_OWNERS, ObligationKind.APPLY,
         )
 
     def _handle_mutation(self, conn, capability, command: WriteCommand) -> WriteResult:

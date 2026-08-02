@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 
@@ -11,11 +12,13 @@ from superlocalmemory.core.transactions.manifest import (
     ManifestState,
     OwnerEvidence,
     build_evidence,
-    compute_manifest_hash,
+    compute_envelope_hash,
     derive_state,
     evidence_json,
+    hash_envelope_fields,
 )
 from superlocalmemory.core.transactions.obligations import ObligationLedger
+from superlocalmemory.core.transactions.owners import ObligationKind, ObligationState
 
 
 class Reconciler:
@@ -28,14 +31,20 @@ class Reconciler:
         operation_id: str,
         profile_id: str,
         *,
-        canonical_committed: bool = True,
+        canonical_committed: bool | None = None,
     ) -> CompletionManifest:
+        committed = self._resolve_canonical(conn, operation_id, canonical_committed)
         obligations = self._ledger.fetch(conn, operation_id)
         evidence = build_evidence(obligations)
-        state, all_met = derive_state(
-            obligations, canonical_committed=canonical_committed
+        state, all_met = derive_state(obligations, canonical_committed=committed)
+        manifest_hash = compute_envelope_hash(
+            operation_id=operation_id,
+            profile_id=profile_id,
+            state=state,
+            all_met=all_met,
+            obligation_count=len(obligations),
+            evidence=evidence,
         )
-        manifest_hash = compute_manifest_hash(evidence)
         payload = evidence_json(evidence)
         now = time.time()
         existing = conn.execute(
@@ -97,7 +106,7 @@ class Reconciler:
             state=ManifestState(row[2]),
             all_met=bool(row[3]),
             obligation_count=int(row[4]),
-            owner_evidence=_evidence_from_stored(conn, operation_id),
+            owner_evidence=_evidence_from_json(row[5]),
             manifest_hash=row[6],
             created_at=float(row[7]),
             updated_at=float(row[8]),
@@ -107,21 +116,74 @@ class Reconciler:
         self, conn: sqlite3.Connection, operation_id: str,
     ) -> bool:
         row = conn.execute(
-            "SELECT manifest_hash FROM completion_manifests WHERE operation_id = ?",
+            "SELECT operation_id, profile_id, state, all_met, obligation_count, "
+            "owner_evidence_json, manifest_hash "
+            "FROM completion_manifests WHERE operation_id = ?",
             (operation_id,),
         ).fetchone()
         if row is None:
             return False
-        obligations = self._ledger.fetch(conn, operation_id)
-        recomputed = compute_manifest_hash(build_evidence(obligations))
-        return recomputed == row[0]
+        try:
+            evidence_dicts = json.loads(row[5])
+            if not isinstance(evidence_dicts, list):
+                return False
+        except (TypeError, json.JSONDecodeError):
+            return False
+        recomputed = hash_envelope_fields(
+            operation_id=row[0],
+            profile_id=row[1],
+            state=row[2],
+            all_met=bool(row[3]),
+            obligation_count=int(row[4]),
+            evidence_dicts=evidence_dicts,
+        )
+        return recomputed == row[6]
+
+    def _resolve_canonical(
+        self,
+        conn: sqlite3.Connection,
+        operation_id: str,
+        canonical_committed: bool | None,
+    ) -> bool:
+        if canonical_committed is not None:
+            return canonical_committed
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='ingestion_operations'"
+        ).fetchone()
+        if table is None:
+            return True
+        row = conn.execute(
+            "SELECT state FROM ingestion_operations WHERE operation_id = ? LIMIT 1",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        return row[0] in ("queryable", "enriching", "complete")
 
 
-def _evidence_from_stored(
-    conn: sqlite3.Connection, operation_id: str,
-) -> tuple[OwnerEvidence, ...]:
-    ledger = ObligationLedger()
-    return build_evidence(ledger.fetch(conn, operation_id))
+def _evidence_from_json(payload: str) -> tuple[OwnerEvidence, ...]:
+    try:
+        rows = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return ()
+    if not isinstance(rows, list):
+        return ()
+    evidence: list[OwnerEvidence] = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            evidence.append(OwnerEvidence(
+                owner=str(entry["owner"]),
+                kind=ObligationKind(entry["kind"]),
+                state=ObligationState(entry["state"]),
+                revision=int(entry["revision"]),
+                checksum=str(entry["checksum"]),
+            ))
+        except (KeyError, ValueError):
+            continue
+    return tuple(evidence)
 
 
 __all__ = ["Reconciler"]

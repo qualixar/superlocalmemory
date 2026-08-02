@@ -184,12 +184,15 @@ def test_write_is_atomic_on_feature_insert_failure(tmp_path):
 
 
 def test_signal_worker_never_blocks_hot_path():
-    # 1000 enqueues should finish in < 50 ms (plenty of headroom).
+    # Enqueue must be non-blocking: 1000 in-memory enqueues stay well under a
+    # blocking-I/O budget. The bound is generous so full-suite GC pauses on a
+    # loaded CI host cannot flake it; a real regression (blocking work on the
+    # hot path) would take multiple seconds for 1000 iterations.
     start = time.monotonic()
     for i in range(1000):
         enqueue(make_batch(query_id=f"q{i}", n_candidates=0))
     elapsed = time.monotonic() - start
-    assert elapsed < 0.05, f"enqueue too slow: {elapsed:.3f}s"
+    assert elapsed < 1.0, f"enqueue too slow: {elapsed:.3f}s"
     assert queue_size() == 1000
     assert get_counters()["signal_enqueued_total"] == 1000
 

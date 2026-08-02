@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterable, Mapping
 
@@ -13,9 +14,12 @@ from superlocalmemory.core.transactions.owners import (
     ObligationState,
     OperationContext,
     ProjectionOwner,
-    is_terminal_success,
 )
 from superlocalmemory.core.transactions.reconciler import Reconciler
+
+logger = logging.getLogger("superlocalmemory.core.transactions.service")
+
+MAX_APPLY_ATTEMPTS = 10
 
 
 class MemoryTransactionService:
@@ -54,9 +58,12 @@ class MemoryTransactionService:
         for obligation in self._ledger.fetch(conn, context.operation_id):
             if obligation.kind is not ObligationKind.APPLY:
                 continue
-            if is_terminal_success(obligation.state):
+            if (
+                obligation.state in (ObligationState.FAILED, ObligationState.APPLIED)
+                and obligation.attempts >= MAX_APPLY_ATTEMPTS
+            ):
                 continue
-            self._apply_one(conn, context, obligation.owner)
+            self._reconcile_owner(conn, context, obligation)
 
     def erase(
         self, conn: sqlite3.Connection, context: OperationContext,
@@ -64,7 +71,7 @@ class MemoryTransactionService:
         for obligation in self._ledger.fetch(conn, context.operation_id):
             if obligation.kind is not ObligationKind.ERASE:
                 continue
-            if is_terminal_success(obligation.state):
+            if obligation.state is ObligationState.ERASED:
                 continue
             self._erase_one(conn, context, obligation.owner)
 
@@ -104,7 +111,7 @@ class MemoryTransactionService:
         operation_id: str,
         profile_id: str,
         *,
-        canonical_committed: bool = True,
+        canonical_committed: bool | None = None,
     ) -> CompletionManifest:
         return self._reconciler.reconcile(
             conn, operation_id, profile_id,
@@ -116,13 +123,118 @@ class MemoryTransactionService:
         conn: sqlite3.Connection,
         context: OperationContext,
         *,
-        canonical_committed: bool = True,
+        canonical_committed: bool | None = None,
     ) -> CompletionManifest:
         self.apply(conn, context)
         return self.reconcile(
             conn, context.operation_id, context.profile_id,
             canonical_committed=canonical_committed,
         )
+
+    def reconcile_operation(
+        self,
+        db: object,
+        context: OperationContext,
+        *,
+        canonical_committed: bool | None = None,
+    ) -> CompletionManifest:
+        op = context.operation_id
+        with db.raw_connection() as conn:
+            obligations = self._ledger.fetch(conn, op)
+        for obligation in obligations:
+            if obligation.kind is not ObligationKind.APPLY:
+                continue
+            if (
+                obligation.state in (ObligationState.FAILED, ObligationState.APPLIED)
+                and obligation.attempts >= MAX_APPLY_ATTEMPTS
+            ):
+                continue
+            self._reconcile_owner_unlocked(db, context, obligation)
+        with db.raw_connection() as conn:
+            return self._reconciler.reconcile(
+                conn, op, context.profile_id,
+                canonical_committed=canonical_committed,
+            )
+
+    def _reconcile_owner_unlocked(
+        self, db: object, context: OperationContext, obligation: object,
+    ) -> None:
+        op = context.operation_id
+        owner_name = obligation.owner
+        owner = self._owners.get(owner_name)
+        if owner is None:
+            with db.raw_connection() as conn:
+                self._ledger.mark(
+                    conn, op, owner_name, ObligationKind.APPLY,
+                    ObligationState.FAILED,
+                    detail={"phase": "apply", "error": "owner not registered"},
+                    bump_attempts=True,
+                )
+            return
+        ok, checksum, detail = self._safe_verify(owner, context)
+        if (
+            ok
+            and obligation.state is ObligationState.VERIFIED
+            and obligation.checksum is not None
+            and checksum != obligation.checksum
+        ):
+            ok = False
+            detail = {"error": "projection drift: content changed since verification"}
+        if not ok:
+            applied_ok, a_checksum, a_detail = self._safe_apply(owner, context)
+            with db.raw_connection() as conn:
+                if applied_ok:
+                    self._ledger.mark(
+                        conn, op, owner_name, ObligationKind.APPLY,
+                        ObligationState.APPLIED, checksum=a_checksum,
+                        bump_attempts=True,
+                    )
+                else:
+                    self._ledger.mark(
+                        conn, op, owner_name, ObligationKind.APPLY,
+                        ObligationState.FAILED, checksum=a_checksum,
+                        detail={"phase": "apply", **a_detail}, bump_attempts=True,
+                    )
+            if applied_ok:
+                ok, checksum, detail = self._safe_verify(owner, context)
+        with db.raw_connection() as conn:
+            if ok:
+                updated = self._ledger.mark(
+                    conn, op, owner_name, ObligationKind.APPLY,
+                    ObligationState.VERIFIED, checksum=checksum,
+                    bump_verify_attempts=True, set_verified_at=True,
+                )
+            else:
+                updated = self._ledger.mark(
+                    conn, op, owner_name, ObligationKind.APPLY,
+                    ObligationState.FAILED, checksum=checksum,
+                    detail={"phase": "verify", **detail},
+                    bump_verify_attempts=True,
+                )
+        if updated == 0:
+            logger.warning(
+                "obligation %s/%s missing during reconcile mark", op, owner_name,
+            )
+
+    @staticmethod
+    def _safe_verify(
+        owner: ProjectionOwner, context: OperationContext,
+    ) -> tuple[bool, str | None, dict]:
+        try:
+            result = owner.verify(context)
+        except Exception as exc:  # noqa: BLE001
+            return False, None, {"error": _err(exc)}
+        return result.ok, result.checksum, dict(result.detail)
+
+    @staticmethod
+    def _safe_apply(
+        owner: ProjectionOwner, context: OperationContext,
+    ) -> tuple[bool, str | None, dict]:
+        try:
+            result = owner.apply(context)
+        except Exception as exc:  # noqa: BLE001
+            return False, None, {"error": _err(exc)}
+        return result.ok, result.checksum, dict(result.detail)
 
     def verify_manifest(
         self, conn: sqlite3.Connection, operation_id: str,
@@ -134,11 +246,12 @@ class MemoryTransactionService:
     ) -> CompletionManifest | None:
         return self._reconciler.fetch_manifest(conn, operation_id)
 
-    def _apply_one(
-        self, conn: sqlite3.Connection, context: OperationContext, owner_name: str,
+    def _reconcile_owner(
+        self, conn: sqlite3.Connection, context: OperationContext, obligation: object,
     ) -> None:
-        owner = self._owners.get(owner_name)
         op = context.operation_id
+        owner_name = obligation.owner
+        owner = self._owners.get(owner_name)
         if owner is None:
             self._ledger.mark(
                 conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
@@ -146,44 +259,39 @@ class MemoryTransactionService:
                 bump_attempts=True,
             )
             return
-        try:
-            applied = owner.apply(context)
-        except Exception as exc:  # noqa: BLE001
-            self._ledger.mark(
-                conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
-                detail={"phase": "apply", "error": _err(exc)}, bump_attempts=True,
-            )
-            return
-        if not applied.ok:
-            self._ledger.mark(
-                conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
-                checksum=applied.checksum,
-                detail={"phase": "apply", **dict(applied.detail)},
-                bump_attempts=True,
-            )
-            return
-        self._ledger.mark(
-            conn, op, owner_name, ObligationKind.APPLY, ObligationState.APPLIED,
-            checksum=applied.checksum, bump_attempts=True,
-        )
-        try:
-            verified = owner.verify(context)
-        except Exception as exc:  # noqa: BLE001
-            self._ledger.mark(
-                conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
-                detail={"phase": "verify", "error": _err(exc)},
-            )
-            return
-        if verified.ok:
+        ok, checksum, detail = self._safe_verify(owner, context)
+        if (
+            ok
+            and obligation.state is ObligationState.VERIFIED
+            and obligation.checksum is not None
+            and checksum != obligation.checksum
+        ):
+            ok = False
+            detail = {"error": "projection drift: content changed since verification"}
+        if not ok:
+            applied_ok, a_checksum, a_detail = self._safe_apply(owner, context)
+            if applied_ok:
+                self._ledger.mark(
+                    conn, op, owner_name, ObligationKind.APPLY,
+                    ObligationState.APPLIED, checksum=a_checksum, bump_attempts=True,
+                )
+                ok, checksum, detail = self._safe_verify(owner, context)
+            else:
+                self._ledger.mark(
+                    conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
+                    checksum=a_checksum, detail={"phase": "apply", **a_detail},
+                    bump_attempts=True,
+                )
+        if ok:
             self._ledger.mark(
                 conn, op, owner_name, ObligationKind.APPLY, ObligationState.VERIFIED,
-                checksum=verified.checksum,
+                checksum=checksum, bump_verify_attempts=True, set_verified_at=True,
             )
         else:
             self._ledger.mark(
                 conn, op, owner_name, ObligationKind.APPLY, ObligationState.FAILED,
-                checksum=verified.checksum,
-                detail={"phase": "verify", **dict(verified.detail)},
+                checksum=checksum, detail={"phase": "verify", **detail},
+                bump_verify_attempts=True,
             )
 
     def _erase_one(
@@ -206,20 +314,13 @@ class MemoryTransactionService:
                 detail={"phase": "erase", "error": _err(exc)}, bump_attempts=True,
             )
             return
-        if proof.erased:
-            self._ledger.mark(
-                conn, op, owner_name, ObligationKind.ERASE, ObligationState.ERASED,
-                checksum=proof.checksum,
-                detail={"phase": "erase", **dict(proof.detail)},
-                bump_attempts=True,
-            )
-        else:
-            self._ledger.mark(
-                conn, op, owner_name, ObligationKind.ERASE, ObligationState.FAILED,
-                checksum=proof.checksum,
-                detail={"phase": "erase", **dict(proof.detail)},
-                bump_attempts=True,
-            )
+        state = ObligationState.ERASED if proof.erased else ObligationState.FAILED
+        self._ledger.mark(
+            conn, op, owner_name, ObligationKind.ERASE, state,
+            checksum=proof.checksum,
+            detail={"phase": "erase", **dict(proof.detail)},
+            bump_attempts=True,
+        )
 
 
 def _err(exc: BaseException) -> str:
