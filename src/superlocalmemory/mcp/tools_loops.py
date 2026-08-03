@@ -39,6 +39,8 @@ from typing import Any, Callable
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.loops import (
     Bounds,
     LapResult,
@@ -75,6 +77,7 @@ def register_loop_tools(server, get_engine: Callable) -> None:
     """
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    @admits(OperationKind.REMEMBER)
     async def slm_loop_run(
         name: str,
         gate_query: str,

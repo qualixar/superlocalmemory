@@ -37,6 +37,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
     """Register learning MCP tools for two-way intelligence."""
 
     @server.tool()
+    @admits(OperationKind.REMEMBER)
     async def log_tool_event(
         tool_name: str,
         event_type: str = "invoke",

@@ -130,6 +130,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # 3. set_retention_policy
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def set_retention_policy(
         cold_after_days: int = 30,
         archive_after_days: int = 90,
@@ -166,6 +167,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # 4. compact_memories
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def compact_memories(dry_run: bool = True) -> dict:
         """Compact memory store by archiving cold/stale facts.
 

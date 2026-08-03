@@ -637,6 +637,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def core_memory(
         action: str,
         fact_id: str = "",

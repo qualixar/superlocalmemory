@@ -74,6 +74,26 @@ def authorize_route_mutation(
     if content_preview:
         context["content_preview"] = content_preview[:100]
 
+    # Phase-1/E2: run admission registry before trust-hook pre-handler so
+    # enterprise policy can deny the mutation even if the trust hook allows it.
+    from superlocalmemory.core.admission import (
+        AdmissionDenied,
+        OperationKind,
+        _resolve_deployment,
+        admit,
+        resolve_actor,
+    )
+    from superlocalmemory.core.actor_context import Transport
+    deployment = _resolve_deployment()
+    tier = "enterprise" if deployment.is_enterprise else "personal"
+    mode = "company" if deployment.is_enterprise else "local"
+    http_actor = resolve_actor(Transport.HTTP, tier=tier, mode=mode)
+    kind = OperationKind.FORGET if operation == "delete" else OperationKind.CORRECT
+    try:
+        admit(kind, http_actor, mode=mode)
+    except AdmissionDenied as exc:
+        raise HTTPException(403, detail="Write authorization rejected") from exc
+
     try:
         engine._hooks.run_pre(operation, context)
     except Exception as exc:

@@ -337,6 +337,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 5. reap_processes — Find and kill orphaned SLM processes
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def reap_processes(
         dry_run: bool = True,
     ) -> dict:
@@ -437,6 +438,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 7. run_maintenance — V3.3.12: Combined periodic maintenance cycle
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def run_maintenance() -> dict:
         """Run all periodic maintenance tasks in a single call.
 

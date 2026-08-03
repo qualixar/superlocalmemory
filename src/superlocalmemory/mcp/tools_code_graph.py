@@ -110,6 +110,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # ==================================================================
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def build_code_graph(
         repo_path: str,
         languages: str = "",
@@ -1219,6 +1220,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # ==================================================================
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def apply_refactor(
         action: str,
         target: str,
@@ -1541,6 +1543,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     })
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def link_memory_to_code(
         fact_id: str,
         code_entity: str,
