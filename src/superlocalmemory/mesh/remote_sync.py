@@ -159,6 +159,11 @@ except ImportError:
     RemoteOutbox = None  # type: ignore[assignment,misc]
     _OUTBOX_AVAILABLE = False
 
+#: Wall-clock budget for a single outbox drain pass. Bounds how long a
+#: slow/black-holing peer can monopolize the shared 30s sync thread (audit
+#: P1); remaining due rows are deferred to the next cycle.
+_DRAIN_BUDGET_SECONDS: float = 8.0
+
 
 class RemoteSyncClient:
     """HTTP-based sync client for multi-machine mesh coordination.
@@ -304,8 +309,14 @@ class RemoteSyncClient:
 
         parsed = httpx.URL(peer_url)
         if parsed.scheme != "https":
-            # Pinning is only meaningful over TLS
-            return True, ""
+            # A pin is configured but the peer URL is not https. Pinning is
+            # impossible over plaintext, so FAIL CLOSED (audit P1) rather than
+            # silently sending in the clear under a false sense of pinning.
+            return False, (
+                f"SLM_MESH_TLS_PIN is set but peer URL scheme is "
+                f"{parsed.scheme!r}, not https — refusing to send unpinned "
+                "plaintext (set an https:// peer URL or unset the pin)"
+            )
 
         host = parsed.host
         port = parsed.port or 443
@@ -422,6 +433,16 @@ class RemoteSyncClient:
             return
 
         for row in due_rows:
+            # Audit P1: bound wall-clock so a slow/black-holing peer can't
+            # monopolize the shared 30s sync thread. Remaining due rows stay
+            # queued and are retried next cycle.
+            if time.time() - now > _DRAIN_BUDGET_SECONDS:
+                logger.debug(
+                    "RemoteOutbox: drain budget (%.0fs) exhausted; deferring "
+                    "remaining rows to next cycle",
+                    _DRAIN_BUDGET_SECONDS,
+                )
+                break
             row_id: int = row["id"]
             peer_url: str = row["peer_url"]
             to_peer: str = row["to_peer"]
@@ -519,6 +540,18 @@ class RemoteSyncClient:
         if not self._peer_url:
             return
 
+        # Audit P1: the peers-sync GET carries the bearer token — it MUST honor
+        # the same cert pin as send/drain, else a MITM (CA-valid wrong leaf)
+        # harvests the token here and poisons the remote-peer directory while
+        # /mesh/send is pin-blocked. Fail closed for this cycle on pin failure.
+        pin_ok, pin_err = self._check_cert_pin(self._peer_url)
+        if not pin_ok:
+            logger.debug(
+                "RemoteSyncClient: peer-sync pin check failed, skipping: %s",
+                pin_err,
+            )
+            return
+
         try:
             with self._http_client(timeout=5) as client:
                 headers = self._auth_headers()
@@ -580,23 +613,28 @@ class RemoteSyncClient:
             "content": content,
             "type": message_data.get("type", "text"),
         }
-        base_headers = self._auth_headers()
-        signed_headers = self._build_signed_headers(payload, to_peer, base_headers)
-
-        # 3b-3: pre-flight cert pin check before sending any data
-        pin_ok, pin_err = self._check_cert_pin(self._peer_url)
-        if not pin_ok:
-            logger.debug(
-                "RemoteSyncClient: cert pin check failed for %s: %s",
-                self._peer_url, pin_err,
-            )
-            err = f"certificate pin mismatch: {pin_err}"
-            self._enqueue_on_failure(
-                self._peer_url, to_peer, payload, base_headers, now=time.time()
-            )
-            return {"ok": False, "error": err}
-
+        # Everything below (pin pre-flight, signing, POST) runs INSIDE the try
+        # so any error returns the stable {"ok": False, ...} contract instead
+        # of propagating into the broker / route handler (audit P1 — restores
+        # the pre-3b fail-soft behavior).
         try:
+            # 3b-3: pre-flight cert pin check before sending any data. A pin
+            # mismatch (or pin-set-without-https) is a PERMANENT config/attack
+            # condition — do NOT enqueue: retrying cannot fix it and would just
+            # fill the outbox with undeliverable rows (audit P2).
+            pin_ok, pin_err = self._check_cert_pin(self._peer_url)
+            if not pin_ok:
+                logger.warning(
+                    "RemoteSyncClient: cert pin check failed for %s "
+                    "(not enqueued): %s",
+                    self._peer_url, pin_err,
+                )
+                return {"ok": False, "error": f"certificate pin failure: {pin_err}"}
+
+            signed_headers = self._build_signed_headers(
+                payload, to_peer, self._auth_headers()
+            )
+
             with self._http_client(timeout=10) as client:
                 resp = client.post(
                     f"{self._peer_url}/mesh/send",
@@ -612,8 +650,10 @@ class RemoteSyncClient:
                 "RemoteSyncClient: HTTP error sending to remote peer %s: %s",
                 to_peer, e,
             )
+            # Audit P0: never persist auth headers (bearer secret) to disk —
+            # the drain re-signs from the in-memory secret. headers=None.
             self._enqueue_on_failure(
-                self._peer_url, to_peer, payload, base_headers, now=time.time()
+                self._peer_url, to_peer, payload, None, now=time.time()
             )
             return {"ok": False, "error": f"remote send failed: {e}"}
 
@@ -623,7 +663,7 @@ class RemoteSyncClient:
                 to_peer, e,
             )
             self._enqueue_on_failure(
-                self._peer_url, to_peer, payload, base_headers, now=time.time()
+                self._peer_url, to_peer, payload, None, now=time.time()
             )
             return {"ok": False, "error": f"remote send non-2xx: {e}"}
 
@@ -633,7 +673,7 @@ class RemoteSyncClient:
                 to_peer, e,
             )
             self._enqueue_on_failure(
-                self._peer_url, to_peer, payload, base_headers, now=time.time()
+                self._peer_url, to_peer, payload, None, now=time.time()
             )
             return {"ok": False, "error": f"remote send error: {e}"}
 

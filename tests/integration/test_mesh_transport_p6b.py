@@ -294,6 +294,38 @@ class TestOutboxDrain:
         assert _row_count(mesh_db) == 1, "not-yet-due row must remain untouched"
         post_mock.assert_not_called()
 
+    def test_drain_resigns_with_fresh_nonce(self, sync_client, mesh_db):
+        """Crux regression: the drain RE-SIGNS with a fresh nonce/ts on every
+        attempt (never replays stored headers). Guards against a future
+        'optimize by replaying stored headers' regression that would break the
+        3a replay window or reuse a nonce.
+        """
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        mock_resp.raise_for_status.return_value = None
+
+        # Attempt 1
+        self._prefill_row(mesh_db)
+        post1 = MagicMock(return_value=mock_resp)
+        with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
+            mock_cls.return_value.__enter__.return_value.post = post1
+            sync_client._drain_outbox()
+        headers1 = post1.call_args.kwargs["headers"]
+        assert "X-Mesh-Nonce" in headers1
+        assert "X-Mesh-Ts" in headers1
+        assert "X-Mesh-Sig" in headers1
+
+        # Attempt 2 (fresh row) — nonce MUST differ from attempt 1
+        self._prefill_row(mesh_db)
+        post2 = MagicMock(return_value=mock_resp)
+        with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
+            mock_cls.return_value.__enter__.return_value.post = post2
+            sync_client._drain_outbox()
+        headers2 = post2.call_args.kwargs["headers"]
+        assert headers2["X-Mesh-Nonce"] != headers1["X-Mesh-Nonce"], (
+            "each drain attempt must generate a FRESH nonce"
+        )
+
 
 class TestOutboxTTLAndCap:
     """3b-1: TTL prune and per-peer cap."""
@@ -492,22 +524,46 @@ class TestCertPinning:
 
         assert result["ok"] is True
 
-    def test_pin_ignored_for_plaintext_url(self, sync_client, mesh_db):
-        """When the URL is http://, cert pinning is skipped (no TLS connection)."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"ok": True}
-        mock_resp.raise_for_status.return_value = None
+    def test_pin_set_with_http_fails_closed(self, sync_client, mesh_db):
+        """Audit P1: PIN configured + http:// peer URL must FAIL CLOSED.
+
+        Pinning is impossible over plaintext; silently sending in the clear
+        under a false sense of pinning is the bug. The send must be refused,
+        no POST made, and — since this is a permanent config error — the
+        message must NOT be enqueued (would just fill the outbox).
+        """
+        post_mock = MagicMock()
         with patch.dict("os.environ", {"SLM_MESH_TLS_PIN": self._BAD_PIN}):
-            # http:// URL — pin check bypassed
             sync_client._peer_url = "http://192.168.1.5:8765"
             with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
-                mock_cls.return_value.__enter__.return_value.post.return_value = mock_resp
+                mock_cls.return_value.__enter__.return_value.post = post_mock
                 result = sync_client.send_to_remote(
                     "peer-1",
                     {"from_peer": "me", "content": "plain", "type": "text"},
                 )
 
-        assert result["ok"] is True
+        assert result["ok"] is False
+        assert "pin" in result["error"].lower()
+        post_mock.assert_not_called()
+        assert _row_count(mesh_db) == 0  # permanent config error → not enqueued
+
+    def test_pin_mismatch_does_not_enqueue(self, sync_client, mesh_db):
+        """Audit P2: a cert pin MISMATCH on https must NOT be enqueued."""
+        post_mock = MagicMock()
+        with patch("superlocalmemory.mesh.remote_sync._get_cert_sha256",
+                   return_value=self._GOOD_PIN):
+            with patch.dict("os.environ", {"SLM_MESH_TLS_PIN": self._BAD_PIN}):
+                sync_client._peer_url = "https://192.168.1.5:8765"
+                with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
+                    mock_cls.return_value.__enter__.return_value.post = post_mock
+                    result = sync_client.send_to_remote(
+                        "peer-1",
+                        {"from_peer": "me", "content": "x", "type": "text"},
+                    )
+
+        assert result["ok"] is False
+        post_mock.assert_not_called()
+        assert _row_count(mesh_db) == 0  # pin mismatch is permanent → not enqueued
 
 
 # ===========================================================================
@@ -583,3 +639,48 @@ class TestBackwardCompatibility:
         assert client._peer_url.startswith("https://"), (
             "SLM_MESH_TLS=on must produce https:// for discovered peers"
         )
+
+
+class TestPeerSyncPinAndSecretHygiene:
+    """Audit P1/P0: /mesh/peers honors the cert pin; secrets never hit disk."""
+
+    _GOOD_PIN = "a" * 64
+    _BAD_PIN = "b" * 64
+
+    def test_peers_sync_fails_closed_on_pin_mismatch(self, sync_client, mesh_db):
+        """Audit P1: the peers-sync GET (which carries the bearer token) must be
+        skipped when the cert pin does not match — otherwise a MITM harvests the
+        token here even though /mesh/send is pin-blocked.
+        """
+        sync_client._peer_url = "https://192.168.1.5:8765"
+        get_mock = MagicMock()
+        with patch("superlocalmemory.mesh.remote_sync._get_cert_sha256",
+                   return_value=self._GOOD_PIN):
+            with patch.dict("os.environ", {"SLM_MESH_TLS_PIN": self._BAD_PIN}):
+                with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
+                    mock_cls.return_value.__enter__.return_value.get = get_mock
+                    sync_client._sync_peers_from_remote()
+
+        get_mock.assert_not_called()
+        sync_client._broker.add_remote_peer.assert_not_called()
+
+    def test_failed_send_does_not_persist_secret(self, sync_client, mesh_db):
+        """Audit P0: the bearer shared secret must NEVER be written to the outbox.
+
+        sync_client is configured with SLM_MESH_SHARED_SECRET='test-secret'.
+        A failed send enqueues — the persisted row must contain no auth material.
+        """
+        with patch("superlocalmemory.mesh.remote_sync.httpx.Client") as mock_cls:
+            mock_cls.return_value.__enter__.return_value.post.side_effect = (
+                httpx.RequestError("down")
+            )
+            sync_client.send_to_remote(
+                "peer-1",
+                {"from_peer": "me", "content": "secret-check", "type": "text"},
+            )
+
+        row = _first_row(mesh_db)
+        assert row is not None, "failed send must enqueue"
+        blob = f"{row['headers']}|{row['payload']}"
+        assert "test-secret" not in blob, "shared secret leaked to outbox!"
+        assert "Authorization" not in blob and "Bearer" not in blob

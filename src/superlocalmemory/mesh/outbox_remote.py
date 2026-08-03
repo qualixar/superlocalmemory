@@ -34,9 +34,23 @@ _TTL_SECONDS: int = 48 * 3600
 #: Per-peer cap matches broker MAX_QUEUED_PER_TARGET = 50.
 _CAP_PER_PEER: int = 50
 
-#: Maximum rows returned by due() per cycle. Caps how long the sync thread
-#: blocks in a single drain pass (each row can take up to 10s on timeout).
-_BATCH_LIMIT: int = 20
+#: Maximum rows returned by due() per cycle. A wall-clock budget in the drain
+#: loop (remote_sync._DRAIN_BUDGET_SECONDS) is the primary guard against a slow
+#: peer monopolizing the sync thread; this is a secondary belt.
+_BATCH_LIMIT: int = 10
+
+#: Header keys never persisted to disk (audit P0). Callers pass headers=None,
+#: but enqueue() also scrubs these defensively so a future caller cannot leak
+#: a bearer token / HMAC signature into the outbox table. Matched lowercase.
+_SENSITIVE_HEADER_KEYS: frozenset[str] = frozenset({
+    "authorization",
+    "x-mesh-sig",
+    "x-mesh-nonce",
+    "x-mesh-ts",
+    "cookie",
+    "x-api-key",
+    "x-install-token",
+})
 
 #: Hard dead-letter threshold. After this many attempts the row is deleted.
 _MAX_RETRIES: int = 12
@@ -201,7 +215,16 @@ class RemoteOutbox:
             return
         try:
             payload_str = json.dumps(payload)
-            headers_str = json.dumps(headers) if headers is not None else None
+            # Defense-in-depth (audit P0): never persist auth material. Callers
+            # pass headers=None; scrub sensitive keys here too so a future
+            # caller cannot leak a bearer token / signature into the DB.
+            headers_str = None
+            if headers is not None:
+                safe_headers = {
+                    k: v for k, v in headers.items()
+                    if k.lower() not in _SENSITIVE_HEADER_KEYS
+                }
+                headers_str = json.dumps(safe_headers) if safe_headers else None
             expires_at = now + _TTL_SECONDS
 
             conn = self._connect()
@@ -248,8 +271,10 @@ class RemoteOutbox:
                 )
             finally:
                 conn.close()
-        except sqlite3.Error as exc:
-            logger.error("RemoteOutbox.enqueue: DB error: %s", exc)
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            # TypeError/ValueError guard non-JSON-serializable payloads (audit
+            # P2) so enqueue never propagates into the online send path.
+            logger.error("RemoteOutbox.enqueue: enqueue failed: %s", exc)
 
     def due(self, now: float) -> list[sqlite3.Row]:
         """Return up to _BATCH_LIMIT rows ready for re-delivery (oldest first).
