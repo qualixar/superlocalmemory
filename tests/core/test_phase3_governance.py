@@ -834,3 +834,77 @@ def test_embedded_fact_ids_query_failure_returns_degraded(tmp_path: Path) -> Non
         "VectorOwner.verify() must return ok=False when _embedded_fact_ids query fails; "
         "not vacuous NOT_APPLICABLE"
     )
+
+
+# ---------------------------------------------------------------------------
+# C. P2 POLISH (Tranche C)
+# ---------------------------------------------------------------------------
+
+def test_obligation_schema_negative_cache_resets_after_migration(tmp_path: Path) -> None:
+    """TC1: _obligation_schema_ok=False (stale) must re-check after M033 is applied.
+
+    Scenario: a runtime instance first encounters a DB without M033 — it caches
+    _obligation_schema_ok=False.  When M033 is later applied (hot migration),
+    the NEXT call to _record_projection_obligations must detect the schema and
+    succeed, NOT raise from the stale False value.
+
+    With the bug (cache never re-checks False), the second call raises RuntimeError
+    even though the schema is now present.  After the fix (re-check when False),
+    the second call succeeds.
+    """
+    import sqlite3
+    import types
+    from superlocalmemory.core.remember_runtime import _obligation_schema_present
+    from superlocalmemory.storage.migrations import (
+        M033_projection_transactions,
+        M034_obligation_integrity,
+    )
+
+    db_path = tmp_path / "nc.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    # Start without M033 — schema absent.
+    assert not _obligation_schema_present(conn), "precondition: schema is absent"
+
+    # Simulate the runtime's cached state after a first failed check.
+    # We construct a minimal carrier object that exercises the caching code
+    # path in _record_projection_obligations without needing a full runtime.
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+
+    carrier = types.SimpleNamespace(_obligation_schema_ok=False)
+
+    # Bind the method to our carrier so it reads/writes carrier._obligation_schema_ok.
+    bound = CanonicalRememberRuntime._record_projection_obligations.__get__(
+        carrier, type(carrier)
+    )
+
+    # Apply M033 — hot migration simulated.
+    M033_projection_transactions.apply(conn)
+    M034_obligation_integrity.apply(conn)
+    conn.commit()
+
+    # Minimal receipt/request stubs with one fact_id so the schema check fires.
+    receipt_stub = types.SimpleNamespace(fact_ids=("f-tc1",), operation_id="op-tc1")
+    request_stub = types.SimpleNamespace(profile_id="p-tc1")
+
+    # With the stale False cache and the BUG: this call raises RuntimeError
+    # "schema is absent" because the re-check is gated behind `is None` not `not`.
+    # After the fix: it re-checks, finds M033, updates the cache to True, and
+    # either succeeds or raises for an UNRELATED reason (e.g. missing profile row).
+    # The only failure we assert against is the stale-cache message.
+    try:
+        bound(conn, request_stub, receipt_stub)
+        # If we reach here, the schema was detected and ledger recorded — GREEN path.
+    except Exception as exc:
+        if "schema is absent" in str(exc):
+            raise AssertionError(
+                "stale _obligation_schema_ok=False was NOT re-checked after M033 "
+                f"was applied — caching bug still present: {exc}"
+            ) from exc
+        # Any other exception (from ledger, FK, etc.) is unrelated — schema check passed.
+
+    # The cache must now be True — schema was detected.
+    assert carrier._obligation_schema_ok is True, (
+        "_obligation_schema_ok must be True after the schema was successfully detected"
+    )

@@ -522,10 +522,30 @@ class CanonicalRememberRuntime:
         )
 
     def _record_projection_obligations(self, conn, request, receipt) -> None:
+        """Record per-owner APPLY obligations for the admitted facts.
+
+        Fail-closed: raises RuntimeError if M033 is absent.  This is
+        intentional — a successful remember() without a corresponding
+        obligation record would make projection audits permanently incomplete.
+        Back-compat: installs without M033 must run migrations first.
+
+        Schema negative cache: ``_obligation_schema_ok`` is re-checked on
+        every call while False so that hot migrations (M033 applied while the
+        runtime is running) are detected without a restart.  Once the schema
+        is confirmed present the value is cached True for the lifetime of the
+        runtime instance.
+
+        Cross-process erasure fence: distributed, multi-writer erasure fencing
+        is intentionally SCOPED OUT of V4.  Single-process SQLite WAL provides
+        adequate isolation for the current deployment model.  See
+        docs/architecture/erasure-fence-deferred.md for the deferred design.
+        """
         fact_ids = tuple(getattr(receipt, "fact_ids", ()) or ())
         if not fact_ids:
             return
-        if self._obligation_schema_ok is None:
+        # Re-check while False so a hot M033 migration is picked up without
+        # requiring a daemon restart.  Cache True permanently once confirmed.
+        if not self._obligation_schema_ok:
             self._obligation_schema_ok = _obligation_schema_present(conn)
         if not self._obligation_schema_ok:
             raise RuntimeError(
