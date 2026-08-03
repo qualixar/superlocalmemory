@@ -36,6 +36,12 @@ _BACKFILL_BURN_IN_STEPS = 50
 _LANGEVIN_DIM = 8
 _MAX_NORM = 0.99
 
+# ELC zone vocabulary: EbbinghausCurve returns 'archive'/'forgotten' but
+# atomic_facts.lifecycle CHECK only allows 'active|warm|cold|archived'.
+# Remap at write boundary so ELC never triggers IntegrityError.
+_VALID_LIFECYCLE_ZONES: frozenset[str] = frozenset({"active", "warm", "cold", "archived"})
+_ELC_ZONE_REMAP: dict[str, str] = {"archive": "archived", "forgotten": "archived"}
+
 
 def _age_days(created_at: str | None) -> float:
     """Age in days from an ISO timestamp.
@@ -130,6 +136,8 @@ def run_maintenance(
         "langevin_backfilled": 0,
         "langevin_updated": 0,
         "fisher_coupled": 0,
+        "fisher_posterior_updated": 0,       # P1-9: Fisher bayesian_update on access
+        "ebbinghaus_coupled": 0,             # Phase 5: Ebbinghaus-Langevin coupling
         "sheaf_checked": 0,
         "entity_summaries_consolidated": 0,  # V3.4.40
         "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
@@ -329,6 +337,154 @@ def run_maintenance(
             counts["fisher_coupled"] = coupled_count
         except Exception as exc:
             logger.warning("Fisher-Langevin coupling failed: %s", exc)
+
+    # 1c. Fisher posterior update (P1-9): tighten variance per new access event.
+    # Access-delta semantics: apply one Bayesian update per net-new access since
+    # the last maintenance run.  Zero new accesses → variance unchanged.
+    # This prevents idle-corpus drift that tick-based updates would cause.
+    # Inline schema migration: adds fisher_last_applied_access when absent.
+    # Gate: config.math.fisher_bayesian_update (default True).
+    if config.math.fisher_bayesian_update:
+        try:
+            import json as _json
+            from superlocalmemory.math.fisher import FisherRaoMetric
+
+            # Inline migration — harmless no-op if column already exists.
+            try:
+                db.execute(
+                    "ALTER TABLE atomic_facts "
+                    "ADD COLUMN fisher_last_applied_access INTEGER NOT NULL DEFAULT 0"
+                )
+            except Exception:
+                pass  # already migrated on a previous run
+
+            frm = FisherRaoMetric(temperature=config.math.fisher_temperature)
+            posterior_count = 0
+            for f in facts:
+                if f.fisher_variance is None:
+                    continue
+                rows = db.execute(
+                    "SELECT access_count, fisher_last_applied_access "
+                    "FROM atomic_facts WHERE fact_id = ?",
+                    (f.fact_id,),
+                )
+                if not rows:
+                    continue
+                r = dict(rows[0])
+                acc = r.get("access_count") or 0
+                last_applied = r.get("fisher_last_applied_access") or 0
+                delta = acc - last_applied
+                if delta <= 0:
+                    continue  # no new accesses — variance unchanged this run
+                # Apply min(delta, 100) unit-information Bayesian updates.
+                # One update per access: 1/v_new = 1/v_old + 1 (unit obs_var).
+                current_var = list(f.fisher_variance)
+                dim = len(current_var)
+                obs_var = [1.0] * dim
+                for _ in range(min(delta, 100)):
+                    current_var = frm.bayesian_update(current_var, obs_var)
+                # Single atomic write: variance + watermark together.
+                db.execute(
+                    "UPDATE atomic_facts "
+                    "SET fisher_variance = ?, fisher_last_applied_access = ? "
+                    "WHERE fact_id = ?",
+                    (_json.dumps(current_var), acc, f.fact_id),
+                )
+                # Refresh in-memory so step 1d ELC sees the updated variance.
+                f.fisher_variance = current_var
+                posterior_count += 1
+            counts["fisher_posterior_updated"] = posterior_count
+        except Exception as exc:
+            logger.warning("Fisher posterior update failed: %s", exc)
+
+    # 1d. Ebbinghaus-Langevin coupling (Phase 5 — P1-ELC): combine forgetting
+    # drift with Fisher-Langevin dynamics to produce a unified lifecycle state.
+    # Updates the lifecycle zone of each fact based on Ebbinghaus retention.
+    # NOTE: this step overwrites the Langevin-only lifecycle set in step 1b.
+    #       The Ebbinghaus zone is intentionally authoritative when ELC is ON.
+    # Gate: config.math.ebbinghaus_langevin_coupling_enabled (default False).
+    if config.math.ebbinghaus_langevin_coupling_enabled:
+        try:
+            from superlocalmemory.dynamics.ebbinghaus_langevin_coupling import (
+                EbbinghausLangevinCoupling,
+            )
+            from superlocalmemory.dynamics.fisher_langevin_coupling import (
+                FisherLangevinCoupling,
+            )
+            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+            from superlocalmemory.math.langevin import LangevinDynamics
+
+            ebbinghaus = EbbinghausCurve(config.forgetting)
+            langevin = LangevinDynamics(
+                dim=_LANGEVIN_DIM,
+                dt=config.math.langevin_dt,
+                temperature=config.math.langevin_temperature,
+            )
+            fisher_coupling = FisherLangevinCoupling(
+                base_temperature=config.math.langevin_temperature,
+            )
+            coupling = EbbinghausLangevinCoupling(
+                ebbinghaus, langevin, fisher_coupling, config.forgetting,
+            )
+            import numpy as np
+
+            # Build fact_id → last_accessed_at lookup from fact_retention.
+            # Using real last-access time (not created_at) so hot facts are not
+            # mis-classified as forgotten due to old creation timestamps.
+            if facts:
+                retention_rows = db.execute(
+                    "SELECT fact_id, last_accessed_at FROM fact_retention "
+                    "WHERE fact_id IN ({})".format(",".join("?" * len(facts))),
+                    tuple(f.fact_id for f in facts),
+                )
+            else:
+                retention_rows = []
+            last_accessed_map: dict[str, str | None] = {
+                dict(r)["fact_id"]: dict(r)["last_accessed_at"]
+                for r in retention_rows
+            }
+
+            elc_count = 0
+            for f in facts:
+                if f.fisher_variance is None or f.langevin_position is None:
+                    continue
+                # Prefer real last-access timestamp; fall back to created_at.
+                raw_ts = last_accessed_map.get(f.fact_id) or f.created_at
+                hours_since = _age_days(raw_ts) * 24.0
+                state = coupling.compute_coupled_state(
+                    fact_id=f.fact_id,
+                    fisher_variance=np.asarray(f.fisher_variance, dtype=np.float64),
+                    langevin_radius=float(np.linalg.norm(f.langevin_position)),
+                    access_count=f.access_count,
+                    importance=f.importance,
+                    confirmation_count=f.evidence_count,
+                    emotional_salience=0.0,
+                    hours_since_last_access=hours_since,
+                )
+                # Remap ELC zone vocabulary to atomic_facts CHECK constraint.
+                # EbbinghausCurve returns 'archive'/'forgotten'; schema only allows
+                # 'active|warm|cold|archived'.
+                zone = _ELC_ZONE_REMAP.get(state.lifecycle_zone, state.lifecycle_zone)
+                if zone not in _VALID_LIFECYCLE_ZONES:
+                    logger.warning(
+                        "ELC returned unknown lifecycle zone %r for fact %s — skipping",
+                        state.lifecycle_zone, f.fact_id,
+                    )
+                    continue
+                # Count fact as processed regardless of whether we write.
+                elc_count += 1
+                # Skip write when zone hasn't changed — avoids O(N) UPDATEs per tick.
+                current_zone = (
+                    f.lifecycle.value
+                    if hasattr(f.lifecycle, "value")
+                    else str(f.lifecycle)
+                )
+                if zone == current_zone:
+                    continue
+                db.update_fact(f.fact_id, {"lifecycle": zone})
+            counts["ebbinghaus_coupled"] = elc_count
+        except Exception as exc:
+            logger.warning("Ebbinghaus-Langevin coupling failed: %s", exc)
 
     # 2. Sheaf batch consistency on recent facts (last 24h)
     if config.math.sheaf_at_encoding:

@@ -77,24 +77,26 @@ class PromptInjector:
 
         templates: list[SoftPromptTemplate] = []
         for row in rows:
-            raw_ids = row.get("source_pattern_ids", "[]")
+            # DatabaseManager returns sqlite3.Row which lacks .get() — convert to dict.
+            r = dict(row)
+            raw_ids = r.get("source_pattern_ids", "[]")
             try:
                 source_ids = json.loads(raw_ids) if isinstance(raw_ids, str) else raw_ids
             except (json.JSONDecodeError, TypeError):
                 source_ids = []
 
             templates.append(SoftPromptTemplate(
-                prompt_id=row["prompt_id"],
-                profile_id=row.get("profile_id", profile_id),
-                category=row["category"],
-                content=row["content"],
+                prompt_id=r["prompt_id"],
+                profile_id=r.get("profile_id", profile_id),
+                category=r["category"],
+                content=r["content"],
                 source_pattern_ids=source_ids,
-                confidence=row["confidence"],
-                effectiveness=row.get("effectiveness", 0.5),
-                token_count=row.get("token_count", 0),
-                retention_score=row.get("retention_score", 1.0),
-                active=bool(row.get("active", 1)),
-                version=row.get("version", 1),
+                confidence=r["confidence"],
+                effectiveness=r.get("effectiveness", 0.5),
+                token_count=r.get("token_count", 0),
+                retention_score=r.get("retention_score", 1.0),
+                active=bool(r.get("active", 1)),
+                version=r.get("version", 1),
             ))
 
         # Budget enforcement

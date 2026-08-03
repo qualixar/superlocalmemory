@@ -406,6 +406,25 @@ def _init_spreading_activation(
         return None
 
 
+def _init_prompt_injector(config: SLMConfig, db: DatabaseManager) -> Any | None:
+    """Construct a profile-scoped PromptInjector for soft-prompt injection (P1-8).
+
+    Returns None when parameterization is disabled or construction fails.
+    Failure is fail-soft — soft-prompt absence must never block auto-invoke.
+    """
+    if not hasattr(config, "parameterization") or not config.parameterization.enabled:
+        return None
+    try:
+        from superlocalmemory.parameterization.prompt_injector import PromptInjector
+        from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
+
+        generator = SoftPromptGenerator(config.parameterization)
+        return PromptInjector(db=db, generator=generator, config=config.parameterization)
+    except Exception as exc:
+        logger.warning("PromptInjector init failed — soft-prompt injection disabled: %s", exc)
+        return None
+
+
 def _init_auto_invoker(
     config: SLMConfig,
     db: DatabaseManager,
@@ -413,20 +432,28 @@ def _init_auto_invoker(
     trust_scorer: Any,
     embedder: Any,
 ) -> Any | None:
-    """Create AutoInvoker for Phase 2 multi-signal retrieval."""
+    """Create AutoInvoker for Phase 2 multi-signal retrieval.
+
+    V3.3 (P1-8): A profile-scoped PromptInjector is constructed and wired in
+    so stored behavioral soft prompts are prepended to every session context.
+    The injector is fail-soft — its absence never blocks auto-invoke.
+    """
     if not hasattr(config, "auto_invoke") or not config.auto_invoke.enabled:
         return None
     try:
         from superlocalmemory.hooks.auto_invoker import AutoInvoker
+
+        prompt_injector = _init_prompt_injector(config, db)
         return AutoInvoker(
             db=db,
             vector_store=vector_store,
             trust_scorer=trust_scorer,
             embedder=embedder,
             config=config.auto_invoke,
+            prompt_injector=prompt_injector,
         )
     except Exception as exc:
-        logger.debug("AutoInvoker init failed: %s", exc)
+        logger.warning("AutoInvoker init failed — auto-invoke disabled: %s", exc)
         return None
 
 
@@ -500,9 +527,9 @@ def init_retrieval(
     trust_scorer: Any,
     vector_store: Any = None,
 ) -> Any:
-    """Create the RetrievalEngine — five candidate producers (semantic, BM25,
-    temporal, spreading_activation, hopfield) plus the entity graph used for
-    post-fusion score enhancement. Returns it."""
+    """Create the RetrievalEngine — six candidate producers (semantic, BM25,
+    entity_graph, temporal, spreading_activation, hopfield) fused via RRF.
+    Returns the engine."""
     from superlocalmemory.retrieval.engine import RetrievalEngine
     from superlocalmemory.retrieval.semantic_channel import SemanticChannel
     from superlocalmemory.retrieval.bm25_channel import BM25Channel
