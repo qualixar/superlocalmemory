@@ -85,6 +85,8 @@ def _register_nonce(nonce: str, now: float) -> bool:
         if _nonce_db_path:
             try:
                 conn = sqlite3.connect(_nonce_db_path, timeout=3)
+                # P2: bound table growth — drop nonces whose replay window has passed.
+                conn.execute("DELETE FROM mesh_nonces WHERE expires_at < ?", (now,))
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO mesh_nonces (nonce, expires_at) VALUES (?, ?)",
                     (nonce, exp),
@@ -95,7 +97,11 @@ def _register_nonce(nonce: str, now: float) -> bool:
                 if rowcount == 0:
                     return False  # SQLite already has this nonce — cross-restart replay
             except sqlite3.Error:
-                pass  # SQLite error: fall back to in-memory only (fail-open for availability)
+                # P1: FAIL CLOSED. A durable nonce store is configured but the write
+                # could not be confirmed, so replay defense cannot be guaranteed for
+                # this signed message — reject rather than silently degrade to
+                # process-local memory (which reopens the multi-worker replay hole).
+                return False
         _nonce_store[nonce] = exp
         return True
 

@@ -365,11 +365,17 @@ def send(req: SendRequest, request: Request):
         strict = is_strict_identity(config)
         fleet_secret = getattr(broker, "_shared_secret", None)
 
-        # SEC-4: In strict mode, registered peers MUST sign with their own per-peer key.
-        # Unregistered from_peer falls back to the fleet secret in both strict and compat mode
-        # (preserves backward compat for legacy remote senders not yet registered).
+        # SEC-4 (hardened): identity resolution per mode.
+        #  - COMPAT (default): fleet secret verifies (or unsigned legacy accepted).
+        #  - STRICT: the sender MUST be a registered peer with its own per-peer key.
+        #    There is NO fleet-secret fallback in strict mode — unregistered
+        #    from_peer, a NULL peer_key, or a DB error all FAIL CLOSED. (The old
+        #    fleet fallback was an impersonation escape hatch: any fleet-secret
+        #    holder could claim an unregistered/legacy from_peer.)
         verify_secret = fleet_secret
-        if strict and req.from_peer:
+        if strict:
+            if not req.from_peer:
+                raise HTTPException(401, detail="strict identity: from_peer required")
             import sqlite3 as _sqlite3
             try:
                 _conn = _sqlite3.connect(broker._db_path, timeout=3)
@@ -379,12 +385,14 @@ def send(req: SendRequest, request: Request):
                     (req.from_peer,),
                 ).fetchone()
                 _conn.close()
-                if _row and _row["peer_key"]:
-                    # Registered peer: MUST use their per-peer key — fleet secret cannot forge it
-                    verify_secret = str(_row["peer_key"])
-                # else: unregistered from_peer — keep fleet_secret (backward compat)
             except _sqlite3.Error:
-                pass  # DB error: fall back to fleet secret
+                raise HTTPException(503, detail="strict identity: peer key lookup failed")
+            if not _row or not _row["peer_key"]:
+                raise HTTPException(
+                    401,
+                    detail="strict identity: from_peer is not a registered peer with a per-peer key",
+                )
+            verify_secret = str(_row["peer_key"])
 
         sig_err = check_mesh_message_signature(
             verify_secret,
