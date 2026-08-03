@@ -364,6 +364,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
             #
             # V3.4.26: WorkerPool now concurrent — parallel calls no longer
             # block behind a single threading.Lock. See worker_pool.py.
+            # Phase 4b: normalize as_of at MCP boundary. Invalid → reject.
+            if as_of is not None:
+                from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+                as_of = normalize_as_of(as_of)
+                if as_of is None:
+                    return {"success": False, "error": "invalid_as_of"}
+
             from superlocalmemory.core.admission import enforce_read_scope
             _incl_global, _incl_shared = enforce_read_scope(include_global, include_shared)
 

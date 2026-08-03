@@ -824,6 +824,17 @@ async def recall_trace(request: Request):
         query = body.get("query", "")
         limit = body.get("limit", 10)
         window = body.get("window", "") or ""
+        as_of_raw = (body.get("as_of", "") or "").strip()
+
+        # Normalize as_of at HTTP boundary. Invalid → 400.
+        _as_of: str | None = None
+        if as_of_raw:
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+            _as_of = normalize_as_of(as_of_raw)
+            if _as_of is None:
+                return JSONResponse(
+                    {"error": "invalid_as_of", "raw": as_of_raw}, status_code=400
+                )
 
         # Use daemon engine — already loaded, shares warm page cache.
         # run_in_executor keeps event loop alive so browser doesn't abort.
@@ -836,7 +847,10 @@ async def recall_trace(request: Request):
         t0 = _time.monotonic()
         response = await loop.run_in_executor(
             None,
-            lambda: engine.recall(query, limit=limit, fast=False, window=window or None),
+            lambda: engine.recall(
+                query, limit=limit, fast=False,
+                window=window or None, as_of=_as_of,
+            ),
         )
         elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
 

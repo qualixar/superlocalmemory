@@ -3497,6 +3497,19 @@ def _register_daemon_routes(application: FastAPI) -> None:
         engine = _get_engine_or_503()
         if not search_query:
             return {"results": [], "count": 0, "query_type": "none", "retrieval_time_ms": 0}
+        # Phase 4b: normalize as_of at HTTP boundary. Invalid → return error.
+        _as_of_raw = as_of.strip() if as_of else ""
+        if _as_of_raw:
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+            _as_of_norm = normalize_as_of(_as_of_raw)
+            if _as_of_norm is None:
+                return {
+                    "error": "invalid_as_of",
+                    "message": f"Cannot parse as_of: {_as_of_raw!r}",
+                }
+            as_of = _as_of_norm
+        else:
+            as_of = ""
         # v3.8.2: resolve the client-driven-agentic default now so the concrete
         # bool drives BOTH the full-recall semaphore below and engine.recall().
         from superlocalmemory.core.recall_pipeline import resolve_hot_path_fast

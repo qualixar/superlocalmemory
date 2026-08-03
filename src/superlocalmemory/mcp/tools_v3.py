@@ -282,7 +282,11 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # 5. recall_trace
     # ------------------------------------------------------------------
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
-    async def recall_trace(query: str, limit: int = 10) -> dict:
+    async def recall_trace(
+        query: str,
+        limit: int = 10,
+        as_of: str | None = None,
+    ) -> dict:
         """Recall with per-channel score breakdown.
 
         Like recall, but returns detailed channel-by-channel scores
@@ -291,14 +295,25 @@ def register_v3_tools(server, get_engine: Callable) -> None:
         Args:
             query: Natural-language search query.
             limit: Maximum results (default 10).
+            as_of: Optional ISO 8601 UTC datetime for point-in-time recall
+                (e.g. "2024-01-01T00:00:00Z"). Omit for current-state recall.
         """
         try:
             import asyncio
             from superlocalmemory.mcp._daemon_proxy import choose_pool
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+
+            # Normalize at MCP boundary before forwarding.
+            _as_of: str | None = None
+            if as_of:
+                _as_of = normalize_as_of(as_of)
+                if _as_of is None:
+                    return {"success": False, "error": "invalid_as_of"}
+
             # choose_pool().recall uses blocking urllib; run off the event loop
             # so recall_trace doesn't stall the MCP server for other tools.
             raw = await asyncio.to_thread(
-                lambda: choose_pool().recall(query=query, limit=limit)
+                lambda: choose_pool().recall(query=query, limit=limit, as_of=_as_of)
             )
             items = raw.get("results", []) if isinstance(raw, dict) else []
             results = []

@@ -64,7 +64,10 @@ _DEFAULT_LIMITER = _RateLimiter()
 
 
 # RecallFn for the tool. Callers inject a real recall engine; tests inject fakes.
-PrestageRecallFn = Callable[[str, int, str], list[dict]]
+# Phase 4b: extended to accept optional 4th positional arg (as_of: str | None).
+# Legacy callers with a 3-arg signature are handled by the try/except TypeError
+# fallback in prestage_context() (Decision A2, LLD §Module 8).
+PrestageRecallFn = Callable[..., list[dict]]
 
 
 def _iso_now() -> str:
@@ -100,12 +103,17 @@ def prestage_context(
     session_id: str = "default",
     recall_fn: PrestageRecallFn,
     limiter: _RateLimiter | None = None,
+    as_of: str | None = None,
 ) -> dict:
     """Proactive-context tool body.
 
     Pure function: takes an injected recall_fn + limiter. The MCP server
     wrapper in the session process wires the real engine and shares a
     single limiter instance.
+
+    Phase 4b: optional ``as_of`` (ISO 8601 UTC) for point-in-time context.
+    Normalized at entry; invalid input is silently ignored (background tool).
+    3-arg recall_fn callers are supported via TypeError fallback (Decision A2).
     """
     _limiter = limiter or _DEFAULT_LIMITER
     if not _limiter.allow(session_id):
@@ -127,8 +135,23 @@ def prestage_context(
         }
     limit = max(1, min(int(limit), 50))
 
+    # Normalize as_of at prestage boundary. Invalid input → silently ignore
+    # (prestage is background; user-facing surfaces raise instead).
+    _as_of: str | None = None
+    if as_of:
+        from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+        _as_of = normalize_as_of(as_of)
+        if _as_of is None:
+            logger.warning("prestage_context: invalid as_of %r; ignoring", as_of)
+
     try:
-        raw = recall_fn(query, limit, profile_id) or []
+        # Decision A2 (LLD §Module 8): try 4-arg call first; fall back to 3-arg
+        # for legacy recall_fn callers that don't accept as_of. This avoids
+        # breaking any existing callers while enabling the new as_of path.
+        try:
+            raw = recall_fn(query, limit, profile_id, _as_of) or []
+        except TypeError:
+            raw = recall_fn(query, limit, profile_id) or []
     except Exception as exc:
         logger.warning("prestage_context recall failed: %s", exc)
         return {
@@ -180,12 +203,17 @@ def register_prestage_tool(server, recall_fn: PrestageRecallFn,
         query: str,
         limit: int = 5,
         profile_id: str = "default",
+        as_of: str | None = None,
     ) -> dict:
-        """Proactively return top-K memories for a query."""
+        """Proactively return top-K memories for a query.
+
+        Optional ``as_of`` (ISO 8601 UTC) for point-in-time context retrieval.
+        """
         session_id = session_id_fn() if session_id_fn else "default"
         return prestage_context(
             query, limit=limit, profile_id=profile_id,
-            session_id=session_id, recall_fn=recall_fn, limiter=limiter,
+            session_id=session_id, recall_fn=recall_fn,
+            limiter=limiter, as_of=as_of,
         )
 
 

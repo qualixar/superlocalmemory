@@ -35,10 +35,19 @@ def disabled_config() -> TemporalValidatorConfig:
 
 def _make_mock_db(invalid_ids: set[str]) -> MagicMock:
     """Mock DB whose get_invalidated_fact_ids returns the candidates that
-    intersect ``invalid_ids`` (mirrors the real bounded query)."""
+    intersect ``invalid_ids`` (mirrors the real bounded query).
+
+    Phase 4b update: accepts optional ``as_of`` keyword arg so the filter
+    can call ``get_invalidated_fact_ids(ids, pid, as_of=as_of)`` without
+    triggering a TypeError in these unit tests.
+    """
     db = MagicMock()
 
-    def get_invalidated_fact_ids(fact_ids: list[str], profile_id: str) -> set[str]:
+    def get_invalidated_fact_ids(
+        fact_ids: list[str],
+        profile_id: str,
+        as_of: str | None = None,
+    ) -> set[str]:
         return {fid for fid in fact_ids if fid in invalid_ids}
 
     db.get_invalidated_fact_ids = MagicMock(side_effect=get_invalidated_fact_ids)
