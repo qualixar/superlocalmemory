@@ -23,6 +23,8 @@ from mcp.types import ToolAnnotations
 
 logger = logging.getLogger(__name__)
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
@@ -75,6 +77,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 1. forget — Ebbinghaus forgetting decay cycle
     # ------------------------------------------------------------------
     @server.tool(annotations=ToolAnnotations(destructiveHint=True))
+    @admits(OperationKind.FORGET)
     async def forget(
         dry_run: bool = True,
     ) -> dict:
@@ -214,6 +217,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 3. consolidate_cognitive — CCQ cognitive consolidation
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def consolidate_cognitive() -> dict:
         """Run CCQ cognitive consolidation pipeline.
 

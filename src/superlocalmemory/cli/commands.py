@@ -1047,6 +1047,11 @@ def cmd_mode(args: Namespace) -> None:
 
     config = SLMConfig.load()
 
+    if args.value:
+        from superlocalmemory.core.admission import gate_cli_mutation
+        from superlocalmemory.core.operation_request import OperationKind
+        gate_cli_mutation(OperationKind.MODE_CHANGE)
+
     if getattr(args, 'json', False):
         from superlocalmemory.cli.json_output import json_print
         if args.value:
@@ -3712,6 +3717,10 @@ def cmd_quantize(args: Namespace) -> None:
 
 def cmd_consolidate(args: Namespace) -> None:
     """Run cognitive consolidation pipeline."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.CONSOLIDATE)
+
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
 

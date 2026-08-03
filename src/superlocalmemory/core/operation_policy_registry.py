@@ -223,7 +223,7 @@ class OperationPolicyRegistry:
                 required_roles=_owner_admin,
                 required_authentication=True,
                 allowed_transports=frozenset({
-                    Transport.MESH, Transport.INTERNAL,
+                    Transport.MESH, Transport.INTERNAL, Transport.MCP,
                 }),
                 audit_level="full",
             ),
@@ -240,7 +240,7 @@ class OperationPolicyRegistry:
                 kind=OperationKind.MODE_CHANGE,
                 required_roles=_owner_only,
                 required_authentication=True,
-                allowed_transports=_ADMIN_TRANSPORTS,
+                allowed_transports=_ADMIN_TRANSPORTS | frozenset({Transport.MCP}),
                 audit_level="full",
             ),
             OperationKind.PROFILE_SWITCH: OperationPolicy(
@@ -262,6 +262,13 @@ class OperationPolicyRegistry:
                 required_roles=_owner_admin,
                 required_authentication=True,
                 allowed_transports=frozenset({Transport.CLI, Transport.INTERNAL}),
+                audit_level="full",
+            ),
+            OperationKind.EVOLVE_SKILL: OperationPolicy(
+                kind=OperationKind.EVOLVE_SKILL,
+                required_roles=_owner_admin,
+                required_authentication=True,
+                allowed_transports=_ALL_TRANSPORTS,
                 audit_level="full",
             ),
         }
@@ -287,6 +294,22 @@ class OperationPolicyRegistry:
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
+
+    def coverage(self) -> dict[str, dict]:
+        """Return a coverage summary for every known OperationKind.
+
+        Returns a mapping of {kind_value: {"has_policy": bool}} for every
+        value in OperationKind. Used by the startup self-check and unit tests.
+
+        Example::
+
+            cov = _DEFAULT_REGISTRY.coverage()
+            assert cov["remember"]["has_policy"] is True
+        """
+        return {
+            kind.value: {"has_policy": kind in self._policies}
+            for kind in OperationKind
+        }
 
     def get_policy(
         self,

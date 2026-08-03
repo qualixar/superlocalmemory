@@ -50,6 +50,7 @@ class OperationKind(str, Enum):
     PROFILE_SWITCH = "profile_switch"
     SCHEMA_MIGRATE = "schema_migrate"
     VECTOR_MIGRATE = "vector_migrate"
+    EVOLVE_SKILL = "evolve_skill"
 
 
 class OperationStatus(str, Enum):

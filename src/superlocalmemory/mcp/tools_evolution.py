@@ -19,6 +19,8 @@ import logging
 from typing import Callable
 
 from mcp.types import ToolAnnotations
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
@@ -28,6 +30,7 @@ def register_evolution_tools(server, get_engine: Callable) -> None:
     """Register evolution MCP tools for skill evolution intelligence."""
 
     @server.tool()
+    @admits(OperationKind.EVOLVE_SKILL)
     async def evolve_skill(
         skill_name: str,
         evolution_type: str = "fix",

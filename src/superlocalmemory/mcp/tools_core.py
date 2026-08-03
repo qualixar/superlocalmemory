@@ -19,7 +19,9 @@ from typing import Callable
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.core.admission import admits
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
@@ -62,6 +64,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
     """Register the 13 core MCP tools on *server*."""
 
     @server.tool()
+    @admits(OperationKind.REMEMBER)
     async def remember(
         content: str, tags: str = "", project: str = "",
         importance: int = 5, session_id: str = "",
@@ -569,6 +572,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
+    @admits(OperationKind.PROFILE_SWITCH)
     async def switch_profile(profile_id: str) -> dict:
         """Switch the active memory profile. All operations scope to this profile."""
         try:
@@ -751,6 +755,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def correct_pattern(pattern_id: str, correction: str) -> dict:
         """Correct or annotate a learned behavioral pattern to improve retrieval."""
         try:

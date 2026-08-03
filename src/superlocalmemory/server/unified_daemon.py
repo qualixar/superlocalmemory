@@ -2142,6 +2142,20 @@ async def lifespan(application: FastAPI):
         logger.warning("Deployment config wire failed (non-fatal): %s", _dep_exc)
         application.state.deployment = None
 
+    # Phase 1: Admission gateway coverage self-check.
+    # Verifies every OperationKind has a registered policy. Warns in personal
+    # mode; raises RuntimeError in enterprise mode (hard startup failure).
+    try:
+        from superlocalmemory.core.admission import coverage_self_check
+        from superlocalmemory.core.config import DEPLOYMENT_PERSONAL
+
+        _cov_deployment = getattr(application.state, "deployment", None) or DEPLOYMENT_PERSONAL
+        coverage_self_check(_cov_deployment)
+    except RuntimeError as _cov_exc:
+        raise
+    except Exception as _cov_exc:
+        logger.warning("admission coverage self-check failed (non-fatal): %s", _cov_exc)
+
     # Start idle watchdog if configured
     idle_timeout = int(os.environ.get("SLM_DAEMON_IDLE_TIMEOUT", "0"))
     if config and hasattr(config, 'daemon_idle_timeout'):
