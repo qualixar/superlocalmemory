@@ -547,14 +547,18 @@ class TestHTTPSignatureVerification:
             "X-Mesh-Ts": ts,
         }
 
-    def test_strict_mode_accepts_valid_signature(self, monkeypatch):
-        """In strict mode, a correctly signed message passes the route."""
-        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+    def test_compat_mode_accepts_fleet_signed_unregistered(self, monkeypatch):
+        """Backward-compat (default, non-strict): a valid fleet-secret-signed message
+        from an UNregistered from_peer is accepted (legacy remote path preserved).
+        (Strict-mode acceptance of a REGISTERED peer signing with its own peer_key is
+        covered by TestPerPeerIdentityBinding.test_legitimate_peer_key_holder_accepted.)"""
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+        monkeypatch.delenv("SLM_MESH_PRODUCTION", raising=False)
         app, broker = _make_app(secret="s3cr3t")
         c = TestClient(app)
         peer_id = self._register_peer(c, "s3cr3t")
 
-        from_peer = "remote-sender"
+        from_peer = "legacy-sender"
         content = "task complete"
         headers = self._make_sig_headers("s3cr3t", from_peer, peer_id, content)
         r = c.post(
@@ -562,7 +566,27 @@ class TestHTTPSignatureVerification:
             json={"from_peer": from_peer, "to_peer": peer_id, "content": content},
             headers=headers,
         )
-        assert r.status_code == 200, f"strict mode, valid sig: {r.status_code} {r.text}"
+        assert r.status_code == 200, f"compat fleet-signed: {r.status_code} {r.text}"
+
+    def test_strict_rejects_unregistered_from_peer(self, monkeypatch):
+        """P1 (hardened): strict mode rejects an UNregistered from_peer even with a
+        valid fleet-secret signature — the fleet-fallback escape hatch is closed."""
+        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+        app, broker = _make_app(secret="s3cr3t")
+        c = TestClient(app)
+        recv_id = self._register_peer(c, "s3cr3t")
+        from_peer = "not-registered"
+        content = "x"
+        headers = self._make_sig_headers("s3cr3t", from_peer, recv_id, content)
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": from_peer, "to_peer": recv_id, "content": content},
+            headers=headers,
+        )
+        assert r.status_code == 401, (
+            f"strict must reject unregistered from_peer (no fleet fallback): "
+            f"{r.status_code} {r.text}"
+        )
         monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
 
     def test_strict_mode_rejects_tampered_content(self, monkeypatch):
@@ -976,12 +1000,33 @@ class TestPerPeerIdentityBinding:
             f"peer_key must be 64-char hex string (32 bytes token_hex). Got: {pk!r}"
         )
 
-    def test_register_idempotent_same_peer_key(self, broker):
-        """Re-registering the same session must return the same peer_key."""
+    def test_register_idempotent_peer_id_but_key_not_reexported(self, broker):
+        """P0: re-registering the same session keeps the same peer_id but MUST NOT
+        re-export the peer_key. The legitimate owner keeps the key issued at first
+        registration; a fleet-secret holder who learns the session_id (via
+        /mesh/peers) therefore cannot re-register to steal the victim's key."""
         r1 = broker.register_peer("idem-session")
         r2 = broker.register_peer("idem-session")
         assert r1["peer_id"] == r2["peer_id"], "Same session → same peer_id"
-        assert r1["peer_key"] == r2["peer_key"], "Re-registration must return same peer_key"
+        assert "peer_key" in r1, "First registration must issue the peer_key"
+        assert "peer_key" not in r2, "Re-registration must NOT re-export the peer_key (P0)"
+
+    def test_p0_reregister_does_not_reexport_peer_key_http(self, monkeypatch):
+        """P0 end-to-end: attacker re-registers a victim's session_id over HTTP with
+        the fleet secret → response carries NO peer_key (identity-theft closure)."""
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+        app, _broker = _make_app(secret="fleet-p0")
+        c = TestClient(app)
+        r1 = c.post("/mesh/register", json={"session_id": "victim-sess"},
+                    headers={"Authorization": "Bearer fleet-p0"})
+        assert r1.status_code == 200 and "peer_key" in r1.json(), r1.text
+        r2 = c.post("/mesh/register", json={"session_id": "victim-sess"},
+                    headers={"Authorization": "Bearer fleet-p0"})
+        assert r2.status_code == 200, r2.text
+        assert "peer_key" not in r2.json(), (
+            "Re-registration must NOT re-export peer_key (P0 identity-theft closure)"
+        )
+        assert r1.json()["peer_id"] == r2.json()["peer_id"], "same peer_id (idempotent)"
 
     def test_spoof_with_fleet_secret_rejected_in_strict_mode(self, monkeypatch):
         """Strict mode: fleet secret cannot forge a registered peer's from_peer identity."""

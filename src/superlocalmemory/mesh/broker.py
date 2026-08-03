@@ -210,6 +210,7 @@ class MeshBroker:
             ).fetchone()
             if existing:
                 peer_id = existing["peer_id"]
+                is_new_peer = False
                 conn.execute(
                     "UPDATE mesh_peers SET summary=?, host=?, port=?, last_heartbeat=?, "
                     "status='active', project_path=?, agent_type=? "
@@ -219,6 +220,7 @@ class MeshBroker:
                 )
             else:
                 peer_id = str(uuid.uuid4())[:12]
+                is_new_peer = True
                 conn.execute(
                     "INSERT INTO mesh_peers (peer_id, session_id, summary, status, host, port, "
                     "registered_at, last_heartbeat, project_path, agent_type, profile_id) "
@@ -231,11 +233,17 @@ class MeshBroker:
             }, profile_id=profile_id)
             conn.commit()
 
-            # SEC-4: Mint per-peer HMAC key (idempotent — returns existing key on re-registration)
-            peer_key = get_or_create_peer_key(conn, peer_id, profile_id)
+            # SEC-4 + P0: mint & RETURN the per-peer HMAC key ONLY on first
+            # registration. Re-registration MUST NOT re-export the key — otherwise
+            # a fleet-secret holder who learns a session_id (via /mesh/peers) could
+            # re-register as the victim and steal their peer_key (identity theft).
+            # The legitimate owner keeps the key it received at first registration.
             # v3.4.6: Deliver pending broadcast/project messages on registration
             pending = self._get_pending_for_peer(conn, peer_id, project_path, profile_id)
-            return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending), "peer_key": peer_key}
+            result = {"peer_id": peer_id, "ok": True, "pending_messages": len(pending)}
+            if is_new_peer:
+                result["peer_key"] = get_or_create_peer_key(conn, peer_id, profile_id)
+            return result
 
         return self._write_with_retry(_register)
 
