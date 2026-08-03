@@ -148,6 +148,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # 2. quantize — EAP embedding quantization cycle
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def quantize(
         dry_run: bool = True,
     ) -> dict:

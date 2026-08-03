@@ -22,6 +22,8 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Callable
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 from superlocalmemory.storage.read_connection import ReadConnectionFactory
@@ -428,6 +430,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     # 2. observe — Auto-capture decisions/bugs/preferences
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.REMEMBER)
     async def observe(
         content: str,
         agent_id: str | None = None,
@@ -510,6 +513,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     # 3. report_feedback — Explicit feedback for learning
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.REMEMBER)
     async def report_feedback(
         fact_id: str,
         feedback: str = "relevant",
@@ -579,6 +583,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
 
     @server.tool()
+    @admits(OperationKind.CONSOLIDATE)
     async def close_session(session_id: str = "") -> dict:
         """Close the current session and create temporal summary events.
 

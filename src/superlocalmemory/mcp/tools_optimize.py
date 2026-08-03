@@ -24,6 +24,8 @@ import time
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.agent_context import get_current_agent_id
 from superlocalmemory.optimize.compress.ccr import CCRStore, _UUID4_RE
 from superlocalmemory.optimize.compress.router import CompressRouter
@@ -70,6 +72,7 @@ def register_optimize_tools(server) -> None:
     """
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    @admits(OperationKind.CONSOLIDATE)
     async def slm_compress(
         content: str,
         mode: str = "auto",
@@ -191,6 +194,7 @@ def register_optimize_tools(server) -> None:
             }
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    @admits(OperationKind.REMEMBER)
     async def slm_cache_set(key: str, value: str, ttl_seconds: int = 86400) -> dict:
         """Cache a result you want to reuse (tool output, file read, search result).
 

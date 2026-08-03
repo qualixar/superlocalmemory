@@ -62,17 +62,32 @@ _REQUIRED_MCP_GATES: frozenset[str] = frozenset({
     "update_memory",
     "correct_pattern",
     "switch_profile",
+    "build_graph",
     # Forgetting / consolidation (tools_v33.py)
     "forget",
     "consolidate_cognitive",
+    "quantize",
     # Mode mutations (tools_v3.py)
     "set_mode",
     # Mesh mutations (tools_mesh.py)
     "mesh_send",
     "mesh_lock",
     "mesh_state",
+    "mesh_summary",
     # Evolution (tools_evolution.py)
     "evolve_skill",
+    # Learning / feedback (tools_learning.py, tools_v28.py, tools_active.py)
+    "reinforce_assertion",
+    "contradict_assertion",
+    "report_outcome",
+    "report_feedback",
+    "observe",
+    "close_session",
+    # Optimize / cache (tools_optimize.py)
+    "slm_cache_set",
+    "slm_compress",
+    # Code graph (tools_code_graph.py)
+    "update_code_graph",
 })
 
 

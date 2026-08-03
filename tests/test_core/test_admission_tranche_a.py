@@ -176,11 +176,7 @@ class TestDestructiveMcpGated:
         """In enterprise mode, anonymous caller → delete_memory returns not_authorized."""
         monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
         _write_config(tmp_path, '[deployment]\nmode = "enterprise"\nrequire_login = true\n')
-
-        # Re-import admission so _resolve_deployment uses fresh env
-        import importlib
-        import superlocalmemory.core.admission as adm_mod
-        importlib.reload(adm_mod)
+        # No importlib.reload needed: _resolve_deployment() reads SLM_DATA_DIR at call time.
 
         from superlocalmemory.core.admission import admits
         from superlocalmemory.core.operation_request import OperationKind

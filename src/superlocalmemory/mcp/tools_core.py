@@ -544,6 +544,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def build_graph() -> dict:
         """Rebuild knowledge graph edges for all facts in the active profile."""
         try:

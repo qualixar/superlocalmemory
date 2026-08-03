@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.security_primitives import (
     PathTraversalError,
     safe_resolve,
@@ -242,6 +244,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # ==================================================================
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def update_code_graph(
         repo_path: str = "",
         changed_files: str = "",

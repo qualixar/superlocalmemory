@@ -63,12 +63,31 @@ def authorize_mcp_mutation(
     MCP URL/env agent identifiers remain audit attribution only.  The trusted
     principal is derived from the private local install capability, matching
     the canonical ingestion and recall-worker mutation boundaries.
+
+    Phase 1: Routes through the admission registry so enterprise policy applies
+    even when the caller has local trust (trust-hook alone cannot bypass registry).
+    AdmissionDenied propagates to the caller; personal OWNER is always admitted.
     """
     if operation not in {"update", "delete"}:
         raise ValueError("MCP mutations must use update or delete policy")
 
+    from superlocalmemory.core.actor_context import Transport
+    from superlocalmemory.core.admission import (
+        AdmissionDenied,
+        _resolve_deployment,
+        admit,
+        resolve_actor,
+    )
     from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.operation_request import OperationKind
     from superlocalmemory.mcp.agent_context import get_current_agent_id
+
+    deployment = _resolve_deployment()
+    tier = "enterprise" if deployment.is_enterprise else "personal"
+    mode = "company" if deployment.is_enterprise else "local"
+    actor = resolve_actor(Transport.MCP, tier=tier, mode=mode)
+    kind = OperationKind.FORGET if operation == "delete" else OperationKind.CORRECT
+    admit(kind, actor, mode=mode)  # raises AdmissionDenied on deny
 
     source_agent_id = get_current_agent_id(env_fallback=True)
     context = {

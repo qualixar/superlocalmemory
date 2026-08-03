@@ -24,6 +24,8 @@ from typing import Callable
 
 from mcp.types import ToolAnnotations
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             return {"assertions": [], "count": 0, "error": str(exc)}
 
     @server.tool()
+    @admits(OperationKind.CORRECT)
     async def reinforce_assertion(assertion_id: str) -> dict:
         """Reinforce a behavioral assertion (increase confidence).
 
@@ -173,6 +176,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool()
+    @admits(OperationKind.FORGET)
     async def contradict_assertion(assertion_id: str) -> dict:
         """Contradict a behavioral assertion (decrease confidence).
 

@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from superlocalmemory.core.admission import admits
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # 1. report_outcome
     # ------------------------------------------------------------------
     @server.tool()
+    @admits(OperationKind.REMEMBER)
     async def report_outcome(
         memory_ids: str,
         outcome: str,

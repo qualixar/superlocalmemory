@@ -970,6 +970,10 @@ def cmd_evolve(args: Namespace) -> None:
     if not session_id:
         return  # Silent exit — nothing to do without a session
 
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.EVOLVE_SKILL)
+
     # Check if evolution is enabled via config.json
     config_path = state_path("config.json")
     try:
@@ -3554,6 +3558,10 @@ def cmd_observe(args: Namespace) -> None:
         print("No content to observe.")
         return
 
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.REMEMBER)
+
     # V3.3.28: Route through daemon (singleton engine, single embedding worker).
     # This is the P0 fix for the memory blast incident of April 7, 2026.
     try:
@@ -3621,6 +3629,9 @@ def cmd_observe(args: Namespace) -> None:
 
 def cmd_decay(args: Namespace) -> None:
     """Run Ebbinghaus forgetting decay cycle."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.CONSOLIDATE)
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
 
@@ -3677,6 +3688,9 @@ def cmd_decay(args: Namespace) -> None:
 
 def cmd_quantize(args: Namespace) -> None:
     """Run EAP embedding quantization cycle."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.CONSOLIDATE)
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
 

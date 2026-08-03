@@ -224,6 +224,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
     """Register all 8 mesh MCP tools."""
 
     @server.tool()
+    @admits(OperationKind.MESH_SEND)
     async def mesh_summary(summary: str = "") -> dict:
         """Register this session and describe what you're working on.
 
