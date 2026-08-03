@@ -346,6 +346,46 @@ def send(req: SendRequest, request: Request):
     if not to_target:
         raise HTTPException(400, detail="'to' or 'to_peer' required")
     profile = _active_profile()
+
+    # 3a-1 + 3a-2: Apply signature verification and admission gate for non-loopback.
+    client_host = request.client.host if request.client else "127.0.0.1"
+    from superlocalmemory.server.loopback import is_loopback as _is_loopback_host
+    _is_lb = _is_loopback_host(client_host)
+
+    if not _is_lb:
+        from superlocalmemory.mesh.broker_security import (
+            check_mesh_message_signature,
+            is_strict_identity,
+        )
+        sig_err = check_mesh_message_signature(
+            getattr(broker, "_shared_secret", None),
+            req.from_peer,
+            to_target,
+            req.content,
+            request.headers.get("x-mesh-sig"),
+            request.headers.get("x-mesh-nonce"),
+            request.headers.get("x-mesh-ts"),
+            is_loopback=False,
+            strict=is_strict_identity(),
+        )
+        if sig_err is not None:
+            raise HTTPException(401, detail=sig_err.get("error", "signature error"))
+
+        # Admission gate parity (closes Wave-1 P1 bypass for inbound remote send).
+        try:
+            from superlocalmemory.core.admission import (
+                AdmissionDenied,
+                admit,
+                resolve_actor,
+            )
+            from superlocalmemory.core.actor_context import Transport
+            from superlocalmemory.core.operation_request import OperationKind
+
+            actor = resolve_actor(Transport.HTTP, client_host=client_host)
+            admit(OperationKind.MESH_SEND, actor)
+        except AdmissionDenied as exc:
+            raise HTTPException(403, detail=str(exc))
+
     # This sync FastAPI route already runs in the worker thread pool, so the
     # broker's SQLite retries and optional remote HTTP delivery cannot block
     # the daemon event loop.

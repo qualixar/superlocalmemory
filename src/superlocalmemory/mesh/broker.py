@@ -25,8 +25,8 @@ logger = logging.getLogger("superlocalmemory.mesh")
 import os as _os
 
 from .broker_security import (  # noqa: E501
-    apply_security_schema, check_cross_profile_sender,
-    ensure_db_healthy, reject_secret_state, validate_lock_fence_query,
+    apply_security_schema, check_cross_profile_sender, ensure_db_healthy, reject_secret_state,
+    scrub_message_content, seed_fencing_counter, validate_lock_fence_query,
 )
 
 # Remote sync support (optional, try/except to avoid import issues)
@@ -73,13 +73,14 @@ class MeshBroker:
         self._sync_client: Any = None
         self._degraded: bool = False
         self._fencing_lock = threading.Lock()
-        self._fencing_counter: int = 0
+        self._fencing_counter: int = 0  # seeded below after schema is applied
         if self._is_remote and not self._shared_secret:
             raise RuntimeError(
                 "SLM_MESH_SHARED_SECRET is required when SLM_MESH_HOST is not localhost"
             )
         self._ensure_db_healthy()
         self._apply_schema_updates()
+        self._fencing_counter = seed_fencing_counter(self._db_path)  # 3a-3: restart-safe fence
 
     # -- Remote / Multi-Machine support (v3.4.47) --
 
@@ -388,11 +389,12 @@ class MeshBroker:
                          count - MAX_QUEUED_PER_TARGET + 1),
                     )
 
+            _content = scrub_message_content(content)  # 3a-2: redact before storage
             cursor = conn.execute(
                 "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, "
                 "created_at, expires_at, target_type, project_path, profile_id) "
                 "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-                (from_peer, _to_peer, msg_type, content, now, expires_at,
+                (from_peer, _to_peer, msg_type, _content, now, expires_at,
                  target_type, _project_path, profile_id),
             )
             msg_id = cursor.lastrowid

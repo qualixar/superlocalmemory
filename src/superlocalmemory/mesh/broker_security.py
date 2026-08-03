@@ -8,12 +8,219 @@ Pure functions so they can be unit-tested independently of the broker.
 
 from __future__ import annotations
 
+import hashlib
+import hmac as _hmac
 import logging
+import os
+import secrets as _secrets
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
 logger = logging.getLogger("superlocalmemory.mesh")
+
+# ---------------------------------------------------------------------------
+# 3a-1  Per-message HMAC identity (sign / verify / replay defense)
+# ---------------------------------------------------------------------------
+
+#: Seconds of acceptable clock skew between signer and verifier.
+MESH_SIG_SKEW_SECONDS: int = int(os.environ.get("MESH_SIG_SKEW_SECONDS", "300"))
+
+#: Hard cap on the in-memory nonce table to prevent memory exhaustion.
+_NONCE_STORE_MAX: int = 10_000
+
+_nonce_lock = threading.Lock()
+# Maps nonce → expiry monotonic timestamp
+_nonce_store: dict[str, float] = {}
+
+
+def _clear_nonce_store() -> None:
+    """Purge the nonce table — for use in tests only."""
+    with _nonce_lock:
+        _nonce_store.clear()
+
+
+def _prune_nonces(now: float) -> None:
+    """Evict expired entries (caller must hold _nonce_lock)."""
+    expired = [n for n, exp in _nonce_store.items() if exp <= now]
+    for n in expired:
+        del _nonce_store[n]
+
+
+def _register_nonce(nonce: str, now: float) -> bool:
+    """Register *nonce*; return False if already seen (replay), True if fresh."""
+    with _nonce_lock:
+        _prune_nonces(now)
+        if nonce in _nonce_store:
+            return False
+        # Emergency eviction when the store is full (bounded)
+        if len(_nonce_store) >= _NONCE_STORE_MAX:
+            oldest = min(_nonce_store, key=lambda k: _nonce_store[k])
+            del _nonce_store[oldest]
+        _nonce_store[nonce] = now + MESH_SIG_SKEW_SECONDS
+        return True
+
+
+def _canonical_payload(
+    from_peer: str, to: str, content: str, nonce: str, ts: str
+) -> str:
+    """Deterministic string signed by HMAC. Covers SHA-256 of content for integrity."""
+    content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+    return "|".join([from_peer, to, content_hash, nonce, ts])
+
+
+def sign_mesh_message(
+    secret: str,
+    from_peer: str,
+    to: str,
+    content: str,
+    nonce: str,
+    ts: str,
+) -> str:
+    """Return hex HMAC-SHA256 over the canonical mesh payload."""
+    payload = _canonical_payload(from_peer, to, content, nonce, ts)
+    return _hmac.new(
+        secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def verify_mesh_message(
+    secret: str,
+    from_peer: str,
+    to: str,
+    content: str,
+    nonce: str,
+    ts: str,
+    sig: str,
+) -> bool:
+    """Constant-time compare of presented sig vs expected. Returns False on any mismatch."""
+    try:
+        expected = sign_mesh_message(secret, from_peer, to, content, nonce, ts)
+        return _hmac.compare_digest(expected, sig)
+    except Exception:
+        return False
+
+
+def is_strict_identity() -> bool:
+    """Return True if strict per-message HMAC is required for inbound remote messages.
+
+    True when SLM_MESH_PRODUCTION=1 OR SLM_MESH_STRICT_IDENTITY=1.
+    Default False — preserves backward compat for existing deployments.
+    """
+    _truthy = frozenset({"1", "true", "yes", "on", "production", "prod"})
+    if os.environ.get("SLM_MESH_PRODUCTION", "").strip().lower() in _truthy:
+        return True
+    return os.environ.get("SLM_MESH_STRICT_IDENTITY", "").strip().lower() in _truthy
+
+
+def check_mesh_message_signature(
+    secret: str | None,
+    from_peer: str,
+    to: str,
+    content: str,
+    sig_header: str | None,
+    nonce_header: str | None,
+    ts_header: str | None,
+    *,
+    is_loopback: bool,
+    strict: bool,
+) -> dict | None:
+    """Gate inbound mesh message signatures.
+
+    Returns None on acceptance, or ``{"ok": False, "error": "..."}`` on rejection.
+
+    Backward-compat rules (NON-NEGOTIABLE):
+      - Loopback is always trusted; no sig required regardless of strict.
+      - strict=False + no sig → accepted (unsigned legacy remote).
+      - strict=False + bad sig present → rejected (reject known-bad, not silent swallow).
+      - strict=True + no sig → rejected.
+      - strict=True + valid sig → accepted.
+    """
+    if is_loopback:
+        return None  # Always trusted; existing require_write_actor path unchanged.
+
+    has_sig = bool(sig_header)
+
+    if not has_sig:
+        if strict:
+            return {"ok": False, "error": "missing message signature (strict identity mode)"}
+        return None  # unsigned legacy remote accepted in compat mode
+
+    # Signature present — must be well-formed and valid regardless of strict flag.
+    if not secret:
+        # A sig was presented but we have no secret to verify against.
+        if strict:
+            return {"ok": False, "error": "signature present but no shared secret configured"}
+        return None  # compat mode: can't verify, treat as unsigned legacy
+
+    if not nonce_header or not ts_header:
+        return {"ok": False, "error": "X-Mesh-Sig present but X-Mesh-Nonce or X-Mesh-Ts missing"}
+
+    # Timestamp skew check
+    try:
+        ts_float = float(ts_header)
+    except (ValueError, TypeError):
+        return {"ok": False, "error": "X-Mesh-Ts is not a valid unix timestamp"}
+
+    now = time.time()
+    if abs(now - ts_float) > MESH_SIG_SKEW_SECONDS:
+        return {"ok": False, "error": "message timestamp outside acceptable skew window"}
+
+    # HMAC verification (before nonce registration — prevent timing oracle)
+    if not verify_mesh_message(secret, from_peer, to, content, nonce_header, ts_header, sig_header):
+        return {"ok": False, "error": "message signature verification failed"}
+
+    # Nonce replay check (register after HMAC so only valid sigs consume a slot)
+    if not _register_nonce(nonce_header, now):
+        return {"ok": False, "error": "message nonce has been used before (replay rejected)"}
+
+    return None  # All checks passed
+
+
+# ---------------------------------------------------------------------------
+# 3a-2  Content scrub helper
+# ---------------------------------------------------------------------------
+
+
+def scrub_message_content(content: str) -> str:
+    """Redact known secret patterns from message content before durable storage.
+
+    Fail-open: on any import/runtime error the original content is returned
+    unchanged so a storage failure never loses a message.
+    """
+    try:
+        from superlocalmemory.core.security_primitives import redact_secrets
+
+        return redact_secrets(content)
+    except Exception:
+        return content
+
+
+# ---------------------------------------------------------------------------
+# 3a-3  Restart-safe fencing counter seed
+# ---------------------------------------------------------------------------
+
+
+def seed_fencing_counter(db_path: str) -> int:
+    """Return MAX(fencing_token) from mesh_locks so post-restart tokens exceed
+    any surviving DB value. Returns 0 on empty table or any DB error.
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(COALESCE(fencing_token, 0)), 0) AS max_tok "
+                "FROM mesh_locks"
+            ).fetchone()
+            return int(row["max_tok"]) if row else 0
+        except sqlite3.OperationalError:
+            return 0
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
 
 # Pattern matches key names that imply secret material.
 import re as _re
