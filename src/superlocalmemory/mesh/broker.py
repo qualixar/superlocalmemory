@@ -25,8 +25,7 @@ logger = logging.getLogger("superlocalmemory.mesh")
 import os as _os
 
 from .broker_security import (  # noqa: E501
-    apply_security_schema, check_cross_profile_sender,
-    ensure_db_healthy, reject_secret_state, validate_lock_fence_query,
+    apply_security_schema, check_cross_profile_sender, ensure_db_healthy, get_or_create_peer_key, reject_secret_state, scrub_message_content, seed_fencing_counter, _set_nonce_db_path, validate_lock_fence_query,  # noqa: E501
 )
 
 # Remote sync support (optional, try/except to avoid import issues)
@@ -36,8 +35,6 @@ except ImportError:
     RemoteSyncClient = None  # type: ignore
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-
-
 
 MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data dumps
 MESSAGE_TTL_HOURS = 48   # Offline messages expire after 48h
@@ -73,13 +70,15 @@ class MeshBroker:
         self._sync_client: Any = None
         self._degraded: bool = False
         self._fencing_lock = threading.Lock()
-        self._fencing_counter: int = 0
+        self._fencing_counter: int = 0  # seeded below after schema is applied
         if self._is_remote and not self._shared_secret:
             raise RuntimeError(
                 "SLM_MESH_SHARED_SECRET is required when SLM_MESH_HOST is not localhost"
             )
         self._ensure_db_healthy()
         self._apply_schema_updates()
+        _set_nonce_db_path(self._db_path)  # SEC-3: wire SQLite nonce store for durability
+        self._fencing_counter = seed_fencing_counter(self._db_path)  # 3a-3: restart-safe fence
 
     # -- Remote / Multi-Machine support (v3.4.47) --
 
@@ -232,9 +231,11 @@ class MeshBroker:
             }, profile_id=profile_id)
             conn.commit()
 
+            # SEC-4: Mint per-peer HMAC key (idempotent — returns existing key on re-registration)
+            peer_key = get_or_create_peer_key(conn, peer_id, profile_id)
             # v3.4.6: Deliver pending broadcast/project messages on registration
             pending = self._get_pending_for_peer(conn, peer_id, project_path, profile_id)
-            return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending)}
+            return {"peer_id": peer_id, "ok": True, "pending_messages": len(pending), "peer_key": peer_key}
 
         return self._write_with_retry(_register)
 
@@ -388,11 +389,12 @@ class MeshBroker:
                          count - MAX_QUEUED_PER_TARGET + 1),
                     )
 
+            _content = scrub_message_content(content)  # 3a-2: redact before storage
             cursor = conn.execute(
                 "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, "
                 "created_at, expires_at, target_type, project_path, profile_id) "
                 "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-                (from_peer, _to_peer, msg_type, content, now, expires_at,
+                (from_peer, _to_peer, msg_type, _content, now, expires_at,
                  target_type, _project_path, profile_id),
             )
             msg_id = cursor.lastrowid

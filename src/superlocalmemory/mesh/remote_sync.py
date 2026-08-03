@@ -261,12 +261,29 @@ class RemoteSyncClient:
             with httpx.Client(timeout=10) as client:
                 headers = self._auth_headers()
 
+                from_peer = message_data.get("from_peer", "")
+                content = message_data.get("content", "")
                 payload = {
-                    "from_peer": message_data.get("from_peer", ""),
+                    "from_peer": from_peer,
                     "to_peer": to_peer,
-                    "content": message_data.get("content", ""),
+                    "content": content,
                     "type": message_data.get("type", "text"),
                 }
+
+                # 3a-1: Sign outbound messages when a shared secret is configured.
+                if self._shared_secret and self._peer_url_trusted:
+                    import secrets as _sec
+                    from .broker_security import sign_mesh_message
+                    nonce = _sec.token_hex(16)
+                    ts = str(int(time.time()))
+                    sig = sign_mesh_message(
+                        self._shared_secret, from_peer, to_peer, content, nonce, ts,
+                    )
+                    headers.update({
+                        "X-Mesh-Sig": sig,
+                        "X-Mesh-Nonce": nonce,
+                        "X-Mesh-Ts": ts,
+                    })
 
                 resp = client.post(
                     f"{self._peer_url}/mesh/send",
