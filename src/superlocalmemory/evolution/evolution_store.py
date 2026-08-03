@@ -12,9 +12,11 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -61,6 +63,44 @@ CREATE TABLE IF NOT EXISTS evolution_cycle_state (
     updated_at TEXT,
     PRIMARY KEY (profile_id, key)
 );
+
+-- Phase 2: append-only status-transition log (LLD Decision B2).
+-- Each state change for a record produces one new row here.
+-- The BEFORE UPDATE trigger enforces immutability at the DB layer.
+CREATE TABLE IF NOT EXISTS skill_evolution_transitions (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id       TEXT NOT NULL,
+    profile_id      TEXT NOT NULL DEFAULT 'default',
+    from_status     TEXT NOT NULL,
+    to_status       TEXT NOT NULL,
+    transitioned_at TEXT NOT NULL,
+    actor_id        TEXT DEFAULT '',
+    reason          TEXT DEFAULT '',
+    prev_hash       TEXT DEFAULT '',
+    transition_hash TEXT NOT NULL,
+    metadata        TEXT DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_evo_trans_record
+    ON skill_evolution_transitions(record_id, seq);
+
+CREATE INDEX IF NOT EXISTS idx_evo_trans_profile
+    ON skill_evolution_transitions(profile_id, transitioned_at);
+
+-- DB-enforced append-only: any UPDATE on this table is a bug (LLD Decision B2).
+CREATE TRIGGER IF NOT EXISTS no_update_evo_transitions
+BEFORE UPDATE ON skill_evolution_transitions
+BEGIN
+    SELECT RAISE(ABORT, 'skill_evolution_transitions is append-only');
+END;
+
+-- Audit P1-3: DELETE must also be forbidden — otherwise the hash chain can be
+-- silently truncated/erased without a DB abort, breaking the immutable-log claim.
+CREATE TRIGGER IF NOT EXISTS no_delete_evo_transitions
+BEFORE DELETE ON skill_evolution_transitions
+BEGIN
+    SELECT RAISE(ABORT, 'skill_evolution_transitions is append-only');
+END;
 """
 
 # Anti-loop budget
@@ -224,10 +264,193 @@ class EvolutionStore:
             del self._addressed_degradations[k]
 
     # ------------------------------------------------------------------
+    # Phase 2: append-only transition log
+    # ------------------------------------------------------------------
+
+    def insert_record(self, record: EvolutionRecord, profile_id: str) -> None:
+        """INSERT a new evolution record (CANDIDATE status).
+
+        Unlike save_record, this uses plain INSERT — NOT INSERT OR REPLACE.
+        Raises sqlite3.IntegrityError if a row with the same id already exists.
+        Call this exactly once per candidate (CRIT-1: never reuse record_id).
+        """
+        conn = sqlite3.connect(self._db_path, timeout=10)
+        try:
+            conn.execute(
+                "INSERT INTO skill_evolution_log "
+                "(id, profile_id, skill_name, parent_skill_id, evolution_type, "
+                " trigger_type, generation, status, mutation_summary, evidence, "
+                " original_content, evolved_content, content_diff, "
+                " blind_verified, rejection_reason, created_at, completed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record.id,
+                    profile_id,
+                    record.skill_name,
+                    record.parent_skill_id,
+                    record.evolution_type.value,
+                    record.trigger.value,
+                    record.generation,
+                    record.status.value,
+                    record.mutation_summary,
+                    json.dumps(list(record.evidence)),
+                    record.original_content,
+                    record.evolved_content,
+                    record.content_diff,
+                    1 if record.blind_verified else 0,
+                    record.rejection_reason,
+                    record.created_at,
+                    record.completed_at,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def append_transition(
+        self,
+        record_id: str,
+        profile_id: str,
+        from_status: EvolutionStatus,
+        to_status: EvolutionStatus,
+        *,
+        actor_id: str = "",
+        reason: str = "",
+        metadata: dict | None = None,
+    ) -> str:
+        """Append an immutable status-transition row. Returns transition_hash.
+
+        Hash linkage (audit P2-3): transition_hash = SHA-256 over a canonical,
+        pipe-delimited payload covering EVERY persisted field —
+        ``prev_hash | record_id | from_status | to_status | ts | actor_id |
+        reason | metadata_str``. Delimiters remove concatenation ambiguity and
+        including reason+metadata makes those columns tamper-evident too.
+
+        prev_hash is the transition_hash of the most recent row for this
+        record_id, or 'genesis' for the first transition.
+
+        Concurrency (audit P1-5): the read-prev-then-insert is wrapped in a
+        single ``BEGIN IMMEDIATE`` transaction so two concurrent writers cannot
+        both read the same prev_hash and fork the chain.
+
+        Never calls UPDATE or DELETE. Raises ValueError if from_status == to_status.
+        """
+        if from_status == to_status:
+            raise ValueError(
+                f"append_transition: from_status == to_status == {from_status!r}; "
+                "no-op transitions are not allowed in the append-only log."
+            )
+        ts = datetime.now(timezone.utc).isoformat()
+        metadata_str = json.dumps(metadata or {}, sort_keys=True)
+
+        # isolation_level=None + explicit BEGIN IMMEDIATE = one atomic
+        # select-prev-then-insert critical section per call (P1-5).
+        conn = sqlite3.connect(self._db_path, timeout=10, isolation_level=None)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            # Find prev_hash for this record_id (genesis if first)
+            row = conn.execute(
+                "SELECT transition_hash FROM skill_evolution_transitions "
+                "WHERE record_id = ? AND profile_id = ? "
+                "ORDER BY seq DESC LIMIT 1",
+                (record_id, profile_id),
+            ).fetchone()
+            prev_hash = row[0] if row else "genesis"
+
+            # Canonical, delimited payload over ALL persisted fields (P2-3).
+            payload = "|".join((
+                prev_hash, record_id,
+                from_status.value, to_status.value,
+                ts, actor_id, reason, metadata_str,
+            ))
+            transition_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+            conn.execute(
+                "INSERT INTO skill_evolution_transitions "
+                "(record_id, profile_id, from_status, to_status, "
+                " transitioned_at, actor_id, reason, prev_hash, "
+                " transition_hash, metadata) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record_id,
+                    profile_id,
+                    from_status.value,
+                    to_status.value,
+                    ts,
+                    actor_id,
+                    reason,
+                    prev_hash,
+                    transition_hash,
+                    metadata_str,
+                ),
+            )
+            conn.execute("COMMIT")
+            return transition_hash
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def get_latest_status(
+        self, record_id: str, profile_id: str,
+    ) -> EvolutionStatus | None:
+        """Return the to_status of the highest-seq transition for record_id.
+
+        Returns None if no transitions exist for this record_id / profile_id.
+        """
+        conn = sqlite3.connect(self._db_path, timeout=10)
+        try:
+            row = conn.execute(
+                "SELECT to_status FROM skill_evolution_transitions "
+                "WHERE record_id = ? AND profile_id = ? "
+                "ORDER BY seq DESC LIMIT 1",
+                (record_id, profile_id),
+            ).fetchone()
+            if row is None:
+                return None
+            return EvolutionStatus(row[0])
+        finally:
+            conn.close()
+
+    def get_transitions(self, record_id: str, profile_id: str) -> list[dict]:
+        """Return all transition rows for record_id ordered by seq ASC."""
+        conn = sqlite3.connect(self._db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT seq, record_id, profile_id, from_status, to_status, "
+                "transitioned_at, actor_id, reason, prev_hash, transition_hash, "
+                "metadata "
+                "FROM skill_evolution_transitions "
+                "WHERE record_id = ? AND profile_id = ? "
+                "ORDER BY seq ASC",
+                (record_id, profile_id),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
 
     def save_record(self, record: EvolutionRecord, profile_id: str) -> None:
+        """DEPRECATED: use insert_record() for new records and append_transition() for state changes.
+
+        Retained for backward-compatibility with existing tests and callers.
+        Uses INSERT OR REPLACE — mutable semantics, not append-only.
+        Will be removed in a future cleanup pass (not Phase 2 scope).
+        """
+        warnings.warn(
+            "EvolutionStore.save_record() is deprecated; "
+            "use insert_record() + append_transition() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             conn.execute(
@@ -306,13 +529,30 @@ class EvolutionStore:
             conn.close()
 
     def count_attempts(self, skill_name: str, profile_id: str) -> int:
+        """Count non-successful evolution attempts for a skill.
+
+        Audit P0-2: with the Phase-2 append-only model, ``skill_evolution_log``
+        rows are frozen at 'candidate' by ``insert_record`` and never updated, so
+        the legacy ``status NOT IN ('promoted')`` filter counted successes too —
+        permanently disabling a skill after MAX_ATTEMPTS_PER_SKILL improvements.
+        The current status is now read from the append-only transitions log
+        (latest ``to_status`` per record), and success states are excluded,
+        mirroring the pre-Phase-2 exclusion of 'promoted'. Legacy rows with no
+        transitions fall back to their frozen log status via COALESCE.
+        """
+        success = ("promoted", "verified_quarantined", "approved", "active")
+        marks = ",".join("?" for _ in success)
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT COUNT(*) FROM skill_evolution_log "
-                "WHERE skill_name = ? AND profile_id = ? "
-                "AND status NOT IN ('promoted')",
-                (skill_name, profile_id),
+                "SELECT COUNT(*) FROM skill_evolution_log l "
+                "WHERE l.skill_name = ? AND l.profile_id = ? "
+                "AND COALESCE("
+                "  (SELECT t.to_status FROM skill_evolution_transitions t "
+                "   WHERE t.record_id = l.id AND t.profile_id = l.profile_id "
+                "   ORDER BY t.seq DESC LIMIT 1), l.status"
+                f") NOT IN ({marks})",
+                (skill_name, profile_id, *success),
             ).fetchone()
             return row[0] if row else 0
         finally:
