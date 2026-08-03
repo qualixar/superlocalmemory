@@ -36,8 +36,16 @@ def register_resources(server, get_engine: Callable) -> None:
         try:
             from superlocalmemory.hooks.auto_recall import AutoRecall
             from superlocalmemory.mcp._pool_adapter import pool_recall
+            # Pass engine so the soft-prompt bridge (engine->AutoInvoker) fires on
+            # this real MCP session-context surface; recall_fn still drives recall.
+            # Fail-soft: if the engine is unavailable, recall via pool_recall alone.
+            try:
+                _eng = get_engine()
+            except Exception:
+                _eng = None
             auto = AutoRecall(
                 recall_fn=pool_recall,
+                engine=_eng,
                 config={"enabled": True, "max_memories_injected": 10, "relevance_threshold": 0.3},
             )
             context = auto.get_session_context(query="recent decisions and important context")

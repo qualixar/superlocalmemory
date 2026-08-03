@@ -329,6 +329,20 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 # weaker ad-hoc path when the mandatory renderer fails.
                 context = ""
 
+            # Live soft-prompt injection (Phase 5): prepend the profile's behavioral
+            # soft prompt so it reaches the session_init context agents actually
+            # consume (same engine->AutoInvoker bridge AutoRecall uses). Fail-soft.
+            try:
+                _sp_getter = getattr(
+                    getattr(engine, "_auto_invoker", None),
+                    "_get_soft_prompt_text", None,
+                )
+                _soft_prompt = _sp_getter() if callable(_sp_getter) else ""
+                if _soft_prompt:
+                    context = f"{_soft_prompt}\n\n{context}" if context else _soft_prompt
+            except Exception as exc:
+                logger.warning("session_init soft-prompt injection failed: %s", exc)
+
             # GAP-FIX (v3.4.65 delivery-lead): the memories[] array is part of
             # the MCP response Claude Code ingests — it MUST be bounded too, not
             # just the rendered `context` string. Previously full unclamped

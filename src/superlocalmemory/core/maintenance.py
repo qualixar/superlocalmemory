@@ -381,14 +381,18 @@ def run_maintenance(
                 current_var = list(f.fisher_variance)
                 dim = len(current_var)
                 obs_var = [1.0] * dim
-                for _ in range(min(delta, 100)):
+                applied = min(delta, 100)
+                for _ in range(applied):
                     current_var = frm.bayesian_update(current_var, obs_var)
-                # Single atomic write: variance + watermark together.
+                # Single atomic write: variance + watermark together. Advance the
+                # watermark only by the number of updates ACTUALLY applied (not to
+                # acc), so accesses beyond the per-run cap are applied on subsequent
+                # runs instead of being silently dropped.
                 db.execute(
                     "UPDATE atomic_facts "
                     "SET fisher_variance = ?, fisher_last_applied_access = ? "
                     "WHERE fact_id = ?",
-                    (_json.dumps(current_var), acc, f.fact_id),
+                    (_json.dumps(current_var), last_applied + applied, f.fact_id),
                 )
                 # Refresh in-memory so step 1d ELC sees the updated variance.
                 f.fisher_variance = current_var
