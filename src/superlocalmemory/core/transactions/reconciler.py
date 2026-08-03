@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib as _hashlib
+import hmac as _hmac
 import json
 import sqlite3
 import time
@@ -164,9 +166,16 @@ class Reconciler:
         except (TypeError, json.JSONDecodeError):
             return False
 
-        version = _manifest_row_version(conn, operation_id)
+        db_version = _manifest_version_supported(conn)
+        row_version = _manifest_row_version(conn, operation_id)
 
-        if version >= MANIFEST_V2:
+        if db_version >= MANIFEST_V2:
+            # On M037-capable DBs NEVER accept the unkeyed v1 SHA path —
+            # an attacker can write manifest_version=1 with a valid SHA of
+            # mutated content.  Any v1 row here is either a downgrade attack
+            # or a legacy row that hasn't been re-sealed; both are rejected.
+            if row_version < MANIFEST_V2:
+                return False
             return verify_envelope_hmac(
                 operation_id=row[0],
                 profile_id=row[1],
@@ -177,6 +186,8 @@ class Reconciler:
                 stored_mac=row[6],
             )
 
+        # v1 path (M037 absent) — use constant-time comparison to prevent
+        # timing oracles on old SHA256 hex digests.
         recomputed = hash_envelope_fields(
             operation_id=row[0],
             profile_id=row[1],
@@ -185,7 +196,10 @@ class Reconciler:
             obligation_count=int(row[4]),
             evidence_dicts=evidence_dicts,
         )
-        return recomputed == row[6]
+        stored = row[6] or ""
+        return _hmac.compare_digest(
+            recomputed.encode("utf-8"), stored.encode("utf-8")
+        )
 
     def _resolve_canonical(
         self,

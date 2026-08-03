@@ -40,15 +40,35 @@ def _ensure_signing_key() -> bytes:
     """Read the 32-byte hex signing key, creating it on first call.
 
     Returns the raw bytes of the key (NOT the hex string).
+
+    Raises RuntimeError if the key cannot be obtained (corrupt, unreadable,
+    permission error).  Ephemeral keys are NEVER returned — they would
+    permanently desync multi-process daemons and silently break all
+    verification of previously-signed manifests.
     """
     key_path = _signing_key_path()
-    key_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            "signing key: cannot create key directory (key never logged)"
+        ) from exc
 
     if key_path.exists():
-        raw = key_path.read_text(encoding="utf-8").strip()
-        if len(raw) == 64:
-            return bytes.fromhex(raw)
+        try:
+            raw = key_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(
+                "signing key: cannot read existing key file (key never logged)"
+            ) from exc
+        if len(raw) != 64:
+            raise RuntimeError(
+                "signing key: file has unexpected length (corrupt or truncated) — "
+                "remove the file and restart to generate a fresh key"
+            )
+        return bytes.fromhex(raw)
 
+    # First-use: generate and persist atomically.
     raw = secrets.token_hex(32)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
@@ -60,18 +80,23 @@ def _ensure_signing_key() -> bytes:
         finally:
             os.close(fd)
     except FileExistsError:
-        # Another process won the race — read its key.
+        # Another process won the race — read its key (never return our own).
         try:
             existing = key_path.read_text(encoding="utf-8").strip()
-        except OSError:
-            existing = ""
-        if len(existing) == 64:
-            return bytes.fromhex(existing)
-        # Truncated write by the winner — fall through and use our in-memory key.
-    except OSError:
-        # Permission / symlink error — do NOT overwrite an existing key file.
-        # Return an ephemeral key for this call; next call retries the file path.
-        return bytes.fromhex(raw)
+        except OSError as exc:
+            raise RuntimeError(
+                "signing key: race winner's key unreadable (key never logged)"
+            ) from exc
+        if len(existing) != 64:
+            raise RuntimeError(
+                "signing key: race winner wrote a corrupt key (key never logged)"
+            )
+        return bytes.fromhex(existing)
+    except OSError as exc:
+        # Permission / symlink error — never return an ephemeral key.
+        raise RuntimeError(
+            "signing key: cannot create key file (key never logged)"
+        ) from exc
 
     if sys.platform != "win32":
         try:

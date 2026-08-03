@@ -530,3 +530,307 @@ def test_hmac_receipt_verify_rejects_all_tampered_fields(tmp_path: Path, monkeyp
             conn.commit()
         receipt2 = svc.erase(db, ctx, subject_type="fact", subject_id="f1", requested_by="tester")
         assert receipt2.persisted
+
+
+# ---------------------------------------------------------------------------
+# TRANCHE A RED TESTS — version-downgrade + signing-key fail-closed
+# ---------------------------------------------------------------------------
+
+def test_manifest_version_downgrade_forgery_detected(tmp_path: Path, monkeypatch) -> None:
+    """TA1: On M037 DB, attacker sets manifest_version=1 + valid SHA256 of mutated
+    envelope → verify_manifest MUST return False (downgrade forgery blocked)."""
+    import hashlib as _hashlib
+
+    _patch_manifest_key(monkeypatch)
+    db = _fresh_db_with_m037(tmp_path)
+
+    from superlocalmemory.core.transactions.owners import OperationContext, ObligationKind
+    from superlocalmemory.core.transactions.obligations import ObligationLedger
+    from superlocalmemory.core.transactions.reconciler import Reconciler
+
+    ledger = ObligationLedger()
+    reconciler = Reconciler(ledger)
+    ctx = OperationContext(
+        operation_id="downgrade-forgery-manifest",
+        profile_id="p1",
+        subject_id="s1",
+    )
+
+    with db.raw_connection() as conn:
+        ledger.record(conn, ctx, "bm25", ObligationKind.APPLY)
+        conn.commit()
+
+    with db.raw_connection() as conn:
+        reconciler.reconcile(conn, "downgrade-forgery-manifest", "p1", canonical_committed=True)
+        conn.commit()
+
+    with db.raw_connection() as conn:
+        assert reconciler.verify_manifest(conn, "downgrade-forgery-manifest") is True
+
+    # Attacker reads the stored row to get the REAL evidence JSON, then:
+    # 1) mutates state → FAILED, 2) computes SHA256 of mutated canonical using
+    # the SAME evidence — valid forged SHA the verifier would accept on SHA path.
+    with db.raw_connection() as conn:
+        stored = conn.execute(
+            "SELECT owner_evidence_json, obligation_count FROM completion_manifests "
+            "WHERE operation_id = ?",
+            ("downgrade-forgery-manifest",),
+        ).fetchone()
+    real_evidence_json = stored[0]
+    obligation_count = stored[1]
+
+    mutated_canonical = json.dumps({
+        "operation_id": "downgrade-forgery-manifest",
+        "profile_id": "p1",
+        "state": "FAILED",
+        "all_met": False,
+        "obligation_count": int(obligation_count),
+        "evidence": json.loads(real_evidence_json),
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    forged_sha = _hashlib.sha256(mutated_canonical).hexdigest()
+
+    with db.raw_connection() as conn:
+        conn.execute(
+            "UPDATE completion_manifests "
+            "SET state = 'FAILED', all_met = 0, manifest_version = 1, manifest_hash = ? "
+            "WHERE operation_id = ?",
+            (forged_sha, "downgrade-forgery-manifest"),
+        )
+        conn.commit()
+
+    with db.raw_connection() as conn:
+        result = reconciler.verify_manifest(conn, "downgrade-forgery-manifest")
+    assert result is False, (
+        "verify_manifest must detect version-downgrade forgery: "
+        "a v1 SHA on an M037 DB must always fail"
+    )
+
+
+def test_receipt_version_downgrade_forgery_detected(tmp_path: Path, monkeypatch) -> None:
+    """TA2: On M037 DB, attacker sets receipt_version=1 + valid SHA256 of mutated
+    receipt envelope → verify_receipt MUST return False."""
+    import hashlib as _hashlib
+
+    _patch_manifest_key(monkeypatch)
+    db = _fresh_db_with_m037(tmp_path)
+
+    from superlocalmemory.core.transactions.owners import OperationContext
+    from superlocalmemory.core.transactions.concrete_owners import Bm25Owner
+    from superlocalmemory.core.transactions.erasure import ErasureService, verify_receipt, _erasure_canonical
+
+    db.store_bm25_tokens("f-dg", "p1", ["token"])
+    ctx = OperationContext(
+        operation_id="downgrade-forgery-receipt",
+        profile_id="p1",
+        subject_id="f-dg",
+        fact_ids=("f-dg",),
+    )
+    svc = ErasureService({"bm25": Bm25Owner(db)})
+    receipt = svc.erase(db, ctx, subject_type="fact", subject_id="f-dg", requested_by="tester")
+    assert receipt.persisted
+
+    with db.raw_connection() as conn:
+        assert verify_receipt(conn, "downgrade-forgery-receipt") is True
+
+    # Fetch original evidence_json and tamper
+    with db.raw_connection() as conn:
+        row = conn.execute(
+            "SELECT requested_at, completed_at, owner_evidence_json FROM erasure_receipts "
+            "WHERE erasure_id = ?", ("downgrade-forgery-receipt",)
+        ).fetchone()
+
+    # Compute SHA256 of mutated canonical (state=FAILED, all_erased=False)
+    canonical = _erasure_canonical(
+        erasure_id="downgrade-forgery-receipt",
+        profile_id="p1",
+        subject_type="fact",
+        subject_id="f-dg",
+        requested_by="tester",
+        fact_count=1,
+        state="FAILED",
+        all_erased=False,
+        evidence_json=row[2],
+        requested_at=float(row[0]),
+        completed_at=float(row[1]),
+    )
+    forged_sha = _hashlib.sha256(canonical).hexdigest()
+
+    with db.raw_connection() as conn:
+        conn.execute(
+            "UPDATE erasure_receipts "
+            "SET state = 'FAILED', all_erased = 0, receipt_version = 1, audit_hash = ? "
+            "WHERE erasure_id = ?",
+            (forged_sha, "downgrade-forgery-receipt"),
+        )
+        conn.commit()
+
+    with db.raw_connection() as conn:
+        result = verify_receipt(conn, "downgrade-forgery-receipt")
+    assert result is False, (
+        "verify_receipt must detect version-downgrade forgery: "
+        "v1 SHA on M037 DB must always fail"
+    )
+
+
+def test_signing_key_fail_closed_on_corrupt(tmp_path: Path, monkeypatch) -> None:
+    """TA3: Corrupt key file (len != 64) raises RuntimeError; no ephemeral key returned."""
+    from superlocalmemory.core.transactions import manifest_key as _mk
+
+    key_path = tmp_path / ".manifest_signing_key"
+    key_path.write_text("not-a-valid-64-hex-key", encoding="utf-8")
+    monkeypatch.setattr(_mk, "_signing_key_path", lambda: key_path)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="signing key"):
+        _mk._ensure_signing_key()
+
+
+def test_signing_key_fail_closed_on_unreadable(tmp_path: Path, monkeypatch) -> None:
+    """TA4: OSError reading/creating key raises RuntimeError; never returns ephemeral."""
+    import os
+    from superlocalmemory.core.transactions import manifest_key as _mk
+
+    key_path = tmp_path / ".manifest_signing_key"
+    # Simulate unreadable path by pointing at a directory
+    bad_path = tmp_path / "adir"
+    bad_path.mkdir()
+    monkeypatch.setattr(_mk, "_signing_key_path", lambda: bad_path / "key")
+    # Make the parent unwritable so os.open fails
+    os.chmod(str(bad_path), 0o444)
+
+    try:
+        import pytest
+        with pytest.raises(RuntimeError, match="signing key"):
+            _mk._ensure_signing_key()
+    finally:
+        os.chmod(str(bad_path), 0o755)
+
+
+def test_v1_manifest_uses_constant_time_compare(tmp_path: Path, monkeypatch) -> None:
+    """TA5: v1 manifest path on non-M037 DB uses hmac.compare_digest (constant-time)."""
+    _patch_manifest_key(monkeypatch)
+    db = _fresh_db(tmp_path)
+
+    from superlocalmemory.core.transactions.manifest import (
+        ManifestState, OwnerEvidence, compute_envelope_hash, evidence_json,
+    )
+    from superlocalmemory.core.transactions.owners import ObligationKind, ObligationState
+    from superlocalmemory.core.transactions.reconciler import Reconciler
+
+    reconciler = Reconciler()
+    op_id = "v1-constant-time"
+    evidence = (OwnerEvidence(
+        owner="bm25", kind=ObligationKind.APPLY, state=ObligationState.VERIFIED,
+        revision=0, checksum="abc",
+    ),)
+    state = ManifestState.COMPLETE
+    old_hash = compute_envelope_hash(
+        operation_id=op_id, profile_id="p1", state=state, all_met=True,
+        obligation_count=1, evidence=evidence,
+    )
+    payload = evidence_json(evidence)
+    now = __import__("time").time()
+
+    with db.raw_connection() as conn:
+        conn.execute(
+            "INSERT INTO completion_manifests "
+            "(operation_id, profile_id, state, all_met, obligation_count, "
+            "owner_evidence_json, manifest_hash, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (op_id, "p1", str(state), 1, 1, payload, old_hash, now, now),
+        )
+        conn.commit()
+
+    # Tamper: wrong hash on v1, non-M037 DB → must return False
+    with db.raw_connection() as conn:
+        conn.execute(
+            "UPDATE completion_manifests SET manifest_hash = ? WHERE operation_id = ?",
+            ("0" * 64, op_id),
+        )
+        conn.commit()
+
+    with db.raw_connection() as conn:
+        result = reconciler.verify_manifest(conn, op_id)
+    assert result is False, "v1 tampered manifest must return False"
+
+
+# ---------------------------------------------------------------------------
+# TRANCHE B RED TESTS — erasure claim + fail-closed paths
+# ---------------------------------------------------------------------------
+
+def test_forget_profile_produces_real_erasure_receipt(tmp_path: Path) -> None:
+    """TB1: forget_profile must write an erasure_receipts row with non-empty
+    proofs (real per-owner coverage), not proofs:[]."""
+    db = _fresh_db(tmp_path, with_receipts=True)
+    db.execute("INSERT INTO profiles (profile_id, name) VALUES ('p2', 'p2')")
+    db.execute(
+        "INSERT INTO memories (memory_id, profile_id, content) VALUES ('m2', 'p2', 'x')"
+    )
+    db.execute(
+        "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content) "
+        "VALUES ('f2', 'm2', 'p2', 'profile fact')"
+    )
+    db.store_bm25_tokens("f2", "p2", ["profile", "fact"])
+
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+    compliance = GDPRCompliance(db, engine=None)
+    compliance.forget_profile("p2")
+
+    with db.raw_connection() as conn:
+        row = conn.execute(
+            "SELECT owner_evidence_json FROM erasure_receipts "
+            "WHERE subject_type = 'profile' AND subject_id = 'p2'"
+        ).fetchone()
+
+    assert row is not None, "erasure receipt must be written for profile wipe"
+    parsed = json.loads(row[0])
+    proofs = parsed.get("proofs", [])
+    assert len(proofs) > 0, (
+        f"profile erase receipt must contain non-empty proofs, got: {parsed}"
+    )
+
+
+def test_embedded_fact_ids_query_failure_returns_degraded(tmp_path: Path) -> None:
+    """TB2: When _embedded_fact_ids DB query fails, VectorOwner.verify()
+    must return ok=False (not vacuous NOT_APPLICABLE)."""
+    from superlocalmemory.storage import schema
+    from superlocalmemory.storage.database import DatabaseManager
+    from superlocalmemory.core.transactions.owners import OperationContext
+    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
+    from unittest.mock import MagicMock, patch
+
+    db_path = tmp_path / "memory.db"
+    db = DatabaseManager(db_path)
+    db.initialize(schema)
+    db.execute("INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('p1', 'p1')")
+    db.execute("INSERT INTO memories (memory_id, profile_id, content) VALUES ('m1', 'p1', 'x')")
+    db.execute(
+        "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content, embedding) "
+        "VALUES ('f1', 'm1', 'p1', 'test', '[0.1]')"
+    )
+
+    unavailable_store = MagicMock()
+    unavailable_store.available = False
+
+    ctx = OperationContext(
+        operation_id="embedded-query-fail-test",
+        profile_id="p1",
+        subject_id="f1",
+        fact_ids=("f1",),
+    )
+    owner = VectorOwner(db, vector_store=unavailable_store)
+
+    # Simulate DB query failure
+    original_execute = db.execute
+    def failing_execute(sql, *args, **kwargs):
+        if "atomic_facts" in sql and "embedding" in sql:
+            raise RuntimeError("simulated DB failure")
+        return original_execute(sql, *args, **kwargs)
+
+    with patch.object(db, "execute", side_effect=failing_execute):
+        result = owner.verify(ctx)
+
+    assert result.ok is False, (
+        "VectorOwner.verify() must return ok=False when _embedded_fact_ids query fails; "
+        "not vacuous NOT_APPLICABLE"
+    )

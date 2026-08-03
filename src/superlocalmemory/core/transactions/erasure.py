@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac as _hmac_mod
 import json
 import logging
 import time
@@ -123,8 +124,14 @@ def _erasure_canonical(
     evidence_json: str,
     requested_at: float,
     completed_at: float,
+    receipt_version: int | None = None,
 ) -> bytes:
-    envelope = {
+    """Produce the deterministic byte representation of the erasure receipt envelope.
+
+    When ``receipt_version`` is provided (v2+), it is bound into the canonical
+    bytes so a downgrade from v2 → v1 is detected by the MAC mismatch.
+    """
+    envelope: dict[str, object] = {
         "erasure_id": erasure_id,
         "profile_id": profile_id,
         "subject_type": subject_type,
@@ -137,6 +144,8 @@ def _erasure_canonical(
         "requested_at": repr(float(requested_at)),
         "completed_at": repr(float(completed_at)),
     }
+    if receipt_version is not None:
+        envelope["receipt_version"] = receipt_version
     return json.dumps(
         envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
@@ -180,6 +189,7 @@ def compute_erasure_hmac(
         evidence_json=evidence_json,
         requested_at=requested_at,
         completed_at=completed_at,
+        receipt_version=_RECEIPT_V2,
     )
     return compute_hmac(actual_key, canonical)
 
@@ -550,7 +560,8 @@ def verify_receipt(
         predicate += " AND profile_id = ?"
         params.append(profile_id)
 
-    version = _receipt_row_version(conn, erasure_id)
+    db_version = _receipt_version_supported(conn)
+    row_version = _receipt_row_version(conn, erasure_id)
 
     row = conn.execute(
         "SELECT erasure_id, profile_id, subject_type, subject_id, requested_by, "
@@ -575,16 +586,27 @@ def verify_receipt(
         completed_at=float(row[11]),
     )
 
-    if version >= _RECEIPT_V2:
+    if db_version >= _RECEIPT_V2:
+        # On M037-capable DBs NEVER accept the unkeyed v1 SHA path — a
+        # version-downgrade forgery rewrites receipt_version=1 with a valid
+        # SHA of mutated content.  Any v1 row here is rejected; legitimate
+        # old rows should be re-sealed before use.
+        if row_version < _RECEIPT_V2:
+            return False
         from superlocalmemory.core.transactions.manifest_key import (
             derive_receipt_hmac_key,
             verify_hmac,
         )
-        canonical = _erasure_canonical(**kwargs)
+        canonical = _erasure_canonical(**kwargs, receipt_version=_RECEIPT_V2)
         return verify_hmac(row[9], derive_receipt_hmac_key(), canonical)
 
+    # v1 path (M037 absent) — use constant-time comparison to prevent
+    # timing oracles on old SHA256 hex digests.
     recomputed = compute_erasure_hash(**kwargs)
-    return recomputed == row[9]
+    stored = row[9] or ""
+    return _hmac_mod.compare_digest(
+        recomputed.encode("utf-8"), stored.encode("utf-8")
+    )
 
 
 def write_tombstones(

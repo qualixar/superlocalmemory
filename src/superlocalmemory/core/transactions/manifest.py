@@ -142,8 +142,16 @@ def _canonical_envelope(
     all_met: bool,
     obligation_count: int,
     evidence_dicts: list[dict[str, object]],
+    manifest_version: int | None = None,
 ) -> bytes:
-    envelope = {
+    """Produce the deterministic byte representation of the manifest envelope.
+
+    When ``manifest_version`` is provided (v2+), it is bound into the canonical
+    bytes so a downgrade from v2 → v1 is detected by the MAC mismatch: the v1
+    SHA path does NOT include version, so any v2 HMAC covers a strictly different
+    byte string than any v1 SHA.
+    """
+    envelope: dict[str, object] = {
         "operation_id": operation_id,
         "profile_id": profile_id,
         "state": state,
@@ -151,6 +159,8 @@ def _canonical_envelope(
         "obligation_count": obligation_count,
         "evidence": evidence_dicts,
     }
+    if manifest_version is not None:
+        envelope["manifest_version"] = manifest_version
     return json.dumps(
         envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
@@ -181,6 +191,7 @@ def compute_envelope_hmac(
         all_met=all_met,
         obligation_count=obligation_count,
         evidence_dicts=_sorted_evidence_dicts(evidence),
+        manifest_version=MANIFEST_V2,
     )
     return compute_hmac(actual_key, payload)
 
@@ -210,6 +221,7 @@ def verify_envelope_hmac(
         all_met=all_met,
         obligation_count=obligation_count,
         evidence_dicts=evidence_dicts,
+        manifest_version=MANIFEST_V2,
     )
     return verify_hmac(stored_mac, actual_key, payload)
 
