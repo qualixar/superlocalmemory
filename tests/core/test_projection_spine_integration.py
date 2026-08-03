@@ -97,16 +97,24 @@ def test_admission_records_obligations_atomically(tmp_path) -> None:
     assert all(dict(r)["kind"] == "apply" for r in rows)
 
 
-def test_admission_failopen_without_ledger_table(tmp_path) -> None:
+def test_admission_failclosed_without_ledger_table(tmp_path) -> None:
+    """Phase-3 behaviour: remember() raises when M033 is absent.
+
+    Previously the system silently ignored missing obligations (fail-open).
+    Phase-3 makes it fail-closed: the first attempt to record obligations
+    when the schema is absent propagates a RuntimeError wrapped inside a
+    WriteCoordinatorError, ensuring the operator is never silently misled.
+    """
+    from superlocalmemory.core.remember_runtime import CanonicalRememberUnavailable
+
     runtime, db = _build_runtime(tmp_path, with_m033=False)
     runtime.start()
     try:
-        receipt = _remember(runtime)
+        with pytest.raises(CanonicalRememberUnavailable):
+            _remember(runtime)
     finally:
         runtime.stop()
 
-    assert receipt["status"] == "queryable"
-    assert receipt["fact_ids"] == ["fact-1", "fact-2"]
     tables = db.execute(
         "SELECT name FROM sqlite_master WHERE name = 'projection_obligations'"
     )

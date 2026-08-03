@@ -359,8 +359,15 @@ class VectorOwner(_FactScopedOwner):
             getattr(self._vector_store, "available", False)
         )
 
-    def _required(self, context: OperationContext) -> set[str]:
-        if not context.fact_ids or not self._store_available():
+    def _embedded_fact_ids(self, context: OperationContext) -> set[str]:
+        """Query which facts have embeddings, regardless of store availability.
+
+        Raises whatever exception the DB raises — callers that need fail-closed
+        behaviour must handle (or propagate) the exception.  Do NOT swallow
+        here: a silent empty-set return would let verify() produce a vacuous
+        NOT_APPLICABLE, masking a real DB fault as "no obligation".
+        """
+        if not context.fact_ids:
             return set()
         rows = self._db.execute(
             f"SELECT fact_id FROM atomic_facts WHERE profile_id = ? "
@@ -370,6 +377,50 @@ class VectorOwner(_FactScopedOwner):
         )
         found = {fid for fid in (_row_fact_id(row) for row in rows) if fid is not None}
         return found - self._tombstoned(context)
+
+    def _required(self, context: OperationContext) -> set[str]:
+        if not context.fact_ids:
+            return set()
+        embedded = self._embedded_fact_ids(context)
+        if not embedded or not self._store_available():
+            return set()
+        return embedded
+
+    def verify(self, context: OperationContext) -> OwnerResult:
+        """Return NOT_APPLICABLE (ok=True) when no facts have embeddings.
+
+        Return REQUIRED_UNAVAILABLE (ok=False, detail.required_unavailable=True)
+        when embedded facts exist but the vector store is unavailable, OR when
+        the embedding DB query itself fails (fail-closed: unknown state is never
+        treated as "no obligation").
+
+        Return normal fingerprint-based result when the store is available.
+        """
+        try:
+            embedded = self._embedded_fact_ids(context)
+        except Exception:  # noqa: BLE001
+            # DB query failure — we cannot determine whether embeddings exist.
+            # Fail closed: surface as REQUIRED_UNAVAILABLE so the obligation is
+            # recorded as unverified rather than silently waived.
+            return OwnerResult(
+                owner=self._name,
+                ok=False,
+                detail={"required_unavailable": True, "db_query_failed": True},
+            )
+        if not embedded:
+            return OwnerResult(
+                owner=self._name,
+                ok=True,
+                checksum=_scope_checksum(self._name, {}),
+                detail={"not_applicable": True},
+            )
+        if not self._store_available():
+            return OwnerResult(
+                owner=self._name,
+                ok=False,
+                detail={"required_unavailable": True, "fact_count": len(embedded)},
+            )
+        return self._result(context)
 
     def _fingerprints(self, context: OperationContext) -> dict[str, str]:
         if not context.fact_ids or not self._store_available():
@@ -495,6 +546,25 @@ def build_erasure_service(engine: Any) -> ErasureService:
     return ErasureService(_admission_owners(engine), audit_logger=audit_logger)
 
 
+def build_erasure_service_for_db(db: Any, engine: Any = None) -> ErasureService:
+    """Build an ErasureService given a db wrapper and an optional engine.
+
+    Used by GDPR erasure paths that have a db handle but may not have an
+    engine reference (e.g. entity erase from GDPRCompliance).
+    """
+    audit_logger = _audit_chain_logger()
+    owners: dict[str, Any] = {
+        "bm25": Bm25Owner(db),
+        "temporal": TemporalOwner(db),
+        "vector": VectorOwner(
+            db,
+            vector_store=getattr(engine, "_vector_store", None),
+            ann_index=getattr(engine, "_ann_index", None),
+        ),
+    }
+    return ErasureService(owners, audit_logger=audit_logger)
+
+
 def _audit_chain_logger() -> Any:
     def _log(event: dict[str, Any]) -> None:
         from superlocalmemory.compliance.audit import AuditChain
@@ -522,5 +592,6 @@ __all__ = [
     "TemporalOwner",
     "VectorOwner",
     "build_erasure_service",
+    "build_erasure_service_for_db",
     "build_transaction_service",
 ]

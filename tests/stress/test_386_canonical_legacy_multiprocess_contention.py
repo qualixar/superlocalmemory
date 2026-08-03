@@ -50,6 +50,8 @@ def _new_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Harness:
     from superlocalmemory.storage.migrations import (
         M018_ingestion_operations,
         M032_write_coordinator_admission,
+        M033_projection_transactions,
+        M034_obligation_integrity,
     )
 
     data_dir = tmp_path / "slm-multiprocess-contention"
@@ -62,6 +64,10 @@ def _new_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Harness:
     with db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
         M032_write_coordinator_admission.apply(conn)
+        # M033/M034 required for projection-obligation recording (Phase 3
+        # fail-closed: _record_projection_obligations raises if absent).
+        M033_projection_transactions.apply(conn)
+        M034_obligation_integrity.apply(conn)
         conn.execute(
             "CREATE TABLE legacy_memory_write_events("
             "sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)"

@@ -40,6 +40,8 @@ def _bootstrap_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from superlocalmemory.storage.migrations import (
         M018_ingestion_operations,
         M032_write_coordinator_admission,
+        M033_projection_transactions,  # required: _record_projection_obligations fail-closed
+        M034_obligation_integrity,      # required: obligation FK + index
     )
 
     data_dir = tmp_path / "isolated-slm-data"
@@ -50,6 +52,8 @@ def _bootstrap_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     with db.raw_connection() as conn:
         M018_ingestion_operations.apply(conn)
         M032_write_coordinator_admission.apply(conn)
+        M033_projection_transactions.apply(conn)
+        M034_obligation_integrity.apply(conn)
     for profile_id in ("mode-a", "mode-b", "mode-c"):
         db.execute(
             "INSERT INTO profiles(profile_id, name) VALUES (?, ?)",

@@ -96,37 +96,88 @@ def test_fact_vector_residue_counts_remaining_map_rows():
 
 
 def test_entity_receipt_marks_failed_when_residue_remains(tmp_path):
-    import sqlite3
+    """ErasureService.finalize with BM25 residue remaining must produce a FAILED
+    receipt with real per-owner proofs (not the dead helper's proofs:[]).
 
-    from superlocalmemory.core.transactions.erasure import fetch_receipt
-    from superlocalmemory.storage.migrations import M035_erasure_receipts
+    Retargeted from _write_entity_erasure_receipt (removed — wrote proofs:[] +
+    unkeyed SHA, no production caller) to ErasureService.finalize.
+    """
+    import sqlite3
+    import uuid
+
+    from superlocalmemory.core.transactions.concrete_owners import (
+        build_erasure_service_for_db,
+    )
+    from superlocalmemory.core.transactions.erasure import fetch_receipt, verify_receipt
+    from superlocalmemory.core.transactions.owners import OperationContext
+    from superlocalmemory.storage import schema
+    from superlocalmemory.storage.database import DatabaseManager
+    from superlocalmemory.storage.migrations import (
+        M033_projection_transactions,
+        M034_obligation_integrity,
+        M035_erasure_receipts,
+    )
 
     db_path = tmp_path / "receipts.db"
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    M035_erasure_receipts.apply(conn)
-    conn.commit()
+    raw = sqlite3.connect(db_path)
+    M033_projection_transactions.apply(raw)
+    M034_obligation_integrity.apply(raw)
+    M035_erasure_receipts.apply(raw)
+    raw.commit()
+    raw.close()
 
-    class _ReceiptDB:
-        def raw_connection(self):
-            from contextlib import contextmanager
-
-            @contextmanager
-            def _cm():
-                yield conn
-            return _cm()
-
-    gdpr = GDPRCompliance(db=_ReceiptDB())
-    ok = gdpr._write_entity_erasure_receipt(
-        "p1", "Acme", ["f1"], 0.0, all_erased=False,
+    db = DatabaseManager(db_path)
+    db.initialize(schema)
+    db.execute(
+        "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('p1', 'p1')"
     )
-    assert ok is True
-    rows = conn.execute(
-        "SELECT erasure_id, state, all_erased FROM erasure_receipts"
-    ).fetchall()
-    assert len(rows) == 1
-    assert rows[0]["state"] == "FAILED"
-    assert rows[0]["all_erased"] == 0
-    # The persisted receipt is still tamper-evident.
-    assert fetch_receipt(conn, rows[0]["erasure_id"]) is not None
-    conn.close()
+    db.execute(
+        "INSERT INTO memories (memory_id, profile_id, content) VALUES ('m1', 'p1', 'x')"
+    )
+    db.execute(
+        "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content) "
+        "VALUES ('f1', 'm1', 'p1', 'entity fact')"
+    )
+    # Write BM25 tokens so BM25 owner detects residue when finalize() is called
+    # without remove() first — simulates a wipe where BM25 data was left behind.
+    db.store_bm25_tokens("f1", "p1", ["residue"])
+
+    erasure_id = uuid.uuid4().hex
+    ctx = OperationContext(
+        operation_id=erasure_id,
+        profile_id="p1",
+        subject_id="Acme",
+        fact_ids=("f1",),
+    )
+    svc = build_erasure_service_for_db(db, engine=None)
+    # finalize() without remove() → BM25 owner finds residue → FAILED receipt
+    receipt = svc.finalize(
+        db, ctx,
+        subject_type="entity",
+        subject_id="Acme",
+        requested_by="gdpr",
+        requested_at=0.0,
+    )
+
+    assert not receipt.all_erased, "receipt must be FAILED when residue remains"
+
+    with db.raw_connection() as conn:
+        rows = conn.execute(
+            "SELECT erasure_id, state, all_erased, owner_evidence_json "
+            "FROM erasure_receipts"
+        ).fetchall()
+
+    assert len(rows) == 1, "exactly one receipt must be persisted"
+    assert rows[0][1] == "FAILED", f"state must be FAILED, got {rows[0][1]}"
+    assert rows[0][2] == 0, "all_erased must be 0"
+
+    # Real per-owner proofs — not proofs:[] like the dead helper wrote.
+    proofs = __import__("json").loads(rows[0][3]).get("proofs", [])
+    assert len(proofs) > 0, (
+        f"receipt must have real per-owner proofs; got: {rows[0][3]}"
+    )
+
+    # Tamper-evidence: verify_receipt must pass for the unmodified row.
+    with db.raw_connection() as conn:
+        assert fetch_receipt(conn, rows[0][0]) is not None
+        assert verify_receipt(conn, rows[0][0]) is True

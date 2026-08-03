@@ -9,6 +9,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+MANIFEST_V1: int = 1
+MANIFEST_V2: int = 2
+
 from superlocalmemory.core.transactions.obligations import Obligation
 from superlocalmemory.core.transactions.owners import (
     ObligationKind,
@@ -131,6 +134,98 @@ def hash_envelope_fields(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _canonical_envelope(
+    *,
+    operation_id: str,
+    profile_id: str,
+    state: str,
+    all_met: bool,
+    obligation_count: int,
+    evidence_dicts: list[dict[str, object]],
+    manifest_version: int | None = None,
+) -> bytes:
+    """Produce the deterministic byte representation of the manifest envelope.
+
+    When ``manifest_version`` is provided (v2+), it is bound into the canonical
+    bytes so a downgrade from v2 → v1 is detected by the MAC mismatch: the v1
+    SHA path does NOT include version, so any v2 HMAC covers a strictly different
+    byte string than any v1 SHA.
+    """
+    envelope: dict[str, object] = {
+        "operation_id": operation_id,
+        "profile_id": profile_id,
+        "state": state,
+        "all_met": bool(all_met),
+        "obligation_count": obligation_count,
+        "evidence": evidence_dicts,
+    }
+    if manifest_version is not None:
+        envelope["manifest_version"] = manifest_version
+    return json.dumps(
+        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def compute_envelope_hmac(
+    *,
+    operation_id: str,
+    profile_id: str,
+    state: ManifestState,
+    all_met: bool,
+    obligation_count: int,
+    evidence: Iterable[OwnerEvidence],
+    key: bytes | None = None,
+) -> str:
+    """HMAC-SHA256 keyed manifest hash (v2).  ``key`` is injected in tests;
+    production code passes ``key=None`` to auto-derive from the installation key."""
+    from superlocalmemory.core.transactions.manifest_key import (
+        compute_hmac,
+        derive_manifest_hmac_key,
+    )
+
+    actual_key = key if key is not None else derive_manifest_hmac_key()
+    payload = _canonical_envelope(
+        operation_id=operation_id,
+        profile_id=profile_id,
+        state=str(state),
+        all_met=all_met,
+        obligation_count=obligation_count,
+        evidence_dicts=_sorted_evidence_dicts(evidence),
+        manifest_version=MANIFEST_V2,
+    )
+    return compute_hmac(actual_key, payload)
+
+
+def verify_envelope_hmac(
+    *,
+    operation_id: str,
+    profile_id: str,
+    state: str,
+    all_met: bool,
+    obligation_count: int,
+    evidence_dicts: list[dict[str, object]],
+    stored_mac: str,
+    key: bytes | None = None,
+) -> bool:
+    """Constant-time verify an HMAC-keyed manifest hash (v2)."""
+    from superlocalmemory.core.transactions.manifest_key import (
+        derive_manifest_hmac_key,
+        verify_hmac,
+    )
+
+    actual_key = key if key is not None else derive_manifest_hmac_key()
+    payload = _canonical_envelope(
+        operation_id=operation_id,
+        profile_id=profile_id,
+        state=state,
+        all_met=all_met,
+        obligation_count=obligation_count,
+        evidence_dicts=evidence_dicts,
+        manifest_version=MANIFEST_V2,
+    )
+    return verify_hmac(stored_mac, actual_key, payload)
+
+
 def derive_state(
     obligations: tuple[Obligation, ...], *, canonical_committed: bool,
 ) -> tuple[ManifestState, bool]:
@@ -145,12 +240,16 @@ def derive_state(
 
 
 __all__ = [
+    "MANIFEST_V1",
+    "MANIFEST_V2",
     "CompletionManifest",
     "ManifestState",
     "OwnerEvidence",
     "build_evidence",
     "compute_envelope_hash",
+    "compute_envelope_hmac",
     "derive_state",
     "evidence_json",
     "hash_envelope_fields",
+    "verify_envelope_hmac",
 ]
