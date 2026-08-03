@@ -360,19 +360,22 @@ class VectorOwner(_FactScopedOwner):
         )
 
     def _embedded_fact_ids(self, context: OperationContext) -> set[str]:
-        """Query which facts have embeddings, regardless of store availability."""
+        """Query which facts have embeddings, regardless of store availability.
+
+        Raises whatever exception the DB raises — callers that need fail-closed
+        behaviour must handle (or propagate) the exception.  Do NOT swallow
+        here: a silent empty-set return would let verify() produce a vacuous
+        NOT_APPLICABLE, masking a real DB fault as "no obligation".
+        """
         if not context.fact_ids:
             return set()
-        try:
-            rows = self._db.execute(
-                f"SELECT fact_id FROM atomic_facts WHERE profile_id = ? "
-                f"AND embedding IS NOT NULL AND embedding != '' "
-                f"AND fact_id IN ({_placeholders(len(context.fact_ids))})",
-                (context.profile_id, *context.fact_ids),
-            )
-            found = {fid for fid in (_row_fact_id(row) for row in rows) if fid is not None}
-        except Exception:  # noqa: BLE001
-            return set()
+        rows = self._db.execute(
+            f"SELECT fact_id FROM atomic_facts WHERE profile_id = ? "
+            f"AND embedding IS NOT NULL AND embedding != '' "
+            f"AND fact_id IN ({_placeholders(len(context.fact_ids))})",
+            (context.profile_id, *context.fact_ids),
+        )
+        found = {fid for fid in (_row_fact_id(row) for row in rows) if fid is not None}
         return found - self._tombstoned(context)
 
     def _required(self, context: OperationContext) -> set[str]:
@@ -387,11 +390,23 @@ class VectorOwner(_FactScopedOwner):
         """Return NOT_APPLICABLE (ok=True) when no facts have embeddings.
 
         Return REQUIRED_UNAVAILABLE (ok=False, detail.required_unavailable=True)
-        when embedded facts exist but the vector store is unavailable.
+        when embedded facts exist but the vector store is unavailable, OR when
+        the embedding DB query itself fails (fail-closed: unknown state is never
+        treated as "no obligation").
 
         Return normal fingerprint-based result when the store is available.
         """
-        embedded = self._embedded_fact_ids(context)
+        try:
+            embedded = self._embedded_fact_ids(context)
+        except Exception:  # noqa: BLE001
+            # DB query failure — we cannot determine whether embeddings exist.
+            # Fail closed: surface as REQUIRED_UNAVAILABLE so the obligation is
+            # recorded as unverified rather than silently waived.
+            return OwnerResult(
+                owner=self._name,
+                ok=False,
+                detail={"required_unavailable": True, "db_query_failed": True},
+            )
         if not embedded:
             return OwnerResult(
                 owner=self._name,

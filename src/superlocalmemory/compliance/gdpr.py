@@ -40,9 +40,11 @@ class GDPRCompliance:
     """
 
     # Tables that carry a profile_id column but are NOT tenant memory to be
-    # erased/exported wholesale. `profiles` is the tenant record (handled
-    # separately, deleted last).
-    _NON_MEMORY_SCOPED = frozenset({"profiles"})
+    # erased/exported wholesale.
+    # `profiles` — the tenant record (handled separately, deleted last).
+    # `erasure_receipts` — tamper-evident audit chain for Art.17 erasure events;
+    #   must survive the profile wipe so operators can prove deletion occurred.
+    _NON_MEMORY_SCOPED = frozenset({"profiles", "erasure_receipts"})
 
     def __init__(self, db, *, engine=None) -> None:
         self._db = db
@@ -431,6 +433,59 @@ class GDPRCompliance:
                 counts["vector_store_failures"] = vector_failures
         except Exception as exc:
             logger.warning("GDPR erase: vector purge failed: %s", exc)
+
+        # Erasure receipt (P1-5) — route the profile wipe through ErasureService
+        # so the receipt captures real per-owner proofs (not proofs:[]).
+        #
+        # erasure_receipts is in _NON_MEMORY_SCOPED so Pass 2 does NOT delete
+        # the receipt — it survives as the tamper-evident Art.17 audit chain.
+        # remove() + finalize() therefore run here, before Pass 2, while
+        # atomic_facts is still queryable for embedding presence checks.
+        #
+        # Wrapped in try-except so a missing M033/M035 schema never blocks the
+        # Art.17 right-to-erasure.
+        import time as _time
+        import uuid as _uuid
+
+        _profile_fact_ids: tuple[str, ...] = ()
+        try:
+            _fact_rows = self._db.execute(
+                "SELECT fact_id FROM atomic_facts WHERE profile_id = ?",
+                (profile_id,),
+            )
+            _profile_fact_ids = tuple(sorted(
+                dict(r)["fact_id"] for r in _fact_rows
+                if dict(r).get("fact_id") is not None
+            ))
+        except Exception as exc:
+            logger.warning("GDPR profile erase: fact_id scan failed: %s", exc)
+
+        if _profile_fact_ids:
+            try:
+                from superlocalmemory.core.transactions.concrete_owners import (
+                    build_erasure_service_for_db,
+                )
+                from superlocalmemory.core.transactions.owners import OperationContext
+
+                _erasure_svc = build_erasure_service_for_db(self._db, self._engine)
+                _ctx = OperationContext(
+                    operation_id=_uuid.uuid4().hex,
+                    profile_id=profile_id,
+                    subject_id=profile_id,
+                    fact_ids=_profile_fact_ids,
+                )
+                _erasure_svc.remove(self._db, _ctx)
+                _receipt = _erasure_svc.finalize(
+                    self._db, _ctx,
+                    subject_type="profile",
+                    subject_id=profile_id,
+                    requested_by="gdpr",
+                    requested_at=_time.time(),
+                )
+                if not _receipt.persisted:
+                    counts["receipt_persist_failed"] = 1
+            except Exception as exc:
+                logger.warning("GDPR profile erase: erasure receipt skipped: %s", exc)
 
         # Pass 2 — full-tenant wipe with FK enforcement OFF so table order is
         # irrelevant (every profile row in every table goes). FTS shadow rows
