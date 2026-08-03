@@ -105,6 +105,11 @@ def _resolve_advertise_ip(injected_ip: Optional[str] = None) -> str:
     """
     if injected_ip is not None:
         return injected_ip
+    # Operator override for multi-homed / VPN hosts where the auto-detected
+    # route would advertise the wrong NIC (audit P2). Explicit wins.
+    env_ip = os.environ.get("SLM_MESH_ADVERTISE_IP", "").strip()
+    if env_ip:
+        return env_ip
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect(("8.8.8.8", 80))
@@ -113,6 +118,13 @@ def _resolve_advertise_ip(injected_ip: Optional[str] = None) -> str:
             return ip
     except OSError:
         pass
+    # No routable non-loopback interface — peers off this host cannot reach a
+    # 127.0.0.1 advertisement. Warn so the operator can set SLM_MESH_ADVERTISE_IP.
+    logger.warning(
+        "MeshAdvertiser: no routable non-loopback IPv4 found; advertising "
+        "127.0.0.1 (off-host peers cannot reach this node). Set "
+        "SLM_MESH_ADVERTISE_IP to advertise a reachable address."
+    )
     return "127.0.0.1"
 
 
@@ -258,13 +270,26 @@ class MeshAdvertiser:
         # Perform I/O outside the lock so a concurrent stop() call (highly
         # unlikely given daemon lifecycle, but possible in tests) can't
         # deadlock waiting for us.
+        # Audit P1: close() MUST run even when unregister_service raises,
+        # otherwise the Zeroconf multicast sockets + threads leak. Best-effort
+        # unregister, then close in a finally.
         try:
             if zc is not None and info is not None:
-                zc.unregister_service(info)
+                try:
+                    zc.unregister_service(info)
+                except Exception as exc:
+                    logger.warning(
+                        "MeshAdvertiser.stop: unregister failed (closing anyway): %s",
+                        exc,
+                    )
+        finally:
             if zc is not None:
-                zc.close()
-        except Exception as exc:
-            logger.warning("MeshAdvertiser.stop failed (non-fatal): %s", exc)
+                try:
+                    zc.close()
+                except Exception as exc:
+                    logger.warning(
+                        "MeshAdvertiser.stop: close failed (non-fatal): %s", exc
+                    )
 
     @property
     def is_advertising(self) -> bool:
@@ -283,8 +308,12 @@ class MeshAdvertiser:
         """
         ip: str = _resolve_advertise_ip(self._injected_ip)
 
-        # Include port in instance label (CRIT fix #1 — collision prevention).
-        instance_label: str = f"slm-{self._node_id}-{self._service_port}"
+        # Instance label carries port AND pid so the mDNS name is unique:
+        # - port disambiguates two daemons on the SAME host (CRIT fix #1);
+        # - pid disambiguates two machines that share a short hostname on the
+        #   segment (audit P2 — cross-machine NonUniqueNameException).
+        # The TXT node_id stays hostname-only (see _properties below).
+        instance_label: str = f"slm-{self._node_id}-{self._service_port}-{os.getpid()}"
         service_name: str = f"{instance_label}.{_SERVICE_TYPE}"
 
         # Build bytes-keyed properties dict (zeroconf API requirement).
@@ -310,7 +339,18 @@ class MeshAdvertiser:
         # register_service sends mDNS probe + announce packets.
         # This call blocks for ~750 ms (3 × 250 ms probe interval).
         # Callers on the async event loop MUST use asyncio.to_thread().
-        zc.register_service(info)
+        try:
+            zc.register_service(info)
+        except Exception:
+            # Audit P1: register_service failed AFTER Zeroconf() opened its
+            # multicast sockets + background threads. Close it before
+            # propagating so those resources are released instead of leaking
+            # for the daemon's lifetime (start() catches and logs).
+            try:
+                zc.close()
+            except Exception:  # pragma: no cover — best-effort cleanup
+                pass
+            raise
 
         # Only update state after successful registration.
         self._zeroconf = zc

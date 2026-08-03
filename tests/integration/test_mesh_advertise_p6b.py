@@ -91,7 +91,7 @@ class TestDefaultOff:
                 adv = _make_advertiser()
                 adv.start()
 
-            mock_zc_cls.assert_not_called(), f"unexpected call for value={val!r}"
+            assert not mock_zc_cls.called, f"unexpected call for value={val!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +319,9 @@ class TestFailSoft:
             adv.start()  # must NOT raise
 
         assert adv.is_advertising is False, "Failed registration must leave advertiser not-advertising"
+        # Audit P1: the Zeroconf instance opened before register_service failed
+        # MUST be closed so its multicast sockets + threads don't leak.
+        mock_zc_instance.close.assert_called_once()
 
     def test_unregister_raises_on_stop_does_not_propagate(self, monkeypatch):
         """stop() must not propagate even if unregister_service raises."""
@@ -339,6 +342,9 @@ class TestFailSoft:
         mock_zc_instance.unregister_service.side_effect = RuntimeError("network gone")
 
         adv.stop()  # must NOT raise — daemon graceful shutdown must continue
+        # Audit P1: close() MUST still run even though unregister_service raised,
+        # otherwise the Zeroconf sockets/threads leak.
+        mock_zc_instance.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -426,3 +432,43 @@ class TestProperties:
         props = info.properties
         assert b"node_id" in props, f"node_id missing from TXT record: {props}"
         assert props[b"node_id"] == b"myhost"
+
+    def test_txt_properties_carry_no_secret(self, monkeypatch):
+        """TXT record must never leak a secret (broadcast in plaintext on LAN)."""
+        monkeypatch.setenv("SLM_MESH_ADVERTISE", "1")
+        mock_zc_instance = MagicMock()
+        mock_zc_cls = MagicMock(return_value=mock_zc_instance)
+        with patch(
+            "superlocalmemory.mesh.discovery.Zeroconf", mock_zc_cls
+        ), patch(
+            "superlocalmemory.mesh.discovery.ZEROCONF_AVAILABLE", True
+        ):
+            adv = _make_advertiser(node_id="myhost", injected_ip="10.0.0.1")
+            adv.start()
+
+        info = mock_zc_instance.register_service.call_args[0][0]
+        blob = b"|".join(list(info.properties.keys()) + list(info.properties.values()))
+        for needle in (b"secret", b"token", b"authorization", b"password"):
+            assert needle not in blob.lower(), f"possible secret in TXT: {needle!r}"
+
+
+# ---------------------------------------------------------------------------
+# Test: cross-file service-type invariant (advertise type == browse type)
+# ---------------------------------------------------------------------------
+
+def test_service_type_matches_remote_sync_browse_literal():
+    """Audit P2: the type discovery ADVERTISES must equal the type
+    remote_sync BROWSES, or peers silently never discover each other.
+    remote_sync uses a string literal (not a shared constant), so assert the
+    exact literal appears in its source.
+    """
+    import inspect
+    from superlocalmemory.mesh import remote_sync
+    from superlocalmemory.mesh.discovery import _SERVICE_TYPE
+
+    assert _SERVICE_TYPE == "_slm-mesh._tcp.local."
+    src = inspect.getsource(remote_sync)
+    assert _SERVICE_TYPE in src, (
+        f"discovery advertises {_SERVICE_TYPE!r} but remote_sync does not browse "
+        "that exact type — advertise/browse have diverged"
+    )

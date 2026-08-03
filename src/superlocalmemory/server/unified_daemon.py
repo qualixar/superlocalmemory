@@ -2103,10 +2103,22 @@ async def lifespan(application: FastAPI):
 
     # Phase C-2: opt-in mDNS advertiser (default OFF — backward-compatible).
     # Enabled only when SLM_MESH_ADVERTISE=1|on|true|yes is set explicitly.
-    # No-op unless the mesh broker is running (no broker = no mesh subnet).
-    # See superlocalmemory.mesh.discovery.MeshAdvertiser for full policy docs.
+    # Gating on the env var BEFORE importing discovery keeps the default-off
+    # path byte-for-byte identical to pre-3b (no discovery import, no thread
+    # hop, no object alloc). See mesh.discovery.MeshAdvertiser for full docs.
     application.state.mesh_advertiser = None
-    if application.state.mesh_broker is not None:
+    _advertise_requested = (
+        os.environ.get("SLM_MESH_ADVERTISE", "").strip().lower()
+        in ("1", "on", "true", "yes")
+    )
+    if _advertise_requested and application.state.mesh_broker is None:
+        # Operator asked for advertising but the broker isn't up — make the
+        # skip diagnosable rather than silent (audit P2).
+        logger.warning(
+            "mDNS advertise requested (SLM_MESH_ADVERTISE) but mesh broker is "
+            "not running — advertising skipped"
+        )
+    elif _advertise_requested and application.state.mesh_broker is not None:
         try:
             import socket as _adv_sock
             from superlocalmemory.mesh.discovery import MeshAdvertiser as _MeshAdvertiser
@@ -2498,11 +2510,13 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("mesh_broker stop failed: %s", exc)
 
-    # Stop mDNS advertiser (symmetric with Phase C-2 startup).
+    # Stop mDNS advertiser (symmetric with Phase C-2 startup). stop() joins
+    # Zeroconf background threads (blocking) — run it OFF the event loop so
+    # shutdown of other async resources isn't stalled (audit P1).
     _adv = getattr(application.state, "mesh_advertiser", None)
     if _adv is not None:
         try:
-            _adv.stop()
+            await asyncio.to_thread(_adv.stop)
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("mDNS advertiser stop failed (non-fatal): %s", exc)
 
