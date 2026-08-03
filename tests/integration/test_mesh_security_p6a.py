@@ -124,12 +124,13 @@ class TestSignVerify:
         """Signature must cover sha256(content) not raw content, to prevent length extension."""
         from superlocalmemory.mesh.broker_security import sign_mesh_message
 
-        # Two messages with the same content hash should produce the same sig
+        # Two messages with the same content hash should produce the same sig.
+        # SEC-2: delimiter is now NUL (\x00), not pipe.
         content = "important data"
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         sig1 = sign_mesh_message("s", "a", "b", content, "n", "1")
-        # Manually compute expected
-        payload = "|".join(["a", "b", content_hash, "n", "1"])
+        # Manually compute expected with NUL delimiter
+        payload = "\x00".join(["a", "b", content_hash, "n", "1"])
         expected = hmac.new("s".encode(), payload.encode(), hashlib.sha256).hexdigest()
         assert sig1 == expected
 
@@ -766,3 +767,572 @@ class TestBackwardCompat:
         # All tokens strictly increasing
         assert tokens == sorted(tokens)
         assert len(set(tokens)) == len(tokens), "All tokens must be unique"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-2: NUL delimiter — canonicalization collision prevention
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCanonicalPayloadSecurity:
+    """SEC-2: NUL delimiter prevents field injection / canonicalization collisions."""
+
+    def test_pipe_in_from_peer_does_not_collide_with_pipe_in_to(self):
+        """(from='a|b', to='c') must differ from (from='a', to='b|c') — pipe collision."""
+        from superlocalmemory.mesh.broker_security import sign_mesh_message
+
+        sig1 = sign_mesh_message("s", "a|b", "c", "content", "n", "1")
+        sig2 = sign_mesh_message("s", "a", "b|c", "content", "n", "1")
+        assert sig1 != sig2, (
+            "Canonicalization collision detected: ('a|b','c') == ('a','b|c'). "
+            "Delimiter must be a NUL byte, not pipe."
+        )
+
+    def test_nul_byte_in_from_peer_rejected(self):
+        """from_peer containing NUL byte must be rejected before HMAC (SEC-2)."""
+        from superlocalmemory.mesh.broker_security import check_mesh_message_signature, sign_mesh_message
+
+        ts = str(int(time.time()))
+        nonce = "test-nonce-nul"
+        sig = sign_mesh_message("s", "peer\x00hack", "to", "msg", nonce, ts)
+        result = check_mesh_message_signature(
+            "s", "peer\x00hack", "to", "msg", sig, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert result is not None, "NUL in from_peer must be rejected"
+        assert result.get("ok") is False
+
+    def test_nul_byte_in_nonce_rejected(self):
+        """nonce containing NUL byte must be rejected (SEC-2)."""
+        from superlocalmemory.mesh.broker_security import check_mesh_message_signature, sign_mesh_message
+
+        ts = str(int(time.time()))
+        nonce = "no\x00nce"
+        sig = sign_mesh_message("s", "peerA", "peerB", "msg", nonce, ts)
+        result = check_mesh_message_signature(
+            "s", "peerA", "peerB", "msg", sig, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert result is not None, "NUL in nonce must be rejected"
+        assert result.get("ok") is False
+
+    def test_control_char_in_from_peer_rejected(self):
+        """Control characters (< 0x20) in from_peer must be rejected (SEC-2)."""
+        from superlocalmemory.mesh.broker_security import check_mesh_message_signature, sign_mesh_message
+
+        ts = str(int(time.time()))
+        nonce = "ctrl-nonce"
+        from_peer = "peer\x01id"  # SOH control character
+        sig = sign_mesh_message("s", from_peer, "to", "msg", nonce, ts)
+        result = check_mesh_message_signature(
+            "s", from_peer, "to", "msg", sig, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert result is not None, "Control char in from_peer must be rejected"
+        assert result.get("ok") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-1: Nonce boundary — strict expiry so nonce outlives skew window
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestNonceBoundaryReplay:
+    """SEC-1: Nonce at exactly T+skew must still be in store (strict < not <=)."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_nonce_at_exact_skew_boundary_not_pruned(self):
+        """A nonce whose expiry == now must NOT be pruned (strict < means it stays)."""
+        from superlocalmemory.mesh.broker_security import (
+            MESH_SIG_SKEW_SECONDS,
+            _nonce_lock,
+            _nonce_store,
+            _prune_nonces,
+        )
+        nonce = "boundary-nonce"
+        now = 1_000_000.0
+        # Set nonce to expire exactly at now (exp = now)
+        with _nonce_lock:
+            _nonce_store[nonce] = now  # expires_at == now
+
+        # Prune at exactly 'now' — strict < means exp==now is NOT expired yet
+        _prune_nonces(now)
+
+        with _nonce_lock:
+            remaining = nonce in _nonce_store
+        assert remaining, (
+            "Nonce at exp==now must survive pruning (strict < prevents boundary replay)."
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-3: SQLite nonce durability — survives in-memory clear
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSQLiteNonceDurability:
+    """SEC-3: Nonces in SQLite survive in-memory cache clear (restart-safe)."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_nonce_reuse_rejected_after_memory_clear_with_broker(self, mesh_db):
+        """After clearing only in-memory nonce cache, SQLite still rejects replay."""
+        from superlocalmemory.mesh.broker import MeshBroker
+        from superlocalmemory.mesh.broker_security import (
+            _nonce_lock,
+            _nonce_store,
+            check_mesh_message_signature,
+            sign_mesh_message,
+        )
+
+        # Broker init wires SQLite nonce storage
+        _broker = MeshBroker(str(mesh_db))  # noqa: F841 — side effect: wires DB path
+
+        nonce = "sqlite-durability-nonce"
+        ts = str(int(time.time()))
+        sig = sign_mesh_message("s", "a", "b", "content", nonce, ts)
+
+        # First use — must succeed
+        r1 = check_mesh_message_signature(
+            "s", "a", "b", "content", sig, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert r1 is None, f"First use must pass, got: {r1}"
+
+        # Clear ONLY the in-memory dict (simulates process restart losing RAM state)
+        with _nonce_lock:
+            _nonce_store.clear()
+
+        # Re-sign for the replay attempt (same nonce, fresh signature)
+        sig2 = sign_mesh_message("s", "a", "b", "content", nonce, ts)
+        r2 = check_mesh_message_signature(
+            "s", "a", "b", "content", sig2, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert r2 is not None, (
+            "SQLite must remember the nonce and reject replay even after in-memory clear. "
+            "Current in-memory implementation would accept (bug)."
+        )
+        assert "replay" in r2.get("error", "").lower() or "nonce" in r2.get("error", "").lower()
+
+    def test_clear_nonce_store_clears_sqlite_table(self, mesh_db):
+        """_clear_nonce_store must also clear the SQLite mesh_nonces table."""
+        import sqlite3 as _sqlite3
+        from superlocalmemory.mesh.broker import MeshBroker
+        from superlocalmemory.mesh.broker_security import (
+            _clear_nonce_store,
+            check_mesh_message_signature,
+            sign_mesh_message,
+        )
+
+        _broker = MeshBroker(str(mesh_db))  # noqa: F841 — wires DB path
+
+        nonce = "clear-test-nonce"
+        ts = str(int(time.time()))
+        sig = sign_mesh_message("s", "a", "b", "c", nonce, ts)
+        r1 = check_mesh_message_signature(
+            "s", "a", "b", "c", sig, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert r1 is None, "First use must pass"
+
+        # Clear store — must remove from SQLite too
+        _clear_nonce_store()
+
+        # Now the nonce should be accepted again (table cleared)
+        sig2 = sign_mesh_message("s", "a", "b", "c", nonce, ts)
+        r2 = check_mesh_message_signature(
+            "s", "a", "b", "c", sig2, nonce, ts,
+            is_loopback=False, strict=True,
+        )
+        assert r2 is None, "_clear_nonce_store must flush SQLite so test isolation works"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-4: Per-peer identity binding
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestPerPeerIdentityBinding:
+    """SEC-4: Per-peer keys make from_peer unspoofable without the registrant's key."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_register_returns_peer_key(self, broker):
+        """register_peer must return a 'peer_key' in the result dict."""
+        result = broker.register_peer("key-test-session")
+        assert "peer_key" in result, (
+            f"register_peer must return peer_key. Got keys: {list(result.keys())}"
+        )
+        pk = result["peer_key"]
+        assert isinstance(pk, str) and len(pk) == 64, (
+            f"peer_key must be 64-char hex string (32 bytes token_hex). Got: {pk!r}"
+        )
+
+    def test_register_idempotent_same_peer_key(self, broker):
+        """Re-registering the same session must return the same peer_key."""
+        r1 = broker.register_peer("idem-session")
+        r2 = broker.register_peer("idem-session")
+        assert r1["peer_id"] == r2["peer_id"], "Same session → same peer_id"
+        assert r1["peer_key"] == r2["peer_key"], "Re-registration must return same peer_key"
+
+    def test_spoof_with_fleet_secret_rejected_in_strict_mode(self, monkeypatch):
+        """Strict mode: fleet secret cannot forge a registered peer's from_peer identity."""
+        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+        app, _broker = _make_app(secret="fleet-secret")
+        c = TestClient(app)
+
+        # Register peer X and receiver
+        rx = c.post("/mesh/register", json={"session_id": "px-sess"},
+                    headers={"Authorization": "Bearer fleet-secret"})
+        assert rx.status_code == 200, rx.text
+        peer_x_id = rx.json()["peer_id"]
+
+        rv = c.post("/mesh/register", json={"session_id": "recv-sess"},
+                    headers={"Authorization": "Bearer fleet-secret"})
+        recv_id = rv.json()["peer_id"]
+
+        from superlocalmemory.mesh.broker_security import sign_mesh_message
+
+        content = "spoofed message"
+        nonce = secrets.token_hex(8)
+        ts = str(int(time.time()))
+        # Attacker uses FLEET SECRET to sign as peer_x_id — must fail in strict mode
+        spoof_sig = sign_mesh_message("fleet-secret", peer_x_id, recv_id, content, nonce, ts)
+
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": peer_x_id, "to_peer": recv_id, "content": content},
+            headers={
+                "Authorization": "Bearer fleet-secret",
+                "X-Mesh-Sig": spoof_sig,
+                "X-Mesh-Nonce": nonce,
+                "X-Mesh-Ts": ts,
+            },
+        )
+        assert r.status_code == 401, (
+            f"Fleet secret spoofing from_peer of registered peer must fail in strict mode. "
+            f"Got: {r.status_code} {r.text}"
+        )
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+    def test_legitimate_peer_key_holder_accepted(self, monkeypatch):
+        """Strict mode: the legitimate peer_key holder can send as their peer_id."""
+        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+        app, _broker = _make_app(secret="fleet-s2")
+        c = TestClient(app)
+
+        rx = c.post("/mesh/register", json={"session_id": "legit-sess"},
+                    headers={"Authorization": "Bearer fleet-s2"})
+        assert rx.status_code == 200, rx.text
+        peer_id = rx.json()["peer_id"]
+        peer_key = rx.json().get("peer_key")
+        assert peer_key is not None, "register must return peer_key (SEC-4)"
+
+        rv = c.post("/mesh/register", json={"session_id": "legit-recv"},
+                    headers={"Authorization": "Bearer fleet-s2"})
+        recv_id = rv.json()["peer_id"]
+
+        from superlocalmemory.mesh.broker_security import sign_mesh_message
+
+        content = "legit message"
+        nonce = secrets.token_hex(8)
+        ts = str(int(time.time()))
+        # Sign with OWN peer_key — must succeed
+        legit_sig = sign_mesh_message(peer_key, peer_id, recv_id, content, nonce, ts)
+
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": peer_id, "to_peer": recv_id, "content": content},
+            headers={
+                "Authorization": "Bearer fleet-s2",
+                "X-Mesh-Sig": legit_sig,
+                "X-Mesh-Nonce": nonce,
+                "X-Mesh-Ts": ts,
+            },
+        )
+        assert r.status_code == 200, (
+            f"Legitimate peer_key holder must succeed. Got: {r.status_code} {r.text}"
+        )
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+    def test_compat_mode_fleet_secret_still_works_for_unregistered_sender(self, monkeypatch):
+        """In compat mode (strict=False), unregistered from_peer + fleet secret sig is accepted."""
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+        monkeypatch.delenv("SLM_MESH_PRODUCTION", raising=False)
+        app, _broker = _make_app(secret="fleet-compat")
+        c = TestClient(app)
+
+        rv = c.post("/mesh/register", json={"session_id": "compat-recv"},
+                    headers={"Authorization": "Bearer fleet-compat"})
+        recv_id = rv.json()["peer_id"]
+
+        from superlocalmemory.mesh.broker_security import sign_mesh_message
+
+        content = "compat content"
+        nonce = secrets.token_hex(8)
+        ts = str(int(time.time()))
+        # Unregistered from_peer using fleet secret — compat mode must accept
+        sig = sign_mesh_message("fleet-compat", "unregistered-peer", recv_id, content, nonce, ts)
+
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": "unregistered-peer", "to_peer": recv_id, "content": content},
+            headers={
+                "Authorization": "Bearer fleet-compat",
+                "X-Mesh-Sig": sig,
+                "X-Mesh-Nonce": nonce,
+                "X-Mesh-Ts": ts,
+            },
+        )
+        assert r.status_code == 200, (
+            f"Compat mode + unregistered from_peer + valid fleet sig must succeed. "
+            f"Got: {r.status_code} {r.text}"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-5: Admission actor + deny path exercised
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAdmissionActorGate:
+    """SEC-5: Admission gate deny path is real (not a dead code path)."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_admission_deny_returns_403(self):
+        """Mocked admission denial must return HTTP 403 from /mesh/send."""
+        from unittest.mock import patch
+
+        from superlocalmemory.core.admission import AdmissionDenied
+        from superlocalmemory.core.operation_policy_registry import PolicyDecision
+
+        app, _broker = _make_app(secret="sec5-secret")
+        c = TestClient(app)
+
+        rv = c.post("/mesh/register", json={"session_id": "deny-recv"},
+                    headers={"Authorization": "Bearer sec5-secret"})
+        assert rv.status_code == 200, rv.text
+        recv_id = rv.json()["peer_id"]
+
+        denial = PolicyDecision(allowed=False, reason="test_denial_unauthorized_actor")
+
+        with patch("superlocalmemory.core.admission.admit",
+                   side_effect=AdmissionDenied(denial)):
+            r = c.post(
+                "/mesh/send",
+                json={"from_peer": "attacker", "to_peer": recv_id, "content": "denied-msg"},
+                headers={"Authorization": "Bearer sec5-secret"},
+            )
+            assert r.status_code == 403, (
+                f"Admission denial must return 403. Got: {r.status_code} {r.text}"
+            )
+            assert "test_denial" in r.text or "unauthorized" in r.text.lower() or "deny" in r.text.lower()
+
+    def test_admission_authorized_allowed(self):
+        """No admission mock → personal mode → OWNER → admitted → 200."""
+        app, _broker = _make_app(secret="sec5-authz")
+        c = TestClient(app)
+
+        rv = c.post("/mesh/register", json={"session_id": "authz-recv"},
+                    headers={"Authorization": "Bearer sec5-authz"})
+        recv_id = rv.json()["peer_id"]
+
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": "authorized-peer", "to_peer": recv_id, "content": "admitted"},
+            headers={"Authorization": "Bearer sec5-authz"},
+        )
+        assert r.status_code == 200, f"Authorized personal mode must admit. Got: {r.status_code} {r.text}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-6: Fencing fail-closed when table exists but query errors
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFencingFailClosed:
+    """SEC-6: seed_fencing_counter raises if mesh_locks exists but MAX query errors."""
+
+    def test_fail_closed_when_table_exists_but_max_query_errors(self, tmp_path):
+        """Fail-closed: raise RuntimeError instead of silently returning 0."""
+        import sqlite3 as _sqlite3
+        from unittest.mock import MagicMock, patch
+
+        from superlocalmemory.mesh.broker_security import seed_fencing_counter
+
+        db_path = str(tmp_path / "fence_fc.db")
+        _init_mesh_schema(db_path)  # creates mesh_locks table
+
+        # Build a mock connection that reports mesh_locks exists but fails on MAX
+        mock_conn = MagicMock()
+
+        def execute_side_effect(sql, params=()):
+            mock_result = MagicMock()
+            if "sqlite_master" in sql.lower():
+                # Report table exists
+                mock_result.fetchone.return_value = MagicMock()  # truthy
+            elif "MAX" in sql.upper() and "mesh_locks" in sql.lower():
+                raise _sqlite3.OperationalError("simulated MAX query failure")
+            else:
+                mock_result.fetchone.return_value = None
+            return mock_result
+
+        mock_conn.execute.side_effect = execute_side_effect
+        mock_conn.close = MagicMock()
+        mock_conn.row_factory = None
+
+        with patch("sqlite3.connect", return_value=mock_conn):
+            with pytest.raises((RuntimeError, _sqlite3.OperationalError)):
+                seed_fencing_counter(db_path)
+
+    def test_missing_table_returns_zero_not_raises(self, tmp_path):
+        """First-run: mesh_locks absent → return 0, no exception (normal startup)."""
+        import sqlite3 as _sqlite3
+        from superlocalmemory.mesh.broker_security import seed_fencing_counter
+
+        # Empty DB with no tables
+        db_path = str(tmp_path / "empty_fence.db")
+        conn = _sqlite3.connect(db_path)
+        conn.close()
+
+        result = seed_fencing_counter(db_path)
+        assert result == 0, f"Missing table must return 0 (first-run). Got: {result}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC-7: Config wiring for mesh.strict_identity
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestConfigWiredStrict:
+    """SEC-7: is_strict_identity reads mesh.strict_identity config key."""
+
+    def test_reads_config_attribute_when_no_env(self, monkeypatch):
+        """Config object with mesh_strict_identity=True → strict mode on."""
+        monkeypatch.delenv("SLM_MESH_PRODUCTION", raising=False)
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+        from superlocalmemory.mesh.broker_security import is_strict_identity
+
+        class FakeConfig:
+            mesh_strict_identity = True
+
+        assert is_strict_identity(FakeConfig()) is True
+
+    def test_config_false_does_not_override_env(self, monkeypatch):
+        """Env var SLM_MESH_STRICT_IDENTITY=1 wins even if config says False."""
+        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+
+        from superlocalmemory.mesh.broker_security import is_strict_identity
+
+        class FakeConfig:
+            mesh_strict_identity = False
+
+        assert is_strict_identity(FakeConfig()) is True
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+    def test_no_config_no_env_returns_false(self, monkeypatch):
+        """Default (no env, no config): strict is False — backward compat."""
+        monkeypatch.delenv("SLM_MESH_PRODUCTION", raising=False)
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+        from superlocalmemory.mesh.broker_security import is_strict_identity
+
+        assert is_strict_identity() is False
+        assert is_strict_identity(None) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST-1: Real loopback — 127.0.0.1 client actually exercises _is_lb=True branch
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRealLoopback:
+    """TEST-1: Real loopback (client=127.0.0.1) correctly bypasses signature check."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_real_loopback_bypasses_strict_sig_check(self, monkeypatch):
+        """127.0.0.1 client with strict mode: no signature required (loopback trusted)."""
+        monkeypatch.setenv("SLM_MESH_STRICT_IDENTITY", "1")
+        app, lb_broker = _make_app(secret="lb-secret")
+        # client=("127.0.0.1", 50000) makes request.client.host = "127.0.0.1"
+        c = TestClient(app, client=("127.0.0.1", 50000))
+
+        receiver = lb_broker.register_peer("lb-recv-sess")
+
+        r = c.post(
+            "/mesh/send",
+            json={
+                "from_peer": "lb-sender",
+                "to_peer": receiver["peer_id"],
+                "content": "loopback strict test",
+            },
+            headers={"Authorization": "Bearer lb-secret"},  # for _get_broker auth
+        )
+        assert r.status_code == 200, (
+            f"Loopback (127.0.0.1) must bypass strict sig requirement. "
+            f"Got: {r.status_code} {r.text}"
+        )
+        monkeypatch.delenv("SLM_MESH_STRICT_IDENTITY", raising=False)
+
+    def test_non_loopback_testclient_requires_auth(self):
+        """TestClient without loopback override ('testclient' host) goes through auth path."""
+        app, nb_broker = _make_app(secret="nb-secret")
+        c = TestClient(app)  # host = "testclient" — NOT loopback
+
+        receiver = nb_broker.register_peer("nb-recv-sess")
+        # No Authorization header → _get_broker must reject
+        r = c.post(
+            "/mesh/send",
+            json={"from_peer": "x", "to_peer": receiver["peer_id"], "content": "test"},
+        )
+        assert r.status_code == 401, (
+            f"Non-loopback without auth must be rejected. Got: {r.status_code}"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST-2: Future timestamp rejection
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFutureTimestamp:
+    """TEST-2: Timestamps far in the future are rejected (skew window applies both ways)."""
+
+    def setup_method(self):
+        from superlocalmemory.mesh.broker_security import _clear_nonce_store
+        _clear_nonce_store()
+
+    def test_future_timestamp_rejected(self):
+        """ts > now + MESH_SIG_SKEW_SECONDS must be rejected (prevents future replay)."""
+        from superlocalmemory.mesh.broker_security import (
+            MESH_SIG_SKEW_SECONDS,
+            check_mesh_message_signature,
+            sign_mesh_message,
+        )
+
+        future_ts = str(int(time.time()) + MESH_SIG_SKEW_SECONDS + 60)
+        nonce = secrets.token_hex(8)
+        sig = sign_mesh_message("shared", "peerA", "peerB", "hello", nonce, future_ts)
+
+        result = check_mesh_message_signature(
+            "shared", "peerA", "peerB", "hello", sig, nonce, future_ts,
+            is_loopback=False, strict=True,
+        )
+        assert result is not None, "Future timestamp beyond skew must be rejected"
+        assert result.get("ok") is False
+        assert "skew" in result.get("error", "").lower() or "timestamp" in result.get("error", "").lower()
