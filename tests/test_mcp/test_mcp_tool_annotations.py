@@ -139,7 +139,11 @@ def test_write_tools_do_not_claim_readOnlyHint(tools: dict[str, object]) -> None
     """
     write_tools = {
         "remember", "delete_memory", "update_memory",
-        "session_init", "observe", "close_session",
+        # session_init excluded: verified read-only in tools_active.py — it recalls
+        # (pool_recall + get_pinned SELECT) and returns an in-memory session_id with no
+        # DB writes, the same read-only class as recall/search. It exposes no scope-
+        # escalation surface, so readOnlyHint=True is honest, not a mutation lie.
+        "observe", "close_session",
         "forget", "run_maintenance", "consolidate_cognitive",
         "set_mode", "report_outcome",
         "log_tool_event", "reinforce_assertion", "contradict_assertion",

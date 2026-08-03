@@ -177,7 +177,7 @@ class TestToolsActiveUsesPool:
         registered: dict = {}
 
         class _Server:
-            def tool(self):
+            def tool(self, *args, **kwargs):
                 def _wrap(fn):
                     registered[fn.__name__] = fn
                     return fn
@@ -215,7 +215,7 @@ class TestToolsActiveUsesPool:
         registered: dict = {}
 
         class _Server:
-            def tool(self):
+            def tool(self, *args, **kwargs):
                 def _wrap(fn):
                     registered[fn.__name__] = fn
                     return fn
