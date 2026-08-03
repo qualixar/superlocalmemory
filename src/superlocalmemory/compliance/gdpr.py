@@ -526,16 +526,49 @@ class GDPRCompliance:
         eid = entity.entity_id
         counts: dict[str, int] = {}
 
-        # Delete facts mentioning this entity
+        # Delete facts mentioning this entity — use ErasureService for projection
+        # erasure so the receipt captures real per-owner proofs (not proofs:[]).
         rows = self._db.execute(
             "SELECT fact_id, memory_id FROM atomic_facts WHERE profile_id = ? "
             "AND canonical_entities_json LIKE ?",
             (profile_id, f'%"{eid}"%'),
         )
         targets = [(dict(r)["fact_id"], dict(r).get("memory_id")) for r in rows]
+        target_fact_ids = [fid for fid, _ in targets]
+        counts["facts"] = len(targets)
+
+        if targets:
+            import uuid as _uuid
+
+            from superlocalmemory.core.transactions.concrete_owners import (
+                build_erasure_service_for_db,
+            )
+            from superlocalmemory.core.transactions.owners import OperationContext
+
+            erasure_svc = build_erasure_service_for_db(self._db, self._engine)
+            op_id = _uuid.uuid4().hex
+            ctx = OperationContext(
+                operation_id=op_id,
+                profile_id=profile_id,
+                subject_id=entity_name,
+                fact_ids=tuple(sorted(target_fact_ids)),
+            )
+            erasure_svc.remove(self._db, ctx)
+            receipt = erasure_svc.finalize(
+                self._db, ctx,
+                subject_type="entity",
+                subject_id=entity_name,
+                requested_by="gdpr",
+                requested_at=requested_at,
+            )
+            if not receipt.persisted:
+                counts["receipt_persist_failed"] = 1
+            if not receipt.all_erased:
+                counts["vector_store_failures"] = sum(
+                    1 for p in receipt.proofs if not p.erased
+                )
+
         for fid, mid in targets:
-            self._tombstone(fid, profile_id, mid)
-            self._purge_fact_projections(fid, profile_id)
             self._db.delete_fact(fid)
             if mid and not self._memory_has_siblings(mid, profile_id):
                 try:
@@ -545,7 +578,6 @@ class GDPRCompliance:
                     )
                 except Exception:
                     pass
-        counts["facts"] = len(targets)
 
         # Delete temporal events
         self._db.execute(
@@ -568,18 +600,6 @@ class GDPRCompliance:
             "DELETE FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
             (eid, profile_id))
         counts["entity"] = 1
-
-        target_fact_ids = [fid for fid, _ in targets]
-        vector_residue = self._fact_vector_residue(profile_id, target_fact_ids)
-        if vector_residue:
-            counts["vector_store_failures"] = vector_residue
-        if targets:
-            receipt_ok = self._write_entity_erasure_receipt(
-                profile_id, entity_name, target_fact_ids, requested_at,
-                all_erased=vector_residue == 0,
-            )
-            if not receipt_ok:
-                counts["receipt_persist_failed"] = 1
         if not audit_request_ok:
             counts["audit_request_failed"] = 1
 

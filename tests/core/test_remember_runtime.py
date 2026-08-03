@@ -11,12 +11,18 @@ def _install_write_commits(path) -> None:
     from superlocalmemory.storage.migrations import (
         M018_ingestion_operations,
         M032_write_coordinator_admission,
+        M033_projection_transactions,
+        M034_obligation_integrity,
     )
 
     conn = sqlite3.connect(path)
     try:
         M018_ingestion_operations.apply(conn)
         M032_write_coordinator_admission.apply(conn)
+        # Phase-3: M033 is now mandatory (fail-closed schema guard); apply here
+        # so all runtime tests use a fully-migrated database.
+        M033_projection_transactions.apply(conn)
+        M034_obligation_integrity.apply(conn)
         conn.commit()
     finally:
         conn.close()

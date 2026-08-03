@@ -142,6 +142,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M036_vector_row_map as _M036,
 )
+from superlocalmemory.storage.migrations import (
+    M037_manifest_hmac_version as _M037,
+)
 from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
@@ -210,6 +213,8 @@ MIGRATIONS: list[Migration] = [
               dependencies=(_M033.NAME,)),
     Migration(name=_M036.NAME, db_target="memory", ddl=_M036.DDL,
               dependencies=(_M033.NAME,)),
+    Migration(name=_M037.NAME, db_target="memory", ddl=_M037.DDL,
+              dependencies=(_M033.NAME, _M035.NAME)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 

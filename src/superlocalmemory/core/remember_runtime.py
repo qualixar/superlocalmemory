@@ -528,7 +528,10 @@ class CanonicalRememberRuntime:
         if self._obligation_schema_ok is None:
             self._obligation_schema_ok = _obligation_schema_present(conn)
         if not self._obligation_schema_ok:
-            return
+            raise RuntimeError(
+                "projection_obligations schema is absent; "
+                "run migrations (M033) before ingesting facts"
+            )
         context = OperationContext(
             operation_id=receipt.operation_id,
             profile_id=request.profile_id,

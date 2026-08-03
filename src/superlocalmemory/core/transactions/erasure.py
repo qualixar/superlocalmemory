@@ -10,6 +10,9 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
+_RECEIPT_V1: int = 1
+_RECEIPT_V2: int = 2
+
 from superlocalmemory.core.transactions.obligations import ObligationLedger
 from superlocalmemory.core.transactions.owners import (
     ObligationKind,
@@ -90,6 +93,37 @@ def compute_erasure_hash(
     requested_at: float,
     completed_at: float,
 ) -> str:
+    """Unkeyed SHA-256 hash for erasure receipts (v1, backward-compat)."""
+    canonical = _erasure_canonical(
+        erasure_id=erasure_id,
+        profile_id=profile_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        requested_by=requested_by,
+        fact_count=fact_count,
+        state=state,
+        all_erased=all_erased,
+        evidence_json=evidence_json,
+        requested_at=requested_at,
+        completed_at=completed_at,
+    )
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _erasure_canonical(
+    *,
+    erasure_id: str,
+    profile_id: str,
+    subject_type: str,
+    subject_id: str,
+    requested_by: str,
+    fact_count: int,
+    state: str,
+    all_erased: bool,
+    evidence_json: str,
+    requested_at: float,
+    completed_at: float,
+) -> bytes:
     envelope = {
         "erasure_id": erasure_id,
         "profile_id": profile_id,
@@ -103,10 +137,51 @@ def compute_erasure_hash(
         "requested_at": repr(float(requested_at)),
         "completed_at": repr(float(completed_at)),
     }
-    canonical = json.dumps(
-        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    return json.dumps(
+        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def compute_erasure_hmac(
+    *,
+    erasure_id: str,
+    profile_id: str,
+    subject_type: str,
+    subject_id: str,
+    requested_by: str,
+    fact_count: int,
+    state: str,
+    all_erased: bool,
+    evidence_json: str,
+    requested_at: float,
+    completed_at: float,
+    key: bytes | None = None,
+) -> str:
+    """HMAC-SHA256 keyed hash for erasure receipts (v2).
+
+    ``key`` is injected in tests; production code passes ``key=None`` to
+    auto-derive from the installation key.
+    """
+    from superlocalmemory.core.transactions.manifest_key import (
+        compute_hmac,
+        derive_receipt_hmac_key,
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    actual_key = key if key is not None else derive_receipt_hmac_key()
+    canonical = _erasure_canonical(
+        erasure_id=erasure_id,
+        profile_id=profile_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        requested_by=requested_by,
+        fact_count=fact_count,
+        state=state,
+        all_erased=all_erased,
+        evidence_json=evidence_json,
+        requested_at=requested_at,
+        completed_at=completed_at,
+    )
+    return compute_hmac(actual_key, canonical)
 
 
 class ErasureService:
@@ -180,19 +255,35 @@ class ErasureService:
         )
         fact_count = len(set(context.fact_ids))
         completed_at = time.time()
-        audit_hash = compute_erasure_hash(
-            erasure_id=context.operation_id,
-            profile_id=context.profile_id,
-            subject_type=subject_type,
-            subject_id=subject_id,
-            requested_by=requested_by,
-            fact_count=fact_count,
-            state=state,
-            all_erased=all_erased,
-            evidence_json=evidence_json,
-            requested_at=requested_at,
-            completed_at=completed_at,
-        )
+        receipt_version = _receipt_version_from_db(db)
+        if receipt_version >= _RECEIPT_V2:
+            audit_hash = compute_erasure_hmac(
+                erasure_id=context.operation_id,
+                profile_id=context.profile_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
+                requested_by=requested_by,
+                fact_count=fact_count,
+                state=state,
+                all_erased=all_erased,
+                evidence_json=evidence_json,
+                requested_at=requested_at,
+                completed_at=completed_at,
+            )
+        else:
+            audit_hash = compute_erasure_hash(
+                erasure_id=context.operation_id,
+                profile_id=context.profile_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
+                requested_by=requested_by,
+                fact_count=fact_count,
+                state=state,
+                all_erased=all_erased,
+                evidence_json=evidence_json,
+                requested_at=requested_at,
+                completed_at=completed_at,
+            )
         persisted = self._persist(
             db,
             erasure_id=context.operation_id,
@@ -334,34 +425,51 @@ class ErasureService:
             with db.raw_connection() as conn:
                 if not _table_exists(conn, "erasure_receipts"):
                     return False
-                conn.execute(
-                    "INSERT INTO erasure_receipts "
-                    "(erasure_id, profile_id, subject_type, subject_id, "
-                    "requested_by, fact_count, state, all_erased, "
-                    "owner_evidence_json, audit_hash, requested_at, completed_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(erasure_id) DO UPDATE SET "
-                    "state = excluded.state, "
-                    "all_erased = excluded.all_erased, "
-                    "owner_evidence_json = excluded.owner_evidence_json, "
-                    "audit_hash = excluded.audit_hash, "
-                    "requested_at = excluded.requested_at, "
-                    "completed_at = excluded.completed_at",
-                    (
-                        erasure_id,
-                        profile_id,
-                        subject_type,
-                        subject_id,
-                        requested_by,
-                        fact_count,
-                        state,
-                        1 if all_erased else 0,
-                        evidence_json,
-                        audit_hash,
-                        requested_at,
-                        completed_at,
-                    ),
-                )
+                version = _receipt_version_supported(conn)
+                if version >= _RECEIPT_V2:
+                    conn.execute(
+                        "INSERT INTO erasure_receipts "
+                        "(erasure_id, profile_id, subject_type, subject_id, "
+                        "requested_by, fact_count, state, all_erased, "
+                        "owner_evidence_json, audit_hash, receipt_version, "
+                        "requested_at, completed_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(erasure_id) DO UPDATE SET "
+                        "state = excluded.state, "
+                        "all_erased = excluded.all_erased, "
+                        "owner_evidence_json = excluded.owner_evidence_json, "
+                        "audit_hash = excluded.audit_hash, "
+                        "receipt_version = excluded.receipt_version, "
+                        "requested_at = excluded.requested_at, "
+                        "completed_at = excluded.completed_at",
+                        (
+                            erasure_id, profile_id, subject_type, subject_id,
+                            requested_by, fact_count, state,
+                            1 if all_erased else 0, evidence_json, audit_hash,
+                            _RECEIPT_V2, requested_at, completed_at,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO erasure_receipts "
+                        "(erasure_id, profile_id, subject_type, subject_id, "
+                        "requested_by, fact_count, state, all_erased, "
+                        "owner_evidence_json, audit_hash, requested_at, completed_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(erasure_id) DO UPDATE SET "
+                        "state = excluded.state, "
+                        "all_erased = excluded.all_erased, "
+                        "owner_evidence_json = excluded.owner_evidence_json, "
+                        "audit_hash = excluded.audit_hash, "
+                        "requested_at = excluded.requested_at, "
+                        "completed_at = excluded.completed_at",
+                        (
+                            erasure_id, profile_id, subject_type, subject_id,
+                            requested_by, fact_count, state,
+                            1 if all_erased else 0, evidence_json, audit_hash,
+                            requested_at, completed_at,
+                        ),
+                    )
                 conn.commit()
             return True
         except Exception as exc:  # noqa: BLE001
@@ -431,11 +539,19 @@ def fetch_receipt(
 def verify_receipt(
     conn: object, erasure_id: str, *, profile_id: str | None = None,
 ) -> bool:
+    """Verify the audit_hash of an erasure receipt.
+
+    Uses HMAC (v2) when the ``receipt_version`` column is present and
+    the row has version >= 2, otherwise falls back to unkeyed SHA-256 (v1).
+    """
     predicate = "erasure_id = ?"
     params: list[object] = [erasure_id]
     if profile_id is not None:
         predicate += " AND profile_id = ?"
         params.append(profile_id)
+
+    version = _receipt_row_version(conn, erasure_id)
+
     row = conn.execute(
         "SELECT erasure_id, profile_id, subject_type, subject_id, requested_by, "
         "fact_count, state, all_erased, owner_evidence_json, audit_hash, "
@@ -444,7 +560,8 @@ def verify_receipt(
     ).fetchone()
     if row is None:
         return False
-    recomputed = compute_erasure_hash(
+
+    kwargs = dict(
         erasure_id=row[0],
         profile_id=row[1],
         subject_type=row[2],
@@ -457,6 +574,16 @@ def verify_receipt(
         requested_at=float(row[10]),
         completed_at=float(row[11]),
     )
+
+    if version >= _RECEIPT_V2:
+        from superlocalmemory.core.transactions.manifest_key import (
+            derive_receipt_hmac_key,
+            verify_hmac,
+        )
+        canonical = _erasure_canonical(**kwargs)
+        return verify_hmac(row[9], derive_receipt_hmac_key(), canonical)
+
+    recomputed = compute_erasure_hash(**kwargs)
     return recomputed == row[9]
 
 
@@ -570,6 +697,39 @@ def _table_exists(conn: object, name: str) -> bool:
     ).fetchone() is not None
 
 
+def _receipt_version_supported(conn: object) -> int:
+    """Return the highest receipt version this DB supports."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(erasure_receipts)").fetchall()}
+        return _RECEIPT_V2 if "receipt_version" in cols else _RECEIPT_V1
+    except Exception:  # noqa: BLE001
+        return _RECEIPT_V1
+
+
+def _receipt_version_from_db(db: object) -> int:
+    """Return the highest receipt version supported by the DB wrapper."""
+    try:
+        with db.raw_connection() as conn:
+            return _receipt_version_supported(conn)
+    except Exception:  # noqa: BLE001
+        return _RECEIPT_V1
+
+
+def _receipt_row_version(conn: object, erasure_id: str) -> int:
+    """Read the receipt_version for an existing row; fall back to V1."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(erasure_receipts)").fetchall()}
+        if "receipt_version" not in cols:
+            return _RECEIPT_V1
+        row = conn.execute(
+            "SELECT receipt_version FROM erasure_receipts WHERE erasure_id = ?",
+            (erasure_id,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else _RECEIPT_V1
+    except Exception:  # noqa: BLE001
+        return _RECEIPT_V1
+
+
 def _err(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:500]
 
@@ -583,6 +743,7 @@ __all__ = [
     "MAX_ERASE_ATTEMPTS",
     "VALID_SUBJECT_TYPES",
     "compute_erasure_hash",
+    "compute_erasure_hmac",
     "fetch_receipt",
     "is_tombstoned",
     "tombstone_memory_id",
