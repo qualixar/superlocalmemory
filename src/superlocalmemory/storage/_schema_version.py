@@ -23,7 +23,7 @@ from pathlib import Path
 #: Highest schema_version this runner can write.  Matches the trailing serial
 #: of the latest migration (M036).  Increment when adding new migrations or
 #: table-level breaking changes.
-SUPPORTED_SCHEMA_VERSION: int = 36
+SUPPORTED_SCHEMA_VERSION: int = 37
 
 
 class SchemaVersionError(RuntimeError):

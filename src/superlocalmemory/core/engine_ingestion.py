@@ -151,14 +151,26 @@ def build_immediate_admission_handler(
         from datetime import UTC, datetime
 
         from superlocalmemory.core.ingest_gate import apply_ingest_gate
+        from superlocalmemory.core.ingest_policy import scrub_secrets_for_ingest
         from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
+
+        # Secrets are ALWAYS scrubbed at this shared queryable-write chokepoint,
+        # which both the canonical HTTP /remember runtime and the canonical_store
+        # Python/CLI path funnel through. A credential must never persist verbatim
+        # in any durable representation (memory rows, fact rows), regardless of
+        # ingress surface. The scrub is idempotent: content already scrubbed by an
+        # upstream caller is returned unchanged.
+        scrub = scrub_secrets_for_ingest(request.content)
+        content = scrub.content
+        if scrub.redacted:
+            logger.info("secret scrub: redacted credential material on queryable write")
 
         metadata = dict(request.metadata)
         metadata["ingestion_operation_id"] = operation_id
         if request.session_id:
             metadata.setdefault("session_id", request.session_id)
         gate = apply_ingest_gate(
-            request.content,
+            content,
             max_verbatim_chars=max_verbatim_chars,
             max_ingest_bytes=max_ingest_bytes,
         )
@@ -225,7 +237,7 @@ def build_immediate_admission_handler(
             record = MemoryRecord(
                 memory_id=memory_id,
                 profile_id=request.profile_id,
-                content=request.content,
+                content=content,
                 session_id=request.session_id,
                 session_date=observation_date,
                 speaker=request.speaker,
