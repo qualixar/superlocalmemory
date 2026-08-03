@@ -88,7 +88,9 @@ class SkillActivator:
         safe = _SAFE_NAME_RE.sub("-", skill_name).lower()[:50] or "skill"
         target = (base / safe).resolve()
         base_resolved = base.resolve()
-        if not str(target).startswith(str(base_resolved)):
+        # Audit P2-5: is_relative_to is not prefix-fragile (a sibling like
+        # ".../skills-evil" cannot masquerade as being under ".../skills").
+        if not target.is_relative_to(base_resolved):
             raise ValueError(
                 f"skill_name {skill_name!r} escapes sandbox: {target}"
             )
@@ -99,8 +101,30 @@ class SkillActivator:
 
         quarantine_dir_name is the sanitized directory name (CRIT-2), e.g.
         'brainstorming-vabc12'.  It is NOT the skill_name.
+
+        Hardened (audit P0-1 / P1-4): reject absolute paths and '..' traversal,
+        then resolve() and require containment inside the quarantine root. The
+        resolve() step also defeats a symlinked quarantine dir that would
+        otherwise redirect the read outside the sandbox and inject arbitrary
+        content into a live skill.
         """
-        return self._quarantine_root / quarantine_dir_name / "SKILL.md"
+        raw = Path(quarantine_dir_name)
+        if raw.is_absolute() or ".." in raw.parts:
+            raise ValueError(
+                f"quarantine_dir_name {quarantine_dir_name!r} contains path traversal"
+            )
+        root = self._quarantine_root.resolve()
+        q_dir = (self._quarantine_root / quarantine_dir_name).resolve()
+        if not q_dir.is_relative_to(root):
+            raise ValueError(
+                f"quarantine_dir_name {quarantine_dir_name!r} escapes sandbox: {q_dir}"
+            )
+        q_path = (q_dir / "SKILL.md").resolve()
+        if not q_path.is_relative_to(root):
+            raise ValueError(
+                f"quarantine artifact escapes sandbox: {q_path}"
+            )
+        return q_path
 
     def _live_path(self, skill_name: str) -> Path:
         return self._safe_skill_dir(skill_name, self._live_root) / "SKILL.md"
@@ -204,7 +228,12 @@ class SkillActivator:
         ts = datetime.now(timezone.utc).isoformat()
 
         if backup_path.exists():
-            shutil.copy2(backup_path, live_path)
+            # Audit P2-4: restore atomically (tmp → os.replace) so a crash
+            # mid-rollback cannot leave a torn live SKILL.md.
+            live_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = live_path.with_suffix(".tmp")
+            tmp_path.write_bytes(backup_path.read_bytes())
+            os.replace(tmp_path, live_path)
             logger.info(
                 "skill_activator: rolled back %s ← %s",
                 live_path, backup_path,

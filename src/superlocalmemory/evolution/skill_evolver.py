@@ -564,10 +564,30 @@ class SkillEvolver:
                 },
             )
             return "evolved"
-        except SkillActivationError as exc:
+        except (SkillActivationError, FileNotFoundError, ValueError, OSError) as exc:
+            # Audit P1-1: broaden the catch. A missing quarantine artifact raises
+            # FileNotFoundError and a path-traversal guard raises ValueError; both
+            # previously escaped after APPROVED was recorded, leaving the machine
+            # stuck at APPROVED with no terminal transition.
+            # Audit P1-2: actually PERFORM the rollback instead of only logging
+            # one. The terminal status is honest — ROLLED_BACK only if a restore
+            # happened, otherwise FAILED (nothing was written to live).
+            try:
+                rb = activator.rollback(candidate.skill_name)
+                rolled_back = bool(rb.get("rolled_back"))
+            except Exception as rb_exc:  # rollback must never mask the original error
+                logger.error(
+                    "skill rollback errored for %s: %s",
+                    candidate.skill_name, rb_exc,
+                )
+                rolled_back = False
+            end_status = (
+                EvolutionStatus.ROLLED_BACK if rolled_back
+                else EvolutionStatus.FAILED
+            )
             self._store.append_transition(
                 record_id, profile_id,
-                EvolutionStatus.APPROVED, EvolutionStatus.ROLLED_BACK,
+                EvolutionStatus.APPROVED, end_status,
                 actor_id=actor_id, reason=str(exc),
             )
             self._audit.log(
@@ -579,11 +599,13 @@ class SkillEvolver:
                     "record_id": record_id,
                     "skill_name": candidate.skill_name,
                     "error": str(exc),
+                    "rolled_back": rolled_back,
                 },
             )
             logger.error(
-                "skill activation failed for %s: %s — rolled back",
+                "skill activation failed for %s: %s (%s)",
                 candidate.skill_name, exc,
+                "rolled back" if rolled_back else "failed, nothing to roll back",
             )
             return "rejected"
 

@@ -93,6 +93,14 @@ BEFORE UPDATE ON skill_evolution_transitions
 BEGIN
     SELECT RAISE(ABORT, 'skill_evolution_transitions is append-only');
 END;
+
+-- Audit P1-3: DELETE must also be forbidden — otherwise the hash chain can be
+-- silently truncated/erased without a DB abort, breaking the immutable-log claim.
+CREATE TRIGGER IF NOT EXISTS no_delete_evo_transitions
+BEFORE DELETE ON skill_evolution_transitions
+BEGIN
+    SELECT RAISE(ABORT, 'skill_evolution_transitions is append-only');
+END;
 """
 
 # Anti-loop budget
@@ -312,11 +320,18 @@ class EvolutionStore:
     ) -> str:
         """Append an immutable status-transition row. Returns transition_hash.
 
-        Hash linkage: transition_hash = SHA-256(prev_hash + record_id +
-        from_status + to_status + ts + actor_id).
+        Hash linkage (audit P2-3): transition_hash = SHA-256 over a canonical,
+        pipe-delimited payload covering EVERY persisted field —
+        ``prev_hash | record_id | from_status | to_status | ts | actor_id |
+        reason | metadata_str``. Delimiters remove concatenation ambiguity and
+        including reason+metadata makes those columns tamper-evident too.
 
         prev_hash is the transition_hash of the most recent row for this
         record_id, or 'genesis' for the first transition.
+
+        Concurrency (audit P1-5): the read-prev-then-insert is wrapped in a
+        single ``BEGIN IMMEDIATE`` transaction so two concurrent writers cannot
+        both read the same prev_hash and fork the chain.
 
         Never calls UPDATE or DELETE. Raises ValueError if from_status == to_status.
         """
@@ -328,8 +343,11 @@ class EvolutionStore:
         ts = datetime.now(timezone.utc).isoformat()
         metadata_str = json.dumps(metadata or {}, sort_keys=True)
 
-        conn = sqlite3.connect(self._db_path, timeout=10)
+        # isolation_level=None + explicit BEGIN IMMEDIATE = one atomic
+        # select-prev-then-insert critical section per call (P1-5).
+        conn = sqlite3.connect(self._db_path, timeout=10, isolation_level=None)
         try:
+            conn.execute("BEGIN IMMEDIATE")
             # Find prev_hash for this record_id (genesis if first)
             row = conn.execute(
                 "SELECT transition_hash FROM skill_evolution_transitions "
@@ -339,11 +357,12 @@ class EvolutionStore:
             ).fetchone()
             prev_hash = row[0] if row else "genesis"
 
-            # Compute transition_hash
-            payload = (
-                f"{prev_hash}{record_id}"
-                f"{from_status.value}{to_status.value}{ts}{actor_id}"
-            )
+            # Canonical, delimited payload over ALL persisted fields (P2-3).
+            payload = "|".join((
+                prev_hash, record_id,
+                from_status.value, to_status.value,
+                ts, actor_id, reason, metadata_str,
+            ))
             transition_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
             conn.execute(
@@ -365,8 +384,14 @@ class EvolutionStore:
                     metadata_str,
                 ),
             )
-            conn.commit()
+            conn.execute("COMMIT")
             return transition_hash
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
         finally:
             conn.close()
 
@@ -504,13 +529,30 @@ class EvolutionStore:
             conn.close()
 
     def count_attempts(self, skill_name: str, profile_id: str) -> int:
+        """Count non-successful evolution attempts for a skill.
+
+        Audit P0-2: with the Phase-2 append-only model, ``skill_evolution_log``
+        rows are frozen at 'candidate' by ``insert_record`` and never updated, so
+        the legacy ``status NOT IN ('promoted')`` filter counted successes too —
+        permanently disabling a skill after MAX_ATTEMPTS_PER_SKILL improvements.
+        The current status is now read from the append-only transitions log
+        (latest ``to_status`` per record), and success states are excluded,
+        mirroring the pre-Phase-2 exclusion of 'promoted'. Legacy rows with no
+        transitions fall back to their frozen log status via COALESCE.
+        """
+        success = ("promoted", "verified_quarantined", "approved", "active")
+        marks = ",".join("?" for _ in success)
         conn = sqlite3.connect(self._db_path, timeout=10)
         try:
             row = conn.execute(
-                "SELECT COUNT(*) FROM skill_evolution_log "
-                "WHERE skill_name = ? AND profile_id = ? "
-                "AND status NOT IN ('promoted')",
-                (skill_name, profile_id),
+                "SELECT COUNT(*) FROM skill_evolution_log l "
+                "WHERE l.skill_name = ? AND l.profile_id = ? "
+                "AND COALESCE("
+                "  (SELECT t.to_status FROM skill_evolution_transitions t "
+                "   WHERE t.record_id = l.id AND t.profile_id = l.profile_id "
+                "   ORDER BY t.seq DESC LIMIT 1), l.status"
+                f") NOT IN ({marks})",
+                (skill_name, profile_id, *success),
             ).fetchone()
             return row[0] if row else 0
         finally:
