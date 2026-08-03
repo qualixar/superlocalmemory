@@ -179,6 +179,8 @@ CREATE TABLE IF NOT EXISTS atomic_facts (
     embedding          TEXT,
     fisher_mean        TEXT,
     fisher_variance    TEXT,
+    -- Tracks how many accesses had Fisher applied; delta-based update in maintenance
+    fisher_last_applied_access INTEGER NOT NULL DEFAULT 0,
 
     -- Lifecycle
     lifecycle          TEXT NOT NULL DEFAULT 'active'

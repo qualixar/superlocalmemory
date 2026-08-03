@@ -43,6 +43,29 @@ class AutoRecall:
         self._max_memories = self._config.get("max_memories_injected", 10)
         self._threshold = self._config.get("relevance_threshold", 0.3)
 
+    def _get_soft_prompt_text(self) -> str:
+        """Return soft prompt text via engine._auto_invoker (V3.3 bridge, fail-soft).
+
+        The CLI and daemon paths pass ``engine=<MemoryEngine>`` to AutoRecall.
+        The engine stores an AutoInvoker that has a wired PromptInjector.
+        This bridge lets AutoRecall surface soft prompts without needing the
+        caller to pass a separate PromptInjector argument.
+
+        Falls back to "" when no engine, no invoker, or any error occurs.
+        """
+        try:
+            invoker = getattr(self._engine, "_auto_invoker", None)
+            if invoker is None:
+                return ""
+            getter = getattr(invoker, "_get_soft_prompt_text", None)
+            if getter is None:
+                return ""
+            return getter() or ""
+        except Exception as exc:
+            # warning: unexpected bridge failure silences a claimed feature
+            logger.warning("Soft-prompt bridge (AutoRecall→AutoInvoker) failed: %s", exc)
+            return ""
+
     def _recall(self, query: str, limit: int):
         if self._recall_fn is not None:
             return self._recall_fn(query, limit=limit)
@@ -55,47 +78,58 @@ class AutoRecall:
 
         Returns a formatted string of relevant memories suitable
         for injection into an AI's system prompt.
+
+        Soft prompts are fetched via the engine→AutoInvoker bridge FIRST so
+        they are returned even when recall finds no memories.  Memory recall
+        is then layered on top when results are present.
         """
         if not self._enabled:
             return ""
         if self._recall_fn is None and self._engine is None:
             return ""
 
+        # --- 1. Soft-prompt (fail-soft, may return "") ---
+        soft_prompt = self._get_soft_prompt_text()
+
+        # --- 2. Memory recall ---
         try:
-            # Build query from project path or explicit query
             search_query = query or f"project context {project_path}"
             response = self._recall(search_query, self._max_memories)
-
-            if response is None or not response.results:
-                return ""
-
-            # Filter by relevance threshold
-            relevant = [r for r in response.results if r.score >= self._threshold]
-
-            if not relevant:
-                return ""
-
-            memories = [
-                InjectableMemory(
-                    content=r.fact.content,
-                    score=float(r.score),
-                    fact_id=str(r.fact.fact_id),
-                    importance=float(getattr(r.fact, "importance", 0.0) or 0.0),
-                    access_count=int(getattr(r.fact, "access_count", 0) or 0),
-                    source_type="recall",
-                )
-                for r in relevant[:self._max_memories]
-            ]
-            ctx = render_context(memories, mode="B", cfg=None, wrap=True)
-            # T-inject: anchor the injected memories to "now" so a time-blind
-            # model can weigh recency. Prepend a one-line temporal frame.
-            frame = temporal_frame(
-                [getattr(r.fact, "created_at", "") for r in relevant[:self._max_memories]]
-            )
-            return f"{frame}\n\n{ctx}" if ctx else ctx
         except Exception as exc:
             logger.warning("Auto-recall failed: %s", exc)
-            return ""
+            # Still return soft prompt if present
+            return soft_prompt
+
+        # --- 3. Build memory context block (empty string when no results) ---
+        memory_ctx = ""
+        try:
+            if response is not None and response.results:
+                relevant = [r for r in response.results if r.score >= self._threshold]
+                if relevant:
+                    memories = [
+                        InjectableMemory(
+                            content=r.fact.content,
+                            score=float(r.score),
+                            fact_id=str(r.fact.fact_id),
+                            importance=float(getattr(r.fact, "importance", 0.0) or 0.0),
+                            access_count=int(getattr(r.fact, "access_count", 0) or 0),
+                            source_type="recall",
+                        )
+                        for r in relevant[:self._max_memories]
+                    ]
+                    ctx = render_context(memories, mode="B", cfg=None, wrap=True)
+                    # T-inject: anchor memories to "now" so a time-blind model
+                    # can weigh recency. Prepend a one-line temporal frame.
+                    frame = temporal_frame(
+                        [getattr(r.fact, "created_at", "") for r in relevant[:self._max_memories]]
+                    )
+                    memory_ctx = f"{frame}\n\n{ctx}" if ctx else ctx
+        except Exception as exc:
+            logger.warning("Auto-recall memory formatting failed: %s", exc)
+
+        # --- 4. Combine: soft-prompt + memories (either may be empty) ---
+        parts = [p for p in (soft_prompt, memory_ctx) if p]
+        return "\n\n".join(parts)
 
     def get_query_context(self, query: str) -> list[dict]:
         """Get relevant memories for a specific query.
