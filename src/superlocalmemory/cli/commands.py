@@ -1454,6 +1454,17 @@ def cmd_recall(args: Namespace) -> None:
             _window = getattr(args, "window", "") or ""
             window_qs = f"&window={quote(_window)}" if _window else ""
             _as_of = getattr(args, "as_of", "") or ""
+            if _as_of:
+                from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+                _as_of_norm = normalize_as_of(_as_of)
+                if _as_of_norm is None:
+                    import sys as _sys
+                    _sys.stderr.write(
+                        f"Error: invalid --as-of value: {_as_of!r}\n"
+                        "Expected ISO 8601 UTC datetime, e.g. '2024-01-01T00:00:00Z'.\n"
+                    )
+                    _sys.exit(1)
+                _as_of = _as_of_norm
             as_of_qs = f"&as_of={quote(_as_of)}" if _as_of else ""
             result = daemon_request(
                 "GET",

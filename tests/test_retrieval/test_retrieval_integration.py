@@ -476,7 +476,7 @@ class TestTemporalValidityWiring:
         facts = self._facts()
         db = _mock_db(facts)
         db.get_invalidated_fact_ids.side_effect = (
-            lambda ids, pid: {"f_superseded"} & set(ids)
+            lambda ids, pid, as_of=None: {"f_superseded"} & set(ids)
         )
         engine = _build_engine(
             db=db,

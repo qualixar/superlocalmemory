@@ -1670,7 +1670,10 @@ class DatabaseManager:
         return [dict(r)["fact_id"] for r in rows]
 
     def get_invalidated_fact_ids(
-        self, fact_ids: list[str], profile_id: str,
+        self,
+        fact_ids: list[str],
+        profile_id: str,
+        as_of: str | None = None,
     ) -> set[str]:
         """Return the subset of ``fact_ids`` that are system-invalidated.
 
@@ -1678,6 +1681,21 @@ class DatabaseManager:
         it was superseded/contradicted by a newer fact (see
         ``invalidate_fact_temporal``). Such facts are wrong/outdated and must be
         excluded from default retrieval (T1, Phase 4).
+
+        Phase 4b — bi-temporal as_of:
+          When ``as_of`` is None (default): returns ALL facts with
+          ``system_expired_at IS NOT NULL`` — existing behaviour, no regression.
+
+          When ``as_of`` is set (UTC ISO 8601, "+00:00" suffix): returns only
+          facts where ``system_expired_at <= as_of`` (transaction-time boundary
+          inclusive). This means supersessions that occurred AFTER ``as_of`` are
+          excluded — at the historical query point the fact was still valid.
+
+        ``as_of`` MUST be UTC-normalized via ``normalize_as_of()`` before this
+        call. The stored ``system_expired_at`` values use Python's
+        ``datetime.now(UTC).isoformat()`` format ("...+00:00") so the
+        ``normalize_as_of()`` "+00:00" output produces correct lexicographic
+        SQL comparisons.
 
         Bounded + indexed: only the supplied candidate ids are queried (never a
         full-table scan), keyed on the ``fact_id`` PK with the
@@ -1698,13 +1716,26 @@ class DatabaseManager:
         for start in range(0, len(fact_ids), chunk):
             batch = fact_ids[start:start + chunk]
             placeholders = ",".join("?" for _ in batch)
-            rows = self.execute(
-                f"SELECT fact_id FROM fact_temporal_validity "
-                f"WHERE fact_id IN ({placeholders}) "
-                f"  AND profile_id = ? "
-                f"  AND system_expired_at IS NOT NULL",
-                (*batch, profile_id),
-            )
+            if as_of is not None:
+                # Transaction-time point-in-time: only supersessions that
+                # occurred AT OR BEFORE as_of contribute to invalidation.
+                # Supersessions after as_of are invisible at this query point.
+                rows = self.execute(
+                    f"SELECT fact_id FROM fact_temporal_validity "
+                    f"WHERE fact_id IN ({placeholders}) "
+                    f"  AND profile_id = ? "
+                    f"  AND system_expired_at IS NOT NULL "
+                    f"  AND system_expired_at <= ?",
+                    (*batch, profile_id, as_of),
+                )
+            else:
+                rows = self.execute(
+                    f"SELECT fact_id FROM fact_temporal_validity "
+                    f"WHERE fact_id IN ({placeholders}) "
+                    f"  AND profile_id = ? "
+                    f"  AND system_expired_at IS NOT NULL",
+                    (*batch, profile_id),
+                )
             for r in rows:
                 invalid.add(dict(r)["fact_id"])
         return invalid
@@ -1720,8 +1751,10 @@ class DatabaseManager:
         Returns fact_ids whose event-time validity window does not encompass
         ``as_of`` (or the current wall-clock time when ``as_of`` is None):
 
-        1. **Already expired** — ``valid_until IS NOT NULL AND valid_until < ref``
+        1. **Already expired** — ``valid_until IS NOT NULL AND valid_until <= ref``
            where ``ref`` is ``as_of`` when provided or the current UTC time.
+           The ``<=`` implements the half-open interval ``[valid_from, valid_until)``:
+           a fact with ``valid_until == as_of`` has expired at that boundary (Phase 4b fix).
         2. **Not yet valid** — ``valid_from IS NOT NULL AND valid_from > as_of``
            (only when ``as_of`` is provided for explicit point-in-time recall).
 
@@ -1770,7 +1803,7 @@ class DatabaseManager:
                         f"WHERE fact_id IN ({placeholders}) "
                         f"  AND profile_id = ? "
                         f"  AND ("
-                        f"    (valid_until IS NOT NULL AND valid_until < ?) "
+                        f"    (valid_until IS NOT NULL AND valid_until <= ?) "
                         f"    OR (valid_from IS NOT NULL AND valid_from > ?)"
                         f"  )",
                         (*batch, profile_id, as_of, as_of),

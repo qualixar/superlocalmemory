@@ -36,8 +36,8 @@ When ``as_of`` is packed into the filter context dict (``{"as_of": "..."}``),
 event-time demotion is always applied regardless of
 ``include_expired_in_history``, because the caller explicitly requested a
 point-in-time view. Facts not yet valid at ``as_of`` (``valid_from > as_of``)
-and facts already expired at ``as_of`` (``valid_until < as_of``) are both
-demoted.
+and facts already expired at ``as_of`` (``valid_until <= as_of``, half-open) are
+both demoted.
 
 **Demotion priority:**
 - System-invalidated facts: score × ``superseded_demotion_factor`` (0.25).
@@ -142,10 +142,27 @@ class TemporalValidityFilter:
         if not all_fact_ids:
             return all_results
 
-        # --- Axis 1: Transaction-time supersession (existing behaviour) ---
+        # Extract as_of FIRST — needed for both Axis 1 and Axis 2. Must happen
+        # before any DB call so as_of is available for transaction-time gating.
+        # None context = legacy/default; non-dict = upstream caller without
+        # as_of support. Both treated as "no time-travel, current time".
+        as_of: str | None = (
+            context.get("as_of") if isinstance(context, dict) else None
+        )
+        # UTC-normalize at the filter boundary to guarantee format consistency
+        # before forwarding to DB comparisons.
+        if as_of is not None:
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+            as_of = normalize_as_of(as_of)
+            # normalize_as_of returns None on invalid input; treat as no as_of.
+
+        # --- Axis 1: Transaction-time supersession ---
+        # When as_of is set: only supersessions that occurred AT OR BEFORE
+        # as_of contribute (Phase 4b bi-temporal fix). Supersessions after
+        # as_of are invisible — the fact was still valid at the query point.
         try:
             invalid = self._db.get_invalidated_fact_ids(
-                list(all_fact_ids), profile_id,
+                list(all_fact_ids), profile_id, as_of=as_of,
             )
         except Exception as exc:
             # Fail-open: a validity-lookup error must never break retrieval.
@@ -153,13 +170,6 @@ class TemporalValidityFilter:
             return all_results
 
         # --- Axis 2: Event-time expiry (Phase 4 T1b) ---
-        # Extract as_of from context safely.  None context = legacy/default;
-        # non-dict context = upstream caller that hasn't threaded as_of yet.
-        # Both are treated as "no time-travel, current time".
-        as_of: str | None = (
-            context.get("as_of") if isinstance(context, dict) else None
-        )
-
         # Guard: skip event-time demotion when the caller signals it wants
         # historical / all-expired-included mode AND no explicit as_of point
         # is requested.  Config default is include_expired_in_history=True,
