@@ -148,7 +148,8 @@ class TestEvolutionStatus:
         assert EvolutionStatus.FAILED.value == "failed"
 
     def test_member_count(self):
-        assert len(EvolutionStatus) == 7
+        # Phase 2 added 4 new states: VERIFIED_QUARANTINED, APPROVED, ACTIVE, ROLLED_BACK
+        assert len(EvolutionStatus) == 11
 
 
 class TestEvolutionCandidate:

@@ -32,14 +32,30 @@ class TriggerType(str, Enum):
 
 
 class EvolutionStatus(str, Enum):
-    """Pipeline status."""
-    CANDIDATE = "candidate"     # Detected, not yet confirmed
-    CONFIRMED = "confirmed"     # LLM gate passed
-    MUTATED = "mutated"         # New SKILL.md generated
-    VERIFIED = "verified"       # Blind verification passed
-    PROMOTED = "promoted"       # Live — evolved skill active
-    REJECTED = "rejected"       # Failed verification or gate
-    FAILED = "failed"           # Error during evolution
+    """Pipeline status.
+
+    State machine (Phase 2):
+      CANDIDATE → VERIFIED_QUARANTINED → APPROVED → ACTIVE
+                              ↓                ↓
+                           REJECTED        ROLLED_BACK
+
+    Legacy values (CONFIRMED, MUTATED, VERIFIED, PROMOTED) are retained for
+    DB-row compatibility with pre-Phase-2 records.  New code uses the states
+    above.  PROMOTED is an alias for what is now VERIFIED_QUARANTINED in the
+    live-in-quarantine sense; new records use VERIFIED_QUARANTINED explicitly.
+    """
+    CANDIDATE            = "candidate"             # Detected, not yet processed
+    CONFIRMED            = "confirmed"             # Legacy: LLM gate passed
+    MUTATED              = "mutated"               # Legacy: new SKILL.md generated
+    VERIFIED             = "verified"              # Legacy: blind verify passed
+    PROMOTED             = "promoted"              # Legacy alias for quarantined
+    REJECTED             = "rejected"              # Failed gate or verification
+    FAILED               = "failed"               # Error during evolution
+    # --- Phase 2 states ---
+    VERIFIED_QUARANTINED = "verified_quarantined"  # Passed blind verify, in quarantine
+    APPROVED             = "approved"              # Human/policy approved; ready to activate
+    ACTIVE               = "active"               # Live in skill directory
+    ROLLED_BACK          = "rolled_back"           # Activation reverted; prior artifact restored
 
 
 @dataclass(frozen=True)
@@ -74,6 +90,12 @@ class EvolutionRecord:
     rejection_reason: str = ""
     created_at: str = ""
     completed_at: str = ""
+    # Phase 2 (CRIT-2): the sanitized directory name inside the quarantine root,
+    # e.g. "brainstorming-vabc12".  Distinct from skill_name ("brainstorming").
+    # Stored in-memory; not persisted to skill_evolution_log (no schema column).
+    # The activator reads this to locate the artifact; it is also stored in the
+    # VERIFIED_QUARANTINED transition metadata for auditability.
+    quarantine_dir_name: str = ""
 
 
 @dataclass(frozen=True)
