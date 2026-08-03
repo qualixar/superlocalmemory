@@ -2662,6 +2662,18 @@ def create_app() -> FastAPI:
     except ImportError:
         pass
 
+    # -- Mesh 3c protocol routes: state-delta (LWW) + lock-delta (fencing) --
+    try:
+        from superlocalmemory.server.routes.mesh_state import router as mesh_state_router
+        application.include_router(mesh_state_router)
+    except ImportError:
+        pass
+    try:
+        from superlocalmemory.server.routes.mesh_lock import router as mesh_lock_router
+        application.include_router(mesh_lock_router)
+    except ImportError:
+        pass
+
     # -- Entity routes (Phase D) --
     try:
         from superlocalmemory.server.routes.entity import router as entity_router

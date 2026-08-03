@@ -508,6 +508,64 @@ class RemoteSyncClient:
     # Core sync loop
     # ------------------------------------------------------------------
 
+    def _sync_protocol_from_remote(self) -> None:
+        """3c: pull the peer's state + lock deltas and converge locally.
+
+        - State: deterministic LWW merge (StateSyncer.merge_remote).
+        - Locks: fencing-token resolution (LockCoordinator.resolve).
+
+        Fail-soft: any error is logged and never interrupts the sync loop.
+        Honors the SAME cert pin as peer-sync/send (fail-closed) so a MITM peer
+        cannot feed us forged deltas or harvest the bearer token. Scoped to the
+        "default" profile (single-profile mesh); per-profile sync is a
+        documented follow-up.
+        """
+        if not self._peer_url:
+            return
+        pin_ok, pin_err = self._check_cert_pin(self._peer_url)
+        if not pin_ok:
+            logger.debug("RemoteSyncClient: protocol-sync pin check failed: %s", pin_err)
+            return
+        try:
+            from .lock_protocol import LockCoordinator
+            from .state_sync import StateSyncer
+        except Exception as exc:  # pragma: no cover — modules always present
+            logger.debug("RemoteSyncClient: protocol modules unavailable: %s", exc)
+            return
+
+        profile = "default"
+        headers = self._auth_headers()
+
+        # State delta → LWW merge.
+        try:
+            with self._http_client(timeout=5) as client:
+                resp = client.get(
+                    f"{self._peer_url}/mesh/state/delta", headers=headers, timeout=5
+                )
+                resp.raise_for_status()
+                entries = resp.json().get("entries", [])
+            if entries:
+                StateSyncer(self._broker).merge_remote(profile, entries)
+        except httpx.RequestError as exc:
+            logger.debug("RemoteSyncClient: state-delta sync error: %s", exc)
+        except Exception as exc:
+            logger.debug("RemoteSyncClient: state-delta merge error: %s", exc)
+
+        # Lock delta → fencing-token resolution.
+        try:
+            with self._http_client(timeout=5) as client:
+                resp = client.get(
+                    f"{self._peer_url}/mesh/lock/delta", headers=headers, timeout=5
+                )
+                resp.raise_for_status()
+                locks = resp.json().get("locks", [])
+            if locks:
+                LockCoordinator(self._broker).resolve(profile, locks)
+        except httpx.RequestError as exc:
+            logger.debug("RemoteSyncClient: lock-delta sync error: %s", exc)
+        except Exception as exc:
+            logger.debug("RemoteSyncClient: lock-delta resolve error: %s", exc)
+
     def _sync_loop(self) -> None:
         """Background thread: sync remote peers every 30s, then drain outbox."""
         while not self._stop_event.is_set():
@@ -522,6 +580,12 @@ class RemoteSyncClient:
                     self._drain_outbox()
                 except Exception as exc:
                     logger.debug("RemoteSyncClient: outbox drain error: %s", exc)
+
+                # 3c: converge remote state (LWW) + locks (fencing) each cycle
+                try:
+                    self._sync_protocol_from_remote()
+                except Exception as exc:
+                    logger.debug("RemoteSyncClient: protocol sync error: %s", exc)
 
             # Wait 30s before next sync
             if self._stop_event.wait(30):

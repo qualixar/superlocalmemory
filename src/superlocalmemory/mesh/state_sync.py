@@ -176,6 +176,10 @@ class StateSyncer:
         applied = 0
         skipped = 0
         for entry in remote_entries:
+            # Compute a safe log key BEFORE the try so a non-dict entry can
+            # never make the error handler itself raise (audit P0/P2 — the
+            # handler previously called entry.get() on possibly-non-dict).
+            entry_key = entry.get("key") if isinstance(entry, dict) else repr(entry)
             try:
                 if self._merge_one(profile_id, entry):
                     applied += 1
@@ -184,13 +188,13 @@ class StateSyncer:
             except sqlite3.Error as exc:
                 logger.error(
                     "StateSyncer.merge_remote: DB error on key=%r: %s",
-                    entry.get("key"), exc,
+                    entry_key, exc,
                 )
                 skipped += 1
-            except (KeyError, TypeError, ValueError) as exc:
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
                 logger.error(
                     "StateSyncer.merge_remote: malformed entry key=%r: %s",
-                    entry.get("key"), exc,
+                    entry_key, exc,
                 )
                 skipped += 1
         return {"applied": applied, "skipped": skipped}
@@ -206,14 +210,32 @@ class StateSyncer:
         merge of the same delta computes the identical comparison result and
         takes no action.
         """
+        # Audit P0/P2: a non-dict entry must never crash the merge.
+        if not isinstance(entry, dict):
+            return False
         key = str(entry["key"])
         # Guard: cast revision to int to prevent string lexicographic miscompare
         # (e.g. "10" < "9" as strings but 10 > 9 as ints).
         remote_rev: int = int(entry["revision"])
-        remote_node: str = str(entry.get("node_id", ""))
+        remote_node: str = str(entry.get("node_id", "")).strip()
+        # Audit P1: an empty node_id would be stored as origin_node='' and then
+        # re-exported under THIS node's id, rewriting provenance and corrupting
+        # the tie-break. Refuse an entry without a real origin.
+        if not remote_node:
+            return False
+        # Audit P2: never persist a NULL value as the literal string "None".
+        if entry.get("value") is None:
+            return False
 
         conn = self._open_conn()
+        # Audit P1 (TOCTOU): the read-compare-write MUST be atomic against a
+        # concurrent broker.set_state on the same key. Without a write lock, a
+        # stale local read lets a lower remote revision overwrite a fresher
+        # local write (losing local-highest-revision). BEGIN IMMEDIATE takes the
+        # write lock for the whole critical section.
+        conn.isolation_level = None  # manual transaction control
         try:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT COALESCE(revision, 0) AS revision,"
                 " COALESCE(origin_node, '') AS origin_node"
@@ -233,6 +255,7 @@ class StateSyncer:
             # A strict > means ties-to-local (same rev, same node) → do nothing (idempotent).
             remote_wins: bool = (remote_rev, remote_node) > (local_rev, local_node)
             if not remote_wins:
+                conn.execute("ROLLBACK")
                 return False
 
             # UPSERT: set origin_node = remote_node so subsequent merges of the
@@ -257,7 +280,7 @@ class StateSyncer:
                     remote_node,
                 ),
             )
-            conn.commit()
+            conn.execute("COMMIT")
             return True
         finally:
             conn.close()

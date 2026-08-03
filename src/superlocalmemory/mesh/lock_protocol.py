@@ -160,84 +160,103 @@ class LockCoordinator:
         """Core resolve logic — separated so the outer method can catch all errors."""
         now: str = datetime.now(timezone.utc).isoformat()
 
-        # Build a map of file_path → remote lock for O(1) lookup.
-        # Only include remote locks that are actually live.
+        # Build a map of file_path → strongest LIVE remote claim.
+        # Audit P2: a non-dict entry must never crash resolve (per-entry skip).
+        # Audit P2: if a caller ever concatenates multiple peers' deltas, keep
+        # the winner under the SAME total order (token, node_id) rather than
+        # letting a later, weaker claim overwrite a stronger one.
         live_remote: dict[str, dict] = {}
         for rlock in remote_locks:
-            fp = rlock.get("file_path", "")
-            if not fp:
+            if not isinstance(rlock, dict):
                 continue
-            if self._dict_is_live(rlock, now):
+            fp = rlock.get("file_path", "")
+            if not fp or not self._dict_is_live(rlock, now):
+                continue
+            existing = live_remote.get(fp)
+            if existing is None or self._lock_key(rlock) > self._lock_key(existing):
                 live_remote[fp] = rlock
 
         if not live_remote:
             return {"yielded": [], "kept": 0}
 
-        # Fetch local rows for the contested file_paths only.
+        # Fetch local rows for the contested file_paths only — including
+        # expires_at (audit P1: an EXPIRED local row must not win over a live
+        # remote claim just because it carries a higher token).
         file_paths: tuple[str, ...] = tuple(live_remote.keys())
         placeholders = ",".join("?" * len(file_paths))
-        conn: sqlite3.Connection | None = None
+        conn: sqlite3.Connection = sqlite3.connect(self._db_path, timeout=5.0)
         try:
-            conn = sqlite3.connect(self._db_path, timeout=5.0)
             conn.row_factory = sqlite3.Row
-            local_rows = conn.execute(
-                f"SELECT file_path, COALESCE(fencing_token, 0) AS fencing_token"
-                f" FROM mesh_locks WHERE profile_id=? AND file_path IN ({placeholders})",
-                (profile_id, *file_paths),
-            ).fetchall()
-        except sqlite3.Error as exc:
-            logger.error(
-                "resolve: failed to query local locks for profile %r: %s",
-                profile_id, exc,
-            )
-            if conn is not None:
-                conn.close()
-            return {"yielded": [], "kept": 0}
+            try:
+                local_rows = conn.execute(
+                    f"SELECT file_path, expires_at,"
+                    f" COALESCE(fencing_token, 0) AS fencing_token"
+                    f" FROM mesh_locks WHERE profile_id=? AND file_path IN ({placeholders})",
+                    (profile_id, *file_paths),
+                ).fetchall()
+            except sqlite3.Error as exc:
+                logger.error(
+                    "resolve: failed to query local locks for profile %r: %s",
+                    profile_id, exc,
+                )
+                return {"yielded": [], "kept": 0}
 
-        # Index local rows.
-        local_by_path: dict[str, dict] = {
-            row["file_path"]: {"fencing_token": int(row["fencing_token"])}
-            for row in local_rows
-        }
+            local_by_path: dict[str, dict] = {
+                row["file_path"]: {
+                    "fencing_token": int(row["fencing_token"]),
+                    "expires_at": row["expires_at"],
+                }
+                for row in local_rows
+            }
 
-        yielded: list[str] = []
-        kept: int = 0
+            yielded: list[str] = []
+            kept: int = 0
 
-        for fp, rlock in live_remote.items():
-            local = local_by_path.get(fp)
-            if local is None:
-                # No local row — nothing to yield or keep.
-                continue
+            for fp, rlock in live_remote.items():
+                local = local_by_path.get(fp)
+                if local is None:
+                    continue  # No local row — nothing to yield or keep.
 
-            if self._remote_wins(rlock, local):
-                # Delete the contested local row so our token goes stale.
+                snapshot_token: int = local["fencing_token"]
+                local_live: bool = self._row_is_live(local["expires_at"], now)
+
+                # Yield when: (a) the local row is EXPIRED garbage while a live
+                # remote claim exists (audit P1 — clean it up so its stale token
+                # can't pass the fence), or (b) the live remote strictly wins the
+                # total order.
+                if local_live and not self._remote_wins(rlock, local):
+                    kept += 1
+                    continue
+
+                # Token-CONDITIONAL delete (audit P1/TOCTOU): only delete the
+                # row we compared against. If the local node reacquired to a new
+                # (higher) token between snapshot and now, the predicate misses
+                # and we do NOT wipe the fresher live lock.
                 try:
-                    conn.execute(
-                        "DELETE FROM mesh_locks WHERE profile_id=? AND file_path=?",
-                        (profile_id, fp),
+                    cur = conn.execute(
+                        "DELETE FROM mesh_locks WHERE profile_id=? AND file_path=?"
+                        " AND COALESCE(fencing_token, 0)=?",
+                        (profile_id, fp, snapshot_token),
                     )
                     conn.commit()
-                    logger.info(
-                        "resolve: yielded lock %r to remote node %r (token %s > %s)",
-                        fp,
-                        rlock.get("node_id", "?"),
-                        self._safe_token(rlock),
-                        local["fencing_token"],
-                    )
-                    yielded.append(fp)
+                    if cur.rowcount and cur.rowcount > 0:
+                        logger.info(
+                            "resolve: yielded lock %r to remote node %r "
+                            "(remote (tok=%s,node=%s) vs local (tok=%s), local_live=%s)",
+                            fp, rlock.get("node_id", "?"), self._safe_token(rlock),
+                            rlock.get("node_id", "?"), snapshot_token, local_live,
+                        )
+                        yielded.append(fp)
+                    # rowcount==0 → lost the race (reacquired); leave it, don't count.
                 except sqlite3.Error as exc:
                     logger.error(
                         "resolve: failed to yield lock %r for profile %r: %s",
                         fp, profile_id, exc,
                     )
-                    # Do not add to yielded — row may still exist.
-            else:
-                kept += 1
 
-        if conn is not None:
+            return {"yielded": yielded, "kept": kept}
+        finally:
             conn.close()
-
-        return {"yielded": yielded, "kept": kept}
 
     @staticmethod
     def _row_is_live(expires_at: str | None, now_iso: str) -> bool:
@@ -265,6 +284,10 @@ class LockCoordinator:
             return int(lock.get("fencing_token", 0))
         except (TypeError, ValueError):
             return 0
+
+    def _lock_key(self, lock: dict) -> tuple[int, str]:
+        """Total-order key ``(fencing_token, node_id)`` for comparing claims."""
+        return (self._safe_token(lock), str(lock.get("node_id", "")))
 
     def _remote_wins(self, remote: dict, local: dict) -> bool:
         """Total order: ``(fencing_token DESC, node_id DESC)``.

@@ -548,11 +548,17 @@ class MeshBroker:
                     return {"ok": False,
                             "error": f"revision mismatch: expected {expected_revision}, current {current}"}
             conn.execute(
-                "INSERT INTO mesh_state (profile_id, key, value, set_by, updated_at, revision)"
-                " VALUES (?, ?, ?, ?, ?, 1)"
+                "INSERT INTO mesh_state"
+                " (profile_id, key, value, set_by, updated_at, revision, origin_node)"
+                " VALUES (?, ?, ?, ?, ?, 1, '')"
                 " ON CONFLICT(profile_id, key) DO UPDATE SET value=excluded.value,"
                 " set_by=excluded.set_by, updated_at=excluded.updated_at,"
-                " revision=COALESCE(mesh_state.revision, 0) + 1",
+                " revision=COALESCE(mesh_state.revision, 0) + 1,"
+                # 3c-1: a local write resets provenance to THIS node ('' = local).
+                # Without this, a local set_state after a remote merge would keep
+                # the remote's origin_node and re-export under the wrong identity
+                # → permanent same-(revision,node) divergence (audit P0-1).
+                " origin_node=''",
                 (profile_id, key, value, set_by, now),
             )
             conn.commit()

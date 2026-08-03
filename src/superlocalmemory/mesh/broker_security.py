@@ -326,6 +326,9 @@ _SCHEMA_ALTERS = (
     "ALTER TABLE mesh_locks ADD COLUMN fencing_token INTEGER DEFAULT 0",
     "ALTER TABLE mesh_state ADD COLUMN revision INTEGER DEFAULT 0",
     "ALTER TABLE mesh_peers ADD COLUMN peer_key TEXT",  # SEC-4: per-peer HMAC key
+    # 3c-1: LWW provenance. '' = local-origin (set by broker.set_state);
+    # a merged row stores the winning remote node_id. See mesh/state_sync.py.
+    "ALTER TABLE mesh_state ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''",
 )
 _SENT_OPS_DDL = """
 CREATE TABLE IF NOT EXISTS mesh_sent_ops (
