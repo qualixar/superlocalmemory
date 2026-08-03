@@ -145,12 +145,18 @@ def prestage_context(
             logger.warning("prestage_context: invalid as_of %r; ignoring", as_of)
 
     try:
-        # Decision A2 (LLD §Module 8): try 4-arg call first; fall back to 3-arg
-        # for legacy recall_fn callers that don't accept as_of. This avoids
-        # breaking any existing callers while enabling the new as_of path.
+        # Decision A2 (LLD §Module 8) + audit P2 (CRIT-3): decide arity by
+        # INSPECTING the callable, not by catching TypeError. A bare
+        # `except TypeError` would silently swallow a genuine TypeError raised
+        # inside a 4-arg recall_fn body and drop as_of (silent wrong PIT view).
+        import inspect as _inspect
         try:
+            _arity = len(_inspect.signature(recall_fn).parameters)
+        except (TypeError, ValueError):
+            _arity = 4  # unintrospectable (partial/builtin) → assume as_of-capable
+        if _arity >= 4:
             raw = recall_fn(query, limit, profile_id, _as_of) or []
-        except TypeError:
+        else:
             raw = recall_fn(query, limit, profile_id) or []
     except Exception as exc:
         logger.warning("prestage_context recall failed: %s", exc)

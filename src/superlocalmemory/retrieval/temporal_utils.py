@@ -9,9 +9,10 @@ STORED TIMESTAMP FORMAT (empirically verified, Phase 4b):
     via datetime.now(timezone.utc).isoformat() which produces:
         "YYYY-MM-DDTHH:MM:SS.microseconds+00:00"  (Python isoformat, +00:00 suffix)
 
-    normalize_as_of() outputs "YYYY-MM-DDTHH:MM:SS+00:00" (no microseconds, same
-    +00:00 suffix) so that SQL string comparisons ("system_expired_at <= as_of")
-    are lexicographically correct:
+    normalize_as_of() outputs canonical datetime.isoformat() (preserving any
+    sub-second precision, same +00:00 suffix as the stored values) so that SQL
+    string comparisons ("system_expired_at <= as_of") are lexicographically
+    correct AND the inclusive boundary round-trips (audit P0/CRIT-1):
 
         "2026-03-01T00:00:00.123456+00:00" <= "2026-06-01T00:00:00+00:00"
         → first 10 chars "2026-03-01" < "2026-06-01" → TRUE  ✓
@@ -49,11 +50,18 @@ def normalize_as_of(s: object) -> Optional[str]:
     Returns None (not empty string) on invalid input so callers can
     distinguish "no as_of" from "bad as_of" and reject or ignore accordingly.
 
-    Output format: "YYYY-MM-DDTHH:MM:SS+00:00"
-        - No microseconds (user input seldom has sub-second precision)
-        - +00:00 suffix matches the format produced by datetime.now(UTC).isoformat()
-          (the stored format in fact_temporal_validity), ensuring SQL string
-          comparisons are correct (see module docstring for analysis).
+    Output format: canonical UTC ISO-8601 via datetime.isoformat():
+        - "YYYY-MM-DDTHH:MM:SS+00:00", OR
+          "YYYY-MM-DDTHH:MM:SS.ffffff+00:00" when the input carries sub-second
+          precision.
+        - Audit P0 (CRIT-1): sub-second precision is PRESERVED (not stripped) so
+          a caller can round-trip a real stored system_expired_at / valid_until
+          value — always written with microseconds by datetime.now(UTC).isoformat()
+          — and hit the inclusive boundary (`system_expired_at <= as_of`) EXACTLY.
+          Stripping microseconds made that boundary unreachable and silently
+          wrong on both temporal axes.
+        - +00:00 suffix matches the stored format so SQL string comparisons are
+          lexicographically correct (see module docstring for analysis).
 
     Requirements:
         Python >=3.11 (fromisoformat handles "Z" suffix natively). The
@@ -82,14 +90,16 @@ def normalize_as_of(s: object) -> Optional[str]:
                 dt = dt.replace(tzinfo=timezone.utc)
             else:
                 dt = dt.astimezone(timezone.utc)
-            return dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            # Audit P0: isoformat() preserves microseconds when present so the
+            # value round-trips against microsecond-bearing stored timestamps.
+            return dt.isoformat()
         except ValueError:
             continue
 
     # Date-only "YYYY-MM-DD" — treat as midnight UTC.
     try:
         dt = datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        return dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        return dt.isoformat()
     except ValueError:
         return None
 

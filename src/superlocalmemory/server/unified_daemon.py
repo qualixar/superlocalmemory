@@ -3503,10 +3503,16 @@ def _register_daemon_routes(application: FastAPI) -> None:
             from superlocalmemory.retrieval.temporal_utils import normalize_as_of
             _as_of_norm = normalize_as_of(_as_of_raw)
             if _as_of_norm is None:
-                return {
-                    "error": "invalid_as_of",
-                    "message": f"Cannot parse as_of: {_as_of_raw!r}",
-                }
+                # Audit P1a: hard-reject with HTTP 400 (a bare dict serializes as
+                # 200, so status-code-only clients would miss the rejection).
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    {
+                        "error": "invalid_as_of",
+                        "message": f"Cannot parse as_of: {_as_of_raw!r}",
+                    },
+                    status_code=400,
+                )
             as_of = _as_of_norm
         else:
             as_of = ""

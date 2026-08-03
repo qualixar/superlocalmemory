@@ -241,6 +241,33 @@ class TestGetInvalidatedFactIdsWithAsOf:
         assert "F_rt" in r_after, (
             "Fact IS superseded (now); should appear in invalidated set at 2099."
         )
+        # (d) AUDIT P0/CRIT-1 — the killer case the far past/future checks CANNOT
+        # catch: round-trip the EXACT microsecond-bearing stored value as as_of.
+        # The inclusive boundary (system_expired_at <= as_of) only holds if
+        # normalize_as_of PRESERVES microseconds. This is the test that fails if
+        # microseconds are stripped.
+        assert "." in stored_ts.split("+")[0], (
+            "real write path must produce microsecond precision"
+        )
+        exact = normalize_as_of(stored_ts)
+        assert exact == stored_ts, (
+            "normalize_as_of must preserve sub-second precision so a real stored "
+            "supersession instant round-trips to the inclusive boundary (P0)."
+        )
+        assert "F_rt" in db.get_invalidated_fact_ids(["F_rt"], "default", as_of=exact), (
+            "as_of == exact stored supersession must be inclusive (fact demoted)."
+        )
+        # ±1s around the real (microsecond-bearing) supersession instant
+        from datetime import datetime as _dt, timedelta as _td
+        base = _dt.fromisoformat(stored_ts)
+        before = normalize_as_of((base - _td(seconds=1)).isoformat())
+        after = normalize_as_of((base + _td(seconds=1)).isoformat())
+        assert "F_rt" not in db.get_invalidated_fact_ids(["F_rt"], "default", as_of=before), (
+            "1s before the supersession → fact still valid → not demoted."
+        )
+        assert "F_rt" in db.get_invalidated_fact_ids(["F_rt"], "default", as_of=after), (
+            "1s after the supersession → fact demoted."
+        )
 
 
 # ============================================================================
@@ -588,6 +615,31 @@ class TestPrestageContextWithAsOf:
         )
         assert call_count[0] == 1, "recall_fn must be called exactly once (fallback)"
         assert result.get("error") is None
+
+    def test_4arg_internal_typeerror_not_swallowed_as_3arg(self):
+        """AUDIT P2/CRIT-3: a genuine TypeError raised INSIDE a 4-arg recall_fn
+        must NOT be silently swallowed and retried as a 3-arg call (which would
+        drop as_of and give a wrong point-in-time view). With arity inspection
+        the fn is invoked exactly once and the error surfaces honestly.
+        """
+        from superlocalmemory.mcp.tools_context import prestage_context
+
+        call_count = [0]
+
+        def recall_fn_4arg(q, lim, pid, as_of=None):
+            call_count[0] += 1
+            raise TypeError("internal bug, NOT an arity mismatch")
+
+        result = prestage_context(
+            "query",
+            limit=2,
+            profile_id="default",
+            session_id="s1",
+            recall_fn=recall_fn_4arg,
+            as_of="2024-01-01T00:00:00Z",
+        )
+        assert call_count[0] == 1, "4-arg fn called exactly once (no silent 3-arg retry)"
+        assert result.get("error") == "recall_error"
 
 
 # ============================================================================

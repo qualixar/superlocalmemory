@@ -36,8 +36,8 @@ When ``as_of`` is packed into the filter context dict (``{"as_of": "..."}``),
 event-time demotion is always applied regardless of
 ``include_expired_in_history``, because the caller explicitly requested a
 point-in-time view. Facts not yet valid at ``as_of`` (``valid_from > as_of``)
-and facts already expired at ``as_of`` (``valid_until < as_of``) are both
-demoted.
+and facts already expired at ``as_of`` (``valid_until <= as_of``, half-open) are
+both demoted.
 
 **Demotion priority:**
 - System-invalidated facts: score × ``superseded_demotion_factor`` (0.25).
