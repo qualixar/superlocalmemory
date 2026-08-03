@@ -88,6 +88,9 @@ _REQUIRED_MCP_GATES: frozenset[str] = frozenset({
     "slm_compress",
     # Code graph (tools_code_graph.py)
     "update_code_graph",
+    # Scoped reads (Tranche C — tools_core.py)
+    "recall",
+    "search",
 })
 
 
@@ -417,11 +420,47 @@ def coverage_self_check(
         logger.warning(full)
 
 
+def enforce_read_scope(
+    include_global: "bool | None",
+    include_shared: "bool | None",
+    *,
+    registry: "OperationPolicyRegistry | None" = None,
+) -> "tuple[bool | None, bool | None]":
+    """Clamp cross-profile read flags to the RECALL policy's ``allow_cross_profile``.
+
+    In personal mode the OWNER is unrestricted — flags pass through unchanged.
+    In enterprise mode with ``allow_cross_profile=False`` (the default), any
+    explicit ``True`` is silently clamped to ``False`` to prevent client
+    escalation beyond the configured scope authority.  ``None`` (not specified)
+    is left alone so the server default applies.
+    """
+    deployment = _resolve_deployment()
+    if not deployment.is_enterprise:
+        return include_global, include_shared
+
+    reg = registry if registry is not None else _DEFAULT_REGISTRY
+    from superlocalmemory.core.operation_request import OperationKind as _OK
+    policy = reg._policies.get(_OK.RECALL)
+    if policy is None or policy.allow_cross_profile:
+        return include_global, include_shared
+
+    clamped_global = False if include_global is True else include_global
+    clamped_shared = False if include_shared is True else include_shared
+    if clamped_global is not include_global or clamped_shared is not include_shared:
+        logger.debug(
+            "admission: enforce_read_scope clamped cross-profile flags "
+            "(include_global=%s→%s, include_shared=%s→%s)",
+            include_global, clamped_global, include_shared, clamped_shared,
+        )
+    return clamped_global, clamped_shared
+
+
 __all__ = [
     "AdmissionDenied",
     "admit",
     "admits",
     "coverage_self_check",
+    "enforce_read_scope",
     "gate_cli_mutation",
     "resolve_actor",
     "_resolve_deployment",

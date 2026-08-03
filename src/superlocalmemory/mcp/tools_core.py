@@ -263,6 +263,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             }
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @admits(OperationKind.RECALL)
     async def recall(
         query: str, limit: int = CANONICAL_RECALL_LIMIT, agent_id: str = "mcp_client",
         session_id: str = "", fast: bool | None = None,
@@ -363,12 +364,15 @@ def register_core_tools(server, get_engine: Callable) -> None:
             #
             # V3.4.26: WorkerPool now concurrent — parallel calls no longer
             # block behind a single threading.Lock. See worker_pool.py.
+            from superlocalmemory.core.admission import enforce_read_scope
+            _incl_global, _incl_shared = enforce_read_scope(include_global, include_shared)
+
             def _recall_via_daemon_pool():
                 pool = choose_pool()
                 return pool.recall(
                     query, limit=limit, session_id=effective_sid,
-                    fast=fast, include_global=include_global,
-                    include_shared=include_shared, window=window or None,
+                    fast=fast, include_global=_incl_global,
+                    include_shared=_incl_shared, window=window or None,
                     as_of=as_of,
                 )
 
@@ -398,6 +402,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @admits(OperationKind.RECALL)
     async def search(query: str, limit: int = 10) -> dict:
         """Full-text search across memories using FTS5 with BM25 ranking."""
         try:
