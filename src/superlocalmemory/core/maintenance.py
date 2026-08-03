@@ -130,6 +130,8 @@ def run_maintenance(
         "langevin_backfilled": 0,
         "langevin_updated": 0,
         "fisher_coupled": 0,
+        "fisher_posterior_updated": 0,       # P1-9: Fisher bayesian_update on access
+        "ebbinghaus_coupled": 0,             # Phase 5: Ebbinghaus-Langevin coupling
         "sheaf_checked": 0,
         "entity_summaries_consolidated": 0,  # V3.4.40
         "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
@@ -329,6 +331,84 @@ def run_maintenance(
             counts["fisher_coupled"] = coupled_count
         except Exception as exc:
             logger.warning("Fisher-Langevin coupling failed: %s", exc)
+
+    # 1c. Fisher posterior update (P1-9): tighten variance for accessed facts.
+    # Each access event is a Bayesian observation: 1/new = 1/old + 1/obs.
+    # Using obs_var = old_var (identical-prior update) halves variance per call,
+    # monotonically tightening well-confirmed memories' distributions.
+    # Gate: config.math.fisher_bayesian_update (default True).
+    if config.math.fisher_bayesian_update:
+        try:
+            from superlocalmemory.math.fisher import FisherRaoMetric
+
+            frm = FisherRaoMetric(temperature=config.math.fisher_temperature)
+            posterior_count = 0
+            for f in facts:
+                if f.fisher_variance is None or f.access_count == 0:
+                    continue
+                # Unit observation variance: each access provides one unit of
+                # information. Precision increases by 1/prior per update.
+                # Using obs_var = prior_var would halve variance every run
+                # (geometric decay → underflow in O(50) runs). Unit obs_var
+                # gives v_new = v / (1+v), converging ~1000x more slowly.
+                dim = len(f.fisher_variance)
+                obs_var = [1.0] * dim
+                new_var = frm.bayesian_update(f.fisher_variance, obs_var)
+                db.update_fact(f.fact_id, {"fisher_variance": new_var})
+                posterior_count += 1
+            counts["fisher_posterior_updated"] = posterior_count
+        except Exception as exc:
+            logger.warning("Fisher posterior update failed: %s", exc)
+
+    # 1d. Ebbinghaus-Langevin coupling (Phase 5 — P1-ELC): combine forgetting
+    # drift with Fisher-Langevin dynamics to produce a unified lifecycle state.
+    # Updates the lifecycle zone of each fact based on Ebbinghaus retention.
+    # Gate: config.math.ebbinghaus_langevin_coupling_enabled (default False).
+    if config.math.ebbinghaus_langevin_coupling_enabled:
+        try:
+            from superlocalmemory.dynamics.ebbinghaus_langevin_coupling import (
+                EbbinghausLangevinCoupling,
+            )
+            from superlocalmemory.dynamics.fisher_langevin_coupling import (
+                FisherLangevinCoupling,
+            )
+            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+            from superlocalmemory.math.langevin import LangevinDynamics
+
+            ebbinghaus = EbbinghausCurve(config.forgetting)
+            langevin = LangevinDynamics(
+                dim=_LANGEVIN_DIM,
+                dt=config.math.langevin_dt,
+                temperature=config.math.langevin_temperature,
+            )
+            fisher_coupling = FisherLangevinCoupling(
+                base_temperature=config.math.langevin_temperature,
+            )
+            coupling = EbbinghausLangevinCoupling(
+                ebbinghaus, langevin, fisher_coupling, config.forgetting,
+            )
+            import numpy as np
+            elc_count = 0
+            for f in facts:
+                if f.fisher_variance is None or f.langevin_position is None:
+                    continue
+                age_days = _age_days(f.created_at)
+                hours_since = age_days * 24.0
+                state = coupling.compute_coupled_state(
+                    fact_id=f.fact_id,
+                    fisher_variance=np.asarray(f.fisher_variance, dtype=np.float64),
+                    langevin_radius=float(np.linalg.norm(f.langevin_position)),
+                    access_count=f.access_count,
+                    importance=f.importance,
+                    confirmation_count=f.evidence_count,
+                    emotional_salience=0.0,
+                    hours_since_last_access=hours_since,
+                )
+                db.update_fact(f.fact_id, {"lifecycle": state.lifecycle_zone})
+                elc_count += 1
+            counts["ebbinghaus_coupled"] = elc_count
+        except Exception as exc:
+            logger.warning("Ebbinghaus-Langevin coupling failed: %s", exc)
 
     # 2. Sheaf batch consistency on recent facts (last 24h)
     if config.math.sheaf_at_encoding:

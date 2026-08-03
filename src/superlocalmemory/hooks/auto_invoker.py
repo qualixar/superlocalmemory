@@ -516,5 +516,6 @@ class AutoInvoker:
                 self._config.profile_id,
             )
         except Exception as exc:
-            logger.debug("Soft prompt injection failed: %s", exc)
+            # warning — not debug — so unexpected failures surface in prod logs
+            logger.warning("Soft prompt injection failed: %s", exc)
             return ""

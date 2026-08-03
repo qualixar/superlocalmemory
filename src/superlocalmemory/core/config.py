@@ -352,6 +352,12 @@ class MathConfig:
 
     # Hopfield
 
+    # Ebbinghaus-Langevin coupling in maintenance (Phase 5 — P1-ELC)
+    # When True, the maintenance cycle computes the combined Ebbinghaus-Langevin
+    # coupled state for each fact and writes back the lifecycle zone.
+    # Defaults to False to preserve existing maintenance behaviour.
+    ebbinghaus_langevin_coupling_enabled: bool = False
+
     # Sheaf (at encoding time, NOT retrieval)
     sheaf_at_encoding: bool = True
     sheaf_contradiction_threshold: float = 0.45

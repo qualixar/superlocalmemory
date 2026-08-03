@@ -2,10 +2,13 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3
 
-"""SuperLocalMemory V3.3 -- Hopfield Associative Memory (6th Retrieval Channel).
+"""SuperLocalMemory V3.3 -- Hopfield Associative Memory (6th of 6 Retrieval Channels).
 
 Modern Continuous Hopfield Network retrieval channel based on
 Ramsauer et al. (2020): "Hopfield Networks is All You Need".
+
+Channel lineup (6 total): semantic, BM25, entity_graph, temporal,
+spreading_activation, hopfield (this module).
 
 The Hopfield channel excels at pattern completion for vague/noisy queries.
 It operates on the same embedding space as the semantic channel but uses
@@ -14,7 +17,7 @@ an energy-based attention mechanism instead of cosine similarity.
 Key features:
   - Full memory matrix path for stores < 10K facts
   - ANN pre-filter path for stores 10K-100K (VectorStore KNN -> Hopfield refinement)
-  - Skip path for stores > 100K (other 5 channels are sufficient)
+  - Skip path for stores > 100K (other 5 non-Hopfield channels are sufficient)
   - TTL-based matrix cache to avoid rebuilding every query
   - Returns [] on any error (HR-06)
 
@@ -38,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class HopfieldChannel:
-    """6th retrieval channel: Modern Hopfield associative memory.
+    """6th of 6 retrieval channels: Modern Hopfield associative memory.
 
     Implements the RetrievalChannel protocol::
 
@@ -47,6 +50,9 @@ class HopfieldChannel:
     The channel builds an in-memory matrix from all fact embeddings,
     computes Hopfield attention scores (softmax of scaled dot products),
     then ranks facts by similarity to the completed pattern.
+
+    Six-channel retrieval model: semantic, BM25, entity_graph, temporal,
+    spreading_activation, hopfield (this channel).
 
     Routing logic (per LLD Section 2.2):
       - n > skip_threshold (100K): return [] immediately
