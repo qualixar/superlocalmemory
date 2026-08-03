@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from mcp.types import ToolAnnotations
+
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
@@ -94,7 +96,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 2. get_lifecycle_status
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_lifecycle_status(limit: int = 50) -> dict:
         """Get lifecycle state distribution for stored memories.
 
@@ -217,7 +219,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 5. get_behavioral_patterns
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_behavioral_patterns(limit: int = 20) -> dict:
         """Get detected behavioral patterns for the active profile.
 
@@ -246,7 +248,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 6. audit_trail
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def audit_trail(limit: int = 50) -> dict:
         """Get compliance audit trail for the active profile.
 

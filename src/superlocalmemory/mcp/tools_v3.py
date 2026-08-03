@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from mcp.types import ToolAnnotations
+
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
@@ -27,7 +29,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 0. get_version (so IDEs can check compatibility)
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_version() -> dict:
         """Get SuperLocalMemory version, Python version, and platform info."""
         try:
@@ -109,7 +111,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 2. get_mode
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_mode() -> dict:
         """Get current operating mode and its capabilities.
 
@@ -138,7 +140,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 3. health
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def health() -> dict:
         """Get system health including math layer status.
 
@@ -222,7 +224,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 4. consistency_check
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def consistency_check(limit: int = 100) -> dict:
         """Run sheaf consistency check on stored memories.
 
@@ -279,7 +281,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 5. recall_trace
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def recall_trace(query: str, limit: int = 10) -> dict:
         """Recall with per-channel score breakdown.
 

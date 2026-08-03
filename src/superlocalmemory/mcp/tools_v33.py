@@ -386,7 +386,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 6. get_retention_stats — Memory retention zone distribution
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_retention_stats() -> dict:
         """Get memory retention statistics (zone distribution, decay rates).
 

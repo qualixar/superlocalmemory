@@ -703,7 +703,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             logger.exception("switch_profile failed")
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def backup_status() -> dict:
         """Get backup system status, last backup time, and available backup files."""
         try:
@@ -718,7 +718,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             logger.exception("backup_status failed")
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def memory_used() -> dict:
         """Get memory usage breakdown by fact type and lifecycle state."""
         try:
@@ -743,7 +743,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             logger.exception("memory_used failed")
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_learned_patterns(pattern_type: str = "", limit: int = 20) -> dict:
         """Get learned behavioral patterns (interests, refinements, archival habits)."""
         try:
@@ -921,7 +921,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             logger.exception("update_memory failed")
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_attribution() -> dict:
         """Get system attribution: author, version, license, and provenance metadata."""
         return {

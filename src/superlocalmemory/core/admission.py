@@ -102,6 +102,8 @@ _REQUIRED_MCP_GATES: frozenset[str] = frozenset({
     "build_code_graph",
     "apply_refactor",
     "link_memory_to_code",
+    # Tranche G — mesh_inbox marks messages as read (POST to mesh broker)
+    "mesh_inbox",
 })
 
 

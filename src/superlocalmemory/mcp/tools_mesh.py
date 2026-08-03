@@ -314,6 +314,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         return result
 
     @server.tool()
+    @admits(OperationKind.MESH_SEND)
     async def mesh_inbox() -> dict:
         """Read messages sent to this session.
 

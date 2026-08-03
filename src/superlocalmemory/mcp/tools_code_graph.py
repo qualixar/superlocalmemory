@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from mcp.types import ToolAnnotations
+
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.security_primitives import (
@@ -394,7 +396,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 3: get_blast_radius
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_blast_radius(
         changed_files: str,
         max_depth: int = 2,
@@ -456,7 +458,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 4: get_review_context
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_review_context(
         changed_files: str,
         include_source: bool = True,
@@ -513,7 +515,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
         "tests_for", "inherits_from", "inherited_by", "contains",
     })
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def query_graph(
         pattern: str,
         target: str = "",
@@ -612,7 +614,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 6: semantic_search_code
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def semantic_search_code(
         query: str,
         kind: str = "",
@@ -662,7 +664,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 7: list_graph_stats
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def list_graph_stats() -> dict:
         """Get code graph size and health metrics."""
         try:
@@ -709,7 +711,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 8: find_large_functions
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def find_large_functions(
         threshold: int = 50,
         limit: int = 20,
@@ -756,7 +758,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 9: list_flows
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def list_flows(
         sort_by: str = "criticality",
         limit: int = 20,
@@ -813,7 +815,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 10: get_flow
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_flow(
         flow_name: str,
     ) -> dict:
@@ -864,7 +866,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 11: get_affected_flows
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_affected_flows(
         changed_files: str,
     ) -> dict:
@@ -924,7 +926,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 12: list_communities
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def list_communities(
         sort_by: str = "cohesion",
         limit: int = 20,
@@ -971,7 +973,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 13: get_community
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_community(
         community_id: int,
     ) -> dict:
@@ -1018,7 +1020,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 14: get_architecture_overview
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_architecture_overview() -> dict:
         """Get high-level architecture map showing communities and their relationships."""
         try:
@@ -1067,7 +1069,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 15: detect_changes
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def detect_changes(
         base: str = "HEAD~1",
     ) -> dict:
@@ -1126,7 +1128,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 16: refactor_preview
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def refactor_preview(
         action: str,
         target: str,
@@ -1255,7 +1257,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 18 (BRIDGE): code_memory_search
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def code_memory_search(
         code_entity: str,
         link_type: str = "",
@@ -1325,7 +1327,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 19 (BRIDGE): code_entity_history
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def code_entity_history(
         code_entity: str,
     ) -> dict:
@@ -1395,7 +1397,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 20 (BRIDGE): enrich_blast_radius
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def enrich_blast_radius(
         changed_files: str,
         max_depth: int = 2,
@@ -1469,7 +1471,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
     # Tool 21 (BRIDGE): code_stale_check
     # ==================================================================
 
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def code_stale_check(
         scope: str = "all",
     ) -> dict:

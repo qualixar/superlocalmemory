@@ -2146,13 +2146,17 @@ async def lifespan(application: FastAPI):
     # Uses _resolve_deployment() (fail-closed) rather than application.state.deployment
     # (which may be None if the load failed) so an enterprise box with a broken
     # config never silently skips a hard coverage check.
+    # G-tranche: pass the real MCP server so dynamic tool enumeration catches
+    # any newly-added tool that lacks both @admits and readOnlyHint=True.
     try:
         from superlocalmemory.core.admission import (
             _resolve_deployment as _adm_resolve,
             coverage_self_check,
         )
+        from superlocalmemory.mcp import server as _mcp_server_mod
         _cov_deployment = _adm_resolve()
-        coverage_self_check(_cov_deployment)
+        _mcp_server = getattr(_mcp_server_mod, "server", None)
+        coverage_self_check(_cov_deployment, server=_mcp_server)
     except RuntimeError as _cov_exc:
         raise
     except Exception as _cov_exc:

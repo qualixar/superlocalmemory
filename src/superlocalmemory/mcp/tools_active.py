@@ -22,6 +22,8 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Callable
 
+from mcp.types import ToolAnnotations
+
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
@@ -148,7 +150,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 1. session_init — Auto-recall project context at session start
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def session_init(
         project_path: str = "",
         query: str = "",
