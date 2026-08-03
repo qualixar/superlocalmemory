@@ -421,7 +421,7 @@ def _init_prompt_injector(config: SLMConfig, db: DatabaseManager) -> Any | None:
         generator = SoftPromptGenerator(config.parameterization)
         return PromptInjector(db=db, generator=generator, config=config.parameterization)
     except Exception as exc:
-        logger.debug("PromptInjector init failed (non-fatal): %s", exc)
+        logger.warning("PromptInjector init failed — soft-prompt injection disabled: %s", exc)
         return None
 
 
@@ -453,7 +453,7 @@ def _init_auto_invoker(
             prompt_injector=prompt_injector,
         )
     except Exception as exc:
-        logger.debug("AutoInvoker init failed: %s", exc)
+        logger.warning("AutoInvoker init failed — auto-invoke disabled: %s", exc)
         return None
 
 

@@ -471,8 +471,17 @@ def run_maintenance(
                         state.lifecycle_zone, f.fact_id,
                     )
                     continue
-                db.update_fact(f.fact_id, {"lifecycle": zone})
+                # Count fact as processed regardless of whether we write.
                 elc_count += 1
+                # Skip write when zone hasn't changed — avoids O(N) UPDATEs per tick.
+                current_zone = (
+                    f.lifecycle.value
+                    if hasattr(f.lifecycle, "value")
+                    else str(f.lifecycle)
+                )
+                if zone == current_zone:
+                    continue
+                db.update_fact(f.fact_id, {"lifecycle": zone})
             counts["ebbinghaus_coupled"] = elc_count
         except Exception as exc:
             logger.warning("Ebbinghaus-Langevin coupling failed: %s", exc)
