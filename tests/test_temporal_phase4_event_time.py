@@ -75,7 +75,10 @@ def _make_mock_db(
     _inv = invalid_ids or set()
     _evt = event_expired_ids or set()
 
-    def _get_invalid(fids: list[str], pid: str) -> set[str]:
+    def _get_invalid(fids: list[str], pid: str, as_of: str | None = None) -> set[str]:
+        # Phase 4: the filter now forwards as_of to the transaction-time axis;
+        # the mock must accept it (mirrors _get_event_expired). Without this the
+        # filter's Axis-1 call raises, is swallowed, and no demotion is applied.
         if invalidated_raises:
             raise RuntimeError("simulated DB error")
         return {f for f in fids if f in _inv}
@@ -313,7 +316,9 @@ class TestTemporalValidityFilterEventTime:
         assert scores["f_old"] == pytest.approx(0.8 * 0.5)
         db.get_event_time_expired_fact_ids.assert_called_once()
         _, call_kwargs = db.get_event_time_expired_fact_ids.call_args
-        assert call_kwargs.get("as_of") == "2020-01-01T00:00:00Z"
+        # Phase 4: the filter UTC-normalizes as_of at its boundary before
+        # forwarding, so the DB receives canonical "+00:00" (not the raw "Z").
+        assert call_kwargs.get("as_of") == "2020-01-01T00:00:00+00:00"
 
     def test_f5_not_yet_valid_demoted_on_as_of(self) -> None:
         """F-5: fact not-yet-valid at as_of is demoted (valid_from > as_of path)."""
@@ -474,7 +479,8 @@ class TestEngineAsOfThreading:
         filt.filter({"s": [("f1", 0.9)]}, "default", context)
         db.get_event_time_expired_fact_ids.assert_called_once()
         _, call_kwargs = db.get_event_time_expired_fact_ids.call_args
-        assert call_kwargs.get("as_of") == "2024-06-01T00:00:00Z"
+        # Phase 4: filter normalizes as_of at its boundary → canonical "+00:00".
+        assert call_kwargs.get("as_of") == "2024-06-01T00:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------
