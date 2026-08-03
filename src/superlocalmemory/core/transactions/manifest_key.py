@@ -54,7 +54,17 @@ def _ensure_signing_key() -> bytes:
             "signing key: cannot create key directory (key never logged)"
         ) from exc
 
-    if key_path.exists():
+    try:
+        key_exists = key_path.exists()
+    except OSError as exc:
+        # stat() itself can fail (e.g. an unreadable parent dir). Fail closed
+        # with the same RuntimeError contract — never leak a raw OSError or
+        # fall through to an ephemeral key.
+        raise RuntimeError(
+            "signing key: cannot access key path (key never logged)"
+        ) from exc
+
+    if key_exists:
         try:
             raw = key_path.read_text(encoding="utf-8").strip()
         except OSError as exc:

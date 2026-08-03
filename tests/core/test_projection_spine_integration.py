@@ -164,8 +164,13 @@ def test_reconcile_produces_manifest(stored_engine) -> None:
 
     manifest = _manifest_row(engine, operation.operation_id)
     assert manifest is not None
-    assert manifest["state"] == ManifestState.COMPLETE.value, manifest["state"]
-    assert manifest["all_met"] == 1
+    # The fixture embeds the fact (mock_embedder) but wires NO vector store, so the
+    # vector projection is genuinely unverifiable -> REQUIRED_UNAVAILABLE -> DEGRADED
+    # (bm25 + temporal still verify). Pre-P3 this returned a vacuous COMPLETE; that
+    # vacuous-VERIFIED was the bug P3 fixed. A COMPLETE happy-path needs a wired
+    # vector store (native infra) and is covered by the P7 hero-path suite.
+    assert manifest["state"] == ManifestState.DEGRADED.value, manifest["state"]
+    assert manifest["all_met"] == 0
     assert manifest["obligation_count"] == 3
     assert len(manifest["manifest_hash"]) == 64
 
@@ -188,7 +193,10 @@ def test_deleted_projection_is_self_healed(stored_engine) -> None:
 
     manifest = _manifest_row(engine, operation.operation_id)
     assert manifest is not None
-    assert manifest["state"] == ManifestState.COMPLETE.value, manifest["state"]
+    # bm25 is self-healed (tokens restored below + obligation re-verified); the
+    # manifest is DEGRADED overall only because the embedded fact has no wired
+    # vector store (vector REQUIRED_UNAVAILABLE). The bm25 self-heal is the assertion.
+    assert manifest["state"] == ManifestState.DEGRADED.value, manifest["state"]
     after = engine._db.execute("SELECT COUNT(*) c FROM bm25_tokens")
     assert dict(after[0])["c"] >= 1
     rows = engine._db.execute(
@@ -228,7 +236,10 @@ def test_redrive_reconciles_orphaned_obligations(stored_engine) -> None:
     assert reconciled >= 1
     manifest = _manifest_row(engine, operation.operation_id)
     assert manifest is not None
-    assert manifest["state"] == ManifestState.COMPLETE.value, manifest["state"]
+    # Redrive reconciled the orphaned obligations (reconciled >= 1 above). The
+    # manifest is DEGRADED because the embedded fact has no wired vector store
+    # (vector REQUIRED_UNAVAILABLE); bm25 + temporal verify. Redrive is the assertion.
+    assert manifest["state"] == ManifestState.DEGRADED.value, manifest["state"]
 
 
 def test_manifest_is_reverifiable(stored_engine) -> None:
