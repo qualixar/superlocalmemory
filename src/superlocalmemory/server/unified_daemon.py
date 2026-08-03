@@ -3517,6 +3517,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 getattr(application.state, "daemon_descriptor", None),
                 actor_kind="http-recall",
             )
+        # Phase-1/D2: clamp cross-profile scope flags per enterprise recall policy.
+        from superlocalmemory.core.admission import enforce_read_scope
+        include_global, include_shared = enforce_read_scope(include_global, include_shared)
         # v3.4.32: mark recall in-flight so the pending materializer pauses
         # v3.4.52: run engine.recall() in a thread-pool executor so the
         # FastAPI event loop stays responsive for /health, /remember, and

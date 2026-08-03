@@ -1428,6 +1428,9 @@ def cmd_recall(args: Namespace) -> None:
     # produces True/False here.
     include_global = getattr(args, 'include_global', None)
     include_shared = getattr(args, 'include_shared', None)
+    # Phase-1/D2: clamp cross-profile scope flags before forwarding to daemon.
+    from superlocalmemory.core.admission import enforce_read_scope
+    include_global, include_shared = enforce_read_scope(include_global, include_shared)
 
     # V3.3.21: Route through daemon for instant response (no cold start).
     # S9-DASH-02: pass a stable session_id derived from the shell's

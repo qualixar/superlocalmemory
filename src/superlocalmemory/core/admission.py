@@ -91,6 +91,17 @@ _REQUIRED_MCP_GATES: frozenset[str] = frozenset({
     # Scoped reads (Tranche C — tools_core.py)
     "recall",
     "search",
+    # Tranche E — remaining MCP mutators
+    "slm_loop_run",
+    "set_retention_policy",
+    "compact_memories",
+    "log_tool_event",
+    "core_memory",
+    "run_maintenance",
+    "reap_processes",
+    "build_code_graph",
+    "apply_refactor",
+    "link_memory_to_code",
 })
 
 
@@ -143,7 +154,7 @@ def _resolve_deployment() -> "DeploymentConfig":
     try:
         import tomllib
         raw = config_path.read_text(encoding="utf-8")
-        tomllib.loads(raw)  # raises on corrupt TOML
+        parsed_toml = tomllib.loads(raw)  # raises on corrupt TOML
     except Exception as exc:
         # File exists but cannot be parsed → fail-closed (treat as enterprise).
         logger.warning(
@@ -155,10 +166,26 @@ def _resolve_deployment() -> "DeploymentConfig":
     # Step 4: readable → delegate to canonical loader (handles mode/fields).
     try:
         from superlocalmemory.core.config import load_deployment_config
-        return load_deployment_config(config_toml_path=config_path)
+        result = load_deployment_config(config_toml_path=config_path)
     except Exception as exc:
         logger.debug("admission: load_deployment_config raised (unexpected): %s", exc)
         return DEPLOYMENT_PERSONAL
+
+    # D1 fail-closed: [deployment] section present but mode is unrecognized or
+    # absent means someone tried to configure enterprise and a typo/omission
+    # should not silently grant personal (OWNER) access on an enterprise box.
+    # Explicit mode="personal" is a deliberate choice — honour it.
+    # Explicit mode="enterprise" → canonical loader already returned ENTERPRISE.
+    _KNOWN_MODES = ("personal", "enterprise")
+    dep_section = parsed_toml.get("deployment", {})
+    declared_mode = str(dep_section.get("mode", "")).strip().lower()
+    if "deployment" in parsed_toml and declared_mode not in _KNOWN_MODES:
+        logger.warning(
+            "admission: config.toml has [deployment] section but mode %r is "
+            "unrecognized/absent — fail-closed → ENTERPRISE.", declared_mode or "<missing>",
+        )
+        return DEPLOYMENT_ENTERPRISE
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +389,7 @@ def gate_cli_mutation(
 def coverage_self_check(
     deployment: "DeploymentConfig",
     registry: "OperationPolicyRegistry | None" = None,
+    server: "object | None" = None,
 ) -> None:
     """Assert comprehensive policy coverage at daemon startup.
 
@@ -369,6 +397,8 @@ def coverage_self_check(
       1. Every OperationKind has a registered policy (existing check).
       2. No policy has an empty allowed_transports set (unreachable = bug).
       3. Every tool in _REQUIRED_MCP_GATES appears in _GATED_MCP_TOOLS.
+      4. (F1) Dynamic: every mutating tool in server._tool_manager._tools
+         that is NOT flagged readOnlyHint=True must be in _GATED_MCP_TOOLS.
 
     In personal/local mode: logs warnings for any gap (non-fatal).
     In enterprise mode: raises RuntimeError on the first gap (fatal startup).
@@ -377,6 +407,8 @@ def coverage_self_check(
     ----------
     deployment : Loaded DeploymentConfig (from unified_daemon startup).
     registry   : Override the default registry (for testing).
+    server     : Optional FastMCP server; when supplied, its tool registry
+                 is enumerated for check 4 (dynamic mutator coverage).
     """
     reg = registry if registry is not None else _DEFAULT_REGISTRY
     is_enterprise = deployment.is_enterprise
@@ -408,6 +440,26 @@ def coverage_self_check(
     ungated = sorted(_REQUIRED_MCP_GATES - _GATED_MCP_TOOLS)
     if ungated:
         messages.append(f"ungated MCP tools (missing @admits): {ungated}")
+
+    # Check 4 (F1): dynamic discovery — enumerate server tool registry and flag
+    # any mutating tool (readOnlyHint != True) not in _GATED_MCP_TOOLS.
+    if server is not None:
+        try:
+            tool_dict = server._tool_manager._tools  # type: ignore[attr-defined]
+            dynamic_ungated = sorted(
+                name
+                for name, tool in tool_dict.items()
+                if name not in _GATED_MCP_TOOLS
+                and getattr(getattr(tool, "annotations", None), "readOnlyHint", None) is not True
+            )
+            if dynamic_ungated:
+                messages.append(
+                    f"dynamic ungated MCP mutators (not in _GATED_MCP_TOOLS): {dynamic_ungated}"
+                )
+        except AttributeError:
+            logger.debug(
+                "admission: server does not expose _tool_manager._tools — skipping dynamic check"
+            )
 
     if not messages:
         logger.debug("admission: coverage self-check passed (%d kinds)", len(list(OperationKind)))
