@@ -114,6 +114,48 @@ def _mutation_runtime_or_missing_fact(
     raise HTTPException(503, detail="canonical mutation writer is not ready; retry shortly")
 
 
+def _admit_http_mutation(request: Request, operation: str) -> None:
+    """Route a memory HTTP mutation through OperationPolicyRegistry.evaluate().
+
+    Called from _authorize_memory_mutation after RBAC passes. Raises HTTP 403
+    if the policy registry denies the actor. Maps "delete" → FORGET,
+    "update" → CORRECT. Uses the server-derived principal and roles.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    from superlocalmemory.core.actor_context import Transport
+    from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
+    from superlocalmemory.core.operation_request import OperationKind
+    from superlocalmemory.server.rbac_enforce import (
+        resolve_actor_roles,
+        resolve_principal,
+    )
+
+    deployment = getattr(request.app.state, "deployment", None)
+    is_enterprise = bool(deployment and deployment.is_enterprise)
+    tier = "enterprise" if is_enterprise else "personal"
+    mode = "company" if is_enterprise else "local"
+
+    principal_info = resolve_principal(request)
+    principal = str(principal_info.get("user_id") or "")
+    actor_roles = resolve_actor_roles(request)
+    actor = resolve_actor(
+        Transport.HTTP,
+        tier=tier,
+        mode=mode,
+        principal=principal,
+        roles=actor_roles,
+    )
+    kind = OperationKind.FORGET if operation == "delete" else OperationKind.CORRECT
+    try:
+        admit(kind, actor, mode=mode)
+    except AdmissionDenied as exc:
+        raise _HTTPException(
+            status_code=403,
+            detail=f"Operation denied: {exc.decision.reason}",
+        ) from exc
+
+
 def _authorize_memory_mutation(
     request: Request,
     operation: str,
@@ -131,14 +173,15 @@ def _authorize_memory_mutation(
         actor_kind="dashboard",
     )
     # RBAC (C3): on top of machine auth, enforce the caller's role on the active
-    # profile. delete → DELETE; every other mutation → WRITE. A viewer (or an
-    # owner in require_login mode) is rejected here; owner/admin/member pass.
+    # profile. delete → DELETE; every other mutation → WRITE.
     from superlocalmemory.access.rbac import Permission as _Perm
     from superlocalmemory.server.rbac_enforce import require_permission as _rbac_require
     _rbac_require(
         request,
         _Perm.DELETE if operation == "delete" else _Perm.WRITE,
     )
+    # Phase 1: admission gateway — policy registry decision for this route.
+    _admit_http_mutation(request, operation)
     engine = _get_engine(request)
     if engine is None:
         raise HTTPException(503, detail="Engine not initialized")

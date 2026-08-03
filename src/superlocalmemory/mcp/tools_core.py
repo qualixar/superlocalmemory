@@ -784,6 +784,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(destructiveHint=True))
+    @admits(OperationKind.FORGET)
     async def delete_memory(fact_id: str, agent_id: str = "mcp_client") -> dict:
         """Delete a specific memory by exact fact ID.
 
@@ -850,6 +851,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(idempotentHint=True))
+    @admits(OperationKind.CORRECT)
     async def update_memory(
         fact_id: str, content: str, agent_id: str = "mcp_client",
     ) -> dict:

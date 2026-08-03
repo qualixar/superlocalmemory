@@ -306,10 +306,17 @@ class OperationPolicyRegistry:
             cov = _DEFAULT_REGISTRY.coverage()
             assert cov["remember"]["has_policy"] is True
         """
-        return {
-            kind.value: {"has_policy": kind in self._policies}
-            for kind in OperationKind
-        }
+        result: dict[str, dict] = {}
+        for kind in OperationKind:
+            has_policy = kind in self._policies
+            entry: dict = {"has_policy": has_policy, "kind": kind.value}
+            if has_policy:
+                policy = self._policies[kind]
+                entry["has_transports"] = len(policy.allowed_transports) > 0
+            else:
+                entry["has_transports"] = False
+            result[kind.value] = entry
+        return result
 
     def get_policy(
         self,

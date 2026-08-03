@@ -1507,6 +1507,10 @@ def _cli_record_signals(config, query, results):
 
 def cmd_forget(args: Namespace) -> None:
     """Delete daemon-queried memories matching a query."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.FORGET)
+
     import urllib.parse
 
     from superlocalmemory.cli.daemon import (
@@ -1629,6 +1633,10 @@ def cmd_forget(args: Namespace) -> None:
 
 def cmd_delete(args: Namespace) -> None:
     """Delete a specific memory by exact fact ID."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.FORGET)
+
     import urllib.parse
 
     from superlocalmemory.cli.daemon import (
@@ -1696,6 +1704,10 @@ def cmd_delete(args: Namespace) -> None:
 
 def cmd_update(args: Namespace) -> None:
     """Update the content of a specific memory by exact fact ID."""
+    from superlocalmemory.core.admission import gate_cli_mutation
+    from superlocalmemory.core.operation_request import OperationKind
+    gate_cli_mutation(OperationKind.CORRECT)
+
     import urllib.parse
 
     from superlocalmemory.cli.daemon import (
@@ -2995,6 +3007,12 @@ def cmd_profile(args: Namespace) -> None:
     Writes to BOTH SQLite and profiles.json so CLI, Dashboard, and
     MCP all see the same profiles.
     """
+    action = getattr(args, "action", "list")
+    if action in ("switch", "create"):
+        from superlocalmemory.core.admission import gate_cli_mutation
+        from superlocalmemory.core.operation_request import OperationKind
+        gate_cli_mutation(OperationKind.PROFILE_SWITCH)
+
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage import schema

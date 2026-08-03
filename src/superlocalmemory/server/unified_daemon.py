@@ -2143,13 +2143,15 @@ async def lifespan(application: FastAPI):
         application.state.deployment = None
 
     # Phase 1: Admission gateway coverage self-check.
-    # Verifies every OperationKind has a registered policy. Warns in personal
-    # mode; raises RuntimeError in enterprise mode (hard startup failure).
+    # Uses _resolve_deployment() (fail-closed) rather than application.state.deployment
+    # (which may be None if the load failed) so an enterprise box with a broken
+    # config never silently skips a hard coverage check.
     try:
-        from superlocalmemory.core.admission import coverage_self_check
-        from superlocalmemory.core.config import DEPLOYMENT_PERSONAL
-
-        _cov_deployment = getattr(application.state, "deployment", None) or DEPLOYMENT_PERSONAL
+        from superlocalmemory.core.admission import (
+            _resolve_deployment as _adm_resolve,
+            coverage_self_check,
+        )
+        _cov_deployment = _adm_resolve()
         coverage_self_check(_cov_deployment)
     except RuntimeError as _cov_exc:
         raise

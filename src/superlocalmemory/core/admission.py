@@ -17,6 +17,7 @@ Key design choices
 - admit() raises AdmissionDenied on deny so the caller can return a clean error.
 - @admits(kind) is a thin async decorator for MCP tools.
 - coverage_self_check() is called at daemon startup.
+- Fail-closed: config.toml present but unreadable → enterprise (not personal).
 
 Part of SuperLocalMemory V4 | Phase 1: Admission Gateway
 """
@@ -44,6 +45,36 @@ _COMPANY_MODES: frozenset[str] = frozenset({
     "company", "remote", "enterprise", "multi-user", "multi_user",
 })
 
+# ---------------------------------------------------------------------------
+# Tool inventory tracking (populated at decoration time by @admits)
+# ---------------------------------------------------------------------------
+
+# Auto-populated as each @admits decorator is applied. Checked at startup.
+_GATED_MCP_TOOLS: set[str] = set()
+
+# Minimal set of MCP mutating tools that MUST be decorated with @admits.
+# Extend this set when new mutating tools are added (Tranche B extends it).
+# coverage_self_check verifies _REQUIRED_MCP_GATES ⊆ _GATED_MCP_TOOLS.
+_REQUIRED_MCP_GATES: frozenset[str] = frozenset({
+    # Core mutations (tools_core.py)
+    "remember",
+    "delete_memory",
+    "update_memory",
+    "correct_pattern",
+    "switch_profile",
+    # Forgetting / consolidation (tools_v33.py)
+    "forget",
+    "consolidate_cognitive",
+    # Mode mutations (tools_v3.py)
+    "set_mode",
+    # Mesh mutations (tools_mesh.py)
+    "mesh_send",
+    "mesh_lock",
+    "mesh_state",
+    # Evolution (tools_evolution.py)
+    "evolve_skill",
+})
+
 
 # ---------------------------------------------------------------------------
 # Exception
@@ -64,22 +95,51 @@ class AdmissionDenied(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Deployment config resolution (lazy, fail-open)
+# Deployment config resolution (fail-closed on present-but-unreadable)
 # ---------------------------------------------------------------------------
 
 def _resolve_deployment() -> "DeploymentConfig":
-    """Load DeploymentConfig from disk; always returns a value (fail-open).
+    """Load DeploymentConfig. Fail-closed when config.toml is present but unreadable.
 
-    Returns DEPLOYMENT_PERSONAL if config.toml is absent or unreadable.
-    Calling this at tool-call time (not decoration time) lets tests patch it
-    via monkeypatch or SLM_DATA_DIR without re-importing the module.
+    Distinction:
+      - config.toml absent   → legitimate fresh personal install → PERSONAL (frictionless)
+      - config.toml present + unreadable/corrupt → unknown enterprise state → ENTERPRISE
+      - config.toml present + readable → use canonical loader result
     """
+    from superlocalmemory.core.config import DEPLOYMENT_ENTERPRISE, DEPLOYMENT_PERSONAL
+
+    # Step 1: resolve the expected config path (same root as load_deployment_config).
+    try:
+        from superlocalmemory.infra.data_root import state_path
+        config_path = state_path("config.toml")
+        config_exists = config_path.exists()
+    except Exception as exc:
+        logger.debug("admission: cannot resolve config path, personal default: %s", exc)
+        return DEPLOYMENT_PERSONAL
+
+    # Step 2: absent → personal (fresh install, no config ever written).
+    if not config_exists:
+        return DEPLOYMENT_PERSONAL
+
+    # Step 3: present → probe raw to detect corrupt/unreadable before delegating.
+    try:
+        import tomllib
+        raw = config_path.read_text(encoding="utf-8")
+        tomllib.loads(raw)  # raises on corrupt TOML
+    except Exception as exc:
+        # File exists but cannot be parsed → fail-closed (treat as enterprise).
+        logger.warning(
+            "admission: config.toml present but unreadable — fail-closed "
+            "(treating as enterprise). Cause: %s", exc,
+        )
+        return DEPLOYMENT_ENTERPRISE
+
+    # Step 4: readable → delegate to canonical loader (handles mode/fields).
     try:
         from superlocalmemory.core.config import load_deployment_config
-        return load_deployment_config()
+        return load_deployment_config(config_toml_path=config_path)
     except Exception as exc:
-        logger.debug("admission: deployment config unreadable, defaulting personal: %s", exc)
-        from superlocalmemory.core.config import DEPLOYMENT_PERSONAL
+        logger.debug("admission: load_deployment_config raised (unexpected): %s", exc)
         return DEPLOYMENT_PERSONAL
 
 
@@ -111,16 +171,13 @@ def resolve_actor(
     Parameters
     ----------
     transport    : MCP, CLI, INTERNAL, etc.
-    profile      : Active profile id (metadata only; used by registry for
-                   cross-profile checks in future phases).
+    profile      : Active profile id (metadata only).
     principal    : Authenticated principal id (from session store, never from
                    request body). Empty string → anonymous.
-    session      : Session token (only the first 16 hex chars are stored;
-                   the raw token is never retained).
+    session      : Session token (only the first 16 hex chars are stored).
     tier         : Deployment tier: "personal" or "enterprise".
     mode         : Deployment mode string; "company"/"remote"/"enterprise" are
-                   treated as enterprise. Checked in addition to ``tier`` so
-                   callers can pass either.
+                   treated as enterprise. Checked in addition to ``tier``.
     client_host  : Resolved remote address (for is_local check).
     roles        : Explicit role set for authenticated enterprise actor.
                    When None, defaults to {ActorRole.MEMBER}.
@@ -207,15 +264,15 @@ def admits(kind: OperationKind):
         async def remember(content: str, ...) -> dict:
             ...
 
-    On AdmissionDenied the decorator returns the error dict directly without
-    calling the wrapped function. The tool's own error-handling code is NOT
-    reached — the deny is clean and consistent across all gated tools.
+    Also registers the tool name in _GATED_MCP_TOOLS at decoration time,
+    enabling coverage_self_check() to verify tool inventory at startup.
 
-    The admission check reads the deployment config lazily at each call so
-    tests can monkeypatch SLM_DATA_DIR or _resolve_deployment without
-    reimporting the module.
+    On AdmissionDenied the decorator returns the error dict directly without
+    calling the wrapped function.
     """
     def decorator(fn):
+        _GATED_MCP_TOOLS.add(fn.__name__)  # register at decoration time
+
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
             deployment = _resolve_deployment()
@@ -281,16 +338,21 @@ def gate_cli_mutation(
 
 
 # ---------------------------------------------------------------------------
-# Startup coverage self-check
+# Startup coverage self-check (non-vacuous)
 # ---------------------------------------------------------------------------
 
 def coverage_self_check(
     deployment: "DeploymentConfig",
     registry: "OperationPolicyRegistry | None" = None,
 ) -> None:
-    """Assert every OperationKind has a registered policy.
+    """Assert comprehensive policy coverage at daemon startup.
 
-    In personal/local mode: logs a warning for any gap (non-fatal).
+    Checks:
+      1. Every OperationKind has a registered policy (existing check).
+      2. No policy has an empty allowed_transports set (unreachable = bug).
+      3. Every tool in _REQUIRED_MCP_GATES appears in _GATED_MCP_TOOLS.
+
+    In personal/local mode: logs warnings for any gap (non-fatal).
     In enterprise mode: raises RuntimeError on the first gap (fatal startup).
 
     Parameters
@@ -299,20 +361,45 @@ def coverage_self_check(
     registry   : Override the default registry (for testing).
     """
     reg = registry if registry is not None else _DEFAULT_REGISTRY
+    is_enterprise = deployment.is_enterprise
+    messages: list[str] = []
+
+    # Check 1: every OperationKind has a policy entry.
     cov = reg.coverage()
-    gaps = [
+    missing_kinds = [
         kind.value
         for kind in OperationKind
         if not cov.get(kind.value, {}).get("has_policy", False)
     ]
-    if not gaps:
+    if missing_kinds:
+        messages.append(f"policy coverage gap — no policy for: {missing_kinds}")
+
+    # Check 2: no policy has empty allowed_transports (unreachable).
+    empty_transport_kinds = [
+        info["kind"]
+        for info in cov.values()
+        if info.get("has_policy") and not info.get("has_transports", True)
+    ]
+    if empty_transport_kinds:
+        messages.append(
+            f"empty_transports in policies for: {empty_transport_kinds} "
+            "(no reachable transport — these operations can never be invoked)"
+        )
+
+    # Check 3: tool inventory — every required MCP gate is wired.
+    ungated = sorted(_REQUIRED_MCP_GATES - _GATED_MCP_TOOLS)
+    if ungated:
+        messages.append(f"ungated MCP tools (missing @admits): {ungated}")
+
+    if not messages:
         logger.debug("admission: coverage self-check passed (%d kinds)", len(list(OperationKind)))
         return
 
-    msg = f"admission: policy coverage gap — no policy for: {gaps}"
-    if deployment.is_enterprise:
-        raise RuntimeError(msg)
-    logger.warning(msg)
+    for msg in messages:
+        full = f"admission: {msg}"
+        if is_enterprise:
+            raise RuntimeError(full)
+        logger.warning(full)
 
 
 __all__ = [
@@ -323,4 +410,6 @@ __all__ = [
     "gate_cli_mutation",
     "resolve_actor",
     "_resolve_deployment",
+    "_GATED_MCP_TOOLS",
+    "_REQUIRED_MCP_GATES",
 ]
