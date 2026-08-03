@@ -908,3 +908,301 @@ def test_obligation_schema_negative_cache_resets_after_migration(tmp_path: Path)
     assert carrier._obligation_schema_ok is True, (
         "_obligation_schema_ok must be True after the schema was successfully detected"
     )
+
+
+# ---------------------------------------------------------------------------
+# D. FINAL MICRO-PASS — 4 P2 residuals (Grok 4.5 re-audit 2026-08-03)
+# ---------------------------------------------------------------------------
+# TDD: tests D1/D3/D4/D5/D6/D7/D8 are RED before the fixes, GREEN after.
+# D2 (real proofs via ErasureService) is GREEN immediately — companion to D1.
+# ---------------------------------------------------------------------------
+
+
+def test_dead_write_entity_erasure_receipt_removed() -> None:
+    """D1: _write_entity_erasure_receipt must not exist — it wrote proofs:[] +
+    unkeyed v1 SHA, and had no production caller after Tranche B routed
+    forget_profile through ErasureService.finalize."""
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+    assert not hasattr(GDPRCompliance, "_write_entity_erasure_receipt"), (
+        "_write_entity_erasure_receipt still present — dead helper must be removed; "
+        "it writes proofs:[] and an unkeyed SHA256, not a real per-owner proof chain"
+    )
+
+
+def test_entity_receipt_failure_writes_real_proofs(tmp_path: Path) -> None:
+    """D2: ErasureService.finalize with residue remaining produces a FAILED receipt
+    with real per-owner proofs (not proofs:[]).  Companion to D1."""
+    import uuid
+
+    from superlocalmemory.core.transactions.concrete_owners import (
+        build_erasure_service_for_db,
+    )
+    from superlocalmemory.core.transactions.erasure import verify_receipt
+    from superlocalmemory.core.transactions.owners import OperationContext
+
+    db = _fresh_db(tmp_path, with_receipts=True)
+    db.execute(
+        "INSERT INTO memories (memory_id, profile_id, content) VALUES ('m-res', 'p1', 'x')"
+    )
+    db.execute(
+        "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content) "
+        "VALUES ('f-res', 'm-res', 'p1', 'residue fact')"
+    )
+    # Write BM25 tokens so BM25 owner finds residue when finalize() is called
+    # without remove() first (simulating a wipe that left BM25 data behind).
+    db.store_bm25_tokens("f-res", "p1", ["residue"])
+
+    erasure_id = uuid.uuid4().hex
+    ctx = OperationContext(
+        operation_id=erasure_id,
+        profile_id="p1",
+        subject_id="Acme",
+        fact_ids=("f-res",),
+    )
+    svc = build_erasure_service_for_db(db, engine=None)
+    # finalize() without remove() → BM25 owner detects residue → FAILED receipt
+    receipt = svc.finalize(
+        db, ctx,
+        subject_type="entity",
+        subject_id="Acme",
+        requested_by="gdpr",
+        requested_at=0.0,
+    )
+
+    assert not receipt.all_erased, "receipt must report all_erased=False when residue remains"
+    with db.raw_connection() as conn:
+        row = conn.execute(
+            "SELECT state, all_erased, owner_evidence_json FROM erasure_receipts "
+            "WHERE erasure_id = ?",
+            (erasure_id,),
+        ).fetchone()
+
+    assert row is not None, "receipt must be persisted"
+    assert row[0] == "FAILED", f"state must be FAILED, got: {row[0]}"
+    assert row[1] == 0, "all_erased must be 0"
+    proofs = json.loads(row[2]).get("proofs", [])
+    assert len(proofs) > 0, (
+        f"receipt must contain real per-owner proofs, not proofs:[], got: {json.loads(row[2])}"
+    )
+    # Tamper-evidence: verify_receipt must pass on the unmodified row
+    with db.raw_connection() as conn:
+        assert verify_receipt(conn, erasure_id) is True, (
+            "verify_receipt must pass for the freshly-written receipt"
+        )
+
+
+def test_empty_profile_wipe_produces_honest_receipt(tmp_path: Path) -> None:
+    """D3: forget_profile on a profile with NO facts must still write an
+    erasure_receipts row (fact_count=0, all_erased=1).
+
+    The old guard ``if _profile_fact_ids:`` left an Art.17 accountability gap
+    for no-op wipes — an empty profile was deleted with no audit trail."""
+    db = _fresh_db(tmp_path, with_receipts=True)
+    # "p1" has no atomic_facts — only the profile row created by _fresh_db.
+
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+    GDPRCompliance(db).forget_profile("p1")
+
+    with db.raw_connection() as conn:
+        row = conn.execute(
+            "SELECT all_erased, fact_count FROM erasure_receipts "
+            "WHERE subject_type = 'profile' AND subject_id = 'p1'"
+        ).fetchone()
+
+    assert row is not None, (
+        "forget_profile must write a receipt even for profiles with no facts"
+    )
+    assert row[0] == 1, "all_erased must be 1 for an empty-profile wipe (nothing to erase)"
+    assert row[1] == 0, "fact_count must be 0 for an empty-profile wipe"
+
+
+def test_receipt_write_failure_is_surfaced_not_swallowed(tmp_path: Path) -> None:
+    """D4: when ErasureService.finalize raises, forget_profile must NOT silently
+    swallow — it must propagate the failure so callers know a destructive wipe
+    proceeded without a durable accountability record."""
+    import uuid
+
+    db = _fresh_db(tmp_path, with_receipts=True)
+    db.execute(
+        "INSERT INTO memories (memory_id, profile_id, content) VALUES ('m-fail', 'p1', 'x')"
+    )
+    db.execute(
+        "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content) "
+        "VALUES ('f-fail', 'm-fail', 'p1', 'fail fact')"
+    )
+
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+    with patch(
+        "superlocalmemory.core.transactions.erasure.ErasureService.finalize",
+        side_effect=RuntimeError("signing key unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="signing key unavailable"):
+            GDPRCompliance(db).forget_profile("p1")
+
+
+def test_manifest_version_probe_pragma_failure_is_fail_closed() -> None:
+    """D5: _manifest_version_supported must return MANIFEST_V2 (not V1) on any
+    PRAGMA error.  Returning V1 is fail-OPEN: it allows the unkeyed-SHA path
+    and an attacker can forge a manifest with a valid SHA256 of mutated content."""
+    import sqlite3
+
+    from superlocalmemory.core.transactions.manifest import MANIFEST_V2
+    from superlocalmemory.core.transactions.reconciler import _manifest_version_supported
+
+    broken_conn = MagicMock()
+    broken_conn.execute.side_effect = sqlite3.OperationalError("DB is locked")
+
+    result = _manifest_version_supported(broken_conn)
+    assert result == MANIFEST_V2, (
+        f"_manifest_version_supported must return MANIFEST_V2={MANIFEST_V2} on PRAGMA error "
+        f"(fail-closed); returning V1 is fail-OPEN to unkeyed-SHA; got {result}"
+    )
+
+
+def test_receipt_version_probe_pragma_failure_is_fail_closed() -> None:
+    """D6: _receipt_version_supported must return _RECEIPT_V2 (not V1) on any
+    PRAGMA error.  Returning V1 is fail-OPEN and allows the unkeyed-SHA path."""
+    import sqlite3
+
+    from superlocalmemory.core.transactions.erasure import (
+        _RECEIPT_V2,
+        _receipt_version_supported,
+    )
+
+    broken_conn = MagicMock()
+    broken_conn.execute.side_effect = sqlite3.OperationalError("DB is locked")
+
+    result = _receipt_version_supported(broken_conn)
+    assert result == _RECEIPT_V2, (
+        f"_receipt_version_supported must return _RECEIPT_V2={_RECEIPT_V2} on PRAGMA error "
+        f"(fail-closed); returning V1 is fail-OPEN to unkeyed-SHA; got {result}"
+    )
+
+
+def test_m037_reseals_v1_manifests_to_v2(tmp_path: Path) -> None:
+    """D7: Rows written before M037 have manifest_version=1 (unkeyed SHA).
+    M037.apply() must re-seal them to manifest_version=2 (HMAC) so
+    verify_manifest continues to PASS post-migration.
+
+    Without re-seal, verify_manifest rejects v1 rows on v2 DBs as potential
+    downgrade attacks, breaking all pre-existing evidence chains."""
+    import time as _time
+
+    from superlocalmemory.core.transactions.manifest import hash_envelope_fields
+    from superlocalmemory.core.transactions.reconciler import Reconciler
+    from superlocalmemory.storage.migrations import (
+        M033_projection_transactions,
+        M034_obligation_integrity,
+        M037_manifest_hmac_version,
+    )
+
+    db_path = tmp_path / "reseal_manifest.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    M033_projection_transactions.apply(conn)
+    M034_obligation_integrity.apply(conn)
+    conn.commit()
+
+    op_id = "op-m037-reseal"
+    prof_id = "p-reseal"
+    state = "COMPLETE"
+    evidence_json = "[]"
+    now = _time.time()
+    # Write a v1 row (no manifest_version column exists yet)
+    v1_hash = hash_envelope_fields(
+        operation_id=op_id, profile_id=prof_id, state=state,
+        all_met=True, obligation_count=0, evidence_dicts=(),
+    )
+    conn.execute(
+        "INSERT INTO completion_manifests "
+        "(operation_id, profile_id, state, all_met, obligation_count, "
+        "owner_evidence_json, manifest_hash, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (op_id, prof_id, state, 1, 0, evidence_json, v1_hash, now, now),
+    )
+    conn.commit()
+
+    # Apply M037 — must add column and re-seal the pre-existing row to v2 HMAC
+    M037_manifest_hmac_version.apply(conn)
+    conn.commit()
+
+    reconciler = Reconciler()
+    result = reconciler.verify_manifest(conn, op_id)
+    assert result is True, (
+        "verify_manifest must PASS for a pre-M037 row re-sealed by M037; "
+        "if False, M037 did not re-seal the row"
+    )
+
+    # Tamper-detection: mutate state → verify must reject
+    conn.execute(
+        "UPDATE completion_manifests SET state = 'FAILED' WHERE operation_id = ?",
+        (op_id,),
+    )
+    conn.commit()
+    assert reconciler.verify_manifest(conn, op_id) is False, (
+        "verify_manifest must FAIL after a v2-re-sealed row is tampered"
+    )
+
+
+def test_m037_reseals_v1_receipts_to_v2(tmp_path: Path) -> None:
+    """D8: Receipts written before M037 have receipt_version=1 (unkeyed SHA).
+    M037.apply() must re-seal them to receipt_version=2 (HMAC) so
+    verify_receipt continues to PASS post-migration."""
+    import time as _time
+    import uuid
+
+    from superlocalmemory.core.transactions.erasure import (
+        compute_erasure_hash,
+        verify_receipt,
+    )
+    from superlocalmemory.storage.migrations import (
+        M035_erasure_receipts,
+        M037_manifest_hmac_version,
+    )
+
+    db_path = tmp_path / "reseal_receipt.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    M035_erasure_receipts.apply(conn)
+    conn.commit()
+
+    eid = uuid.uuid4().hex
+    now = _time.time()
+    ev_json = '{"fact_ids":[],"proofs":[]}'
+    # Write a v1 receipt (no receipt_version column exists yet)
+    v1_hash = compute_erasure_hash(
+        erasure_id=eid, profile_id="p1", subject_type="profile", subject_id="p1",
+        requested_by="gdpr", fact_count=0, state="COMPLETE", all_erased=True,
+        evidence_json=ev_json, requested_at=now, completed_at=now,
+    )
+    conn.execute(
+        "INSERT INTO erasure_receipts "
+        "(erasure_id, profile_id, subject_type, subject_id, requested_by, "
+        "fact_count, state, all_erased, owner_evidence_json, audit_hash, "
+        "requested_at, completed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (eid, "p1", "profile", "p1", "gdpr", 0, "COMPLETE", 1, ev_json, v1_hash, now, now),
+    )
+    conn.commit()
+
+    # Apply M037 — must add column and re-seal the pre-existing receipt to v2 HMAC
+    M037_manifest_hmac_version.apply(conn)
+    conn.commit()
+
+    result = verify_receipt(conn, eid)
+    assert result is True, (
+        "verify_receipt must PASS for a pre-M037 receipt re-sealed by M037; "
+        "if False, M037 did not re-seal the receipt"
+    )
+
+    # Tamper-detection: mutate state → verify must reject
+    conn.execute(
+        "UPDATE erasure_receipts SET state = 'FAILED' WHERE erasure_id = ?", (eid,)
+    )
+    conn.commit()
+    assert verify_receipt(conn, eid) is False, (
+        "verify_receipt must FAIL after a v2-re-sealed receipt is tampered"
+    )

@@ -234,7 +234,10 @@ def _manifest_version_supported(conn: sqlite3.Connection) -> int:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(completion_manifests)").fetchall()}
         return MANIFEST_V2 if "manifest_version" in cols else MANIFEST_V1
     except Exception:  # noqa: BLE001
-        return MANIFEST_V1
+        # Fail-closed: PRAGMA failure must not silently route verification through
+        # the unkeyed-SHA v1 path — that allows a downgrade-forgery attack where
+        # an attacker resets manifest_version=1 and recomputes a valid v1 SHA.
+        return MANIFEST_V2
 
 
 def _manifest_row_version(conn: sqlite3.Connection, operation_id: str) -> int:

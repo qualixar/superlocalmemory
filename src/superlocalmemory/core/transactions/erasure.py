@@ -725,7 +725,9 @@ def _receipt_version_supported(conn: object) -> int:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(erasure_receipts)").fetchall()}
         return _RECEIPT_V2 if "receipt_version" in cols else _RECEIPT_V1
     except Exception:  # noqa: BLE001
-        return _RECEIPT_V1
+        # Fail-closed: PRAGMA failure must not silently route verification through
+        # the unkeyed-SHA v1 path — same downgrade-forgery risk as manifest probe.
+        return _RECEIPT_V2
 
 
 def _receipt_version_from_db(db: object) -> int:
