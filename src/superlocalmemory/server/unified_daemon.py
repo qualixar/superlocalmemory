@@ -2101,6 +2101,28 @@ async def lifespan(application: FastAPI):
         logger.warning("Mesh broker init failed: %s", exc)
         application.state.mesh_broker = None
 
+    # Phase C-2: opt-in mDNS advertiser (default OFF — backward-compatible).
+    # Enabled only when SLM_MESH_ADVERTISE=1|on|true|yes is set explicitly.
+    # No-op unless the mesh broker is running (no broker = no mesh subnet).
+    # See superlocalmemory.mesh.discovery.MeshAdvertiser for full policy docs.
+    application.state.mesh_advertiser = None
+    if application.state.mesh_broker is not None:
+        try:
+            import socket as _adv_sock
+            from superlocalmemory.mesh.discovery import MeshAdvertiser as _MeshAdvertiser
+            _adv_node_id = _adv_sock.gethostname()
+            _advertiser = _MeshAdvertiser(
+                service_port=_configured_daemon_port(),
+                node_id=_adv_node_id,
+            )
+            # register_service blocks ~750 ms (mDNS probe phase) — run off the
+            # event loop to avoid stalling the async startup path (CRIT fix #2).
+            await asyncio.to_thread(_advertiser.start)
+            application.state.mesh_advertiser = _advertiser
+        except Exception as exc:
+            logger.warning("mDNS advertiser init failed (non-fatal): %s", exc)
+            application.state.mesh_advertiser = None
+
     # RBAC / teams (C3): user identity + role enforcement over memory.db.
     # Additive — with zero users the daemon stays single-operator (owner).
     try:
@@ -2475,6 +2497,14 @@ async def lifespan(application: FastAPI):
                     stop_fn()
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("mesh_broker stop failed: %s", exc)
+
+    # Stop mDNS advertiser (symmetric with Phase C-2 startup).
+    _adv = getattr(application.state, "mesh_advertiser", None)
+    if _adv is not None:
+        try:
+            _adv.stop()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("mDNS advertiser stop failed (non-fatal): %s", exc)
 
     # LLD-02 SW3: flush pending signals to DB before closing. Bounded 3 s
     # to keep daemon shutdown snappy; drops + counts anything unwritten.
