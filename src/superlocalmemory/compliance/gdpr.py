@@ -268,7 +268,10 @@ class GDPRCompliance:
 
         counts: dict[str, int] = {}
 
-        # 1) Durable, tamper-evident record FIRST — survives the erasure.
+        # 1) Durable, tamper-evident record FIRST — a HARD precondition
+        #    (Art. 5(2) accountability). If it cannot be written we fail closed
+        #    and delete nothing, so no erasure ever occurs without an
+        #    accountability record.
         try:
             from superlocalmemory.compliance.audit import AuditChain
             from superlocalmemory.infra.data_root import state_path
@@ -277,8 +280,13 @@ class GDPRCompliance:
                 metadata={"basis": "GDPR Art.17 right-to-erasure"},
             )
         except Exception as exc:
-            logger.warning("GDPR erase: audit-chain log failed: %s", exc)
+            logger.error(
+                "GDPR erase ABORTED for %r: pre-deletion audit-chain log failed: %s",
+                profile_id, exc,
+            )
             counts["audit_request_failed"] = 1
+            counts["erasure_aborted"] = 1
+            return counts
         self._audit("delete", "profile", profile_id, "GDPR erasure request")
         tables = self._profile_scoped_tables()
         # Pass 1 — count every table BEFORE any deletion, so a CASCADE that
@@ -416,16 +424,19 @@ class GDPRCompliance:
                 subject_id=profile_id,
                 fact_ids=_profile_fact_ids,
             )
-            _erasure_svc.remove(self._db, _ctx)
+            _remove_result = _erasure_svc.remove(self._db, _ctx)
             _receipt = _erasure_svc.finalize(
                 self._db, _ctx,
                 subject_type="profile",
                 subject_id=profile_id,
                 requested_by="gdpr",
                 requested_at=_time.time(),
+                remove_result=_remove_result,
             )
             if not _receipt.persisted:
                 counts["receipt_persist_failed"] = 1
+            if not _receipt.all_erased:
+                counts["owner_erasure_incomplete"] = 1
         except Exception as exc:
             counts["receipt_error"] = str(exc)
             raise
@@ -437,6 +448,7 @@ class GDPRCompliance:
             self._db.execute("PRAGMA foreign_keys=OFF")
         except Exception:
             pass
+        table_delete_failures: list[str] = []
         try:
             for table in tables:
                 try:
@@ -445,6 +457,7 @@ class GDPRCompliance:
                     )
                 except Exception as exc:  # pragma: no cover — defensive per-table
                     logger.warning("GDPR erase: delete %s failed: %s", table, exc)
+                    table_delete_failures.append(table)
             # Delete the profile record itself.
             self._db.execute("DELETE FROM profiles WHERE profile_id = ?", (profile_id,))
             counts["profiles"] = 1
@@ -453,6 +466,8 @@ class GDPRCompliance:
                 self._db.execute("PRAGMA foreign_keys=ON")
             except Exception:
                 pass
+        if table_delete_failures:
+            counts["table_delete_failures"] = len(table_delete_failures)
 
         # Erase learning database (separate DB file)
         try:
@@ -461,14 +476,37 @@ class GDPRCompliance:
             learning_db = LearningDatabase(DEFAULT_BASE_DIR / "learning.db")
             learning_db.reset(profile_id)
             counts["learning_db"] = 1
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("GDPR erase: learning-db reset failed: %s", exc)
+            counts["learning_db_failed"] = 1
 
         # VACUUM to remove deleted data from physical file
         try:
             self._db.execute("VACUUM")
         except Exception:
             pass
+
+        # Fail-closed completeness: re-count residue across the wiped tables and
+        # surface an explicit erasure_complete flag so a partial wipe is reported
+        # as failure rather than silent success.
+        residue_rows = 0
+        for table in tables:
+            try:
+                _r = self._db.execute(
+                    f"SELECT COUNT(*) AS c FROM {table} WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                residue_rows += int(dict(_r[0])["c"]) if _r else 0
+            except Exception:
+                pass
+        counts["residue_rows"] = residue_rows
+        counts["erasure_complete"] = 1 if (
+            residue_rows == 0
+            and not table_delete_failures
+            and not counts.get("learning_db_failed")
+            and not counts.get("vector_store_failures")
+            and not counts.get("owner_erasure_incomplete")
+        ) else 0
 
         try:
             from superlocalmemory.compliance.audit import AuditChain

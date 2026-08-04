@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "langgraph>=1.0.0",
-    "superlocalmemory>=3.6.23,<4",
+    "superlocalmemory>=3.6.23,<5",
 ]
 
 [project.urls]

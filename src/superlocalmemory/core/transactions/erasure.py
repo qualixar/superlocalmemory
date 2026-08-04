@@ -216,25 +216,35 @@ class ErasureService:
         requested_by: str = "",
     ) -> ErasureReceipt:
         requested_at = time.time()
-        self.remove(db, context, memory_id=None)
+        remove_result = self.remove(db, context, memory_id=None)
         return self.finalize(
             db, context,
             subject_type=subject_type, subject_id=subject_id,
             requested_by=requested_by, requested_at=requested_at,
+            remove_result=remove_result,
         )
 
     def remove(
         self, db: object, context: OperationContext, *, memory_id: str | None = None,
     ) -> RemoveResult:
         self._record_obligations(db, context)
-        tombstoned = write_tombstones(
+        status = write_tombstones_status(
             db, context.profile_id, tuple(sorted(set(context.fact_ids))),
             context.operation_id, time.time(), memory_id,
         )
+        if status == TOMBSTONE_CONFLICT:
+            # Fail closed: do not delete owner projections under a provenance
+            # conflict — the resurrection guard cannot be trusted here.
+            return RemoveResult(proofs=(), spine_ok=False, tombstoned=False)
         proofs = [self._erase_owner(db, context, name) for name in sorted(self._owners)]
-        spine_ok = bool(proofs) and all(p.erased for p in proofs)
+        owners_ok = bool(proofs) and all(p.erased for p in proofs)
+        # A missing tombstone table (older schema) or an empty fact set does not
+        # gate; a real write error on a modern store does.
+        tombstone_ok = status in (TOMBSTONE_WRITTEN, TOMBSTONE_ABSENT)
         return RemoveResult(
-            proofs=tuple(proofs), spine_ok=spine_ok, tombstoned=tombstoned,
+            proofs=tuple(proofs),
+            spine_ok=owners_ok and tombstone_ok,
+            tombstoned=(status == TOMBSTONE_WRITTEN),
         )
 
     def finalize(
@@ -247,6 +257,7 @@ class ErasureService:
         requested_by: str = "",
         requested_at: float | None = None,
         extra_proofs: Iterable[ErasureProofRecord] = (),
+        remove_result: "RemoveResult | None" = None,
     ) -> ErasureReceipt:
         if subject_type not in VALID_SUBJECT_TYPES:
             raise ValueError(f"invalid subject_type: {subject_type!r}")
@@ -255,7 +266,13 @@ class ErasureService:
             self._prove_owner(context, name) for name in sorted(self._owners)
         ]
         proofs.extend(extra_proofs)
-        all_erased = bool(proofs) and all(p.erased for p in proofs)
+        owners_erased = bool(proofs) and all(p.erased for p in proofs)
+        # Fail closed: COMPLETE requires proven owner erasure AND, when the
+        # caller threads its remove() result, a clean tombstone step (no
+        # provenance conflict or write error on a modern store).
+        all_erased = owners_erased and (
+            remove_result.spine_ok if remove_result is not None else True
+        )
         state = ErasureState.COMPLETE if all_erased else ErasureState.FAILED
         evidence_json = json.dumps(
             {"fact_ids": sorted(set(context.fact_ids)), "proofs": _proof_dicts(proofs)},
@@ -609,20 +626,35 @@ def verify_receipt(
     )
 
 
-def write_tombstones(
+# Tombstone write outcomes. WRITTEN/ABSENT are non-failures (ABSENT = the
+# table does not exist on an older schema, or there were no fact ids);
+# CONFLICT and ERROR must fail the erasure closed on a modern store.
+TOMBSTONE_WRITTEN = "written"
+TOMBSTONE_ABSENT = "absent"
+TOMBSTONE_CONFLICT = "conflict"
+TOMBSTONE_ERROR = "error"
+
+
+def write_tombstones_status(
     db: object,
     profile_id: str,
     fact_ids: tuple[str, ...],
     erasure_id: str,
     created_at: float,
     memory_id: str | None = None,
-) -> bool:
+) -> str:
+    """Write projection tombstones and report a precise outcome code.
+
+    Returns one of TOMBSTONE_WRITTEN / TOMBSTONE_ABSENT / TOMBSTONE_CONFLICT /
+    TOMBSTONE_ERROR so callers can fail an erasure closed on a real failure
+    while still tolerating an older schema without the tombstone table.
+    """
     if not fact_ids:
-        return False
+        return TOMBSTONE_ABSENT
     try:
         with db.raw_connection() as conn:
             if not _table_exists(conn, "projection_tombstones"):
-                return False
+                return TOMBSTONE_ABSENT
             for fact_id in fact_ids:
                 conn.execute(
                     "INSERT INTO projection_tombstones "
@@ -652,12 +684,29 @@ def write_tombstones(
                         conn.rollback()
                     except Exception:  # noqa: BLE001
                         pass
-                    return False
+                    return TOMBSTONE_CONFLICT
             conn.commit()
-        return True
+        return TOMBSTONE_WRITTEN
     except Exception as exc:  # noqa: BLE001
         logger.warning("erasure tombstone write skipped: %s", _err(exc))
-        return False
+        return TOMBSTONE_ERROR
+
+
+def write_tombstones(
+    db: object,
+    profile_id: str,
+    fact_ids: tuple[str, ...],
+    erasure_id: str,
+    created_at: float,
+    memory_id: str | None = None,
+) -> bool:
+    """Backward-compatible boolean wrapper: True only on a clean write."""
+    return (
+        write_tombstones_status(
+            db, profile_id, fact_ids, erasure_id, created_at, memory_id
+        )
+        == TOMBSTONE_WRITTEN
+    )
 
 
 def is_tombstoned(conn: object, profile_id: str, fact_id: str) -> bool:

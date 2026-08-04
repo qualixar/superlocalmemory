@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "llama-index-core>=0.13.0,<0.15",
-    "superlocalmemory>=3.6.23,<4",
+    "superlocalmemory>=3.6.23,<5",
 ]
 
 [project.urls]

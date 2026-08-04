@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "autogen-agentchat>=0.7.5",
     "autogen-core",
-    "superlocalmemory>=3.6.23,<4",
+    "superlocalmemory>=3.6.23,<5",
 ]
 
 [project.urls]

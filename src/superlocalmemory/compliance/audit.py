@@ -74,6 +74,12 @@ class AuditChain:
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
         self._db_path = str(db_path) if db_path else ":memory:"
         self._is_memory = self._db_path == ":memory:"
+        # External truncation anchor: a sidecar file holding the current chain
+        # length and head hash. The in-chain hash links detect mutation of a
+        # retained prefix, but not truncation of a suffix (or the whole chain);
+        # comparing against this externally-persisted (count, head) closes that
+        # gap. Not used for in-memory chains.
+        self._anchor_path = None if self._is_memory else (self._db_path + ".anchor")
         self._lock = threading.Lock()
         # For in-memory DBs, keep a persistent connection (each connect()
         # to ":memory:" creates a separate empty database).
@@ -136,6 +142,37 @@ class AuditChain:
         ).fetchone()
         return row["event_hash"] if row else _GENESIS_HASH
 
+    def _write_anchor(self, count: int, head: str) -> None:
+        """Persist the external (count, head) truncation anchor."""
+        if not self._anchor_path:
+            return
+        try:
+            payload = json.dumps({"count": int(count), "head": head}, sort_keys=True)
+            with open(self._anchor_path, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            try:
+                from superlocalmemory.core.security_primitives import harden_db_perms
+                harden_db_perms(self._anchor_path)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("audit anchor write failed: %s", exc)
+
+    def _read_anchor(self) -> Optional[dict[str, Any]]:
+        """Read the external truncation anchor, or None if absent/unreadable."""
+        if not self._anchor_path:
+            return None
+        try:
+            with open(self._anchor_path, encoding="utf-8") as fh:
+                data = json.loads(fh.read())
+            if isinstance(data, dict) and "count" in data and "head" in data:
+                return data
+        except FileNotFoundError:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("audit anchor read failed: %s", exc)
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -182,6 +219,14 @@ class AuditChain:
                     ),
                 )
                 conn.commit()
+                # Update the external truncation anchor (chain length + head).
+                try:
+                    cnt = conn.execute(
+                        "SELECT COUNT(*) FROM audit_chain"
+                    ).fetchone()[0]
+                    self._write_anchor(int(cnt), event_hash)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("audit anchor update skipped: %s", exc)
                 return event_hash
             finally:
                 self._release_conn(conn)
@@ -260,8 +305,28 @@ class AuditChain:
         finally:
             self._release_conn(conn)
 
+        anchor = self._read_anchor()
+        anchored_count = int(anchor.get("count", 0)) if anchor is not None else None
+
         if not rows:
+            # An empty chain is valid only if no external anchor claims prior
+            # entries; otherwise the whole chain was truncated.
+            if anchored_count is not None and anchored_count > 0:
+                logger.warning(
+                    "Audit chain truncation detected: anchor expects %d entries, "
+                    "found 0", anchored_count,
+                )
+                return False
             return True
+
+        # External truncation check: the retained prefix is verified below, but
+        # a suffix (or full) truncation leaves fewer rows than the anchor recorded.
+        if anchored_count is not None and len(rows) < anchored_count:
+            logger.warning(
+                "Audit chain truncation detected: anchor expects %d entries, "
+                "found %d", anchored_count, len(rows),
+            )
+            return False
 
         expected_prev = _GENESIS_HASH
         for row in rows:

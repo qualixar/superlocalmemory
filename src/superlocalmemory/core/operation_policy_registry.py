@@ -55,13 +55,23 @@ class PolicyDecision:
     ``allowed``     Whether the operation is admitted by policy.
     ``reason``      Machine-readable reason code (never a user-visible message).
     ``annotations`` Supplementary key/value pairs for audit, telemetry, and
-                    downstream enrichment. The dict is NOT a copy — callers
-                    must not mutate it.
+                    downstream enrichment. Exposed as a read-only mapping so a
+                    frozen decision cannot be mutated after construction.
     """
 
     allowed: bool
     reason: str
     annotations: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Freeze the annotations mapping so the whole decision is immutable
+        # (the outer dataclass is frozen; this closes the nested-dict hole).
+        from types import MappingProxyType
+
+        if not isinstance(self.annotations, MappingProxyType):
+            object.__setattr__(
+                self, "annotations", MappingProxyType(dict(self.annotations))
+            )
 
 
 # ---------------------------------------------------------------------------

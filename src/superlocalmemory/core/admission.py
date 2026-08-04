@@ -252,13 +252,20 @@ def resolve_actor(
     effective_roles: FrozenSet[ActorRole] = (
         roles if roles is not None else frozenset({ActorRole.MEMBER})
     )
+    # Store the SHA-256 prefix of the session token (matching the canonical HTTP
+    # actor), never the raw token material, for audit-log attribution only.
+    import hashlib as _hashlib
+
+    _session_hash = (
+        _hashlib.sha256(session.encode("utf-8")).hexdigest()[:16] if session else ""
+    )
     return ActorContext(
         principal_id=principal,
         roles=effective_roles,
         active_profile_id=profile,
         transport=transport,
         client_host=client_host,
-        session_token_hash=session[:16] if session else "",
+        session_token_hash=_session_hash,
     )
 
 

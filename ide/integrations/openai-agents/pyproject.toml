@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "openai-agents>=0.18.3",
-    "superlocalmemory>=3.6.23,<4",
+    "superlocalmemory>=3.6.23,<5",
 ]
 
 [project.urls]
