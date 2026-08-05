@@ -184,14 +184,12 @@ class TestCachePurgeObservabilityWhenNoDbPath:
             )
         ), f"Expected a 'purge skipped' WARNING; captured: {caplog.messages}"
 
-    def test_warning_emitted_and_cache_purged_via_fallback_root(
+    def test_default_root_is_never_used_for_destructive_fallback(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """db_path absent but DEFAULT_BASE_DIR resolves to a real dir:
-        (a) a WARNING is emitted about using the fallback, and
-        (b) cache rows are actually purged via that fallback path."""
+        """A wrapper without db_path must not erase another installation root."""
         db_path = tmp_path / "fallback_test.db"
         real_mgr = DatabaseManager(db_path)
         real_mgr.initialize(real_schema)
@@ -218,22 +216,13 @@ class TestCachePurgeObservabilityWhenNoDbPath:
         ):
             gdpr.forget_profile("carol")
 
-        # Cache rows for 'carol' must be gone — purged via the fallback root.
-        assert _count_cache_rows(cache_path, "carol") == 0, (
-            "Cache rows must be purged via the DEFAULT_BASE_DIR fallback when "
-            "the DB wrapper exposes no db_path"
-        )
+        # The default installation is not authoritative for this wrapper.
+        assert _count_cache_rows(cache_path, "carol") == 4
 
         # A WARNING about using the fallback must have been emitted.
         warning_text = " ".join(caplog.messages)
         assert "carol" in warning_text, "WARNING must name the affected profile_id"
-        assert any(
-            phrase in warning_text
-            for phrase in (
-                "DB wrapper exposes no db_path",
-                "context-cache purge will use resolved data root",
-            )
-        ), f"Expected a fallback-used WARNING; captured: {caplog.messages}"
+        assert "data root could not be resolved" in warning_text
 
 
 # ---------------------------------------------------------------------------

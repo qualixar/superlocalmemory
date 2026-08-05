@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from superlocalmemory.core.config import DEPLOYMENT_ENTERPRISE, DEPLOYMENT_PERSONAL
+from superlocalmemory.core.config import (
+    DEPLOYMENT_ENTERPRISE,
+    DEPLOYMENT_PERSONAL,
+    load_deployment_config,
+)
 from superlocalmemory.server import unified_daemon
 
 
@@ -64,3 +68,23 @@ def test_shared_destructive_modal_requires_typed_target() -> None:
     assert "slm-cd-challenge" in source
     assert "confirmationText" in source
     assert "confirmBtn.disabled" in source
+
+
+def test_shared_destructive_modal_cancels_an_existing_session() -> None:
+    source = (
+        ROOT / "src/superlocalmemory/ui/js/modal.js"
+    ).read_text(encoding="utf-8")
+    assert "activeDestructiveConfirmation" in source
+    assert "activeDestructiveConfirmation.cancel()" in source
+
+
+def test_present_corrupt_deployment_config_fails_closed(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[deployment\nmode = 'enterprise'", encoding="utf-8")
+    assert load_deployment_config(config_path) == DEPLOYMENT_ENTERPRISE
+
+
+def test_unknown_deployment_mode_fails_closed(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[deployment]\nmode = 'enterprize'\n", encoding="utf-8")
+    assert load_deployment_config(config_path) == DEPLOYMENT_ENTERPRISE

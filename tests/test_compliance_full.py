@@ -427,6 +427,30 @@ class TestRetentionEnforcement:
         assert row[0] == "archived"
         assert row[1] == "tombstoned"
 
+    def test_tombstone_write_failure_rolls_back_lifecycle(self):
+        db = sqlite3.connect(":memory:")
+        engine = RetentionEngine(db)
+        db.execute(
+            "CREATE TABLE atomic_facts ("
+            "fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "lifecycle TEXT DEFAULT 'active', created_at TEXT)"
+        )
+        db.execute(
+            "INSERT INTO atomic_facts VALUES "
+            "('f_old', 'p1', 'active', '2020-01-01T00:00:00+00:00')"
+        )
+        engine.create_rule(
+            name="tomb", framework="gdpr", retention_days=30,
+            action="tombstone", applies_to=None, profile_id="p1",
+        )
+
+        with pytest.raises(sqlite3.OperationalError, match="archive_status"):
+            engine.enforce("p1")
+
+        assert db.execute(
+            "SELECT lifecycle FROM atomic_facts WHERE fact_id='f_old'"
+        ).fetchone()[0] == "active"
+
     def test_enforce_honors_applies_to_scope(self):
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)
@@ -510,3 +534,33 @@ class TestRetentionScheduler:
         assert "profiles_processed" in result
         assert "results" in result
         assert result["profiles_processed"] == 0
+
+    def test_profile_failure_rolls_back_partial_enforcement(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "memory.db"
+        with sqlite3.connect(db_path) as db:
+            RetentionEngine(db).add_rule("p1", "rule", 30)
+            db.execute(
+                "CREATE TABLE atomic_facts ("
+                "fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+                "lifecycle TEXT DEFAULT 'active', created_at TEXT)"
+            )
+            db.execute(
+                "INSERT INTO atomic_facts VALUES "
+                "('f1', 'p1', 'active', '2020-01-01T00:00:00+00:00')"
+            )
+            db.commit()
+
+        def partial_then_fail(engine, profile_id):
+            engine._db.execute(
+                "UPDATE atomic_facts SET lifecycle='archived' WHERE profile_id=?",
+                (profile_id,),
+            )
+            raise RuntimeError("injected retention failure")
+
+        monkeypatch.setattr(RetentionEngine, "enforce", partial_then_fail)
+        result = RetentionScheduler(db_path=db_path).run_once()
+        assert result["results"][0]["error"] == "injected retention failure"
+        with sqlite3.connect(db_path) as db:
+            assert db.execute(
+                "SELECT lifecycle FROM atomic_facts WHERE fact_id='f1'"
+            ).fetchone()[0] == "active"
