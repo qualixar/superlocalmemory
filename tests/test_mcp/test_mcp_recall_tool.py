@@ -127,6 +127,7 @@ class TestRecallTool:
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
             fast=None, include_global=None, include_shared=None, window=None,
+            as_of=None,
         )
 
     def test_recall_forwards_fast_flag(self):
@@ -146,6 +147,7 @@ class TestRecallTool:
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
             fast=True, include_global=None, include_shared=None, window=None,
+            as_of=None,
         )
 
     def test_recall_emits_no_persistent_event(self):
@@ -210,6 +212,7 @@ class TestRecallEdgeCases:
         pool.recall.assert_called_once_with(
             "", limit=CANONICAL_RECALL_LIMIT, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
+            as_of=None,
         )
 
     def test_recall_limit_forwarded(self):
@@ -229,6 +232,7 @@ class TestRecallEdgeCases:
         pool.recall.assert_called_once_with(
             "limit test", limit=5, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
+            as_of=None,
         )
 
     def test_recall_returns_even_when_no_implicit_feedback_exists(self):

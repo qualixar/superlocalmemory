@@ -369,7 +369,10 @@ class GDPRCompliance:
                 if cache_purged:
                     counts["context_cache"] = cache_purged
         except Exception as exc:
+            # Fail-closed: a context-cache purge failure must not be silently
+            # tolerated — it can leave profile PII in the cache DB.
             logger.warning("GDPR erase: context-cache purge failed: %s", exc)
+            counts["context_cache_failed"] = 1
 
         try:
             vector_purged, vector_failures = self._purge_vector_and_ann(profile_id)
@@ -377,7 +380,12 @@ class GDPRCompliance:
             if vector_failures:
                 counts["vector_store_failures"] = vector_failures
         except Exception as exc:
+            # Fail-closed: a top-level vector-purge exception (as opposed to the
+            # per-fact failures returned in vector_failures) must set an explicit
+            # marker, or erasure_complete could still report 1 despite the vector
+            # projection never being purged.
             logger.warning("GDPR erase: vector purge failed: %s", exc)
+            counts["vector_store_failures"] = counts.get("vector_store_failures", 0) or 1
 
         # Erasure receipt (P1-5) — route the profile wipe through ErasureService
         # so the receipt captures real per-owner proofs (not proofs:[]).
@@ -490,6 +498,7 @@ class GDPRCompliance:
         # surface an explicit erasure_complete flag so a partial wipe is reported
         # as failure rather than silent success.
         residue_rows = 0
+        residue_recount_failed = False
         for table in tables:
             try:
                 _r = self._db.execute(
@@ -497,14 +506,24 @@ class GDPRCompliance:
                     (profile_id,),
                 )
                 residue_rows += int(dict(_r[0])["c"]) if _r else 0
-            except Exception:
-                pass
+            except Exception as exc:
+                # Fail-closed: a residue re-count that cannot be performed is a
+                # verification failure, not zero residue. We cannot certify the
+                # table is clean, so erasure must not report complete.
+                logger.warning(
+                    "GDPR erase: residue re-count for %s failed: %s", table, exc
+                )
+                residue_recount_failed = True
         counts["residue_rows"] = residue_rows
+        if residue_recount_failed:
+            counts["residue_recount_failed"] = 1
         counts["erasure_complete"] = 1 if (
             residue_rows == 0
+            and not residue_recount_failed
             and not table_delete_failures
             and not counts.get("learning_db_failed")
             and not counts.get("vector_store_failures")
+            and not counts.get("context_cache_failed")
             and not counts.get("owner_erasure_incomplete")
         ) else 0
 

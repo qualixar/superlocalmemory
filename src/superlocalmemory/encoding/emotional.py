@@ -16,28 +16,89 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-import math
+import os
+import threading
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_vader_analyzer = None
+# ---------------------------------------------------------------------------
+# Thread-safe, fork-safe VADER singleton
+#
+# Design notes:
+#   • _vader_analyzer = None means "not yet initialized for this process" OR
+#     "initialized but vaderSentiment is unavailable" (both cases return None
+#     from _get_vader, which causes tag_emotion to fall back to the keyword
+#     heuristic — the correct, observable behavior in both cases).
+#
+#   • _vader_pid tracks which OS process last ran initialization. On fork()
+#     (e.g., under pytest-xdist, multiprocessing, or uwsgi) the child inherits
+#     the parent's _vader_analyzer pointer but the native SentimentIntensityAnalyzer
+#     object may reference memory that is no longer safe in the child's address
+#     space. Re-initializing per-PID guarantees each process gets a fresh, safe
+#     object constructed in its own address space.
+#
+#   • _vader_lock (threading.Lock) prevents the double-initialization race in a
+#     multi-threaded caller (e.g., the ingestion thread-pool in store_pipeline.py
+#     where tag_emotion is called from multiple MaterializerWorker threads
+#     concurrently). Without the lock, Thread A and Thread B can both see
+#     _vader_analyzer is None, both enter the import block, and both try to load
+#     vaderSentiment's lexicon simultaneously — causing memory corruption when
+#     the native C-extension in the same process's numpy/BLAS layer is already
+#     running in a third thread (the LanceDB tokio background thread). The lock
+#     serializes VADER initialization so only one thread loads the lexicon.
+#
+#   • After initialization, reads bypass the lock entirely (fast-path at top of
+#     _get_vader). The GIL guarantees atomic reads of _vader_pid and
+#     _vader_analyzer in CPython; writing _vader_pid AFTER _vader_analyzer
+#     (always, inside the lock) ensures a reader that sees a matching _vader_pid
+#     is guaranteed to also see the correctly initialized _vader_analyzer.
+# ---------------------------------------------------------------------------
+
+_vader_analyzer = None          # None = uninitialized OR unavailable
+_vader_pid: int | None = None   # PID in which _vader_analyzer was initialized
+_vader_lock = threading.Lock()  # Serializes initialization only; not scoring
 
 
 def _get_vader():
-    """Lazy-load VADER to avoid import cost on startup."""
-    global _vader_analyzer
-    if _vader_analyzer is not None:
+    """Lazy-load VADER — thread-safe via lock, fork-safe via PID tracking.
+
+    Returns a SentimentIntensityAnalyzer instance, or None if vaderSentiment
+    is not installed.  Callers must treat None as "fallback to keyword heuristic."
+    """
+    global _vader_analyzer, _vader_pid
+    current_pid = os.getpid()
+
+    # Fast-path: already initialized in this process — no lock needed.
+    # We read _vader_pid first; if it matches current_pid, _vader_analyzer was
+    # written before _vader_pid was set (see ordering in slow-path below),
+    # so the value we read is fully initialized.
+    if _vader_pid == current_pid:
         return _vader_analyzer
-    try:
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=DeprecationWarning, module="vaderSentiment")
-            from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-            _vader_analyzer = SentimentIntensityAnalyzer()
-    except ImportError:
-        logger.warning("vaderSentiment not installed — emotional tagging disabled")
-        _vader_analyzer = None
+
+    # Slow-path: either first call in this process, or a forked child.
+    with _vader_lock:
+        # Double-checked locking: another thread may have raced us here.
+        if _vader_pid == current_pid:
+            return _vader_analyzer
+
+        # Initialize (or re-initialize) for this process.
+        try:
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=DeprecationWarning, module="vaderSentiment",
+                )
+                from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+                _vader_analyzer = SentimentIntensityAnalyzer()
+        except ImportError:
+            logger.warning("vaderSentiment not installed — emotional tagging disabled")
+            _vader_analyzer = None
+
+        # Write _vader_pid LAST so that the fast-path can safely use it as a
+        # "initialization complete" signal.
+        _vader_pid = current_pid
+
     return _vader_analyzer
 
 

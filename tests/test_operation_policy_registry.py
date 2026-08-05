@@ -195,11 +195,13 @@ class TestOperationRequest:
     def test_operation_kind_members(self):
         # Verify all expected members exist — regression guard.
         # Phase 1 addition: "evolve_skill" (PHASE1_LLD.md mandate).
+        # Wave-3 addition: "ops_inspect", "ops_resolve" (resilience slice).
         expected = {
             "remember", "recall", "forget", "archive", "restore", "correct",
             "erase", "consolidate", "backup", "restore_backup", "mesh_send",
             "mesh_lock", "provider_test", "mode_change", "profile_switch",
             "schema_migrate", "vector_migrate", "evolve_skill",
+            "ops_inspect", "ops_resolve",
         }
         actual = {k.value for k in OperationKind}
         assert expected == actual

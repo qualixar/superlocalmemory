@@ -144,6 +144,15 @@ def pytest_sessionfinish(session, exitstatus):
         shutdown_deferred_writes()
     except Exception:
         pass
+    # Stop any config-store hot-reload watchdog daemon threads. A live watchdog
+    # racing interpreter finalization intermittently SIGSEGVs on macOS (the
+    # watchdog fsevents extension is co-loaded). Signalling + joining them here
+    # keeps the harness deterministic; store.py also does this via atexit.
+    try:
+        from superlocalmemory.optimize.config.store import _stop_all_watchdogs
+        _stop_all_watchdogs()
+    except Exception:
+        pass
     # Join any SLM daemon threads to prevent Windows KeyboardInterrupt on exit
     import threading
     for t in threading.enumerate():
@@ -229,6 +238,26 @@ def _prevent_heavy_model_loading():
     try:
         _kill_orphaned_slm_workers()
     except (KeyboardInterrupt, Exception):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _stop_leaked_config_watchdogs():
+    """Stop any config-store hot-reload watchdog left running by a test.
+
+    Daemon-boot tests call ``ConfigStore.start_watchdog()`` on the shared
+    singleton (via unified_daemon) and never stop it, so that daemon thread
+    otherwise keeps running for the whole rest of the session. A live watchdog
+    thread concurrent with native-extension code (sqlite/numpy/torch) in an
+    unrelated later test intermittently SIGSEGVs on macOS. Stopping it at each
+    test boundary keeps the watchdog scoped to the test that started it and
+    makes full-suite runs deterministic. Cheap no-op when none are running.
+    """
+    yield
+    try:
+        from superlocalmemory.optimize.config.store import _stop_all_watchdogs
+        _stop_all_watchdogs()
+    except Exception:
         pass
 
 

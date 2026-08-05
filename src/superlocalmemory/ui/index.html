@@ -989,6 +989,12 @@
                     </div>
                     <div id="compliance-audit-content"><span class="text-muted">Loading...</span></div>
                 </section>
+
+                <!-- Admin Operations Health is provided as a self-injected tab by
+                     ui/js/od-ops-health.js (fetches /operations/failed, KPI strip,
+                     writer-stall banner, one-click Retry/Reconcile/Cancel). The earlier
+                     static shell here was unpopulated and carried an inline handler, so it
+                     was removed in favour of the single functional CSP-clean tab. -->
             </div>
 
             <!-- Skill Evolution (v3.4.10 — Arsenal Evolution) -->
@@ -1573,6 +1579,7 @@
     <script src="static/js/od-health.js?v=382"></script>
     <script src="static/js/od-operations.js?v=380"></script>
     <script src="static/js/od-compliance-ext.js?v=100"></script>
+    <script src="static/js/od-ops-health.js?v=400"></script>
     <script src="static/js/od-team.js?v=379"></script>
     <script src="static/js/od-graph.js?v=379"></script>
     <script src="static/js/od-memories.js?v=379"></script>

@@ -21,6 +21,7 @@ from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
     ensure_schema_version_table,
+    read_schema_version,
     write_schema_version,
 )
 
@@ -70,3 +71,38 @@ def test_dependent_migration_skipped_when_dependency_fails(
             ).fetchall()
         }
     assert "zzz_child" not in tables
+
+
+def test_version_singleton_coexists_with_legacy_schema_version(tmp_path: Path) -> None:
+    """Regression: every real (3.x) database already carries the legacy multi-row
+    ``schema_version`` history table (columns version/applied_at/description).  The
+    version-ceiling singleton must create/read/write its own marker without
+    colliding with that legacy table — previously it failed with
+    "table schema_version has no column named id" on every migrated DB.
+    """
+    memory_db = tmp_path / "memory.db"
+    with sqlite3.connect(memory_db) as conn:
+        # Legacy history table exactly as schema.py / schema_v34x create it.
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            " version TEXT NOT NULL,"
+            " applied_at TEXT NOT NULL DEFAULT (datetime('now')),"
+            " description TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            "INSERT INTO schema_version (version, description) VALUES ('3.4.11', 'legacy')"
+        )
+        conn.commit()
+
+    with sqlite3.connect(memory_db) as conn:
+        ensure_schema_version_table(conn)
+        write_schema_version(conn, SUPPORTED_SCHEMA_VERSION)
+        conn.commit()
+
+    # The singleton guard now reads back the stamped ceiling (was 0 before the fix).
+    assert read_schema_version(memory_db) == SUPPORTED_SCHEMA_VERSION
+
+    # The legacy history table is untouched and still queryable.
+    with sqlite3.connect(memory_db) as conn:
+        legacy = {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+    assert "3.4.11" in legacy

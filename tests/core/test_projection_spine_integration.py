@@ -137,6 +137,14 @@ def stored_engine(engine_with_mock_deps):
         require_complete=True,
         return_receipt=True,
     )
+    # These tests verify the DEGRADED / self-heal / redrive reconcile path that
+    # occurs when the vector projection is genuinely unverifiable
+    # (REQUIRED_UNAVAILABLE). Force "no wired vector store" deterministically so
+    # the assertions hold on ANY machine — otherwise, on a host whose Python has
+    # sqlite-vec installed, the engine wires a real vector store and the manifest
+    # is (correctly) COMPLETE, making these DEGRADED-path tests environment-fragile.
+    # The COMPLETE happy-path is covered separately by the hero-path suite.
+    engine._vector_store = None
     return engine, operation
 
 

@@ -281,6 +281,25 @@ class OperationPolicyRegistry:
                 allowed_transports=_ALL_TRANSPORTS,
                 audit_level="full",
             ),
+            # Operational recovery & admin remediation (Wave-3 resilience slice)
+            # OPS_INSPECT: read-only listing of failed/stuck/degraded ops.
+            # Allowed over all transports so dashboard, MCP, and CLI all work.
+            OperationKind.OPS_INSPECT: OperationPolicy(
+                kind=OperationKind.OPS_INSPECT,
+                required_roles=_owner_admin,
+                required_authentication=True,
+                allowed_transports=_ALL_TRANSPORTS,
+                audit_level="standard",
+            ),
+            # OPS_RESOLVE: retry/force-reconcile/cancel a failed operation.
+            # Write permission — OWNER/ADMIN only, full audit trail.
+            OperationKind.OPS_RESOLVE: OperationPolicy(
+                kind=OperationKind.OPS_RESOLVE,
+                required_roles=_owner_admin,
+                required_authentication=True,
+                allowed_transports=_ALL_TRANSPORTS,
+                audit_level="full",
+            ),
         }
         return cls(policies)
 

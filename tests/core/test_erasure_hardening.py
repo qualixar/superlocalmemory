@@ -71,7 +71,14 @@ def test_raw_vector_present_detects_map_residue(tmp_path: Path) -> None:
         conn.close()
 
     store = VectorStore(db_path, VectorStoreConfig())
-    # sqlite-vec not available in CI — uses map-only fallback path
+    # This test targets the map-only fallback residue detection (the path used
+    # when sqlite-vec is unavailable): an orphan vector_row_map entry with no
+    # backing fact_embeddings row must be reported present so GC can catch it.
+    # Force the fallback deterministically so the test holds on hosts whose
+    # Python HAS sqlite-vec (where the real vec0 path would instead require an
+    # actual embedding row). The sqlite-vec-present semantics are covered by the
+    # store's own vec0 tests.
+    store._available = False
     assert store.raw_vector_present("f1") is True
     assert store.raw_vector_present("f99") is False
 

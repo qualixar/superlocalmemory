@@ -94,6 +94,7 @@ def _register_every_tool(target) -> None:
     from superlocalmemory.mcp.tools_mesh import register_mesh_tools
     from superlocalmemory.mcp.tools_optimize import register_optimize_tools
     from superlocalmemory.mcp.tools_loops import register_loop_tools
+    from superlocalmemory.mcp.tools_ops import register_ops_tools
     from superlocalmemory.mcp.tools_v28 import register_v28_tools
     from superlocalmemory.mcp.tools_v3 import register_v3_tools
     from superlocalmemory.mcp.tools_v33 import register_v33_tools
@@ -110,6 +111,7 @@ def _register_every_tool(target) -> None:
     register_evolution_tools(target, get_engine)
     register_optimize_tools(target)
     register_loop_tools(target, get_engine)
+    register_ops_tools(target, get_engine)
 
 
 @pytest.mark.parametrize(
@@ -117,7 +119,7 @@ def _register_every_tool(target) -> None:
     (
         ("essential", "", 42),
         ("named-core", "core", 14),
-        ("whole", "whole", 84),
+        ("whole", "whole", 86),
     ),
 )
 def test_registration_exposure_is_exact_and_duplicate_free(

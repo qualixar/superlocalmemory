@@ -51,6 +51,9 @@ class OperationKind(str, Enum):
     SCHEMA_MIGRATE = "schema_migrate"
     VECTOR_MIGRATE = "vector_migrate"
     EVOLVE_SKILL = "evolve_skill"
+    # Operational recovery & admin remediation (V4 Wave-3 resilience slice)
+    OPS_INSPECT = "ops_inspect"    # List failed/stuck/degraded operations (OWNER/ADMIN)
+    OPS_RESOLVE = "ops_resolve"    # Retry/force-reconcile/cancel an operation (OWNER/ADMIN)
 
 
 class OperationStatus(str, Enum):

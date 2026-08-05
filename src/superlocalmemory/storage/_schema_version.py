@@ -34,13 +34,21 @@ class SchemaVersionError(RuntimeError):
     """
 
 
+# NOTE: this singleton lives in its OWN table ``slm_schema_version`` rather than
+# ``schema_version``.  The legacy multi-row migration-history table
+# ``schema_version`` (columns version/applied_at/description, seeded by
+# schema.py + the schema_v34x migrations) already exists on every real database
+# — fresh installs and upgrades alike — so a ``CREATE TABLE IF NOT EXISTS
+# schema_version`` here would no-op against that legacy shape and every
+# ``id``-keyed read/write would fail ("no column named id").  A distinct table
+# name decouples the version-ceiling guard from that legacy history table.
 _SCHEMA_VERSION_DDL = """\
-CREATE TABLE IF NOT EXISTS schema_version (
+CREATE TABLE IF NOT EXISTS slm_schema_version (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
     version     INTEGER NOT NULL DEFAULT 0,
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-INSERT OR IGNORE INTO schema_version (id, version, updated_at)
+INSERT OR IGNORE INTO slm_schema_version (id, version, updated_at)
 VALUES (1, 0, datetime('now'));
 """
 
@@ -51,11 +59,11 @@ def read_schema_version(db_path: Path) -> int:
         conn = sqlite3.connect(str(db_path))
         try:
             row = conn.execute(
-                "SELECT version FROM schema_version WHERE id = 1"
+                "SELECT version FROM slm_schema_version WHERE id = 1"
             ).fetchone()
             return int(row[0]) if row is not None else 0
         except sqlite3.OperationalError:
-            return 0  # schema_version table does not exist (legacy DB)
+            return 0  # slm_schema_version table does not exist (legacy DB)
         finally:
             conn.close()
     except sqlite3.Error:
@@ -70,7 +78,7 @@ def ensure_schema_version_table(conn: sqlite3.Connection) -> None:
 def write_schema_version(conn: sqlite3.Connection, version: int) -> None:
     """Overwrite the singleton version record."""
     conn.execute(
-        "UPDATE schema_version "
+        "UPDATE slm_schema_version "
         "SET version = ?, updated_at = datetime('now') WHERE id = 1",
         (version,),
     )

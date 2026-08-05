@@ -6,6 +6,9 @@ Covers:
   F-46  Tombstone provenance conflict fails the erasure closed.
   F-36  forget_profile aborts (deletes nothing) when the pre-deletion audit fails.
   F-35  forget_profile reports an explicit completeness flag.
+  P-11  forget_profile is fail-closed on every purge/re-count error branch:
+        a top-level vector-purge exception, a context-cache purge exception, and
+        a residue re-count exception each force erasure_complete=0 (preprint audit).
 """
 
 from __future__ import annotations
@@ -121,3 +124,71 @@ def test_forget_profile_reports_completeness(tmp_path: Path) -> None:
     assert counts.get("erasure_aborted") is None  # audit succeeded -> not aborted
     assert counts.get("erasure_complete") == 1
     assert counts.get("residue_rows") == 0
+
+
+# --- P-11: fail-closed on every purge / re-count error branch ----------------
+
+class _RecountFailDB:
+    """Delegates to a real DatabaseManager, but raises on the residue re-count
+    COUNT(*) queries that run *after* VACUUM — simulating a table that cannot be
+    re-counted. Earlier pre-deletion counts and the deletes themselves succeed."""
+
+    def __init__(self, real) -> None:
+        self._real = real
+        self._vacuumed = False
+
+    def __getattr__(self, name):  # delegate db_path, etc.
+        return getattr(self._real, name)
+
+    def execute(self, sql, *args, **kwargs):
+        stripped = sql.strip().upper()
+        if stripped.startswith("VACUUM"):
+            self._vacuumed = True
+            return self._real.execute(sql, *args, **kwargs)
+        if self._vacuumed and stripped.startswith("SELECT COUNT(*)"):
+            raise sqlite3.OperationalError("simulated residue re-count failure")
+        return self._real.execute(sql, *args, **kwargs)
+
+
+def _run_forget(db, tmp_path: Path):
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+    with patch("superlocalmemory.infra.data_root.state_path",
+               return_value=tmp_path / "audit.db"), \
+         patch("superlocalmemory.learning.database.LearningDatabase") as MockLDB:
+        MockLDB.return_value = MagicMock()
+        return GDPRCompliance(db, engine=None).forget_profile("p1")
+
+
+def test_vector_purge_toplevel_failure_is_fail_closed(tmp_path: Path) -> None:
+    from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+    db = _gdpr_db(tmp_path)
+    with patch.object(GDPRCompliance, "_purge_vector_and_ann",
+                      side_effect=RuntimeError("vector store down")), \
+         patch("superlocalmemory.infra.data_root.state_path",
+               return_value=tmp_path / "audit.db"), \
+         patch("superlocalmemory.learning.database.LearningDatabase") as MockLDB:
+        MockLDB.return_value = MagicMock()
+        counts = GDPRCompliance(db, engine=None).forget_profile("p1")
+
+    assert counts.get("vector_store_failures")            # explicit marker set
+    assert counts.get("erasure_complete") == 0            # fail-closed
+
+
+def test_context_cache_purge_failure_is_fail_closed(tmp_path: Path) -> None:
+    db = _gdpr_db(tmp_path)
+    with patch("superlocalmemory.core.context_cache.purge_profile_from_cache_db",
+               side_effect=RuntimeError("cache db locked")):
+        counts = _run_forget(db, tmp_path)
+
+    assert counts.get("context_cache_failed") == 1
+    assert counts.get("erasure_complete") == 0            # fail-closed
+
+
+def test_residue_recount_failure_is_fail_closed(tmp_path: Path) -> None:
+    db = _RecountFailDB(_gdpr_db(tmp_path))
+    counts = _run_forget(db, tmp_path)
+
+    assert counts.get("residue_recount_failed") == 1
+    assert counts.get("erasure_complete") == 0            # fail-closed

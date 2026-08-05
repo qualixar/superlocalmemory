@@ -263,6 +263,8 @@ from superlocalmemory.mcp.tools_optimize import register_optimize_tools
 register_optimize_tools(_target)  # v3.6.11: Surface B Optimize tools (proxy-free)
 from superlocalmemory.mcp.tools_loops import register_loop_tools
 register_loop_tools(_target, get_engine)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
+from superlocalmemory.mcp.tools_ops import register_ops_tools
+register_ops_tools(_target, get_engine)  # Wave-3: operational recovery & admin remediation
 
 
 # Keep stdio MCP processes thin until a tool truly needs a local LIGHT engine.

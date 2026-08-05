@@ -1465,6 +1465,58 @@ async def lifespan(application: FastAPI):
             "details": {"_crash": str(_exc)},
         }
 
+    # H1 — boot self-heal: remove provably-dead SLM lock/PID artifacts BEFORE
+    # claiming the writer. The writer claim uses a portalocker OS advisory lock
+    # that auto-releases on holder death, so stale artifacts are metadata-only
+    # leftovers. Fail-soft — a crash here is logged but never blocks startup.
+    try:
+        from superlocalmemory.infra.self_heal import reap_stale_artifacts
+
+        # NOTE: canonical_data_root is imported at module scope (top of file).
+        # Do NOT re-import it locally here — a local import would shadow the
+        # module name for this whole startup function and make the earlier
+        # migration-runner reference raise UnboundLocalError.
+        _sh_report = reap_stale_artifacts(canonical_data_root())
+        if _sh_report["removed"]:
+            logger.info(
+                "boot self-heal: removed %d stale artifact(s)",
+                len(_sh_report["removed"]),
+            )
+        if _sh_report["errors"]:
+            logger.debug(
+                "boot self-heal: %d removal error(s) (non-fatal)",
+                len(_sh_report["errors"]),
+            )
+    except Exception as _sh_exc:
+        logger.debug("boot self-heal failed (non-fatal): %s", _sh_exc)
+
+    # H4 — mesh lock TTL expiry: delete expired mesh_locks rows on boot so
+    # dead-node leases are cleared before any actor reads the lock table.
+    # mesh_locks lives in memory.db.  Fail-soft — never blocks startup.
+    try:
+        from superlocalmemory.infra.self_heal import expire_stale_mesh_locks
+
+        _mesh_db = canonical_data_root() / "memory.db"
+        _mesh_expired = expire_stale_mesh_locks(_mesh_db)
+        if _mesh_expired:
+            logger.info("boot mesh expiry: cleared %d stale mesh_lock row(s)", _mesh_expired)
+    except Exception as _mesh_exc:
+        logger.debug("boot mesh expiry failed (non-fatal): %s", _mesh_exc)
+
+    # H3 — process reaper: kill orphaned SLM child processes whose parent is
+    # dead. Wires the existing infra/process_reaper.py at daemon start.
+    # Fail-soft — never blocks the startup path.
+    try:
+        from superlocalmemory.infra.process_reaper import ReaperConfig, reap_stale_on_startup
+        from superlocalmemory.infra.pid_manager import PidManager
+        from superlocalmemory.infra.data_root import canonical_data_root as _cdr
+
+        _rpr_cfg = ReaperConfig(orphan_age_threshold_hours=0.0)
+        _rpr_mgr = PidManager(_cdr() / "slm.pids")
+        reap_stale_on_startup(_rpr_cfg, _rpr_mgr)
+    except Exception as _rpr_exc:
+        logger.debug("boot process reaper failed (non-fatal): %s", _rpr_exc)
+
     try:
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.core.engine import MemoryEngine
@@ -1492,10 +1544,25 @@ async def lifespan(application: FastAPI):
         # tables. Claim the daemon's writer lease, install the typed admission
         # handler, and replay crash-surviving journal entries *before* any
         # background writer or ready descriptor is published.
-        from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
+        from superlocalmemory.core.remember_runtime import (
+            CanonicalRememberRuntime,
+            CanonicalRememberUnavailable,
+            DaemonAlreadyServing,
+        )
 
         canonical_remember_runtime = CanonicalRememberRuntime.for_engine(engine)
-        canonical_remember_runtime.start()
+        try:
+            canonical_remember_runtime.start()
+        except (DaemonAlreadyServing, CanonicalRememberUnavailable):
+            # H2 — graceful single-instance: a health-verified daemon is already
+            # serving (DaemonAlreadyServing), OR the bounded retry loop exhausted
+            # (CanonicalRememberUnavailable).  Belt-and-suspenders: a lost writer
+            # race must NEVER be a traceback for a non-technical user.
+            logger.info(
+                "another SLM daemon holds the writer; this instance exits cleanly"
+            )
+            import sys
+            sys.exit(0)
         application.state.canonical_remember_runtime = canonical_remember_runtime
 
         # WAL is already established at DB creation (DatabaseManager._enable_wal
@@ -3525,6 +3592,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "runtime_state": runtime_state,
             "active_profile": profile_snapshot.profile_id,
             "profile_generation": profile_snapshot.generation,
+            # Wave-3: operational failure counts (visible to all team members)
+            **_ops_failure_counts(engine),
         }
 
     @application.get("/recall")
@@ -4093,6 +4162,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # index backfill after an upgrade). Dashboard renders a plain
             # "Optimizing memory…" line from this. Defaults to idle before start.
             "self_heal": globals().get("_SELF_HEAL_STATUS", {"state": "idle"}),
+            # Wave-3: operational failure counts (dead-letter, degraded, stalled)
+            **_ops_failure_counts(engine),
         }
 
     @application.get("/api/v3/components")
@@ -4143,6 +4214,105 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
         threading.Thread(target=_run, daemon=True, name="manual-heal").start()
         return {"status": "started"}
+
+    # ------------------------------------------------------------------
+    # Wave-3: Operational Recovery & Admin Remediation  (V4 resilience slice)
+    # ------------------------------------------------------------------
+
+    @application.get("/operations/failed")
+    async def list_failed_operations_endpoint(
+        request: Request,
+        profile: str = None,
+    ):
+        """Return all failed/stuck/degraded operations — admin surface.
+
+        Requires MANAGE permission (OWNER or ADMIN role).  Returns three
+        categories: dead-letter DLQ entries, DEGRADED completion manifests,
+        and exhausted projection obligations.  Safe read-only; never mutates.
+        """
+        from superlocalmemory.server.rbac_enforce import require_permission
+        from superlocalmemory.access.rbac import Permission
+
+        require_permission(request, Permission.MANAGE)
+        _update_activity()
+
+        config = getattr(application.state, "config", None)
+        db_path = getattr(config, "db_path", None)
+        if db_path is None or not db_path.exists():
+            return {"dead_letter": [], "degraded_manifests": [],
+                    "exhausted_obligations": [], "total": 0}
+
+        try:
+            from superlocalmemory.core.ops_remediation import list_failed_operations
+            return list_failed_operations(db_path, profile_id=profile)
+        except Exception as exc:
+            logger.warning("list_failed_operations endpoint error: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to query operations")
+
+    @application.post("/operations/{operation_id}/resolve")
+    async def resolve_operation_endpoint(request: Request, operation_id: str):
+        """Admin remediation: retry / force-reconcile / cancel a stuck operation.
+
+        Body JSON: ``{"action": "retry"|"force_reconcile"|"cancel"}``
+
+        Requires MANAGE permission.  Writes an audit event for every mutation.
+        The action itself is delegated to ``core.ops_remediation.resolve_operation``.
+        Returns ``{"success": bool, "action": str, "operation_id": str, ...}``.
+        """
+        from superlocalmemory.server.rbac_enforce import require_permission
+        from superlocalmemory.access.rbac import Permission
+
+        require_permission(request, Permission.MANAGE)
+        _update_activity()
+
+        body: dict = {}
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON body required")
+
+        action = body.get("action", "")
+        if action not in ("retry", "force_reconcile", "cancel"):
+            raise HTTPException(
+                status_code=400,
+                detail="action must be one of: retry, force_reconcile, cancel",
+            )
+
+        config = getattr(application.state, "config", None)
+        db_path = getattr(config, "db_path", None)
+        if db_path is None or not db_path.exists():
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        engine = getattr(application.state, "engine", None)
+
+        try:
+            from superlocalmemory.core.ops_remediation import resolve_operation
+            result = resolve_operation(db_path, engine, operation_id, action)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            logger.warning(
+                "resolve_operation endpoint error op=%s action=%s: %s",
+                operation_id, action, exc, exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Remediation failed")
+
+        # Audit trail — best effort, non-blocking
+        try:
+            from superlocalmemory.compliance.audit import AuditChain
+            audit_path = state_path("audit_chain.db")
+            actor_header = request.headers.get("X-Actor-Id", "admin")
+            AuditChain(str(audit_path)).log(
+                operation=f"ops_resolve:{action}",
+                agent_id=actor_header,
+                profile_id="",
+                content_hash="",
+                metadata={"operation_id": operation_id, "result": result},
+            )
+        except Exception:
+            logger.debug("audit log for ops_resolve failed (non-fatal)", exc_info=True)
+
+        return result
 
     @application.get("/list")
     async def list_facts(limit: int = 50):
@@ -4569,6 +4739,50 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
         Reconciler(ledger).reconcile(
             conn, operation_id, profile_id, canonical_committed=False,
         )
+
+
+def _ops_failure_counts(engine) -> dict:
+    """Return Wave-3 operational failure counts for /status and /health.
+
+    Always returns a dict (never raises). Counts default to 0 on any error.
+    Includes: dead_letter_count, degraded_operations, exhausted_obligations,
+    writer_stalled (bool), writer_stalled_op_id, writer_stalled_age_s.
+    """
+    result: dict = {
+        "dead_letter_count": 0,
+        "degraded_operations": 0,
+        "exhausted_obligations": 0,
+        "writer_stalled": False,
+        "writer_stalled_op_id": None,
+        "writer_stalled_age_s": None,
+    }
+    # Writer stall info from canonical coordinator
+    try:
+        writer_runtime = getattr(application.state, "canonical_remember_runtime", None)
+        coordinator = getattr(writer_runtime, "_coordinator", None) if writer_runtime else None
+        if coordinator is None:
+            coordinator = getattr(application.state, "write_coordinator", None)
+        if coordinator is not None and hasattr(coordinator, "inflight_info"):
+            info = coordinator.inflight_info()
+            result["writer_stalled"] = bool(info.get("stalled"))
+            result["writer_stalled_op_id"] = info.get("op_id")
+            result["writer_stalled_age_s"] = info.get("age_s")
+    except Exception:
+        pass
+
+    # DB failure counts
+    try:
+        from superlocalmemory.core.ops_remediation import get_failure_counts
+        db_path = getattr(getattr(application.state, "config", None), "db_path", None)
+        if db_path is not None and db_path.exists():
+            counts = get_failure_counts(db_path)
+            result["dead_letter_count"] = counts.get("dead_letter_count", 0)
+            result["degraded_operations"] = counts.get("degraded_operations", 0)
+            result["exhausted_obligations"] = counts.get("exhausted_obligations", 0)
+    except Exception:
+        pass
+
+    return result
 
 
 def _materialize_ingestion_one_pass(

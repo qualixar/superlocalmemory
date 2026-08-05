@@ -258,6 +258,12 @@ def _cmd_loop(args: Namespace) -> None:
     cmd_loop(args)
 
 
+def _cmd_ops(args: Namespace) -> None:
+    """Wave-3: operational recovery & admin remediation commands."""
+    from superlocalmemory.cli.ops_cmd import cmd_ops
+    cmd_ops(args)
+
+
 # ---- end SLM v3.6 Optimize dispatch functions ----
 
 
@@ -387,6 +393,8 @@ def dispatch(args: Namespace) -> None:
         "loop": _cmd_loop,
         # V3.8.2 super-help — grouped overview of every command + topics
         "help": cmd_help,
+        # Wave-3: operational recovery & admin remediation
+        "ops": _cmd_ops,
     }
     handler = handlers.get(args.command)
     if handler:
@@ -2106,6 +2114,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Health & self-healing", [
         ("doctor", "Full pre-flight check (add --fix to auto-repair)"),
         ("health", "Quick math/retrieval layer status"),
+        ("ops", "List/resolve stuck, dead-lettered, or degraded operations (admin)"),
         ("diagnostics", "Export a local diagnostics bundle"),
         ("evidence", "Build/inspect evidence bundles"),
         ("rotate-token", "Rotate the local dashboard install token"),
@@ -2300,6 +2309,32 @@ def cmd_doctor(args: Namespace) -> None:
         except Exception as _fix_exc:
             if not use_json:
                 print(f"  auto-repair error: {_fix_exc}\n")
+
+        # H5 — stale-artifact reap (additive; runs after component healer).
+        # Removes provably-dead lock/PID files so the doctor report below
+        # reflects the healed state.  Fail-open — never blocks doctor.
+        try:
+            from superlocalmemory.infra.self_heal import reap_stale_artifacts
+            from superlocalmemory.infra.data_root import canonical_data_root
+
+            _sh_report = reap_stale_artifacts(canonical_data_root())
+            if not use_json:
+                if _sh_report["removed"]:
+                    print(
+                        f"  Cleaned {len(_sh_report['removed'])} stale"
+                        " lock/pid file(s):"
+                    )
+                    for _item in _sh_report["removed"]:
+                        print(
+                            f"    - {Path(_item['path']).name}"
+                            f" ({_item['reason']})"
+                        )
+                else:
+                    print("  No stale lock/pid files found.")
+                print()
+        except Exception as _sh_exc:
+            if not use_json:
+                print(f"  stale-artifact cleanup skipped: {_sh_exc}\n")
 
     # 1. Python version
     v = sys.version_info

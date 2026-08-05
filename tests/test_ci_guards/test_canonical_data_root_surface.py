@@ -17,9 +17,8 @@ _INTENTIONAL_NON_STATE_ALLOWLIST: dict[
     str,
     dict[int, str],
 ] = {
-    "src/superlocalmemory/cli/post_install.py": {
-        55: "Display-only fallback for reporting the database location.",
-    },
+    # (empty) — cli/post_install.py was removed as dead code (npm uses
+    # scripts/postinstall.js); its display-only fallback entry is no longer needed.
 }
 
 

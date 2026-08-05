@@ -67,6 +67,16 @@ class CommandRejectedError(WriteCoordinatorError):
         self.error_code = error_code
 
 
+class WriterStalledError(WriteCoordinatorError):
+    """Raised by submit()/execute() when the worker thread has stalled past STALL_THRESHOLD.
+
+    This is the circuit-breaker fast-fail: instead of enqueueing behind a dead worker
+    (causing every new caller to wait for their per-item timeout), new callers get
+    this immediate, actionable error. Admin remediation: check /operations/failed,
+    then restart the daemon if the stall persists.
+    """
+
+
 class Lane(StrEnum):
     """Scheduling lanes, ordered to protect foreground memory operations."""
 
@@ -236,12 +246,18 @@ class WriteCoordinator:
     this coordinator.
     """
 
+    #: Default stall threshold in seconds. Well above the per-item 1s deadline.
+    #: The watchdog is inert for any item that completes within this window,
+    #: preserving healthy-path performance byte-for-byte.
+    _DEFAULT_STALL_THRESHOLD_S: float = 30.0
+
     def __init__(
         self,
         db_path: str | Path,
         *,
         owner_id: str | None = None,
         max_queue_depth: int = _MAX_QUEUE_DEPTH,
+        stall_threshold: float | None = None,
     ) -> None:
         if max_queue_depth < 1:
             raise ValueError("max_queue_depth must be at least one")
@@ -274,6 +290,15 @@ class WriteCoordinator:
         self._worker_ident: int | None = None
         self._capability_token = object()
         self._handlers: dict[CommandKind, CommandHandler] = {}
+        # ---- Stall watchdog state (additive — inert on the healthy path) ----
+        # Protected by self._condition for thread-safety.
+        self._stall_threshold: float = (
+            stall_threshold if stall_threshold is not None else self._DEFAULT_STALL_THRESHOLD_S
+        )
+        self._inflight_started_at: float | None = None
+        self._inflight_op_id: str | None = None
+        self._writer_stalled: bool = False
+        self._stall_logged_once: bool = False
 
     @property
     def db_path(self) -> Path:
@@ -284,6 +309,46 @@ class WriteCoordinator:
     def owner_id(self) -> str:
         """Opaque daemon instance identifier recorded in the ownership lease."""
         return self._owner_id
+
+    @property
+    def stall_threshold(self) -> float:
+        """Seconds before an in-flight item is considered stalled."""
+        return self._stall_threshold
+
+    @property
+    def writer_stalled(self) -> bool:
+        """True when the worker thread has exceeded stall_threshold on one item.
+
+        This is a dynamic check — computed from the current inflight age without
+        requiring a submitter to trigger _check_stall(). Safe to poll from any thread.
+        """
+        with self._condition:
+            if self._writer_stalled:
+                return True
+            started = self._inflight_started_at
+            if started is None:
+                return False
+            return (time.monotonic() - started) > self._stall_threshold
+
+    def inflight_info(self) -> dict:
+        """Return stall health snapshot for /health and get_status.
+
+        Returns:
+            {"stalled": bool, "op_id": str | None, "age_s": float | None}
+
+        Pure read — never raises.
+        """
+        with self._condition:
+            started = self._inflight_started_at
+            stalled = self._writer_stalled
+            op_id = self._inflight_op_id
+        if started is None:
+            return {"stalled": False, "op_id": None, "age_s": None}
+        now = time.monotonic()
+        age = now - started
+        # Dynamic stall check (same logic as writer_stalled property)
+        is_stalled = stalled or (age > self._stall_threshold)
+        return {"stalled": is_stalled, "op_id": op_id, "age_s": round(age, 2)}
 
     def claim_ownership(self) -> bool:
         """Claim the cross-platform owner lease without waiting on another daemon."""
@@ -407,6 +472,34 @@ class WriteCoordinator:
         if context is not None:
             context.__exit__(None, None, None)
 
+    def _check_stall(self) -> None:
+        """Circuit-breaker check: raise WriterStalledError if worker is stalled.
+
+        Called from submit() and execute() BEFORE enqueueing. Inert on the
+        healthy path (started_at is None or within stall_threshold).
+        Thread-safe: reads only condition-protected state.
+        """
+        with self._condition:
+            started = self._inflight_started_at
+            if started is None:
+                return
+            age = time.monotonic() - started
+            if age > self._stall_threshold:
+                if not self._stall_logged_once:
+                    import logging as _log
+                    _log.getLogger(__name__).critical(
+                        "WriteCoordinator: worker thread stalled for %.1fs on op=%s; "
+                        "new submitters will receive WriterStalledError",
+                        age,
+                        self._inflight_op_id,
+                    )
+                    self._stall_logged_once = True
+                self._writer_stalled = True
+            if self._writer_stalled:
+                raise WriterStalledError(
+                    "write subsystem stalled; admin remediation required"
+                )
+
     def execute(
         self,
         sql: str,
@@ -424,6 +517,7 @@ class WriteCoordinator:
             raise ValueError("sql must be a non-empty statement")
         if timeout <= 0:
             raise ValueError("timeout must be greater than zero")
+        self._check_stall()  # circuit-breaker (inert if no stall)
         lane = self._coerce_lane(priority)
         self.start()
         item = _Execution(
@@ -467,6 +561,7 @@ class WriteCoordinator:
             raise TypeError("command must be a WriteCommand")
         if timeout <= 0:
             raise ValueError("timeout must be greater than zero")
+        self._check_stall()  # circuit-breaker (inert if no stall)
         lane = self._coerce_lane(priority)
         self.start()
         item = _Execution(
@@ -569,8 +664,25 @@ class WriteCoordinator:
         return Lane.FOREGROUND
 
     def _execute_item(self, conn: sqlite3.Connection, item: _Execution) -> None:
+        # ------------------------------------------------------------------
+        # Stall watchdog: record inflight state so _check_stall() can detect
+        # a frozen worker.  Cleared in the finally block.  This guard is
+        # strictly ADDITIVE — the item execution path is unchanged.
+        # ------------------------------------------------------------------
+        op_id: str | None = None
+        if item.command is not None:
+            op_id = item.command.command_id
+        with self._condition:
+            self._inflight_started_at = time.monotonic()
+            self._inflight_op_id = op_id
+
         if item.cancelled or time.monotonic() >= item.deadline:
             item.error = WriteDeadlineExceededError("canonical write expired before execution")
+            with self._condition:
+                self._inflight_started_at = None
+                self._inflight_op_id = None
+                self._writer_stalled = False
+                self._stall_logged_once = False
             item.completion.set()
             return
         remaining = max(0.0, item.deadline - time.monotonic())
@@ -578,6 +690,11 @@ class WriteCoordinator:
             item.error = WriteDeadlineExceededError(
                 "canonical write expired waiting for its process lock"
             )
+            with self._condition:
+                self._inflight_started_at = None
+                self._inflight_op_id = None
+                self._writer_stalled = False
+                self._stall_logged_once = False
             item.completion.set()
             return
         try:
@@ -637,6 +754,13 @@ class WriteCoordinator:
             item.error.__cause__ = exc
         finally:
             self._process_write_lock.release()
+            # Clear inflight state and reset stall breaker so next caller can proceed.
+            with self._condition:
+                self._inflight_started_at = None
+                self._inflight_op_id = None
+                if self._writer_stalled:
+                    self._writer_stalled = False
+                    self._stall_logged_once = False
             item.completion.set()
 
     def _execute_command(self, conn: sqlite3.Connection, command: WriteCommand) -> WriteResult:
@@ -800,4 +924,5 @@ __all__ = [
     "WriteCoordinatorError",
     "WriteDeadlineExceededError",
     "WriteResult",
+    "WriterStalledError",
 ]

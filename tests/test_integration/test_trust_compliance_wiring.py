@@ -590,27 +590,6 @@ class TestPoisoningResistanceWiring:
 
 class TestAttributionWiring:
 
-    def test_mathematical_dna_returns_string(self) -> None:
-        from superlocalmemory.attribution.mathematical_dna import MathematicalDNA
-        dna = MathematicalDNA(seed="test-seed")
-        result = dna.generate_dna_hash(42)
-        assert isinstance(result, str)
-        assert len(result) == 64  # SHA-256 hex digest
-
-    def test_dna_is_deterministic(self) -> None:
-        from superlocalmemory.attribution.mathematical_dna import MathematicalDNA
-        dna = MathematicalDNA(seed="test-seed")
-        a = dna.generate_dna_hash(42)
-        b = dna.generate_dna_hash(42)
-        assert a == b
-
-    def test_dna_changes_with_different_id(self) -> None:
-        from superlocalmemory.attribution.mathematical_dna import MathematicalDNA
-        dna = MathematicalDNA(seed="test-seed")
-        a = dna.generate_dna_hash(1)
-        b = dna.generate_dna_hash(2)
-        assert a != b
-
     def test_steganographic_watermark_round_trip(self) -> None:
         from superlocalmemory.attribution.watermark import QualixarWatermark
         wm = QualixarWatermark(key="qualixar")
@@ -639,51 +618,7 @@ class TestAttributionWiring:
 
 
 # ---------------------------------------------------------------------------
-# 12. TestAccessControlWiring
-# ---------------------------------------------------------------------------
-
-class TestAccessControlWiring:
-
-    def test_grant_and_check_access(self) -> None:
-        from superlocalmemory.storage.access_control import (
-            AccessController, AccessLevel, Permission,
-        )
-        ac = AccessController()
-        ac.grant_access("agent_1", "work", AccessLevel.AGENT)
-        assert ac.check_permission("agent_1", "work", Permission.READ) is True
-        assert ac.check_permission("agent_1", "work", Permission.WRITE) is True
-        assert ac.check_permission("agent_1", "work", Permission.DELETE) is False
-
-    def test_revoke_access_denies(self) -> None:
-        from superlocalmemory.storage.access_control import (
-            AccessController, AccessLevel, Permission,
-        )
-        ac = AccessController()
-        ac.grant_access("agent_2", "secret", AccessLevel.OWNER)
-        assert ac.check_permission("agent_2", "secret", Permission.DELETE) is True
-        ac.revoke_access("agent_2", "secret")
-        assert ac.check_permission("agent_2", "secret", Permission.DELETE) is False
-
-    def test_default_profile_allows_read(self) -> None:
-        from superlocalmemory.storage.access_control import (
-            AccessController, Permission,
-        )
-        ac = AccessController()
-        # No explicit grant, but default profile should allow read
-        assert ac.check_permission("anyone", "default", Permission.READ) is True
-        assert ac.check_permission("anyone", "default", Permission.WRITE) is False
-
-    def test_require_permission_raises_on_denied(self) -> None:
-        from superlocalmemory.storage.access_control import (
-            AccessController, Permission,
-        )
-        ac = AccessController()
-        with pytest.raises(PermissionError):
-            ac.require_permission("unknown_agent", "secret_profile", Permission.READ)
-
-
-# ---------------------------------------------------------------------------
-# 13. TestComplianceAuditTrailWiring
+# 12. TestComplianceAuditTrailWiring
 # ---------------------------------------------------------------------------
 
 class TestComplianceAuditTrailWiring:

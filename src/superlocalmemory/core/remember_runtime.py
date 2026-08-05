@@ -96,6 +96,15 @@ class CanonicalRememberUnavailable(RuntimeError):
     """The daemon cannot accept a bounded canonical remember request."""
 
 
+class DaemonAlreadyServing(RuntimeError):
+    """A healthy SLM daemon is already serving; this instance should exit 0.
+
+    Raised by ``CanonicalRememberRuntime.start()`` (H2) when the writer claim
+    fails AND a health-verified daemon is responding on the configured port.
+    Caught by ``unified_daemon.py`` lifespan → ``sys.exit(0)``.
+    """
+
+
 class CanonicalMutationConflict(ValueError):
     """A mutation retry key was reused for different immutable input."""
 
@@ -127,6 +136,54 @@ def validate_deterministic_admission(
         max_ingest_bytes=max_ingest_bytes,
     ).rejected:
         raise AdmissionPayloadError("content rejected by deterministic ingest policy")
+
+
+# ---------------------------------------------------------------------------
+# H2 — graceful single-instance helpers (keep all I/O in stdlib; no imports
+# from the server layer to avoid circular dependencies with core).
+# ---------------------------------------------------------------------------
+
+def _get_daemon_port() -> int:
+    """Return the HTTP port this daemon instance listens on.
+
+    Reads ``SLM_DAEMON_PORT`` from the environment (set by ``unified_daemon``
+    at startup) and falls back to the conventional default of 8765.
+    """
+    import os
+
+    raw = os.environ.get("SLM_DAEMON_PORT", "")
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return 8765
+
+
+def _slm_health_check(port: int) -> bool:
+    """Return True iff a healthy SLM daemon responds on *port* within 2 s."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=2
+        ) as resp:
+            return int(resp.status) == 200
+    except Exception:
+        return False
+
+
+def _boot_self_heal(data_dir: Path) -> None:
+    """Run the H1 stale-artifact reaper.  Fail-soft — never blocks startup."""
+    try:
+        from superlocalmemory.infra.self_heal import reap_stale_artifacts
+
+        report = reap_stale_artifacts(data_dir)
+        if report["removed"]:
+            logger.info(
+                "remember_runtime self-heal: removed %d stale artifact(s)",
+                len(report["removed"]),
+            )
+    except Exception as exc:
+        logger.debug("remember_runtime self-heal failed (non-fatal): %s", exc)
 
 
 class _CoordinatorAdapter:
@@ -210,13 +267,72 @@ class CanonicalRememberRuntime:
         )
 
     def start(self) -> None:
-        """Claim writer ownership, install the handler, then recover journal work."""
+        """Claim writer ownership, install the handler, then recover journal work.
+
+        H2 / G-01+G-05 — bounded graceful single-instance:
+
+        When ``claim_ownership()`` fails (another process holds the portalocker
+        flock), we enter a bounded retry loop (≤ 5 attempts, ~1 s between each,
+        total ≤ ~6 s) rather than immediately crashing or silently giving up.
+        This handles the race between a healthy daemon's HTTP-server bind and our
+        health check — the holder may be alive but not yet responding.
+
+        Per-iteration logic:
+          (a) ``claim_ownership()`` succeeds → break and proceed (holder died).
+          (b) ``_slm_health_check(port)`` is True → raise ``DaemonAlreadyServing``
+              (caught by ``unified_daemon.py`` lifespan → ``sys.exit(0)``).
+          (c) First iteration only → run ``_boot_self_heal()`` to clear
+              provably-dead metadata artifacts, then continue.
+
+        After the loop exhausts all attempts without claiming the lock, we know
+        a live process is holding the portalocker flock.  Raise
+        ``DaemonAlreadyServing`` (NOT ``CanonicalRememberUnavailable``) so the
+        daemon exits cleanly rather than crashing with a traceback.
+
+        INVARIANT: ``claim_ownership()`` (portalocker OS flock) is the sole
+        writer-integrity gate.  We never bypass it, never signal or kill a live
+        process.
+        """
+        import time as _time
+
         if self._started:
             return
         if not self.coordinator.claim_ownership():
-            raise CanonicalRememberUnavailable(
-                "another daemon owns the canonical memory writer"
-            )
+            port = _get_daemon_port()
+            _self_heal_done = False
+            _MAX_ATTEMPTS = 5
+
+            for _attempt in range(_MAX_ATTEMPTS):
+                if _attempt > 0:
+                    _time.sleep(1.0)
+
+                # (a) Re-try the claim — holder may have died in the gap.
+                if self.coordinator.claim_ownership():
+                    break  # claimed → proceed to handler registration
+
+                # (b) Health-verified owner → exit gracefully.
+                if _slm_health_check(port):
+                    raise DaemonAlreadyServing(
+                        f"another healthy SLM daemon is already serving"
+                        f" on port {port}"
+                    )
+
+                # (c) First iteration only: clear provably-dead stale artifacts.
+                if not _self_heal_done:
+                    logger.info(
+                        "remember_runtime: writer claim failed, no healthy"
+                        " daemon on port %d; running self-heal (attempt %d/%d)",
+                        port, _attempt + 1, _MAX_ATTEMPTS,
+                    )
+                    _boot_self_heal(self.coordinator.db_path.parent)
+                    _self_heal_done = True
+            else:
+                # Loop exhausted: a live process holds the portalocker flock.
+                # Exit cleanly — never crash with a traceback.
+                raise DaemonAlreadyServing(
+                    f"another SLM daemon holds the writer lock after"
+                    f" {_MAX_ATTEMPTS} attempts on port {port}"
+                )
         try:
             self.coordinator.register_handler(CommandKind.ADMISSION, self._handle_admission)
             self.coordinator.register_handler(CommandKind.DELETE_FACT, self._handle_mutation)
@@ -789,5 +905,6 @@ def _thaw_command_value(value: Any) -> Any:
 __all__ = [
     "CanonicalRememberRuntime",
     "CanonicalRememberUnavailable",
+    "DaemonAlreadyServing",
     "validate_deterministic_admission",
 ]
