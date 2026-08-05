@@ -102,6 +102,23 @@ def is_mcp_server_process(process: SlmProcessInfo) -> bool:
     )
 
 
+def is_unified_daemon_process(process: SlmProcessInfo) -> bool:
+    """Return whether *process* is a long-lived shared SLM daemon.
+
+    A healthy daemon is deliberately detached and therefore commonly has
+    PPID 1.  That is not evidence that it is stale.  Automatic startup reaping
+    must never kill one merely because another SLM data root is starting.
+    """
+    command = process.command.lower()
+    return (
+        "superlocalmemory.server.unified_daemon" in command
+        or "/slm serve" in command
+        or " slm serve" in command
+        or "/slm daemon" in command
+        or " slm daemon" in command
+    )
+
+
 # ---------------------------------------------------------------------------
 # Windows no-op stubs (AUDIT FIX H0-HIGH-02)
 # ---------------------------------------------------------------------------
@@ -475,6 +492,7 @@ else:
             untracked_orphans = [
                 o for o in find_orphans(config)
                 if o.pid not in tracked_pids
+                and not is_unified_daemon_process(o)
             ]
             for orphan in untracked_orphans:
                 logger.warning(
