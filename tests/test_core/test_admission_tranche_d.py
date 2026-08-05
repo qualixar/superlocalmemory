@@ -104,11 +104,11 @@ class TestHttpRecallScopeClamped:
 
     def test_enforce_read_scope_called_in_http_handler(self):
         """enforce_read_scope must be imported and invoked in the HTTP recall body."""
-        import ast
         import pathlib
-        src = pathlib.Path(
-            "/Users/v.pratap.bhardwaj/Documents/varun-world/Agentic_official/"
-            "slm-wt-p1/src/superlocalmemory/server/unified_daemon.py"
+        import superlocalmemory
+        src = (
+            pathlib.Path(superlocalmemory.__file__).parent
+            / "server" / "unified_daemon.py"
         ).read_text()
         assert "enforce_read_scope" in src, (
             "enforce_read_scope not found in unified_daemon.py — HTTP recall scope NOT clamped"

@@ -177,9 +177,10 @@ class TestE2AuthorizeRouteMutationCallsAdmit:
 
     def test_admit_referenced_in_route_mutations(self):
         """Static check: 'admit' must appear in route_mutations.py source."""
-        src = pathlib.Path(
-            "/Users/v.pratap.bhardwaj/Documents/varun-world/Agentic_official/"
-            "slm-wt-p1/src/superlocalmemory/server/route_mutations.py"
+        import superlocalmemory
+        src = (
+            pathlib.Path(superlocalmemory.__file__).parent
+            / "server" / "route_mutations.py"
         ).read_text()
         assert "admit(" in src or "admit\n" in src or "from superlocalmemory.core.admission import" in src, (
             "admit() not referenced in route_mutations.py — HTTP routes bypass registry"

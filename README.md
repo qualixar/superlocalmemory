@@ -41,11 +41,7 @@ SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph
 
 **Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
 
-**What V4.0.0 adds.** V4 turns the store into a *governed* runtime: every canonical
-write passes one admission path that a policy layer authorizes, records as durable
-obligations across its projection stores (lexical, temporal, vector), and seals with
-a completion manifest — so a write is either fully applied or explicitly marked
-degraded, never silently half-done. Concretely:
+**What V4.0.0 adds.** V4 turns the store into a *governed* runtime — every canonical write is admitted, policy-authorized, tracked as durable per-store obligations (lexical, temporal, vector), and sealed by a completion manifest, so it is either fully applied or explicitly marked degraded, never silently half-done:
 
 - **Governed write path & verifiable transactions** — admission + policy control on the canonical write path, a per-owner obligation ledger, and a hash-sealed completion manifest with a reconciler that redrives unmet obligations.
 - **Cross-store erasure** — a fail-closed erasure orchestrator that removes a fact from every store and proves it, for GDPR right-to-erasure.
@@ -54,8 +50,7 @@ degraded, never silently half-done. Concretely:
 
 3.8.x installs upgrade in place — the database migrates automatically on first start, with no manual steps and no data loss.
 
-**What V3.8.0 added.** The 3.8.0 capability release introduced the following
-foundation; 3.8.1 is the existing-install stability patch for it:
+**What V3.8.0 added.** The 3.8.0 release introduced the following foundation (3.8.1 was its stability patch):
 
 - **Temporal depth** — the time-aware retrieval and lifecycle described above.
 - **Governance & EU compliance** — [team roles, workspace isolation, a login gate, multi-scope memory, GDPR access/erasure/portability rights, a hash-chained audit trail, and per-mode EU AI Act self-assessment](#teams-and-enterprise-memory-v380).
@@ -723,5 +718,3 @@ Start at **[qualixar.com](https://qualixar.com)** or browse the
 If this project solves a real problem for you, **please star the repo** — it helps other developers discover Qualixar and signals that the AI agent reliability community is growing.
 
 [![Star SuperLocalMemory on GitHub](https://img.shields.io/github/stars/qualixar/superlocalmemory?style=for-the-badge&logo=github&label=Star%20on%20GitHub)](https://github.com/qualixar/superlocalmemory)
-
-The live Star History chart is intentionally not embedded: its upstream service timed out during release validation. The link above is the stable, direct way to star and follow the repository.
