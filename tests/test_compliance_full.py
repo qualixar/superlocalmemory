@@ -427,6 +427,39 @@ class TestRetentionEnforcement:
         assert row[0] == "archived"
         assert row[1] == "tombstoned"
 
+    def test_enforce_honors_applies_to_scope(self):
+        db = sqlite3.connect(":memory:")
+        engine = RetentionEngine(db)
+        db.execute(
+            "CREATE TABLE atomic_facts ("
+            "fact_id TEXT PRIMARY KEY, profile_id TEXT, scope TEXT, "
+            "fact_type TEXT, signal_type TEXT, lifecycle TEXT DEFAULT 'active', "
+            "archive_status TEXT, created_at TEXT)"
+        )
+        db.executemany(
+            "INSERT INTO atomic_facts "
+            "(fact_id, profile_id, scope, fact_type, signal_type, created_at) "
+            "VALUES (?, 'p1', ?, 'semantic', 'factual', '2020-01-01T00:00:00+00:00')",
+            [("personal-old", "personal"), ("shared-old", "shared")],
+        )
+        db.commit()
+        engine.create_rule(
+            name="shared-only",
+            framework="custom",
+            retention_days=30,
+            action="archive",
+            applies_to={"scope": ["shared"]},
+            profile_id="p1",
+        )
+
+        result = engine.enforce("p1")
+
+        states = dict(db.execute(
+            "SELECT fact_id, lifecycle FROM atomic_facts ORDER BY fact_id"
+        ).fetchall())
+        assert result["archived"] == 1
+        assert states == {"personal-old": "active", "shared-old": "archived"}
+
     def test_enforce_no_rules_no_deletions(self):
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)
