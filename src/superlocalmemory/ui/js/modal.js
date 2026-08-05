@@ -579,6 +579,7 @@ function addDetailTagsRow(parent, label, tags) {
  * @param {string} opts.target         Exact item being acted on, e.g. "my-project"
  * @param {string} opts.consequence    What happens, e.g. "Memories moved to default profile"
  * @param {string} [opts.confirmLabel] Confirm button text (default: "Confirm")
+ * @param {string} [opts.confirmationText] Exact text required to unlock confirmation
  * @returns {Promise<boolean>} Resolves true when confirmed, false when cancelled
  */
 function confirmDestructive(opts) {
@@ -604,7 +605,11 @@ function confirmDestructive(opts) {
                 '</div>' +
                 '<div class="modal-body pt-1">' +
                 '<p class="slm-cd-target fw-semibold mb-1"></p>' +
-                '<p class="slm-cd-consequence text-muted small mb-0"></p>' +
+                '<p class="slm-cd-consequence text-muted small mb-2"></p>' +
+                '<label class="form-label small mb-1" for="slm-cd-challenge">' +
+                'Type <code class="slm-cd-confirmation-text"></code> to continue</label>' +
+                '<input id="slm-cd-challenge" class="form-control form-control-sm slm-cd-challenge"' +
+                ' type="text" autocomplete="off" spellcheck="false">' +
                 '</div>' +
                 '<div class="modal-footer border-0 pt-0">' +
                 '<button type="button" class="btn btn-secondary btn-sm"' +
@@ -620,12 +625,20 @@ function confirmDestructive(opts) {
         var titleEl = modalEl.querySelector('.slm-cd-title');
         var targetEl = modalEl.querySelector('.slm-cd-target');
         var consequenceEl = modalEl.querySelector('.slm-cd-consequence');
+        var confirmationTextEl = modalEl.querySelector('.slm-cd-confirmation-text');
+        var challengeInput = modalEl.querySelector('.slm-cd-challenge');
         var confirmBtn = modalEl.querySelector('[data-slm-cd-action="confirm"]');
+        var confirmationText = opts.confirmationText || opts.target || 'CONFIRM';
 
         if (titleEl) titleEl.textContent = opts.title || 'Confirm action';
         if (targetEl) targetEl.textContent = opts.target || '';
         if (consequenceEl) consequenceEl.textContent = opts.consequence || '';
-        if (confirmBtn) confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+        if (confirmationTextEl) confirmationTextEl.textContent = confirmationText;
+        if (challengeInput) challengeInput.value = '';
+        if (confirmBtn) {
+            confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+            confirmBtn.disabled = true;
+        }
 
         var bsModal = null;
         if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
@@ -636,8 +649,10 @@ function confirmDestructive(opts) {
             if (settled) return;
             settled = true;
             modalEl.removeEventListener('click', onAction);
+            if (challengeInput) challengeInput.removeEventListener('input', onChallengeInput);
             if (bsModal) {
                 modalEl.removeEventListener('hidden.bs.modal', onHide);
+                modalEl.removeEventListener('shown.bs.modal', onShown);
                 bsModal.hide();
             }
             resolve(result);
@@ -646,14 +661,26 @@ function confirmDestructive(opts) {
         function onAction(e) {
             var actionEl = e.target.closest('[data-slm-cd-action]');
             if (!actionEl) return;
+            if (actionEl.getAttribute('data-slm-cd-action') === 'confirm' &&
+                    (!challengeInput || challengeInput.value !== confirmationText)) return;
             settle(actionEl.getAttribute('data-slm-cd-action') === 'confirm');
+        }
+
+        function onChallengeInput() {
+            if (confirmBtn) confirmBtn.disabled = challengeInput.value !== confirmationText;
+        }
+
+        function onShown() {
+            if (challengeInput) challengeInput.focus();
         }
 
         function onHide() { settle(false); }
 
         modalEl.addEventListener('click', onAction);
+        if (challengeInput) challengeInput.addEventListener('input', onChallengeInput);
         if (bsModal) {
             modalEl.addEventListener('hidden.bs.modal', onHide, { once: true });
+            modalEl.addEventListener('shown.bs.modal', onShown, { once: true });
             bsModal.show();
         }
     });
