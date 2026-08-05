@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 if TYPE_CHECKING:
     from superlocalmemory.core.config import SLMConfig
 
@@ -60,6 +62,137 @@ _NO_MODEL = ""
 
 # Batch size for progressive re-embedding.
 _REINDEX_BATCH_SIZE = 50
+
+
+def _activate_staged_vectors(
+    config: SLMConfig,
+    db: Any,
+    stage_path: Path,
+    expected_count: int,
+) -> None:
+    """Atomically replace canonical and sqlite-vec embeddings from a shadow DB."""
+    db_path = getattr(db, "db_path", None)
+    if not isinstance(db_path, (str, Path)):
+        raise RuntimeError("embedding migration requires an authoritative db_path")
+
+    import sqlite_vec
+
+    from superlocalmemory.storage.write_lock import get_write_lock
+
+    db_path = Path(db_path)
+    with get_write_lock(db_path), sqlite3.connect(stage_path) as stage:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA busy_timeout=10000")
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DROP TABLE IF EXISTS embedding_metadata")
+            conn.execute("DROP TABLE IF EXISTS vector_row_map")
+            conn.execute("DROP TABLE IF EXISTS fact_embeddings")
+            conn.execute(
+                "CREATE VIRTUAL TABLE fact_embeddings USING vec0("
+                "profile_id TEXT PARTITION KEY, "
+                f"embedding float[{config.embedding.dimension}] distance_metric=cosine)"
+            )
+            conn.execute(
+                "CREATE TABLE embedding_metadata ("
+                "vec_rowid INTEGER PRIMARY KEY, fact_id TEXT NOT NULL UNIQUE, "
+                "profile_id TEXT NOT NULL DEFAULT 'default', "
+                "model_name TEXT NOT NULL DEFAULT '', "
+                "dimension INTEGER NOT NULL DEFAULT 768, "
+                "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+            )
+            conn.execute(
+                "CREATE INDEX idx_embmeta_fact ON embedding_metadata (fact_id)"
+            )
+            conn.execute(
+                "CREATE INDEX idx_embmeta_profile ON embedding_metadata (profile_id)"
+            )
+            conn.execute(
+                "CREATE TABLE vector_row_map ("
+                "fact_id TEXT NOT NULL PRIMARY KEY, profile_id TEXT NOT NULL, "
+                "vec_rowid INTEGER NOT NULL)"
+            )
+            conn.execute(
+                "CREATE INDEX idx_vector_row_map_profile "
+                "ON vector_row_map (profile_id)"
+            )
+
+            first_probe: tuple[bytes, str] | None = None
+            activated = 0
+            for rowid, (fact_id, profile_id, embedding_json) in enumerate(
+                stage.execute(
+                    "SELECT fact_id, profile_id, embedding "
+                    "FROM staged_embeddings ORDER BY fact_id"
+                ),
+                start=1,
+            ):
+                vector = json.loads(embedding_json)
+                vec_bytes = np.asarray(vector, dtype=np.float32).tobytes()
+                conn.execute(
+                    "INSERT INTO fact_embeddings(rowid, profile_id, embedding) "
+                    "VALUES (?, ?, ?)",
+                    (rowid, profile_id, vec_bytes),
+                )
+                conn.execute(
+                    "INSERT INTO embedding_metadata "
+                    "(vec_rowid, fact_id, profile_id, model_name, dimension) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        rowid,
+                        fact_id,
+                        profile_id,
+                        config.embedding.model_name,
+                        config.embedding.dimension,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO vector_row_map (fact_id, profile_id, vec_rowid) "
+                    "VALUES (?, ?, ?)",
+                    (fact_id, profile_id, rowid),
+                )
+                updated = conn.execute(
+                    "UPDATE atomic_facts SET embedding = ? "
+                    "WHERE fact_id = ? AND profile_id = ?",
+                    (embedding_json, fact_id, profile_id),
+                )
+                if updated.rowcount != 1:
+                    raise RuntimeError(
+                        f"canonical fact changed during migration: {fact_id}"
+                    )
+                if first_probe is None:
+                    first_probe = (vec_bytes, profile_id)
+                activated += 1
+
+            counts = [
+                int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                for table in (
+                    "fact_embeddings",
+                    "embedding_metadata",
+                    "vector_row_map",
+                )
+            ]
+            if activated != expected_count or any(c != expected_count for c in counts):
+                raise RuntimeError(
+                    f"vector activation incomplete: activated={activated}, "
+                    f"projection_counts={counts}, expected={expected_count}"
+                )
+            if first_probe is not None:
+                probe = conn.execute(
+                    "SELECT rowid FROM fact_embeddings "
+                    "WHERE embedding MATCH ? AND profile_id = ? AND k = 1",
+                    (first_probe[0], first_probe[1]),
+                ).fetchone()
+                if probe is None:
+                    raise RuntimeError("post-activation KNN probe returned no row")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def _model_signature(config: SLMConfig) -> str:
@@ -175,14 +308,15 @@ def run_embedding_migration(
         return 0
 
     current_sig = _model_signature(config)
-    profile_id = config.active_profile
-
-    # Get all fact IDs that need re-embedding (all facts for the profile).
+    # Embedding configuration is database-wide. Rebuild every profile so one
+    # vec0 table never contains vectors from mixed model spaces.
     rows = db.execute(
-        "SELECT fact_id, content FROM atomic_facts WHERE profile_id = ? ORDER BY created_at",
-        (profile_id,),
+        "SELECT fact_id, profile_id, content FROM atomic_facts ORDER BY created_at",
     )
-    facts = [(dict(r)["fact_id"], dict(r)["content"]) for r in rows]
+    facts = [
+        (dict(r)["fact_id"], dict(r)["profile_id"], dict(r)["content"])
+        for r in rows
+    ]
     total = len(facts)
 
     if total == 0:
@@ -206,30 +340,39 @@ def run_embedding_migration(
             with sqlite3.connect(stage_path) as stage:
                 stage.execute(
                     "CREATE TABLE staged_embeddings ("
-                    "fact_id TEXT PRIMARY KEY, embedding TEXT NOT NULL)"
+                    "fact_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, "
+                    "embedding TEXT NOT NULL)"
                 )
                 for i in range(0, total, _REINDEX_BATCH_SIZE):
                     batch = facts[i : i + _REINDEX_BATCH_SIZE]
-                    texts = [content for _, content in batch]
-                    fact_ids = [fid for fid, _ in batch]
+                    texts = [content for _, _, content in batch]
+                    fact_ids = [fid for fid, _, _ in batch]
+                    profile_ids = [pid for _, pid, _ in batch]
                     vectors = list(embedder.embed_batch(texts))
                     if len(vectors) != len(batch):
                         raise ValueError(
                             "embedder returned "
                             f"{len(vectors)} vectors for {len(batch)} facts"
                         )
-                    staged_rows: list[tuple[str, str]] = []
-                    for fid, vec in zip(fact_ids, vectors, strict=True):
+                    staged_rows: list[tuple[str, str, str]] = []
+                    for fid, profile_id, vec in zip(
+                        fact_ids, profile_ids, vectors, strict=True
+                    ):
                         if vec is None or len(vec) != config.embedding.dimension:
                             raise ValueError(
                                 f"invalid embedding for fact {fid[:16]}: "
                                 f"expected dimension {config.embedding.dimension}"
                             )
                         staged_rows.append(
-                            (fid, json.dumps([float(value) for value in vec]))
+                            (
+                                fid,
+                                profile_id,
+                                json.dumps([float(value) for value in vec]),
+                            )
                         )
                     stage.executemany(
-                        "INSERT INTO staged_embeddings (fact_id, embedding) VALUES (?, ?)",
+                        "INSERT INTO staged_embeddings "
+                        "(fact_id, profile_id, embedding) VALUES (?, ?, ?)",
                         staged_rows,
                     )
                     stage.commit()
@@ -242,20 +385,7 @@ def run_embedding_migration(
                         f"shadow migration incomplete: {staged_count}/{total} facts"
                     )
 
-                with db.transaction():
-                    cursor = stage.execute(
-                        "SELECT fact_id, embedding FROM staged_embeddings ORDER BY fact_id"
-                    )
-                    for fid, embedding_json in cursor:
-                        db.execute(
-                            "UPDATE atomic_facts SET embedding = ? WHERE fact_id = ?",
-                            (embedding_json, fid),
-                        )
-                        db.execute(
-                            "UPDATE embedding_metadata "
-                            "SET model_name = ?, dimension = ? WHERE fact_id = ?",
-                            (config.embedding.model_name, config.embedding.dimension, fid),
-                        )
+                _activate_staged_vectors(config, db, stage_path, total)
     except Exception as exc:
         logger.error(
             "Embedding migration aborted; previous embedding space remains active: %s",

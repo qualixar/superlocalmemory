@@ -63,7 +63,7 @@ def _make_mock_db(facts: list[tuple[str, str]] | None = None):
         row.__iter__ = MagicMock(return_value=iter([fid, content]))
         row.keys = MagicMock(return_value=["fact_id", "content"])
         # Support dict(r) via sqlite3.Row-like interface
-        row_dict = {"fact_id": fid, "content": content}
+        row_dict = {"fact_id": fid, "profile_id": "default", "content": content}
         row.__getitem__ = lambda self, k, d=row_dict: d[k]
 
         class _FakeRow:
@@ -250,9 +250,13 @@ class TestRunEmbeddingMigration:
         db.execute.side_effect = _side_effect
 
         emb = _make_mock_embedder()
-        result = run_embedding_migration(cfg, db, emb)
+        with patch(
+            "superlocalmemory.storage.embedding_migrator._activate_staged_vectors"
+        ) as activate:
+            result = run_embedding_migration(cfg, db, emb)
 
         assert result == 3
+        activate.assert_called_once()
         # Verify embed_batch was called
         emb.embed_batch.assert_called_once()
 
@@ -284,25 +288,12 @@ class TestRunEmbeddingMigration:
         cfg = _make_config(tmp_path)
         _write_stored_signature(tmp_path, "old-model::768")
         db = _make_mock_db(facts=facts)
-        db.transaction.return_value.__enter__.return_value = None
-        db.transaction.return_value.__exit__.return_value = False
-
-        call_count = [0]
-        original_return = db.execute.return_value
-
-        def _side_effect(sql, params=()):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return original_return
-            # Fail on first UPDATE (f1), succeed on rest
-            if call_count[0] == 2 and "UPDATE atomic_facts" in sql:
-                raise RuntimeError("disk full")
-            return []
-
-        db.execute.side_effect = _side_effect
-
         emb = _make_mock_embedder()
-        result = run_embedding_migration(cfg, db, emb)
+        with patch(
+            "superlocalmemory.storage.embedding_migrator._activate_staged_vectors",
+            side_effect=RuntimeError("disk full"),
+        ):
+            result = run_embedding_migration(cfg, db, emb)
         assert result == 0
         assert _read_stored_signature(tmp_path) == "old-model::768"
 
@@ -357,6 +348,50 @@ class TestRunEmbeddingMigration:
         )
         assert new_store.search([0.0, 1.0], top_k=1) == [("f1", 1.0)]
         assert _read_stored_signature(tmp_path) == "new-model::2"
+
+    def test_dimension_change_failure_restores_old_vector_projection(self, tmp_path):
+        from superlocalmemory.retrieval.vector_store import VectorStore, VectorStoreConfig
+        from superlocalmemory.storage import schema
+        from superlocalmemory.storage.database import DatabaseManager
+
+        db_path = tmp_path / "memory.db"
+        db = DatabaseManager(db_path)
+        db.initialize(schema)
+        db.execute(
+            "INSERT INTO memories "
+            "(memory_id, profile_id, content, created_at, metadata_json, scope) "
+            "VALUES ('m1', 'default', 'rollback witness', "
+            "'2026-01-01T00:00:00Z', '{}', 'personal')"
+        )
+        db.execute(
+            "INSERT INTO atomic_facts "
+            "(fact_id, memory_id, profile_id, content, lifecycle, created_at, scope) "
+            "VALUES ('f1', 'm1', 'default', 'rollback witness', 'active', "
+            "'2026-01-01T00:00:00Z', 'personal')"
+        )
+        old_store = VectorStore(
+            db_path, VectorStoreConfig(dimension=2, model_name="old-model")
+        )
+        if not old_store.available:
+            pytest.skip("sqlite-vec unavailable")
+        assert old_store.upsert("f1", "default", [1.0, 0.0], "old-model")
+        db.execute(
+            "CREATE TRIGGER reject_embedding_migration "
+            "BEFORE UPDATE OF embedding ON atomic_facts "
+            "BEGIN SELECT RAISE(ABORT, 'injected activation failure'); END"
+        )
+
+        cfg = _make_config(tmp_path, model_name="new-model", dimension=3)
+        _write_stored_signature(tmp_path, "old-model::2")
+        embedder = MagicMock()
+        embedder.embed_batch.return_value = [[0.0, 1.0, 0.0]]
+
+        assert run_embedding_migration(cfg, db, embedder) == 0
+        restored = VectorStore(
+            db_path, VectorStoreConfig(dimension=2, model_name="old-model")
+        )
+        assert restored.search([1.0, 0.0], top_k=1) == [("f1", 1.0)]
+        assert _read_stored_signature(tmp_path) == "old-model::2"
 
 
 # ---------------------------------------------------------------------------

@@ -13,9 +13,9 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,10 @@ class GDPRCompliance:
     #   must survive the profile wipe so operators can prove deletion occurred.
     _NON_MEMORY_SCOPED = frozenset({"profiles", "erasure_receipts"})
 
-    def __init__(self, db, *, engine=None) -> None:
+    def __init__(self, db, *, engine=None, data_root: str | Path | None = None) -> None:
         self._db = db
         self._engine = engine
+        self._data_root = Path(data_root).resolve() if data_root is not None else None
 
     def _memory_has_siblings(self, memory_id: str, profile_id: str) -> bool:
         try:
@@ -317,43 +318,24 @@ class GDPRCompliance:
         # or in an immediate subdirectory.  Scan both levels to cover the default
         # layout and any explicitly-namespaced cache dirs.
         #
-        # Limitation: when the DB wrapper exposes no db_path AND the
-        # DEFAULT_BASE_DIR fallback points to a different directory than the
-        # actual cache (e.g. a fully custom data-root path), the purge may miss
-        # that custom cache.  Operators should ensure db_path is accessible on
-        # any custom DB wrapper.
-        data_root = None
+        # Destructive sidecar erasure requires an authoritative root. Never
+        # fall back to a process-global default, which might be another SLM
+        # installation.
+        data_root = self._data_root
         try:
-            from pathlib import Path as _Path
-
             from superlocalmemory.core.context_cache import purge_profile_from_cache_db
-            data_root = getattr(self._db, "db_path", None)
-            if data_root is not None:
-                data_root = _Path(data_root).parent
-            else:
-                # The DB wrapper does not expose db_path.  Attempt to resolve
-                # the data root via the canonical path used elsewhere in this
-                # module (same source as the learning-db reset below).
-                try:
-                    from superlocalmemory.core.config import DEFAULT_BASE_DIR
-                    data_root = _Path(DEFAULT_BASE_DIR)
-                except Exception:
-                    data_root = None
+            if data_root is None:
+                db_path = getattr(self._db, "db_path", None)
+                if db_path is not None:
+                    data_root = Path(db_path).resolve().parent
 
-                if data_root is None:
-                    logger.warning(
-                        "GDPR erase: context-cache purge skipped for profile %r — "
-                        "data root could not be resolved (DB wrapper exposes no "
-                        "db_path and canonical root lookup failed).",
-                        profile_id,
-                    )
-                else:
-                    logger.warning(
-                        "GDPR erase: DB wrapper exposes no db_path for profile %r; "
-                        "context-cache purge will use resolved data root %s — "
-                        "verify coverage if a custom cache path is in use.",
-                        profile_id, data_root,
-                    )
+            if data_root is None:
+                logger.warning(
+                    "GDPR erase: context-cache purge skipped for profile %r — "
+                    "data root could not be resolved; pass data_root explicitly "
+                    "for custom DB wrappers.",
+                    profile_id,
+                )
 
             if data_root is not None:
                 cache_name = "active_brain_cache.db"

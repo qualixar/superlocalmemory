@@ -2,12 +2,15 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — Mode System.
+"""SuperLocalMemory V4 mode capability descriptors.
 
 Three operating modes with clear capability boundaries.
-Mode A: EU AI Act FULL compliance (zero LLM).
-Mode B: EU AI Act FULL (local LLM only).
-Mode C: UNRESTRICTED — best models, full power, 90%+ target.
+Mode A: deterministic local extraction and local inference.
+Mode B: local LLM enrichment and local inference.
+Mode C: configured provider-assisted inference.
+
+An operating mode does not determine EU AI Act compliance.  That assessment
+depends on the deployment, intended use, operator role, and applicable duties.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """

@@ -41,6 +41,8 @@ class RetentionScheduler:
         if retention_engine is None and db_path is None:
             raise ValueError("retention_engine or db_path is required")
         self._engine = retention_engine
+        if self._engine is not None:
+            self._engine._autocommit = False
         self._db_path = Path(db_path) if db_path is not None else None
         self._interval = interval_seconds
         self._timer: Optional[threading.Timer] = None
@@ -75,14 +77,21 @@ class RetentionScheduler:
     def stop(self) -> None:
         """Stop the background scheduler.
 
-        Cancels the pending timer. Safe to call even if not running.
+        Cancels the pending timer and waits briefly for an active cycle. Safe
+        to call even if not running.
         """
+        timer: threading.Timer | None
         with self._lock:
             self._running = False
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
-            logger.info("Retention scheduler stopped")
+            timer = self._timer
+            self._timer = None
+            if timer is not None:
+                timer.cancel()
+        if timer is not None and timer is not threading.current_thread():
+            timer.join(timeout=10.0)
+            if timer.is_alive():
+                logger.warning("Retention scheduler did not stop within 10 seconds")
+        logger.info("Retention scheduler stopped")
 
     # ------------------------------------------------------------------
     # Execution
@@ -127,7 +136,9 @@ class RetentionScheduler:
             from superlocalmemory.storage.memory_write import memory_write
 
             with memory_write(self._db_path) as connection:
-                return self._execute_with_engine(RetentionEngine(connection))
+                return self._execute_with_engine(
+                    RetentionEngine(connection, autocommit=False)
+                )
         if self._engine is None:  # pragma: no cover - constructor invariant
             raise RuntimeError("retention scheduler has no engine")
         return self._execute_with_engine(self._engine)
@@ -147,10 +158,20 @@ class RetentionScheduler:
             profile_ids = []
 
         for profile_id in profile_ids:
+            savepoint = "slm_retention_scheduler_profile"
             try:
+                engine._db.execute(f"SAVEPOINT {savepoint}")
                 result = engine.enforce(profile_id)
+                engine._db.execute(f"RELEASE SAVEPOINT {savepoint}")
                 results.append(result)
             except Exception as exc:
+                try:
+                    engine._db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    engine._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                except sqlite3.Error:
+                    logger.exception(
+                        "Retention rollback failed for profile '%s'", profile_id
+                    )
                 logger.error(
                     "Retention enforcement failed for profile '%s': %s",
                     profile_id, exc,

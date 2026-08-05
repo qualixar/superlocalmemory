@@ -304,6 +304,11 @@ class MemoryEngine:
 
         self._embedder = init_embedder(self._config)
 
+        # Rebuild the complete vector projection before VectorStore opens it.
+        # This preserves the previous vec0 table until the shadow activation
+        # succeeds, including across embedding-dimension changes.
+        self._check_embedding_migration()
+
         if self._caps.llm_fact_extraction:
             self._llm = LLMBackbone(self._config.llm)
             if not self._llm.is_available():
@@ -393,8 +398,6 @@ class MemoryEngine:
             embedder=self._embedder,  # v3.4.7: for CCQ worker
             llm=getattr(self, "_llm", None),  # v3.4.7: for CCQ worker
         )
-
-        self._check_embedding_migration()
 
         # Lifecycle/tier evaluation, bounded housekeeping, and backup checks
         # must continue even when optional forgetting/math maintenance is

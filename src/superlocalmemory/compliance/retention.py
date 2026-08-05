@@ -60,8 +60,9 @@ class RetentionEngine:
     The engine can identify expired facts and enforce deletion.
     """
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, *, autocommit: bool = True) -> None:
         self._db = db
+        self._autocommit = autocommit
         self._ensure_table()
 
     # ------------------------------------------------------------------
@@ -296,6 +297,21 @@ class RetentionEngine:
     # ------------------------------------------------------------------
 
     def enforce(self, profile_id: str) -> dict[str, Any]:
+        """Atomically enforce all rules for one profile."""
+        savepoint = "slm_retention_profile"
+        self._db.execute(f"SAVEPOINT {savepoint}")
+        try:
+            result = self._enforce_uncommitted(profile_id)
+            self._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            if self._autocommit:
+                self._db.commit()
+            return result
+        except Exception:
+            self._db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            self._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            raise
+
+    def _enforce_uncommitted(self, profile_id: str) -> dict[str, Any]:
         """Enforce every retention rule for a profile, honoring each action.
 
         For each rule, facts in the profile older than its retention_days are
@@ -375,18 +391,14 @@ class RetentionEngine:
             )
             if action in _TOMBSTONE_ACTIONS:
                 # Flag purgeable without violating the lifecycle CHECK.
-                try:
-                    self._db.execute(
-                        f"UPDATE atomic_facts SET archive_status = 'tombstoned' "
-                        f"WHERE profile_id = ? AND fact_id IN ({placeholders})",
-                        [profile_id, *expired],
-                    )
-                except Exception:
-                    pass
+                self._db.execute(
+                    f"UPDATE atomic_facts SET archive_status = 'tombstoned' "
+                    f"WHERE profile_id = ? AND fact_id IN ({placeholders})",
+                    [profile_id, *expired],
+                )
             result["archived" if action == "archive" else "tombstoned"] += len(expired)
             affected.update(expired)
 
-        self._db.commit()
         result["affected_ids"] = sorted(affected)
         result["deleted_count"] = result["tombstoned"]  # legacy alias
         logger.info(

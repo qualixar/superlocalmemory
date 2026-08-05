@@ -582,8 +582,13 @@ function addDetailTagsRow(parent, label, tags) {
  * @param {string} [opts.confirmationText] Exact text required to unlock confirmation
  * @returns {Promise<boolean>} Resolves true when confirmed, false when cancelled
  */
+var activeDestructiveConfirmation = null;
+
 function confirmDestructive(opts) {
     return new Promise(function(resolve) {
+        if (activeDestructiveConfirmation) {
+            activeDestructiveConfirmation.cancel();
+        }
         var settled = false;
         var MODAL_ID = 'slm-confirm-destructive-modal';
         var modalEl = document.getElementById(MODAL_ID);
@@ -648,6 +653,9 @@ function confirmDestructive(opts) {
         function settle(result) {
             if (settled) return;
             settled = true;
+            if (activeDestructiveConfirmation === confirmationSession) {
+                activeDestructiveConfirmation = null;
+            }
             modalEl.removeEventListener('click', onAction);
             if (challengeInput) challengeInput.removeEventListener('input', onChallengeInput);
             if (bsModal) {
@@ -675,6 +683,11 @@ function confirmDestructive(opts) {
         }
 
         function onHide() { settle(false); }
+
+        var confirmationSession = {
+            cancel: function() { settle(false); }
+        };
+        activeDestructiveConfirmation = confirmationSession;
 
         modalEl.addEventListener('click', onAction);
         if (challengeInput) challengeInput.addEventListener('input', onChallengeInput);

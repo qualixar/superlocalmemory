@@ -885,7 +885,7 @@ DEPLOYMENT_ENTERPRISE = DeploymentConfig(
 def load_deployment_config(
     config_toml_path: Path | None = None,
 ) -> DeploymentConfig:
-    """Parse [deployment] from config.toml; return Personal defaults if absent.
+    """Parse [deployment] from config.toml with fail-closed invalid-state handling.
 
     config.toml is the installer-written performance config (separate from the
     daemon's config.json managed by SLMConfig). This function reads ONLY the
@@ -896,8 +896,9 @@ def load_deployment_config(
             ``~/.superlocalmemory/config.toml`` via the canonical data root.
 
     Returns:
-        DeploymentConfig — Personal preset when the file is absent, the section
-        is missing, or any parse error occurs (fail-open, non-destructive).
+        DeploymentConfig — Personal only when the file or deployment section is
+        absent. A present but invalid deployment configuration resolves to the
+        enterprise preset so startup controls cannot silently downgrade.
     """
     if config_toml_path is None:
         try:
@@ -916,40 +917,48 @@ def load_deployment_config(
         logger.warning(
             "load_deployment_config: failed to parse %s: %s", config_toml_path, exc
         )
-        return DEPLOYMENT_PERSONAL
+        return DEPLOYMENT_ENTERPRISE
 
     dep = data.get("deployment", {})
     if not dep:
         # No [deployment] section — personal defaults, no behaviour change.
         return DEPLOYMENT_PERSONAL
 
-    raw_mode = str(dep.get("mode", "personal")).lower()
+    raw_mode = str(dep.get("mode", "")).lower()
     if raw_mode not in _VALID_DEPLOYMENT_MODES:
         logger.warning(
-            "load_deployment_config: unknown mode %r in %s — defaulting to personal",
+            "load_deployment_config: unknown mode %r in %s — failing closed to enterprise",
             raw_mode, config_toml_path,
         )
-        raw_mode = "personal"
+        return DEPLOYMENT_ENTERPRISE
 
     # Use the preset for the mode as the base so omitted keys inherit
     # sensible values (enterprise → require_login=True etc.).
     base = DEPLOYMENT_ENTERPRISE if raw_mode == "enterprise" else DEPLOYMENT_PERSONAL
 
+    def _strict_bool(name: str, default: bool) -> bool:
+        value = dep.get(name, default)
+        if not isinstance(value, bool):
+            raise TypeError(f"{name} must be a TOML boolean")
+        return value
+
     try:
         return DeploymentConfig(
             mode=raw_mode,
-            require_login=bool(dep.get("require_login", base.require_login)),
-            pii_redaction=bool(dep.get("pii_redaction", base.pii_redaction)),
-            retention_enabled=bool(dep.get("retention_enabled", base.retention_enabled)),
-            audit=bool(dep.get("audit", base.audit)),
+            require_login=_strict_bool("require_login", base.require_login),
+            pii_redaction=_strict_bool("pii_redaction", base.pii_redaction),
+            retention_enabled=_strict_bool(
+                "retention_enabled", base.retention_enabled
+            ),
+            audit=_strict_bool("audit", base.audit),
         )
     except (ValueError, TypeError) as exc:
         logger.warning(
             "load_deployment_config: invalid values in [deployment] in %s: %s — "
-            "falling back to personal",
+            "failing closed to enterprise",
             config_toml_path, exc,
         )
-        return DEPLOYMENT_PERSONAL
+        return DEPLOYMENT_ENTERPRISE
 
 
 # ---------------------------------------------------------------------------
