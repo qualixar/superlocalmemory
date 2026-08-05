@@ -17,7 +17,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS retention_rules (
 _ACTION_LIFECYCLE = {"archive": "archived", "tombstone": "archived"}
 _TOMBSTONE_ACTIONS = frozenset({"tombstone"})
 _VALID_ACTIONS = ("archive", "tombstone", "notify")
+_SUPPORTED_APPLIES_TO = frozenset({"scope", "fact_type", "signal_type", "session_id"})
 
 _FACTS_TABLE_CHECK = """
 SELECT name FROM sqlite_master
@@ -205,12 +206,20 @@ class RetentionEngine:
         """
         if action not in _VALID_ACTIONS:
             raise ValueError(f"action must be one of {_VALID_ACTIONS}")
+        selectors = applies_to or {}
+        if not isinstance(selectors, dict):
+            raise ValueError("applies_to must be an object")
+        unsupported = set(selectors) - _SUPPORTED_APPLIES_TO
+        if unsupported:
+            raise ValueError(
+                "unsupported applies_to selectors: " + ", ".join(sorted(unsupported))
+            )
         cur = self._db.execute(
             "INSERT OR REPLACE INTO retention_rules "
             "(profile_id, rule_name, days, description, framework, action, applies_to) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (profile_id, name, int(retention_days), "", framework, action,
-             json.dumps(applies_to or {})),
+             json.dumps(selectors, sort_keys=True)),
         )
         self._db.commit()
         logger.info(
@@ -312,19 +321,43 @@ class RetentionEngine:
         if not rules or not self._has_facts_table():
             return result
 
+        fact_columns = {
+            row[1] for row in self._db.execute("PRAGMA table_info(atomic_facts)").fetchall()
+        }
+        selector_columns = sorted(_SUPPORTED_APPLIES_TO & fact_columns)
+        selected_columns = ["fact_id", "created_at", *selector_columns]
         rows = self._db.execute(
-            "SELECT fact_id, created_at FROM atomic_facts WHERE profile_id = ?",
+            f"SELECT {', '.join(selected_columns)} FROM atomic_facts "
+            "WHERE profile_id = ?",
             (profile_id,),
         ).fetchall()
+        facts = [dict(zip(selected_columns, row, strict=True)) for row in rows]
 
         affected: set[str] = set()
         for rule in rules:
             action = rule.get("action", "archive")
             days = rule.get("retention_days", rule.get("days", 0))
-            expired = [
-                str(r[0]) for r in rows
-                if r[1] and self._age_in_days(r[1]) > days
-            ]
+            selectors = rule.get("applies_to") or {}
+            if set(selectors) - set(selector_columns):
+                logger.warning(
+                    "Retention rule %r skipped unsupported/unavailable selectors: %s",
+                    rule.get("name"),
+                    sorted(set(selectors) - set(selector_columns)),
+                )
+                continue
+            expired = []
+            for fact in facts:
+                created_at = fact.get("created_at")
+                if not created_at or self._age_in_days(created_at) <= days:
+                    continue
+                matches = True
+                for field, expected in selectors.items():
+                    accepted = expected if isinstance(expected, list) else [expected]
+                    if fact.get(field) not in accepted:
+                        matches = False
+                        break
+                if matches:
+                    expired.append(str(fact["fact_id"]))
             if not expired:
                 continue
             if action == "notify":
