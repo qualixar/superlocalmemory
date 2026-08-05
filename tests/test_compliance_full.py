@@ -451,6 +451,46 @@ class TestRetentionEnforcement:
             "SELECT lifecycle FROM atomic_facts WHERE fact_id='f_old'"
         ).fetchone()[0] == "active"
 
+    def test_caller_owned_transaction_remains_rollbackable(self):
+        db = sqlite3.connect(":memory:")
+        engine = RetentionEngine(db, autocommit=False)
+        db.execute(
+            "CREATE TABLE atomic_facts ("
+            "fact_id TEXT PRIMARY KEY, profile_id TEXT, "
+            "lifecycle TEXT DEFAULT 'active', archive_status TEXT, created_at TEXT)"
+        )
+        engine.add_rule("p1", "rule", 30)
+        db.execute(
+            "INSERT INTO atomic_facts VALUES "
+            "('f_old', 'p1', 'active', NULL, '2020-01-01T00:00:00+00:00')"
+        )
+        db.commit()
+
+        assert engine.enforce("p1")["archived"] == 1
+        assert db.in_transaction is True
+        db.rollback()
+        assert db.execute(
+            "SELECT lifecycle FROM atomic_facts WHERE fact_id='f_old'"
+        ).fetchone()[0] == "active"
+
+    def test_constructing_non_autocommit_engine_preserves_caller_transaction(self):
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE caller_data (value TEXT)")
+        db.execute("INSERT INTO caller_data VALUES ('uncommitted')")
+
+        engine = RetentionEngine(db, autocommit=False)
+        engine.add_rule("p1", "rule", 30)
+        engine.create_rule(
+            name="gdpr", framework="gdpr", retention_days=60,
+            action="archive", applies_to=None, profile_id="p1",
+        )
+        engine.remove_rule("p1", "rule")
+        assert engine.delete_rule("p1", "gdpr") is True
+        assert db.in_transaction is True
+
+        db.rollback()
+        assert db.execute("SELECT COUNT(*) FROM caller_data").fetchone()[0] == 0
+
     def test_enforce_honors_applies_to_scope(self):
         db = sqlite3.connect(":memory:")
         engine = RetentionEngine(db)

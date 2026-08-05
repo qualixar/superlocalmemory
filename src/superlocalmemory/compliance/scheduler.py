@@ -41,13 +41,12 @@ class RetentionScheduler:
         if retention_engine is None and db_path is None:
             raise ValueError("retention_engine or db_path is required")
         self._engine = retention_engine
-        if self._engine is not None:
-            self._engine._autocommit = False
         self._db_path = Path(db_path) if db_path is not None else None
         self._interval = interval_seconds
         self._timer: Optional[threading.Timer] = None
         self._running = False
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
 
     @property
     def is_running(self) -> bool:
@@ -67,6 +66,7 @@ class RetentionScheduler:
         with self._lock:
             if self._running:
                 return
+            self._stop_event.clear()
             self._running = True
             self._schedule_next()
             logger.info(
@@ -74,24 +74,30 @@ class RetentionScheduler:
                 self._interval,
             )
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         """Stop the background scheduler.
 
         Cancels the pending timer and waits briefly for an active cycle. Safe
-        to call even if not running.
+        to call even if not running. Returns False only when an active cycle
+        does not exit within the bounded shutdown window.
         """
         timer: threading.Timer | None
         with self._lock:
             self._running = False
+            self._stop_event.set()
             timer = self._timer
             self._timer = None
             if timer is not None:
                 timer.cancel()
+        stopped = True
         if timer is not None and timer is not threading.current_thread():
             timer.join(timeout=10.0)
             if timer.is_alive():
+                stopped = False
                 logger.warning("Retention scheduler did not stop within 10 seconds")
-        logger.info("Retention scheduler stopped")
+        if stopped:
+            logger.info("Retention scheduler stopped")
+        return stopped
 
     # ------------------------------------------------------------------
     # Execution
@@ -118,7 +124,8 @@ class RetentionScheduler:
     def _run_cycle(self) -> None:
         """Run one enforcement cycle, then schedule the next."""
         try:
-            self._execute_cycle()
+            if not self._stop_event.is_set():
+                self._execute_cycle()
         except Exception as exc:
             # Scheduler must not crash — log and continue
             logger.error("Retention scheduler cycle failed: %s", exc)
@@ -133,15 +140,42 @@ class RetentionScheduler:
         Discovers all profiles with retention rules and enforces each.
         """
         if self._db_path is not None:
-            from superlocalmemory.storage.memory_write import memory_write
-
-            with memory_write(self._db_path) as connection:
-                return self._execute_with_engine(
-                    RetentionEngine(connection, autocommit=False)
-                )
+            return self._execute_db_path_cycle()
         if self._engine is None:  # pragma: no cover - constructor invariant
             raise RuntimeError("retention scheduler has no engine")
         return self._execute_with_engine(self._engine)
+
+    def _execute_db_path_cycle(self) -> dict[str, Any]:
+        """Discover read-only, then enforce each profile in its own write transaction."""
+        from superlocalmemory.storage.memory_write import memory_read, memory_write
+
+        try:
+            with memory_read(self._db_path) as connection:
+                rows = connection.execute(
+                    "SELECT DISTINCT profile_id FROM retention_rules"
+                ).fetchall()
+                profile_ids = [str(row[0]) for row in rows]
+        except sqlite3.OperationalError:
+            profile_ids = []
+
+        results: list[dict[str, Any]] = []
+        for profile_id in profile_ids:
+            if self._stop_event.is_set():
+                break
+            try:
+                with memory_write(self._db_path) as connection:
+                    result = RetentionEngine(
+                        connection, autocommit=False
+                    ).enforce(profile_id)
+                results.append(result)
+            except Exception as exc:
+                logger.error(
+                    "Retention enforcement failed for profile '%s': %s",
+                    profile_id,
+                    exc,
+                )
+                results.append({"profile_id": profile_id, "error": str(exc)})
+        return {"profiles_processed": len(results), "results": results}
 
     @staticmethod
     def _execute_with_engine(engine: RetentionEngine) -> dict[str, Any]:
@@ -158,16 +192,12 @@ class RetentionScheduler:
             profile_ids = []
 
         for profile_id in profile_ids:
-            savepoint = "slm_retention_scheduler_profile"
             try:
-                engine._db.execute(f"SAVEPOINT {savepoint}")
                 result = engine.enforce(profile_id)
-                engine._db.execute(f"RELEASE SAVEPOINT {savepoint}")
                 results.append(result)
             except Exception as exc:
                 try:
-                    engine._db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                    engine._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                    engine._db.rollback()
                 except sqlite3.Error:
                     logger.exception(
                         "Retention rollback failed for profile '%s'", profile_id

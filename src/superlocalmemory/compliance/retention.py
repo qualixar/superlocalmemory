@@ -86,7 +86,12 @@ class RetentionEngine:
         ):
             if col not in cols:
                 self._db.execute(f"ALTER TABLE retention_rules ADD COLUMN {ddl}")
-        self._db.commit()
+        self._commit_if_owned()
+
+    def _commit_if_owned(self) -> None:
+        """Commit only when this engine owns the transaction boundary."""
+        if self._autocommit:
+            self._db.commit()
 
     def _has_facts_table(self) -> bool:
         """Check if atomic_facts table exists in the database."""
@@ -133,7 +138,7 @@ class RetentionEngine:
             "VALUES (?, ?, ?, ?)",
             (profile_id, rule_name, days, description),
         )
-        self._db.commit()
+        self._commit_if_owned()
         logger.info(
             "Added retention rule '%s' (%d days) to profile '%s'",
             rule_name, days, profile_id,
@@ -151,7 +156,7 @@ class RetentionEngine:
             "WHERE profile_id = ? AND rule_name = ?",
             (profile_id, rule_name),
         )
-        self._db.commit()
+        self._commit_if_owned()
         logger.info(
             "Removed retention rule '%s' from profile '%s'",
             rule_name, profile_id,
@@ -222,7 +227,7 @@ class RetentionEngine:
             (profile_id, name, int(retention_days), "", framework, action,
              json.dumps(selectors, sort_keys=True)),
         )
-        self._db.commit()
+        self._commit_if_owned()
         logger.info(
             "Created retention rule '%s' (%dd, %s/%s) for profile '%s'",
             name, retention_days, framework, action, profile_id,
@@ -247,7 +252,7 @@ class RetentionEngine:
             "DELETE FROM retention_rules WHERE profile_id = ? AND rule_name = ?",
             (profile_id, name),
         )
-        self._db.commit()
+        self._commit_if_owned()
         return cur.rowcount > 0
 
     # ------------------------------------------------------------------
@@ -298,6 +303,8 @@ class RetentionEngine:
 
     def enforce(self, profile_id: str) -> dict[str, Any]:
         """Atomically enforce all rules for one profile."""
+        if not self._autocommit and not self._db.in_transaction:
+            self._db.execute("BEGIN")
         savepoint = "slm_retention_profile"
         self._db.execute(f"SAVEPOINT {savepoint}")
         try:

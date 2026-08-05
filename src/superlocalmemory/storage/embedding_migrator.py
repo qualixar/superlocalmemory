@@ -16,6 +16,8 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import hashlib
+import itertools
 import json
 import logging
 import os as _os
@@ -88,6 +90,24 @@ def _activate_staged_vectors(
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
             conn.execute("BEGIN IMMEDIATE")
+            canonical = conn.execute(
+                "SELECT fact_id, profile_id, content "
+                "FROM atomic_facts ORDER BY fact_id"
+            )
+            staged = stage.execute(
+                "SELECT fact_id, profile_id, content_hash "
+                "FROM staged_embeddings ORDER BY fact_id"
+            )
+            for current, shadow in itertools.zip_longest(canonical, staged):
+                if current is None or shadow is None:
+                    raise RuntimeError("canonical fact set changed during migration")
+                current_key = (str(current[0]), str(current[1]))
+                shadow_key = (str(shadow[0]), str(shadow[1]))
+                current_hash = hashlib.sha256(str(current[2]).encode("utf-8")).hexdigest()
+                if current_key != shadow_key or current_hash != str(shadow[2]):
+                    raise RuntimeError(
+                        f"canonical fact changed during migration: {current_key[0]}"
+                    )
             conn.execute("DROP TABLE IF EXISTS embedding_metadata")
             conn.execute("DROP TABLE IF EXISTS vector_row_map")
             conn.execute("DROP TABLE IF EXISTS fact_embeddings")
@@ -341,7 +361,7 @@ def run_embedding_migration(
                 stage.execute(
                     "CREATE TABLE staged_embeddings ("
                     "fact_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, "
-                    "embedding TEXT NOT NULL)"
+                    "content_hash TEXT NOT NULL, embedding TEXT NOT NULL)"
                 )
                 for i in range(0, total, _REINDEX_BATCH_SIZE):
                     batch = facts[i : i + _REINDEX_BATCH_SIZE]
@@ -354,9 +374,9 @@ def run_embedding_migration(
                             "embedder returned "
                             f"{len(vectors)} vectors for {len(batch)} facts"
                         )
-                    staged_rows: list[tuple[str, str, str]] = []
-                    for fid, profile_id, vec in zip(
-                        fact_ids, profile_ids, vectors, strict=True
+                    staged_rows: list[tuple[str, str, str, str]] = []
+                    for fid, profile_id, content, vec in zip(
+                        fact_ids, profile_ids, texts, vectors, strict=True
                     ):
                         if vec is None or len(vec) != config.embedding.dimension:
                             raise ValueError(
@@ -367,12 +387,14 @@ def run_embedding_migration(
                             (
                                 fid,
                                 profile_id,
+                                hashlib.sha256(content.encode("utf-8")).hexdigest(),
                                 json.dumps([float(value) for value in vec]),
                             )
                         )
                     stage.executemany(
                         "INSERT INTO staged_embeddings "
-                        "(fact_id, profile_id, embedding) VALUES (?, ?, ?)",
+                        "(fact_id, profile_id, content_hash, embedding) "
+                        "VALUES (?, ?, ?, ?)",
                         staged_rows,
                     )
                     stage.commit()

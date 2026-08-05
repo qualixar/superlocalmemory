@@ -919,10 +919,17 @@ def load_deployment_config(
         )
         return DEPLOYMENT_ENTERPRISE
 
-    dep = data.get("deployment", {})
-    if not dep:
+    if "deployment" not in data:
         # No [deployment] section — personal defaults, no behaviour change.
         return DEPLOYMENT_PERSONAL
+    dep = data["deployment"]
+    if not isinstance(dep, dict):
+        logger.warning(
+            "load_deployment_config: [deployment] in %s is not a table — "
+            "failing closed to enterprise",
+            config_toml_path,
+        )
+        return DEPLOYMENT_ENTERPRISE
 
     raw_mode = str(dep.get("mode", "")).lower()
     if raw_mode not in _VALID_DEPLOYMENT_MODES:

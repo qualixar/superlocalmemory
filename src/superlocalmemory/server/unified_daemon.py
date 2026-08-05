@@ -1372,6 +1372,22 @@ def _start_deployment_retention(application, config, deployment) -> None:
     application.state.retention_scheduler = scheduler
 
 
+def _stop_deployment_retention(application) -> bool:
+    """Stop retention and report whether its writer thread fully terminated."""
+    scheduler = getattr(application.state, "retention_scheduler", None)
+    if scheduler is None:
+        return True
+    try:
+        stopped = scheduler.stop()
+    except Exception as exc:  # pragma: no cover - defensive shutdown
+        logger.error("retention scheduler stop failed: %s", exc)
+        return False
+    if stopped is False:
+        logger.error("retention scheduler did not stop within its shutdown budget")
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -2520,12 +2536,7 @@ async def lifespan(application: FastAPI):
     # not skip the rest.
     _observe_buffer.flush_sync()
 
-    _retention_scheduler = getattr(application.state, "retention_scheduler", None)
-    if _retention_scheduler is not None:
-        try:
-            _retention_scheduler.stop()
-        except Exception as exc:  # pragma: no cover - defensive shutdown
-            logger.warning("retention scheduler stop failed: %s", exc)
+    _retention_stopped = _stop_deployment_retention(application)
 
     # S9-DASH-02: stop outcome-queue worker (final drain on graceful
     # shutdown). Any events left unpersisted are logged but not
@@ -2681,6 +2692,10 @@ async def lifespan(application: FastAPI):
         getattr(application.state, "daemon_descriptor", None),
     )
     logger.info("Unified daemon shutdown complete")
+    if not _retention_stopped:
+        raise RuntimeError(
+            "retention scheduler remained active during daemon shutdown"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -650,7 +650,7 @@ function confirmDestructive(opts) {
             bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
         }
 
-        function settle(result) {
+        function settle(result, hideModal) {
             if (settled) return;
             settled = true;
             if (activeDestructiveConfirmation === confirmationSession) {
@@ -661,7 +661,7 @@ function confirmDestructive(opts) {
             if (bsModal) {
                 modalEl.removeEventListener('hidden.bs.modal', onHide);
                 modalEl.removeEventListener('shown.bs.modal', onShown);
-                bsModal.hide();
+                if (hideModal !== false) bsModal.hide();
             }
             resolve(result);
         }
@@ -685,7 +685,7 @@ function confirmDestructive(opts) {
         function onHide() { settle(false); }
 
         var confirmationSession = {
-            cancel: function() { settle(false); }
+            cancel: function() { settle(false, false); }
         };
         activeDestructiveConfirmation = confirmationSession;
 

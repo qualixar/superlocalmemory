@@ -393,6 +393,56 @@ class TestRunEmbeddingMigration:
         assert restored.search([1.0, 0.0], top_k=1) == [("f1", 1.0)]
         assert _read_stored_signature(tmp_path) == "old-model::2"
 
+    def test_concurrent_fact_aborts_snapshot_activation(self, tmp_path, monkeypatch):
+        from superlocalmemory.retrieval.vector_store import VectorStore, VectorStoreConfig
+        from superlocalmemory.storage import schema
+        from superlocalmemory.storage.database import DatabaseManager
+        from superlocalmemory.storage import embedding_migrator as migrator
+
+        db_path = tmp_path / "memory.db"
+        db = DatabaseManager(db_path)
+        db.initialize(schema)
+        db.execute(
+            "INSERT INTO memories "
+            "(memory_id, profile_id, content, created_at, metadata_json, scope) "
+            "VALUES ('m1', 'default', 'first', '2026-01-01', '{}', 'personal')"
+        )
+        db.execute(
+            "INSERT INTO atomic_facts "
+            "(fact_id, memory_id, profile_id, content, lifecycle, created_at, scope) "
+            "VALUES ('f1', 'm1', 'default', 'first', 'active', "
+            "'2026-01-01', 'personal')"
+        )
+        store = VectorStore(db_path, VectorStoreConfig(dimension=2, model_name="old"))
+        if not store.available:
+            pytest.skip("sqlite-vec unavailable")
+        assert store.upsert("f1", "default", [1.0, 0.0], "old")
+        original_activate = migrator._activate_staged_vectors
+
+        def insert_then_activate(config, manager, stage_path, expected_count):
+            manager.execute(
+                "INSERT INTO memories "
+                "(memory_id, profile_id, content, created_at, metadata_json, scope) "
+                "VALUES ('m2', 'default', 'concurrent', '2026-01-02', '{}', 'personal')"
+            )
+            manager.execute(
+                "INSERT INTO atomic_facts "
+                "(fact_id, memory_id, profile_id, content, lifecycle, created_at, scope) "
+                "VALUES ('f2', 'm2', 'default', 'concurrent', 'active', "
+                "'2026-01-02', 'personal')"
+            )
+            return original_activate(config, manager, stage_path, expected_count)
+
+        monkeypatch.setattr(migrator, "_activate_staged_vectors", insert_then_activate)
+        cfg = _make_config(tmp_path, model_name="new", dimension=2)
+        _write_stored_signature(tmp_path, "old::2")
+        embedder = MagicMock()
+        embedder.embed_batch.return_value = [[0.0, 1.0]]
+
+        assert run_embedding_migration(cfg, db, embedder) == 0
+        assert _read_stored_signature(tmp_path) == "old::2"
+        assert store.search([1.0, 0.0], top_k=1) == [("f1", 1.0)]
+
 
 # ---------------------------------------------------------------------------
 # Mode config integration

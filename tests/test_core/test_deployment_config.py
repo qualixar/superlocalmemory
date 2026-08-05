@@ -151,19 +151,19 @@ class TestLoadDeploymentConfig:
         assert result.retention_enabled is True
         assert result.audit is True
 
-    def test_unknown_mode_falls_back_to_personal(self, tmp_path: Path) -> None:
+    def test_unknown_mode_fails_closed_to_enterprise(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             "[deployment]\nmode = \"superuser\"\n", encoding="utf-8"
         )
         result = load_deployment_config(cfg)
-        assert result == DEPLOYMENT_PERSONAL
+        assert result == DEPLOYMENT_ENTERPRISE
 
-    def test_malformed_toml_returns_personal(self, tmp_path: Path) -> None:
+    def test_malformed_toml_fails_closed_to_enterprise(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.toml"
         cfg.write_text("{{{ definitely not toml }}}", encoding="utf-8")
         result = load_deployment_config(cfg)
-        assert result == DEPLOYMENT_PERSONAL
+        assert result == DEPLOYMENT_ENTERPRISE
 
     def test_partial_enterprise_override(self, tmp_path: Path) -> None:
         """Enterprise mode with audit=false override."""

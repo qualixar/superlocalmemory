@@ -32,6 +32,13 @@ function cdHarness() {
     return h;
 }
 
+function typeConfirmation(h, value = 'my-project') {
+    const challenge = h.document.querySelector('.slm-cd-challenge');
+    assert.ok(challenge, 'typed confirmation input must exist');
+    challenge.value = value;
+    challenge.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+}
+
 describe('confirmDestructive — shared destructive-action modal', function() {
 
     it('exposes confirmDestructive on window after modal.js loads', function() {
@@ -73,7 +80,7 @@ describe('confirmDestructive — shared destructive-action modal', function() {
         );
     });
 
-    it('resolves true when the confirm button is clicked', async function() {
+    it('requires the exact target before confirmation', async function() {
         const h = cdHarness();
         const p = h.window.confirmDestructive({
             title: 'Delete profile',
@@ -83,6 +90,11 @@ describe('confirmDestructive — shared destructive-action modal', function() {
 
         const confirmBtn = h.document.querySelector('[data-slm-cd-action="confirm"]');
         assert.ok(confirmBtn, 'confirm button must exist in modal');
+        assert.equal(confirmBtn.disabled, true, 'confirm starts disabled');
+        typeConfirmation(h, 'wrong-project');
+        assert.equal(confirmBtn.disabled, true, 'wrong text cannot unlock confirmation');
+        typeConfirmation(h);
+        assert.equal(confirmBtn.disabled, false, 'exact target unlocks confirmation');
         confirmBtn.click();
 
         const result = await p;
@@ -160,6 +172,7 @@ describe('confirmDestructive — shared destructive-action modal', function() {
         assert.equal(calls.length, 0, 'no fetch before confirmation');
 
         const confirmBtn = h.document.querySelector('[data-slm-cd-action="confirm"]');
+        typeConfirmation(h);
         confirmBtn.click();
         await action;
 

@@ -43,6 +43,24 @@ def test_enterprise_runtime_starts_and_personal_skips_retention(tmp_path: Path) 
         app.state.retention_scheduler.stop()
 
 
+def test_retention_shutdown_surfaces_a_live_writer() -> None:
+    stop_retention = getattr(unified_daemon, "_stop_deployment_retention", None)
+    assert callable(stop_retention)
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(retention_scheduler=SimpleNamespace(stop=lambda: False))
+    )
+    assert stop_retention(app) is False
+
+
+def test_retention_shutdown_accepts_a_clean_stop() -> None:
+    stop_retention = getattr(unified_daemon, "_stop_deployment_retention", None)
+    app = SimpleNamespace(
+        state=SimpleNamespace(retention_scheduler=SimpleNamespace(stop=lambda: True))
+    )
+    assert stop_retention(app) is True
+
+
 def test_dashboard_does_not_claim_unconditional_locality_or_legal_compliance() -> None:
     index = (ROOT / "src/superlocalmemory/ui/index.html").read_text(encoding="utf-8")
     settings = (
@@ -76,6 +94,7 @@ def test_shared_destructive_modal_cancels_an_existing_session() -> None:
     ).read_text(encoding="utf-8")
     assert "activeDestructiveConfirmation" in source
     assert "activeDestructiveConfirmation.cancel()" in source
+    assert "settle(false, false)" in source
 
 
 def test_present_corrupt_deployment_config_fails_closed(tmp_path: Path) -> None:
@@ -87,4 +106,10 @@ def test_present_corrupt_deployment_config_fails_closed(tmp_path: Path) -> None:
 def test_unknown_deployment_mode_fails_closed(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text("[deployment]\nmode = 'enterprize'\n", encoding="utf-8")
+    assert load_deployment_config(config_path) == DEPLOYMENT_ENTERPRISE
+
+
+def test_non_table_deployment_config_fails_closed(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("deployment = 'enterprise'\n", encoding="utf-8")
     assert load_deployment_config(config_path) == DEPLOYMENT_ENTERPRISE
