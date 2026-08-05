@@ -1352,6 +1352,39 @@ def _apply_readiness_gate(runtime, application) -> None:
     )
 
 
+def _apply_deployment_runtime(config, deployment) -> None:
+    """Upgrade engine policy from deployment config without downgrading it."""
+    if deployment.pii_redaction and not getattr(config, "pii_redaction", False):
+        config.pii_redaction = True
+
+
+def _start_deployment_retention(application, config, deployment) -> None:
+    """Start the named-rule retention scheduler when explicitly enabled."""
+    application.state.retention_scheduler = None
+    application.state.retention_connection = None
+    if not deployment.retention_enabled:
+        return
+
+    connection = sqlite3.connect(
+        str(config.db_path),
+        timeout=10,
+        check_same_thread=False,
+    )
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=5000")
+        from superlocalmemory.compliance.retention import RetentionEngine
+        from superlocalmemory.compliance.scheduler import RetentionScheduler
+
+        scheduler = RetentionScheduler(RetentionEngine(connection))
+        scheduler.start()
+    except Exception:
+        connection.close()
+        raise
+    application.state.retention_connection = connection
+    application.state.retention_scheduler = scheduler
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -1359,6 +1392,7 @@ async def lifespan(application: FastAPI):
 
     engine = None
     config = None
+    deployment = None
     canonical_remember_runtime = None
     profile_runtime = None
 
@@ -1525,6 +1559,10 @@ async def lifespan(application: FastAPI):
         SLMConfig.migrate_to_3mode()
 
         config = SLMConfig.load()
+        from superlocalmemory.core.config import load_deployment_config
+        deployment = load_deployment_config()
+        _apply_deployment_runtime(config, deployment)
+        application.state.deployment = deployment
         engine = MemoryEngine(config)
         engine.initialize()
 
@@ -2221,8 +2259,9 @@ async def lifespan(application: FastAPI):
     # ENFORCE rule: only UPGRADE a setting, NEVER downgrade an already-stronger
     # runtime setting (e.g. RBAC require_login already True → leave it alone).
     try:
-        from superlocalmemory.core.config import load_deployment_config
-        deployment = load_deployment_config()
+        if deployment is None:
+            from superlocalmemory.core.config import load_deployment_config
+            deployment = load_deployment_config()
         application.state.deployment = deployment
         if deployment.require_login:
             _dep_rbac = getattr(application.state, "rbac", None)
@@ -2231,8 +2270,7 @@ async def lifespan(application: FastAPI):
                 logger.info(
                     "Deployment: require_login enforced via enterprise deployment config"
                 )
-        # TODO: Wire deployment.pii_redaction → PII redaction subsystem (WP-10)
-        # TODO: Wire deployment.retention_enabled → retention scheduler (WP-11)
+        _start_deployment_retention(application, config, deployment)
         logger.info(
             "Deployment config loaded: mode=%s require_login=%s "
             "pii=%s retention=%s audit=%s",
@@ -2494,6 +2532,19 @@ async def lifespan(application: FastAPI):
     # order. Each stop is wrapped in try/except so one failure does
     # not skip the rest.
     _observe_buffer.flush_sync()
+
+    _retention_scheduler = getattr(application.state, "retention_scheduler", None)
+    if _retention_scheduler is not None:
+        try:
+            _retention_scheduler.stop()
+        except Exception as exc:  # pragma: no cover - defensive shutdown
+            logger.warning("retention scheduler stop failed: %s", exc)
+    _retention_connection = getattr(application.state, "retention_connection", None)
+    if _retention_connection is not None:
+        try:
+            _retention_connection.close()
+        except Exception as exc:  # pragma: no cover - defensive shutdown
+            logger.warning("retention connection close failed: %s", exc)
 
     # S9-DASH-02: stop outcome-queue worker (final drain on graceful
     # shutdown). Any events left unpersisted are logged but not

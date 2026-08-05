@@ -334,7 +334,21 @@
   }
 
   function _resolveOp(opId, action) {
-    if (!window.confirm('Action: ' + action + '\nOperation: ' + opId + '\n\nProceed?')) return;
+    if (typeof window.confirmDestructive !== 'function') {
+      _toast('error', 'Confirmation control unavailable; operation was not changed.');
+      return;
+    }
+    window.confirmDestructive({
+      title: 'Resolve operation',
+      target: opId,
+      consequence: 'Apply the "' + action + '" resolution to this operation.',
+      confirmLabel: 'Resolve'
+    }).then(function (confirmed) {
+      if (confirmed) _resolveOpConfirmed(opId, action);
+    });
+  }
+
+  function _resolveOpConfirmed(opId, action) {
     _post('/operations/' + encodeURIComponent(opId) + '/resolve', { action: action })
       .then(function (res) {
         if (res.status === 403) { _toast('error', 'Permission denied.'); return; }

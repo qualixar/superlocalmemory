@@ -1069,6 +1069,11 @@ class SLMConfig:
     # v3.4.3: Mesh
     mesh_enabled: bool = True
 
+    # Deployment policy overlay. Personal installs remain unchanged; the
+    # daemon upgrades this to True before engine initialization when the
+    # enterprise deployment preset requests PII redaction.
+    pii_redaction: bool = False
+
     def __post_init__(self) -> None:
         if self.db_path is None:
             self.db_path = self.base_dir / DEFAULT_DB_NAME

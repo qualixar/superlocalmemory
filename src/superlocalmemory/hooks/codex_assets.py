@@ -6,7 +6,20 @@ import shutil
 import sysconfig
 from pathlib import Path
 
-SKILLS = ("slm-cache", "slm-compress", "slm-graph", "slm-recall", "slm-remember", "slm-session", "slm-status")
+SKILLS = (
+    "slm-cache",
+    "slm-compress",
+    "slm-governance",
+    "slm-graph",
+    "slm-loop",
+    "slm-mesh",
+    "slm-profile",
+    "slm-recall",
+    "slm-remember",
+    "slm-scope",
+    "slm-session",
+    "slm-status",
+)
 
 # Codex subagent files written to ~/.codex/agents (content built by _agent_files()).
 AGENTS = ("slm-memory-advisor.toml", "slm-optimize-advisor.toml")

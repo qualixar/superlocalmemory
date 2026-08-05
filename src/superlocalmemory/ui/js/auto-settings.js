@@ -195,10 +195,21 @@ async function loadModeSettings() {
 
         var bannerDetail = document.getElementById('settings-current-detail');
         if (bannerDetail) {
-            if (mode === 'a') bannerDetail.textContent = 'Zero cloud — EU AI Act compliant';
+            if (mode === 'a') bannerDetail.textContent = 'Local inference — legal classification requires deployment assessment';
             else if (data.has_key) bannerDetail.textContent = 'API key configured';
             else if (provider === 'ollama') bannerDetail.textContent = 'No API key needed';
             else bannerDetail.textContent = 'API key not set';
+        }
+
+        var postureBadge = document.querySelector('.badge-local');
+        if (postureBadge) {
+            if (mode === 'c') {
+                postureBadge.innerHTML = '<i class="bi bi-cloud" aria-hidden="true"></i> CLOUD MODE';
+                postureBadge.title = 'Mode C can use configured cloud providers and integrations.';
+            } else {
+                postureBadge.innerHTML = '<i class="bi bi-lock-fill" aria-hidden="true"></i> LOCAL INFERENCE';
+                postureBadge.title = 'Inference is local; mesh, integrations, and backups have separate egress controls.';
+            }
         }
 
         var banner = document.getElementById('settings-current-banner');
