@@ -41,6 +41,19 @@ SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph
 
 **Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
 
+**What V4.0.0 adds.** V4 turns the store into a *governed* runtime: every canonical
+write passes one admission path that a policy layer authorizes, records as durable
+obligations across its projection stores (lexical, temporal, vector), and seals with
+a completion manifest — so a write is either fully applied or explicitly marked
+degraded, never silently half-done. Concretely:
+
+- **Governed write path & verifiable transactions** — admission + policy control on the canonical write path, a per-owner obligation ledger, and a hash-sealed completion manifest with a reconciler that redrives unmet obligations.
+- **Cross-store erasure** — a fail-closed erasure orchestrator that removes a fact from every store and proves it, for GDPR right-to-erasure.
+- **Self-healing, deadlock-free lifecycle** — stale locks or leftover state from a crash, force-quit, or reboot are cleared automatically on the next start; a second launch exits cleanly instead of failing; team-mode locks expire on a lease. No manual recovery, in individual or team mode.
+- **Admin remediation surface** — list and resolve any stuck operation (retry / reconcile / cancel) from the CLI, MCP, or the dashboard.
+
+3.8.x installs upgrade in place — the database migrates automatically on first start, with no manual steps and no data loss.
+
 **What V3.8.0 added.** The 3.8.0 capability release introduced the following
 foundation; 3.8.1 is the existing-install stability patch for it:
 
