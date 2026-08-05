@@ -1365,23 +1365,10 @@ def _start_deployment_retention(application, config, deployment) -> None:
     if not deployment.retention_enabled:
         return
 
-    connection = sqlite3.connect(
-        str(config.db_path),
-        timeout=10,
-        check_same_thread=False,
-    )
-    try:
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=5000")
-        from superlocalmemory.compliance.retention import RetentionEngine
-        from superlocalmemory.compliance.scheduler import RetentionScheduler
+    from superlocalmemory.compliance.scheduler import RetentionScheduler
 
-        scheduler = RetentionScheduler(RetentionEngine(connection))
-        scheduler.start()
-    except Exception:
-        connection.close()
-        raise
-    application.state.retention_connection = connection
+    scheduler = RetentionScheduler(db_path=config.db_path)
+    scheduler.start()
     application.state.retention_scheduler = scheduler
 
 
@@ -2539,12 +2526,6 @@ async def lifespan(application: FastAPI):
             _retention_scheduler.stop()
         except Exception as exc:  # pragma: no cover - defensive shutdown
             logger.warning("retention scheduler stop failed: %s", exc)
-    _retention_connection = getattr(application.state, "retention_connection", None)
-    if _retention_connection is not None:
-        try:
-            _retention_connection.close()
-        except Exception as exc:  # pragma: no cover - defensive shutdown
-            logger.warning("retention connection close failed: %s", exc)
 
     # S9-DASH-02: stop outcome-queue worker (final drain on graceful
     # shutdown). Any events left unpersisted are logged but not

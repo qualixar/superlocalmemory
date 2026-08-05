@@ -34,10 +34,9 @@ def test_enterprise_runtime_starts_and_personal_skips_retention(tmp_path: Path) 
     start_retention(app, config, DEPLOYMENT_ENTERPRISE)
     try:
         assert app.state.retention_scheduler.is_running is True
-        assert app.state.retention_connection is not None
+        assert app.state.retention_connection is None
     finally:
         app.state.retention_scheduler.stop()
-        app.state.retention_connection.close()
 
 
 def test_dashboard_does_not_claim_unconditional_locality_or_legal_compliance() -> None:

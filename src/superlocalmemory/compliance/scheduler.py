@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from pathlib import Path
 from typing import Any, Optional
 
 from .retention import RetentionEngine
@@ -32,10 +33,15 @@ class RetentionScheduler:
 
     def __init__(
         self,
-        retention_engine: RetentionEngine,
+        retention_engine: RetentionEngine | None = None,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
+        *,
+        db_path: str | Path | None = None,
     ) -> None:
+        if retention_engine is None and db_path is None:
+            raise ValueError("retention_engine or db_path is required")
         self._engine = retention_engine
+        self._db_path = Path(db_path) if db_path is not None else None
         self._interval = interval_seconds
         self._timer: Optional[threading.Timer] = None
         self._running = False
@@ -117,10 +123,22 @@ class RetentionScheduler:
 
         Discovers all profiles with retention rules and enforces each.
         """
+        if self._db_path is not None:
+            from superlocalmemory.storage.memory_write import memory_write
+
+            with memory_write(self._db_path) as connection:
+                return self._execute_with_engine(RetentionEngine(connection))
+        if self._engine is None:  # pragma: no cover - constructor invariant
+            raise RuntimeError("retention scheduler has no engine")
+        return self._execute_with_engine(self._engine)
+
+    @staticmethod
+    def _execute_with_engine(engine: RetentionEngine) -> dict[str, Any]:
+        """Enforce one cycle through the supplied short-lived engine."""
         results: list[dict[str, Any]] = []
 
         try:
-            db = self._engine._db
+            db = engine._db
             rows = db.execute(
                 "SELECT DISTINCT profile_id FROM retention_rules"
             ).fetchall()
@@ -130,7 +148,7 @@ class RetentionScheduler:
 
         for profile_id in profile_ids:
             try:
-                result = self._engine.enforce(profile_id)
+                result = engine.enforce(profile_id)
                 results.append(result)
             except Exception as exc:
                 logger.error(
