@@ -41,7 +41,7 @@ class ModeCapabilities:
     embedding_dimension: int       # Expected embedding dimension
 
     # Compliance
-    eu_ai_act_compliant: bool      # Full EU AI Act compliance?
+    eu_ai_act_compliant: bool | None  # None: requires deployment assessment
     data_stays_local: bool         # Does ALL data stay on device?
 
     # Description
@@ -63,13 +63,13 @@ MODE_A = ModeCapabilities(
     cloud_reranker=False,
     cloud_embeddings=False,
     embedding_dimension=768,
-    eu_ai_act_compliant=True,
+    eu_ai_act_compliant=None,
     data_stays_local=True,
     description=(
         "Local Guardian — Zero LLM, zero cloud. "
         "Uses nomic-embed-text-v1.5 encoder (768d, 8K context) for embeddings. "
-        "spaCy + rules for extraction. ONNX cross-encoder reranking (~200MB). "
-        "Full EU AI Act compliance. Target: 65%+"
+        "Deterministic rules for extraction and a local PyTorch cross-encoder. "
+        "EU AI Act classification requires deployment assessment."
     ),
 )
 
@@ -84,13 +84,13 @@ MODE_B = ModeCapabilities(
     cloud_reranker=False,
     cloud_embeddings=False,
     embedding_dimension=768,
-    eu_ai_act_compliant=True,
+    eu_ai_act_compliant=None,
     data_stays_local=True,
     description=(
         "Smart Local — Local Ollama LLM (Phi-3, Llama 3.2). "
         "LLM-quality extraction and classification, fully local. "
-        "ONNX cross-encoder reranking (~200MB). "
-        "No cloud, no data export. EU AI Act compliant. Target: 75-80%"
+        "Local PyTorch cross-encoder reranking. No configured cloud inference. "
+        "EU AI Act classification requires deployment assessment."
     ),
 )
 
@@ -105,12 +105,13 @@ MODE_C = ModeCapabilities(
     cloud_reranker=True,
     cloud_embeddings=True,
     embedding_dimension=3072,
-    eu_ai_act_compliant=False,
+    eu_ai_act_compliant=None,
     data_stays_local=False,
     description=(
         "FULL POWER — UNRESTRICTED. Best embeddings (text-embedding-3-large, 3072-dim). "
         "Best configured cloud LLMs (e.g. GPT-5, Claude Opus 4). Agentic multi-round retrieval. "
-        "Cohere reranker option. No EU restriction. Target: 90%+"
+        "Cohere reranker option. Cloud processing requires deployment-specific "
+        "privacy, contractual, and EU AI Act assessment."
     ),
 )
 

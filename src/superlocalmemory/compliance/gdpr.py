@@ -322,6 +322,7 @@ class GDPRCompliance:
         # actual cache (e.g. a fully custom data-root path), the purge may miss
         # that custom cache.  Operators should ensure db_path is accessible on
         # any custom DB wrapper.
+        data_root = None
         try:
             from pathlib import Path as _Path
 
@@ -477,11 +478,15 @@ class GDPRCompliance:
         if table_delete_failures:
             counts["table_delete_failures"] = len(table_delete_failures)
 
-        # Erase learning database (separate DB file)
+        # Erase the learning sidecar next to the active memory database.  A
+        # custom SLM data root must never fall back to another installation's
+        # DEFAULT_BASE_DIR: doing so can both miss the subject data and erase
+        # unrelated learning state.
         try:
-            from superlocalmemory.core.config import DEFAULT_BASE_DIR
             from superlocalmemory.learning.database import LearningDatabase
-            learning_db = LearningDatabase(DEFAULT_BASE_DIR / "learning.db")
+            if data_root is None:
+                raise RuntimeError("active data root could not be resolved")
+            learning_db = LearningDatabase(data_root / "learning.db")
             learning_db.reset(profile_id)
             counts["learning_db"] = 1
         except Exception as exc:

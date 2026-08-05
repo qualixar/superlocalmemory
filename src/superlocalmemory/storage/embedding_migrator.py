@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import logging
 import os as _os
+import sqlite3
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -160,12 +162,13 @@ def run_embedding_migration(
     db: Any,
     embedder: Any,
 ) -> int:
-    """Re-embed all facts with the current model. Returns count re-embedded.
+    """Stage and atomically activate embeddings for the current model.
 
-    Processes facts in batches to avoid memory spikes. Updates the
-    embedding_metadata table and vector store for each fact.
-
-    This is idempotent — can be interrupted and resumed safely.
+    Embedding is performed in bounded batches into a temporary shadow store.
+    Canonical rows are changed only after every target fact has a valid vector;
+    the activation itself runs in one database transaction.  A failed batch,
+    malformed vector set, or database write therefore leaves both the old
+    embeddings and the old model signature active.
     """
     if embedder is None:
         logger.warning("No embedder available. Skipping re-indexing.")
@@ -193,54 +196,80 @@ def run_embedding_migration(
         _REINDEX_BATCH_SIZE,
     )
 
-    reindexed = 0
-    for i in range(0, total, _REINDEX_BATCH_SIZE):
-        batch = facts[i : i + _REINDEX_BATCH_SIZE]
-        texts = [content for _, content in batch]
-        fact_ids = [fid for fid, _ in batch]
-
-        try:
-            vectors = embedder.embed_batch(texts)
-        except Exception as exc:
-            logger.error(
-                "Re-embedding batch %d-%d failed: %s. Stopping migration.",
-                i,
-                i + len(batch),
-                exc,
-            )
-            break
-
-        for j, (fid, vec) in enumerate(zip(fact_ids, vectors)):
-            if vec is None:
-                continue
-            # Update embedding in the database (embedding column on atomic_facts).
-            try:
-                embedding_json = json.dumps(vec)
-                db.execute(
-                    "UPDATE atomic_facts SET embedding = ? WHERE fact_id = ?",
-                    (embedding_json, fid),
+    config.base_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="embedding-migration-",
+            dir=config.base_dir,
+        ) as stage_dir:
+            stage_path = Path(stage_dir) / "shadow.sqlite3"
+            with sqlite3.connect(stage_path) as stage:
+                stage.execute(
+                    "CREATE TABLE staged_embeddings ("
+                    "fact_id TEXT PRIMARY KEY, embedding TEXT NOT NULL)"
                 )
-                # Update embedding_metadata with new model name.
-                db.execute(
-                    "UPDATE embedding_metadata SET model_name = ? WHERE fact_id = ?",
-                    (config.embedding.model_name, fid),
-                )
-                reindexed += 1
-            except Exception as exc:
-                logger.warning(
-                    "Failed to update embedding for fact %s: %s",
-                    fid[:16],
-                    exc,
-                )
+                for i in range(0, total, _REINDEX_BATCH_SIZE):
+                    batch = facts[i : i + _REINDEX_BATCH_SIZE]
+                    texts = [content for _, content in batch]
+                    fact_ids = [fid for fid, _ in batch]
+                    vectors = list(embedder.embed_batch(texts))
+                    if len(vectors) != len(batch):
+                        raise ValueError(
+                            "embedder returned "
+                            f"{len(vectors)} vectors for {len(batch)} facts"
+                        )
+                    staged_rows: list[tuple[str, str]] = []
+                    for fid, vec in zip(fact_ids, vectors, strict=True):
+                        if vec is None or len(vec) != config.embedding.dimension:
+                            raise ValueError(
+                                f"invalid embedding for fact {fid[:16]}: "
+                                f"expected dimension {config.embedding.dimension}"
+                            )
+                        staged_rows.append(
+                            (fid, json.dumps([float(value) for value in vec]))
+                        )
+                    stage.executemany(
+                        "INSERT INTO staged_embeddings (fact_id, embedding) VALUES (?, ?)",
+                        staged_rows,
+                    )
+                    stage.commit()
 
-    # Update stored signature after successful migration.
+                staged_count = int(
+                    stage.execute("SELECT COUNT(*) FROM staged_embeddings").fetchone()[0]
+                )
+                if staged_count != total:
+                    raise ValueError(
+                        f"shadow migration incomplete: {staged_count}/{total} facts"
+                    )
+
+                with db.transaction():
+                    cursor = stage.execute(
+                        "SELECT fact_id, embedding FROM staged_embeddings ORDER BY fact_id"
+                    )
+                    for fid, embedding_json in cursor:
+                        db.execute(
+                            "UPDATE atomic_facts SET embedding = ? WHERE fact_id = ?",
+                            (embedding_json, fid),
+                        )
+                        db.execute(
+                            "UPDATE embedding_metadata "
+                            "SET model_name = ?, dimension = ? WHERE fact_id = ?",
+                            (config.embedding.model_name, config.embedding.dimension, fid),
+                        )
+    except Exception as exc:
+        logger.error(
+            "Embedding migration aborted; previous embedding space remains active: %s",
+            exc,
+        )
+        return 0
+
     _write_stored_signature(config.base_dir, current_sig)
     logger.info(
         "Embedding migration complete: %d/%d facts re-embedded.",
-        reindexed,
+        total,
         total,
     )
-    return reindexed
+    return total
 
 
 # ---------------------------------------------------------------------------

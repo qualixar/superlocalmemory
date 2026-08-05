@@ -381,19 +381,19 @@ class TestGDPRComplianceWiring:
 
 class TestEUAIActWiring:
 
-    def test_mode_a_is_compliant(self) -> None:
+    def test_mode_a_posture_does_not_certify_compliance(self) -> None:
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
         checker = EUAIActChecker()
         report = checker.check_compliance(Mode.A)
-        assert report.compliant is True
+        assert report.compliant is None
         assert report.data_stays_local is True
         assert report.uses_generative_ai is False
 
-    def test_mode_c_is_not_compliant(self) -> None:
+    def test_mode_c_posture_does_not_certify_compliance(self) -> None:
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
         checker = EUAIActChecker()
         report = checker.check_compliance(Mode.C)
-        assert report.compliant is False
+        assert report.compliant is None
 
     def test_compliance_report_has_required_fields(self) -> None:
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
@@ -401,15 +401,13 @@ class TestEUAIActWiring:
         report = checker.check_compliance(Mode.A)
         assert report.timestamp
         assert report.mode == Mode.A
-        assert report.risk_category in ("minimal", "limited", "high", "unacceptable")
+        assert report.risk_category == "undetermined"
 
-    def test_get_compliant_modes_excludes_c(self) -> None:
+    def test_get_compliant_modes_returns_no_legal_certifications(self) -> None:
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
         checker = EUAIActChecker()
         modes = checker.get_compliant_modes()
-        assert Mode.A in modes
-        assert Mode.B in modes
-        assert Mode.C not in modes
+        assert modes == []
 
     def test_verify_all_modes_returns_all_three(self) -> None:
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker

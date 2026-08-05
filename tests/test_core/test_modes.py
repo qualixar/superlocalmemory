@@ -54,7 +54,7 @@ class TestGetCapabilities:
 
 class TestModeA:
     def test_eu_ai_act_compliant(self) -> None:
-        assert MODE_A.eu_ai_act_compliant is True
+        assert MODE_A.eu_ai_act_compliant is None
 
     def test_data_stays_local(self) -> None:
         assert MODE_A.data_stays_local is True
@@ -85,7 +85,7 @@ class TestModeA:
 
 class TestModeB:
     def test_eu_ai_act_compliant(self) -> None:
-        assert MODE_B.eu_ai_act_compliant is True
+        assert MODE_B.eu_ai_act_compliant is None
 
     def test_data_stays_local(self) -> None:
         assert MODE_B.data_stays_local is True
@@ -116,7 +116,7 @@ class TestModeB:
 
 class TestModeC:
     def test_not_eu_ai_act_compliant(self) -> None:
-        assert MODE_C.eu_ai_act_compliant is False
+        assert MODE_C.eu_ai_act_compliant is None
 
     def test_data_not_local(self) -> None:
         assert MODE_C.data_stays_local is False

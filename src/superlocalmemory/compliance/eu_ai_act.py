@@ -2,11 +2,11 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — EU AI Act Compliance Verification.
+"""EU AI Act technical deployment-posture reporting.
 
-Verifies that each operating mode meets EU AI Act requirements.
-Mode A and B: FULL compliance (zero cloud, zero generative AI / local only).
-Mode C: NOT compliant (cloud LLM processing).
+An operating mode can establish technical facts such as locality and use of
+generative AI.  It cannot determine the Act's risk classification or certify
+legal compliance without the system's intended purpose and deployment context.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
@@ -28,29 +28,19 @@ class ComplianceReport:
     """EU AI Act compliance assessment for a specific mode."""
 
     mode: Mode
-    compliant: bool
-    risk_category: str          # "minimal" / "limited" / "high" / "unacceptable"
+    compliant: bool | None
+    risk_category: str
     data_stays_local: bool
     uses_generative_ai: bool
-    transparency_met: bool
-    human_oversight: bool
+    transparency_met: bool | None
+    human_oversight: bool | None
+    deployment_context_required: bool
     findings: list[str]
     timestamp: str
 
 
 class EUAIActChecker:
-    """Verify EU AI Act compliance for each operating mode.
-
-    EU AI Act (effective Aug 2025) classifies AI systems by risk:
-    - Minimal risk: No obligations (most AI systems)
-    - Limited risk: Transparency obligations
-    - High risk: Strict requirements (biometric, critical infra)
-    - Unacceptable: Banned
-
-    Memory systems are generally "minimal risk" UNLESS they process
-    personal data via cloud AI services (then "limited risk" with
-    transparency obligations).
-    """
+    """Report mode-level technical posture without giving legal certification."""
 
     def check_compliance(self, mode: Mode) -> ComplianceReport:
         """Generate compliance report for a mode."""
@@ -75,43 +65,26 @@ class EUAIActChecker:
                 "transparency: users must be informed AI generates content."
             )
 
-        # Transparency
-        transparency = True  # We always disclose AI usage
-        findings.append("Transparency requirement MET: system identifies as AI-assisted.")
-
-        # Human oversight
-        human_oversight = True  # User controls all memory operations
-        findings.append("Human oversight MET: user controls store/recall/delete.")
-
-        # Risk classification
-        if not uses_gen_ai:
-            risk = "minimal"
-            findings.append("Minimal risk: no generative AI, local processing only.")
-        elif local_gen_ai:
-            risk = "minimal"
-            findings.append("Minimal risk: generative AI is local-only (Ollama).")
-        else:
-            risk = "limited"
-            findings.append(
-                "Limited risk: cloud generative AI requires transparency "
-                "disclosure and DPA with cloud provider."
-            )
-
-        compliant = caps.eu_ai_act_compliant
-        if not compliant:
-            findings.append(
-                "Mode C is NOT EU AI Act compliant by design. "
-                "Use Mode A or B for EU-compliant deployments."
-            )
+        if local_gen_ai:
+            findings.append("Generative AI processing is configured to remain local.")
+        findings.append(
+            "Legal classification is undetermined: intended purpose, affected persons, "
+            "sector, deployment context, and operator controls must be assessed."
+        )
+        findings.append(
+            "Transparency and human-oversight obligations require deployment evidence; "
+            "the operating mode alone cannot mark them as met."
+        )
 
         return ComplianceReport(
             mode=mode,
-            compliant=compliant,
-            risk_category=risk,
+            compliant=None,
+            risk_category="undetermined",
             data_stays_local=data_local,
             uses_generative_ai=uses_gen_ai,
-            transparency_met=transparency,
-            human_oversight=human_oversight,
+            transparency_met=None,
+            human_oversight=None,
+            deployment_context_required=True,
             findings=findings,
             timestamp=datetime.now(UTC).isoformat(),
         )
@@ -124,8 +97,5 @@ class EUAIActChecker:
         }
 
     def get_compliant_modes(self) -> list[Mode]:
-        """Return list of EU AI Act compliant modes."""
-        return [
-            mode for mode in Mode
-            if get_capabilities(mode).eu_ai_act_compliant
-        ]
+        """Return no certified modes; mode alone is insufficient evidence."""
+        return []

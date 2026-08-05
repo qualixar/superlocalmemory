@@ -338,6 +338,9 @@ class TestCachePurgeOrderingBeforeMainDelete:
 
         # Return value must account for both the main-DB and the cache purge.
         assert result.get("profiles") == 1
+        assert result.get("context_cache", 0) >= 1, (
+            "Return value must report the count of cache rows deleted"
+        )
 
 
 class TestLearningDatabaseUsesActiveDataRoot:
@@ -372,9 +375,6 @@ class TestLearningDatabaseUsesActiveDataRoot:
         assert result["erasure_complete"] == 1
         assert active_learning.get_signal_count("alice") == 0
         assert default_learning.get_signal_count("alice") == 1
-        assert result.get("context_cache", 0) >= 1, (
-            "Return value must report the count of cache rows deleted"
-        )
 
     def test_cache_partial_failure_does_not_block_main_db_delete(
         self,
