@@ -268,19 +268,24 @@ class TestRunEmbeddingMigration:
     def test_embed_batch_failure_stops_gracefully(self, tmp_path):
         facts = [("f1", "content 1")]
         cfg = _make_config(tmp_path)
+        _write_stored_signature(tmp_path, "old-model::768")
         db = _make_mock_db(facts=facts)
         emb = _make_mock_embedder()
         emb.embed_batch.side_effect = RuntimeError("GPU exploded")
         result = run_embedding_migration(cfg, db, emb)
         assert result == 0
+        assert _read_stored_signature(tmp_path) == "old-model::768"
 
-    def test_individual_update_failure_continues(self, tmp_path):
+    def test_individual_update_failure_aborts_without_activation(self, tmp_path):
         facts = [
             ("f1", "content 1"),
             ("f2", "content 2"),
         ]
         cfg = _make_config(tmp_path)
+        _write_stored_signature(tmp_path, "old-model::768")
         db = _make_mock_db(facts=facts)
+        db.transaction.return_value.__enter__.return_value = None
+        db.transaction.return_value.__exit__.return_value = False
 
         call_count = [0]
         original_return = db.execute.return_value
@@ -298,8 +303,21 @@ class TestRunEmbeddingMigration:
 
         emb = _make_mock_embedder()
         result = run_embedding_migration(cfg, db, emb)
-        # At least 1 should succeed (f2), f1 failed
-        assert result >= 1
+        assert result == 0
+        assert _read_stored_signature(tmp_path) == "old-model::768"
+
+    def test_vector_count_mismatch_aborts_without_activation(self, tmp_path):
+        facts = [("f1", "content 1"), ("f2", "content 2")]
+        cfg = _make_config(tmp_path)
+        _write_stored_signature(tmp_path, "old-model::768")
+        db = _make_mock_db(facts=facts)
+        emb = MagicMock()
+        emb.embed_batch.return_value = [[0.1] * 768]
+
+        result = run_embedding_migration(cfg, db, emb)
+
+        assert result == 0
+        assert _read_stored_signature(tmp_path) == "old-model::768"
 
 
 # ---------------------------------------------------------------------------

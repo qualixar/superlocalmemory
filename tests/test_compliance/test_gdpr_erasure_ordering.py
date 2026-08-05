@@ -338,6 +338,40 @@ class TestCachePurgeOrderingBeforeMainDelete:
 
         # Return value must account for both the main-DB and the cache purge.
         assert result.get("profiles") == 1
+
+
+class TestLearningDatabaseUsesActiveDataRoot:
+    """Erasure must target sidecar databases next to the active memory DB."""
+
+    def test_custom_root_learning_data_erased_without_touching_default_root(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from superlocalmemory.learning.database import LearningDatabase
+        import superlocalmemory.core.config as config_module
+
+        active_root = tmp_path / "active-root"
+        default_root = tmp_path / "default-root"
+        active_root.mkdir()
+        default_root.mkdir()
+
+        mgr = DatabaseManager(active_root / "memory.db")
+        mgr.initialize(real_schema)
+        mgr.execute(
+            "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('alice', 'Alice')"
+        )
+
+        active_learning = LearningDatabase(active_root / "learning.db")
+        default_learning = LearningDatabase(default_root / "learning.db")
+        active_learning.store_signal("alice", "q", "f1", "recall_hit")
+        default_learning.store_signal("alice", "q", "f2", "recall_hit")
+
+        with patch.object(config_module, "DEFAULT_BASE_DIR", default_root):
+            result = GDPRCompliance(mgr).forget_profile("alice")
+
+        assert result["erasure_complete"] == 1
+        assert active_learning.get_signal_count("alice") == 0
+        assert default_learning.get_signal_count("alice") == 1
         assert result.get("context_cache", 0) >= 1, (
             "Return value must report the count of cache rows deleted"
         )
