@@ -113,6 +113,16 @@ def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
     required_build_sources = {
         source for sources in data_files.values() for source in sources
     }
+    bundled_codex_skills = {
+        Path(source).parent.name
+        for source in required_build_sources
+        if source.startswith("plugin-src/skills/")
+    }
+    assert bundled_codex_skills == {
+        "slm-cache", "slm-compress", "slm-governance", "slm-graph",
+        "slm-loop", "slm-mesh", "slm-profile", "slm-recall",
+        "slm-remember", "slm-scope", "slm-session", "slm-status",
+    }
     assert required_build_sources <= paths
     assert "scripts/install.sh" not in paths
     assert "scripts/install.ps1" not in paths
