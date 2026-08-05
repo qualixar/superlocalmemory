@@ -55,3 +55,12 @@ def test_operations_resolution_uses_shared_destructive_confirmation() -> None:
     ).read_text(encoding="utf-8")
     assert "window.confirm(" not in source
     assert "confirmDestructive" in source
+
+
+def test_shared_destructive_modal_requires_typed_target() -> None:
+    source = (
+        ROOT / "src/superlocalmemory/ui/js/modal.js"
+    ).read_text(encoding="utf-8")
+    assert "slm-cd-challenge" in source
+    assert "confirmationText" in source
+    assert "confirmBtn.disabled" in source
