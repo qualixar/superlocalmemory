@@ -40,7 +40,7 @@ _PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 8
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
 })
 
-_PROFILE_FULL: frozenset[str] = frozenset({  # 35 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
+_PROFILE_FULL: frozenset[str] = frozenset({  # 34 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
     "remember", "recall", "search", "fetch", "list_recent", "delete_memory", "update_memory",
     "get_status", "session_init", "observe", "close_session", "report_feedback", "forget",
     "run_maintenance", "consolidate_cognitive", "get_soft_prompts", "set_mode", "report_outcome",
@@ -49,11 +49,14 @@ _PROFILE_FULL: frozenset[str] = frozenset({  # 35 base — EXPLICIT literal, NOT
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # v3.8.0: bounded-loop tools (CLI + /slm-loop command + MCP).
     "slm_loop_run", "slm_loop_history", "slm_loop_show",
-    # v4: proactive-context tool (was defined but never registered).
-    "prestage_context",
-}) | _PROFILE_FULL_MESH  # 43
+    # v4: prestage_context IS registered (see mcp/server.py) but is deliberately
+    # NOT in full/power. The profile names are a user-facing config contract
+    # (SLM_MCP_PROFILE=full42) and the published tool-count table depends on
+    # them; adding a tool here would make "full42" serve 43 tools. New tools
+    # reach users through the `whole` profile until a profile rename is shipped.
+}) | _PROFILE_FULL_MESH  # 42
 
-_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 55
+_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 54
     "get_version", "get_mode", "health", "consistency_check", "recall_trace",
     "get_lifecycle_status", "set_retention_policy", "compact_memories",
     "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",

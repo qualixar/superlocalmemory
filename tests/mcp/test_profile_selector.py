@@ -110,8 +110,9 @@ _EXPECTED_FULL_BASE = frozenset({
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # 3.8.0: bounded-loop tools (CLI + command + MCP).
     "slm_loop_run", "slm_loop_history", "slm_loop_show",
-    # v4: proactive-context tool (registered via tools_context).
-    "prestage_context",
+    # v4: prestage_context is registered but intentionally NOT in full/power —
+    # the profile names encode the counts (full42/power54) and the published
+    # tool-count table depends on them. It reaches users via `whole`.
 })
 
 _EXPECTED_FULL = _EXPECTED_FULL_BASE | _EXPECTED_FULL_MESH
@@ -123,7 +124,7 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 43, f"full must be 43 names, got {len(full)}"
+    assert len(full) == 42, f"full must be 42 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
@@ -148,7 +149,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 55, f"power must be 55 names, got {len(power)}"
+    assert len(power) == 54, f"power must be 54 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 

@@ -119,7 +119,10 @@ def _register_every_tool(target) -> None:
 @pytest.mark.parametrize(
     ("exposure", "profile", "expected_count"),
     (
-        ("essential", "", 43),
+        # essential stays 42 to match the full42 profile name (user-facing
+        # config contract + published tool-count table). prestage_context is
+        # registered but reaches users through `whole`, which is why whole is 87.
+        ("essential", "", 42),
         ("named-core", "core", 14),
         ("whole", "whole", 87),
     ),

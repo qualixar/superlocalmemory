@@ -206,3 +206,9 @@ ide/integrations/*/tests/**
 docs/screenshots/
 
 docs/SLM-INTELLIGENCE-AUDIT-*.md
+
+# Code-intelligence graph output (contains full source structure — never publish)
+graphify-out/
+.gitnexus/
+.graphify_analysis.json
+.graphify_labels.json

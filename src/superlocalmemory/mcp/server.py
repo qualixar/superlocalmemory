@@ -99,8 +99,11 @@ _ESSENTIAL_TOOLS: set[str] = {
     "report_feedback",
     # Memory management (2)
     "forget", "run_maintenance",
-    # Proactive context (1) — documented utility; registered via tools_context
-    "prestage_context",
+    # NOTE: prestage_context IS registered (see register_prestage_tool below)
+    # but is deliberately absent from the default surface. _ESSENTIAL_TOOLS must
+    # stay at 42 to match the full42 profile: the profile names are a
+    # user-facing config contract and the published tool-count table depends on
+    # them. New tools reach users via the `whole` profile until a rename ships.
     # Infinite memory + learning (4)
     "consolidate_cognitive", "get_soft_prompts",
     "set_mode", "report_outcome",
