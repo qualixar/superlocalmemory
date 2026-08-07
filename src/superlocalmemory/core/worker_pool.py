@@ -234,12 +234,38 @@ class WorkerPool:
     def _readline_with_timeout(stream, timeout_seconds: float) -> str:
         """Read one line from *stream* with a timeout.
 
-        Uses a daemon thread so the call never blocks the main thread
-        indefinitely. This is the cross-platform replacement for
-        ``selectors`` which fails on Windows pipes.
+        Prefer a deadline-driven selector poll of the stream's file descriptor
+        (POSIX pipes). That path never spawns a helper thread, so a hung
+        worker cannot leak reader threads or pin the pipe FD across timeouts.
+        A thread fallback remains only for streams without a usable fileno
+        (unit-test mocks) and for Windows, where selectors cannot wait on
+        pipes.
 
         Returns the line read, or ``""`` on timeout / error.
         """
+        import selectors
+
+        timeout_seconds = max(0.0, float(timeout_seconds))
+        fd: int | None
+        try:
+            raw_fd = stream.fileno()
+            fd = raw_fd if isinstance(raw_fd, int) else None
+        except (AttributeError, OSError, ValueError, TypeError):
+            fd = None
+
+        # Windows select()/selectors only accept sockets, not subprocess pipes.
+        if fd is not None and sys.platform != "win32":
+            try:
+                with selectors.DefaultSelector() as sel:
+                    sel.register(fd, selectors.EVENT_READ)
+                    events = sel.select(timeout=timeout_seconds)
+                if not events:
+                    return ""
+                line = stream.readline()
+                return line if line else ""
+            except (OSError, ValueError):
+                return ""
+
         result_container: list[str] = []
         error_container: list[Exception] = []
 

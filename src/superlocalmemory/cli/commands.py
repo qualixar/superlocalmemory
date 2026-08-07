@@ -2046,13 +2046,35 @@ def _gather_optimize_surface_b() -> dict:
 def _readline_with_timeout(
     stream, timeout_sec: float,
 ) -> tuple[str | None, Exception | None]:
-    """Read one line from a pipe-like stream without POSIX-only select().
+    """Read one line from a pipe-like stream with a deadline.
 
-    Windows select() only accepts sockets, not subprocess pipes. A bounded
-    helper thread keeps the embedding-worker probe cross-platform while
-    preserving the existing timeout behavior.
+    Prefer a selector poll of the stream's file descriptor on POSIX so a
+    timeout never abandons a thread blocked in readline() (thread + FD leak).
+    Windows select() only accepts sockets, not subprocess pipes — fall back
+    to a bounded helper thread there and for streams without a usable fileno.
     """
+    import selectors
     import threading
+
+    timeout_sec = max(0.0, float(timeout_sec))
+    fd: int | None
+    try:
+        raw_fd = stream.fileno()
+        fd = raw_fd if isinstance(raw_fd, int) else None
+    except (AttributeError, OSError, ValueError, TypeError):
+        fd = None
+
+    if fd is not None and sys.platform != "win32":
+        try:
+            with selectors.DefaultSelector() as sel:
+                sel.register(fd, selectors.EVENT_READ)
+                events = sel.select(timeout=timeout_sec)
+            if not events:
+                return None, None
+            line = stream.readline()
+            return (line if isinstance(line, str) else None), None
+        except (OSError, ValueError) as exc:
+            return None, exc
 
     result: dict[str, object] = {}
 

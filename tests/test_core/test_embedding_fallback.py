@@ -240,16 +240,76 @@ class TestEmbeddingServiceTimeout:
 
     def test_readline_with_timeout_returns_empty_on_timeout(self) -> None:
         """Slow case: no data arrives → returns empty string."""
-        # Use a mock stream whose readline blocks for longer than timeout
-        slow_stream = MagicMock()
+        import os
 
-        def _slow_readline():
-            time.sleep(5.0)  # Simulate a hang
-            return '{"ok": true}\n'
+        # Real pipe with no writer data — production hang shape, no mock sleep
+        # threads left behind to pollute later tests.
+        r_fd, w_fd = os.pipe()
+        stream = os.fdopen(r_fd, "r")
+        try:
+            result = EmbeddingService._readline_with_timeout(
+                stream, timeout_seconds=0.1,
+            )
+            assert result == ""
+        finally:
+            try:
+                os.close(w_fd)
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
 
-        slow_stream.readline = _slow_readline
-        result = EmbeddingService._readline_with_timeout(slow_stream, timeout_seconds=0.3)
-        assert result == ""
+    def test_readline_with_timeout_does_not_leak_reader_threads(self) -> None:
+        """Timeout must not abandon blocked reader threads (FD + thread leak).
+
+        Production shape: a real pipe whose write end never produces a line.
+        N induced timeouts must leave ZERO new surviving threads whose name
+        contains ``_read`` — the pre-fix thread-per-read path abandoned one
+        daemon thread per timeout while it stayed blocked in readline().
+        """
+        import os
+
+        n = 5
+        held: list[tuple[object, int]] = []
+        before_ids = {t.ident for t in threading.enumerate()}
+        try:
+            for _ in range(n):
+                r_fd, w_fd = os.pipe()
+                # Keep write end open so a blocking readline would hang forever
+                # without a proper timeout implementation.
+                stream = os.fdopen(r_fd, "r")
+                held.append((stream, w_fd))
+                result = EmbeddingService._readline_with_timeout(stream, 0.05)
+                assert result == ""
+
+            # Brief settle — any correctly-joined/never-spawned reader is gone.
+            time.sleep(0.05)
+            survivors = [
+                t for t in threading.enumerate()
+                if t.is_alive()
+                and t.ident not in before_ids
+                and "_read" in (t.name or "")
+            ]
+            assert survivors == [], (
+                f"leaked {len(survivors)} reader thread(s) after {n} timeouts: "
+                f"{[t.name for t in survivors]}"
+            )
+        finally:
+            # Unblock any abandoned readers via write-end EOF first.
+            # Concurrent TextIOWrapper.close() on the read side while another
+            # thread is inside readline() can deadlock on macOS.
+            for _stream, w_fd in held:
+                try:
+                    os.close(w_fd)
+                except Exception:
+                    pass
+            for stream, _w_fd in held:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
     def test_readline_with_timeout_propagates_error(self) -> None:
         """Error case: stream raises → exception propagated."""
