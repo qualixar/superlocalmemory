@@ -1078,6 +1078,13 @@ class SLMConfig:
     daemon_legacy_port: int = 8767     # Backward-compat redirect port
     daemon_enable_legacy_port: bool = True  # Set False to disable 8767 redirect
 
+    # v4: auto-close orphaned application sessions during maintenance.
+    # A session is stale when it has had no new atomic_facts for this many
+    # hours. close_session is only invoked by the MCP tool otherwise, so
+    # without this pass temporal summaries never form for abandoned sessions.
+    session_idle_close_hours: float = 24.0
+    session_idle_close_max_per_pass: int = 50
+
     # v3.4.3: Entity compilation
     entity_compilation_enabled: bool = True
     entity_compilation_retrieval_boost: float = 1.0  # 1.0 = disabled. >1.0 = boost score.
@@ -1284,6 +1291,12 @@ class SLMConfig:
         # V3.4.3 config fields (additive — missing keys get dataclass defaults)
         config.daemon_idle_timeout = data.get("daemon_idle_timeout", 0)
         config.daemon_port = data.get("daemon_port", 8765)
+        config.session_idle_close_hours = float(
+            data.get("session_idle_close_hours", 24.0) or 24.0
+        )
+        config.session_idle_close_max_per_pass = int(
+            data.get("session_idle_close_max_per_pass", 50) or 50
+        )
         config.daemon_legacy_port = data.get("daemon_legacy_port", 8767)
         config.daemon_enable_legacy_port = data.get("daemon_enable_legacy_port", True)
         config.entity_compilation_enabled = data.get("entity_compilation_enabled", True)
@@ -1511,6 +1524,8 @@ class SLMConfig:
         # explicitly so a load-then-save is lossless for these fields.
         data["daemon_idle_timeout"] = self.daemon_idle_timeout
         data["daemon_port"] = self.daemon_port
+        data["session_idle_close_hours"] = self.session_idle_close_hours
+        data["session_idle_close_max_per_pass"] = self.session_idle_close_max_per_pass
         data["daemon_legacy_port"] = self.daemon_legacy_port
         data["daemon_enable_legacy_port"] = self.daemon_enable_legacy_port
         data["entity_compilation_enabled"] = self.entity_compilation_enabled

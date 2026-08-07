@@ -16,6 +16,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,20 @@ if TYPE_CHECKING:
     from superlocalmemory.storage.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+def _module_spec_present(module: str) -> bool:
+    """True if ``module`` can be imported, WITHOUT importing it.
+
+    ``find_spec`` only resolves the loader; it never executes the module, so
+    native packages (lancedb, pycozo) cannot spawn background runtimes during
+    availability probes. Mirrors component_registry._module_present.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except Exception:
+        # A broken/partial install can raise inside find_spec — treat as absent.
+        return False
 
 # ---------------------------------------------------------------------------
 # Global singleton (set by daemon, read by store_pipeline)
@@ -407,11 +422,10 @@ class BackendOrchestrator:
         if gb == "sqlite":
             return False
         if gb in ("auto", "cozo"):
-            try:
-                import pycozo  # noqa: F401
-                return True
-            except ImportError:
-                return False
+            # find_spec only resolves the loader — never executes the module.
+            # Native pycozo import can spawn background runtimes; do not probe
+            # availability by importing (Python 3.14 GC race class).
+            return _module_spec_present("pycozo")
         return False
 
     def _detect_lancedb(self) -> bool:
@@ -419,11 +433,10 @@ class BackendOrchestrator:
         if vb == "sqlite-vec":
             return False
         if vb in ("auto", "lancedb"):
-            try:
-                import lancedb  # noqa: F401
-                return True
-            except ImportError:
-                return False
+            # find_spec never executes the module. `import lancedb` starts
+            # LanceDBBackgroundEventLoop and segfaults under Python 3.14 GC
+            # when the full suite races cleanup — never import for a yes/no.
+            return _module_spec_present("lancedb")
         return False
 
     # ------------------------------------------------------------------

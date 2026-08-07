@@ -124,4 +124,4 @@ def test_register_tool_smoke():
     from superlocalmemory.mcp.tools_context import register_prestage_tool
     fs = _FakeServer()
     register_prestage_tool(fs, _fake_recall)
-    assert fs.registered == ["prestage_context_tool"]
+    assert fs.registered == ["prestage_context"]

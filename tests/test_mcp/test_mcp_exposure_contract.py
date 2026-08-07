@@ -112,14 +112,16 @@ def _register_every_tool(target) -> None:
     register_optimize_tools(target)
     register_loop_tools(target, get_engine)
     register_ops_tools(target, get_engine)
+    from superlocalmemory.mcp.tools_context import register_prestage_tool
+    register_prestage_tool(target, lambda *a, **k: [])
 
 
 @pytest.mark.parametrize(
     ("exposure", "profile", "expected_count"),
     (
-        ("essential", "", 42),
+        ("essential", "", 43),
         ("named-core", "core", 14),
-        ("whole", "whole", 86),
+        ("whole", "whole", 87),
     ),
 )
 def test_registration_exposure_is_exact_and_duplicate_free(

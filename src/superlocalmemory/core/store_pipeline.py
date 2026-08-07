@@ -1102,6 +1102,25 @@ def run_store_fact_direct(
 # run_close_session  (was MemoryEngine.close_session)
 # ---------------------------------------------------------------------------
 
+def _session_already_summarised(
+    db: DatabaseManager,
+    profile_id: str,
+    session_id: str,
+) -> bool:
+    """True if close_session already wrote temporal summaries for this session."""
+    if not session_id:
+        return False
+    try:
+        rows = db.execute(
+            "SELECT 1 FROM temporal_events "
+            "WHERE profile_id = ? AND description LIKE ? LIMIT 1",
+            (profile_id, f"Session {session_id}:%"),
+        )
+        return bool(rows)
+    except Exception:
+        return False
+
+
 def run_close_session(
     session_id: str,
     profile_id: str,
@@ -1114,9 +1133,19 @@ def run_close_session(
     with session scope. Enables temporal queries like "What happened
     in session 3?"
 
+    Idempotent: if temporal summaries for this session already exist,
+    returns 0 without writing duplicates.
+
     Returns number of session summary events created.
     """
     from superlocalmemory.storage.models import TemporalEvent
+
+    if not session_id:
+        return 0
+
+    if _session_already_summarised(db, profile_id, session_id):
+        logger.debug("Session %s already summarised — skip close", session_id)
+        return 0
 
     facts = db.get_all_facts(profile_id)
     session_facts = [f for f in facts if f.session_id == session_id]

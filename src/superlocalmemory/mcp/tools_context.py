@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Callable
 
+from mcp.types import ToolAnnotations
+
 from superlocalmemory.core.security_primitives import redact_secrets
 
 logger = logging.getLogger(__name__)
@@ -201,11 +203,17 @@ def prestage_context(
 def register_prestage_tool(server, recall_fn: PrestageRecallFn,
                            *, session_id_fn: Callable[[], str] | None = None
                            ) -> None:
-    """Register the ``prestage_context`` tool on an MCP server."""
-    limiter = _RateLimiter()
+    """Register the ``prestage_context`` tool on an MCP server.
 
-    @server.tool()
-    async def prestage_context_tool(  # pragma: no cover — MCP wiring
+    The tool function is named ``prestage_context`` so profile filters
+    (``func.__name__``) and docs agree.
+    """
+    limiter = _RateLimiter()
+    # Module-level pure function (avoid UnboundLocalError from nested def name).
+    _pure_prestage = globals()["prestage_context"]
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def prestage_context(  # noqa: F811 — MCP tool surface name
         query: str,
         limit: int = 5,
         profile_id: str = "default",
@@ -216,7 +224,7 @@ def register_prestage_tool(server, recall_fn: PrestageRecallFn,
         Optional ``as_of`` (ISO 8601 UTC) for point-in-time context retrieval.
         """
         session_id = session_id_fn() if session_id_fn else "default"
-        return prestage_context(
+        return _pure_prestage(
             query, limit=limit, profile_id=profile_id,
             session_id=session_id, recall_fn=recall_fn,
             limiter=limiter, as_of=as_of,

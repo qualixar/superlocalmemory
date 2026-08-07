@@ -110,6 +110,8 @@ _EXPECTED_FULL_BASE = frozenset({
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # 3.8.0: bounded-loop tools (CLI + command + MCP).
     "slm_loop_run", "slm_loop_history", "slm_loop_show",
+    # v4: proactive-context tool (registered via tools_context).
+    "prestage_context",
 })
 
 _EXPECTED_FULL = _EXPECTED_FULL_BASE | _EXPECTED_FULL_MESH
@@ -121,14 +123,14 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 42, f"full must be 42 names, got {len(full)}"
+    assert len(full) == 43, f"full must be 43 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
 
 
 # ---------------------------------------------------------------------------
-# RED-5: power == 54 and ⊇ full
+# RED-5: power == 55 and ⊇ full
 # ---------------------------------------------------------------------------
 
 _POWER_EXTRA = frozenset({
@@ -146,7 +148,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 54, f"power must be 54 names, got {len(power)}"
+    assert len(power) == 55, f"power must be 55 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 
@@ -211,6 +213,7 @@ def test_every_profile_name_is_a_real_registered_tool():
     from superlocalmemory.mcp.tools_evolution import register_evolution_tools
     from superlocalmemory.mcp.tools_optimize import register_optimize_tools
     from superlocalmemory.mcp.tools_loops import register_loop_tools
+    from superlocalmemory.mcp.tools_context import register_prestage_tool
 
     collector = _NameCollector()
     get_engine_stub = lambda: None  # noqa: E731
@@ -226,6 +229,7 @@ def test_every_profile_name_is_a_real_registered_tool():
     register_evolution_tools(collector, get_engine_stub)
     register_optimize_tools(collector)
     register_loop_tools(collector, get_engine_stub)
+    register_prestage_tool(collector, lambda *a, **k: [])
 
     mod = _get_module()
     all_profile_names: set[str] = set()

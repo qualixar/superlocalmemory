@@ -99,6 +99,8 @@ _ESSENTIAL_TOOLS: set[str] = {
     "report_feedback",
     # Memory management (2)
     "forget", "run_maintenance",
+    # Proactive context (1) — documented utility; registered via tools_context
+    "prestage_context",
     # Infinite memory + learning (4)
     "consolidate_cognitive", "get_soft_prompts",
     "set_mode", "report_outcome",
@@ -267,6 +269,44 @@ from superlocalmemory.mcp.tools_loops import register_loop_tools
 register_loop_tools(_target, get_engine)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
 from superlocalmemory.mcp.tools_ops import register_ops_tools
 register_ops_tools(_target, get_engine)  # Wave-3: operational recovery & admin remediation
+from superlocalmemory.mcp.tools_context import register_prestage_tool
+
+
+def _prestage_recall(query: str, limit: int, profile_id: str, as_of: str | None = None):
+    """Bridge engine.recall → prestage_context recall_fn shape."""
+    engine = get_engine()
+    if hasattr(engine, "profile_id") and profile_id:
+        try:
+            engine.profile_id = profile_id
+        except Exception:
+            pass
+    try:
+        if as_of is not None:
+            results = engine.recall(query, limit=limit, as_of=as_of)
+        else:
+            results = engine.recall(query, limit=limit)
+    except TypeError:
+        results = engine.recall(query, limit=limit)
+    out: list[dict] = []
+    for r in results or []:
+        if isinstance(r, dict):
+            out.append({
+                "id": str(r.get("fact_id") or r.get("id") or ""),
+                "text": str(r.get("content") or r.get("text") or ""),
+                "score": float(r.get("score") or r.get("relevance_score") or 0.0),
+                "source": str(r.get("source") or "recall"),
+            })
+        else:
+            out.append({
+                "id": str(getattr(r, "fact_id", "") or ""),
+                "text": str(getattr(r, "content", "") or ""),
+                "score": float(getattr(r, "score", 0.0) or 0.0),
+                "source": "recall",
+            })
+    return out
+
+
+register_prestage_tool(_target, _prestage_recall)
 
 
 # Keep stdio MCP processes thin until a tool truly needs a local LIGHT engine.

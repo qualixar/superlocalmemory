@@ -14,6 +14,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import sqlite3
 import struct
@@ -24,13 +25,18 @@ from superlocalmemory.storage.sqlite_vectors import iter_canonical_vectors
 
 logger = logging.getLogger(__name__)
 
-# Optional import
-try:
-    import lancedb
-    _LANCEDB_AVAILABLE = True
-except ImportError:
-    lancedb = None  # type: ignore[assignment]
-    _LANCEDB_AVAILABLE = False
+# Availability via find_spec only — never import lancedb at module load.
+# `import lancedb` starts LanceDBBackgroundEventLoop; under Python 3.14 that
+# background native runtime races GC and can segfault the full pytest suite.
+# Real import is deferred to LanceDBVectorBackend construction.
+def _lancedb_spec_present() -> bool:
+    try:
+        return importlib.util.find_spec("lancedb") is not None
+    except Exception:
+        return False
+
+
+_LANCEDB_AVAILABLE: bool = _lancedb_spec_present()
 
 
 class LanceDBError(Exception):
@@ -60,10 +66,14 @@ class LanceDBVectorBackend:
     DEFAULT_DIMENSION: int = 768
 
     def __init__(self, db_path: str, dimension: int | None = None) -> None:
-        if not _LANCEDB_AVAILABLE:
+        # Re-check at construct time so a late install still works.
+        if not _lancedb_spec_present():
             raise LanceDBNotAvailable(
                 "LanceDB not installed. Run: pip install superlocalmemory[lancedb]"
             )
+        # Lazy import: only construct-time starts the native runtime.
+        import lancedb  # noqa: PLC0415
+
         path = Path(db_path)
         path.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
@@ -73,7 +83,7 @@ class LanceDBVectorBackend:
         # wins over the requested value to keep already-materialized stores
         # readable after a config change.
         self._dimension = int(dimension) if dimension else self.DEFAULT_DIMENSION
-        self._db = lancedb.connect(self._db_path)  # type: ignore[union-attr]
+        self._db = lancedb.connect(self._db_path)
         self._table = self._open_or_create_table()
 
     @property

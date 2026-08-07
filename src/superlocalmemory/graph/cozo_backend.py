@@ -17,6 +17,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import sqlite3
@@ -28,13 +29,17 @@ from superlocalmemory.storage.logical_edges import iter_logical_edges
 
 logger = logging.getLogger(__name__)
 
-# Optional import — CozoDB is an optional dependency
-try:
-    from pycozo.client import Client as _CozoClient
-    _COZO_AVAILABLE = True
-except ImportError:
-    _CozoClient = None  # type: ignore[assignment]
-    _COZO_AVAILABLE = False
+# Availability via find_spec only — never import pycozo at module load.
+# Native bindings belong to the same risk class as lancedb (background
+# runtimes / GC races). Real import is deferred to CozoDBGraphBackend.__init__.
+def _pycozo_spec_present() -> bool:
+    try:
+        return importlib.util.find_spec("pycozo") is not None
+    except Exception:
+        return False
+
+
+_COZO_AVAILABLE: bool = _pycozo_spec_present()
 
 
 class CozoDBError(Exception):
@@ -121,14 +126,17 @@ class CozoDBGraphBackend:
     """
 
     def __init__(self, db_path: str) -> None:
-        if not _COZO_AVAILABLE:
+        if not _pycozo_spec_present():
             raise CozoDBNotAvailable(
                 "CozoDB not installed. Run: pip install superlocalmemory[cozo]"
             )
+        # Lazy import: only construct-time loads the native binding.
+        from pycozo.client import Client as _CozoClient  # noqa: PLC0415
+
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(path)
-        client = _CozoClient("rocksdb", self._db_path, dataframe=False)  # type: ignore[misc]
+        client = _CozoClient("rocksdb", self._db_path, dataframe=False)
         self._db = _CozoClientAdapter(client)
         self._shadow_checks = 0
         self._shadow_mismatches = 0

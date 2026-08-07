@@ -111,6 +111,86 @@ def _seed_langevin_position(
     return (direction / norm * r_eq).tolist()
 
 
+def close_stale_sessions(
+    db: DatabaseManager,
+    profile_id: str = "default",
+    *,
+    idle_hours: float = 24.0,
+    max_per_pass: int = 50,
+) -> int:
+    """Close application sessions idle longer than ``idle_hours``.
+
+    Nothing auto-calls ``close_session`` except the MCP tool — un-closed
+    sessions never get temporal summaries. This maintenance pass finds
+    sessions whose newest fact is older than the idle window and closes
+    them via ``run_close_session``.
+
+    Properties:
+      - Idempotent: already-summarised sessions are skipped (no double write).
+      - Bounded: at most ``max_per_pass`` sessions closed per call.
+      - Only sessions with entity-linked facts (summarisable) are selected.
+
+    Returns:
+        Number of sessions successfully summarised in this pass.
+    """
+    if idle_hours <= 0 or max_per_pass <= 0:
+        return 0
+
+    from superlocalmemory.core.store_pipeline import (
+        _session_already_summarised,
+        run_close_session,
+    )
+
+    cutoff = (datetime.now(UTC) - timedelta(hours=float(idle_hours))).isoformat()
+    # Over-fetch slightly so already-closed rows in the window do not starve
+    # the bounded close budget.
+    fetch_limit = max(int(max_per_pass) * 3, int(max_per_pass))
+    try:
+        rows = db.execute(
+            """
+            SELECT session_id, MAX(created_at) AS last_at
+              FROM atomic_facts
+             WHERE profile_id = ?
+               AND session_id IS NOT NULL
+               AND session_id != ''
+               AND canonical_entities_json IS NOT NULL
+               AND canonical_entities_json != '[]'
+             GROUP BY session_id
+            HAVING MAX(created_at) < ?
+             ORDER BY last_at ASC
+             LIMIT ?
+            """,
+            (profile_id, cutoff, fetch_limit),
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("stale session query failed: %s", exc)
+        return 0
+
+    closed = 0
+    for row in rows:
+        if closed >= int(max_per_pass):
+            break
+        d = dict(row)
+        sid = str(d.get("session_id") or "")
+        if not sid:
+            continue
+        if _session_already_summarised(db, profile_id, sid):
+            continue
+        try:
+            n = run_close_session(sid, profile_id, db=db)
+        except Exception as exc:
+            logger.warning("stale session close failed for %s: %s", sid, exc)
+            continue
+        if n > 0:
+            closed += 1
+    if closed:
+        logger.info(
+            "Closed %d stale session(s) (idle > %.1fh, profile=%s)",
+            closed, idle_hours, profile_id,
+        )
+    return closed
+
+
 def run_maintenance(
     db: DatabaseManager,
     config: SLMConfig,
@@ -143,7 +223,22 @@ def run_maintenance(
         "orphan_metadata_gc": 0,             # v3.6.4 (P1-3)
         "expansion_backfilled": 0,           # T3b
         "embeddings_backfilled": 0,          # v3.8.x NULL-embedding self-heal
+        "stale_sessions_closed": 0,          # v4: orphaned application sessions
     }
+
+    # Close idle application sessions so temporal summaries exist even when
+    # clients never call close_session. Bounded + idempotent; fail-soft.
+    try:
+        idle_hours = float(getattr(config, "session_idle_close_hours", 24.0) or 24.0)
+        max_close = int(getattr(config, "session_idle_close_max_per_pass", 50) or 50)
+        counts["stale_sessions_closed"] = close_stale_sessions(
+            db,
+            profile_id,
+            idle_hours=idle_hours,
+            max_per_pass=max_close,
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("stale session close skipped: %s", exc)
 
     # P1-3 (embeddings-vector-02): sweep orphaned embedding_metadata left by
     # any FK-off delete path, so the semantic channel never maps to dead facts.
