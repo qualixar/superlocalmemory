@@ -69,6 +69,17 @@ _READ_ONLY_TOOLS = frozenset({
 # G1: Every read-only tool has readOnlyHint=True in the server tool registry
 # ---------------------------------------------------------------------------
 
+def _read_only_hint(tool: object) -> object:
+    """Wire (readOnlyHint) or mcp 2.0 model (read_only_hint) attribute."""
+    ann = getattr(tool, "annotations", None)
+    if ann is None:
+        return None
+    val = getattr(ann, "readOnlyHint", None)
+    if val is not None:
+        return val
+    return getattr(ann, "read_only_hint", None)
+
+
 def test_read_only_tools_annotated(monkeypatch, tmp_path):
     """G1 — 32 tools carry readOnlyHint=True in the MCP server registry."""
     server_mod = _load_server_module(monkeypatch, tmp_path)
@@ -81,7 +92,7 @@ def test_read_only_tools_annotated(monkeypatch, tmp_path):
         if tool is None:
             missing_annotation.append(f"{name}: NOT REGISTERED")
             continue
-        hint = getattr(getattr(tool, "annotations", None), "readOnlyHint", None)
+        hint = _read_only_hint(tool)
         if hint is not True:
             missing_annotation.append(f"{name}: readOnlyHint={hint!r}")
 

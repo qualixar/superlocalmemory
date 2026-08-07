@@ -167,3 +167,21 @@ class TestF1PersonalWarnsOnUngatedMutator:
         server = _make_server(tools)
         # Must not raise — read-only tools don't need @admits
         coverage_self_check(DEPLOYMENT_ENTERPRISE, server=server)
+
+    def test_read_only_tool_snake_case_hint_not_flagged(self, tmp_path, monkeypatch):
+        """mcp 2.0 ToolAnnotations expose read_only_hint (snake_case) only.
+
+        CamelCase-only getattr misclassifies every annotated read tool as a
+        mutator; enterprise coverage_self_check must accept snake_case too.
+        """
+        monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+        _ensure_required_gated(monkeypatch)
+        from superlocalmemory.core.admission import coverage_self_check
+        from superlocalmemory.core.config import DEPLOYMENT_ENTERPRISE
+
+        tool = SimpleNamespace(
+            name="pure_query_v2",
+            annotations=SimpleNamespace(read_only_hint=True),
+        )
+        server = _make_server({"pure_query_v2": tool})
+        coverage_self_check(DEPLOYMENT_ENTERPRISE, server=server)

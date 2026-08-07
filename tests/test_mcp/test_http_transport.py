@@ -60,6 +60,39 @@ def _post_mcp(client, path: str, payload: dict, session_id: str | None = None):
     return client.post(path, json=payload, headers=headers)
 
 
+def _terminate_mcp_session(client, path: str, session_id: str) -> None:
+    """Orderly MCP session shutdown required by the stateful HTTP protocol."""
+    response = client.delete(
+        path,
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "mcp-session-id": session_id,
+        },
+    )
+    assert response.status_code == 200, (
+        f"session termination failed: {response.status_code} {response.text[:300]}"
+    )
+
+
+def _stream_is_closed(stream) -> bool:
+    """True if an AnyIO (or mcp Context* wrapper) memory stream is closed.
+
+    mcp 2.0 wraps MemoryObject streams in ContextSendStream/ContextReceiveStream
+    that expose ``_inner`` rather than ``_closed`` directly.
+    """
+    closed = getattr(stream, "_closed", None)
+    if closed is not None:
+        return bool(closed)
+    inner = getattr(stream, "_inner", None)
+    if inner is not None:
+        closed = getattr(inner, "_closed", None)
+        if closed is not None:
+            return bool(closed)
+    raise AssertionError(
+        f"cannot determine closed state for stream type {type(stream)!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # (a) /mcp route is mounted on application
 # ---------------------------------------------------------------------------
@@ -257,6 +290,67 @@ def test_mcp_requests_fail_before_lifespan_start():
 
     with pytest.raises(RuntimeError, match="[Tt]ask group"):
         asyncio.run(_probe())
+
+
+def test_mcp_delete_closes_stateful_transport_streams(monkeypatch):
+    """DELETE /mcp with Mcp-Session-Id terminates the stateful transport.
+
+    Fully-stateless is the production default, but ``SLM_MCP_STATEFUL=1``
+    remains a supported opt-out. Under that path DELETE is the MCP-spec
+    session-termination mechanism and must close every transport stream.
+    """
+    monkeypatch.setenv("SLM_MCP_STATEFUL", "1")
+
+    from starlette.testclient import TestClient
+
+    from superlocalmemory.mcp.http_transport import SLMFastMCP
+
+    s = SLMFastMCP("session-close-test")
+    # Explicit stateful kwargs (mirrors _configure_mcp_transport_settings
+    # when SLM_MCP_STATEFUL=1): sessions exist, DELETE is meaningful.
+    mcp_app = s.streamable_http_app(
+        streamable_http_path="/",
+        stateless_http=False,
+        json_response=False,
+        event_store=None,
+        host="127.0.0.1",
+    )
+
+    with TestClient(mcp_app, base_url="http://localhost:8765") as client:
+        init = client.post(
+            "/",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "probe", "version": "1"},
+                },
+            },
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        session_id = init.headers.get("mcp-session-id")
+        assert session_id, f"stateful initialize must mint Mcp-Session-Id: {init.headers}"
+        assert session_id in s.session_manager._server_instances
+        transport = s.session_manager._server_instances[session_id]
+        assert not transport.is_terminated
+
+        _terminate_mcp_session(client, "/", session_id)
+
+        assert transport.is_terminated
+        for stream_name in (
+            "_read_stream_writer",
+            "_read_stream",
+            "_write_stream_reader",
+            "_write_stream",
+        ):
+            stream = getattr(transport, stream_name)
+            assert stream is not None
+            assert _stream_is_closed(stream), (
+                f"{stream_name} remained open after DELETE"
+            )
 
 
 def test_sse_response_closes_owned_body_iterator():

@@ -45,6 +45,24 @@ _COMPANY_MODES: frozenset[str] = frozenset({
     "company", "remote", "enterprise", "multi-user", "multi_user",
 })
 
+
+def _tool_read_only_hint(tool: object) -> object:
+    """Return the tool's read-only annotation under mcp 1.x or 2.x naming.
+
+    MCP wire protocol uses camelCase ``readOnlyHint``. mcp==2.0.0's
+    ``ToolAnnotations`` pydantic model stores the field as snake_case
+    ``read_only_hint`` (alias ``readOnlyHint``) — attribute access by alias
+    is not available, so a camelCase-only getattr always returns None and
+    every annotated read tool is misclassified as a mutator.
+    """
+    ann = getattr(tool, "annotations", None)
+    if ann is None:
+        return None
+    val = getattr(ann, "readOnlyHint", None)
+    if val is not None:
+        return val
+    return getattr(ann, "read_only_hint", None)
+
 # ---------------------------------------------------------------------------
 # Tool inventory tracking (populated at decoration time by @admits)
 # ---------------------------------------------------------------------------
@@ -451,7 +469,8 @@ def coverage_self_check(
         messages.append(f"ungated MCP tools (missing @admits): {ungated}")
 
     # Check 4 (F1): dynamic discovery — enumerate server tool registry and flag
-    # any mutating tool (readOnlyHint != True) not in _GATED_MCP_TOOLS.
+    # any mutating tool (readOnlyHint / read_only_hint != True) not in
+    # _GATED_MCP_TOOLS. See _tool_read_only_hint for mcp 2.0 naming.
     if server is not None:
         try:
             tool_dict = server._tool_manager._tools  # type: ignore[attr-defined]
@@ -459,7 +478,7 @@ def coverage_self_check(
                 name
                 for name, tool in tool_dict.items()
                 if name not in _GATED_MCP_TOOLS
-                and getattr(getattr(tool, "annotations", None), "readOnlyHint", None) is not True
+                and _tool_read_only_hint(tool) is not True
             )
             if dynamic_ungated:
                 messages.append(
