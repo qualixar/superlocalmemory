@@ -27,11 +27,13 @@ _os.environ.setdefault('SLM_SKIP_DEP_CHECK', '1')
 import logging
 import sys
 
+from superlocalmemory import __version__ as _slm_version
 from superlocalmemory.mcp.http_transport import SLMFastMCP
 
 logger = logging.getLogger(__name__)
 
-server = SLMFastMCP("SuperLocalMemory V3")
+# mcp 2.0.0: MCPServer takes version= directly (no private _mcp_server poke).
+server = SLMFastMCP("SuperLocalMemory V3", version=_slm_version)
 
 # Lazy engine singleton -------------------------------------------------------
 

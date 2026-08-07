@@ -2702,22 +2702,61 @@ async def lifespan(application: FastAPI):
 # App factory
 # ---------------------------------------------------------------------------
 
-def _configure_mcp_transport_settings(fastmcp) -> bool:
-    """Apply the current transport mode without leaking singleton state.
+def _configure_mcp_transport_settings() -> dict:
+    """Return kwargs for ``MCPServer.streamable_http_app(...)`` (mcp 2.0.0).
 
-    ``superlocalmemory.mcp.server.server`` is process-global.  App factories
-    are invoked more than once by tests and embedded hosts, so both flags must
-    be assigned on every call; an earlier stateless app must not silently turn
-    a later default app stateless.  Keeping this small policy separate also
-    lets tests exercise the wiring without reloading FastMCP and rebuilding
-    hundreds of Pydantic models in a native-heavy Python process.
+    FastMCP's mutable ``settings.stateless_http`` / ``.json_response`` /
+    ``.streamable_http_path`` / ``.transport_security`` are gone in mcp 2.0.0.
+    Those values are now keyword arguments to ``streamable_http_app()``.
+
+    Fully-stateless is the default (``remote_mode.mcp_stateless()``). Under
+    ``stateless_http=True`` we never pass ``session_idle_timeout`` or an
+    event store — both are illegal/unused for transport sessions that do not
+    exist. Callers pass the returned dict through as
+    ``server.streamable_http_app(**kwargs)``.
     """
+    from typing import Any
+
     from superlocalmemory.core.remote_mode import mcp_stateless
 
     stateless = bool(mcp_stateless())
-    fastmcp.settings.stateless_http = stateless
-    fastmcp.settings.json_response = stateless
-    return stateless
+    kwargs: dict[str, Any] = {
+        "streamable_http_path": "/",
+        "stateless_http": stateless,
+        # json_response pairs with stateless so tool results complete as a
+        # single HTTP body (no long-lived SSE). Required for reliable
+        # gateway/hub forwarding and TestClient e2e.
+        "json_response": True if stateless else False,
+        "event_store": None,
+        "host": "127.0.0.1",
+    }
+
+    # DNS-rebinding protection from env. Default: SDK localhost auto-protect
+    # (host=127.0.0.1). Set SLM_MCP_ALLOWED_HOSTS=... to open to a LAN, or
+    # "*" to disable protection entirely (trusted private network only).
+    _mcp_allowed = os.environ.get("SLM_MCP_ALLOWED_HOSTS", "").strip()
+    if _mcp_allowed:
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        if _mcp_allowed == "*":
+            logger.warning(
+                "SLM_MCP_ALLOWED_HOSTS=* disables MCP DNS-rebinding "
+                "protection entirely. Prefer an explicit host list; only "
+                "use '*' on a trusted private network."
+            )
+            kwargs["transport_security"] = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            )
+        else:
+            _hosts = [h.strip() for h in _mcp_allowed.split(",") if h.strip()]
+            kwargs["transport_security"] = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=_hosts,
+                allowed_origins=[f"http://{h}" for h in _hosts],
+            )
+        logger.info("MCP transport security: allowed_hosts=%r", _mcp_allowed)
+
+    return kwargs
 
 
 def create_app() -> FastAPI:
@@ -2896,76 +2935,43 @@ def create_app() -> FastAPI:
     # -- Daemon-specific routes --
     _register_daemon_routes(application)
 
-    # -- v3.6.7: MCP Streamable-HTTP transport at /mcp --
-    # Mount the FastMCP server as a Starlette ASGI sub-app so ALL clients
+    # -- MCP Streamable-HTTP transport at /mcp (mcp 2.0.0 fully-stateless) --
+    # Mount the MCPServer as a Starlette ASGI sub-app so ALL clients
     # (Claude Code sessions, subagents, desktop, hermes) share ONE daemon
     # process instead of spawning an `slm mcp` subprocess per connection.
     # The session manager lifespan is started in lifespan() via AsyncExitStack.
     # Fail-open: if import or mount fails, stdio transport keeps working.
     #
-    # streamable_http_path is set to "/" so that when mounted at "/mcp" the
-    # effective user-facing endpoint is exactly http://127.0.0.1:8765/mcp.
-    # (FastAPI strips the mount prefix before passing the request to the
-    # sub-app, so the sub-app's internal route must be "/".)
+    # streamable_http_path="/" so that when mounted at "/mcp" the effective
+    # user-facing endpoint is exactly http://127.0.0.1:8765/mcp.
+    # (FastAPI strips the mount prefix before the sub-app sees the request.)
     try:
-        from superlocalmemory.mcp.server import server as _mcp_fastmcp
-        _mcp_fastmcp.settings.streamable_http_path = "/"
-        _mcp_fastmcp._session_manager = None  # Defensive reset for idempotency
-        # v3.6.9 (#36): configure DNS-rebinding protection from env.
-        # Default: localhost-only (safe). Set SLM_MCP_ALLOWED_HOSTS=192.168.x.y:*
-        # (comma-separated, e.g. "192.168.50.144:*,slm.lan:*") to open to a LAN.
-        # Use "*" to disable protection entirely (trusted private network only).
-        # TransportSecuritySettings imported lazily here so that MCP mount
-        # works on older SDK versions when SLM_MCP_ALLOWED_HOSTS is not set.
-        _mcp_allowed = os.environ.get("SLM_MCP_ALLOWED_HOSTS", "").strip()
-        if _mcp_allowed:
-            from mcp.server.transport_security import TransportSecuritySettings
-            if _mcp_allowed == "*":
-                # M-05 (3.7.9): "*" fully disables DNS-rebinding protection.
-                # Never silent — a convenience setting in a CI/Docker env must
-                # not quietly expose the instance.
-                logger.warning(
-                    "SLM_MCP_ALLOWED_HOSTS=* disables MCP DNS-rebinding "
-                    "protection entirely. Prefer an explicit host list; only "
-                    "use '*' on a trusted private network."
-                )
-                _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
-                    enable_dns_rebinding_protection=False,
-                )
-            else:
-                _hosts = [h.strip() for h in _mcp_allowed.split(",") if h.strip()]
-                _mcp_fastmcp.settings.transport_security = TransportSecuritySettings(
-                    enable_dns_rebinding_protection=True,
-                    allowed_hosts=_hosts,
-                    allowed_origins=[f"http://{h}" for h in _hosts],
-                )
-            logger.info("MCP transport security: allowed_hosts=%r", _mcp_allowed)
-        # v3.6.12 (issue #39): stateless MCP transport for distributed/gateway
-        # deployments. SLM's Streamable-HTTP is stateful by default — every call
-        # must replay the Mcp-Session-Id from the initialize handshake. A gateway
-        # (MCP Hub, LAN forwarder) that doesn't replay it gets "-32600 Session
-        # not found" (the mesh-tools symptom in #39). Stateless mode treats each
-        # request independently so any forwarder works. Default OFF (loopback
-        # clients keep full stateful sessions); enabled by SLM_REMOTE=1 or
-        # SLM_MCP_STATELESS=1. Per-agent /mcp/{agent_id} routing is unaffected
-        # (path-based, not session-based).
+        from superlocalmemory.mcp.server import server as _mcp_server
         from superlocalmemory.core.remote_mode import is_remote_mode
-        if _configure_mcp_transport_settings(_mcp_fastmcp):
+
+        # mcp 2.0.0: transport knobs are kwargs to streamable_http_app(), not
+        # mutable settings.stateless_http / .json_response / .transport_security.
+        _mcp_kwargs = _configure_mcp_transport_settings()
+        if _mcp_kwargs.get("stateless_http"):
             if is_remote_mode():
-                logger.warning(
-                    "MCP transport: STATELESS mode ON (SLM_REMOTE) — LAN "
-                    "gateways/hubs may forward tool calls without a session id. "
-                    "Per-session isolation is relaxed; intended for trusted networks."
+                logger.info(
+                    "MCP transport: STATELESS (default; SLM_REMOTE) — gateways/hubs "
+                    "may forward tool calls without a transport session id. "
+                    "App-level session_init remains available."
                 )
             else:
-                logger.warning(
-                    "MCP transport: STATELESS mode ON (SLM_MCP_STATELESS alone) "
-                    "— session isolation relaxed for LOOPBACK clients. Intended "
-                    "for a local gateway/hub (e.g. MCP Hub) on 127.0.0.1 only; "
-                    "the token endpoint stays loopback-only without SLM_REMOTE."
+                logger.info(
+                    "MCP transport: STATELESS (default) — no Mcp-Session-Id "
+                    "required; json_response=True. Opt out with SLM_MCP_STATEFUL=1."
                 )
+        else:
+            logger.warning(
+                "MCP transport: STATEFUL (SLM_MCP_STATEFUL or SLM_MCP_STATELESS=0) "
+                "— clients must replay Mcp-Session-Id after initialize."
+            )
+
         global _mcp_app
-        _mcp_app = _mcp_fastmcp.streamable_http_app()
+        _mcp_app = _mcp_server.streamable_http_app(**_mcp_kwargs)
 
         # v3.6.10: per-agent-ID routing — /mcp/{agent_id} extracts the agent
         # identity from the URL path and places it in a ContextVar so all MCP
@@ -2976,8 +2982,9 @@ def create_app() -> FastAPI:
 
         application.mount("/mcp", AgentIDExtractorASGI(_mcp_app))
         logger.info(
-            "MCP HTTP transport mounted at /mcp (Streamable HTTP, port %d; "
-            "per-agent routing enabled)",
+            "MCP HTTP transport mounted at /mcp (Streamable HTTP, mcp 2.0.0, "
+            "stateless=%s, port %d; per-agent routing enabled)",
+            bool(_mcp_kwargs.get("stateless_http")),
             _configured_daemon_port(),
         )
     except Exception as _mcp_exc:  # pragma: no cover — defensive

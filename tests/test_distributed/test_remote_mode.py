@@ -46,9 +46,16 @@ def test_stateless_granular_without_remote(monkeypatch: pytest.MonkeyPatch) -> N
     assert rm.is_remote_mode() is False  # stateless must NOT open the token endpoint
 
 
-def test_stateless_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stateless_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fully-stateless is the default under mcp 2.0.0."""
     monkeypatch.delenv("SLM_REMOTE", raising=False)
     monkeypatch.delenv("SLM_MCP_STATELESS", raising=False)
+    monkeypatch.delenv("SLM_MCP_STATEFUL", raising=False)
+    assert rm.mcp_stateless() is True
+
+
+def test_stateless_opt_out_via_stateful(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLM_MCP_STATEFUL", "1")
     assert rm.mcp_stateless() is False
 
 

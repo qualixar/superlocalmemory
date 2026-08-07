@@ -24,7 +24,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from superlocalmemory.mcp.http_transport import SLMFastMCP
+
+
+def _ann_flag(ann: object | None, camel: str, snake: str) -> object:
+    """Read an annotation hint under either camelCase (wire) or snake_case (model)."""
+    if ann is None:
+        return None
+    val = getattr(ann, camel, None)
+    if val is not None:
+        return val
+    return getattr(ann, snake, None)
+
 
 
 # Tools whose calls MUST be side-effect-free — safe to parallel-dispatch.
@@ -67,13 +78,13 @@ NON_IDEMPOTENT_MUTATIONS: set[str] = {
 }
 
 
-def _build_server_with_all_tools() -> FastMCP:
-    """Register every tool on a fresh FastMCP instance (SLM_MCP_ALL_TOOLS path)."""
+def _build_server_with_all_tools() -> SLMFastMCP:
+    """Register every tool on a fresh SLMFastMCP instance (SLM_MCP_ALL_TOOLS path)."""
     import os
 
     os.environ["SLM_MCP_ALL_TOOLS"] = "1"
 
-    server = FastMCP("SLM test")
+    server = SLMFastMCP("SLM test")
     # Dummy get_engine that returns a MagicMock — tool wiring doesn't
     # execute bodies at registration time, so this is safe.
     get_engine = MagicMock()
@@ -98,7 +109,7 @@ def _build_server_with_all_tools() -> FastMCP:
     return server
 
 
-def _tool_map(server: FastMCP) -> dict[str, object]:
+def _tool_map(server: SLMFastMCP) -> dict[str, object]:
     return {t.name: t for t in server._tool_manager.list_tools()}
 
 
@@ -121,7 +132,7 @@ def test_read_only_tools_have_readOnlyHint_true(tools: dict[str, object]) -> Non
             missing.append(name)
             continue
         ann = getattr(tool, "annotations", None)
-        if ann is None or getattr(ann, "readOnlyHint", None) is not True:
+        if ann is None or _ann_flag(ann, "readOnlyHint", "read_only_hint") is not True:
             wrong.append((name, ann))
     assert not missing, f"Expected read-only tools not registered: {missing}"
     assert not wrong, (
@@ -158,7 +169,7 @@ def test_write_tools_do_not_claim_readOnlyHint(tools: dict[str, object]) -> None
         if tool is None:
             continue  # tool may not be registered in this build — skip
         ann = getattr(tool, "annotations", None)
-        if ann is not None and getattr(ann, "readOnlyHint", None) is True:
+        if ann is not None and _ann_flag(ann, "readOnlyHint", "read_only_hint") is True:
             liars.append(name)
     assert not liars, (
         "These mutating tools falsely claim readOnlyHint=True: "
@@ -177,7 +188,7 @@ def test_destructive_tools_have_destructiveHint_true(tools: dict[str, object]) -
         if tool is None:
             continue
         ann = getattr(tool, "annotations", None)
-        if ann is None or getattr(ann, "destructiveHint", None) is not True:
+        if ann is None or _ann_flag(ann, "destructiveHint", "destructive_hint") is not True:
             wrong.append(name)
     assert not wrong, (
         "These destructive tools MUST have destructiveHint=True: "
@@ -196,7 +207,7 @@ def test_idempotent_tools_have_idempotentHint_true(tools: dict[str, object]) -> 
         if tool is None:
             continue
         ann = getattr(tool, "annotations", None)
-        if ann is None or getattr(ann, "idempotentHint", None) is not True:
+        if ann is None or _ann_flag(ann, "idempotentHint", "idempotent_hint") is not True:
             wrong.append(name)
     assert not wrong, (
         "These idempotent tools MUST have idempotentHint=True: "
@@ -214,7 +225,7 @@ def test_non_idempotent_mutations_do_not_claim_safe_retry(
         if tool is None:
             continue
         ann = getattr(tool, "annotations", None)
-        if ann is not None and getattr(ann, "idempotentHint", None) is True:
+        if ann is not None and _ann_flag(ann, "idempotentHint", "idempotent_hint") is True:
             liars.append(name)
     assert not liars, f"These tools falsely claim idempotency: {liars}"
 
@@ -228,7 +239,7 @@ def test_read_only_count_at_least_13(tools: dict[str, object]) -> None:
     count = 0
     for tool in tools.values():
         ann = getattr(tool, "annotations", None)
-        if ann is not None and getattr(ann, "readOnlyHint", None) is True:
+        if ann is not None and _ann_flag(ann, "readOnlyHint", "read_only_hint") is True:
             count += 1
     assert count >= 12, (
         f"Only {count} tools have readOnlyHint=True; expected ≥ 12. "

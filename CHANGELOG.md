@@ -12,6 +12,21 @@ canonical commit, projection to every store, migration, backup, and erasure —
 so each step is authorized, atomic, and verifiable. Existing memories and
 configuration are preserved; no manual migration is required.
 
+### Changed
+- **MCP SDK 2.0.0 (fully-stateless Streamable HTTP).** Pinned `mcp==2.0.0`.
+  Replaced deleted `mcp.server.fastmcp.FastMCP` with
+  `mcp.server.mcpserver.MCPServer` (same `@tool` decorator and
+  `run(transport="stdio")`). Transport knobs
+  (`stateless_http`, `json_response`, `streamable_http_path`,
+  `transport_security`) are now kwargs to `streamable_http_app()` —
+  `_configure_mcp_transport_settings()` returns that kwargs dict.
+  **Stateless is the default** (opt out with `SLM_MCP_STATEFUL=1`). Session
+  idle-timeout and EventStore SSE resumability are unused under
+  `stateless_http=True`. Application-level `session_init` / `close_session`
+  are unchanged (orthogonal to transport sessions). SDK lowlevel already
+  registers `server/discover` — not hand-written. Product version is passed
+  as `MCPServer(version=...)` (no private `_mcp_server.version` poke).
+
 ### Added
 - A unified admission gateway resolves one authenticated actor, active profile,
   and policy decision for every write across the CLI, MCP, HTTP, WebSocket, and

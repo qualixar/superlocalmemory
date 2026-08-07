@@ -49,13 +49,28 @@ def is_remote_mode() -> bool:
 
 
 def mcp_stateless() -> bool:
-    """True iff the MCP transport should run stateless (no session id required).
+    """True iff the MCP Streamable-HTTP transport should run fully stateless.
 
-    Enabled by ``SLM_REMOTE=1`` (umbrella) or ``SLM_MCP_STATELESS=1`` (granular).
-    Stateless mode lets any gateway/hub forward ``tools/call`` without replaying
-    the ``Mcp-Session-Id`` handshake — the fix for issue #39 Issue 3.
+    **Default is True** (mcp 2.0.0 fully-stateless contract). Stateless mode
+    lets any gateway/hub forward ``tools/call`` without replaying the
+    ``Mcp-Session-Id`` handshake (issue #39 Issue 3) and is required for
+    ``Client(mode="auto")`` discover probes to stay connection-safe.
+
+    Opt-out: set ``SLM_MCP_STATEFUL=1`` to force stateful Streamable-HTTP
+    (session IDs; event store still unused unless the caller passes one).
+    ``SLM_REMOTE`` / ``SLM_MCP_STATELESS`` remain recognized as positive
+    signals but are no longer required — the default is already stateless.
+
+    Application-level ``session_init`` / ``close_session`` are orthogonal
+    (session_id is a string parameter persisted in the memories table).
     """
-    return is_remote_mode() or _is_truthy(os.environ.get("SLM_MCP_STATELESS"))
+    if _is_truthy(os.environ.get("SLM_MCP_STATEFUL")):
+        return False
+    # Explicit SLM_MCP_STATELESS=0/false still honoured as opt-out when set.
+    raw = os.environ.get("SLM_MCP_STATELESS")
+    if raw is not None and raw.strip() != "":
+        return _is_truthy(raw)
+    return True
 
 
 def _allowlist_entries() -> list[str]:
