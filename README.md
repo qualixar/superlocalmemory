@@ -372,6 +372,8 @@ Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-d
 
 ## Install Paths
 
+> **V4 platform support:** Apple Silicon macOS, 64-bit Windows, and 64-bit Linux. Intel Mac and 32-bit Windows are not supported by the patched `cryptography` 50 runtime.
+
 | Path | Command | When |
 |:-----|:--------|:-----|
 | **npm global CLI** (primary) | `npm install -g superlocalmemory` | Node 18+; package-owned virtual environment; system Python is not modified; run `slm setup` explicitly afterward |

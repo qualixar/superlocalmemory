@@ -34,7 +34,6 @@ jobs:
           uvx --from pip-audit==2.9.0 pip-audit \
             --requirement /tmp/slm-runtime-requirements.txt \
             --no-deps --disable-pip \
-            --ignore-vuln PYSEC-2026-597 \
             --ignore-vuln GHSA-rrmf-rvhw-rf47 \
             --ignore-vuln PYSEC-2026-3447
       - name: Reject high-confidence high-severity Python findings

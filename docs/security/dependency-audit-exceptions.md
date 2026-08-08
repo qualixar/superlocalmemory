@@ -5,27 +5,12 @@ listed below. Each exception must name the transitive dependency path, explain
 why the vulnerable API is not reachable from untrusted input, and be removed
 as soon as a stable patched release is available.
 
-**Status as of 2026-08-08: all three exceptions are now actionable.** A stable
+**Status as of 2026-08-08: both remaining exceptions are actionable.** A stable
 release beyond each affected version is published on PyPI (versions verified
-against the PyPI JSON API on 2026-08-08). None of the exceptions below is
+against the PyPI JSON API on 2026-08-08). Neither exception below is
 blocked on upstream any more; each is blocked only on us scheduling and testing
 the upgrade. The non-reachability arguments remain accurate and unchanged — they
 are why these are exceptions rather than incidents.
-
-## PYSEC-2026-597 — NLTK 3.9.4
-
-- **Dependency path:** `superlocalmemory -> llmlingua 0.2.2 -> nltk 3.9.4`.
-- **Exposure:** The advisory concerns percent-encoded path traversal supplied
-  to `nltk.data.find()` or `nltk.data.load()`. SuperLocalMemory does not accept
-  an NLTK resource path from CLI, HTTP, dashboard, or MCP input. Its optional
-  LLMLingua compressor uses a fixed model identifier.
-- **Upstream state on 2026-08-08:** **superseded.** The previous note recorded
-  that "pip-audit reports no stable fixed version" and that 3.10.0-rc1 was not
-  auditable. **NLTK 3.10.2 is now a stable release on PyPI.** That statement is
-  no longer true and must not be relied on.
-- **Removal condition:** MET upstream. Remaining work is ours: upgrade NLTK past
-  3.9.4 (subject to LLMLingua compatibility) and delete the CI ignore.
-- **Review deadline:** 2026-09-05.
 
 ## PYSEC-2026-3447 — setuptools 81.0.0
 
@@ -82,3 +67,8 @@ This revision exists because they had stopped being true: three "no patch
 available upstream" statements had all been overtaken by stable releases, and
 one deferral rationale blamed a crash that has since been root-caused to an
 unrelated dependency.
+
+## Retired exceptions
+
+- `PYSEC-2026-597` was retired on 2026-08-08 after V4 pinned NLTK 3.10.0,
+  verified LLMLingua compatibility, and removed the CI suppression.
