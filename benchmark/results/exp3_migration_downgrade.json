@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.643205+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "newer-stamped DB refused on deferred pass with zero mutation",
+    "held": 200,
+    "method": "Real migration_runner.apply_deferred against a DB stamped SUPPORTED_SCHEMA_VERSION+5; asserts SchemaVersionError and an unchanged table set.",
+    "metric_name": "refuse-and-preserve rate",
+    "metric_value": 1.0,
+    "name": "exp3_migration_downgrade",
+    "passed": true,
+    "trials": 200
+  }
+}

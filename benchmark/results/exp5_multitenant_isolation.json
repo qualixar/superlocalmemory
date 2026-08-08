@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.643913+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "personal rows of one tenant never leak to another on any read path",
+    "held": 200,
+    "method": "Real store layer + real read paths (get_facts_by_ids, get_external_visible_facts, TemporalChannel) probed from a foreign tenant with include_global/include_shared forced ON.",
+    "metric_name": "zero-leak rate",
+    "metric_value": 1.0,
+    "name": "exp5_multitenant_isolation",
+    "passed": true,
+    "trials": 200
+  }
+}

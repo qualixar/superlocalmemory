@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.643599+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "partial-restore failure rolls live data back to pre-restore bytes",
+    "held": 200,
+    "method": "Real BackupCoordinator create/restore; failure injected on the second staging copy via shutil.copy2; asserts BackupRestoreError, pre-restore bytes intact, no staging/snapshot residue.",
+    "metric_name": "rollback+clean rate",
+    "metric_value": 1.0,
+    "name": "exp4_backup_restore_atomicity",
+    "passed": true,
+    "trials": 200
+  }
+}

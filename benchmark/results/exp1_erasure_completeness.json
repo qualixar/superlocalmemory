@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.633843+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "Real Bm25Owner + TemporalOwner + VectorOwner (no sqlite-vec: embedding_metadata SQL table only, no ANN index) erase all wipe-tenant projection rows from bm25_tokens, fact_temporal_validity, and embedding_metadata; tombstones and a verifiable receipt are persisted; keep-tenant content-hash is identical before and after wipe (full-row tamper detection)",
+    "held": 200,
+    "method": "Real production Bm25Owner(db), TemporalOwner(db), and VectorOwner(db, vector_store=None, ann_index=None) from concrete_owners.py. Each table seeded with real projection rows (bm25_tokens via tokenize(), fact_temporal_validity, embedding_metadata). Six evidence layers: receipt flags, per-proof erased+residue, direct scan of bm25_tokens + fact_temporal_validity + embedding_metadata, tombstone rows, audit_hash via verify_receipt(), keep-tenant full-row content-hash equality. All six must hold.",
+    "metric_name": "complete-erasure rate",
+    "metric_value": 1.0,
+    "name": "exp1_erasure_completeness",
+    "passed": true,
+    "trials": 200
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.649086+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "_DEFAULT_REGISTRY.evaluate(): REMEMBER allowed with reason=='allow' for OWNER/ADMIN/MEMBER; VIEWER\u2192REMEMBER denied with insufficient_roles; unknown kind fail-open in local mode (unknown_kind_allow_local), fail-closed in company mode (unknown_kind_deny_company); unauthenticated actor denied with authentication_required (auth check before role check)",
+    "held": 200,
+    "method": "Pure CPU \u2014 no I/O. Imports _DEFAULT_REGISTRY singleton (operation_policy_registry.py, constructed once at import time). Five sub-assertions: authorized roles (OWNER/ADMIN/MEMBER) \u2192 allow with reason=='allow'; VIEWER\u2192REMEMBER \u2192 insufficient_roles; unknown kind+local \u2192 unknown_kind_allow_local; unknown kind+company \u2192 unknown_kind_deny_company; empty principal_id \u2192 authentication_required (auth before role).",
+    "metric_name": "policy-correct rate",
+    "metric_value": 1.0,
+    "name": "exp8_policy_registry",
+    "passed": true,
+    "trials": 200
+  }
+}

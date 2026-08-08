@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.644838+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "date-proximate events outrank distant ones; horizon excludes far past",
+    "held": 200,
+    "method": "Real TemporalChannel.search over a real DB with a near (+1 day) and a far (>2 year) dated event.",
+    "metric_name": "correct-window rate",
+    "metric_value": 1.0,
+    "name": "exp6c_time_window",
+    "passed": true,
+    "trials": 200
+  }
+}

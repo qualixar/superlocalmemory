@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.638686+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "MemoryTransactionService: committed op \u2192 manifest COMPLETE with both owners applied; faulted op \u2192 manifest DEGRADED, the successful owner's projection removed by real service.compensate() (tracking entry absent post-compensate, ledger=COMPENSATED), failed owner had no projection residue (ledger=FAILED)",
+    "held": 200,
+    "method": "Real MemoryTransactionService (service.py) + ObligationLedger + Reconciler \u2192 CompletionManifest over fresh_db(). Committed sub-trial: both _TrackingOwners succeed \u2192 manifest COMPLETE. Fault+compensate sub-trial: bravo raises in apply() \u2192 manifest DEGRADED; alpha WAS applied (tracking dict checked before compensate); real svc.compensate(conn, ctx, 'alpha') calls owner.compensate() removing alpha from tracking dict AND marking ledger COMPENSATED; asserts alpha absent post-compensate, bravo never present.",
+    "metric_name": "manifest-correct rate",
+    "metric_value": 1.0,
+    "name": "exp2_transaction_atomicity",
+    "passed": true,
+    "trials": 200
+  }
+}

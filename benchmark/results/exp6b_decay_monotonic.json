@@ -1,0 +1,21 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.5",
+    "timestamp": "2026-08-02T18:00:04.644561+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {},
+    "failures": [],
+    "guarantee": "Ebbinghaus retention non-increasing in age, bounded [0,1]",
+    "held": 200,
+    "method": "Real EbbinghausCurve.retention swept over an increasing age vector.",
+    "metric_name": "monotonic-decay rate",
+    "metric_value": 1.0,
+    "name": "exp6b_decay_monotonic",
+    "passed": true,
+    "trials": 200
+  }
+}
