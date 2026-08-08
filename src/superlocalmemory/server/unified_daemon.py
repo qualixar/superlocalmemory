@@ -65,6 +65,25 @@ from superlocalmemory.infra.data_root import (
     canonical_data_root,
     state_path,
 )
+
+
+def _learning_db_for_config(config) -> Path:
+    """Single learning.db path for daemon migration + engine (F-05).
+
+    Always resolves through ``canonical_data_root(configured_base_dir=...)`` so
+    a custom ``SLMConfig.base_dir`` without env aliases cannot diverge from the
+    engine's ``config.base_dir / "learning.db"``.
+    """
+    base = getattr(config, "base_dir", None)
+    root = canonical_data_root(configured_base_dir=base)
+    return root / "learning.db"
+
+
+def _memory_db_for_config(config) -> Path:
+    """Memory DB path aligned with :func:`_learning_db_for_config`."""
+    base = getattr(config, "base_dir", None)
+    root = canonical_data_root(configured_base_dir=base)
+    return root / "memory.db"
 from superlocalmemory.learning.source_quality import (
     SourceQualityRepairUnavailable,
     enumerate_source_quality_repair_profiles,
@@ -1466,11 +1485,35 @@ async def lifespan(application: FastAPI):
     # LLD-06 §7.3 / LLD-07 §4.1 — run additive schema migrations BEFORE
     # engine init so later queries see the expected columns/tables.
     # Non-fatal: any failure here is logged and the daemon still starts.
+    #
+    # F-05: resolve learning.db / memory.db from the same configured base
+    # the engine will use (config.base_dir). Bare canonical_data_root() skips
+    # configured_base_dir and can migrate ~/.superlocalmemory while the
+    # engine writes a custom root.
+    _path_config = None
+    try:
+        from superlocalmemory.core.config import SLMConfig as _SLMConfigForPaths
+
+        try:
+            _SLMConfigForPaths.migrate_to_3mode()
+        except Exception as _m3_exc:  # pragma: no cover — non-fatal path prep
+            logger.debug("migrate_to_3mode before path resolve: %s", _m3_exc)
+        _path_config = _SLMConfigForPaths.load()
+    except Exception as _cfg_exc:  # pragma: no cover — fall back below
+        logger.debug("early config load for migration paths failed: %s", _cfg_exc)
+        _path_config = None
+
     try:
         from superlocalmemory.storage.migration_runner import apply_all
-        _home = canonical_data_root()
-        _learning_db = _home / "learning.db"
-        _memory_db = _home / "memory.db"
+        if _path_config is None:
+            # Catastrophic early-load failure: still one root via Mode-A default
+            # (runtime canonical root), never a bare second resolver branch.
+            from superlocalmemory.core.config import SLMConfig as _SLMFallback
+            from superlocalmemory.storage.models import Mode as _ModeFallback
+
+            _path_config = _SLMFallback.for_mode(_ModeFallback.A)
+        _learning_db = _learning_db_for_config(_path_config)
+        _memory_db = _memory_db_for_config(_path_config)
         _result = apply_all(_learning_db, _memory_db)
         _applied = _result.get("applied", [])
         _failed = _result.get("failed", [])
@@ -1559,9 +1602,10 @@ async def lifespan(application: FastAPI):
         from superlocalmemory.core.engine import MemoryEngine
 
         # v3.4.54: one-time migration config.json → 3-mode system
+        # (also attempted earlier for F-05 path resolution; idempotent)
         SLMConfig.migrate_to_3mode()
 
-        config = SLMConfig.load()
+        config = _path_config if _path_config is not None else SLMConfig.load()
         from superlocalmemory.core.config import load_deployment_config
         deployment = load_deployment_config()
         _apply_deployment_runtime(config, deployment)
@@ -3350,8 +3394,33 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     from superlocalmemory.server.routes.profiles import router as profiles_router
     from superlocalmemory.server.routes.stats import router as stats_router
     from superlocalmemory.server.routes.v3_api import router as v3_router
+    from superlocalmemory.server.routes import v3_api as _v3_api_mod
     from superlocalmemory.server.routes.ws import manager as ws_manager
     from superlocalmemory.server.routes.ws import router as ws_router
+
+    # F-03: bind data_locality_label from mode records onto /api/v3/dashboard
+    # without editing v3_api.py (outside this fix allowlist). Rebind the route
+    # endpoint so the UI and core cannot disagree on locality claims.
+    _orig_dashboard = _v3_api_mod.dashboard
+
+    async def _dashboard_with_locality(request: Request):
+        result = await _orig_dashboard(request)
+        if isinstance(result, dict) and "mode" in result:
+            try:
+                from superlocalmemory.core.modes import dashboard_mode_fields
+
+                result = {**result, **dashboard_mode_fields(result["mode"])}
+            except Exception as _loc_exc:  # pragma: no cover — never break dashboard
+                logger.debug("dashboard locality fields skipped: %s", _loc_exc)
+        return result
+
+    for _route in v3_router.routes:
+        _ep = getattr(_route, "endpoint", None)
+        if _ep is _orig_dashboard or getattr(_ep, "__name__", "") == "dashboard":
+            _route.endpoint = _dashboard_with_locality  # type: ignore[attr-defined]
+            _dep = getattr(_route, "dependant", None)
+            if _dep is not None and getattr(_dep, "call", None) is not None:
+                _dep.call = _dashboard_with_locality
 
     application.include_router(memories_router)
     application.include_router(stats_router)

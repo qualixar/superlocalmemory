@@ -593,7 +593,10 @@ class EmbeddingService:
             except Exception as exc:
                 error_container.append(exc)
 
-        reader = threading.Thread(target=_read, daemon=True)
+        # Name contains ``_read`` so leak detectors can find abandoned readers.
+        reader = threading.Thread(
+            target=_read, daemon=True, name="slm_embed_readline_read",
+        )
         reader.start()
         reader.join(timeout=timeout_seconds)
 
@@ -601,6 +604,25 @@ class EmbeddingService:
             logger.warning(
                 "Embedding worker did not respond within %ds", timeout_seconds,
             )
+            # Close/shutdown the stream so the blocked readline() returns and
+            # the reader thread can exit. Raising alone would leak the thread
+            # (and its FD) on Windows pipes and fileno-less mocks.
+            for closer_name in ("close", "shutdown"):
+                closer = getattr(stream, closer_name, None)
+                if not callable(closer):
+                    continue
+                try:
+                    if closer_name == "shutdown":
+                        try:
+                            closer(True)  # type: ignore[misc]
+                        except TypeError:
+                            closer()
+                    else:
+                        closer()
+                except Exception:
+                    pass
+            # Bound the join so a stuck closer cannot hang the caller forever.
+            reader.join(timeout=min(1.0, max(0.05, timeout_seconds)))
             return ""
         if error_container:
             raise error_container[0]

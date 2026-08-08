@@ -354,11 +354,21 @@ async function loadDashboard() {
         if (dashVer) dashVer.textContent = ver;
         if (settVer) settVer.textContent = ver;
 
-        // OD dashboard subtitle
+        // OD dashboard subtitle — locality comes from the mode record via API
+        // (data.data_locality_label). Never hardcode a fixed locality claim;
+        // Mode C is provider-assisted and must not claim data never leaves.
         var subtitle = document.getElementById('od-dash-subtitle');
         if (subtitle && data.mode_name) {
-            subtitle.textContent = 'Mode ' + data.mode.toUpperCase() + ' · ' + data.mode_name +
-                ' · local-only · v' + (ver || '?');
+            var locality = (data.data_locality_label || '').trim();
+            var parts = [
+                'Mode ' + data.mode.toUpperCase(),
+                data.mode_name,
+            ];
+            if (locality) {
+                parts.push(locality);
+            }
+            parts.push('v' + (ver || '?'));
+            subtitle.textContent = parts.join(' · ');
         }
 
         // Update mode badge in sidebar (ng-premount hidden element)

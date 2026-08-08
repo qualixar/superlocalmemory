@@ -270,17 +270,21 @@ class TestRunEmbeddingMigration:
         assert "test-model::512" in stored
 
     def test_embed_batch_failure_stops_gracefully(self, tmp_path):
+        from superlocalmemory.storage.embedding_migrator import EmbeddingMigrationAborted
+
         facts = [("f1", "content 1")]
         cfg = _make_config(tmp_path)
         _write_stored_signature(tmp_path, "old-model::768")
         db = _make_mock_db(facts=facts)
         emb = _make_mock_embedder()
         emb.embed_batch.side_effect = RuntimeError("GPU exploded")
-        result = run_embedding_migration(cfg, db, emb)
-        assert result == 0
+        with pytest.raises(EmbeddingMigrationAborted):
+            run_embedding_migration(cfg, db, emb)
         assert _read_stored_signature(tmp_path) == "old-model::768"
 
     def test_individual_update_failure_aborts_without_activation(self, tmp_path):
+        from superlocalmemory.storage.embedding_migrator import EmbeddingMigrationAborted
+
         facts = [
             ("f1", "content 1"),
             ("f2", "content 2"),
@@ -293,11 +297,13 @@ class TestRunEmbeddingMigration:
             "superlocalmemory.storage.embedding_migrator._activate_staged_vectors",
             side_effect=RuntimeError("disk full"),
         ):
-            result = run_embedding_migration(cfg, db, emb)
-        assert result == 0
+            with pytest.raises(EmbeddingMigrationAborted):
+                run_embedding_migration(cfg, db, emb)
         assert _read_stored_signature(tmp_path) == "old-model::768"
 
     def test_vector_count_mismatch_aborts_without_activation(self, tmp_path):
+        from superlocalmemory.storage.embedding_migrator import EmbeddingMigrationAborted
+
         facts = [("f1", "content 1"), ("f2", "content 2")]
         cfg = _make_config(tmp_path)
         _write_stored_signature(tmp_path, "old-model::768")
@@ -305,9 +311,9 @@ class TestRunEmbeddingMigration:
         emb = MagicMock()
         emb.embed_batch.return_value = [[0.1] * 768]
 
-        result = run_embedding_migration(cfg, db, emb)
+        with pytest.raises(EmbeddingMigrationAborted):
+            run_embedding_migration(cfg, db, emb)
 
-        assert result == 0
         assert _read_stored_signature(tmp_path) == "old-model::768"
 
     def test_real_vector_projection_is_replaced_before_signature(self, tmp_path):
@@ -386,7 +392,10 @@ class TestRunEmbeddingMigration:
         embedder = MagicMock()
         embedder.embed_batch.return_value = [[0.0, 1.0, 0.0]]
 
-        assert run_embedding_migration(cfg, db, embedder) == 0
+        from superlocalmemory.storage.embedding_migrator import EmbeddingMigrationAborted
+
+        with pytest.raises(EmbeddingMigrationAborted):
+            run_embedding_migration(cfg, db, embedder)
         restored = VectorStore(
             db_path, VectorStoreConfig(dimension=2, model_name="old-model")
         )
@@ -439,7 +448,10 @@ class TestRunEmbeddingMigration:
         embedder = MagicMock()
         embedder.embed_batch.return_value = [[0.0, 1.0]]
 
-        assert run_embedding_migration(cfg, db, embedder) == 0
+        from superlocalmemory.storage.embedding_migrator import EmbeddingMigrationAborted
+
+        with pytest.raises(EmbeddingMigrationAborted):
+            run_embedding_migration(cfg, db, embedder)
         assert _read_stored_signature(tmp_path) == "old::2"
         assert store.search([1.0, 0.0], top_k=1) == [("f1", 1.0)]
 

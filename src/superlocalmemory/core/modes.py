@@ -50,6 +50,14 @@ class ModeCapabilities:
     # Description
     description: str = ""
 
+    @property
+    def data_locality_label(self) -> str:
+        """UI/API locality label derived from the mode record (single source).
+
+        Never invent a parallel mode→label map in the dashboard — consume this.
+        """
+        return "local-only" if self.data_stays_local else "provider-assisted"
+
 
 # ---------------------------------------------------------------------------
 # Mode Definitions
@@ -123,6 +131,21 @@ def get_capabilities(mode: Mode) -> ModeCapabilities:
     """Get capability matrix for a mode."""
     _map = {Mode.A: MODE_A, Mode.B: MODE_B, Mode.C: MODE_C}
     return _map[mode]
+
+
+def dashboard_mode_fields(mode: Mode | str) -> dict[str, object]:
+    """Fields the dashboard API must surface from the mode record.
+
+    Keeps UI locality claims bound to :class:`ModeCapabilities` so Mode C
+    cannot be labeled local-only by a divergent hardcode.
+    """
+    if isinstance(mode, str):
+        mode = Mode(mode.strip().lower())
+    caps = get_capabilities(mode)
+    return {
+        "data_locality_label": caps.data_locality_label,
+        "data_stays_local": caps.data_stays_local,
+    }
 
 
 def validate_mode_config(mode: Mode, *, has_ollama: bool = False, has_cloud_llm: bool = False) -> list[str]:

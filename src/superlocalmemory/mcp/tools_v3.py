@@ -55,9 +55,9 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     async def set_mode(mode: str) -> dict:
         """Switch operating mode (a, b, or c).
 
-        Mode A: Local Guardian (zero LLM, EU AI Act full compliance).
-        Mode B: Smart Local (local Ollama LLM, EU AI Act full).
-        Mode C: Full Power (cloud LLM, best accuracy).
+        Mode A: Local Guardian (zero LLM, local embeddings only).
+        Mode B: Smart Local (local Ollama LLM, on-device inference).
+        Mode C: Full Power (configured cloud LLM provider, best accuracy).
 
         Resets the engine to apply the new mode configuration.
 
@@ -361,10 +361,10 @@ def register_v3_tools(server, get_engine: Callable) -> None:
 # -- Helpers ------------------------------------------------------------------
 
 def _mode_description(mode: str) -> str:
-    """Human-readable description for a mode."""
+    """Human-readable capability description for a mode (never a legal claim)."""
     descriptions = {
-        "a": "Local Guardian: zero LLM, full EU AI Act compliance",
-        "b": "Smart Local: local Ollama LLM, full EU AI Act compliance",
-        "c": "Full Power: cloud LLM, best accuracy, partial EU AI Act",
+        "a": "Local Guardian: zero LLM, local embeddings only",
+        "b": "Smart Local: local Ollama LLM, on-device inference",
+        "c": "Full Power: configured cloud LLM provider, best accuracy",
     }
     return descriptions.get(mode, "Unknown mode")

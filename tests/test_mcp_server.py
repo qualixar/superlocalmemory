@@ -90,9 +90,14 @@ def test_tools_core_helper_format():
 
 
 def test_v3_mode_description():
-    """_mode_description returns string for known modes."""
+    """_mode_description returns capability-only strings for known modes."""
     from superlocalmemory.mcp.tools_v3 import _mode_description
     assert "Local Guardian" in _mode_description("a")
     assert "Smart Local" in _mode_description("b")
     assert "Full Power" in _mode_description("c")
     assert "Unknown" in _mode_description("z")
+    for mode in ("a", "b", "c"):
+        text = _mode_description(mode).lower()
+        assert "ai act" not in text
+        assert "compliance" not in text
+        assert "compliant" not in text

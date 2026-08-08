@@ -34,6 +34,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class EmbeddingMigrationAborted(RuntimeError):
+    """Raised when embedding migration aborts; old signature stays active.
+
+    Distinct from a no-op return of ``0`` (no embedder / no facts). Callers
+    must treat this as failure, not success.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Backfill constants
 # ---------------------------------------------------------------------------
@@ -413,7 +422,12 @@ def run_embedding_migration(
             "Embedding migration aborted; previous embedding space remains active: %s",
             exc,
         )
-        return 0
+        # Do NOT write a new signature — old embedding space stays active.
+        # Raise so callers can distinguish abort from no-op (return 0).
+        raise EmbeddingMigrationAborted(
+            "Embedding migration aborted; previous embedding space remains "
+            f"active: {exc}"
+        ) from exc
 
     _write_stored_signature(config.base_dir, current_sig)
     logger.info(
