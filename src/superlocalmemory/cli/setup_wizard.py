@@ -274,6 +274,35 @@ def _embedding_is_remote(config: Any) -> bool:
     return provider in ("openai", "openai-compatible", "remote") or bool(endpoint)
 
 
+def _reranker_is_remote(config: Any) -> bool:
+    """True when reranking runs against a remote endpoint (v3.8.12, #105).
+
+    In that case the local ~130MB English cross-encoder download is pointless
+    — and worse, misleading, since it is not the model that will score recall.
+    Unlike embeddings, the endpoint alone is NOT sufficient: a stray endpoint
+    against a local backend is a misconfiguration the engine reports, not a
+    remote setup.
+    """
+    rt = getattr(config, "retrieval", None)
+    if rt is None:
+        return False
+    backend = (getattr(rt, "cross_encoder_backend", "") or "").strip().lower()
+    endpoint = getattr(rt, "cross_encoder_endpoint", "") or ""
+    return backend in ("openai", "remote") and bool(endpoint)
+
+
+# Remote-reranker keys the wizard never asks about. ``retrieval`` is otherwise
+# a mode-owned block that the wizard resets from the template, which would
+# silently delete a working remote endpoint on every re-run (#105).
+_USER_OWNED_RETRIEVAL_KEYS = (
+    "cross_encoder_backend",
+    "cross_encoder_endpoint",
+    "cross_encoder_api_key",
+    "cross_encoder_model",
+    "cross_encoder_timeout_seconds",
+)
+
+
 def _build_wizard_config(mode):
     """Apply mode-owned presets without erasing existing user-owned blocks."""
     from superlocalmemory.core.config import SLMConfig
@@ -285,7 +314,14 @@ def _build_wizard_config(mode):
     existing = SLMConfig.load()
     existing.mode = mode
     existing.llm = template.llm
+    preserved = {
+        key: getattr(existing.retrieval, key)
+        for key in _USER_OWNED_RETRIEVAL_KEYS
+        if hasattr(existing.retrieval, key)
+    }
     existing.retrieval = template.retrieval
+    for key, value in preserved.items():
+        setattr(existing.retrieval, key, value)
     existing.math = template.math
     existing.channel_weights = template.channel_weights
     return existing
@@ -566,7 +602,15 @@ def run_wizard(auto: bool = False) -> None:
     print()
     print("─── Step 4b/10: Download Reranker Model ───")
 
-    if not st_ok:
+    if _reranker_is_remote(config):
+        # v3.8.12 (#105): a remote /v1/rerank endpoint scores the results, so
+        # the local English cross-encoder would be dead weight on disk.
+        rt = config.retrieval
+        print("  ✓ Skipped — remote rerank endpoint configured")
+        print(f"    backend={getattr(rt, 'cross_encoder_backend', '?')}, "
+              f"model={getattr(rt, 'cross_encoder_model', '?')}")
+        print("    No local reranker model needed.")
+    elif not st_ok:
         print("  ⚠ Skipped (sentence-transformers not installed)")
     else:
         _download_reranker(_RERANKER_MODEL)

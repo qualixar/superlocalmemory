@@ -84,6 +84,21 @@ _WARMUP_MAX_ATTEMPTS = int(os.environ.get("SLM_RERANKER_WARMUP_ATTEMPTS", "5"))
 _WARMUP_RETRY_BACKOFF_S = float(os.environ.get("SLM_RERANKER_WARMUP_BACKOFF", "3"))
 
 
+# Substrings that mark a load failure as a configuration problem rather than a
+# transient one. Retrying these can never succeed, so the warmup aborts on the
+# first occurrence instead of spending _WARMUP_MAX_ATTEMPTS × backoff on them.
+_PERMANENT_LOAD_ERROR_MARKERS = (
+    "unknown backend",
+    "sentence-transformers is not installed",
+)
+
+
+def _is_permanent_load_error(error: str) -> bool:
+    """True when a worker load error cannot be fixed by retrying."""
+    lowered = (error or "").lower()
+    return any(m in lowered for m in _PERMANENT_LOAD_ERROR_MARKERS)
+
+
 class CrossEncoderReranker:
     """Rerank candidate facts using a local cross-encoder model.
 
@@ -201,11 +216,43 @@ class CrossEncoderReranker:
                                 resp.get("warmup_inference", False),
                             )
                             return
-                        logger.warning(
-                            "Reranker warmup attempt %d/%d did not confirm "
-                            "ready (timeout=%ds); retrying",
-                            attempt, _WARMUP_MAX_ATTEMPTS, _WARMUP_LOAD_TIMEOUT,
-                        )
+                        # v3.8.11 (issue #103): this used to report
+                        # "(timeout=90s)" for EVERY failure, including loads
+                        # that failed instantly. A user whose retries were 3s
+                        # apart was told each one timed out after 90s, and the
+                        # worker's actual error was never printed at all.
+                        # Distinguish the two cases and surface the real cause.
+                        if resp is None:
+                            logger.warning(
+                                "Reranker warmup attempt %d/%d: no response "
+                                "from worker within %ds; retrying",
+                                attempt, _WARMUP_MAX_ATTEMPTS,
+                                _WARMUP_LOAD_TIMEOUT,
+                            )
+                        else:
+                            load_error = (
+                                resp.get("error")
+                                or "worker reported not-ready without an error"
+                            )
+                            # A misconfiguration cannot fix itself. Retrying a
+                            # bad backend name or a missing dependency four
+                            # more times burns ~7.5 minutes of daemon startup
+                            # to reach the same answer (issue #103). Fail fast
+                            # and say exactly what to change.
+                            if _is_permanent_load_error(load_error):
+                                logger.error(
+                                    "Reranker disabled — configuration error: "
+                                    "%s. Not retrying. Fix the config or set "
+                                    "retrieval.use_cross_encoder=false; recall "
+                                    "continues with fusion scores.",
+                                    load_error,
+                                )
+                                return
+                            logger.warning(
+                                "Reranker warmup attempt %d/%d failed: %s; "
+                                "retrying",
+                                attempt, _WARMUP_MAX_ATTEMPTS, load_error,
+                            )
 
                     if attempt < _WARMUP_MAX_ATTEMPTS and not self._model_loaded:
                         if self._shutdown_event.wait(

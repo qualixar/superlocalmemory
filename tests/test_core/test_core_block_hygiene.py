@@ -191,14 +191,26 @@ class TestCompileBlockContent:
 class TestMaintenanceSchedulerRecompile:
     """Daily recompile triggered in MaintenanceScheduler."""
 
-    def test_run_calls_compile_core_blocks(self) -> None:
+    def test_run_calls_compile_core_blocks(self, tmp_path) -> None:
         """MaintenanceScheduler._run() calls consolidation_engine.compile_core_blocks_mode_a."""
         from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
         from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage.models import Mode
 
-        db = MagicMock()
-        db.db_path = "/tmp/test.db"
+        # spec=DatabaseManager is load-bearing, not cosmetic. _run() calls
+        # prune_graph(self._db, ...), whose back-compat shim branches on
+        # isinstance(db_or_path, DatabaseManager). A bare MagicMock fails that
+        # check, so the shim passed THE MOCK ITSELF to DatabaseManager(...),
+        # which does Path(db_path) -> MagicMock.__fspath__() -> the relative
+        # path "MagicMock/mock/<id>", then mkdir(parents=True) + sqlite open.
+        # That leaked MagicMock/mock/ dirs + a stray db file into the repo root
+        # on every full-suite run. Pinning db.db_path could not fix it: db_path
+        # was never read. Spec'ing also removes __fspath__ from the double, so
+        # any future accidental Path(db) raises TypeError instead of silently
+        # writing into the working directory.
+        db = MagicMock(spec=DatabaseManager)
+        db.db_path = str(tmp_path / "test.db")
         db.execute.return_value = []
         config = SLMConfig.for_mode(Mode.A)
         scheduler = MaintenanceScheduler(db, config, "default")

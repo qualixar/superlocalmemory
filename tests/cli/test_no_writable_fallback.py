@@ -70,8 +70,12 @@ def test_cli_mutation_fails_closed_when_daemon_unavailable(
     assert stopped.value.code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is False
-    assert payload["error"] == {
-        "code": "DAEMON_UNAVAILABLE",
-        "message": "Owned daemon is unavailable; retry later.",
-        "retryable": True,
-    }
+    error = payload["error"]
+    # Stable machine contract.
+    assert error["code"] == "DAEMON_UNAVAILABLE"
+    assert error["retryable"] is True
+    # Issue #104: the human-readable half must name the actual cause and the
+    # next command to run, not just restate the error code.
+    assert error["reason"] == "no_daemon"
+    assert "no daemon is registered for this data root" in error["message"]
+    assert "slm start" in error["hint"]

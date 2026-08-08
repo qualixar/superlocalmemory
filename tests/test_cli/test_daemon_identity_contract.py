@@ -21,6 +21,7 @@ from superlocalmemory.infra.daemon_identity import (
     read_descriptor,
     write_descriptor,
 )
+from superlocalmemory.infra.process_identity import process_start_token_for
 
 
 def test_canonical_data_root_uses_documented_alias_precedence(
@@ -67,6 +68,71 @@ def test_descriptor_is_atomic_private_and_round_trips(tmp_path: Path) -> None:
     assert path == tmp_path / "daemon.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert json.loads(path.read_text())["service"] == DAEMON_SERVICE
+
+
+def test_descriptor_records_a_clock_independent_start_token(
+    tmp_path: Path,
+) -> None:
+    """Issue #104: identity must survive a clock step, so it is persisted."""
+    descriptor = build_descriptor(
+        data_root=tmp_path,
+        port=43123,
+        version="3.8.11",
+        pid=os.getpid(),
+        instance_id="instance-a",
+        capability="capability-a",
+        state="ready",
+    )
+    path = write_descriptor(descriptor, data_root=tmp_path)
+    payload = json.loads(path.read_text())
+
+    expected = process_start_token_for(os.getpid())
+    assert payload["process_start_token"] == expected
+    assert read_descriptor(data_root=tmp_path).process_start_token == expected
+
+
+def test_descriptor_written_before_the_token_existed_still_loads(
+    tmp_path: Path,
+) -> None:
+    """A daemon started by an older release must not become unreachable."""
+    descriptor = build_descriptor(
+        data_root=tmp_path,
+        port=43123,
+        version="3.8.11",
+        pid=1234,
+        instance_id="instance-a",
+        capability="capability-a",
+        state="ready",
+    )
+    write_descriptor(descriptor, data_root=tmp_path)
+    path = tmp_path / "daemon.json"
+    legacy = json.loads(path.read_text())
+    legacy.pop("process_start_token")
+    path.write_text(json.dumps(legacy))
+
+    loaded = read_descriptor(data_root=tmp_path)
+    assert loaded is not None
+    assert loaded.process_start_token is None
+    assert loaded.instance_id == "instance-a"
+
+
+def test_descriptor_with_a_non_string_token_fails_closed(tmp_path: Path) -> None:
+    descriptor = build_descriptor(
+        data_root=tmp_path,
+        port=43123,
+        version="3.8.11",
+        pid=1234,
+        instance_id="instance-a",
+        capability="capability-a",
+        state="ready",
+    )
+    write_descriptor(descriptor, data_root=tmp_path)
+    path = tmp_path / "daemon.json"
+    poisoned = json.loads(path.read_text())
+    poisoned["process_start_token"] = {"not": "a token"}
+    path.write_text(json.dumps(poisoned))
+
+    assert read_descriptor(data_root=tmp_path) is None
 
 
 def test_health_match_requires_full_namespace_instance_and_capability(

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Similarity threshold for assigning fact to existing scene
 _ASSIGN_THRESHOLD = 0.6
+_MAX_ASSIGNMENT_CANDIDATES = 256
 
 
 class SceneBuilder:
@@ -35,9 +36,10 @@ class SceneBuilder:
     3. If below threshold: create new scene
     """
 
-    def __init__(self, db, embedder=None) -> None:
+    def __init__(self, db, embedder=None, vector_store=None) -> None:
         self._db = db
         self._embedder = embedder
+        self._vector_store = vector_store
         # Key by scene ID, never theme. Themes are deliberately non-unique,
         # while eligibility and durable anchor membership are scene-specific.
         self._scene_embeddings_cache: dict[str, list[float]] = {}
@@ -71,11 +73,14 @@ class SceneBuilder:
         if fact_emb is None:
             return self._create_scene(new_fact, profile_id)
 
-        scenes = self._get_scenes(profile_id)
+        scenes = self._get_assignment_scenes(profile_id, fact_emb)
         if not scenes:
             return self._create_scene(new_fact, profile_id)
 
-        live_scene_embeddings = self._load_live_scene_embeddings(profile_id)
+        live_scene_embeddings = self._load_live_scene_embeddings(
+            profile_id,
+            tuple(scene.scene_id for scene in scenes),
+        )
         live_scene_ids = set(live_scene_embeddings)
         self._scene_embeddings_cache.update({
             scene_id: embedding
@@ -209,41 +214,138 @@ class SceneBuilder:
         )
         return [self._row_to_scene(dict(r)) for r in rows]
 
+    def _get_assignment_scenes(
+        self,
+        profile_id: str,
+        fact_embedding: list[float],
+    ) -> list[MemoryScene]:
+        """Load bounded semantic candidates with a recency fallback.
+
+        Mature stores must not compare every new fact with every historical
+        scene. The fact vector index finds nearby members in bounded time; the
+        normalized membership projection maps them back to scenes. Recent
+        scenes remain a fail-soft fallback for fresh or unavailable indexes.
+        Semantic candidates are ordered first so an old relevant scene cannot
+        be displaced by the recency cap.
+        """
+        recent_rows = self._db.execute(
+            "SELECT ms.* FROM memory_scenes AS ms WHERE ms.profile_id = ? "
+            "AND EXISTS (SELECT 1 FROM scene_fact_members AS live_member "
+            "WHERE live_member.scene_id = ms.scene_id "
+            "AND live_member.profile_id = ms.profile_id) "
+            "ORDER BY ms.last_updated DESC LIMIT ?",
+            (profile_id, _MAX_ASSIGNMENT_CANDIDATES),
+        )
+        recent = [self._row_to_scene(dict(row)) for row in recent_rows]
+
+        nearest_fact_ids: list[str] = []
+        if self._vector_store is not None:
+            try:
+                nearest_fact_ids = [
+                    fact_id
+                    for fact_id, _score in self._vector_store.search(
+                        fact_embedding,
+                        top_k=_MAX_ASSIGNMENT_CANDIDATES,
+                        profile_id=profile_id,
+                    )
+                ]
+            except Exception:
+                nearest_fact_ids = []
+
+        semantic: list[MemoryScene] = []
+        if nearest_fact_ids:
+            placeholders = ",".join("?" for _ in nearest_fact_ids)
+            try:
+                semantic_rows = self._db.execute(
+                    f"""
+                    SELECT ms.*, member.fact_id AS matched_fact_id
+                    FROM scene_fact_members AS member
+                    JOIN memory_scenes AS ms
+                      ON ms.scene_id = member.scene_id
+                     AND ms.profile_id = member.profile_id
+                    WHERE member.profile_id = ?
+                      AND member.fact_id IN ({placeholders})
+                    """,
+                    (profile_id, *nearest_fact_ids),
+                )
+                hit_rank = {
+                    fact_id: rank
+                    for rank, fact_id in enumerate(nearest_fact_ids)
+                }
+                ranked_scenes: dict[str, tuple[int, MemoryScene]] = {}
+                for row in semantic_rows:
+                    data = dict(row)
+                    rank = hit_rank.get(
+                        str(data.pop("matched_fact_id", "")),
+                        len(hit_rank),
+                    )
+                    scene = self._row_to_scene(data)
+                    previous = ranked_scenes.get(scene.scene_id)
+                    if previous is None or rank < previous[0]:
+                        ranked_scenes[scene.scene_id] = (rank, scene)
+                semantic = [
+                    scene
+                    for _rank, scene in sorted(
+                        ranked_scenes.values(), key=lambda item: item[0]
+                    )
+                ]
+            except Exception:
+                # Migration failure or a disabled vector projection must not
+                # make remember fail. The bounded recent set remains valid.
+                semantic = []
+
+        candidates: list[MemoryScene] = []
+        seen: set[str] = set()
+        for scene in (*semantic, *recent):
+            if scene.scene_id in seen:
+                continue
+            seen.add(scene.scene_id)
+            candidates.append(scene)
+            if len(candidates) >= _MAX_ASSIGNMENT_CANDIDATES:
+                break
+        return candidates
+
     def _load_live_scene_embeddings(
         self,
         profile_id: str,
+        scene_ids: tuple[str, ...],
     ) -> dict[str, list[float] | None]:
         """Load one durable anchor embedding for every live scene.
 
-        ``json_each`` resolves the first still-existing fact in each scene, so
-        scenes whose original anchor was consolidated away can still reuse a
-        surviving member. The result also identifies fully stale scene rows,
-        which are ignored by assignment instead of being re-embedded.
+        The normalized membership projection resolves the first still-existing
+        fact in each scene without expanding every scene's JSON array. Scenes
+        whose original anchor was consolidated away can still reuse a surviving
+        member. Fully stale scene rows are ignored instead of being re-embedded.
         """
+        if not scene_ids:
+            return {}
+        placeholders = ",".join("?" for _ in scene_ids)
         try:
             rows = self._db.execute(
-                """
+                f"""
                 WITH live_scene_facts AS (
                     SELECT
                         ms.scene_id,
-                        ms.theme,
                         af.embedding,
                         ROW_NUMBER() OVER (
                             PARTITION BY ms.scene_id
-                            ORDER BY CAST(member.key AS INTEGER)
+                            ORDER BY member.position
                         ) AS member_rank
                     FROM memory_scenes AS ms
-                    JOIN json_each(ms.fact_ids_json) AS member
+                    JOIN scene_fact_members AS member
+                      ON member.scene_id = ms.scene_id
+                     AND member.profile_id = ms.profile_id
                     JOIN atomic_facts AS af
-                      ON af.fact_id = member.value
+                      ON af.fact_id = member.fact_id
                      AND af.profile_id = ms.profile_id
                     WHERE ms.profile_id = ?
+                      AND ms.scene_id IN ({placeholders})
                 )
                 SELECT scene_id, embedding
                 FROM live_scene_facts
                 WHERE member_rank = 1
                 """,
-                (profile_id,),
+                (profile_id, *scene_ids),
             )
         except Exception:
             return {}

@@ -22,8 +22,88 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def init_reranker(retrieval_config: Any) -> Any:
+    """Build the reranker the config asks for — remote endpoint or local worker.
+
+    v3.8.12 (issue #105). The remote branch is decided HERE, in the parent
+    process, before any subprocess exists. Spawning a worker whose only job
+    would be to forward an HTTP POST costs a fork, a machine-wide PID
+    singleton, and a warmup handshake for nothing — and issue #103 showed that
+    singleton blocking a reranker that was never local in the first place.
+
+    Misconfiguration is reported, never absorbed:
+      * remote backend with no/invalid endpoint -> reranking is DISABLED with
+        an error naming the fix. Quietly loading the English local model
+        instead would recreate the exact silent degradation #105 is about.
+      * endpoint set against a LOCAL backend -> error naming both keys, then
+        the local reranker runs as the backend actually requested. Before
+        3.8.12 this combination was dropped in silence (issue #103).
+
+    Returns the reranker, or None when reranking must stay off.
+    """
+    from superlocalmemory.retrieval.remote_reranker import (
+        RemoteReranker,
+        RemoteRerankerConfigError,
+        is_remote_cross_encoder_backend,
+        validate_remote_reranker_config,
+    )
+    from superlocalmemory.retrieval.reranker import CrossEncoderReranker
+
+    backend = getattr(retrieval_config, "cross_encoder_backend", "") or ""
+    endpoint = getattr(retrieval_config, "cross_encoder_endpoint", "") or ""
+    model = getattr(
+        retrieval_config, "cross_encoder_model",
+        "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    )
+    remote_requested = is_remote_cross_encoder_backend(backend)
+
+    error = validate_remote_reranker_config(backend, endpoint)
+    if error and remote_requested:
+        logger.error(
+            "Remote reranker not started — %s Reranking is DISABLED; recall "
+            "returns fusion-ranked results.", error,
+        )
+        return None
+    if error:
+        logger.error(
+            "Reranker configuration conflict — %s Continuing with the local "
+            "cross-encoder as configured.", error,
+        )
+    elif remote_requested:
+        try:
+            return RemoteReranker(
+                model,
+                endpoint,
+                api_key=getattr(retrieval_config, "cross_encoder_api_key", ""),
+                backend=backend,
+                timeout_seconds=getattr(
+                    retrieval_config, "cross_encoder_timeout_seconds", 15.0,
+                ),
+            )
+        except RemoteRerankerConfigError as exc:
+            logger.error(
+                "Remote reranker not started — %s Reranking is DISABLED.", exc,
+            )
+            return None
+
+    return CrossEncoderReranker(model, backend=backend)
+
+
 def _log_reranker_warmup_status(reranker: Any) -> None:
     """Record non-blocking reranker warmup state without alarming first-run users."""
+    from superlocalmemory.retrieval.remote_reranker import RemoteReranker
+
+    # isinstance, not a duck-typed attribute probe: MagicMock fabricates any
+    # attribute on demand, so ``getattr(reranker, "is_remote", False)`` would
+    # route every mocked reranker in the suite down the remote branch. Same
+    # hazard RetrievalEngine guards against when it checks the TYPE for
+    # ``rerank_with_status``.
+    if isinstance(reranker, RemoteReranker):
+        # The remote reranker logs its own probe outcome (endpoint, model, and
+        # the precise transport error). A second generic line about a local
+        # worker singleton would be noise at best and misleading at worst.
+        reranker.warmup_sync()
+        return
     ready = reranker.warmup_sync(timeout=180)
     if ready:
         logger.info("Cross-encoder reranker warm and ready")
@@ -184,7 +264,10 @@ def init_encoding(
         db, embedder, llm, config.encoding,
     )
     observation_builder = ObservationBuilder(db)
-    scene_builder = SceneBuilder(db, embedder)
+    # V3.2: VectorStore (Phase 1) -- sqlite-vec KNN. Scene assignment also
+    # consumes it, so initialize it before the encoding component is wired.
+    vector_store = _init_vector_store(config)
+    scene_builder = SceneBuilder(db, embedder, vector_store=vector_store)
     entropy_gate = EntropyGate(
         embedder, config.encoding.entropy_threshold,
     )
@@ -195,9 +278,6 @@ def init_encoding(
         sheaf_checker = SheafConsistencyChecker(
             db, config.math.sheaf_contradiction_threshold,
         )
-
-    # V3.2: VectorStore (Phase 1) -- sqlite-vec KNN
-    vector_store = _init_vector_store(config)
 
     # V3.2: AccessLog (Phase 1) -- fact access tracking
     access_log = _init_access_log(db)
@@ -535,7 +615,6 @@ def init_retrieval(
     from superlocalmemory.retrieval.bm25_channel import BM25Channel
     from superlocalmemory.retrieval.entity_channel import EntityGraphChannel
     from superlocalmemory.retrieval.temporal_channel import TemporalChannel
-    from superlocalmemory.retrieval.reranker import CrossEncoderReranker
     from superlocalmemory.retrieval.profile_channel import ProfileChannel
     from superlocalmemory.retrieval.bridge_discovery import BridgeDiscovery
 
@@ -568,10 +647,7 @@ def init_retrieval(
 
     reranker = None
     if config.retrieval.use_cross_encoder:
-        reranker = CrossEncoderReranker(
-            config.retrieval.cross_encoder_model,
-            backend=config.retrieval.cross_encoder_backend,
-        )
+        reranker = init_reranker(config.retrieval)
 
     profile_ch = ProfileChannel(db)
     bridge = BridgeDiscovery(db)

@@ -325,14 +325,28 @@ def _mine_channel_and_coretrieval(
         learn_conn = sqlite3.connect(learning_db, timeout=10)
         learn_conn.row_factory = sqlite3.Row
 
-        channel_rows = learn_conn.execute(
-            "SELECT channel, COUNT(*) AS cnt, "
-            "AVG(signal_value) AS avg_signal "
-            "FROM learning_feedback "
-            "WHERE profile_id = ? "
-            "GROUP BY channel ORDER BY cnt DESC",
-            (profile_id,),
-        ).fetchall()
+        # Isolated from the co-retrieval block below. Until 3.8.11
+        # ``learning_feedback`` had no ``channel`` column, so this query
+        # raised and — sharing one try with co-retrieval — took that mining
+        # down with it. Two pattern types died from one missing column, and
+        # the only trace was a DEBUG line. Each miner now fails alone, loudly.
+        channel_rows = []
+        try:
+            channel_rows = learn_conn.execute(
+                "SELECT channel, COUNT(*) AS cnt, "
+                "AVG(signal_value) AS avg_signal "
+                "FROM learning_feedback "
+                "WHERE profile_id = ? "
+                "GROUP BY channel ORDER BY cnt DESC",
+                (profile_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            logger.warning(
+                "Channel pattern mining skipped — learning_feedback query "
+                "failed (%s). Run 'slm db migrate' to apply M033 if this "
+                "reports a missing 'channel' column. Co-retrieval mining "
+                "continues.", exc,
+            )
 
         for row in channel_rows:
             d = dict(row)
@@ -376,12 +390,18 @@ def _mine_channel_and_coretrieval(
                     confidence=min(1.0, len(coret_rows) / 10),
                 )
                 gen += 1
-        except Exception:
-            pass
+        except sqlite3.Error as exc:
+            logger.warning(
+                "Co-retrieval pattern mining skipped — co_retrieval_edges "
+                "query failed: %s", exc,
+            )
 
         learn_conn.close()
     except Exception as exc:
-        logger.debug("Signal pattern mining failed: %s", exc)
+        # Was DEBUG. A learning subsystem that mines nothing must say so at a
+        # level operators actually see; issue #102 went undiagnosed for weeks
+        # because the only evidence was invisible by default.
+        logger.warning("Signal pattern mining failed: %s", exc)
     return gen
 
 

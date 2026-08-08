@@ -124,16 +124,27 @@ class TestSessionInitTool:
             "what is Q-CLAW", limit=10, fast=None,
         )
 
+    @patch("superlocalmemory.mcp.tools_active._canonical_feedback_count")
     @patch("superlocalmemory.mcp.tools_active._emit_event")
     @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_returns_learning_status(
         self, mock_pool_recall, MockRulesEngine, mock_register, mock_emit,
+        mock_canonical_count,
     ):
-        engine = _make_engine_mock(feedback_count=75)
+        """The learning block must quote the canonical signal count.
+
+        issue #106: this used to report ``feedback_records`` from memory.db,
+        a table no phase counter reads, so session_init and report_feedback
+        published two different signal totals for one profile in one session.
+        The AdaptiveLearner count is deliberately set to a different value
+        here — if it ever reaches the response, that regression is back.
+        """
+        engine = _make_engine_mock(feedback_count=4096)
         MockRulesEngine.return_value = _make_rules_mock()
         mock_pool_recall.return_value = _make_response(0)
+        mock_canonical_count.return_value = 75
 
         session_init, get_engine = _get_session_init_tool()
         get_engine.return_value = engine

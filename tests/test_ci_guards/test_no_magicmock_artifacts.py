@@ -45,13 +45,23 @@ def test_no_magicmock_files_tracked_or_untracked() -> None:
     # to avoid scanning node_modules/.venv/build (those subdirs have their
     # own .gitignore entries and will not contain <MagicMock*> files from
     # this bug class).
-    leaked = [p.name for p in REPO_ROOT.glob("<MagicMock*")]
+    # v3.8.11: the original guard matched only the angle-bracket FILE shape
+    # ("<MagicMock id='...'>"). The same bug class recurred as a DIRECTORY
+    # named "MagicMock/mock/<id>/" — produced when a mock-derived path reaches
+    # mkdir(parents=True) rather than os.open. That shape has no angle
+    # brackets, so both this glob and the .gitignore entry missed it entirely
+    # and the leak went unnoticed. Match both shapes, files and directories.
+    leaked = sorted(
+        p.name for p in REPO_ROOT.glob("*MagicMock*")
+    )
 
     assert leaked == [], (
-        f"Stray MagicMock artifact files found in repo root ({REPO_ROOT}): "
+        f"Stray MagicMock artifacts found in repo root ({REPO_ROOT}): "
         f"{leaked}. "
-        "A test is patching pathlib.Path.home with an unconfigured MagicMock "
-        "and production code is writing to str(mock) as a file path. "
+        "A test is patching a path helper (e.g. pathlib.Path.home) with an "
+        "unconfigured MagicMock, and production code is writing to the "
+        "str()-coerced mock — via os.open (file shape '<MagicMock id=...>') "
+        "or mkdir (directory shape 'MagicMock/mock/<id>'). "
         "Fix: use a real tmp_path/fake_home in the patch so writes go to "
         "a temp directory (see WP-16 fix in test_engine_recall_path.py)."
     )

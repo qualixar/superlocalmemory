@@ -23,6 +23,28 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_OPAQUE_UNAVAILABLE = "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later."
+
+
+def daemon_unavailable_error() -> str:
+    """Return a one-line, *diagnosed* daemon-unavailable message.
+
+    The opaque wording this replaces described a stopped daemon, a recycled
+    PID, an unreachable port and an identity mismatch identically (issue #104).
+    Diagnosis is best effort: if it fails for any reason the caller still gets
+    the original, retryable message rather than an exception.
+    """
+    try:
+        from superlocalmemory.cli.daemon import describe_daemon_unavailability
+
+        diagnosis = describe_daemon_unavailability()
+        return (
+            f"DAEMON_UNAVAILABLE ({diagnosis['reason']}): "
+            f"{diagnosis['message']} {diagnosis['hint']}"
+        )
+    except Exception:  # noqa: BLE001 - diagnosis must never mask the failure
+        return _OPAQUE_UNAVAILABLE
+
 
 class DaemonPoolProxy:
     """:class:`WorkerPool`-shaped facade that talks to the daemon over HTTP.
@@ -52,7 +74,7 @@ class DaemonPoolProxy:
             "ok": False,
             "code": "DAEMON_UNAVAILABLE",
             "retryable": True,
-            "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+            "error": daemon_unavailable_error(),
         }
 
     def recall(

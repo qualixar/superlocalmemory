@@ -152,7 +152,65 @@ All settings live in:
 
 > **Recall result limit:** The default is 20 results per query (CLI: `slm recall --limit N`; MCP `recall` tool: `limit` parameter). There is no config file key for this — override it per-call with `--limit N`.
 
+## Remote embedding and rerank endpoints
 
+Both halves of the retrieval stack can be served by a remote OpenAI-compatible
+endpoint. This is how a non-English deployment replaces the bundled models: the
+default reranker, `cross-encoder/ms-marco-MiniLM-L-12-v2`, is English-only and
+cannot score a Chinese, Japanese, or Arabic corpus meaningfully.
+
+| | Config block | Keys | Route | Since |
+|---|---|---|---|---|
+| Embeddings | `embedding` | `provider: "openai"`, `api_endpoint`, `model_name`, `dimension` | `POST /v1/embeddings` | v3.4.24 (#16) |
+| Reranking | `retrieval` | `cross_encoder_backend: "openai"`, `cross_encoder_endpoint`, `cross_encoder_model` | `POST /v1/rerank` | v3.8.12 (#105) |
+
+```json
+{
+  "embedding": {
+    "provider": "openai",
+    "api_endpoint": "https://models.example.test/v1/embeddings",
+    "model_name": "Qwen3-Embedding",
+    "dimension": 1024
+  },
+  "retrieval": {
+    "use_cross_encoder": true,
+    "cross_encoder_backend": "openai",
+    "cross_encoder_endpoint": "https://models.example.test/v1/rerank",
+    "cross_encoder_model": "/root/model/reranker.gguf",
+    "cross_encoder_timeout_seconds": 15.0
+  }
+}
+```
+
+### Reranker settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `use_cross_encoder` | `true` | Master switch for reranking |
+| `cross_encoder_backend` | `""` | `""` / `"onnx"` run locally; `"openai"` / `"remote"` use `cross_encoder_endpoint` |
+| `cross_encoder_endpoint` | `""` | Full or base rerank URL. `/rerank` is appended when absent. HTTPS is required off-host; HTTP is loopback-only |
+| `cross_encoder_model` | `cross-encoder/ms-marco-MiniLM-L-12-v2` | Local HF id, or the model name the endpoint serves |
+| `cross_encoder_api_key` | `""` | Optional bearer token. Prefer `SLM_CROSS_ENCODER_API_KEY`; persisted config is owner-readable (`0600`) |
+| `cross_encoder_timeout_seconds` | `15.0` | Per-request read budget for the remote endpoint |
+
+Works with any Cohere-shaped `/v1/rerank` service — llama-server,
+text-embeddings-inference, Infinity, vLLM — serving a multilingual reranker
+such as `BAAI/bge-reranker-v2-m3`.
+
+**Behaviour.** The remote path runs in the parent process: no reranker
+subprocess, no machine-wide worker lock, and no 130 MB local model download
+(`slm setup` and `slm doctor` both stop requiring it). If the endpoint is
+unreachable, slow, or returns an unrecognised payload, SLM logs an error and
+returns fusion-ranked results **without** reranking — it does not silently
+substitute the local English model. Setting `cross_encoder_endpoint` while
+`cross_encoder_backend` is a local value is reported as a configuration error
+rather than ignored (issue #103).
+
+**Privacy boundary.** Remote reranking sends the recall query and candidate
+memory text to the configured service. SLM removes recognized secrets and PII
+before transmission, rejects URL query strings, and requires HTTPS except for
+loopback endpoints. Configure only a service you trust; keep reranking local
+when memory text must not leave the machine.
 
 ## Environment Variables
 
@@ -163,6 +221,7 @@ These override config file settings when set:
 | `SLM_MODE` | Override operating mode |
 | `SLM_PROFILE` | Override active profile |
 | `SLM_DATA_DIR` | Override data directory (default: `~/.superlocalmemory/`) |
+| `SLM_CROSS_ENCODER_API_KEY` | Runtime-only bearer token for a remote rerank endpoint; overrides any owner-only config value |
 | `OPENAI_API_KEY` | OpenAI API key for Mode C |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Mode C |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key for Mode C |

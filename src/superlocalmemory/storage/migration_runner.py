@@ -145,6 +145,12 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M037_manifest_hmac_version as _M037,
 )
+from superlocalmemory.storage.migrations import (
+    M038_learning_feedback_channel as _M038,
+)
+from superlocalmemory.storage.migrations import (
+    M039_scene_fact_members as _M039,
+)
 from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
@@ -215,6 +221,11 @@ MIGRATIONS: list[Migration] = [
               dependencies=(_M033.NAME,)),
     Migration(name=_M037.NAME, db_target="memory", ddl=_M037.DDL,
               dependencies=(_M033.NAME, _M035.NAME)),
+    # Main-line M033 is renumbered in V4 because V4 already owns M033-M037.
+    # It repairs the legacy learning_feedback schema before any reader mines
+    # channel patterns.
+    Migration(name=_M038.NAME, db_target="learning", ddl=_M038.DDL,
+              dependencies=(_M003.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 
@@ -275,6 +286,9 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     Migration(name=_M029.NAME, db_target="memory", ddl=_M029.DDL),
     # M030 bounds Entity Explorer pagination and profile-summary ranking.
     Migration(name=_M030.NAME, db_target="memory", ddl=_M030.DDL),
+    # Main-line M034 is renumbered in V4. It must remain deferred because its
+    # backfill joins engine-bootstrapped memory_scenes and atomic_facts.
+    Migration(name=_M039.NAME, db_target="memory", ddl=_M039.DDL),
 ]
 
 
@@ -419,25 +433,6 @@ def apply_all(
             except sqlite3.Error:  # pragma: no cover
                 pass
 
-    # Monotonic schema_version stamp: advance only on a zero-failure run so
-    # the stored version accurately reflects what was fully applied.
-    if not failed and not dry_run:
-        for _stamp_db in (learning_db, memory_db):
-            try:
-                _stamp_conn = _connect(_stamp_db)
-                try:
-                    _ensure_schema_version_table(_stamp_conn)
-                    _write_schema_version(_stamp_conn, SUPPORTED_SCHEMA_VERSION)
-                finally:
-                    try:
-                        _stamp_conn.close()
-                    except sqlite3.Error:  # pragma: no cover
-                        pass
-            except sqlite3.Error as exc:  # pragma: no cover — best-effort stamp
-                logger.warning(
-                    "schema_version stamp failed for %s: %s", _stamp_db, exc
-                )
-
     return {
         "applied": applied,
         "skipped": skipped,
@@ -527,6 +522,46 @@ def apply_deferred(
                 conn.close()
             except sqlite3.Error:  # pragma: no cover
                 pass
+
+    # The version ceiling is a completion certificate, not an intent marker.
+    # M039 is deferred until engine-owned tables exist, so apply_all must not
+    # stamp version 39. Stamp both stores only after every eager and deferred
+    # migration is recorded complete on its declared target.
+    if not failed and not dry_run:
+        logs = {
+            "learning": _read_log(learning_db),
+            "memory": _read_log(memory_db),
+        }
+        incomplete = [
+            migration.name
+            for migration in (*MIGRATIONS, *DEFERRED_MIGRATIONS)
+            if logs[migration.db_target].get(migration.name) != "complete"
+        ]
+        if incomplete:
+            failed.append("schema_version_stamp")
+            details["schema_version_stamp"] = (
+                "not stamped; incomplete migrations: " + ", ".join(incomplete)
+            )
+        else:
+            for _stamp_db in (learning_db, memory_db):
+                try:
+                    _stamp_conn = _connect(_stamp_db)
+                    try:
+                        _ensure_schema_version_table(_stamp_conn)
+                        _write_schema_version(
+                            _stamp_conn, SUPPORTED_SCHEMA_VERSION,
+                        )
+                    finally:
+                        try:
+                            _stamp_conn.close()
+                        except sqlite3.Error:  # pragma: no cover
+                            pass
+                except sqlite3.Error as exc:  # pragma: no cover
+                    failed.append("schema_version_stamp")
+                    details["schema_version_stamp"] = (
+                        f"cannot stamp {_stamp_db}: {exc}"
+                    )
+                    break
 
     return {
         "applied": applied,

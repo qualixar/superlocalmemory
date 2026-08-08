@@ -28,6 +28,8 @@ from . import (
     M020_model_state_integrity,
     M029_behavioral_history_indexes,
     M030_entity_explorer_indexes,
+    M038_learning_feedback_channel,
+    M039_scene_fact_members,
 )
 
 # ---------------------------------------------------------------------------
@@ -81,6 +83,8 @@ __all__ = (
     "M020_model_state_integrity",
     "M029_behavioral_history_indexes",
     "M030_entity_explorer_indexes",
+    "M038_learning_feedback_channel",
+    "M039_scene_fact_members",
     # Legacy re-exports (backward compat):
     "CURRENT_SCHEMA_VERSION",
     "get_schema_version",

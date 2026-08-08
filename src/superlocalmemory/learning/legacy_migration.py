@@ -41,6 +41,20 @@ MIGRATION_NAME = "LEG001_feedback_to_signals"
 _COPY_BATCH_SIZE = 500
 
 
+def legacy_query_id(feedback_row_id: int | str) -> str:
+    """Return the canonical ``learning_signals.query_id`` for a feedback row.
+
+    One explicit-feedback event has exactly ONE canonical identity, whichever
+    path writes it: this batch migration, or ``FeedbackCollector`` writing the
+    canonical pair eagerly at feedback time. Both derive the id from the
+    ``learning_feedback`` row id through this function, which is what lets the
+    migration recognise — and skip — rows already carried forward. Without a
+    shared identity the two writers would double-count the same event into the
+    store that gates the ranking phase.
+    """
+    return f"legacy:{feedback_row_id}"
+
+
 def migrate_legacy_feedback(
     learning_db: Path,
     *,
@@ -156,10 +170,18 @@ def _copy_rows(conn: sqlite3.Connection) -> tuple[int, int]:
 
     Returns ``(copied, failed)``. Does not raise. Commits per batch so
     a later failure still leaves the earlier batches durable.
+
+    Rows whose canonical ``query_id`` is already present in
+    ``learning_signals`` are skipped rather than copied a second time.
+    ``FeedbackCollector`` writes the canonical pair at feedback time, so on
+    any install where this migration has not yet been sentinel-marked the
+    newest rows are already carried forward; copying them again would
+    inflate the very counter that gates the ranking phase.
     """
     copied = 0
     failed = 0
     offset = 0
+    already_present = _existing_legacy_query_ids(conn)
     while True:
         try:
             batch = conn.execute(
@@ -179,6 +201,8 @@ def _copy_rows(conn: sqlite3.Connection) -> tuple[int, int]:
         try:
             conn.execute("BEGIN IMMEDIATE")
             for row in batch:
+                if legacy_query_id(row["id"]) in already_present:
+                    continue
                 try:
                     _copy_single_row(conn, row)
                     copied += 1
@@ -197,6 +221,23 @@ def _copy_rows(conn: sqlite3.Connection) -> tuple[int, int]:
         offset += len(batch)
 
     return copied, failed
+
+
+def _existing_legacy_query_ids(conn: sqlite3.Connection) -> set[str]:
+    """Return every ``legacy:`` query_id already present in learning_signals.
+
+    Read once up front: a per-row EXISTS probe over a signals table that grows
+    to tens of thousands of rows turns an O(n) copy into O(n*m).
+    """
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT query_id FROM learning_signals "
+            "WHERE query_id LIKE 'legacy:%'",
+        ).fetchall()
+    except sqlite3.Error as exc:
+        logger.warning("legacy migration: dedupe probe failed: %s", exc)
+        return set()
+    return {str(row[0]) for row in rows}
 
 
 def _copy_single_row(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
@@ -218,7 +259,7 @@ def _copy_single_row(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
                      datetime.now(timezone.utc).isoformat(timespec="seconds"))
     profile_id = str(row["profile_id"] or "default")
     fact_id = str(row["fact_id"] or "")
-    legacy_query_id = f"legacy:{row['id']}"
+    query_id = legacy_query_id(row["id"])
 
     # Insert the signal row. ``signal_type='legacy_feedback'`` marks it
     # clearly so consumers (dashboard, labeler) can treat it correctly.
@@ -229,7 +270,7 @@ def _copy_single_row(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         "VALUES (?, '', ?, 'legacy_feedback', ?, ?, ?, ?, 0, '{}', NULL)",
         (profile_id, fact_id,
          float(row["signal_value"] or 1.0),
-         created_at, legacy_query_id, query_hash),
+         created_at, query_id, query_hash),
     )
     sid = cur.lastrowid
 
@@ -241,7 +282,7 @@ def _copy_single_row(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         "(profile_id, query_id, fact_id, features_json, label, created_at, "
         " signal_id, is_synthetic) "
         "VALUES (?, ?, ?, '{}', 0.0, ?, ?, 1)",
-        (profile_id, legacy_query_id, fact_id, created_at, sid),
+        (profile_id, query_id, fact_id, created_at, sid),
     )
 
 
@@ -274,4 +315,4 @@ def _record_migration(
         logger.warning("legacy migration: log record failed: %s", exc)
 
 
-__all__ = ("migrate_legacy_feedback", "MIGRATION_NAME")
+__all__ = ("migrate_legacy_feedback", "MIGRATION_NAME", "legacy_query_id")

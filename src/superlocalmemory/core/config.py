@@ -267,7 +267,42 @@ class RetrievalConfig:
     # relevant facts before reranking. See bench-v342-locomo.md.
     use_cross_encoder: bool = True
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
-    cross_encoder_backend: str = ""  # "" = PyTorch (~500MB stable), "onnx" = ONNX (leaks on ARM64 CoreML)
+    # "" = PyTorch (~500MB stable), "onnx" = ONNX (leaks on ARM64 CoreML),
+    # "openai"/"remote" = v3.8.12 (issue #105) OpenAI-compatible /v1/rerank
+    # endpoint (llama-server, TEI, Infinity, vLLM, Cohere-shaped services).
+    cross_encoder_backend: str = ""
+
+    # v3.8.12 (issue #105): remote reranker endpoint. The bundled default
+    # cross-encoder (ms-marco-MiniLM-L-12-v2) is ENGLISH-ONLY, so non-English
+    # deployments scored their own language with a model that cannot read it.
+    # Pointing this at a multilingual reranker (bge-reranker-v2-m3, a Qwen
+    # reranker, …) is the same escape hatch remote embeddings got in v3.4.24.
+    #
+    # This key was accepted-and-ignored before 3.8.12 (issue #103): it was not
+    # a dataclass field, so ``SLMConfig.load`` filtered it out without a word.
+    # It is now read, validated, and — when it disagrees with the backend —
+    # reported as a loud configuration error instead of nothing at all.
+    cross_encoder_endpoint: str = ""
+    # Optional bearer token. SLM_CROSS_ENCODER_API_KEY takes precedence.
+    # When persisted for backward compatibility, config.json is atomically
+    # forced to owner-only mode 0600 by save().
+    cross_encoder_api_key: str = ""
+    # Per-request read budget for the remote reranker. Recall is interactive,
+    # so this stays tight: a slow reranker degrades to fusion scores rather
+    # than holding the recall open.
+    cross_encoder_timeout_seconds: float = 15.0
+
+    @property
+    def is_remote_cross_encoder(self) -> bool:
+        """True when reranking is served by a remote HTTP endpoint."""
+        from superlocalmemory.retrieval.remote_reranker import (
+            is_remote_cross_encoder_backend,
+        )
+
+        return (
+            is_remote_cross_encoder_backend(self.cross_encoder_backend)
+            and bool(self.cross_encoder_endpoint)
+        )
 
     # Agentic (Mode C only)
     agentic_max_rounds: int = 3
@@ -1574,9 +1609,27 @@ class SLMConfig:
         # Atomic write: a crash mid-write must NOT leave a truncated/corrupt
         # config.json (which would make every subsequent `slm` call fail to load).
         import os as _os
-        _tmp = path.with_suffix(path.suffix + ".tmp")
-        _tmp.write_text(json.dumps(data, indent=2))
-        _os.replace(_tmp, path)
+        import tempfile as _tempfile
+
+        _fd, _tmp_name = _tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+        )
+        _tmp = Path(_tmp_name)
+        try:
+            with _os.fdopen(_fd, "w", encoding="utf-8") as _handle:
+                json.dump(data, _handle, indent=2)
+                _handle.write("\n")
+                _handle.flush()
+                _os.fsync(_handle.fileno())
+            _os.chmod(_tmp, 0o600)
+            _os.replace(_tmp, path)
+            _os.chmod(path, 0o600)
+        except BaseException:
+            try:
+                _tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def provider_presets() -> dict[str, dict[str, str]]:

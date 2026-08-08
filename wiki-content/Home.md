@@ -14,7 +14,7 @@ CozoDB graph and LanceDB vector projections, a cache/compression module, and
 
 ## What changed in V4
 
-V4 keeps the multi-channel retrieval and local-first store from the V3 research line, and productizes governed writes, **SLM-Mesh** peer coordination, multi-scope profiles, cache/compress, Entity Explorer and skill evolution, Modes A/B/C, and GDPR-oriented retention/audit controls. Operating mode is not an EU AI Act compliance certificate — deployment context decides legal duties.
+V4 keeps the multi-channel retrieval and local-first store from the V3 research line, and productizes governed writes, **SLM-Mesh** peer coordination, multi-scope profiles, cache/compress, Entity Explorer and skill evolution, Modes A/B/C, and GDPR-oriented retention/audit controls. Operating mode is not legal certification under the EU AI Act — deployment context decides legal duties.
 
 ## The product in one view
 

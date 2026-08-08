@@ -50,18 +50,16 @@ def test_mcp_remember_fails_closed_without_worker_or_writable_sqlite(
     pool = _daemon_proxy.choose_pool()
     rejected = pool.store("the owned daemon is down")
 
-    assert rejected == {
-        "ok": False,
-        "code": "DAEMON_UNAVAILABLE",
-        "retryable": True,
-        "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
-    }
+    assert rejected["ok"] is False
+    assert rejected["code"] == "DAEMON_UNAVAILABLE"
+    assert rejected["retryable"] is True
+    # Issue #104: the message must name the specific cause, not just the code.
+    assert rejected["error"].startswith("DAEMON_UNAVAILABLE (no_daemon):")
+    assert "slm start" in rejected["error"]
 
     result = asyncio.run(_remember_tool()("the owned daemon is down"))
 
-    assert result == {
-        "success": False,
-        "code": "DAEMON_UNAVAILABLE",
-        "retryable": True,
-        "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
-    }
+    assert result["success"] is False
+    assert result["code"] == "DAEMON_UNAVAILABLE"
+    assert result["retryable"] is True
+    assert result["error"].startswith("DAEMON_UNAVAILABLE (no_daemon):")

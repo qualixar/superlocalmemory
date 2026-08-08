@@ -39,15 +39,14 @@ _SOCKET_NAMES: tuple[str, ...] = ("hook_daemon.sock",)
 
 # SLM process fingerprints for command-line checks.
 # Covers the main daemon, packaged CLI entry points, and all named workers.
-_SLM_CMD_MARKERS: tuple[str, ...] = (
+_SLM_EXECUTABLE_NAMES: tuple[str, ...] = (
+    "slm",
     "superlocalmemory",
-    "unified_daemon",
-    "remember_runtime",
-    "reranker_worker",
-    "embedding_worker",
-    "recall_worker",
-    "slm mcp",
-    "/slm",
+    "unified_daemon.py",
+    "remember_runtime.py",
+    "reranker_worker.py",
+    "embedding_worker.py",
+    "recall_worker.py",
 )
 
 
@@ -94,12 +93,66 @@ def _pid_cmdline(pid: int) -> str:
         return ""
 
 
+def _pid_cmdline_parts(pid: int) -> list[str]:
+    """Return argv components for *pid*, or an empty list on failure."""
+    try:
+        import psutil
+        return [str(part) for part in psutil.Process(pid).cmdline()]
+    except Exception:
+        return []
+
+
 def _pid_is_slm(pid: int) -> bool:
     """Return True iff *pid* is alive AND its command line looks like an SLM process."""
     if not _is_pid_alive(pid):
         return False
-    cmd = _pid_cmdline(pid).lower()
-    return any(marker in cmd for marker in _SLM_CMD_MARKERS)
+    argv = _pid_cmdline_parts(pid)
+    if not argv:
+        return False
+    executable = Path(argv[0]).name.lower()
+    if executable in _SLM_EXECUTABLE_NAMES:
+        return True
+    if not (executable.startswith("python") or executable.startswith("pypy")):
+        return False
+
+    # Parse interpreter arguments in order.  Only a leading ``-m`` module or
+    # the first script operand can establish identity; anything after ``-c``
+    # or a script operand belongs to the executed program, not the interpreter.
+    index = 1
+    options_with_values = {"-W", "-X", "--check-hash-based-pycs"}
+    while index < len(argv):
+        part = argv[index]
+        if part == "--":
+            if index + 1 >= len(argv):
+                return False
+            return Path(argv[index + 1]).name.lower() in _SLM_EXECUTABLE_NAMES
+        if part == "-":
+            return False
+        if part == "-m":
+            if index + 1 >= len(argv):
+                return False
+            module = argv[index + 1].lower()
+            return module == "superlocalmemory" or module.startswith(
+                "superlocalmemory."
+            )
+        if part.startswith("-m") and len(part) > 2:
+            module = part[2:].lower()
+            return module == "superlocalmemory" or module.startswith(
+                "superlocalmemory."
+            )
+        if part.startswith("-c"):
+            return False
+        if part in options_with_values:
+            index += 2
+            continue
+        if part.startswith("-W") or part.startswith("-X"):
+            index += 1
+            continue
+        if part.startswith("-"):
+            index += 1
+            continue
+        return Path(part).name.lower() in _SLM_EXECUTABLE_NAMES
+    return False
 
 
 def _pid_matches_claimed_at(pid: int, claimed_at_ms: int) -> bool:

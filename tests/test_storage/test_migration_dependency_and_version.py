@@ -26,6 +26,49 @@ from superlocalmemory.storage._schema_version import (
 )
 
 
+def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
+    """Main's M033/M034 invariants must not collide with V4's M033-M037."""
+    eager_names = [migration.name for migration in mr.MIGRATIONS]
+    deferred_names = [migration.name for migration in mr.DEFERRED_MIGRATIONS]
+    all_names = eager_names + deferred_names
+
+    assert "M038_learning_feedback_channel" in eager_names
+    assert "M039_scene_fact_members" in deferred_names
+    assert len(all_names) == len(set(all_names))
+    targets = {
+        migration.name: migration.db_target
+        for migration in (*mr.MIGRATIONS, *mr.DEFERRED_MIGRATIONS)
+    }
+    assert targets["M033_projection_transactions"] == "memory"
+    assert targets["M038_learning_feedback_channel"] == "learning"
+    assert SUPPORTED_SCHEMA_VERSION == 39
+
+
+def test_schema_39_is_stamped_only_after_m039_completes(tmp_path: Path) -> None:
+    """A version-39 marker must prove the normalized scene schema exists."""
+    from superlocalmemory.storage import schema
+
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    with sqlite3.connect(memory_db) as conn:
+        schema.create_all_tables(conn)
+
+    eager = mr.apply_all(learning_db, memory_db)
+    assert eager["failed"] == []
+    assert read_schema_version(learning_db) < SUPPORTED_SCHEMA_VERSION
+    assert read_schema_version(memory_db) < SUPPORTED_SCHEMA_VERSION
+
+    deferred = mr.apply_deferred(learning_db, memory_db)
+    assert deferred["failed"] == []
+    assert read_schema_version(learning_db) == SUPPORTED_SCHEMA_VERSION
+    assert read_schema_version(memory_db) == SUPPORTED_SCHEMA_VERSION
+    with sqlite3.connect(memory_db) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='scene_fact_members'"
+        ).fetchone() == (1,)
+
+
 def test_apply_deferred_refuses_newer_schema(tmp_path: Path) -> None:
     learning_db = tmp_path / "learning.db"
     memory_db = tmp_path / "memory.db"

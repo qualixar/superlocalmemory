@@ -164,6 +164,20 @@ def _embedding_is_remote(config: Any) -> bool:
         return False
 
 
+def _reranker_is_remote(config: Any) -> bool:
+    """True when reranking is served by a remote endpoint (v3.8.12, #105).
+
+    Same shape as ``_embedding_is_remote``: conservative False on any
+    import/attribute error so a local reranker is still probed.
+    """
+    try:
+        from superlocalmemory.cli.setup_wizard import _reranker_is_remote as _r
+
+        return bool(_r(config))
+    except Exception:
+        return False
+
+
 # --------------------------------------------------------------------------
 # Individual probes — each returns a Component (never raises)
 # --------------------------------------------------------------------------
@@ -259,6 +273,17 @@ def probe_reranker_model(config: Any = None) -> Component:
             if config is not None else True
     except Exception:
         enabled = True
+    if enabled and config is not None and _reranker_is_remote(config):
+        # v3.8.12 (#105): a remote /v1/rerank endpoint supplies the scores, so
+        # the local 130MB English cross-encoder is neither downloaded nor used.
+        # Reporting it MISSING would push the operator to "fix" a component the
+        # configured runtime never touches.
+        return Component(
+            key="reranker_model", label="Reranker model",
+            category=CATEGORY_RECOMMENDED, status=STATUS_OK,
+            detail="remote rerank endpoint (no local model required)",
+            last_checked=time.time(),
+        )
     comp = _probe_hf_model(
         "reranker_model", "Reranker model", _RERANKER_MODEL,
         category=CATEGORY_RECOMMENDED if enabled else CATEGORY_OPTIONAL,

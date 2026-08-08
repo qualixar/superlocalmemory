@@ -553,6 +553,53 @@ class TestMeshLockExpiry:
 class TestPidReuseSafety:
     """T6 — PID-reuse: stale pid file whose PID now belongs to an unrelated live process."""
 
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["python", "job.py", "/tmp/superlocalmemory"],
+            ["python", "job.py", "/tmp/unified_daemon.py"],
+            ["python", "job.py", "-m", "superlocalmemory"],
+            ["python", "-c", "print(1)", "-m", "superlocalmemory"],
+            ["python", "-cprint(1)", "-m", "superlocalmemory"],
+            ["python", "--", "-m", "superlocalmemory"],
+            ["python", "-", "-m", "superlocalmemory"],
+            ["python", "-m", "superlocalmemory_evil"],
+        ],
+    )
+    def test_trailing_or_lookalike_argv_never_claims_slm_identity(
+        self, argv,
+    ):
+        from superlocalmemory.infra import self_heal
+
+        with patch.object(self_heal, "_is_pid_alive", return_value=True), patch.object(
+            self_heal, "_pid_cmdline_parts", return_value=argv,
+        ):
+            assert self_heal._pid_is_slm(12345) is False
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["/opt/bin/slm", "mcp"],
+            ["python", "-m", "superlocalmemory.mcp.server"],
+            ["python", "-msuperlocalmemory.mcp.server"],
+            [
+                "python", "--check-hash-based-pycs", "always",
+                "-m", "superlocalmemory",
+            ],
+            ["python", "--", "/opt/slm/unified_daemon.py", "--port", "8765"],
+            ["python", "-u", "/opt/slm/unified_daemon.py", "--port", "8765"],
+        ],
+    )
+    def test_executable_module_or_script_operand_claims_slm_identity(
+        self, argv,
+    ):
+        from superlocalmemory.infra import self_heal
+
+        with patch.object(self_heal, "_is_pid_alive", return_value=True), patch.object(
+            self_heal, "_pid_cmdline_parts", return_value=argv,
+        ):
+            assert self_heal._pid_is_slm(12345) is True
+
     def test_plain_pid_file_with_reused_non_slm_pid_removed_not_killed(self, tmp_path):
         """A plain PID file pointing to a live but non-SLM process is treated as stale.
 

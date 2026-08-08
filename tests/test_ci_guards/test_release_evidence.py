@@ -166,9 +166,9 @@ def _write_python_artifacts(
     sdist_sources: dict[str, bytes],
     npm_sources: dict[str, bytes],
 ) -> tuple[Path, Path, Path]:
-    wheel = root / "superlocalmemory-3.8.10-py3-none-any.whl"
-    sdist = root / "superlocalmemory-3.8.10.tar.gz"
-    npm = root / "superlocalmemory-3.8.10.tgz"
+    wheel = root / "superlocalmemory-3.8.11-py3-none-any.whl"
+    sdist = root / "superlocalmemory-3.8.11.tar.gz"
+    npm = root / "superlocalmemory-3.8.11.tgz"
     root.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(wheel, "w") as archive:
@@ -177,7 +177,7 @@ def _write_python_artifacts(
     with tarfile.open(sdist, "w:gz") as archive:
         for path, payload in sdist_sources.items():
             info = tarfile.TarInfo(
-                f"superlocalmemory-3.8.10/src/superlocalmemory/{path}"
+                f"superlocalmemory-3.8.11/src/superlocalmemory/{path}"
             )
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
@@ -195,7 +195,7 @@ def test_python_source_parity_accepts_identical_release_archives(
     tmp_path: Path,
 ) -> None:
     sources = {
-        "__init__.py": b'__version__ = "3.8.10"\n',
+        "__init__.py": b'__version__ = "3.8.11"\n',
         "core/runtime.py": b"READY = True\n",
     }
     wheel, sdist, npm = _write_python_artifacts(
@@ -211,7 +211,7 @@ def test_python_source_parity_accepts_identical_release_archives(
 def test_python_source_parity_rejects_stale_wheel_modules(
     tmp_path: Path,
 ) -> None:
-    sources = {"__init__.py": b'__version__ = "3.8.10"\n'}
+    sources = {"__init__.py": b'__version__ = "3.8.11"\n'}
     wheel_sources = {**sources, "cli/deleted_module.py": b"STALE = True\n"}
     wheel, sdist, npm = _write_python_artifacts(
         tmp_path,

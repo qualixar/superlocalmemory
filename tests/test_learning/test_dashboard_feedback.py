@@ -19,6 +19,7 @@ the feature was entirely dead). These tests lock the method's contract:
 from __future__ import annotations
 
 import sqlite3
+import stat
 from pathlib import Path
 
 import pytest
@@ -88,7 +89,25 @@ def test_query_is_hashed_not_stored_raw(collector: FeedbackCollector) -> None:
     row = _rows(collector)[0]
     assert row["query_hash"] is not None
     assert secret not in (row["query_hash"] or "")
-    assert len(row["query_hash"]) == 16  # SHA-256[:16]
+    assert len(row["query_hash"]) == 16
+
+
+def test_query_hash_is_keyed_per_install_and_key_is_owner_only(
+    tmp_path: Path,
+) -> None:
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    one = FeedbackCollector(first_dir / "learning.db")
+    one_again = FeedbackCollector(first_dir / "other-learning.db")
+    two = FeedbackCollector(second_dir / "learning.db")
+
+    assert one._query_hash_key == one_again._query_hash_key
+    assert one._query_hash_key != two._query_hash_key
+    assert stat.S_IMODE(
+        (first_dir / ".feedback-hash-key").stat().st_mode
+    ) == 0o600
 
 
 def test_empty_query_yields_null_hash(collector: FeedbackCollector) -> None:

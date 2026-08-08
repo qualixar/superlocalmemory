@@ -118,3 +118,69 @@ def test_daemon_fallback_includes_exception_text(caplog) -> None:
     assert sentinel in all_messages, (
         f"Exception text '{sentinel}' missing from log output: {all_messages!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# PR #101 — null / missing retrieval_time_ms
+#
+# The original PR shipped a CLI guard and a daemon-side contract fix, but only
+# covered the CLI half: reverting the daemon change left every test green. The
+# daemon contract now has a DIRECT test that calls _recall_keyword_fallback
+# rather than mocking daemon_request over the top of it.
+# ---------------------------------------------------------------------------
+
+
+def test_keyword_fallback_response_includes_retrieval_time_ms() -> None:
+    """The degraded lexical path must satisfy the recall response contract.
+
+    This calls _recall_keyword_fallback DIRECTLY. Mocking ``daemon_request``
+    instead (as the original PR did) never reaches this function, so the
+    contract fix it was meant to protect had no coverage at all.
+    """
+    from superlocalmemory.server.unified_daemon import _recall_keyword_fallback
+
+    class _Fact:
+        fact_id = "f1"
+        content = "fallback content"
+        confidence = 0.5
+        created_at = "2026-01-01T00:00:00Z"
+
+    class _Engine:
+        def search_facts(self, *a, **kw):
+            return [_Fact()]
+
+        def __getattr__(self, name):
+            def _any(*a, **kw):
+                return []
+            return _any
+
+    result = _recall_keyword_fallback(_Engine(), "query", 5)
+
+    assert "retrieval_time_ms" in result, (
+        "keyword fallback must return retrieval_time_ms — every other recall "
+        "path does, and clients format it unconditionally"
+    )
+    # Must be formattable with a numeric format spec (the original crash).
+    assert f"{result['retrieval_time_ms']:.0f}" is not None
+
+
+def test_cmd_recall_survives_present_but_null_retrieval_time() -> None:
+    """A PRESENT key whose value is None must not crash the formatter.
+
+    dict.get(key, default) ignores the default when the key exists with value
+    None, so f"{None:.0f}" raises TypeError. Guarded with ``or 0``.
+    """
+    from superlocalmemory.cli.commands import cmd_recall
+
+    with (
+        patch("superlocalmemory.cli.daemon.is_daemon_running", return_value=True),
+        patch("superlocalmemory.cli.daemon.ensure_daemon", return_value=True),
+        patch(
+            "superlocalmemory.cli.daemon.daemon_request",
+            return_value={
+                "results": [{"score": None, "content": "c"}],
+                "retrieval_time_ms": None,
+            },
+        ),
+    ):
+        cmd_recall(_minimal_args())  # must not raise TypeError

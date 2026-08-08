@@ -41,6 +41,10 @@ from superlocalmemory.infra.data_root import (
     assert_no_durable_root_conflict,
     state_path,
 )
+from superlocalmemory.infra.process_identity import (
+    compare_start_tokens,
+    process_start_token_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,25 +76,91 @@ def _is_pid_alive(pid: int) -> bool:
             return False
 
 
-def _descriptor_process_is_alive(descriptor) -> bool:
-    """Reject stale descriptors when a PID has been reused by another process."""
-    if not _is_pid_alive(descriptor.pid):
+_CREATE_TIME_TOLERANCE_SECONDS = 1.0
+
+
+def _health_proves_descriptor_ownership(descriptor) -> bool:
+    """Return whether the live health endpoint proves this exact daemon.
+
+    This is a *stronger* ownership proof than any process-table comparison. To
+    pass, a process listening on the descriptor's port must echo the random
+    128-bit ``instance_id`` and the SHA-256 fingerprint of the 256-bit
+    capability token -- both of which exist only inside the mode-0600
+    ``daemon.json`` -- alongside its own PID, namespace, owner and port. A
+    process that merely inherited a recycled PID cannot produce any of that.
+    """
+    health = _fetch_health(descriptor.port)
+    if health is None:
         return False
+    return descriptor_matches_health(descriptor, health)
+
+
+def _resolve_descriptor_liveness(descriptor) -> tuple[bool, str]:
+    """Return ``(is_alive, evidence)`` for the descriptor's recorded process.
+
+    Ownership is decided by the strongest available evidence, never by the
+    wall clock alone:
+
+    1. The PID must exist and must not be a zombie.
+    2. A clock-independent start token settles it exactly, with no tolerance.
+       This is the path that fixes issue #104: under WSL2 the boot time behind
+       ``psutil.create_time`` drifts against the wall clock during a session,
+       so a recorded creation time stops matching the *same* live process
+       (~35s after ~4 minutes).  A start token cannot drift, so no tolerance
+       constant is needed and none can silently expire.
+    3. Otherwise fall back to comparing creation times, for descriptors written
+       by an older release and for platforms with no token (Windows, where the
+       kernel creation time is already immune to clock adjustment).
+    4. A creation-time mismatch is *not* proof of PID reuse -- it is exactly
+       what a stepped clock looks like -- so before condemning a running
+       daemon, ask the daemon to prove its identity over loopback. Only if that
+       cryptographic proof also fails is the process declared foreign.
+    """
+    if not _is_pid_alive(descriptor.pid):
+        return False, "process_exited"
     try:
         import psutil
-
+    except ImportError:
+        # Without psutil, PID existence is the only signal there is.
+        return True, "pid_exists_without_psutil"
+    try:
         process = psutil.Process(descriptor.pid)
         # A terminated daemon can remain in the process table briefly as a
         # zombie while its parent reaps it.  PID existence is therefore not
         # liveness and must not block a namespace-owned restart.
         if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
-            return False
-        actual = float(process.create_time())
-    except ImportError:
-        return True
+            return False, "process_zombie"
+        actual_create_time = float(process.create_time())
     except Exception:
-        return False
-    return abs(actual - float(descriptor.process_create_time)) <= 1.0
+        return False, "process_unreadable"
+
+    recorded_token = getattr(descriptor, "process_start_token", None)
+    if recorded_token:
+        verdict = compare_start_tokens(
+            recorded_token, process_start_token_for(descriptor.pid),
+        )
+        if verdict is True:
+            return True, "start_token_match"
+        if verdict is False:
+            return False, "start_token_mismatch"
+
+    drift = abs(actual_create_time - float(descriptor.process_create_time))
+    if drift <= _CREATE_TIME_TOLERANCE_SECONDS:
+        return True, "create_time_match"
+
+    if _health_proves_descriptor_ownership(descriptor):
+        logger.debug(
+            "descriptor creation time drifted by %.3fs for pid %s; owned "
+            "daemon confirmed by health identity instead",
+            drift, descriptor.pid,
+        )
+        return True, "health_identity_match"
+    return False, "identity_mismatch"
+
+
+def _descriptor_process_is_alive(descriptor) -> bool:
+    """Reject stale descriptors when a PID has been reused by another process."""
+    return _resolve_descriptor_liveness(descriptor)[0]
 
 
 def _is_port_available(port: int) -> bool:
@@ -420,6 +490,7 @@ def _start_daemon_subprocess() -> bool:
         bootstrap_descriptor,
         pid=proc.pid,
         process_create_time=process_create_time_for(proc.pid),
+        process_start_token=process_start_token_for(proc.pid),
     )
     current = read_descriptor()
     if not (
@@ -547,6 +618,144 @@ def _wait_for_daemon(timeout: int = 60) -> bool:
         if _verified_legacy_health() is not None:
             return True
     return False
+
+
+_GENERIC_UNAVAILABLE = {
+    "reason": "unknown",
+    "message": "Owned daemon is unavailable; retry later.",
+    "hint": "Run `slm doctor`, then `slm restart` if it stays down.",
+}
+
+_LIVENESS_DIAGNOSIS = {
+    "process_exited": (
+        "daemon_process_exited",
+        "the recorded daemon process (pid {pid}) is no longer running",
+        "Start it again with `slm start`.",
+    ),
+    "process_zombie": (
+        "daemon_process_exited",
+        "the recorded daemon process (pid {pid}) has exited and is awaiting "
+        "reaping by its parent",
+        "Start it again with `slm start`.",
+    ),
+    "process_unreadable": (
+        "daemon_process_unreadable",
+        "the recorded daemon process (pid {pid}) could not be inspected; it "
+        "may belong to another user",
+        "Run `slm restart` to publish a fresh descriptor.",
+    ),
+    "start_token_mismatch": (
+        "pid_reused_by_another_process",
+        "pid {pid} is alive but is a different process than the daemon that "
+        "wrote {path}; the daemon exited and its pid was recycled",
+        "Run `slm restart` to publish a fresh descriptor.",
+    ),
+    "identity_mismatch": (
+        "daemon_identity_mismatch",
+        "pid {pid} did not match the process identity recorded in {path} and "
+        "the process on port {port} did not prove it owns that identity; the "
+        "recorded creation time can also diverge on its own if this machine's "
+        "clock is stepped (common under WSL2)",
+        "Run `slm restart` to publish a fresh descriptor.",
+    ),
+}
+
+
+def describe_daemon_unavailability() -> dict[str, str]:
+    """Explain *why* the owned daemon cannot be used, in actionable terms.
+
+    "Owned daemon is unavailable" is true of a stopped daemon, a recycled PID,
+    an unreachable port and an identity mismatch alike, which left issue #104's
+    reporter with nothing to act on. This names the specific evidence instead.
+    Diagnosis is best-effort and never raises: a broken diagnosis must not
+    replace the caller's real error.
+    """
+    try:
+        return _describe_daemon_unavailability()
+    except Exception:  # noqa: BLE001 - diagnosis is advisory only
+        return dict(_GENERIC_UNAVAILABLE)
+
+
+def _describe_daemon_unavailability() -> dict[str, str]:
+    path = descriptor_path()
+    descriptor = read_descriptor()
+    if descriptor is None:
+        if path.exists():
+            return {
+                "reason": "descriptor_unusable",
+                "message": (
+                    f"{path} is unreadable, malformed, or belongs to another "
+                    f"data root or user."
+                ),
+                "hint": "Run `slm restart` to publish a fresh descriptor.",
+            }
+        if _verified_legacy_health() is not None:
+            return {
+                "reason": "legacy_daemon_request_failed",
+                "message": (
+                    "a pre-descriptor daemon answered health but rejected or "
+                    "dropped the request."
+                ),
+                "hint": "Run `slm restart` to upgrade it to an owned daemon.",
+            }
+        return {
+            "reason": "no_daemon",
+            "message": f"no daemon is registered for this data root ({path} is absent).",
+            "hint": "Run `slm start`.",
+        }
+
+    alive, evidence = _resolve_descriptor_liveness(descriptor)
+    if not alive:
+        reason, template, hint = _LIVENESS_DIAGNOSIS.get(
+            evidence,
+            (
+                "daemon_identity_mismatch",
+                "pid {pid} did not match the identity recorded in {path}",
+                "Run `slm restart` to publish a fresh descriptor.",
+            ),
+        )
+        return {
+            "reason": reason,
+            "message": template.format(
+                pid=descriptor.pid, port=descriptor.port, path=path,
+            ) + ".",
+            "hint": hint,
+        }
+
+    health = _fetch_health(descriptor.port)
+    if health is None:
+        return {
+            "reason": "daemon_unreachable",
+            "message": (
+                f"the owned daemon (pid {descriptor.pid}) is running but did "
+                f"not answer http://127.0.0.1:{descriptor.port}/health within "
+                f"2s."
+            ),
+            "hint": (
+                "Check `slm logs` for a stalled request, or `slm restart` if "
+                "it stays unresponsive."
+            ),
+        }
+    if not descriptor_matches_health(descriptor, health):
+        return {
+            "reason": "port_owned_by_another_daemon",
+            "message": (
+                f"port {descriptor.port} answered health but with a different "
+                f"daemon identity than {path} records."
+            ),
+            "hint": (
+                "Another SuperLocalMemory instance holds that port. Stop it, "
+                "or set SLM_DAEMON_PORT to a free port."
+            ),
+        }
+    return {
+        "reason": "request_rejected",
+        "message": (
+            f"the owned daemon (pid {descriptor.pid}) is healthy but rejected "
+            f"or dropped this request."
+        ),
+        "hint": "Check `slm logs` for the failing request.",
+    }
 
 
 def stop_daemon() -> bool:

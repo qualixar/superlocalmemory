@@ -17,12 +17,10 @@ yours — it is your customers' data, your retention obligations, and your audit
 keeps that layer on infrastructure you control, with multi-workspace isolation, role-based
 access, and GDPR + EU AI Act governance controls built in.</p>
 
-<p align="center"><strong>The gap this fills.</strong> Since 2 August 2026, EU AI Act Annex III
-obligations require high-risk systems to keep tamper-evident logs, trace every action to a
-model, prompt, policy and owner, and reconstruct state at a point in time — and the compliance
-boundary extends to <em>every agent in a chain</em>. Meanwhile the right to erasure reaches into
-agent memory, embeddings and logs, not just database rows. Most memory layers were designed for
-retrieval quality and were never asked these questions. SLM was.</p>
+<p align="center"><strong>The boundary.</strong> SuperLocalMemory starts with a local runtime;
+provider-backed enrichment, cloud backup, connectors, and proxy use are explicit choices.
+Different products solve different boundaries. Published benchmark evidence carried into V4
+comes from the published V3 research architecture; it is not a claim of a newly rerun V4 package benchmark.</p>
 
 <p align="center"><strong>How to check that, rather than believe it.</strong> Every reliability
 guarantee here is stated as a falsifiable invariant, tested under an adversarial condition with a
@@ -41,7 +39,7 @@ Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
   <a href="#privacy-controls-and-operating-modes"><img src="https://img.shields.io/badge/Privacy-Deployment_Assessed-brightgreen?style=for-the-badge" alt="Privacy controls require deployment assessment"/></a>
-  <a href="#teams-and-enterprise-memory-v380"><img src="https://img.shields.io/badge/Enterprise-GDPR_%7C_EU_AI_Act-0b5394?style=for-the-badge" alt="Enterprise governance: GDPR and EU AI Act controls"/></a>
+  <a href="#teams-and-enterprise-memory-v4"><img src="https://img.shields.io/badge/Enterprise-GDPR_%7C_EU_AI_Act-0b5394?style=for-the-badge" alt="Enterprise governance: GDPR and EU AI Act controls"/></a>
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/CLI-Agent--Native-green?style=for-the-badge" alt="CLI Agent-Native"/></a>
@@ -74,17 +72,6 @@ SuperLocalMemory V4 combines conventional dense and lexical retrieval with graph
 - **MCP profiles** — `full` exposes **42** tools (default everyday surface); `power` **54**; `whole` **87** (all registered). Also `core` (14), `code` (24), and `mesh` (8).
 - **Governed write path & verifiable transactions** — admission + policy control, a per-owner obligation ledger, and a hash-sealed completion manifest with a reconciler that redrives unmet obligations.
 - **Self-healing lifecycle & admin remediation** — stale locks cleared on restart; list/resolve stuck operations from CLI, MCP, or the dashboard.
-
-3.8.x installs upgrade in place — the database migrates automatically on first start, with no manual steps and no data loss.
-
-**What V3.8.0 added.** The 3.8.0 release introduced the following foundation (3.8.1 was its stability patch):
-
-- **Temporal depth** — the time-aware retrieval and lifecycle described above.
-- **Governance & EU compliance** — [team roles, workspace isolation, a login gate, multi-scope memory, GDPR access/erasure/portability rights, a hash-chained audit trail, and per-mode EU AI Act self-assessment](#teams-and-enterprise-memory-v380).
-- **Framework adapters** — [drop-in, engine-backed memory for nine agent frameworks](#framework-adapters-v380).
-- **Bounded loops** — [gate-verified agent loops where an independent check, not the agent's own claim, decides when a task is done](#bounded-loops-v380).
-- **Stronger cache and compression** — exact-match caching with tagged invalidation plus opt-in reversible compression, across proxy, MCP, and skill surfaces.
-- **Stability** — a long defect-and-audit sweep across ingestion, retrieval, mesh, and the dashboard hardens the everyday path.
 
 SLM is one strand of Qualixar's work on AI reliability engineering: making agent behavior observable, bounded, and reproducible instead of best-effort.
 
@@ -604,7 +591,7 @@ These are engineering controls. Compliance depends on deployment configuration, 
 
 SLM includes a per-mode EU AI Act *technical posture* report (`EUAIActChecker`). It records facts the runtime can know — whether data is configured to stay local, whether generative AI is used, and that transparency / human-oversight need deployment evidence.
 
-**An operating mode does not determine EU AI Act compliance.** Legal risk classification and conformity assessment depend on intended purpose, affected persons, sector, deployment context, and operator controls. The checker therefore returns `compliant=None` / risk category `undetermined` for every mode and always requires deployment-context review. Mode A/B/C only change technical locality and enrichment options (for example Mode C may send content to a configured provider). See [docs/compliance.md](docs/compliance.md) and `src/superlocalmemory/core/modes.py`.
+**An operating mode does not establish legal compliance under the EU AI Act.** Legal risk classification and conformity assessment depend on intended purpose, affected persons, sector, deployment context, and operator controls. The checker therefore returns `compliant=None` / risk category `undetermined` for every mode and always requires deployment-context review. Mode A/B/C only change technical locality and enrichment options (for example Mode C may send content to a configured provider). See [docs/compliance.md](docs/compliance.md) and `src/superlocalmemory/core/modes.py`.
 
 ### Deployment tiers
 
@@ -716,27 +703,13 @@ SuperLocalMemory is backed by three preprints by Varun Pratap Bhardwaj (2026):
 Use the citation metadata on the linked arXiv or Zenodo records.
 
 ## Support / License / Qualixar
-
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. [Wiki](https://github.com/qualixar/superlocalmemory/wiki) for detailed documentation.
-
 GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE).
-
 For commercial licensing (closed-source, proprietary, or hosted use), see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) or contact varun.pratap.bhardwaj@gmail.com.
-
 Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar.
-
 Part of [Qualixar](https://qualixar.com) · Author: [Varun Pratap Bhardwaj](https://varunpratap.com)
-
-### Acknowledgments
-
-- **[Everything Claude Code (ECC)](https://github.com/affaan-m/everything-claude-code)** inspired SLM's skill-observation patterns; SLM can ingest ECC observations with `slm ingest --source ecc`.
-- **[HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace)** informed the skill-evolution verification design (arXiv:2604.01687).
-
-### Qualixar AI Agent Reliability Platform
-
-Qualixar builds open-source infrastructure for AI reliability engineering.
-Start at **[qualixar.com](https://qualixar.com)** or browse the
-[Qualixar research archive](https://huggingface.co/Qualixar).
+Acknowledgments: [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) informed skill observation; [HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace) informed skill-evolution verification.
+Qualixar builds open-source infrastructure for AI reliability engineering. Start at [qualixar.com](https://qualixar.com) or browse the [research archive](https://huggingface.co/Qualixar).
 
 ## Star This Project
 

@@ -144,12 +144,26 @@ SLM's adaptive learning system observes which memories are recalled frequently, 
 - **Memories marked "outdated"** are deprioritized or flagged for review
 - **Usage patterns** inform what types of information to prioritize for capture
 
-You can see what the system has learned:
+Learning is driven by **explicit feedback**. Recall itself is deliberately
+read-only — it never opens a database writer, so that a busy recall path cannot
+contend with the dashboard — which means reported feedback is what grows the
+learning store. Feedback is recorded through the MCP `report_feedback` tool:
 
-```bash
-slm patterns            # Show learned patterns
-slm patterns correct 5  # Correct pattern #5 if it's wrong
 ```
+report_feedback(fact_id="<id>", feedback="relevant")     # helpful
+report_feedback(fact_id="<id>", feedback="irrelevant")   # not useful
+report_feedback(fact_id="<id>", feedback="partial")      # somewhat relevant
+```
+
+Each call returns `total_signals` and the current `phase`. Adaptive reranking
+activates at 50 signals (phase 2) and the ML ranker at 200 (phase 3).
+
+You can see what the system has learned in the **Living Brain** panel of the
+dashboard (`slm dashboard`), which reads the same store.
+
+> **Note:** the `slm patterns`, `slm useful` and `slm learning` commands
+> described in some older V2 documentation do not exist in V3. Use
+> `report_feedback` and the dashboard instead.
 
 ## Privacy
 

@@ -22,10 +22,21 @@ logger = logging.getLogger(__name__)
 
 
 def _daemon_unavailable(command: str, use_json: bool) -> None:
-    """Exit a mutation client without opening a process-local writer."""
+    """Exit a mutation client without opening a process-local writer.
+
+    The bare "owned daemon is unavailable" of earlier releases described a
+    stopped daemon, a recycled PID, an unreachable port and an identity
+    mismatch identically, which gave issue #104's reporter nothing to act on.
+    The diagnosis names the evidence and the next command to run.
+    """
+    from superlocalmemory.cli.daemon import describe_daemon_unavailability
+
+    diagnosis = describe_daemon_unavailability()
     error = {
         "code": "DAEMON_UNAVAILABLE",
-        "message": "Owned daemon is unavailable; retry later.",
+        "reason": diagnosis["reason"],
+        "message": f"Owned daemon is unavailable: {diagnosis['message']}",
+        "hint": diagnosis["hint"],
         "retryable": True,
     }
     if use_json:
@@ -34,7 +45,8 @@ def _daemon_unavailable(command: str, use_json: bool) -> None:
         json_print(command, error=error)
     else:
         print(
-            "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+            f"DAEMON_UNAVAILABLE ({diagnosis['reason']}): "
+            f"{diagnosis['message']} {diagnosis['hint']}",
             file=sys.stderr,
         )
     raise SystemExit(1)
@@ -1492,10 +1504,20 @@ def cmd_recall(args: Namespace) -> None:
                           if result.get("no_confident_match")
                           else "No matching memories found.")
                     return
-                # Text output
-                print(f"SpreadingActivation.search completed via daemon ({result.get('retrieval_time_ms', 0):.0f}ms)")
+                # Text output.
+                # PR #101: ``dict.get(k, 0)`` returns the DEFAULT only when the
+                # key is ABSENT — a present-but-null value still reaches the
+                # format spec and raises "unsupported format string passed to
+                # NoneType.__format__". ``or 0`` covers both. Same for score,
+                # which the keyword-fallback path returns as None.
+                elapsed_ms = result.get('retrieval_time_ms') or 0
+                print(
+                    "SpreadingActivation.search completed via daemon "
+                    f"({elapsed_ms:.0f}ms)"
+                )
                 for i, r in enumerate(result["results"], 1):
-                    print(f"  {i}. [{r['score']:.2f}] {r['content']}")
+                    score = r.get('score') or 0
+                    print(f"  {i}. [{score:.2f}] {r['content']}")
                 return
     except Exception as _exc:  # noqa: BLE001
         logger.warning(
@@ -2366,6 +2388,28 @@ def cmd_doctor(args: Namespace) -> None:
         _check("Python", "FAIL", f"{v.major}.{v.minor}.{v.micro} (need >= 3.11)",
                "Install Python 3.11+ from https://python.org/downloads/")
 
+    # 1b. Version integrity (issue #107). Doctor is what a user runs when
+    # something seems wrong, so it is exactly where "the code you are running
+    # is not the code you installed" has to appear. Reported as WARN rather
+    # than FAIL: the installation is sound, it is this *process* that is
+    # behind, and `slm doctor` itself is short-lived so it is rarely the
+    # stale one -- it is reporting on behalf of the long-lived servers.
+    try:
+        from superlocalmemory.infra.version_integrity import check_version_integrity
+
+        _vi = check_version_integrity()
+        if _vi.is_stale:
+            _check("Version integrity", "WARN", _vi.detail, _vi.hint)
+        elif _vi.state == "mismatch":
+            _check("Version integrity", "WARN", _vi.detail, _vi.hint)
+        elif _vi.state == "unknown":
+            _check("Version integrity", "WARN", _vi.detail,
+                   "Reinstall so distribution metadata is readable.")
+        else:
+            _check("Version integrity", "PASS", _vi.detail)
+    except Exception as _vi_exc:  # noqa: BLE001 - never break doctor
+        _check("Version integrity", "WARN", f"could not verify: {_vi_exc}")
+
     # 2. Core deps
     core_modules = {
         "numpy": "numpy", "scipy": "scipy", "networkx": "networkx",
@@ -2879,6 +2923,31 @@ def cmd_mcp(_args: Namespace) -> None:
                 kill_orphan(_orphan.pid, graceful_timeout_seconds=1.0)
     except Exception:
         pass  # Never block MCP startup on cleanup failure
+
+    # Version integrity (issue #107). The reaper above only kills *orphans* —
+    # servers whose parent died. A server whose IDE is still alive is never an
+    # orphan, so it survives upgrades indefinitely and keeps serving the code
+    # it imported at startup. That is how eighteen `slm mcp` processes spanning
+    # four days and two releases stayed alive on one machine, and how a stale
+    # one made issue #106 look unfixed across two debugging sessions.
+    #
+    # This runs at startup, so a server launched *after* an upgrade is correct
+    # by construction and stays silent. It fires for a server that started
+    # before its own package was upgraded — which is possible when the client
+    # respawns it from an old cached path.
+    #
+    # CRITICAL: logging only, never stdout — MCP speaks JSON-RPC over stdio and
+    # any print corrupts the protocol. The logger writes to stderr.
+    try:
+        from superlocalmemory.infra.version_integrity import check_version_integrity
+
+        _vi = check_version_integrity()
+        if _vi.is_stale:
+            logger.warning("MCP server version drift: %s. %s", _vi.detail, _vi.hint)
+        elif _vi.differs:
+            logger.info("MCP server version note: %s", _vi.detail)
+    except Exception:
+        pass  # A diagnostic must never prevent the server from starting.
 
     # Auto-install hooks on MCP startup (fast path: ~0.1ms if already current)
     # CRITICAL: No stdout — MCP uses stdio transport, any print corrupts protocol

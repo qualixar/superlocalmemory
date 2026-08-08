@@ -50,6 +50,12 @@ slm-time-papers/
 # file path, and production code (security_primitives, recall_pipeline, etc.)
 # is writing to that str()-coerced path. Fix: use a real tmp_path/fake_home
 # in the patch. Root cause isolated + fixed by WP-16 in v3.6.14.
+# v3.8.11: the leak recurred in a second shape — a DIRECTORY "MagicMock/mock/
+# <id>/" from a mock-derived path hitting mkdir() instead of os.open(). It has
+# no angle brackets, so the pattern below did not match it and it sat untracked
+# in the working tree unnoticed. Both shapes are ignored now; the CI guard
+# tests/test_ci_guards/test_no_magicmock_artifacts.py still FAILS on either,
+# because ignoring the symptom must never hide the test bug.
 <MagicMock*
 # Directory form: a MagicMock coerced to "MagicMock" then mkdir'd, leaving
 # MagicMock/mock/<id> trees. Same root cause as above — unconfigured mock as a path.

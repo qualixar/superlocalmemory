@@ -10,11 +10,14 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from superlocalmemory.infra.daemon_identity import (
     build_descriptor,
     read_descriptor,
     write_descriptor,
 )
+from superlocalmemory.infra.process_identity import process_start_token_for
 
 
 class _HealthResponse:
@@ -114,16 +117,31 @@ def test_arbitrary_live_pid_without_descriptor_is_rejected() -> None:
         assert not daemon.is_daemon_running()
 
 
-def test_reused_pid_with_wrong_process_creation_time_is_rejected() -> None:
+def test_reused_pid_with_wrong_process_identity_is_rejected() -> None:
+    """A live PID that is not our daemon must be rejected without a probe.
+
+    Issue #104: the descriptor now records a clock-independent start token as
+    well as a creation time, so a stale descriptor has to be stale in both --
+    otherwise the token would (correctly) prove this very process is the one
+    the descriptor names.
+    """
     from superlocalmemory.cli import daemon
 
     root = Path(os.environ["SLM_DATA_DIR"])
+    # Same token scheme this platform produces, different value -- i.e. exactly
+    # what a recycled PID looks like, on whichever OS the suite is running.
+    live_token = process_start_token_for(os.getpid())
+    if live_token is None:
+        pytest.skip("platform exposes no clock-independent start token")
+    scheme, _, value = live_token.partition(":")
+    stale_token = f"{scheme}:{value}-recycled"
     descriptor = build_descriptor(
         data_root=root,
         port=43125,
         version="3.7.0a1",
         pid=os.getpid(),
         process_create_time=0.0,
+        process_start_token=stale_token,
         instance_id="stale-process",
         capability="stale-capability",
         state="ready",
@@ -133,6 +151,33 @@ def test_reused_pid_with_wrong_process_creation_time_is_rejected() -> None:
     with patch("urllib.request.urlopen") as request:
         assert not daemon.is_daemon_running()
     request.assert_not_called()
+
+
+def test_legacy_descriptor_with_wrong_creation_time_needs_identity_proof() -> None:
+    """Descriptors from before v3.8.12 carry no token, so health decides.
+
+    A creation-time mismatch alone is ambiguous -- a recycled PID and a stepped
+    clock look identical -- so the daemon is asked to prove ownership. An
+    unanswered port is not proof, and the descriptor is still rejected.
+    """
+    from superlocalmemory.cli import daemon
+
+    root = Path(os.environ["SLM_DATA_DIR"])
+    descriptor = build_descriptor(
+        data_root=root,
+        port=43127,
+        version="3.7.0a1",
+        pid=os.getpid(),
+        process_create_time=0.0,
+        process_start_token=None,
+        instance_id="legacy-stale-process",
+        capability="legacy-stale-capability",
+        state="ready",
+    )
+    write_descriptor(descriptor, data_root=root)
+
+    with patch("urllib.request.urlopen", side_effect=OSError("no listener")):
+        assert not daemon.is_daemon_running()
 
 
 def test_get_port_uses_only_valid_owned_descriptor() -> None:
@@ -366,7 +411,7 @@ def test_stop_request_stays_bound_to_captured_daemon_instance() -> None:
     replacement = build_descriptor(
         data_root=Path(os.environ["SLM_DATA_DIR"]),
         port=43135,
-        version="3.8.10",
+        version="3.8.11",
         pid=os.getpid(),
         instance_id="replacement-instance",
         capability="replacement-capability",

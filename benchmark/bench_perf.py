@@ -445,7 +445,9 @@ def _environment(db_path: Path, emb: dict, config: Any) -> dict:
         "platform": platform.platform(),
         "machine": platform.machine(),
         "timestamp": datetime.now(UTC).isoformat(),
-        "db_path": str(db_path),
+        # The artifact is committed publicly. Preserve the measured byte size
+        # below, but never serialize a host-specific path or username.
+        "db_path": "<redacted: benchmark database path>",
         "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
         "embedding_mode": emb.get("provider_class", "unknown"),
         "embedding_model_ollama_tag": emb.get("model_name", "unknown"),

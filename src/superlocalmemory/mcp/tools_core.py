@@ -23,6 +23,7 @@ from superlocalmemory.core.admission import admits
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "code": "DAEMON_UNAVAILABLE",
                     "retryable": True,
                     "error": (
-                        "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later."
+                        daemon_unavailable_error()
                     ),
                 }
         except Exception as dexc:
@@ -182,7 +183,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "code": "DAEMON_UNAVAILABLE",
                     "retryable": True,
                     "error": (
-                        "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later."
+                        daemon_unavailable_error()
                     ),
                 }
 
@@ -215,14 +216,14 @@ def register_core_tools(server, get_engine: Callable) -> None:
                         "retryable": True,
                         "error": stored.get(
                             "error",
-                            "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+                            daemon_unavailable_error(),
                         ),
                     }
                 return {
                     "success": False,
                     "code": "DAEMON_UNAVAILABLE",
                     "retryable": True,
-                    "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+                    "error": daemon_unavailable_error(),
                 }
             fact_ids = list(stored.get("fact_ids") or [])
             materialization_state = str(
@@ -259,7 +260,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "success": False,
                 "code": "DAEMON_UNAVAILABLE",
                 "retryable": True,
-                "error": "DAEMON_UNAVAILABLE: owned daemon is unavailable; retry later.",
+                "error": daemon_unavailable_error(),
             }
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from superlocalmemory.infra.data_root import canonical_data_root
+from superlocalmemory.infra.process_identity import process_start_token_for
 
 DAEMON_DESCRIPTOR_SCHEMA = 1
 DAEMON_PROTOCOL = 1
@@ -88,6 +89,11 @@ class DaemonDescriptor:
     state: str
     version: str
     started_at: float
+    # Clock-independent process identity. Optional and defaulted so a
+    # descriptor written by an older release still parses; platforms without a
+    # boot-relative start time (Windows) legitimately store None and fall back
+    # to the creation-time comparison. See infra/process_identity.py.
+    process_start_token: str | None = None
 
     def public_health_fields(self) -> dict[str, Any]:
         """Identity fields safe to expose on the loopback health endpoint."""
@@ -112,6 +118,7 @@ def build_descriptor(
     version: str,
     pid: int | None = None,
     process_create_time: float | None = None,
+    process_start_token: str | None = None,
     instance_id: str | None = None,
     capability: str | None = None,
     state: str = "starting",
@@ -141,6 +148,11 @@ def build_descriptor(
         state=state,
         version=version,
         started_at=float(started_at if started_at is not None else time.time()),
+        process_start_token=(
+            process_start_token
+            if process_start_token is not None
+            else process_start_token_for(actual_pid)
+        ),
     )
 
 
@@ -237,6 +249,10 @@ def read_descriptor(
     if descriptor.owner_id != owner_id():
         return None
     if not (1 <= descriptor.port <= 65535) or descriptor.pid <= 0:
+        return None
+    if descriptor.process_start_token is not None and not isinstance(
+        descriptor.process_start_token, str
+    ):
         return None
     return descriptor
 

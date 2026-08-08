@@ -283,7 +283,14 @@ class _ReadOnlyLearningView:
             connection.close()
 
     def count_feedback(self, profile_id: str) -> int:
-        """Count legacy feedback without running schema initialization."""
+        """Count legacy feedback without running schema initialization.
+
+        Reports the raw ``learning_feedback`` table, which the dashboard
+        surfaces as ``legacy_feedback_rows`` alongside a pending-migration
+        card. Do NOT gate a ranking phase on this — use ``count_signals``,
+        which is the counter every other surface resolves its phase from
+        (issue #106).
+        """
         connection = self._connection()
         try:
             row = connection.execute(
@@ -408,17 +415,31 @@ def apply_adaptive_ranking(
     if not learning_db.exists():
         return response
 
+    # issue #106: count the CANONICAL store, not the legacy one. The
+    # dashboard's Living Brain panel and ranker-phase card both resolve their
+    # phase from ``learning_signals``; this gate read ``learning_feedback``,
+    # so the phase a user was shown and the phase that actually ranked their
+    # results were computed from different tables and could disagree without
+    # limit. ``learning_feedback`` rows reach this counter through
+    # ``legacy_migration``, which copies them forward.
     try:
-        signal_count = _ReadOnlyLearningView(learning_db).count_feedback(pid)
+        signal_count = _ReadOnlyLearningView(learning_db).count_signals(pid)
     except sqlite3.Error:
         # A pre-learning database may not have this optional table yet.
         # Recall remains a query and cannot create it on demand.
         return response
 
-    if signal_count < 50:
+    from superlocalmemory.learning.ranker import (
+        PHASE_2_THRESHOLD,
+        AdaptiveRanker,
+    )
+
+    # Thresholds come from ``learning.ranker`` — the same constants the
+    # dashboard gates on. Duplicating the literals here is how the two
+    # surfaces drifted apart in the first place.
+    if signal_count < PHASE_2_THRESHOLD:
         return response  # Phase 1: no change
 
-    from superlocalmemory.learning.ranker import AdaptiveRanker
     ranker = AdaptiveRanker(signal_count=signal_count)
 
     from datetime import UTC

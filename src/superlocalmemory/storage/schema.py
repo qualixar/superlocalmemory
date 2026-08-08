@@ -43,6 +43,7 @@ _TABLES: Final[tuple[str, ...]] = (
     "entity_aliases",
     "entity_profiles",
     "memory_scenes",
+    "scene_fact_members",
     "temporal_events",
     "graph_edges",
     "consolidation_log",
@@ -454,6 +455,67 @@ CREATE TABLE IF NOT EXISTS memory_scenes (
 
 CREATE INDEX IF NOT EXISTS idx_scenes_profile
     ON memory_scenes (profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_scenes_profile_scene
+    ON memory_scenes (profile_id, scene_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_facts_profile_fact
+    ON atomic_facts (profile_id, fact_id);
+"""
+
+
+# ---------------------------------------------------------------------------
+# Normalized scene/fact membership projection (bounded scene assignment)
+# ---------------------------------------------------------------------------
+
+_SQL_SCENE_FACT_MEMBERS: Final[str] = """
+CREATE TABLE IF NOT EXISTS scene_fact_members (
+    profile_id TEXT NOT NULL,
+    scene_id   TEXT NOT NULL,
+    fact_id    TEXT NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scene_id, fact_id),
+    FOREIGN KEY (profile_id, scene_id)
+        REFERENCES memory_scenes(profile_id, scene_id) ON DELETE CASCADE,
+    FOREIGN KEY (profile_id, fact_id)
+        REFERENCES atomic_facts(profile_id, fact_id) ON DELETE CASCADE,
+    FOREIGN KEY (profile_id) REFERENCES profiles(profile_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scene_fact_members_lookup
+    ON scene_fact_members (profile_id, fact_id, scene_id);
+CREATE INDEX IF NOT EXISTS idx_scene_fact_members_order
+    ON scene_fact_members (scene_id, position);
+
+CREATE TRIGGER IF NOT EXISTS trg_scene_fact_members_insert
+AFTER INSERT ON memory_scenes
+BEGIN
+    DELETE FROM scene_fact_members WHERE scene_id = NEW.scene_id;
+    INSERT OR IGNORE INTO scene_fact_members
+        (profile_id, scene_id, fact_id, position)
+    SELECT NEW.profile_id, NEW.scene_id, af.fact_id, CAST(member.key AS INTEGER)
+    FROM json_each(
+        CASE WHEN json_valid(NEW.fact_ids_json)
+             THEN NEW.fact_ids_json ELSE '[]' END
+    ) AS member
+    JOIN atomic_facts AS af
+      ON af.fact_id = member.value
+     AND af.profile_id = NEW.profile_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_scene_fact_members_update
+AFTER UPDATE OF profile_id, fact_ids_json ON memory_scenes
+BEGIN
+    DELETE FROM scene_fact_members WHERE scene_id = NEW.scene_id;
+    INSERT OR IGNORE INTO scene_fact_members
+        (profile_id, scene_id, fact_id, position)
+    SELECT NEW.profile_id, NEW.scene_id, af.fact_id, CAST(member.key AS INTEGER)
+    FROM json_each(
+        CASE WHEN json_valid(NEW.fact_ids_json)
+             THEN NEW.fact_ids_json ELSE '[]' END
+    ) AS member
+    JOIN atomic_facts AS af
+      ON af.fact_id = member.value
+     AND af.profile_id = NEW.profile_id;
+END;
 """
 
 
@@ -805,6 +867,7 @@ _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_ENTITY_ALIASES,
     _SQL_ENTITY_PROFILES,
     _SQL_MEMORY_SCENES,
+    _SQL_SCENE_FACT_MEMBERS,
     _SQL_TEMPORAL_EVENTS,
     _SQL_GRAPH_EDGES,
     _SQL_CONSOLIDATION_LOG,
@@ -889,6 +952,8 @@ def drop_all_tables(conn: sqlite3.Connection) -> None:
         "atomic_facts_fts_insert",
         "atomic_facts_fts_delete",
         "atomic_facts_fts_update",
+        "trg_scene_fact_members_insert",
+        "trg_scene_fact_members_update",
     ):
         conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
 
