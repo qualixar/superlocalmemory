@@ -6,8 +6,29 @@
 </p>
 
 <h1 align="center">SuperLocalMemory V4.0.0</h1>
-<p align="center"><strong>Enterprise-grade, local-first memory for AI agents and teams.</strong><br/>
-<em>A persistent, auditable long-term brain for your agents that runs on your own infrastructure — with multi-workspace isolation, role-based access, and GDPR + EU AI Act governance controls built in.</em></p>
+
+<h2 align="center">Rent the LLM. Own the memory.</h2>
+
+<p align="center"><em>Rent an LLM — but own the memory, for your company and for your industry.</em></p>
+
+<p align="center"><strong>The governed memory layer for AI agents: local-first, auditable, and built for the compliance obligations teams now actually carry.</strong><br/>
+Models are interchangeable and rented by the token. What your agents <em>remember</em> is
+yours — it is your customers' data, your retention obligations, and your audit trail. SLM
+keeps that layer on infrastructure you control, with multi-workspace isolation, role-based
+access, and GDPR + EU AI Act governance controls built in.</p>
+
+<p align="center"><strong>The gap this fills.</strong> Since 2 August 2026, EU AI Act Annex III
+obligations require high-risk systems to keep tamper-evident logs, trace every action to a
+model, prompt, policy and owner, and reconstruct state at a point in time — and the compliance
+boundary extends to <em>every agent in a chain</em>. Meanwhile the right to erasure reaches into
+agent memory, embeddings and logs, not just database rows. Most memory layers were designed for
+retrieval quality and were never asked these questions. SLM was.</p>
+
+<p align="center"><strong>How to check that, rather than believe it.</strong> Every reliability
+guarantee here is stated as a falsifiable invariant, tested under an adversarial condition with a
+negative control, and shipped with the harness that regenerates the evidence:
+<code>python benchmark/run_all.py --trials 200 --output-dir results/</code>. What each experiment
+does <em>not</em> exercise is stated too.</p>
 <p align="center"><code>v4.0.0</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
