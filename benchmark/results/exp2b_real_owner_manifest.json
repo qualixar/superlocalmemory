@@ -1,0 +1,26 @@
+{
+  "environment": {
+    "package": "superlocalmemory",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13",
+    "timestamp": "2026-08-08T08:38:19.918796+00:00",
+    "version": "4.0.0"
+  },
+  "result": {
+    "extra": {
+      "ann_scope": "VectorOwner operates with vector_store=None. sqlite-vec ANN index is NOT loadable in this harness. VectorOwner coverage is limited to embedding_metadata SQL table (SQL DELETE branch in _remove()). ANN index compensation is out of scope; paper must state this.",
+      "bm25_fault_mechanism": "Bm25Owner fails structurally (retrieval=None \u2192 _heal() returns False without writing rows). This faithfully represents the isolated harness but NOT production (where a live BM25 retrieval engine heals missing tokens). Paper must state: 'fault scenario uses isolated Bm25Owner without retrieval engine.'",
+      "slm_module_file": "src/superlocalmemory/__init__.py",
+      "trial_distribution": "100 type-A (even index) + 100 type-B (odd index)"
+    },
+    "failures": [],
+    "guarantee": "Real Bm25Owner + TemporalOwner + VectorOwner (vector_store=None, ann_index=None) via MemoryTransactionService: (A) happy-path run() with all projections seeded \u2192 manifest COMPLETE, all three tables physically present; (B) Bm25 failure (no retrieval, no bm25_tokens) \u2192 manifest DEGRADED, Bm25 has zero partial residue, real svc.compensate('temporal') removes fact_temporal_validity rows to zero, obligation state COMPENSATED.",
+    "held": 200,
+    "method": "Real production Bm25Owner(db), TemporalOwner(db), and VectorOwner(db, vector_store=None, ann_index=None) from concrete_owners.py. DB initialized via fresh_db() \u2014 full production schema (M033 included). Trial type A (happy path, n=100): memories + atomic_facts + bm25_tokens (real tokenize() output) + fact_temporal_validity + embedding_metadata seeded; record() then run() \u2192 all three owners VERIFIED \u2192 COMPLETE; physical row counts in all three projection tables verified. Trial type B (fault+compensate, n=100): memories + atomic_facts + fact_temporal_validity seeded; NO bm25_tokens \u2014 Bm25Owner.verify() fails, apply() calls _heal() which returns False (retrieval=None) without writing any rows \u2192 Bm25 FAILED; Temporal seeded \u2192 VERIFIED; Vector not_applicable (no store) \u2192 VERIFIED; manifest DEGRADED; bm25_tokens residue = 0 (apply never inserted); svc.compensate('temporal') \u2192 _FactScopedOwner._delete_all() calls db.delete_temporal_validity(fact_id) \u2192 fact_temporal_validity = 0; obligation states: temporal=COMPENSATED, bm25=FAILED, vector=VERIFIED. sqlite-vec ANN index: NOT EXERCISED (vector_store=None). Scope: embedding_metadata SQL table only for VectorOwner; ANN index compensation is explicitly out of scope for this harness.",
+    "metric_name": "manifest-correct rate",
+    "metric_value": 1.0,
+    "name": "exp2b_real_owner_manifest",
+    "passed": true,
+    "trials": 200
+  }
+}

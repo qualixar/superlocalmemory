@@ -1,9 +1,9 @@
 {
   "environment": {
     "package": "superlocalmemory",
-    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
-    "python": "3.13.5",
-    "timestamp": "2026-08-02T18:00:04.649086+00:00",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13",
+    "timestamp": "2026-08-08T08:38:19.919439+00:00",
     "version": "4.0.0"
   },
   "result": {

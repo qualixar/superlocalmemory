@@ -58,6 +58,7 @@ import platform
 import random
 import shutil
 import sqlite3
+import tempfile
 import sys
 import threading
 import time
@@ -65,13 +66,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-_SCRATCHPAD = Path(
-    "/private/tmp/claude-501"
-    "/-Users-v-pratap-bhardwaj-Documents-varun-world-Agentic-official"
-    "/56c17f7c-3d6d-4ab6-b209-54da740ba392/scratchpad"
+# This benchmark needs a large, realistic memory store (~1 GB in the published
+# run). Its location is environment-specific, so it is supplied by the operator
+# and never hardcoded.
+#
+# These previously defaulted to a per-session scratchpad path on the author's
+# machine. That both leaked a home-directory identity into a published
+# repository and made the benchmark unrunnable by anyone else, since the path
+# had ceased to exist even locally (F-23).
+#
+#   SLM_BENCH_DB   path to the realistic memory.db to measure against
+#                  (or pass --db); required.
+#   SLM_BENCH_DIR  scratch root for the working copy; defaults to a temp dir.
+_BENCH_BASE = Path(
+    os.environ.get("SLM_BENCH_DIR") or (Path(tempfile.gettempdir()) / "slm-bench")
 )
-_REAL_DB_REF = _SCRATCHPAD / "realdb" / "memory.db"
-_BENCH_BASE = _SCRATCHPAD / "bench_run"
+_REAL_DB_REF = Path(os.environ["SLM_BENCH_DB"]) if os.environ.get("SLM_BENCH_DB") else None
 _RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 logging.basicConfig(level=logging.WARNING,
@@ -490,7 +500,9 @@ def _print_summary(env: dict, lat: dict, conc: dict, rss: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="SLM V4 performance benchmark")
     parser.add_argument("--n", type=int, default=300)
-    parser.add_argument("--db", type=str, default=str(_REAL_DB_REF))
+    parser.add_argument("--db", type=str, default=(str(_REAL_DB_REF) if _REAL_DB_REF else None),
+                        required=_REAL_DB_REF is None,
+                        help="Path to a realistic memory.db (or set SLM_BENCH_DB)")
     parser.add_argument("--duration", type=int, default=60)
     parser.add_argument("--profile", type=str, default="default")
     parser.add_argument("--smoke", action="store_true")

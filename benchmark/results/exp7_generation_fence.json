@@ -1,9 +1,9 @@
 {
   "environment": {
     "package": "superlocalmemory",
-    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
-    "python": "3.13.5",
-    "timestamp": "2026-08-02T18:00:04.645097+00:00",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13",
+    "timestamp": "2026-08-08T08:38:19.919372+00:00",
     "version": "4.0.0"
   },
   "result": {
@@ -11,7 +11,7 @@
     "failures": [],
     "guarantee": "Generation fence rejects a stale-epoch ADMISSION (WriteCoordinatorError with ValueError __cause__ 'epoch is stale', writer never called) and admits a fresh-epoch ADMISSION from runtime.remember() in the same runtime",
     "held": 200,
-    "method": "Real CanonicalRememberRuntime with M018+M032 schema (mirrors test_generation_fence.py). Stale control: direct coordinator.submit() at epoch 0 after advancing _generation to 1 \u2192 WriteCoordinatorError. Positive control: runtime.remember() captures _generation=1, admitted epoch matches \u2192 commits, writer called once, probe has 1 row.",
+    "method": "Real CanonicalRememberRuntime with full production schema via migration_runner.apply_all (learning.db + memory.db) \u2014 structural fix for F-16; no hand-enumerated M0xx list. Stale control: direct coordinator.submit() at epoch 0 after advancing _generation to 1 \u2192 WriteCoordinatorError. Positive control: runtime.remember() captures _generation=1, admitted epoch matches \u2192 commits, writer called once, probe has 1 row.",
     "metric_name": "fence-correct rate",
     "metric_value": 1.0,
     "name": "exp7_generation_fence",

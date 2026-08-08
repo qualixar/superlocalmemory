@@ -45,8 +45,36 @@ def test_every_exp_reachable_from_run_all():
             if isinstance(recv, ast.Name):
                 invoked.add(recv.id)
 
-    exp_files = sorted(p.name for p in exp_dir.glob("exp*.py"))
-    assert exp_files, "no exp*.py files found"
+    # Glob every benchmark module, not just `exp*.py`. The earlier `exp*.py`
+    # pattern missed `bench_perf.py` — which is orphaned from run_all.py and yet
+    # produces bench_perf.json, the sole evidence for the paper's entire
+    # Real-Scale Performance section. A gate written around a naming convention
+    # only guards files that happen to follow it (F-22).
+    _INFRASTRUCTURE = {"run_all.py", "_harness.py", "__init__.py", "conftest.py"}
+
+    # Modules that legitimately cannot run in the default bundle. Each MUST carry
+    # a reason. Being listed here is a declaration, not an exemption from
+    # scrutiny: the paper may only cite one of these alongside the stated
+    # precondition under which it was produced.
+    _MANUAL_RUN = {
+        "bench_perf.py": (
+            "requires a retained ~1 GB real memory-store database (--db); "
+            "cannot run in a fresh-temp-store bundle"
+        ),
+    }
+
+    exp_files = sorted(
+        p.name
+        for p in exp_dir.glob("*.py")
+        if p.name not in _INFRASTRUCTURE and not p.name.startswith("test_")
+    )
+    assert exp_files, "no benchmark modules found"
+
+    undeclared_manual = set(_MANUAL_RUN) - set(exp_files)
+    assert not undeclared_manual, (
+        f"_MANUAL_RUN names modules that no longer exist: {sorted(undeclared_manual)}"
+    )
+    exp_files = [f for f in exp_files if f not in _MANUAL_RUN]
 
     unreachable = []
     for fname in exp_files:

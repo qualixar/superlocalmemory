@@ -80,7 +80,12 @@ import superlocalmemory  # noqa: E402
 
 verify_slm_source_root()
 
+import re as _re_prov  # noqa: E402
 _SLM_FILE = superlocalmemory.__file__
+# Record a repo-relative module path. An absolute path leaks the
+# author's home directory into a published artifact (F-23).
+_m = _re_prov.search(r'(src/superlocalmemory/.*|superlocalmemory/.*)$', _SLM_FILE)
+_SLM_FILE = _m.group(1) if _m else '<module path unavailable>'
 from superlocalmemory.core.engine_ingestion import (  # noqa: E402
     build_immediate_admission_handler,
 )

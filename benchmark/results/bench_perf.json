@@ -6,7 +6,7 @@
     "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
     "machine": "arm64",
     "timestamp": "2026-08-03T02:36:45.176956+00:00",
-    "db_path": "/private/tmp/claude-501/-Users-v-pratap-bhardwaj-Documents-varun-world-Agentic-official/56c17f7c-3d6d-4ab6-b209-54da740ba392/scratchpad/bench_run/20260803T022001Z/memory.db",
+    "db_path": "<redacted: benchmark scratch path>",
     "db_size_bytes": 1014591488,
     "embedding_mode": "OllamaEmbedder",
     "embedding_model_ollama_tag": "nomic-embed-text",

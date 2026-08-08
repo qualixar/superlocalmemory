@@ -1,0 +1,39 @@
+{
+  "experiment": "exp_governed_latency",
+  "slm_module_file": "src/superlocalmemory/__init__.py",
+  "method": "Method B (in-process governed envelope). Entrypoint: CanonicalRememberRuntime.remember() \u2014 the same code path the HTTP /remember handler calls after request parsing. Governed chain includes: AdmissionJournal.prepare() (AES-256-GCM encrypt + fsync journal row), journal.mark_dispatched(), WriteCoordinator.submit() (queue \u2192 background worker thread wake), _handle_admission() \u2192 IngestionCommand.submit() \u2192 write_queryable() \u2192 db.store_memory() + db.store_fact() (SQLite writer thread), _record_projection_obligations() (obligation ledger M033 INSERT), journal.mark_committed() (terminal journal update). Excluded: HTTP transport, request parsing, trust hook, daemon lifecycle. Warmup: 30 calls (discarded). Measurement: 1000 calls, each with unique idempotency_key (journal never short-circuits). Timing: time.monotonic() wall-clock per call. Bypass comparison: IngestionCommand.submit() directly on same throwaway DB, skipping journal/coordinator/obligations. Machine: arm arm64, macOS 26.5.2, Python 3.13.13. DB files reside in APFS temporary directory (OS may use in-memory buffers after warmup \u2014 actual daemon runs on persistent APFS, so p50/p95/p99 may be higher in production due to fsync latency on first journal write).",
+  "governed": {
+    "label": "governed_write_envelope",
+    "n": 1000,
+    "p50_ms": 3.522,
+    "p95_ms": 4.427,
+    "p99_ms": 5.297,
+    "mean_ms": 3.611,
+    "min_ms": 2.972,
+    "max_ms": 7.231,
+    "stdev_ms": 0.429
+  },
+  "bypass": {
+    "label": "bypass_ingestion_command",
+    "n": 1000,
+    "p50_ms": 1.835,
+    "p95_ms": 2.379,
+    "p99_ms": 2.569,
+    "mean_ms": 1.908,
+    "min_ms": 1.449,
+    "max_ms": 6.457,
+    "stdev_ms": 0.291
+  },
+  "governance_overhead_delta_p50_ms": 1.687,
+  "governance_overhead_delta_p99_ms": 2.728,
+  "caveats": [
+    "WARMUP ADEQUACY: 30 warmup calls may leave APFS page-cache partially cold for very early measured calls. Mitigated by holding the same TempWorkspace open across warmup and measure phases.",
+    "GIL CONTENTION: WriteCoordinator worker thread competes with the calling thread for the GIL on Python bookkeeping between SQLite I/O releases. This adds variance; p99 captures the tail accurately but absolute values are CPython-specific.",
+    "BYPASS COMPARISON SCOPE: The bypass path (IngestionCommand.submit) includes the DB transaction and FTS indexing but omits the journal, coordinator queue/wake, obligation ledger, and manifest. The governance delta = governed p50 - bypass p50. A direct store_fast() comparison would also exclude operation-repository bookkeeping, making the true store_fast delta slightly smaller than shown."
+  ],
+  "platform": {
+    "python": "3.13.13",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm"
+  }
+}

@@ -78,7 +78,7 @@ def test_graph_500_generic_body(client):
     """SEC-H-02: forced DB error on GET /api/graph returns no exception detail."""
     tc, h = client
 
-    FS_SENTINEL = "/Users/varun/.superlocalmemory/memory.db: table does not exist"
+    FS_SENTINEL = "/Users/yourusername/.superlocalmemory/memory.db: table does not exist"
 
     with patch(
         "superlocalmemory.server.routes.memories.get_db_connection",

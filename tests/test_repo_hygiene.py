@@ -52,24 +52,64 @@ def _require_git() -> None:
         pytest.skip("not a git checkout")
 
 
-def test_no_tracked_file_contains_an_absolute_home_path() -> None:
-    """No tracked blob may carry anyone's home directory.
+# Home-directory shapes, including the flattened form tools embed in scratch
+# paths and session identifiers.
+# POSIX ERE — `git grep -E` rejects Python's non-capturing `(?:...)` with
+# "repetition-operator operand invalid". Keep this dialect-portable.
+_USER_SEGMENT_RE = r"(/Users/|/home/|-Users-)[A-Za-z0-9._-]+"
 
-    ``git grep`` searches tracked content through git itself, so a sandboxed
-    HOME or an unreadable working tree cannot turn this gate into a no-op.
+# Names that are documentation placeholders, not anyone's identity. Docs and
+# fixtures legitimately show `/Users/yourusername/...`; flagging those would
+# make the gate cry wolf, and a gate that cries wolf gets deleted by whoever
+# hits it next.
+_PLACEHOLDER_SEGMENTS = frozenset({
+    "you", "your", "yourname", "yourusername", "your_username",
+    "user", "username", "name", "me", "someone", "somebody",
+    "alice", "bob", "carol", "foo", "bar", "baz", "example", "test",
+    "runner", "ci", "root", "home", "u", "x", "...",
+})
+
+
+def test_no_tracked_file_leaks_a_real_identity_in_a_path() -> None:
+    """No tracked blob may carry a real person's home-directory path.
+
+    Two failure modes are being avoided at once, and the balance is the point.
+
+    Too narrow: the first version grepped the literal ``/Users/<one-name>`` and
+    missed ``benchmark/results/bench_perf.json``, which recorded the SAME
+    identity hyphenated by a different tool as ``-Users-<author>-``
+    (F-23).
+
+    Too broad: matching every home-directory shape flagged 23 files, nearly all
+    of them documentation showing ``/Users/yourusername/`` — legitimate content.
+
+    So the gate matches the shape and then judges the *segment*: a name outside
+    the placeholder set is treated as a real identity. Verified 2026-08-08.
     """
     _require_git()
-    # -I skips binary, -F fixed string, -l names files only.
-    proc = _git("grep", "-I", "-F", "-l", "-e", _HOME_PREFIX, "--", ".")
-    # git grep: 0 = matches found, 1 = none found, >1 = real error.
+    proc = _git("grep", "-I", "-h", "-o", "-E", _USER_SEGMENT_RE, "--", ".")
     assert proc.returncode in (0, 1), (
         f"git grep failed ({proc.returncode}) — the gate could not run, which "
         f"must never be reported as success: {proc.stderr.strip()}"
     )
-    offenders = [line for line in proc.stdout.splitlines() if line.strip()]
+
+    offenders: set[str] = set()
+    for line in proc.stdout.splitlines():
+        match = line.strip()
+        if not match:
+            continue
+        # `-o` yields e.g. "/Users/alice" or the flattened "-Users-someone".
+        for prefix in ("/Users/", "/home/", "-Users-"):
+            if match.startswith(prefix):
+                seg = match[len(prefix):]
+                if seg and seg.lower() not in _PLACEHOLDER_SEGMENTS:
+                    offenders.add(seg)
+                break
+
     assert not offenders, (
-        "Tracked files contain an absolute home path — this repository is "
-        f"published: {offenders}"
+        "Tracked files embed what look like real home-directory identities — "
+        f"this repository is published: {sorted(offenders)}. Use a placeholder "
+        f"(one of: yourusername, user, alice) or redact the path."
     )
 
 
