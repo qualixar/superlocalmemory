@@ -1908,7 +1908,7 @@ def cmd_status(args: Namespace) -> None:
         ])
         return
 
-    print("SuperLocalMemory V3")
+    print("SuperLocalMemory V4")
     print(f"  Mode: {config.mode.value.upper()}")
     print(f"  Provider: {config.llm.provider or 'none'}")
     print(
@@ -2275,7 +2275,7 @@ def cmd_help(args: Namespace) -> None:
         return
 
     from superlocalmemory.cli.json_output import _get_version
-    print(f"SuperLocalMemory V3 ({_get_version()}) — command overview")
+    print(f"SuperLocalMemory V4 ({_get_version()}) — command overview")
     print("=" * 58)
     print("Run any command with -h for its options, e.g.  slm recall -h\n")
     for title, rows in _COMMAND_GROUPS:
@@ -2322,7 +2322,7 @@ def cmd_doctor(args: Namespace) -> None:
             print(line)
 
     if not use_json:
-        print("SuperLocalMemory V3 — Doctor (Pre-flight Check)")
+        print("SuperLocalMemory V4 — Doctor (Pre-flight Check)")
         print("=" * 50)
         print()
 
@@ -2978,7 +2978,7 @@ def cmd_warmup(_args: Namespace) -> None:
     """
     import superlocalmemory.core.embeddings as _emb_mod
 
-    print("SuperLocalMemory V3 — Embedding Model Warmup")
+    print("SuperLocalMemory V4 — Embedding Model Warmup")
     print("=" * 50)
     print(f"  Python: {sys.executable}")
     print(f"  Model:  nomic-ai/nomic-embed-text-v1.5 (~500MB)")
@@ -3088,7 +3088,7 @@ def cmd_dashboard(args: Namespace) -> None:
 
     port = getattr(args, "port", None) or _get_port()
 
-    print("  SuperLocalMemory V3 — Web Dashboard")
+    print("  SuperLocalMemory V4 — Web Dashboard")
     print(f"  Starting daemon if needed...")
 
     if not ensure_daemon(port=port):

@@ -71,6 +71,21 @@ def test_dashboard_does_not_claim_unconditional_locality_or_legal_compliance() -
     assert "EU AI Act compliant" not in settings
 
 
+def test_live_server_surfaces_identify_v4() -> None:
+    live_v3_labels = (
+        'title="SuperLocalMemory V3',
+        '<title>SuperLocalMemory V3',
+        '<h1>SuperLocalMemory V3',
+        'print("SuperLocalMemory V3',
+    )
+    for name in ("api.py", "ui.py", "unified_daemon.py"):
+        source = (ROOT / "src/superlocalmemory/server" / name).read_text(
+            encoding="utf-8"
+        )
+        assert "SuperLocalMemory V4" in source
+        assert not any(label in source for label in live_v3_labels)
+
+
 def test_operations_resolution_uses_shared_destructive_confirmation() -> None:
     source = (
         ROOT / "src/superlocalmemory/ui/js/od-ops-health.js"

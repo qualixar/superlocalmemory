@@ -215,3 +215,34 @@ async def test_core_registered_callables_work_in_each_product_mode(
     assert session["retrieval_mode"] == "hybrid_candidate_fusion"
     assert session["memory_count"] == 0
     assert session["session_id"].startswith("slm-")
+
+
+@pytest.mark.asyncio
+async def test_attribution_reports_current_product_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public attribution tool must agree with the V4 MCP server name."""
+    mod = _fresh_server(monkeypatch, "whole")
+    registered = {
+        tool.name: tool.fn for tool in mod.server._tool_manager.list_tools()
+    }
+
+    attribution = await registered["get_attribution"]()
+
+    assert attribution["product"] == "SuperLocalMemory V4"
+
+
+def test_imported_server_exposes_product_name_and_whole_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Imported MCP server keeps product identity and whole surface at 87."""
+    mod = _fresh_server(monkeypatch, "whole")
+    # Public SLMFastMCP/MCPServer attribute — do not assert private internals.
+    assert mod.server.name == "SuperLocalMemory V4"
+    strict = _StrictToolServer()
+    _register_every_tool(strict)
+    assert len(strict.tools) == 87
+    actual_names = [tool.name for tool in mod.server._tool_manager.list_tools()]
+    assert len(actual_names) == 87
+    assert len(actual_names) == len(set(actual_names))
+    assert set(actual_names) == set(strict.tools)

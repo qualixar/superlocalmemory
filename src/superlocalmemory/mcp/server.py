@@ -1,8 +1,8 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-# Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
+# Part of SuperLocalMemory V4 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — MCP Server.
+"""SuperLocalMemory V4 — MCP Server.
 
 Clean MCP server calling V3 MemoryEngine. Supports all MCP-compatible IDEs.
 
@@ -33,7 +33,7 @@ from superlocalmemory.mcp.http_transport import SLMFastMCP
 logger = logging.getLogger(__name__)
 
 # mcp 2.0.0: MCPServer takes version= directly (no private _mcp_server poke).
-server = SLMFastMCP("SuperLocalMemory V3", version=_slm_version)
+server = SLMFastMCP("SuperLocalMemory V4", version=_slm_version)
 
 # Lazy engine singleton -------------------------------------------------------
 
@@ -83,7 +83,7 @@ def reset_engine():
 # Antigravity, Windsurf) and a maximal SLM registration crowds out
 # other MCP servers the user may have installed.
 # Admin/diagnostics tools remain available via CLI (`slm <command>`).
-# Set SLM_MCP_ALL_TOOLS=1 to enable all 84 tools (power users).
+# Set SLM_MCP_ALL_TOOLS=1 to enable all 87 tools (power users).
 
 import os as _os_reg
 

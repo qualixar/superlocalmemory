@@ -49,4 +49,4 @@ does. On Codex, cache/compress works through the MCP tools plus the
 
 ---
 
-SuperLocalMemory v3.8.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory V4.0.0 · Qualixar · AGPL-3.0-or-later

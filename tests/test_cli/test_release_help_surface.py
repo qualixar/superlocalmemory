@@ -56,3 +56,56 @@ def test_every_advertised_root_command_has_activation_free_help(
     assert result.returncode == 0, result.stderr
     assert "usage: slm" in result.stdout.lower()
     assert not (tmp_path / "must-not-be-created").exists()
+
+
+def test_root_help_identifies_v4_without_changing_version(
+    tmp_path: Path,
+) -> None:
+    """The public banner must name V4 and retain the package version."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = _SRC + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["SLM_HOME"] = str(tmp_path / "must-not-be-created")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from superlocalmemory.cli.main import main; import sys; "
+            "sys.argv=['slm', '--help']; main()",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "SuperLocalMemory V4 (4.0.0)" in result.stdout
+    assert "SuperLocalMemory V3" not in result.stdout
+
+
+def test_dashboard_help_does_not_claim_fixed_tab_count(
+    tmp_path: Path,
+) -> None:
+    """Dashboard navigation is not a fixed CLI contract."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = _SRC + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["SLM_HOME"] = str(tmp_path / "must-not-be-created")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from superlocalmemory.cli.main import main; import sys; "
+            "sys.argv=['slm', '--help']; main()",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "dashboard" in result.stdout.lower()
+    assert "Open web dashboard" in result.stdout
+    assert "17-tab" not in result.stdout

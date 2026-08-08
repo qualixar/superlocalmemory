@@ -16,6 +16,13 @@ multi-session projects coherent. Cost at Mode A: zero.
 
 ---
 
+## Prerequisites
+
+- **Python:** >=3.11,<3.15 (3.11, 3.12, 3.13, 3.14)
+- **Platforms:** Apple Silicon macOS, 64-bit Windows, 64-bit Linux
+
+---
+
 ## Setup Checklist
 
 ### Step 1 — Confirm install
@@ -23,7 +30,7 @@ multi-session projects coherent. Cost at Mode A: zero.
 ```bash
 slm --version
 ```
-Expected: `superlocalmemory 3.x.x`
+Expected: `superlocalmemory 4.0.0`
 
 On failure: `pip install superlocalmemory` then re-run.
 

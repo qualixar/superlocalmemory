@@ -1,9 +1,11 @@
-# Published V3 LoCoMo Evidence (Architecture Carried into V3.8.0)
+# Published V3 LoCoMo Evidence (Architecture Carried into V4)
 
 This page is the canonical public reference for SuperLocalMemory benchmark
-figures. It reports the published V3 architecture experiments that remain the
-foundation of V3.7. These are not a newly rerun V3.7 package benchmark and are
-not a cross-vendor leaderboard.
+figures. It reports the published V3 architecture experiments (from the
+V3 preprint / V3.7 package) that remain the foundation of V4. These are
+published V3 LoCoMo architecture evidence carried into V4 — never a newly
+rerun V4 package result — and are not a cross-vendor leaderboard. All
+original protocols are retained exactly as published.
 
 Source: [SuperLocalMemory V3 preprint (arXiv:2603.14588)](https://arxiv.org/abs/2603.14588).
 
@@ -30,6 +32,7 @@ an ablation result with its own protocol; it must not be substituted for the
 
 A LoCoMo percentage is comparable only when the conversation subset, question
 count, retrieval stack, answer-construction model, judge, and release artifact
-are declared and compatible. Do not use these figures to claim that V3.7 has
+are declared and compatible. Do not use these figures to claim that V4 has
 been freshly rerun, that every mode has the same score, or that SLM outranks a
-competitor tested under another protocol.
+competitor tested under another protocol. The architecture was introduced in V3
+and its published protocols are carried into V4 unchanged.

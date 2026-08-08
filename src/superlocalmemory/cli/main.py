@@ -179,7 +179,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="slm",
-        description=f"SuperLocalMemory V3 ({_ver}) — AI agent memory with mathematical foundations",
+        description=f"SuperLocalMemory V4 ({_ver}) — AI agent memory with mathematical foundations",
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -519,7 +519,7 @@ def main() -> None:
     sub.add_parser("mcp", help="Start MCP server (stdio transport for IDE integration)")
     sub.add_parser("warmup", help="Pre-download embedding model (~500MB, one-time)")
 
-    dashboard_p = sub.add_parser("dashboard", help="Open 17-tab web dashboard")
+    dashboard_p = sub.add_parser("dashboard", help="Open web dashboard")
     dashboard_p.add_argument(
         "--port", type=int, default=8765, help="Port (default 8765)",
     )

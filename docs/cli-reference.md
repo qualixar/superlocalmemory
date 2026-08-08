@@ -102,12 +102,15 @@ Alias for `slm recall`. Same behavior, same options.
 
 ### `slm forget "query" [options]`
 
-Delete memories matching a query.
+Delete memories matching a fuzzy query (v4: `query` is positional, optional
+when used with `--dry-run`; there is **no** `slm forget --id` — use `slm
+delete <fact_id>` for exact ID deletion).
 
 ```bash
 slm forget "old staging credentials"             # Confirm before deletion
 slm forget "old staging credentials" --dry-run   # Preview only
 slm forget "old staging credentials" --yes       # Skip confirmation
+slm forget --dry-run                            # Preview all memories when no query
 ```
 
 | Option | Description |
@@ -116,7 +119,9 @@ slm forget "old staging credentials" --yes       # Skip confirmation
 | `--yes`, `-y` | Skip the confirmation prompt |
 | `--json` | Emit structured preview or mutation output |
 
-Use `slm delete <fact_id>` for precise deletion by ID.
+Use `slm delete <fact_id>` for precise deletion by ID. See
+`docs/auto-memory.md` for the same correction (fuzzy `forget`, precise
+`delete`).
 
 ### `slm delete <fact_id>`
 
@@ -178,20 +183,29 @@ Reports status of:
 
 ## Migration
 
-### `slm migrate [options]`
+### `slm migrate`
 
-Migrate a V2 database to V3 format.
+Migrate a V2 database to V3 format (one-shot; no `--dry-run`).
 
 ```bash
 slm migrate                # Run migration
-slm migrate --rollback     # Roll back when a valid migration backup exists
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--rollback` | Revert to V2 format (backup must exist) |
+> There is no `slm migrate --dry-run`, no `slm consistency` (use `slm health`
+> / `slm trace` / `slm ops`), no automatic 30-day rollback window, and the
+> migrator is not globally transactional/zero-loss — it spans file copies,
+> SQLite commits and a symlink. Verify a complete offline whole-root backup
+> (`slm serve stop` first, include WAL/SHM + `lance/` if present) before
+> migrating. Downgrade of V4 additive DBs is unsupported; see
+> `slm db migrate` below.
 
-Use `slm db migrate --dry-run` to inspect additive database migrations.
+### V4 additive DB migrations (`slm db migrate`)
+
+Current V4 ships `M038_learning_feedback_channel` (eager, `learning` DB) and
+`M039_scene_fact_members` (deferred, `memory` DB — profile-scoped composite
+`scene_fact_members` with FKs to `memory_scenes(profile_id, scene_id)` and
+`atomic_facts(profile_id, fact_id)`). Both auto-apply at startup; no manual
+migration is normally required.
 
 ## Profile Management
 
@@ -806,14 +820,15 @@ The MCP equivalents are `slm_loop_run`, `slm_loop_history`, and `slm_loop_show`.
 
 ## Database Maintenance
 
-### `slm db migrate [options]`
+### `slm db migrate [status|--dry-run]`
 
-Inspect or run additive database schema migrations.
+Inspect or run additive database schema migrations — **forward-only** (no
+`--rollback`).
 
 ```bash
-slm db migrate             # Apply pending migrations
-slm db migrate --dry-run   # Preview pending migrations
-slm db migrate --rollback  # Roll back to previous schema backup
+slm db migrate --status    # Show migration_log status (no writes)
+slm db migrate --dry-run   # Preview what would change (no writes)
+slm db migrate             # Apply pending migrations (forward-only)
 ```
 
 ### `slm db scale status|prepare|verify|promote|rollback|adopt`

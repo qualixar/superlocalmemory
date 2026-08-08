@@ -72,8 +72,8 @@ UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     application = FastAPI(
-        title="SuperLocalMemory V3 UI Server",
-        description="Memory Dashboard with V3 Engine, Trust, Learning, and Compliance",
+        title="SuperLocalMemory V4 UI Server",
+        description="Memory Dashboard with V4 Engine, Trust, Learning, and Compliance",
         version=SLM_VERSION,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
@@ -224,9 +224,9 @@ def create_app() -> FastAPI:
         if not index_path.exists():
             return (
                 "<!DOCTYPE html><html><head>"
-                "<title>SuperLocalMemory V3</title></head>"
+                "<title>SuperLocalMemory V4</title></head>"
                 "<body style='font-family:Arial;padding:40px'>"
-                "<h1>SuperLocalMemory V3 UI Server Running</h1>"
+                "<h1>SuperLocalMemory V4 UI Server Running</h1>"
                 "<p>UI not found. Check ui/index.html</p>"
                 "<p><a href='/api/docs'>API Documentation</a></p>"
                 "</body></html>"
@@ -290,7 +290,7 @@ if __name__ == "__main__":
     import argparse
     import socket
 
-    parser = argparse.ArgumentParser(description="SuperLocalMemory V3 - Web Dashboard")
+    parser = argparse.ArgumentParser(description="SuperLocalMemory V4 - Web Dashboard")
     parser.add_argument("--port", type=int, default=8765, help="Port (default 8765)")
     parser.add_argument("--profile", type=str, default=None, help="Memory profile")
     args = parser.parse_args()
@@ -310,7 +310,7 @@ if __name__ == "__main__":
         print(f"\n  Port {args.port} in use -- using {ui_port} instead\n")
 
     print("=" * 70)
-    print("  SuperLocalMemory V3 - Web Dashboard")
+    print("  SuperLocalMemory V4 - Web Dashboard")
     print("  Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar")
     print("=" * 70)
     print(f"  Database:  {DB_PATH}")

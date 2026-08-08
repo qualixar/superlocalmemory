@@ -1,6 +1,14 @@
 # Cloud Backup — Google Drive & GitHub
 
-SuperLocalMemory v3.4.10+ can automatically back up your memory databases to **Google Drive** and **GitHub**. All credentials are stored in your OS keychain (macOS Keychain, Windows Credential Locker, or Linux Secret Service) — never in plaintext.
+SuperLocalMemory v3.4.10+ can automatically back up your memory databases to
+**Google Drive** and **GitHub**. Credentials are stored in your OS keychain
+(macOS Keychain, Windows Credential Locker, or Linux Secret Service) when
+available. On systems without a keychain (headless Linux, containers without
+Secret Service) they fall back to an owner-only plaintext
+`~/.superlocalmemory/.credentials.json` (`0600`, parent `0700`, atomic write
+via `_atomic_write_creds` in `src/superlocalmemory/infra/cloud_backup.py`) —
+not encrypted. Protect that file and the data root with volume encryption and
+owner-only modes; prefer a keychain-capable host when possible.
 
 ## GitHub Backup (Recommended)
 
@@ -19,24 +27,42 @@ GitHub backup works out of the box. No additional setup needed beyond a Personal
 
 That's it. SLM will:
 - Verify your token
-- Create a **private** repository (always private — your data is never public)
+- Create a **private** repository when the named repository does not exist
+- Reuse an existing repository without changing or verifying its visibility;
+  confirm that an existing backup repository is private before connecting
 - Initialize it with a README
 - Show your GitHub avatar and username in the sidebar
 
 ### How It Works
 
-- Each backup creates a **GitHub Release** with your database files as assets
-- The configured database set is included. Canonical M018 ingestion operations and raw evidence live in `memory.db`; `pending.db` is a legacy offline compatibility spool where present.
-- Only the last **5 releases** are kept — older ones are automatically deleted to prevent storage bloat
+- Each GitHub backup is an independent per-file `memory-*.db` snapshot plus
+  companion `learning-*.db` etc. when present, published as a **GitHub
+  Release** with those files as assets. Not a coherent cross-store epoch;
+  companion upload failures are non-critical for the primary `memory.db`.
+- The included stores are the `MANAGED_DATABASES` set
+  (`src/superlocalmemory/infra/backup.py`): `memory.db`, `learning.db`,
+  `audit_chain.db`, `code_graph.db`, `pending.db`, `audit.db` — only those
+  present are sent. Canonical M018 ingestion operations and raw evidence live
+  in `memory.db`; `pending.db` is a legacy offline compatibility spool where
+  present. `lance/` is not included on the legacy path.
+- Only the last **5 releases** are kept — older ones are automatically deleted
+  to prevent storage bloat
 - Backups run in the background — the dashboard never freezes
+- Snapshot files follow process `umask`; verify `0600`/`0700` on the data root
+  and any manual copy destination
 
 ### Restoring from GitHub
 
-1. Go to your `slm-backup` repo on GitHub
-2. Click **Releases** in the sidebar
-3. Download the `.db` files from the latest release
-4. Copy them to `~/.superlocalmemory/`
-5. Run `slm restart`
+1. `slm serve stop` — stop the daemon so WAL/SHM checkpoint before overwriting
+   live files
+2. Go to your `slm-backup` repo on GitHub
+3. Click **Releases** in the sidebar
+4. Download the `.db` files (plus `-wal`/`-shm` sidecars and `lance/` if you
+   saved a whole-root copy) from the latest release
+5. Copy them into `~/.superlocalmemory/` (offline replace) and verify they are
+   owner-only (`0600`/`0700`) on an encrypted/private volume
+6. Run `slm restart` (there is no wired in-place `restore` route for whole-root
+   sets in this release)
 
 ---
 
@@ -99,18 +125,27 @@ Google requires every application to register an "OAuth client" before it can ac
 
 ### How It Works
 
-- Backups are uploaded to a `SLM-Backup` folder in your Google Drive
-- Files are **replaced in-place** (no duplicates, no storage bloat)
-- ALL databases are backed up, not just memory.db
-- Your OAuth credentials are stored in your OS keychain
-- Backups run in the background
+- Backups are uploaded as independent per-file snapshots to a `SLM-Backup`
+  folder in your Google Drive; files are **replaced in-place** (no duplicates)
+- Included: `MANAGED_DATABASES` (`memory.db`, `learning.db`, `audit_chain.db`,
+  `code_graph.db`, `pending.db`, `audit.db`) — only present files are sent;
+  `lance/` is not included on the legacy path. Not a coherent epoch.
+  Companion upload failures log as non-critical and do not fail the primary.
+- OAuth credentials are stored in your OS keychain when available; otherwise
+  fallback to owner-only plaintext `.credentials.json` (`0600`, see above)
+- Backups run in the background; resulting snapshot files follow process
+  `umask` — verify `0600`/`0700` and keep the destination private/encrypted
 
 ### Restoring from Google Drive
 
-1. Open Google Drive → `SLM-Backup` folder
-2. Download all `.db` files
-3. Copy them to `~/.superlocalmemory/`
-4. Run `slm restart`
+1. `slm serve stop`
+2. Open Google Drive → `SLM-Backup` folder
+3. Download all `.db` files (plus sidecars/`lance/` if present for a whole-root
+   copy)
+4. Copy them to `~/.superlocalmemory/` and verify owner-only modes on an
+   encrypted/private volume
+5. Run `slm restart` (no wired whole-root restore route; offline copy is the
+   supported path)
 
 ---
 
@@ -130,31 +165,64 @@ Configure the schedule in **Settings** → **Backup Configuration**:
 
 ### Export
 
-Click the **download icon** in the sidebar to export a compressed `.gz` backup file you can store anywhere.
+Click the **download icon** in the sidebar to export a compressed `.gz` backup
+file. This is `POST /api/backup/export` — it creates a single gzipped
+`memory-*.db` snapshot (`memory.db`-only) via `BackupManager` and streams it as
+a temporary `*.db.gz` (removed after the response). Not a coherent whole-root
+export; for a whole-root copy stop the daemon and copy the data-root store set
+offline.
 
 ---
 
 ## What Gets Backed Up
 
-| Database | Contents | Typical Size |
-|---|---|---|
-| `memory.db` | Facts, M018 operations/raw evidence, entities, graph edges, embeddings, sessions | Deployment-specific |
-| `learning.db` | Learning signals, behavioral patterns, ranker data | 0.5 — 5 MB |
-| `audit_chain.db` | Audit trail, compliance provenance | 0.5 — 2 MB |
-| `code_graph.db` | Code knowledge graph (if used) | 0.1 — 10 MB |
-| `pending.db` | Legacy offline spool awaiting canonical M018 replay (when present) | Deployment-specific |
+| Database | Contents | Typical Size | Backup inclusion |
+|---|---|---|---|
+| `memory.db` | Facts, M018 operations/raw evidence, entities, graph edges, embeddings, sessions | Deployment-specific | Always if present (primary) |
+| `learning.db` | Learning signals, behavioral patterns, ranker data | 0.5 — 5 MB | If present via `_backup_all_dbs` (non-critical companion) |
+| `audit_chain.db` | Audit trail, compliance provenance | 0.5 — 2 MB | If present (companion, warning on failure) |
+| `code_graph.db` | Code knowledge graph (if used) | 0.1 — 10 MB | If present (companion) |
+| `pending.db` | Legacy offline spool awaiting canonical M018 replay (when present) | Deployment-specific | If present (companion) |
+| `audit.db` | Legacy audit (pre-v3.4) | — | If present (companion) |
 
-All databases are backed up using SQLite's `sqlite3.backup()` API, which creates a consistent, atomic snapshot even while the daemon is running.
+Production backups use `BackupManager`: independent per-file SQLite
+`sqlite3.backup()` snapshots, one file at a time — **not** a coherent
+cross-store epoch/manifest/atomic set. `sqlite3.backup()` creates a hot
+consistent snapshot of *that* file even while the daemon runs, but there is
+no cross-store epoch or atomic rollback across stores on the legacy path.
+`lance/` is not included on the legacy path (the coherent `BackupCoordinator`
+primitive captures it as an out-of-manifest companion, but it is not wired to
+these routes). Destination files follow process `umask`; verify `0600`/`0700`
+after copy. For offline whole-root backup/restore: `slm serve stop` first so
+WAL/SHM checkpoint, then copy the complete data-root store set.
+
+`MANAGED_DATABASES` registry: `src/superlocalmemory/infra/backup.py`.
 
 ---
 
 ## Security
 
-- **GitHub repos are always private** — hardcoded, cannot be changed
-- **Credentials stored in OS keychain** — macOS Keychain, Windows Credential Locker, or Linux Secret Service
-- **Fallback**: On systems without a keychain (headless Linux), credentials are stored in `~/.superlocalmemory/.credentials.json` with `chmod 0600` (owner-only)
+- **New GitHub backup repositories are created private.** Existing repositories
+  are reused without a visibility check or enforcement, so verify the selected
+  repository is private before uploading any memory database.
+- **Credentials — OS keychain preferred** — macOS Keychain, Windows Credential
+  Locker, or Linux Secret Service when available. **Fallback:** owner-only
+  plaintext `~/.superlocalmemory/.credentials.json` (`0600`, parent `0700`,
+  atomic `_atomic_write_creds`) on systems without a keychain (headless Linux,
+  containers) — not encrypted. Keep that file on an encrypted/private volume
+  and verify `0600`/`0700` after writes. Provider/reranker keys persisted in
+  `~/.superlocalmemory/config.json` are likewise plaintext protected only by
+  atomic `0600` (`core/config.py:SLMConfig.save()`); prefer env
+  (`OPENAI_API_KEY` / `SLM_CROSS_ENCODER_API_KEY`) to avoid disk persistence.
 - **Google OAuth tokens** are refresh tokens — they can be revoked from your [Google Account Security page](https://myaccount.google.com/permissions)
 - **GitHub PATs** can be revoked from [GitHub Settings → Tokens](https://github.com/settings/tokens)
+- **Backup destination permissions:** snapshot files follow process `umask`,
+  not `0600` inheritance — verify owner-only modes. Use an encrypted/private
+  destination for backups/exports (see `docs/SECURITY-encryption-at-rest.md`).
+  No wired whole-root restore route — offline `slm serve stop` + copy is the
+  supported restore path.
+- **No zero-loss claim for the legacy path:** per-file copies have no coherent
+  epoch; offline whole-root copy while stopped is the consistent set.
 
 ---
 

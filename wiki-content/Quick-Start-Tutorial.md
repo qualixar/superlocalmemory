@@ -119,7 +119,7 @@ Works with: Claude Code, Cursor, VS Code Copilot, Windsurf, Continue, Cody, Chat
 slm dashboard
 ```
 
-Opens at http://localhost:8765. 11 workspaces: Dashboard, Brain, Knowledge Graph, Memories, Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and Optimize.
+Opens at http://localhost:8765. Dashboard workspaces include Dashboard, Brain, Knowledge Graph, Memories, Health, Operations, Entity Explorer, Skill Evolution, Mesh Peers, Settings, and Optimize (workspace/tab counts are illustrative — verify the installed dashboard; do not treat a count as a contract).
 
 ---
 
@@ -141,13 +141,13 @@ V3 installs alongside V2. Your V2 data is untouched until you migrate.
 slm migrate
 ```
 
-This will:
+This will (not a global transaction — spans file copies, commits, and symlink/junction; verify after):
 - Show your V2 stats (memory count, DB size)
 - Ask for confirmation
-- Back up your V2 database automatically
+- Create a backup at `~/.superlocalmemory/memory-v2-backup.db` / `~/.claude-memory-v2-original` (verify it exists before relying on rollback)
 - Copy data to the V3 location (`~/.superlocalmemory/`)
 - Convert V2 memories to V3 atomic facts
-- Create a symlink so old tools still find the data
+- Create a symlink/junction so old tools still find the data (platform-dependent)
 
 ### 3. Setup V3
 
@@ -174,17 +174,19 @@ slm recall "something you stored in V2"   # Verify old memories are accessible
 | Lifecycle | Hardcoded thresholds | Self-organizing Langevin dynamics |
 | Modes | Single mode | A (zero-cloud), B (local LLM), C (cloud LLM) |
 | Privacy and compliance controls | Not addressed | Deployment-specific controls and assessment |
-| Dashboard | 5 tabs | 11 workspaces |
+| Dashboard |_tabs are illustrative — verify the installed build_ | _workspace counts are illustrative — verify the installed dashboard_ |
 | MCP Tools | 6 | Profile-selected V3 tool surfaces |
 | Tests | Historical V2 suite | V3 unit, contract, artifact, and integration suites |
 
 ### Rollback if needed
 
 ```bash
+# rollback only while the migrator-created backup still exists — verify before use:
+ls -lh ~/.superlocalmemory/memory-v2-backup.db; ls -ld ~/.claude-memory-v2-original
 slm migrate --rollback
 ```
 
-This restores your V2 installation. No data is lost.
+This restores your V2 installation from the backup while it still exists; verify the backup (`~/.superlocalmemory/memory-v2-backup.db` / `~/.claude-memory-v2-original`) before use — code has no automatic deletion or guaranteed window. It spans file copies, commits, and rename/symlink and reports failures; verify the restored state.
 
 ---
 

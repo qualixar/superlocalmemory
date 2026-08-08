@@ -2,7 +2,7 @@
 
 [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/)
 memory + history providers backed by the local data root of
-[SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory).
+[SuperLocalMemory V4.0.0](https://github.com/qualixar/superlocalmemory).
 
 Give an Agent Framework agent durable conversation history and memory
 enrichment in your local SLM data root, visible through every other SLM
@@ -11,9 +11,10 @@ separate network behavior.
 
 ## Prerequisites
 
-- Python 3.11+
-- [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory) installed in the same environment
+- Python >=3.11,<3.15 (3.11, 3.12, 3.13, 3.14)
+- [SuperLocalMemory V4.0.0](https://github.com/qualixar/superlocalmemory) installed in the same environment
 - `agent-framework-core >= 1.5.0` (the release that introduced `before_run` / `after_run`)
+- Supported platforms: Apple Silicon macOS, 64-bit Windows, 64-bit Linux — Intel Mac and 32-bit Windows (Win32) are outside the V4.0.0 support contract (`cryptography==50.0.0` has no wheel for those architectures).
 
 ## Installation
 
@@ -78,6 +79,6 @@ AGPL-3.0 — see [LICENSE](../../../LICENSE).
 
 ## Links
 
-- [SuperLocalMemory V3](https://github.com/qualixar/superlocalmemory)
+- [SuperLocalMemory V4.0.0](https://github.com/qualixar/superlocalmemory)
 - [Documentation](https://superlocalmemory.com/)
 - [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/)

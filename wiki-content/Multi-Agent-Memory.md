@@ -106,7 +106,7 @@ the daemon. Tools active under each profile:
 | `code` | 24 |
 | `full` | 42 |
 | `power` | 54 |
-| `whole` | 84 |
+| `whole` | 87 |
 
 ## Choosing a coordination mechanism
 

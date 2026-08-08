@@ -265,14 +265,25 @@ Each IDE has its own MCP config file. They do not conflict. All IDEs share the s
 
 Extremely rare with SQLite WAL mode, but if it happens:
 
-```bash
-# Check integrity
-slm status --json
+1. **Stop the daemon first** — a live `cp` of `memory.db` alone is unsafe (WAL/SHM may be uncheckpointed and companion stores diverge):
 
-# Restore from automatic backup
-ls ~/.superlocalmemory/backups/
-cp ~/.superlocalmemory/backups/memory-2026-03-15.db ~/.superlocalmemory/memory.db
-```
+   ```bash
+   slm serve stop
+   ```
+
+2. **Restore a complete, verified data-root/store-set backup** taken with the daemon stopped. Include `memory.db` plus sidecars (`memory.db-wal`, `memory.db-shm`) and any present `lance/` or other store directories — not a single-file `cp` over a running daemon. Backups taken via `BackupManager` are per-file `sqlite3.backup()` snapshots; a coherent offline copy is a whole-root copy with the daemon stopped so WAL checkpoints (see `SECURITY.md` Backup and credential-at-rest caveats).
+
+3. **Verify the restore** before restarting:
+
+   ```bash
+   slm status --json
+   sqlite3 ~/.superlocalmemory/memory.db "PRAGMA integrity_check;"
+   ls -l ~/.superlocalmemory/memory.db* ~/.superlocalmemory/lance 2>&1 | head -20
+   slm serve start
+   slm status --json
+   ```
+
+   Do not rely on `slm migrate --rollback` for schema downgrade — `slm db migrate` is **forward-only** (`status`/`--dry-run`/apply, no rollback) and there is no supported downgrade path except restoring a verified pre-upgrade complete backup.
 
 ### Database is too large
 

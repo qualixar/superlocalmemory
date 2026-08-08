@@ -146,7 +146,7 @@ class TestBackwardCompatibility:
         with patch("sys.argv", ["slm", "status"]):
             main()
         captured = capsys.readouterr()
-        assert "SuperLocalMemory V3" in captured.out
+        assert "SuperLocalMemory V4" in captured.out
         # Must NOT be valid JSON (it's human-readable text)
         with pytest.raises(json.JSONDecodeError):
             json.loads(captured.out)

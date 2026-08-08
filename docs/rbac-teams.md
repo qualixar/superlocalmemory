@@ -73,27 +73,40 @@ After restart, the dashboard prompts for credentials. Session cookies are
 
 ### Via CLI
 
+The `slm profile` CLI manages workspace profiles only — not users:
+
 ```bash
-# List users in the active profile
-slm profile users list
-
-# Create a user
-slm profile users create alice --role member
-
-# Set role
-slm profile users role alice admin
-
-# Remove user from workspace
-slm profile users remove alice
+slm profile list              # list workspaces
+slm profile switch <name>     # switch active workspace
+slm profile create <name>     # create a new workspace
 ```
+
+Verified in `src/superlocalmemory/cli/main.py`: `profile` accepts only `list | switch | create` (`choices=["list", "switch", "create"]`). There is no `slm profile users …` subcommand. User and membership administration is via the RBAC HTTP API and the dashboard (see below).
 
 ### Via dashboard
 
 The **Governance → Access & Users** tab shows the user list for the current workspace. Admins can invite, assign roles, and remove users.
 
-### Via MCP
+### Via HTTP API (RBAC routes in `src/superlocalmemory/server/routes/rbac.py`)
 
-For automated provisioning, use the REST API (HTTP MCP endpoint). The RBAC API requires an admin session token.
+All routes are under `/api/rbac/*` and require machine auth (`require_http_mutation_actor`); user/membership/policy admin further requires `MANAGE` (`src/superlocalmemory/server/rbac_enforce.py: require_manage`).
+
+| Method & Path | Purpose |
+|---|---|
+| `POST /api/rbac/login` | Authenticate; sets `HttpOnly` `slm_session` cookie (add `Secure` with `SLM_DASHBOARD_HTTPS=1`) |
+| `POST /api/rbac/logout` | Revoke session |
+| `GET /api/rbac/whoami` | Current principal |
+| `GET /api/rbac/status` | `rbac_active`, `require_login`, `user_count` |
+| `GET /api/rbac/users` | List users (MANAGE) |
+| `POST /api/rbac/users` | Create user; optional `role` + `profile_id` to set initial membership (requires MANAGE on that profile) |
+| `PATCH /api/rbac/users/{user_id}` | Update `display_name`, `password`, `status` |
+| `DELETE /api/rbac/users/{user_id}` | Delete user |
+| `GET /api/rbac/members?profile_id=` | List workspace members (MANAGE on target profile) |
+| `POST /api/rbac/members` `{user_id, role, profile_id}` | Set membership role (`admin`/`member`/`viewer`) |
+| `DELETE /api/rbac/members` `{user_id, profile_id}` | Remove membership |
+| `POST /api/rbac/policy` `{require_login}` | Toggle login gate |
+
+Workspace membership commands require `MANAGE` on the **target** profile, and modifying a user other than yourself requires authority over that user (owner or an admin who shares a `MANAGE` workspace).
 
 ---
 

@@ -110,8 +110,8 @@ authority to call tools, change roles, or request secrets.
 Cursor, Copilot, and Antigravity instruction files contain only
 product-authored static protocol. Dynamic memories are fetched through MCP at
 runtime and are not persisted into these high-trust files. See
-[`docs/adr/0001-untrusted-memory-boundary.md`](adr/0001-untrusted-memory-boundary.md)
-for the decision and its limits.
+`docs/adr/0001-untrusted-memory-boundary.md` (archived decision; see git history
+at `c1669e94`) for the decision and its limits.
 
 ## Three Operating Modes
 

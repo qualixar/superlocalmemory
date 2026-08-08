@@ -11,7 +11,7 @@ use case, and operator responsibility. SLM is not a legal certification.
 | Control | Where | CLI / Dashboard |
 |---------|-------|-----------------|
 | Data export (Art. 15/20) | Full profile data export as checksummed JSONL | `slm evidence export` · Dashboard → Governance → Data Privacy → Export |
-| Erasure (Art. 17) | Profile deletion removes data from 30+ scoped tables | `slm profile delete <name>` · Dashboard → Governance → Data Privacy → Erase |
+| Erasure (Art. 17) | Typed-confirmation profile erasure removes scoped profile data (the `default` profile cannot be erased) | Dashboard → Governance → Data Privacy → Erase; CLI supports individual `slm forget` / `slm delete`, not `slm profile delete` |
 | Erasure audit log | Erasure is logged to the tamper-proof audit chain before any data is deleted | Dashboard → Governance → Audit |
 | Retention rules (Art. 5) | Time-based expiry policies per workspace | `slm config set retention.default_policy gdpr-30d` |
 | Audit trail (Art. 5(2)) | Hash-chained record of every store, recall, mutation, and erasure | `slm diagnostics export` · Dashboard → Governance → Audit |

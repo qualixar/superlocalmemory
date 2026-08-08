@@ -38,7 +38,7 @@ is_valid = QualixarSigner.verify(signed_output)
 
 ### Research Papers
 
-SuperLocalMemory is backed by three peer-reviewed research papers:
+SuperLocalMemory is backed by three public research preprints (arXiv preprints):
 
 1. **Paper 1 — Trust & Behavioral Foundations** (arXiv:2603.02240)
    Bayesian trust defense, behavioral pattern mining, OWASP-aligned memory poisoning protection.
@@ -47,7 +47,7 @@ SuperLocalMemory is backed by three peer-reviewed research papers:
    Fisher-Rao geodesic distance, cellular sheaf cohomology, Riemannian Langevin lifecycle dynamics.
 
 3. **Paper 3 — The Living Brain** (arXiv:2604.04514)
-   FRQAD mixed-precision metric, Ebbinghaus adaptive forgetting, 7-channel cognitive retrieval, memory parameterization, trust-weighted forgetting.
+   FRQAD mixed-precision metric, Ebbinghaus adaptive forgetting, five candidate producers plus entity-graph enhancement, memory parameterization, trust-weighted forgetting.
 
 ### Research Initiative
 
@@ -61,11 +61,11 @@ SuperLocalMemory uses the following open-source libraries:
 - NumPy (BSD-3-Clause) — Numerical operations
 - SciPy (BSD-3-Clause) — Numerical optimization (used by vCache MLE logistic refit)
 
-See [requirements.txt](requirements.txt) for the full dependency list.
+See [pyproject.toml](pyproject.toml) for the full dependency list.
 
 ### Optimize Module — Research Citations (v3.6)
 
-The Optimize module (LLD-03 / LLD-04) builds on peer-reviewed work.
+The Optimize module (LLD-03 / LLD-04) builds on cited public research.
 The Implementer verified each arXiv ID against arxiv.org before citation.
 
 | Component | Source | License / Note |

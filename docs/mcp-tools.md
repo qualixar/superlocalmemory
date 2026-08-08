@@ -223,6 +223,8 @@ Report whether a recalled memory was useful. Trains the adaptive ranker over tim
 | `feedback` | string | No | `"relevant"`, `"irrelevant"`, or `"partial"` (default: `"relevant"`) |
 | `query` | string | No | The original query that surfaced this memory |
 
+If `query` is provided, the collector stores only a pseudonymized grouping key, not the raw text: per-install keyed HMAC `hmac.digest(key, query.encode("utf-8"), "sha256").hex()[:16]` (16 hex / 64-bit, `src/superlocalmemory/learning/feedback.py: _hash_query`), **not encryption**. Within a single install the same query yields the same `query_hash` (repeat correlation); across installs keys differ. The 32-byte key is at `.feedback-hash-key` beside the DB, mode `0600` (`_load_or_create_hash_key`); a read-only data root falls back to a process-local key and loses cross-restart grouping.
+
 ### `close_session`
 
 Close the current session and create temporal summary events. Aggregates session facts into per-entity summaries.

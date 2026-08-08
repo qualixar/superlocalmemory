@@ -4,7 +4,7 @@
 
 Nine Python packages back their framework's native memory interface with the local SLM data root. Install alongside the target framework; all data stays in the configured data root unless an optional SLM provider, connector, or backup feature is explicitly enabled.
 
-**Prerequisites:** Python 3.11+, SuperLocalMemory V4 installed in the same environment.
+**Prerequisites:** SuperLocalMemory V4, Python >=3.11,<3.15, supported Apple Silicon macOS / 64-bit Windows / 64-bit Linux.
 
 ---
 

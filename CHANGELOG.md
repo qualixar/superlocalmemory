@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Version 4.0 hardens the full lifecycle of a memory operation — admission,
 canonical commit, projection to every store, migration, backup, and erasure —
-so each step is authorized, atomic, and verifiable. Existing memories and
-configuration are preserved; no manual migration is required.
+so each step is authorized and verifiable. Existing memories and
+configuration are preserved; M038 (eager) and M039 (deferred) migrations are
+automatically applied at startup — no manual migration is normally required
+(see `src/superlocalmemory/storage/migration_runner.py`; `slm db migrate` is
+forward-only: `status`/`--dry-run`/apply, no rollback). Schema downgrade is
+unsupported — restore a verified pre-upgrade backup instead.
 
 ### Changed
 - **MCP SDK 2.0.0 (fully-stateless Streamable HTTP).** Pinned `mcp==2.0.0`.
@@ -33,8 +37,15 @@ configuration are preserved; no manual migration is required.
   hook surfaces.
 - Every completed operation carries a durable receipt and a hash-verifiable
   completion manifest spanning all representations.
-- Backups are captured as a coherent, checksum-verified set and restored
-  atomically, rolling the live set back if any store fails mid-restore.
+- **BackupCoordinator** is available as a coherent, checksum-verified backup
+  set primitive (`src/superlocalmemory/infra/backup.py`: `BackupCoordinator.create_backup_set()` /
+  `restore_from_manifest()` — shared epoch, per-store SHA-256, manifest hash,
+  atomic publish, pre-restore snapshot + rollback). Production backup,
+  dashboard, cloud, and export routes currently use the **legacy
+  `BackupManager`** independent per-file SQLite `sqlite3.backup()` snapshots
+  (one file at a time); companion-store failures are logged as non-critical
+  and do not fail the primary `memory.db` snapshot (`_backup_all_dbs`). See
+  correction note below.
 - **SLM-Mesh** remains the peer-coordination plane (cross-session / cross-machine
   messages, locks, shared state, inbox/outbox) with mesh MCP tools on the
   `full` / `power` / `mesh` profiles.
@@ -66,9 +77,46 @@ configuration are preserved; no manual migration is required.
 - In-memory configuration changes are preserved across a save, and unknown or
   externally tuned settings survive a load/save cycle.
 
+### Backup scope and offline guidance (correction)
+
+*Correction 2026-08-08 — the 2026-08-01 text “Backups are captured as a
+coherent, checksum-verified set and restored atomically …” described the
+`BackupCoordinator` primitive, not the wired production path. The production
+path ( `BackupManager.create_backup()` / `server/routes/backup.py` /
+`maintenance_scheduler` auto-backup / cloud sync / dashboard **Export**
+) remains independent per-file `sqlite3.backup()` snapshots; this entry is
+preserved with this pointer rather than silently rewritten.*
+
+- Included stores (legacy path): `memory.db`, `learning.db`, `audit_chain.db`,
+  `code_graph.db`, `pending.db`, `audit.db` — only those present on disk; no
+  other files are backed up. `memory-*.db` is the primary snapshot;
+  `_backup_all_dbs()` copies remaining managed DBs one-by-one.
+  Companion-copy exceptions are caught and logged at `warning` as non-critical.
+  `lance/` (LanceDB directory) is **not** included by the legacy path; the
+  coherent primitive handles it as an out-of-manifest companion.
+- Exclusions: nothing outside `MANAGED_DATABASES`; no coherent epoch or
+  cross-store manifest/rollback claim for the production path.
+- Dashboard **Export** (`POST /api/backup/export`) creates a single compressed
+  `.db.gz` from the latest `memory.db` snapshot only (`memory-*.db` → gzip).
+  It is not a coherent whole-root export.
+- No `BackupCoordinator` epoch/atomic-set / whole-root backup is wired to
+  production routes or `slm` subcommands in this release.
+- Legacy backup destination files follow the process **umask**, not source-file
+  permission inheritance; there is no unwired whole-root restore route. For
+  offline whole-root backup/restore, `slm serve stop` (stop the daemon) first
+  so WAL/SHM are checkpointed, then copy the complete data-root store set
+  (all present `*.db` plus `-wal`/`-shm` sidecars and `lance/` if present)
+  with the destination directory on an encrypted/private volume; verify
+  resulting files are owner-only (`0600`/`0700`) after copy.
+- Legacy backup destination follows process umask; do not claim source
+  permission inheritance.
+
 ### Notes
-- Existing memories and configuration are preserved. No database migration is
-  required.
+- Existing memories and configuration are preserved. V4.0.0 M038 (eager) and
+  M039 (deferred) are auto-applied at startup; no manual `slm db migrate` is
+  normally required. Downgrade requires a verified pre-upgrade complete backup
+  (stop daemon before offline copy, include WAL/SHM). No `slm db migrate
+  --rollback`; use restore of that backup instead.
 
 ## [3.8.10] - 2026-07-29 — Reliable startup and MCP writes
 

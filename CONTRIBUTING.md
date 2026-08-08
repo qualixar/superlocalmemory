@@ -74,7 +74,8 @@ Look for issues labeled:
 
 ### Prerequisites
 
-- Python 3.11 or higher (3.11 - 3.14)
+- Python >=3.11,<3.15 (3.11, 3.12, 3.13, 3.14)
+- Supported platforms: Apple Silicon macOS, 64-bit Windows, 64-bit Linux
 - SQLite3 (usually pre-installed)
 - Git
 - Text editor or IDE (VS Code, PyCharm, etc.)
@@ -162,7 +163,7 @@ superlocalmemory/
 │   │   └── migrate_cmd.py            # V2→V3 migration
 │   ├── core/                       # Core engine + config
 │   ├── storage/                    # Database layer (SQLite + sqlite-vec)
-│   ├── retrieval/                  # 7-channel retrieval
+│   ├── retrieval/                  # five candidate producers plus graph enhancement
 │   ├── dynamics/                   # EAP scheduler, SAGQ
 │   ├── math/                       # Fisher-Rao, FRQAD, Ebbinghaus, Hopfield, TurboQuant
 │   ├── encoding/                   # Embeddings, fact extraction, CCQ consolidation
@@ -171,7 +172,7 @@ superlocalmemory/
 │   ├── learning/                   # LightGBM adaptive re-ranking
 │   ├── parameterization/           # Soft prompt generation
 │   ├── hooks/                      # Claude Code hooks
-│   ├── mcp/                        # MCP server & 60 tools
+│   ├── mcp/                        # MCP server & profile-selected tools (14–87)
 │   ├── server/                     # Dashboard API server
 │   ├── code_graph/                 # Code knowledge graph (rustworkx)
 │   └── ui/                        # Dashboard frontend
@@ -673,9 +674,9 @@ See [LICENSE](LICENSE) for details.
 
 ### Project Documentation
 
-- [Architecture](ARCHITECTURE.md) - Technical design
-- [Installation](INSTALL.md) - Setup guide
-- [Quick Start](QUICKSTART.md) - First steps
+- [Architecture](docs/ARCHITECTURE.md) - Technical design
+- [Installation](docs/getting-started.md) - Setup guide
+- [Quick Start](docs/getting-started.md) - First steps
 - [Security](SECURITY.md) - Security policy
 
 ---

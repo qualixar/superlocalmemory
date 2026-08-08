@@ -410,7 +410,7 @@ def run_wizard(auto: bool = False) -> None:
 
     print()
     print("╔══════════════════════════════════════════════════════════╗")
-    print("║  SuperLocalMemory V3 — The Unified Brain               ║")
+    print("║  SuperLocalMemory V4 — The Unified Brain               ║")
     print("║  by Varun Pratap Bhardwaj / Qualixar                   ║")
     print("╚══════════════════════════════════════════════════════════╝")
     print()

@@ -28,7 +28,7 @@ def test_main_status(capsys):
     with patch("sys.argv", ["slm", "status"]):
         main()
     captured = capsys.readouterr()
-    assert "SuperLocalMemory V3" in captured.out
+    assert "SuperLocalMemory V4" in captured.out
 
 
 def test_main_mode_get(capsys):

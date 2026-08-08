@@ -109,8 +109,8 @@ async def lifespan(application: FastAPI):
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     application = FastAPI(
-        title="SuperLocalMemory V3 API",
-        description="V3 Memory Engine REST API",
+        title="SuperLocalMemory V4 API",
+        description="V4 Memory Engine REST API",
         version=SLM_VERSION,
         lifespan=lifespan,
     )
@@ -240,9 +240,9 @@ def create_app() -> FastAPI:
         index_path = UI_DIR / "index.html"
         if not index_path.exists():
             return (
-                "<html><head><title>SuperLocalMemory V3</title></head>"
+                "<html><head><title>SuperLocalMemory V4</title></head>"
                 "<body style='font-family:Arial;padding:40px'>"
-                "<h1>SuperLocalMemory V3 API Server Running</h1>"
+                "<h1>SuperLocalMemory V4 API Server Running</h1>"
                 "<p><a href='/docs'>API Documentation</a></p>"
                 "</body></html>"
             )
@@ -272,7 +272,7 @@ def create_app() -> FastAPI:
 if __name__ == "__main__":
     app = create_app()
     print("=" * 60)
-    print("SuperLocalMemory V3 - API Server (standalone mode)")
+    print("SuperLocalMemory V4 - API Server (standalone mode)")
     print("=" * 60)
     print(f"Database: {DB_PATH}")
     print(f"UI Directory: {UI_DIR}")

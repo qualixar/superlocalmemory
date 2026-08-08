@@ -939,7 +939,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Get system attribution: author, version, license, and provenance metadata."""
         return {
             "success": True,
-            "product": "SuperLocalMemory V3",
+            "product": "SuperLocalMemory V4",
             "author": "Varun Pratap Bhardwaj",
             "organization": "Qualixar",
             "license": "AGPL-3.0-or-later",

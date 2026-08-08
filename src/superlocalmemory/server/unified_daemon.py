@@ -2812,7 +2812,7 @@ def create_app() -> FastAPI:
     from superlocalmemory.server.routes.helpers import SLM_VERSION
 
     application = FastAPI(
-        title="SuperLocalMemory V3 — Unified Daemon",
+        title="SuperLocalMemory V4 — Unified Daemon",
         description="Memory + Dashboard + Mesh — one process, one engine.",
         version=SLM_VERSION,
         lifespan=lifespan,
@@ -3519,9 +3519,9 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         index_path = UI_DIR / "index.html"
         if not index_path.exists():
             return (
-                "<html><head><title>SuperLocalMemory V3</title></head>"
+                "<html><head><title>SuperLocalMemory V4</title></head>"
                 "<body style='font-family:Arial;padding:40px'>"
-                "<h1>SuperLocalMemory V3 — Unified Daemon</h1>"
+                "<h1>SuperLocalMemory V4 — Unified Daemon</h1>"
                 "<p><a href='/docs'>API Documentation</a></p>"
                 "</body></html>"
             )

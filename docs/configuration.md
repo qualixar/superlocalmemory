@@ -104,13 +104,22 @@ slm provider set       # Interactive provider selector
 You can set keys interactively or via environment variables:
 
 ```bash
-# Interactive (stored in config file)
+# Interactive (stored in config file — plaintext, atomic 0600)
 slm provider set openai
 # Prompts: Enter your OpenAI API key: sk-...
+# File: ~/.superlocalmemory/config.json (0600; see core/config.py:SLMConfig.save)
 
-# Via environment variable (takes precedence)
+# Via environment variable (takes precedence, avoids disk persistence)
 export OPENAI_API_KEY="sk-..."
+export SLM_CROSS_ENCODER_API_KEY="..."  # for remote reranker Bearer
 ```
+
+- Interactive storage is **plaintext** protected only by an atomic `0600` write;
+  env avoids writing the secret to disk.
+- Keychain is **not** used for provider/reranker keys — those live in
+  `config.json` (`0600`) or env. Keychain (`keyring` + fallback
+  `~/.superlocalmemory/.credentials.json` `0600`) is for cloud-backup and
+  ingest credentials (`infra/cloud_backup.py`, `ingestion/credentials.py`).
 
 ## Config File
 
@@ -188,7 +197,7 @@ cannot score a Chinese, Japanese, or Arabic corpus meaningfully.
 |---------|---------|-------------|
 | `use_cross_encoder` | `true` | Master switch for reranking |
 | `cross_encoder_backend` | `""` | `""` / `"onnx"` run locally; `"openai"` / `"remote"` use `cross_encoder_endpoint` |
-| `cross_encoder_endpoint` | `""` | Full or base rerank URL. `/rerank` is appended when absent. HTTPS is required off-host; HTTP is loopback-only |
+| `cross_encoder_endpoint` | `""` | Full or base rerank URL. `/rerank` is appended when absent. HTTPS is required off-host; HTTP is loopback-only; userinfo (`user:pass@`), query strings and fragments are rejected; redirects are not followed |
 | `cross_encoder_model` | `cross-encoder/ms-marco-MiniLM-L-12-v2` | Local HF id, or the model name the endpoint serves |
 | `cross_encoder_api_key` | `""` | Optional bearer token. Prefer `SLM_CROSS_ENCODER_API_KEY`; persisted config is owner-readable (`0600`) |
 | `cross_encoder_timeout_seconds` | `15.0` | Per-request read budget for the remote endpoint |
@@ -206,11 +215,28 @@ substitute the local English model. Setting `cross_encoder_endpoint` while
 `cross_encoder_backend` is a local value is reported as a configuration error
 rather than ignored (issue #103).
 
-**Privacy boundary.** Remote reranking sends the recall query and candidate
-memory text to the configured service. SLM removes recognized secrets and PII
-before transmission, rejects URL query strings, and requires HTTPS except for
-loopback endpoints. Configure only a service you trust; keep reranking local
+**Privacy and network boundary — remote reranker
+(`src/superlocalmemory/retrieval/remote_reranker.py`).** Remote reranking
+sends the **recall query and every candidate's text** (`{model, query,
+documents}`) to the configured `cross_encoder_endpoint`. SLM applies
+`redact_secrets` + `redact_pii_text` as a **best-effort pre-transmission
+filter** (recognized secrets/PII patterns, not a DLP guarantee). The endpoint
+URL is validated: `http`/`https` only, must have a host, rejects embedded
+userinfo (`user:password@`), rejects `?query` and `#fragment` (Bearer goes in
+`Authorization`, not the URL), requires `https` for non-loopback hosts
+(`http` allowed only for `localhost`/`127.0.0.1`/`::1` etc. via
+`_is_loopback_host`), `follow_redirects=False` (3xx raises), transport + 5xx
+retry once, error bodies are suppressed ("response body suppressed"), and
+malformed value paths never log raw payloads. The Bearer token destination is
+that endpoint; configure only a service you trust and keep reranking local
 when memory text must not leave the machine.
+
+**Remote embedding runtime.** `POST /v1/embeddings` in
+`core/embeddings.py:_openai_compatible_embed_batch` sends raw `texts` as
+`{model, input: texts}` with optional `Authorization: Bearer <api_key>`. No
+remote-reranker URL hardening, no secret/PII pre-filter, and no scoped SSRF
+claim applies. The `provider="openai"` token is the generic OpenAI-compatible
+endpoint selector, not a claim of SSRF hardening.
 
 ## Environment Variables
 

@@ -130,11 +130,17 @@ slm remember "The API rate limit on production is 500 req/min, staging is 100 re
 # Explicitly recall
 slm recall "rate limits"
 
-# Delete a memory
-slm forget --id 42
+# Delete by query (fuzzy) — preview then confirm
+slm forget "old rate limit" --dry-run
+slm forget "old rate limit" --yes
+
+# Delete a specific fact by exact ID (precise)
+slm delete QmFzZTY0RmFjdElk --yes
+slm list --limit 20   # shows fact IDs for delete/update
 ```
 
 Manual operations work regardless of auto-capture/auto-recall settings.
+`slm forget` matches by query text (fuzzy); it does not take `--id`. Use `slm delete <fact_id>` for an exact ID.
 
 ## Learning Over Time
 
@@ -173,6 +179,15 @@ connectors, cloud backup, proxy providers, dependency/model downloads, and
 other explicitly enabled integrations can use the network. Mode C sends the
 constructed model request—including selected memory evidence—to the configured
 cloud provider. Review that provider's retention and privacy terms before use.
+
+### Feedback query pseudonymization
+
+Learning feedback stores a pseudonymized grouping key, not the raw query text.
+
+- **Mechanism:** per-install keyed HMAC (`hmac.digest(key, query.encode("utf-8"), "sha256").hex()[:16]`) in `src/superlocalmemory/learning/feedback.py: _hash_query` — 16 hex characters (64-bit), **not encryption** (cannot be reversed to the query).
+- **Correlation:** within a single install, the same query text produces the same `query_hash`, so repeat-query grouping is possible; across installs the keys differ.
+- **Key storage:** 32-byte key at `.feedback-hash-key` beside the DB (`db_path.parent / ".feedback-hash-key"`), written atomically with mode `0600` (`src/superlocalmemory/learning/feedback.py: _load_or_create_hash_key`). Existing keys are re-chmodded to `0600` on load.
+- **Read-only data root fallback:** if the key cannot be persisted (for example, a read-only data root), the collector falls back to a process-local key and logs a warning; this preserves privacy but **loses cross-restart grouping** because the next process generates a new key. See `SECURITY.md` for the operational caveat.
 
 ---
 

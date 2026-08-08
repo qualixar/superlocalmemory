@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally. Local data root; optional networked features have separate behavior."
-version: "3.8.0"
+version: "4.0.0"
 author: "Varun Pratap Bhardwaj"
 license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
@@ -104,7 +104,7 @@ Every `--json` response follows a consistent envelope:
 {
   "success": true,
   "command": "recall",
-  "version": "3.0.22",
+  "version": "4.0.0",
   "data": {
     "results": [
       {"fact_id": "abc123", "score": 0.87, "content": "Alice works at Google"}
@@ -124,7 +124,7 @@ Error responses:
 {
   "success": false,
   "command": "recall",
-  "version": "3.0.22",
+  "version": "4.0.0",
   "error": {"code": "ENGINE_ERROR", "message": "Description of what went wrong"}
 }
 ```
