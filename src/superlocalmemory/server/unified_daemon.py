@@ -3394,33 +3394,8 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     from superlocalmemory.server.routes.profiles import router as profiles_router
     from superlocalmemory.server.routes.stats import router as stats_router
     from superlocalmemory.server.routes.v3_api import router as v3_router
-    from superlocalmemory.server.routes import v3_api as _v3_api_mod
     from superlocalmemory.server.routes.ws import manager as ws_manager
     from superlocalmemory.server.routes.ws import router as ws_router
-
-    # F-03: bind data_locality_label from mode records onto /api/v3/dashboard
-    # without editing v3_api.py (outside this fix allowlist). Rebind the route
-    # endpoint so the UI and core cannot disagree on locality claims.
-    _orig_dashboard = _v3_api_mod.dashboard
-
-    async def _dashboard_with_locality(request: Request):
-        result = await _orig_dashboard(request)
-        if isinstance(result, dict) and "mode" in result:
-            try:
-                from superlocalmemory.core.modes import dashboard_mode_fields
-
-                result = {**result, **dashboard_mode_fields(result["mode"])}
-            except Exception as _loc_exc:  # pragma: no cover — never break dashboard
-                logger.debug("dashboard locality fields skipped: %s", _loc_exc)
-        return result
-
-    for _route in v3_router.routes:
-        _ep = getattr(_route, "endpoint", None)
-        if _ep is _orig_dashboard or getattr(_ep, "__name__", "") == "dashboard":
-            _route.endpoint = _dashboard_with_locality  # type: ignore[attr-defined]
-            _dep = getattr(_route, "dependant", None)
-            if _dep is not None and getattr(_dep, "call", None) is not None:
-                _dep.call = _dashboard_with_locality
 
     application.include_router(memories_router)
     application.include_router(stats_router)

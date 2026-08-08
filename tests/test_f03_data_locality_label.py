@@ -79,3 +79,52 @@ def test_mode_capabilities_locality_label_matches_data_stays_local() -> None:
         assert isinstance(caps, ModeCapabilities)
         derived = "local-only" if caps.data_stays_local else "provider-assisted"
         assert caps.data_locality_label == derived
+
+
+def _dashboard_client_for_mode(mode: Mode, tmp_path: Path):
+    """Minimal ASGI harness for the real /api/v3/dashboard handler.
+
+    Mounts the v3 router only (no unified_daemon monkeypatch path) so the
+    middle link — the route itself serving data_locality_label — is tested.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from superlocalmemory.server.routes.v3_api import router
+
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        mode=mode,
+        active_profile="default",
+        base_dir=tmp_path,
+        llm=SimpleNamespace(provider="none", model=""),
+    )
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_dashboard_api_serves_data_locality_label_for_local_mode(tmp_path: Path) -> None:
+    """Route-level: local modes must expose a local-only locality label."""
+    client = _dashboard_client_for_mode(Mode.A, tmp_path)
+    resp = client.get("/api/v3/dashboard")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "data_locality_label" in body
+    label = body["data_locality_label"]
+    assert isinstance(label, str) and label.strip()
+    assert re.search(r"local[\s-]*only", label, re.IGNORECASE)
+
+
+def test_dashboard_api_serves_non_local_only_label_for_cloud_mode(tmp_path: Path) -> None:
+    """Route-level: provider-assisted Mode C must not claim local-only."""
+    client = _dashboard_client_for_mode(Mode.C, tmp_path)
+    resp = client.get("/api/v3/dashboard")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "data_locality_label" in body
+    label = body["data_locality_label"]
+    assert isinstance(label, str) and label.strip()
+    assert re.search(r"local[\s-]*only", label, re.IGNORECASE) is None
+    assert body.get("data_stays_local") is False

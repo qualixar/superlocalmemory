@@ -134,7 +134,10 @@ async def dashboard(request: Request):
             except Exception:
                 pass
 
-        return {
+        from superlocalmemory.core.modes import dashboard_mode_fields
+
+        # Mode record is the single source of truth for locality claims (F-03).
+        payload = {
             "mode": config.mode.value,
             "mode_name": {"a": "Local Guardian", "b": "Smart Local", "c": "Full Power"}.get(config.mode.value, "Unknown"),
             "provider": config.llm.provider or "none",
@@ -145,6 +148,8 @@ async def dashboard(request: Request):
             "base_dir": str(config.base_dir),
             "version": SLM_VERSION,
         }
+        payload.update(dashboard_mode_fields(config.mode))
+        return payload
     except Exception as e:
         return _internal_error()
 
