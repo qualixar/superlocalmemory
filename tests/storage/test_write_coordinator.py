@@ -299,7 +299,12 @@ def test_stalled_commit_does_not_bypass_bounded_shutdown(tmp_path, monkeypatch) 
                 match="did not stop before its deadline",
             ):
                 coordinator.stop(deadline_s=0.05)
-            assert time.monotonic() - started < 0.2
+            elapsed = time.monotonic() - started
+            # This is a liveness assertion, not a latency benchmark. The
+            # blocked commit releases only after three seconds, so a
+            # scheduler-tolerant half-second ceiling still proves stop did not
+            # wait for it while avoiding millisecond-level CI jitter.
+            assert elapsed < 0.5
             release_commit.set()
             result_future.result(timeout=1.0)
     finally:
