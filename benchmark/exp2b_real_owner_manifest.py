@@ -66,42 +66,37 @@ CRIT (3 potential measurement biases):
 from __future__ import annotations
 
 import json
-import os
 import platform
 import sys
 import uuid
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Path setup
+# Path setup — source-root guard lives in _harness (F-18 single source)
 # ---------------------------------------------------------------------------
-
-_SOURCE_ROOT = os.environ.get("SLM_SOURCE_ROOT")
-if _SOURCE_ROOT:
-    _source_path = Path(_SOURCE_ROOT).expanduser().resolve()
-    _src_path = _source_path if _source_path.name == "src" else _source_path / "src"
-    if not (_src_path / "superlocalmemory").is_dir():
-        raise RuntimeError(
-            "SLM_SOURCE_ROOT must point to a repository root or its src directory: "
-            f"{_source_path}"
-        )
-    sys.path.insert(0, str(_src_path))
 
 _EXP_DIR = str(Path(__file__).resolve().parent)
 if _EXP_DIR not in sys.path:
     sys.path.insert(0, _EXP_DIR)
 
+from _harness import (  # noqa: E402
+    TempWorkspace,
+    TrialOutcome,
+    add_profile,
+    fresh_db,
+    run_trials,
+    verify_slm_source_root,
+)
+
 # ---------------------------------------------------------------------------
-# Import verification
+# Import verification (via harness guard)
 # ---------------------------------------------------------------------------
 
 import superlocalmemory  # noqa: E402
 
-_SLM_FILE = superlocalmemory.__file__
-if _SOURCE_ROOT and not Path(_SLM_FILE).resolve().is_relative_to(_src_path):
-    raise RuntimeError(f"superlocalmemory imported from unexpected location: {_SLM_FILE}")
+verify_slm_source_root()
 
-from _harness import TempWorkspace, TrialOutcome, add_profile, fresh_db, run_trials  # noqa: E402
+_SLM_FILE = superlocalmemory.__file__
 
 # ---------------------------------------------------------------------------
 # DB seed helpers

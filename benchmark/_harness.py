@@ -25,6 +25,7 @@ Design rules:
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import sys
@@ -33,6 +34,69 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Source-root guard (F-18) — single implementation for all experiments.
+#
+# Every experiment imports from this harness, so this guard runs before
+# ``superlocalmemory`` is first imported and guarantees the bundle measures
+# the declared source tree.  ``SLM_SOURCE_ROOT`` may point at the repo root
+# or its ``src/`` directory; when unset the guard is a no-op (installed pkg).
+# ---------------------------------------------------------------------------
+
+_HARNESS_SOURCE_ROOT = os.environ.get("SLM_SOURCE_ROOT")
+_HARNESS_SRC_PATH: Path | None = None
+if _HARNESS_SOURCE_ROOT:
+    _harness_source_path = Path(_HARNESS_SOURCE_ROOT).expanduser().resolve()
+    _HARNESS_SRC_PATH = (
+        _harness_source_path
+        if _harness_source_path.name == "src"
+        else _harness_source_path / "src"
+    )
+    if not (_HARNESS_SRC_PATH / "superlocalmemory").is_dir():
+        raise RuntimeError(
+            "SLM_SOURCE_ROOT must point to a repository root or its src directory: "
+            f"{_harness_source_path}"
+        )
+    if str(_HARNESS_SRC_PATH) not in sys.path:
+        sys.path.insert(0, str(_HARNESS_SRC_PATH))
+    # Eagerly import and verify once so every experiment that imports this
+    # harness inherits the guard without needing its own copy.
+    try:
+        import superlocalmemory as _slm_eager  # noqa: F401
+
+        _slm_file_eager = (
+            Path(_slm_eager.__file__).resolve() if _slm_eager.__file__ else None
+        )
+        if _slm_file_eager is None or not _slm_file_eager.is_relative_to(
+            _HARNESS_SRC_PATH
+        ):
+            raise RuntimeError(
+                f"superlocalmemory imported from unexpected location: {_slm_file_eager}"
+            )
+    except ImportError:
+        # superlocalmemory not yet importable (e.g. harness imported before src
+        # is on sys.path in test collection); verify_slm_source_root() will
+        # check on demand after the experiment imports it.
+        pass
+
+
+def verify_slm_source_root() -> Path | None:
+    """Fail loud if ``superlocalmemory`` was imported from outside SLM_SOURCE_ROOT.
+
+    Call after ``import superlocalmemory``.  Returns the resolved src path when
+    the guard is active, else ``None``.
+    """
+    if _HARNESS_SOURCE_ROOT is None or _HARNESS_SRC_PATH is None:
+        return None
+    import superlocalmemory as _slm  # local import to avoid circular eager import
+
+    slm_file = Path(_slm.__file__).resolve() if _slm.__file__ else None
+    if slm_file is None or not slm_file.is_relative_to(_HARNESS_SRC_PATH):
+        raise RuntimeError(
+            f"superlocalmemory imported from unexpected location: {slm_file}"
+        )
+    return _HARNESS_SRC_PATH
 
 # ---------------------------------------------------------------------------
 # Result types (immutable)

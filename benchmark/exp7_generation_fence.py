@@ -35,7 +35,6 @@ A trial holds only when both controls pass.
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from pathlib import Path
 
@@ -56,24 +55,42 @@ def _reset_fence() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DB bootstrap: only the two migrations the coordinator needs
-# (mirrors test_generation_fence.py exactly — NOT fresh_db())
+# DB bootstrap: full migration runner (structural fix for F-16)
+#
+# Hand-picked M018/M032 went stale when M033+M034+M037 became required.
+# Use the real runner so future schema moves are picked up automatically.
 # ---------------------------------------------------------------------------
 
 
-def _install_write_commits(db_path: Path) -> None:
-    from superlocalmemory.storage.migrations import (
-        M018_ingestion_operations,
-        M032_write_coordinator_admission,
-    )
+def _install_write_commits(ws: Path) -> None:
+    """Bootstrap the workspace DBs via the real migration runner.
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        M018_ingestion_operations.apply(conn)
-        M032_write_coordinator_admission.apply(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    Mirrors ``_harness.fresh_db`` but scoped to exp7's private workspace:
+    base schema + v3.4.3/4.6/4.7 extensions, then ``apply_all`` (learning +
+    memory).  This is the structural fix — no hand-enumerated M0xx list.
+    """
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.storage import schema as real_schema
+    from superlocalmemory.storage.database import DatabaseManager
+    from superlocalmemory.storage.migration_runner import apply_all
+    from superlocalmemory.storage.schema_v343 import (
+        apply_v343_schema,
+        apply_v346_schema,
+    )
+    from superlocalmemory.storage.schema_v347 import apply_v347_schema
+
+    memory_db = ws / "memory.db"
+    learning_db = ws / "learning.db"
+    # Base schema (tables that migration DDL extends).
+    # DatabaseManager.initialize is idempotent; if the caller already
+    # initialised memory.db we simply ensure the file exists via LearningDatabase.
+    manager = DatabaseManager(memory_db)
+    manager.initialize(real_schema)
+    apply_v343_schema(str(memory_db))
+    apply_v346_schema(str(memory_db))
+    apply_v347_schema(str(memory_db))
+    LearningDatabase(learning_db)
+    apply_all(learning_db, memory_db)
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +104,6 @@ def _trial(index: int) -> TrialOutcome:
 
     from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
     from superlocalmemory.storage import generation_fence as gf
-    from superlocalmemory.storage import schema
     from superlocalmemory.storage.admission_journal import Actor, RememberRequest
     from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage.write_coordinator import (
@@ -99,10 +115,9 @@ def _trial(index: int) -> TrialOutcome:
     _reset_fence()
     ws = Path(tempfile.mkdtemp(prefix="slm-exp7-"))
     try:
+        _install_write_commits(ws)
         db_path = ws / "memory.db"
-        _install_write_commits(db_path)
         db = DatabaseManager(db_path)
-        db.initialize(schema)
 
         calls: list[str] = []
 
@@ -252,18 +267,67 @@ def run(n_trials: int = 200, seed: int = 0) -> object:
         n_trials=n_trials,
         trial_fn=_trial,
         method=(
-            "Real CanonicalRememberRuntime with M018+M032 schema (mirrors "
-            "test_generation_fence.py). Stale control: direct coordinator.submit() "
-            "at epoch 0 after advancing _generation to 1 → WriteCoordinatorError. "
-            "Positive control: runtime.remember() captures _generation=1, admitted "
-            "epoch matches → commits, writer called once, probe has 1 row."
+            "Real CanonicalRememberRuntime with full production schema via "
+            "migration_runner.apply_all (learning.db + memory.db) — structural fix "
+            "for F-16; no hand-enumerated M0xx list. Stale control: direct "
+            "coordinator.submit() at epoch 0 after advancing _generation to 1 → "
+            "WriteCoordinatorError. Positive control: runtime.remember() captures "
+            "_generation=1, admitted epoch matches → commits, writer called once, "
+            "probe has 1 row."
         ),
     )
 
 
 if __name__ == "__main__":
-    from _harness import write_result
+    import argparse
 
-    result = run()
-    print(write_result(result, Path(__file__).parent / "results"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--trials", type=int, default=200, help="number of trials")
+    parser.add_argument(
+        "--output-dir",
+        "--output_dir",
+        dest="output_dir",
+        type=Path,
+        default=None,
+        help="output DIRECTORY (unified contract; required to write results)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="output FILE path (legacy, deprecated: use --output-dir)",
+    )
+    args = parser.parse_args()
+
+    result = run(n_trials=args.trials)
+
+    from _harness import write_result as _write_result
+
+    if args.output is not None and args.output_dir is None:
+        # Legacy FILE mode
+        json_path = args.output.expanduser().resolve()
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        import platform as _platform
+        import sys as _sys
+
+        from _harness import environment as _env
+
+        payload = {
+            "environment": _env(),
+            "result": result.to_dict(),
+        }
+        json_path.write_text(_json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        print(json_path)
+    elif args.output_dir is not None:
+        out_dir = Path(args.output_dir).expanduser().resolve()
+        json_path = _write_result(result, out_dir)
+        print(json_path)
+    else:
+        # No output flag given: print summary to stdout only, do NOT write to
+        # the committed results/ directory. Callers that want a file must pass
+        # --output-dir explicitly (F-17: output location is an explicit argument).
+        json_path = None
+        print(f"[exp7] no --output-dir given — results not written to disk (explicit output required)")
+
     print(f"{result.name}: {result.held}/{result.trials} ({result.metric_value:.4f})")
