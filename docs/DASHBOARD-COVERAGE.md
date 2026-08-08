@@ -1,4 +1,4 @@
-# Dashboard Coverage — V3.8.0
+# Dashboard Coverage — V4
 
 The dashboard is a local operational surface over the SLM daemon. It helps an
 operator inspect and control a deployment; it does not replace CLI/MCP traces

@@ -8,7 +8,7 @@
 <h1 align="center">SuperLocalMemory V4.0.0</h1>
 <p align="center"><strong>Enterprise-grade, local-first memory for AI agents and teams.</strong><br/>
 <em>A persistent, auditable long-term brain for your agents that runs on your own infrastructure — with multi-workspace isolation, role-based access, and GDPR + EU AI Act governance controls built in.</em></p>
-<p align="center"><code>v4.0.0</code> — one control plane: auditable retrieval · multi-scope memory (personal / shared / global) · Cache · Compress · trusted-peer Mesh · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
+<p align="center"><code>v4.0.0</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>3 public research preprints</strong> (arXiv + Zenodo archives) · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
@@ -35,18 +35,24 @@ SuperLocalMemory is an enterprise-grade, local-first memory control plane for AI
 
 Agent-memory systems make different storage, model-provider, and deployment trade-offs. SuperLocalMemory starts with a local runtime and makes provider-backed enrichment, cloud backup, connectors, and proxy use explicit choices.
 
-Different products solve different boundaries. The published benchmark evidence carried into V3.8.0 is protocol-scoped evidence from the published V3 research, not a claim of a newly rerun V3.8.0 package benchmark.
+Different products solve different boundaries. The published LoCoMo benchmark evidence in this README is protocol-scoped evidence from the published V3 research architecture; it is carried forward for continuity and is not a claim of a newly rerun V4 package benchmark.
 
-SuperLocalMemory V3 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring. The default local runtime does not require Docker, a separately operated graph database, or an API key.
+SuperLocalMemory V4 combines conventional dense and lexical retrieval with graph, temporal, associative, and statistical relevance scoring in a **7-layer** control plane (admission → queryable core → enrichment → brain → multi-channel retrieval → context safety → operations). The default local runtime does not require Docker, a separately operated graph database, or an API key.
 
 **Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
 
-**What V4.0.0 adds.** V4 turns the store into a *governed* runtime — every canonical write is admitted, policy-authorized, tracked as durable per-store obligations (lexical, temporal, vector), and sealed by a completion manifest, so it is either fully applied or explicitly marked degraded, never silently half-done:
+**What V4.0.0 ships.** V4 is a *governed* local-first control plane — every canonical write is admitted, policy-authorized, tracked as durable per-store obligations (lexical, temporal, vector), and sealed by a completion manifest, so it is either fully applied or explicitly marked degraded, never silently half-done. Flagship surfaces in this release:
 
-- **Governed write path & verifiable transactions** — admission + policy control on the canonical write path, a per-owner obligation ledger, and a hash-sealed completion manifest with a reconciler that redrives unmet obligations.
-- **Cross-store erasure** — a fail-closed erasure orchestrator that removes a fact from every store and proves it, for GDPR right-to-erasure.
-- **Self-healing, deadlock-free lifecycle** — stale locks or leftover state from a crash, force-quit, or reboot are cleared automatically on the next start; a second launch exits cleanly instead of failing; team-mode locks expire on a lease. No manual recovery, in individual or team mode.
-- **Admin remediation surface** — list and resolve any stuck operation (retry / reconcile / cancel) from the CLI, MCP, or the dashboard.
+- **[SLM-Mesh](#slm-mesh-cross-session--cross-machine-coordination)** — authenticated cross-session and cross-machine peer coordination (messages, locks, shared state, inbox/outbox, optional discovery). Coordination only — not automatic replicated memory.
+- **Multi-scope memory & profiles** — workspaces (profiles) plus `personal` / `shared` / `global` scopes; cross-profile recall is default-deny.
+- **Cache & compression (context optimization)** — exact-match cache with tagged invalidation, safe compression, and opt-in reversible/aggressive paths across proxy, MCP, and skill surfaces.
+- **Entity Explorer & skill evolution** — compiled entity summaries/timelines; opt-in skill lineage, budgets, and verification outcomes.
+- **Modes A / B / C** — local-only (A), on-device LLM enrichment (B), provider-assisted (C). An operating mode records technical locality facts; it does **not** determine EU AI Act legal compliance (that is deployment-context assessment — see [Privacy controls](#privacy-controls-and-operating-modes)).
+- **GDPR posture, retention & audit chain** — export, fail-closed cross-store erasure, retention policies, and a hash-chained audit trail. Engineering controls for compliance programs, not a legal certification.
+- **7-layer retrieval/recall stack & code graph** — multi-channel candidates (semantic, BM25, temporal, Hopfield, spreading activation) plus optional code-graph tools for blast radius and review context.
+- **MCP profiles** — `full` exposes **42** tools (default everyday surface); `power` **54**; `whole` **87** (all registered). Also `core` (14), `code` (24), and `mesh` (8).
+- **Governed write path & verifiable transactions** — admission + policy control, a per-owner obligation ledger, and a hash-sealed completion manifest with a reconciler that redrives unmet obligations.
+- **Self-healing lifecycle & admin remediation** — stale locks cleared on restart; list/resolve stuck operations from CLI, MCP, or the dashboard.
 
 3.8.x installs upgrade in place — the database migrates automatically on first start, with no manual steps and no data loss.
 
@@ -68,7 +74,7 @@ The architecture evaluated in the V3 paper remains the foundation of this releas
 Different products solve different boundaries. SLM is for developers who want
 one local-first operating control plane—not only an SDK, managed context API,
 or agent runtime. It combines dated evidence, graph-aware retrieval, cache and
-compression controls, trusted-peer Mesh, and MCP/CLI/hooks/dashboard/IDE
+compression controls, **SLM-Mesh**, and MCP/CLI/hooks/dashboard/IDE
 surfaces in one install.
 
 | If your primary need is… | Product boundary to evaluate |
@@ -86,24 +92,24 @@ for current primary sources and protocol-scoped benchmark evidence. A LoCoMo
 percentage is comparable only when the dataset scope, answer model, judge,
 retrieval stack, and release artifact match.
 
-### The V3.8.0 capability architecture
+### The V4 capability architecture
 
 SuperLocalMemory is one local control plane for persistent agent context. It is
 not just a vector store: the same runtime can accept evidence, build and govern
 memory, retrieve bounded evidence for an agent, and expose cache, compression,
-and peer-coordination controls through a CLI, MCP, dashboard, and supported
+and **SLM-Mesh** peer-coordination controls through a CLI, MCP, dashboard, and supported
 IDE integrations.
 
-![SuperLocalMemory V3 capability architecture: modes, seven operating layers, Scale Engine, Mesh, delivery surfaces, and opt-in adapters](docs/assets/slm-v37-capability-architecture.png)
+![SuperLocalMemory V4 capability architecture: modes, seven operating layers, Scale Engine, SLM-Mesh, delivery surfaces, and opt-in adapters](docs/assets/slm-v37-capability-architecture.png)
 
 *Architecture boundary: SQLite + sqlite-vec remain canonical; CozoDB and
-LanceDB are parity-gated projections; Mesh coordinates trusted peers rather
+LanceDB are parity-gated projections; **SLM-Mesh** coordinates trusted peers rather
 than replicating a distributed memory database; connectors are opt-in.*
 
 **Memory boundaries:** profiles isolate workspaces by default. Every memory is
 `personal`, `shared` with named profile readers, or `global`; cross-profile
 recall is default-deny and must be explicitly enabled. This scoped sharing is
-local authorization, not SLM Mesh synchronization. See
+local authorization, not **SLM-Mesh** synchronization. See
 [shared-memory.md](docs/shared-memory.md).
 
 ```text
@@ -138,7 +144,7 @@ health surfaces expose the stages actually completed by the installed runtime.
 | **Knowledge graph and entities** | Canonical entities, aliases, entity profiles, graph edges, scenes, timelines, explorer and graph APIs | Stored/derived graph data is evidence, not an instruction authority. |
 | **Scale Engine** | SQLite + sqlite-vec are canonical. CozoDB graph and LanceDB vector projections are managed with prepare → verify → promote → rollback; a structurally detected pre-v3.7 projection can be explicitly adopted. | Promotion is parity-gated and crash-recoverable. Legacy adoption preserves the prior projection as a rollback backup; repeated physical edge rows normalize to one logical edge with the strongest weight. |
 | **Optimize** | Exact cache, tagged invalidation, safe compression, opt-in aggressive prose compression, CCR originals, proxy/MCP/skill surfaces | Only proxy intercepts a primary provider turn. MCP/skill cache results explicitly routed through SLM. |
-| **Mesh** | Authenticated peer messages, inbox/outbox, locks, offline queue, optional discovery and mesh MCP tools | Mesh is coordination, not automatic replicated memory or conflict resolution. |
+| **SLM-Mesh** | Authenticated peer messages, inbox/outbox, locks, offline queue, optional discovery and mesh MCP tools | SLM-Mesh is coordination, not automatic replicated memory or conflict resolution. |
 | **Governance and operations** | Provenance, audit/retention/policy surfaces, export/erasure controls, diagnostics, health, backups and daemon lifecycle | These are engineering controls, not a legal certification. |
 | **Integrations** | CLI, Python SDK, MCP HTTP/stdio, Claude plugin, Codex add-on, supported IDE configurations, Gmail/Calendar/transcript adapters | Hooks, IDE edits, connectors, and networked adapters require explicit operator activation. |
 
@@ -154,7 +160,7 @@ health surfaces expose the stages actually completed by the installed runtime.
 | Operations | ingestion-operation state, traces, maintenance and lifecycle work |
 | Entity Explorer and Skill Evolution | compiled entity summaries/timelines; opt-in skill lineage, budgets and verification outcomes |
 | Multi-Agent Memory | per-agent write activity and attribution; memories stamped by `SLM_AGENT_ID`, agent write counts, and trust signals |
-| Mesh Peers | configured peers, inbox/outbox, pending coordination and locks |
+| SLM-Mesh Peers | configured peers, inbox/outbox, pending coordination and locks |
 | Settings and Optimize | mode/provider/configuration; cache, compression and savings telemetry |
 
 Dashboard visibility is not a substitute for runtime proof: use `slm doctor`,
@@ -167,9 +173,9 @@ deployment.
 
 **[Watch the SuperLocalMemory demo on YouTube](https://www.youtube.com/watch?v=PMWW_ypsL60)** — a five-minute walkthrough of installation, setup, recall, cache, and compression. The video shows a product walkthrough; use the commands and release notes in this README as the current release contract.
 
-### Published LoCoMo evidence (V3 architecture, carried into V3.8.0)
+### Published LoCoMo evidence (V3 architecture, carried into V4)
 
-The V3 paper evaluates the architecture carried into V3.8.0. Every figure below
+The V3 paper evaluates the multi-channel architecture that V4 still runs. Every figure below
 is protocol-scoped, so a reader can distinguish local retrieval, answer
 construction, and cloud-assisted evaluation rather than treating unlike runs as
 one score.
@@ -190,7 +196,7 @@ information-geometric layers versus **58.9%** without them: **+12.7pp**.
 See [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) and the [official
 LoCoMo paper](https://arxiv.org/abs/2402.17753) for the full protocol,
 ablation table, and limitations. These are published V3 architecture results
-carried into V3.8.0—not a substitute for a newly rerun release-artifact benchmark.
+carried into V4—not a substitute for a newly rerun release-artifact benchmark.
 
 ---
 
@@ -331,11 +337,12 @@ actual cost and latency savings depend on the intercepted surface and provider.
 
 **Savings dashboard:** `slm optimize savings --since 7` — live USD/INR/tokens saved. Hot-reload config, fail-open.
 
-### Mesh
+### SLM-Mesh (cross-session / cross-machine coordination)
 
 <a id="multi-machine-mesh-coordination"></a>
+<a id="slm-mesh-cross-session--cross-machine-coordination"></a>
 
-Mesh provides authenticated coordination messages between configured peers, with an offline queue and optional mDNS discovery (`SLM_MESH_DISCOVERY=on`). It is not a replicated or conflict-resolving distributed-memory database.
+**SLM-Mesh** is the V4 peer-coordination plane: authenticated messages, locks, shared lightweight state, inbox/outbox, and an offline queue between configured peers (same machine sessions or cross-machine). Optional mDNS discovery (`SLM_MESH_DISCOVERY=on`). It is **not** a replicated or conflict-resolving distributed-memory database — multi-scope memory sharing is a separate local-authorization feature.
 
 ```bash
 # Machine A (broker)
@@ -349,7 +356,7 @@ export SLM_MESH_SHARED_SECRET=my-secret-key
 slm init
 ```
 
-8 mesh MCP tools: `mesh_summary`, `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`.
+Eight **SLM-Mesh** MCP tools: `mesh_summary`, `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`.
 
 Full docs: [docs/multi-machine.md](docs/multi-machine.md) · [docs/distributed-deployment.md](docs/distributed-deployment.md)
 
@@ -402,10 +409,10 @@ Control tool surface via `SLM_MCP_PROFILE`:
 |:--------|:-----:|:---------|
 | `core` | 14 | Memory, session, and optimize core |
 | `code` | 24 | Core + code-graph tools + profile switching + bounded loops |
-| `mesh` | 8 | Mesh-only — multi-machine coordination |
+| `mesh` | 8 | SLM-Mesh only — multi-session / multi-machine coordination |
 | `full` | 42 | Memory + optimize + evolution + mesh + bounded loops |
 | `power` | 54 | Full + administration, lifecycle, and diagnostics |
-| `whole` | all registered | Every registered MCP tool |
+| `whole` | 87 | Every registered MCP tool |
 
 **Precedence:** `ALL` > `TOOLS` > `PROFILE` > `default`
 
@@ -518,9 +525,9 @@ Available controls include local export and erasure commands, hash-chained audit
 
 ---
 
-## Teams and Enterprise Memory (v3.8.0)
+## Teams and Enterprise Memory (V4)
 
-V3.8.0 adds multi-user, multi-workspace controls for teams and organizations. These are opt-in — personal single-user installs work exactly as before with no required login.
+V4 includes multi-user, multi-workspace controls for teams and organizations (introduced on the 3.8 line and retained). These are opt-in — personal single-user installs work exactly as before with no required login.
 
 ### Users and roles
 
@@ -574,12 +581,9 @@ These are engineering controls. Compliance depends on deployment configuration, 
 
 ### EU AI Act mode verification
 
-SLM includes a per-mode EU AI Act self-assessment. The `EUAIActChecker` produces a compliance report for the active operating mode — risk category, whether data stays local, whether generative AI is used, and transparency / human-oversight signals:
+SLM includes a per-mode EU AI Act *technical posture* report (`EUAIActChecker`). It records facts the runtime can know — whether data is configured to stay local, whether generative AI is used, and that transparency / human-oversight need deployment evidence.
 
-- **Mode A (Local Guardian)** and **Mode B (Smart Local)** — assessed as compliant: memory processing stays local and uses no generative AI.
-- **Mode C (Provider-assisted)** — flagged non-compliant, because query or enrichment content is sent to a cloud model provider.
-
-This is operator self-assessment tooling, not a legal certification or conformity assessment; actual EU AI Act obligations depend on your system, deployment, and role. See [docs/compliance.md](docs/compliance.md).
+**An operating mode does not determine EU AI Act compliance.** Legal risk classification and conformity assessment depend on intended purpose, affected persons, sector, deployment context, and operator controls. The checker therefore returns `compliant=None` / risk category `undetermined` for every mode and always requires deployment-context review. Mode A/B/C only change technical locality and enrichment options (for example Mode C may send content to a configured provider). See [docs/compliance.md](docs/compliance.md) and `src/superlocalmemory/core/modes.py`.
 
 ### Deployment tiers
 
@@ -598,7 +602,7 @@ Full reference: [docs/rbac-teams.md](docs/rbac-teams.md) · [docs/deployment-tie
 
 ---
 
-## Bounded Loops (v3.8.0)
+## Bounded Loops (V4)
 
 A bounded loop terminates only when an **independent gate** passes — a test
 suite exit code, a linter, a JSON-schema check, or an SLM-recall condition.
@@ -629,7 +633,7 @@ Multi-Agent Memory workspace.
 
 ---
 
-## Framework Adapters (v3.8.0)
+## Framework Adapters (V4)
 
 SLM ships nine framework adapters under `ide/integrations/`. Each adapter
 wires SLM as the memory and history provider for the respective framework

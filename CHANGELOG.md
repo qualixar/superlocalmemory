@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to SuperLocalMemory V3 will be documented in this file.
+All notable changes to SuperLocalMemory will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -35,6 +35,15 @@ configuration are preserved; no manual migration is required.
   completion manifest spanning all representations.
 - Backups are captured as a coherent, checksum-verified set and restored
   atomically, rolling the live set back if any store fails mid-restore.
+- **SLM-Mesh** remains the peer-coordination plane (cross-session / cross-machine
+  messages, locks, shared state, inbox/outbox) with mesh MCP tools on the
+  `full` / `power` / `mesh` profiles.
+- Documented MCP profile counts for the V4 surface: `full` 42 (default everyday),
+  `power` 54, `whole` 87 registered tools; `core` 14, `code` 24, `mesh` 8.
+- Product documentation reframes the release as V4: multi-scope memory and
+  profiles, cache/compress context optimization, Entity Explorer and skill
+  evolution, Modes A/B/C locality choices, GDPR export/erasure/retention and
+  hash-chained audit controls, and the seven-layer retrieval/operations stack.
 
 ### Security
 - Outbound provider requests are validated against server-side request forgery,
@@ -2322,7 +2331,7 @@ Hardening release — correctness, stability, and security fixes.
 **Varun Pratap Bhardwaj**
 *Solution Architect*
 
-SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
+SuperLocalMemory V4 - Intelligent local memory system for AI coding assistants.
 
 ---
 
@@ -2760,7 +2769,7 @@ We use [Semantic Versioning](https://semver.org/):
 - **MINOR:** New features (backward compatible, e.g., 2.0.0 → 2.1.0)
 - **PATCH:** Bug fixes (backward compatible, e.g., 2.1.0 → 2.1.1)
 
-**Current Version:** v3.3.0
+**Current Version:** v4.0.0 (see top of this file for the active release entry)
 **Website:** [superlocalmemory.com](https://superlocalmemory.com)
 **npm:** `npm install -g superlocalmemory`
 
@@ -2768,7 +2777,7 @@ We use [Semantic Versioning](https://semver.org/):
 
 ## License
 
-SuperLocalMemory V3 is released under the [Elastic License 2.0](LICENSE).
+Early SuperLocalMemory V3 packaging used the [Elastic License 2.0](LICENSE); the current public project license is AGPL-3.0-or-later (see LICENSE at the repository root).
 
 ---
 

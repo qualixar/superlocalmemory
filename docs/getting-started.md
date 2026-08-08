@@ -1,5 +1,5 @@
 # Getting Started
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Install the CLI, activate the product explicitly, and verify one store/recall
@@ -176,4 +176,4 @@ For the full parameter set, see [CLI Reference → Bounded Loops](cli-reference.
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

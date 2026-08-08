@@ -1,6 +1,6 @@
 # GDPR Compliance
 
-SuperLocalMemory V3.8.0 ships built-in controls that support GDPR compliance
+SuperLocalMemory V4 ships built-in controls that support GDPR compliance
 programs. Full documentation: [docs/compliance.md](../docs/compliance.md).
 
 These are engineering controls. Compliance depends on deployment configuration,

@@ -1,6 +1,6 @@
 # Capabilities and Operations
 
-This page is the product-level map for SuperLocalMemory V3.8.0. It separates
+This page is the product-level map for SuperLocalMemory V4 (built on the 3.8 control plane). It separates
 what the runtime provides from what an operator must explicitly configure or
 verify.
 
@@ -65,7 +65,7 @@ a proxy is in the path.
 
 ## Bounded loops and multi-agent coordination
 
-V3.8.0 adds gate-verified bounded loops. The invariant: an independent gate
+V4 includes gate-verified bounded loops. The invariant: an independent gate
 decides when a loop is done, never the agent's own claim. Every lap is
 persisted to the SLM data root with tag `loop:<name>`.
 

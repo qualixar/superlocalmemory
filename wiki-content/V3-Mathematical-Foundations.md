@@ -1,6 +1,8 @@
 # V3 Mathematical Foundations
 
-SuperLocalMemory V3 introduces three mathematical pillars — to our knowledge the first application of each of these techniques to agent memory retrieval, as documented in our public arXiv preprints ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
+> **V4 note:** The mathematical retrieval layers documented here are still active in V4. Product framing for V4 (SLM-Mesh, scopes, cache/compress, governance) lives in the root README and docs/ARCHITECTURE.md.
+
+SuperLocalMemory (V3 research, carried into V4) introduces three mathematical pillars — to our knowledge the first application of each of these techniques to agent memory retrieval, as documented in our public arXiv preprints ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
 
 ## Published LoCoMo Evidence Carried into V3.7
 

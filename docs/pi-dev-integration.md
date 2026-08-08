@@ -1,5 +1,5 @@
 # pi.dev Integration
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 pi.dev can connect to SuperLocalMemory through the standard stdio MCP

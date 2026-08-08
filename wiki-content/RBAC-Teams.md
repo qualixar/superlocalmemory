@@ -1,6 +1,6 @@
 # RBAC and Teams
 
-SuperLocalMemory V3.8.0 introduces multi-user access control. This page summarizes
+SuperLocalMemory V4 includes multi-user access control (introduced on the 3.8 line). This page summarizes
 the key concepts; full documentation is in [docs/rbac-teams.md](../docs/rbac-teams.md).
 
 ## Roles

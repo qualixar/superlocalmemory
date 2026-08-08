@@ -1,5 +1,5 @@
 # Proxy Setup — All CLIs & Editors
-> SuperLocalMemory V3.8.0 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar — AI Reliability Engineering
 
 SLM Optimize Proxy intercepts every LLM API call and applies three cost-reduction levers — cache, compress, and align — before the call reaches the provider. This page shows exactly how to wire it into every supported CLI and editor.

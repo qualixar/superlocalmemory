@@ -1,5 +1,5 @@
 # MCP Tools Reference
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 SuperLocalMemory exposes profile-selected tools and resources through the Model
@@ -668,4 +668,4 @@ Show every lap of one run, in order (read-only).
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

@@ -1,5 +1,5 @@
 # Configuration
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Control how SuperLocalMemory stores, retrieves, and processes your memories.
@@ -238,4 +238,4 @@ See [docs/optimize-config.md](./optimize-config.md) for all 45+ config fields wi
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

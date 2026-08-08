@@ -1,10 +1,10 @@
 # Framework Adapters
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Nine Python packages back their framework's native memory interface with the local SLM data root. Install alongside the target framework; all data stays in the configured data root unless an optional SLM provider, connector, or backup feature is explicitly enabled.
 
-**Prerequisites:** Python 3.11+, SuperLocalMemory V3 installed in the same environment.
+**Prerequisites:** Python 3.11+, SuperLocalMemory V4 installed in the same environment.
 
 ---
 
@@ -98,7 +98,7 @@ history.clear()
 ## LlamaIndex
 
 **Install:** `pip install llama-index-storage-chat-store-superlocalmemory`  
-**Requires:** SuperLocalMemory V3 installed in the same virtual environment  
+**Requires:** SuperLocalMemory V4 installed in the same virtual environment  
 **Implements:** `BaseChatStore`  
 **Class:** `SuperLocalMemoryChatStore`
 
@@ -213,4 +213,4 @@ Source is under `ide/integrations/<framework>/` in the repository. Each adapter 
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

@@ -1,6 +1,6 @@
 # Python API Reference
 
-> SuperLocalMemory V3 documentation · AGPL-3.0-or-later
+> SuperLocalMemory V4 documentation · AGPL-3.0-or-later
 
 The Python API and Python-installed CLI are for applications running inside an
 activated virtual environment. The other primary CLI path is the npm global

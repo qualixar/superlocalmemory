@@ -1,5 +1,5 @@
 # Deployment Tiers: Personal and Enterprise
-> SuperLocalMemory V3.8.0 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 SLM ships one binary. The deployment tier is a configuration preset applied
@@ -140,4 +140,4 @@ Any individual setting can be changed afterward with `slm config set`.
 
 ---
 
-*SuperLocalMemory V3.8.0 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

@@ -1,5 +1,7 @@
 # Multi-Machine Mesh (v3.4.48)
 
+**SLM-Mesh** provides authenticated peer coordination across sessions and machines.
+
 SuperLocalMemory v3.4.48 enables two machines on the same LAN to share agent peer lists and route messages cross-machine — zero manual configuration required when mDNS is available.
 
 ## How It Works

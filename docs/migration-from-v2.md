@@ -1,5 +1,5 @@
 # Migration from V2
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Upgrade from SuperLocalMemory V2 to V3. Zero data loss, one command, rollback available.
@@ -167,4 +167,4 @@ The V3 schema adds approximately 20-40% to database size due to the entity graph
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

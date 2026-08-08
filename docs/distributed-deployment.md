@@ -1,5 +1,5 @@
 # Distributed Deployment
-> SuperLocalMemory V3.6.9+ — Multi-machine / LXC / container setup
+> SuperLocalMemory V4 — Multi-machine / LXC / container setup (SLM-Mesh)
 > https://superlocalmemory.com | Part of Qualixar
 
 This guide covers running SLM in distributed environments: multiple containers, LXC hosts, VMs, or any topology where the daemon runs on a different host than the MCP clients.

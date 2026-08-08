@@ -1,6 +1,6 @@
 # FAQ
 
-Frequently asked questions about SuperLocalMemory V3.
+Frequently asked questions about SuperLocalMemory V4.
 
 ## General
 

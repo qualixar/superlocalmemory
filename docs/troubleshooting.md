@@ -1,5 +1,5 @@
 # Troubleshooting
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Solutions for common issues. If your problem is not listed here, run `slm status --json` and check the output for clues.
@@ -45,7 +45,7 @@ npx superlocalmemory status
 
 ### "Python not found" during setup
 
-SLM V3 requires Python 3.10 or later for the math engine.
+SLM V4 requires Python 3.10 or later for the math engine.
 
 ```bash
 # Check Python version
@@ -320,4 +320,4 @@ If none of the above resolves your issue:
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

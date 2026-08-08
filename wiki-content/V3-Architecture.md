@@ -1,5 +1,7 @@
 # V3.8.0 Architecture
 
+> **V4 note:** This page documents the V3 architecture that remains the retrieval and memory foundation of SuperLocalMemory V4. V4 adds governed writes, SLM-Mesh coordination, multi-scope profiles, cache/compress, and enterprise governance controls on top of this stack. See the root [README](../README.md) for the V4 product surface.
+
 SuperLocalMemory combines a local canonical memory store, multi-channel
 retrieval, lifecycle and learning controls, Optimize, Mesh, and MCP/CLI/IDE
 surfaces. It is an operator-controlled memory runtime rather than a single
@@ -18,7 +20,7 @@ local authorization contract, not a synonym for SLM Mesh peer coordination.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                 SuperLocalMemory V3                    │
+│                 SuperLocalMemory V4                    │
 │                                                        │
 │  ┌──────────────────┐  ┌────────────────────────────┐ │
 │  │  Product Shell     │  │  Mathematical Engine       │ │
@@ -227,7 +229,7 @@ These are published V3 architecture experiments carried into V3.7 messaging:
 - The raw zero-LLM and category results remain documented in the paper and must not be compared with other vendors without matching protocols.
 
 These scores retain their evaluated protocol scope; they are not a newly rerun 3.7 package benchmark. See the paper for ablations and full results.
-Those historical experiments are not performance claims for the current V3.7
+Those historical experiments are not performance claims for the current V4 package (they predate even the V3.7 layout)
 runtime or a cross-vendor comparison.
 
 ---

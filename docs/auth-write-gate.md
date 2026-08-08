@@ -1,5 +1,5 @@
 # Auth Write Gate
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 The SLM daemon protects mutating operations (store, delete, update, config
@@ -191,4 +191,4 @@ set `SLM_REQUIRE_CREDENTIALS=1` and use the API key.
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

@@ -1,5 +1,5 @@
 # IDE Setup
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Connect SuperLocalMemory to your AI coding tool. Once connected, memories are captured and recalled automatically.
@@ -567,7 +567,7 @@ curl -s http://127.0.0.1:8765/mcp/ \
   | grep '"name":"SuperLocalMemory'
 ```
 
-A response containing `"name":"SuperLocalMemory V3"` confirms HTTP MCP is live.
+A response containing `"name":"SuperLocalMemory V4"` confirms HTTP MCP is live.
 
 ---
 
@@ -626,4 +626,4 @@ When using HTTP transport, all IDEs connect to the same daemon process at `http:
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

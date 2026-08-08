@@ -1,12 +1,16 @@
 # Architecture
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-A high-level overview of how SuperLocalMemory V3 stores, organizes, and retrieves your memories.
+A high-level overview of how SuperLocalMemory V4 stores, organizes, and retrieves your memories.
 
-Published V3 LoCoMo evidence carried into V3.7 is maintained in
+Published V3 LoCoMo evidence carried into V4 (from the V3 paper / V3.7 package) is maintained in
 [Benchmark Evidence](benchmarks.md), including the original model, judge, and
 sample disclosures required to interpret each result.
+
+## What changed in V4
+
+V4 keeps the V3 multi-channel retrieval and local-first store as the foundation, and adds a governed write path (admission, per-store obligations, completion manifests), stronger cross-store erasure, SLM-Mesh peer coordination, multi-scope memory with profiles, cache/compress context optimization, Entity Explorer and skill evolution surfaces, and enterprise controls (roles, retention, hash-chained audit). Modes A/B/C still describe locality and enrichment choices; they do **not** determine EU AI Act legal compliance — that depends on deployment context.
 
 ## Memory boundaries: profiles and scopes
 
@@ -216,4 +220,4 @@ is marked done.
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

@@ -1,5 +1,5 @@
 # CLI Reference
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Complete reference for the `slm` command-line interface.
@@ -833,4 +833,4 @@ SQLite + sqlite-vec remain canonical. Projections are parity-gated; a failed ver
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

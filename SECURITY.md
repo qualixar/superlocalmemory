@@ -1,14 +1,15 @@
 # Security Policy
 
-## SuperLocalMemory V3 Security
+## SuperLocalMemory V4 Security
 
 ### Supported Versions
 
 | Version | Supported |
 |:--------|:---------:|
-| 3.7.x | Yes |
-| 3.6.x | Security fixes only |
-| < 3.6 | No |
+| 4.0.x | Yes |
+| 3.8.x | Security fixes only |
+| 3.7.x | Security fixes only |
+| < 3.7 | No |
 
 ### Reporting Vulnerabilities
 

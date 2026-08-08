@@ -1,6 +1,6 @@
-# SuperLocalMemory V3.8.1
+# SuperLocalMemory V4.0.0
 
-> **The existing-install stability release for the V3.8 control plane:
+> **V4 — governed local-first agent memory control plane built on the V3.8 foundation:
 > local-first agent memory, retrieval, cache, compression, trusted-peer
 > coordination, team workspaces, roles, and governance controls.**
 
@@ -9,7 +9,12 @@ evidence into durable memory that can be recalled through a CLI, MCP, hooks,
 dashboard, or documented IDE integrations. SQLite + sqlite-vec are the
 canonical local store. The product also includes an explicit Scale Engine for
 CozoDB graph and LanceDB vector projections, a cache/compression module, and
-SLM Mesh coordination controls.
+**SLM-Mesh** coordination controls.
+
+
+## What changed in V4
+
+V4 keeps the multi-channel retrieval and local-first store from the V3 research line, and productizes governed writes, **SLM-Mesh** peer coordination, multi-scope profiles, cache/compress, Entity Explorer and skill evolution, Modes A/B/C, and GDPR-oriented retention/audit controls. Operating mode is not an EU AI Act compliance certificate — deployment context decides legal duties.
 
 ## The product in one view
 
@@ -46,7 +51,7 @@ optional enrichers and retrieval channels are dependency- and mode-aware.
 | Graph | Canonical entities, aliases, profiles, edges, scenes, timelines and an Entity Explorer | Graph evidence is inspectable and provenance-bearing. |
 | Scale Engine | CozoDB graph + LanceDB vectors with prepare → verify → promote → rollback | SQLite remains canonical; promotion is explicit and parity-gated. |
 | Optimize | Exact cache, tag invalidation, safe compression, opt-in lossy prose compression and CCR originals | Only the proxy can intercept a primary provider turn. |
-| Mesh | Authenticated peer messages, locks, inbox/outbox, queues and optional discovery | Mesh coordinates peers; it is not a replicated distributed-memory database. |
+| **SLM-Mesh** | Authenticated peer messages, locks, inbox/outbox, queues and optional discovery | Mesh coordinates peers; it is not a replicated distributed-memory database. |
 | Governance | Provenance, audit, retention, policy, export/erasure, health and diagnostics | Deployment configuration determines compliance posture. |
 | Integrations | CLI, Python SDK, MCP, Claude plugin, Codex add-on, documented IDE configs, Gmail/Calendar/transcript adapters, nine framework adapters (LangGraph, Semantic Kernel, Microsoft Agent Framework, LangChain, LlamaIndex, CrewAI, AutoGen, Google ADK, OpenAI Agents) | Connectors and hooks are opt-in and have their own data paths. |
 
@@ -89,7 +94,7 @@ the agent's claim of completion is never used. See [[Bounded Loops]].
 **Nine framework adapters** — LangGraph, Semantic Kernel, Microsoft Agent
 Framework, LangChain, LlamaIndex, CrewAI, AutoGen, Google ADK, and OpenAI
 Agents. Each implements its framework's native memory interface and writes
-through the SLM V3 ingestion contract. See [[Framework Adapters]].
+through the SLM V4 ingestion contract. See [[Framework Adapters]].
 
 **MCP profile update** — profiles now include bounded-loop tools. Counts:
 core 14 / code 24 / full 42 / power 54 / whole 84. See [[MCP Tools]].

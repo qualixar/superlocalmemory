@@ -1,5 +1,5 @@
 # Optimize Overview — v3.8.0
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 SLM exposes optimization controls through a proxy plus content explicitly

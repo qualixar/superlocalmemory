@@ -1,6 +1,6 @@
 # Installation
 
-SuperLocalMemory V3 has two primary paths: an npm global CLI with a
+SuperLocalMemory V4 has two primary paths: an npm global CLI with a
 package-owned Python environment, and a Python CLI + SDK inside an activated
 virtual environment. Repository-clone installers share the same release
 identity but have different ownership and verification contracts.
@@ -44,7 +44,7 @@ slm status
 
 You should see:
 ```
-SuperLocalMemory V3
+SuperLocalMemory V4
   Mode: A
   Provider: none
   Base dir: /home/you/.superlocalmemory

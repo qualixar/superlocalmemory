@@ -1,8 +1,8 @@
 # Framework Adapters
 
-SuperLocalMemory V3.8.0 ships nine framework adapters. Each adapter implements
+SuperLocalMemory V4 ships nine framework adapters. Each adapter implements
 the memory or history interface that its target framework defines, writing data
-through the SLM V3 ingestion contract so all records are visible across the
+through the SLM V4 ingestion contract so all records are visible across the
 CLI, MCP, and dashboard surfaces.
 
 All adapters write to the configured SLM data root. Optional SLM providers,
@@ -23,7 +23,7 @@ behavior.
 | Google ADK | `google-adk-superlocalmemory` | `BaseMemoryService` | `google-adk >= 2.5.0` |
 | OpenAI Agents | `openai-agents-superlocalmemory` | `SessionABC` | `openai-agents >= 0.18.3` |
 
-All adapters require Python 3.11+ and SuperLocalMemory V3 installed in the
+All adapters require Python 3.11+ and SuperLocalMemory V4 installed in the
 same virtual environment.
 
 ## Installation
@@ -209,7 +209,7 @@ in SQL scans is escaped to prevent wildcard collisions.
 
 All nine adapters:
 
-- Write through the SLM V3 ingestion contract — records are immediately
+- Write through the SLM V4 ingestion contract — records are immediately
   queryable via `slm recall`, the dashboard, and any MCP-connected client.
 - Isolate sessions with a SHA-256-namespaced or scoped session identifier.
 - Handle async via `asyncio.to_thread` over the synchronous SLM engine, so

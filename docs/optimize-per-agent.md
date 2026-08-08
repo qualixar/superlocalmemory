@@ -1,6 +1,6 @@
 # Using SLM cache & compression per coding agent
 
-> SuperLocalMemory V3 · https://superlocalmemory.com · Part of Qualixar
+> SuperLocalMemory V4 · https://superlocalmemory.com · Part of Qualixar
 
 SuperLocalMemory's token optimization is **proxy-free** by default. The MCP tools
 `slm_compress`, `slm_retrieve`, `slm_cache_set`, `slm_cache_get`, and

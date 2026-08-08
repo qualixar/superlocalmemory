@@ -1,6 +1,6 @@
-# Contributing to SuperLocalMemory V3
+# Contributing to SuperLocalMemory V4
 
-Thank you for considering contributing to SuperLocalMemory V3! This document provides guidelines and instructions for contributing to the project.
+Thank you for considering contributing to SuperLocalMemory V4! This document provides guidelines and instructions for contributing to the project.
 
 ---
 
@@ -647,7 +647,7 @@ Maintainers are responsible for:
 
 ## License
 
-By contributing to SuperLocalMemory V3, you agree that your contributions will be licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+By contributing to SuperLocalMemory V4, you agree that your contributions will be licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
 See [LICENSE](LICENSE) for details.
 
@@ -685,7 +685,7 @@ See [LICENSE](LICENSE) for details.
 **Varun Pratap Bhardwaj**
 *Solution Architect*
 
-SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
+SuperLocalMemory V4 - Intelligent local memory system for AI coding assistants.
 
 ---
 
@@ -697,6 +697,6 @@ Don't hesitate to ask! We're here to help.
 - Start a discussion
 - Reach out to maintainers
 
-**Thank you for contributing to SuperLocalMemory V3!**
+**Thank you for contributing to SuperLocalMemory V4!**
 
 Your contributions help make intelligent, local-first memory accessible to everyone.

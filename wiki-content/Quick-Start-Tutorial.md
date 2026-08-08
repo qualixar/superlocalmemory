@@ -69,7 +69,7 @@ slm status
 ```
 
 ```
-SuperLocalMemory V3
+SuperLocalMemory V4
   Mode: A
   Provider: none
   Base dir: ~/.superlocalmemory

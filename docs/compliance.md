@@ -1,6 +1,6 @@
 # Compliance Controls and Limits
 
-> SuperLocalMemory V3 documentation · not legal advice or certification
+> SuperLocalMemory V4 documentation · not legal advice or certification
 
 SuperLocalMemory exposes local storage, scoped recall, erasure mutations,
 provenance, policy hooks, and audit records that can support a compliance
@@ -38,7 +38,7 @@ A complete erasure claim requires proof that deletion propagates through:
 - exports, backups, snapshots, logs, queues, and recovery artifacts; and
 - any configured provider, connector, mesh peer, or external system.
 
-The V3.7 release gate includes this lifecycle propagation matrix. Do not delete
+The release gate (from V3.7 onward, including V4) includes this lifecycle propagation matrix. Do not delete
 only `memory.db` and call the deployment erased: the data root can also contain
 configuration, logs, queues, credentials, models, derived indexes, and optional
 backend state.

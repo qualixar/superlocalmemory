@@ -1,5 +1,5 @@
 # Optimize CLI Reference — v3.6
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Complete reference for all SLM v3.6 Optimize CLI commands.

@@ -1,8 +1,8 @@
 # Teams, Users, and Access Control (RBAC)
-> SuperLocalMemory V3.8.0 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
-V3.8.0 adds multi-user access control to SLM. This page covers roles, workspace
+V4 includes multi-user access control to SLM (from the 3.8 line). This page covers roles, workspace
 membership, the login gate, and how to operate RBAC from the CLI, API, and
 dashboard.
 
@@ -161,4 +161,4 @@ slm diagnostics export /tmp/audit-report.json
 
 ---
 
-*SuperLocalMemory V3.8.0 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

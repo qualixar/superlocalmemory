@@ -1,5 +1,5 @@
 # Auto-Memory
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 SuperLocalMemory captures and recalls context automatically. Install it once, then forget about it — your AI assistant gets smarter over time without any manual effort.
@@ -162,4 +162,4 @@ cloud provider. Review that provider's retention and privacy terms before use.
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*

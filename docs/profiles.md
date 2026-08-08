@@ -1,5 +1,5 @@
 # Profiles
-> SuperLocalMemory V3 Documentation
+> SuperLocalMemory V4 Documentation
 > https://superlocalmemory.com | Part of Qualixar
 
 Profiles organize memory contexts inside one installation. Personal facts are
@@ -154,4 +154,4 @@ The entity graph, BM25 index, and all math layer state are also per-profile. Bui
 
 ---
 
-*SuperLocalMemory V3 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
+*SuperLocalMemory V4 — Copyright 2026 Varun Pratap Bhardwaj. AGPL-3.0-or-later. Part of Qualixar.*
