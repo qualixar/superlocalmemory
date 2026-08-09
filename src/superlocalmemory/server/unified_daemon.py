@@ -3467,7 +3467,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     _data_io_mod.ws_manager = ws_manager
 
     # Root page
-    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
     # v3.4.23: /api/version — dashboard polls this to detect daemon upgrades
     # and auto-reload stale tabs (see ui/js/core.js::checkVersionFingerprint).
@@ -3530,6 +3530,11 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         # days, but we want zero caching surprises during development).
         html = index_path.read_text()
         return html.replace("__SLM_VERSION__", _SLM_VERSION)
+
+    @application.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        """Serve the packaged SVG icon for browsers that request favicon.ico."""
+        return RedirectResponse(url="/static/favicon.svg", status_code=307)
 
 def _register_daemon_routes(application: FastAPI) -> None:
     """Add daemon-specific routes for CLI integration."""
@@ -3695,7 +3700,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             "active_profile": profile_snapshot.profile_id,
             "profile_generation": profile_snapshot.generation,
             # Wave-3: operational failure counts (visible to all team members)
-            **_ops_failure_counts(engine),
+            **_ops_failure_counts(engine, application),
             # issue #107: does this daemon's *imported* code still match the
             # installed distribution? ``version`` above reports what this
             # process loaded, which is self-consistent and therefore cannot
@@ -4271,7 +4276,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # "Optimizing memory…" line from this. Defaults to idle before start.
             "self_heal": globals().get("_SELF_HEAL_STATUS", {"state": "idle"}),
             # Wave-3: operational failure counts (dead-letter, degraded, stalled)
-            **_ops_failure_counts(engine),
+            **_ops_failure_counts(engine, application),
         }
 
     @application.get("/api/v3/components")
@@ -4870,7 +4875,7 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
         )
 
 
-def _ops_failure_counts(engine) -> dict:
+def _ops_failure_counts(engine, application) -> dict:
     """Return Wave-3 operational failure counts for /status and /health.
 
     Always returns a dict (never raises). Counts default to 0 on any error.
@@ -4885,6 +4890,9 @@ def _ops_failure_counts(engine) -> dict:
         "writer_stalled_op_id": None,
         "writer_stalled_age_s": None,
     }
+    # ``application`` is explicitly passed by the route handlers.  There is no
+    # module-global FastAPI app; relying on one silently returned all-zero
+    # counters whenever this helper caught the resulting NameError.
     # Writer stall info from canonical coordinator
     try:
         writer_runtime = getattr(application.state, "canonical_remember_runtime", None)

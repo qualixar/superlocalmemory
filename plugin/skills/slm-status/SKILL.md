@@ -163,4 +163,4 @@ multi-profile setup. To switch the active profile, see `slm-profile`.
 
 ---
 
-SuperLocalMemory v4.0.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.1 · Qualixar · AGPL-3.0-or-later

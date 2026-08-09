@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "4.0.0"
+version = "4.0.1"
 description = "Local-first agent memory with auditable hybrid retrieval"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -90,8 +90,8 @@ dependencies = [
     # the ~560MB model downloads on first setup/warmup (fail-open). Verified the
     # pin does NOT disturb the transformers/torch/numpy pins above.
     "llmlingua==0.2.2",
-    # LLMLingua pulls NLTK transitively. Pin the patched release so clean
-    # installs cannot resolve to the vulnerable 3.9.x line.
+    # LLMLingua pulls NLTK transitively. Pin above the disclosed traversal
+    # advisories so clean installs cannot resolve to the vulnerable 3.9.x line.
     "nltk==3.10.0",
 ]
 

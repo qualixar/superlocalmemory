@@ -5,13 +5,16 @@ listed below. Each exception must name the transitive dependency path, explain
 why the vulnerable API is not reachable from untrusted input, and be removed
 as soon as a stable patched release is available.
 
-**Status as of 2026-08-08: both remaining exceptions are actionable.** A stable
-release beyond each affected version is published on PyPI (versions verified
-against the PyPI JSON API on 2026-08-08). Neither exception below is
-blocked on upstream any more; each is blocked only on us scheduling and testing
-the upgrade. The non-reachability arguments remain accurate and unchanged — they
-are why these are exceptions rather than incidents.
+**Status as of 2026-08-09:** the NLTK exception is retired in 4.0.1. The two
+remaining exceptions are actionable: stable releases beyond the affected
+versions are available, so removal is blocked only on our scheduled, verified
+native-stack upgrade. Their non-reachability arguments remain accurate and are
+why these are exceptions rather than incidents.
 
+## Retired: PYSEC-2026-597 — NLTK
+
+SuperLocalMemory 4.0.1 pins `nltk==3.10.0`, above the affected 3.9.4 release.
+The CI suppression was removed with that upgrade.
 ## PYSEC-2026-3447 — setuptools 81.0.0
 
 - **Dependency path:** `superlocalmemory -> torch 2.11.0 -> setuptools <82`.

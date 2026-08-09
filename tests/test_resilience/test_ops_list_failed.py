@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -155,6 +156,33 @@ class TestListFailedOperationsBasic:
         assert len(result["degraded_manifests"]) == 1
         assert len(result["exhausted_obligations"]) == 1
         assert result["total"] == 3
+
+
+class TestOpsStatusFailureCounts:
+    def test_status_helper_reports_persisted_failure_surfaces(self, tmp_path):
+        """The daemon status route must not silently report zero for a bad DB."""
+        from superlocalmemory.server.unified_daemon import _ops_failure_counts
+
+        db_path = tmp_path / "memory.db"
+        conn = sqlite3.connect(db_path)
+        _apply_migrations(conn)
+        _seed_dead_letter(conn, "default", "dlq-status")
+        _seed_degraded_manifest(conn, "default", "deg-status")
+        _seed_exhausted_obligation(conn, "default", "exh-status", attempts=10)
+        conn.close()
+
+        application = SimpleNamespace(
+            state=SimpleNamespace(
+                config=SimpleNamespace(db_path=db_path),
+                canonical_remember_runtime=None,
+                write_coordinator=None,
+            )
+        )
+        counts = _ops_failure_counts(engine=None, application=application)
+
+        assert counts["dead_letter_count"] == 1
+        assert counts["degraded_operations"] == 1
+        assert counts["exhausted_obligations"] == 1
 
 
 class TestListFailedOperationsProfileFilter:

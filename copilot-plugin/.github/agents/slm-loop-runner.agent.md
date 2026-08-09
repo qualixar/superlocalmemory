@@ -11,7 +11,7 @@ description: >
 tools: Bash, slm_recall, slm_remember, Read
 model: inherit
 target: vscode
-version: "4.0.0"
+version: "4.0.1"
 ---
 
 # Role
@@ -70,4 +70,4 @@ assessment. The gate is the authority.
 
 ---
 
-SuperLocalMemory v4.0.0 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.1 · Qualixar · AGPL-3.0-or-later

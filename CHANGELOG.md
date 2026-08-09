@@ -5,6 +5,17 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.1] - 2026-08-09 — Dashboard and operations-status correctness
+
+### Fixed
+- The packaged dashboard identifies itself as SuperLocalMemory V4 and uses an
+  absolute packaged favicon path. Both unified and standalone dashboard servers
+  now provide the conventional `/favicon.ico` route by redirecting to the
+  packaged SVG icon.
+- The daemon's operations-status counters now receive their FastAPI application
+  explicitly, so persisted dead-letter, degraded-manifest, and exhausted-
+  obligation counts cannot be silently reported as zero.
+
 ## [4.0.0] - 2026-08-01 — Verifiable memory transactions
 
 Version 4.0 hardens the full lifecycle of a memory operation — admission,

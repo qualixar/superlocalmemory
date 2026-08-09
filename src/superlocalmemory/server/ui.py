@@ -43,7 +43,7 @@ sys.path = [p for p in sys.path if p not in ("", _script_dir)]
 try:
     from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.middleware.gzip import GZipMiddleware
     import uvicorn
@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     application = FastAPI(
         title="SuperLocalMemory V4 UI Server",
-        description="Memory Dashboard with V4 Engine, Trust, Learning, and Compliance",
+        description="Governed memory dashboard with trust, learning, and compliance controls.",
         version=SLM_VERSION,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
@@ -232,6 +232,11 @@ def create_app() -> FastAPI:
                 "</body></html>"
             )
         return index_path.read_text()
+
+    @application.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        """Serve the packaged SVG icon for browsers that request favicon.ico."""
+        return RedirectResponse(url="/static/favicon.svg", status_code=307)
 
     @application.get("/health")
     async def health_check():

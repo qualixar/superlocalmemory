@@ -126,6 +126,15 @@ def test_brain_js_has_report_outcome_and_reset_endpoints() -> None:
     assert "/api/learning/migrate-legacy" in js
 
 
+def test_brain_js_exposes_safe_manual_cold_start_training() -> None:
+    """A qualified cold-start user can train without discovering an API."""
+    js = _UI_JS.read_text(encoding="utf-8")
+    assert "Manual training trigger" in js
+    assert "Train model now" in js
+    assert "Enough signals collected. You can train the model now" in js
+    assert "postRetrain(hasLegacy)" in js
+
+
 def test_brain_js_no_developer_view_render_path() -> None:
     """renderDeveloper / kvTable removed — one honest view only."""
     js = _UI_JS.read_text(encoding="utf-8")
