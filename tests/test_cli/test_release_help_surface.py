@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from superlocalmemory import __version__
 
 
 _ROOT_COMMANDS = (
@@ -80,7 +81,7 @@ def test_root_help_identifies_v4_without_changing_version(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "SuperLocalMemory V4 (4.0.0)" in result.stdout
+    assert f"SuperLocalMemory V4 ({__version__})" in result.stdout
     assert "SuperLocalMemory V3" not in result.stdout
 
 
