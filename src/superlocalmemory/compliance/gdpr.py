@@ -53,11 +53,12 @@ class GDPRCompliance:
 
     def _memory_has_siblings(self, memory_id: str, profile_id: str) -> bool:
         try:
-            return bool(self._db.execute(
-                "SELECT 1 FROM atomic_facts "
-                "WHERE memory_id = ? AND profile_id = ? LIMIT 1",
-                (memory_id, profile_id),
-            ))
+            return bool(
+                self._db.execute(
+                    "SELECT 1 FROM atomic_facts WHERE memory_id = ? AND profile_id = ? LIMIT 1",
+                    (memory_id, profile_id),
+                )
+            )
         except Exception:
             return True
 
@@ -69,8 +70,12 @@ class GDPRCompliance:
             from superlocalmemory.core.transactions.erasure import write_tombstones
 
             write_tombstones(
-                self._db, profile_id, (fact_id,), uuid.uuid4().hex,
-                time.time(), memory_id,
+                self._db,
+                profile_id,
+                (fact_id,),
+                uuid.uuid4().hex,
+                time.time(),
+                memory_id,
             )
         except Exception:
             pass
@@ -192,9 +197,7 @@ class GDPRCompliance:
         try:
             names = [
                 dict(r)["name"]
-                for r in self._db.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                for r in self._db.execute("SELECT name FROM sqlite_master WHERE type='table'")
             ]
         except Exception:
             return []
@@ -230,18 +233,14 @@ class GDPRCompliance:
 
         # Profile record itself (the tenant metadata).
         try:
-            rows = self._db.execute(
-                "SELECT * FROM profiles WHERE profile_id = ?", (profile_id,)
-            )
+            rows = self._db.execute("SELECT * FROM profiles WHERE profile_id = ?", (profile_id,))
             data["profile_record"] = [dict(r) for r in rows]
         except Exception:
             data["profile_record"] = []
 
         # total_items counts the canonical (table-name) keys only, before
         # friendly aliases are added, so it is not double-counted.
-        data["total_items"] = sum(
-            len(v) for v in data.values() if isinstance(v, list)
-        )
+        data["total_items"] = sum(len(v) for v in data.values() if isinstance(v, list))
 
         # Backward-compatible friendly aliases for the well-known keys (stable
         # export contract) — they reference the same lists, not copies.
@@ -264,8 +263,9 @@ class GDPRCompliance:
         the chain in a separate DB is the durable evidence.
         """
         if profile_id == "default":
-            raise ValueError("Cannot delete the default profile via GDPR erasure. "
-                             "Use profile deletion instead.")
+            raise ValueError(
+                "Cannot delete the default profile via GDPR erasure. Use profile deletion instead."
+            )
 
         counts: dict[str, int] = {}
 
@@ -276,14 +276,18 @@ class GDPRCompliance:
         try:
             from superlocalmemory.compliance.audit import AuditChain
             from superlocalmemory.infra.data_root import state_path
+
             AuditChain(str(state_path("audit_chain.db"))).log(
-                "gdpr_erase", agent_id="gdpr", profile_id=profile_id,
+                "gdpr_erase",
+                agent_id="gdpr",
+                profile_id=profile_id,
                 metadata={"basis": "GDPR Art.17 right-to-erasure"},
             )
         except Exception as exc:
             logger.error(
                 "GDPR erase ABORTED for %r: pre-deletion audit-chain log failed: %s",
-                profile_id, exc,
+                profile_id,
+                exc,
             )
             counts["audit_request_failed"] = 1
             counts["erasure_aborted"] = 1
@@ -324,6 +328,7 @@ class GDPRCompliance:
         data_root = self._data_root
         try:
             from superlocalmemory.core.context_cache import purge_profile_from_cache_db
+
             if data_root is None:
                 db_path = getattr(self._db, "db_path", None)
                 if db_path is not None:
@@ -389,10 +394,9 @@ class GDPRCompliance:
                 "SELECT fact_id FROM atomic_facts WHERE profile_id = ?",
                 (profile_id,),
             )
-            _profile_fact_ids = tuple(sorted(
-                dict(r)["fact_id"] for r in _fact_rows
-                if dict(r).get("fact_id") is not None
-            ))
+            _profile_fact_ids = tuple(
+                sorted(dict(r)["fact_id"] for r in _fact_rows if dict(r).get("fact_id") is not None)
+            )
         except Exception as exc:
             logger.warning("GDPR profile erase: fact_id scan failed: %s", exc)
 
@@ -417,7 +421,8 @@ class GDPRCompliance:
             )
             _remove_result = _erasure_svc.remove(self._db, _ctx)
             _receipt = _erasure_svc.finalize(
-                self._db, _ctx,
+                self._db,
+                _ctx,
                 subject_type="profile",
                 subject_id=profile_id,
                 requested_by="gdpr",
@@ -432,6 +437,33 @@ class GDPRCompliance:
             counts["receipt_error"] = str(exc)
             raise
 
+        # Purge the learning sidecar *before* removing memory/profile rows. A
+        # learning failure is retryable and must leave the profile intact; the
+        # former best-effort-after-delete ordering could orphan receipts.
+        if data_root is None:
+            # Compatibility for third-party legacy wrappers that expose no
+            # durable path. We cannot safely guess another installation's
+            # sidecar. Native v4.0.2 runtime objects always provide the root.
+            logger.warning(
+                "GDPR erase: learning receipt purge skipped for profile %r — "
+                "data root could not be resolved",
+                profile_id,
+            )
+            counts["learning_db_skipped"] = 1
+        else:
+            try:
+                from superlocalmemory.learning.database import LearningDatabase
+
+                learning_db = LearningDatabase(data_root / "learning.db")
+                learning_db.reset(profile_id)
+                counts["learning_db"] = 1
+            except Exception as exc:
+                logger.warning("GDPR erase: learning-db reset failed: %s", exc)
+                counts["learning_db_failed"] = 1
+                raise RuntimeError(
+                    "learning receipt purge failed; profile deletion was not started"
+                ) from exc
+
         # Pass 2 — full-tenant wipe with FK enforcement OFF so table order is
         # irrelevant (every profile row in every table goes). FTS shadow rows
         # are still removed by the base-table delete triggers.
@@ -443,9 +475,7 @@ class GDPRCompliance:
         try:
             for table in tables:
                 try:
-                    self._db.execute(
-                        f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,)
-                    )
+                    self._db.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
                 except Exception as exc:  # pragma: no cover — defensive per-table
                     logger.warning("GDPR erase: delete %s failed: %s", table, exc)
                     table_delete_failures.append(table)
@@ -459,21 +489,6 @@ class GDPRCompliance:
                 pass
         if table_delete_failures:
             counts["table_delete_failures"] = len(table_delete_failures)
-
-        # Erase the learning sidecar next to the active memory database.  A
-        # custom SLM data root must never fall back to another installation's
-        # DEFAULT_BASE_DIR: doing so can both miss the subject data and erase
-        # unrelated learning state.
-        try:
-            from superlocalmemory.learning.database import LearningDatabase
-            if data_root is None:
-                raise RuntimeError("active data root could not be resolved")
-            learning_db = LearningDatabase(data_root / "learning.db")
-            learning_db.reset(profile_id)
-            counts["learning_db"] = 1
-        except Exception as exc:
-            logger.warning("GDPR erase: learning-db reset failed: %s", exc)
-            counts["learning_db_failed"] = 1
 
         # VACUUM to remove deleted data from physical file
         try:
@@ -497,28 +512,34 @@ class GDPRCompliance:
                 # Fail-closed: a residue re-count that cannot be performed is a
                 # verification failure, not zero residue. We cannot certify the
                 # table is clean, so erasure must not report complete.
-                logger.warning(
-                    "GDPR erase: residue re-count for %s failed: %s", table, exc
-                )
+                logger.warning("GDPR erase: residue re-count for %s failed: %s", table, exc)
                 residue_recount_failed = True
         counts["residue_rows"] = residue_rows
         if residue_recount_failed:
             counts["residue_recount_failed"] = 1
-        counts["erasure_complete"] = 1 if (
-            residue_rows == 0
-            and not residue_recount_failed
-            and not table_delete_failures
-            and not counts.get("learning_db_failed")
-            and not counts.get("vector_store_failures")
-            and not counts.get("context_cache_failed")
-            and not counts.get("owner_erasure_incomplete")
-        ) else 0
+        counts["erasure_complete"] = (
+            1
+            if (
+                residue_rows == 0
+                and not residue_recount_failed
+                and not table_delete_failures
+                and not counts.get("learning_db_failed")
+                and not counts.get("learning_db_skipped")
+                and not counts.get("vector_store_failures")
+                and not counts.get("context_cache_failed")
+                and not counts.get("owner_erasure_incomplete")
+            )
+            else 0
+        )
 
         try:
             from superlocalmemory.compliance.audit import AuditChain
             from superlocalmemory.infra.data_root import state_path
+
             AuditChain(str(state_path("audit_chain.db"))).log(
-                "gdpr_erase_complete", agent_id="gdpr", profile_id=profile_id,
+                "gdpr_erase_complete",
+                agent_id="gdpr",
+                profile_id=profile_id,
                 metadata={
                     "basis": "GDPR Art.17 right-to-erasure",
                     "tables_erased": len(tables),
@@ -539,13 +560,17 @@ class GDPRCompliance:
         and the entity itself. For targeted erasure requests.
         """
         import time
+
         requested_at = time.time()
         audit_request_ok = True
         try:
             from superlocalmemory.compliance.audit import AuditChain
             from superlocalmemory.infra.data_root import state_path
+
             AuditChain(str(state_path("audit_chain.db"))).log(
-                "gdpr_erase_entity", agent_id="gdpr", profile_id=profile_id,
+                "gdpr_erase_entity",
+                agent_id="gdpr",
+                profile_id=profile_id,
                 metadata={
                     "basis": "GDPR Art.17 right-to-erasure",
                     "entity": entity_name,
@@ -554,9 +579,13 @@ class GDPRCompliance:
         except Exception as exc:
             logger.warning("GDPR entity erase: audit-chain log failed: %s", exc)
             audit_request_ok = False
-        self._audit("delete", "entity", entity_name,
-                     f"GDPR entity erasure in profile {profile_id}",
-                     profile_id=profile_id)
+        self._audit(
+            "delete",
+            "entity",
+            entity_name,
+            f"GDPR entity erasure in profile {profile_id}",
+            profile_id=profile_id,
+        )
 
         entity = self._db.get_entity_by_name(entity_name, profile_id)
         if entity is None:
@@ -597,7 +626,8 @@ class GDPRCompliance:
             )
             erasure_svc.remove(self._db, ctx)
             receipt = erasure_svc.finalize(
-                self._db, ctx,
+                self._db,
+                ctx,
                 subject_type="entity",
                 subject_id=entity_name,
                 requested_by="gdpr",
@@ -606,9 +636,7 @@ class GDPRCompliance:
             if not receipt.persisted:
                 counts["receipt_persist_failed"] = 1
             if not receipt.all_erased:
-                counts["vector_store_failures"] = sum(
-                    1 for p in receipt.proofs if not p.erased
-                )
+                counts["vector_store_failures"] = sum(1 for p in receipt.proofs if not p.erased)
 
         for fid, mid in targets:
             self._db.delete_fact(fid)
@@ -636,11 +664,12 @@ class GDPRCompliance:
         # Delete aliases + entity (profile-scoped — entity_id is UUID-global but
         # keep the tenant predicate for consistent Art.17 isolation).
         self._db.execute(
-            "DELETE FROM entity_aliases WHERE entity_id = ? AND profile_id = ?",
-            (eid, profile_id))
+            "DELETE FROM entity_aliases WHERE entity_id = ? AND profile_id = ?", (eid, profile_id)
+        )
         self._db.execute(
             "DELETE FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
-            (eid, profile_id))
+            (eid, profile_id),
+        )
         counts["entity"] = 1
         if not audit_request_ok:
             counts["audit_request_failed"] = 1
@@ -650,23 +679,25 @@ class GDPRCompliance:
 
     # -- Audit Trail -------------------------------------------------------
 
-    def get_audit_trail(
-        self, profile_id: str, limit: int = 100
-    ) -> list[dict]:
+    def get_audit_trail(self, profile_id: str, limit: int = 100) -> list[dict]:
         """Get compliance audit trail for a profile."""
         rows = self._db.execute(
-            "SELECT * FROM compliance_audit WHERE profile_id = ? "
-            "ORDER BY timestamp DESC LIMIT ?",
+            "SELECT * FROM compliance_audit WHERE profile_id = ? ORDER BY timestamp DESC LIMIT ?",
             (profile_id, limit),
         )
         return [dict(r) for r in rows]
 
     def _audit(
-        self, action: str, target_type: str, target_id: str, details: str,
+        self,
+        action: str,
+        target_type: str,
+        target_id: str,
+        details: str,
         profile_id: str | None = None,
     ) -> None:
         """Log a compliance action."""
         from superlocalmemory.storage.models import _new_id
+
         pid = profile_id if profile_id is not None else target_id
         self._db.execute(
             "INSERT INTO compliance_audit "

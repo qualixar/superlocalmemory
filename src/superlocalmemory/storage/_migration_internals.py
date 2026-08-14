@@ -144,6 +144,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M039_scene_fact_members as _M039,
 )
+from superlocalmemory.storage.migrations import (
+    M040_agent_experience_receipts as _M040,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -191,6 +194,7 @@ _MODULES = {
     _M037.NAME: _M037,
     _M038.NAME: _M038,
     _M039.NAME: _M039,
+    _M040.NAME: _M040,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

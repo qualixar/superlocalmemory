@@ -151,6 +151,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M039_scene_fact_members as _M039,
 )
+from superlocalmemory.storage.migrations import (
+    M040_agent_experience_receipts as _M040,
+)
 from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
@@ -225,6 +228,11 @@ MIGRATIONS: list[Migration] = [
     # It repairs the legacy learning_feedback schema before any reader mines
     # channel patterns.
     Migration(name=_M038.NAME, db_target="learning", ddl=_M038.DDL,
+              dependencies=(_M003.NAME,)),
+    # Receipt writes are a learning-plane concern and must never share the
+    # memory.db recall lock domain.  The tables are self-contained: profile
+    # lifecycle performs explicit cross-store erasure rather than an FK.
+    Migration(name=_M040.NAME, db_target="learning", ddl=_M040.DDL,
               dependencies=(_M003.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]

@@ -34,6 +34,7 @@ def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
 
     assert "M038_learning_feedback_channel" in eager_names
     assert "M039_scene_fact_members" in deferred_names
+    assert "M040_agent_experience_receipts" in eager_names
     assert len(all_names) == len(set(all_names))
     targets = {
         migration.name: migration.db_target
@@ -41,11 +42,12 @@ def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
     }
     assert targets["M033_projection_transactions"] == "memory"
     assert targets["M038_learning_feedback_channel"] == "learning"
-    assert SUPPORTED_SCHEMA_VERSION == 39
+    assert targets["M040_agent_experience_receipts"] == "learning"
+    assert SUPPORTED_SCHEMA_VERSION == 40
 
 
-def test_schema_39_is_stamped_only_after_m039_completes(tmp_path: Path) -> None:
-    """A version-39 marker must prove the normalized scene schema exists."""
+def test_schema_40_is_stamped_only_after_m040_completes(tmp_path: Path) -> None:
+    """A version-40 marker must prove Agent Experience receipt storage exists."""
     from superlocalmemory.storage import schema
 
     learning_db = tmp_path / "learning.db"
@@ -62,10 +64,10 @@ def test_schema_39_is_stamped_only_after_m039_completes(tmp_path: Path) -> None:
     assert deferred["failed"] == []
     assert read_schema_version(learning_db) == SUPPORTED_SCHEMA_VERSION
     assert read_schema_version(memory_db) == SUPPORTED_SCHEMA_VERSION
-    with sqlite3.connect(memory_db) as conn:
+    with sqlite3.connect(learning_db) as conn:
         assert conn.execute(
             "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='scene_fact_members'"
+            "WHERE type='table' AND name='agent_experiences'"
         ).fetchone() == (1,)
 
 

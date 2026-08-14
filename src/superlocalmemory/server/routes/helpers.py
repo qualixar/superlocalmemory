@@ -8,9 +8,10 @@ Shared utilities for all route modules: DB connection, dict factory,
 profile helper, validation, Pydantic models, config paths, and the
 shared lazy engine accessor used by every engine-dependent route.
 """
+
+import json
 import logging
 import re
-import json
 import sqlite3
 import threading
 import time
@@ -24,13 +25,13 @@ from pydantic import BaseModel, Field
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 from superlocalmemory.storage.memory_write import memory_read, memory_write
 
-
 _engine_logger = logging.getLogger("superlocalmemory.engine")
 
 
 # ---------------------------------------------------------------------------
 # Version detection (shared — avoids circular import between ui.py ↔ v3_api.py)
 # ---------------------------------------------------------------------------
+
 
 def _get_version() -> str:
     """Read version from package.json / pyproject.toml / importlib.
@@ -43,6 +44,7 @@ def _get_version() -> str:
     for depth in (5, 4):
         try:
             import json as _json
+
             root = here
             for _ in range(depth):
                 root = root.parent
@@ -55,12 +57,14 @@ def _get_version() -> str:
             toml_path = root / "pyproject.toml"
             if toml_path.exists():
                 import tomllib
+
                 with open(toml_path, "rb") as f:
                     return tomllib.load(f)["project"]["version"]
         except Exception:
             continue
     try:
         from importlib.metadata import version
+
         return version("superlocalmemory")
     except Exception:
         pass
@@ -147,6 +151,7 @@ def get_engine_lazy(app_state):
         try:
             from superlocalmemory.core.config import SLMConfig
             from superlocalmemory.core.engine import MemoryEngine
+
             config = SLMConfig.load()
             new_engine = MemoryEngine(config)
             new_engine.initialize()
@@ -213,7 +218,11 @@ def log_mode_change(
 
     _engine_logger.info(
         "Mode change: %s→%s provider=%s model=%s (%s)",
-        old_mode, new_mode, provider, model, source,
+        old_mode,
+        new_mode,
+        provider,
+        model,
+        source,
     )
 
 
@@ -277,17 +286,17 @@ def get_active_profile() -> str:
     config_file = MEMORY_DIR / "profiles.json"
     if config_file.exists():
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, "r") as f:
                 pconfig = json.load(f)
-            return pconfig.get('active_profile', 'default')
+            return pconfig.get("active_profile", "default")
         except (json.JSONDecodeError, IOError):
             pass
-    return 'default'
+    return "default"
 
 
 def validate_profile_name(name: str) -> bool:
     """Validate profile name (alphanumeric, underscore, hyphen only)."""
-    return bool(re.match(r'^[a-zA-Z0-9_-]+$', name))
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", name))
 
 
 # ============================================================================
@@ -308,8 +317,7 @@ def ensure_profile_in_db(name: str, description: str = "") -> None:
     with memory_write(DB_PATH) as conn:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute(
-            "INSERT OR IGNORE INTO profiles (profile_id, name, description) "
-            "VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO profiles (profile_id, name, description) VALUES (?, ?, ?)",
             (name, name, description or f"Memory profile: {name}"),
         )
 
@@ -317,17 +325,17 @@ def ensure_profile_in_db(name: str, description: str = "") -> None:
 def ensure_profile_in_json(name: str, description: str = "") -> None:
     """Ensure a profile entry exists in profiles.json (idempotent)."""
     from datetime import datetime
-    config_file = MEMORY_DIR / "profiles.json"
+
     config = _load_profiles_json()
-    profiles = config.get('profiles', {})
+    profiles = config.get("profiles", {})
     if name not in profiles:
         profiles[name] = {
-            'name': name,
-            'description': description or f'Memory profile: {name}',
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'last_used': None,
+            "name": name,
+            "description": description or f"Memory profile: {name}",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_used": None,
         }
-        config['profiles'] = profiles
+        config["profiles"] = profiles
         _save_profiles_json(config)
 
 
@@ -340,31 +348,31 @@ def sync_profiles() -> list[dict]:
     """
     db_profiles = _get_db_profiles()
     json_config = _load_profiles_json()
-    json_profiles = json_config.get('profiles', {})
+    json_profiles = json_config.get("profiles", {})
 
     # profile_id is the canonical key (PK in SQLite, FK target everywhere)
-    db_ids = {p['profile_id'] for p in db_profiles}
+    db_ids = {p["profile_id"] for p in db_profiles}
     json_keys = set(json_profiles.keys())
 
     changed = False
 
     # JSON-only → add to SQLite (fixes Dashboard-created profiles)
     for key in json_keys - db_ids:
-        ensure_profile_in_db(key, json_profiles[key].get('description', ''))
+        ensure_profile_in_db(key, json_profiles[key].get("description", ""))
 
     # SQLite-only → add to profiles.json (fixes CLI-created profiles)
     for pid in db_ids - json_keys:
-        db_entry = next(p for p in db_profiles if p['profile_id'] == pid)
+        db_entry = next(p for p in db_profiles if p["profile_id"] == pid)
         json_profiles[pid] = {
-            'name': pid,
-            'description': db_entry.get('description', ''),
-            'created_at': db_entry.get('created_at', ''),
-            'last_used': db_entry.get('last_used'),
+            "name": pid,
+            "description": db_entry.get("description", ""),
+            "created_at": db_entry.get("created_at", ""),
+            "last_used": db_entry.get("last_used"),
         }
         changed = True
 
     if changed:
-        json_config['profiles'] = json_profiles
+        json_config["profiles"] = json_profiles
         _save_profiles_json(json_config)
 
     # Return merged list from SQLite (now authoritative)
@@ -389,6 +397,12 @@ def delete_profile_from_db(name: str) -> None:
     """
     if not DB_PATH.exists():
         return
+    # Receipt evidence lives in learning.db, not recall's memory.db.  Purge it
+    # first: if this fails the profile row must survive for a retry rather than
+    # leaving profile-scoped learning evidence orphaned.
+    from superlocalmemory.storage.agent_experience import purge_profile_receipts
+
+    purge_profile_receipts(Path(DB_PATH).parent / "learning.db", name)
     with memory_write(DB_PATH) as conn:
         conn.execute("PRAGMA foreign_keys=ON")
         # Purge role grants for this workspace (no FK CASCADE covers these).
@@ -420,24 +434,24 @@ def _load_profiles_json() -> dict:
     config_file = MEMORY_DIR / "profiles.json"
     if config_file.exists():
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, "r") as f:
                 data = json.load(f)
             # Handle ProfileManager array format → convert to dict format
-            if isinstance(data.get('profiles'), list):
+            if isinstance(data.get("profiles"), list):
                 converted = {}
-                for p in data['profiles']:
-                    n = p.get('name', '')
+                for p in data["profiles"]:
+                    n = p.get("name", "")
                     if n:
                         converted[n] = p
-                data['profiles'] = converted
-                if 'active' in data and 'active_profile' not in data:
-                    data['active_profile'] = data.pop('active')
+                data["profiles"] = converted
+                if "active" in data and "active_profile" not in data:
+                    data["active_profile"] = data.pop("active")
             return data
         except (json.JSONDecodeError, IOError):
             pass
     return {
-        'profiles': {'default': {'name': 'default', 'description': 'Default memory profile'}},
-        'active_profile': 'default',
+        "profiles": {"default": {"name": "default", "description": "Default memory profile"}},
+        "active_profile": "default",
     }
 
 
@@ -445,7 +459,7 @@ def _save_profiles_json(config: dict) -> None:
     """Save profiles.json config."""
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     config_file = MEMORY_DIR / "profiles.json"
-    with open(config_file, 'w') as f:
+    with open(config_file, "w") as f:
         json.dump(config, f, indent=2)
 
 
@@ -453,8 +467,10 @@ def _save_profiles_json(config: dict) -> None:
 # Pydantic Models (shared across routes)
 # ============================================================================
 
+
 class SearchRequest(BaseModel):
     """Advanced search request model."""
+
     query: str = Field(..., min_length=1, max_length=1000)
     limit: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.3, ge=0.0, le=1.0)
@@ -471,11 +487,13 @@ class SearchRequest(BaseModel):
 
 class ProfileSwitch(BaseModel):
     """Profile switching request."""
+
     profile_name: str = Field(..., min_length=1, max_length=50)
 
 
 class BackupConfigRequest(BaseModel):
     """Backup configuration update request."""
+
     interval_hours: Optional[int] = Field(None, ge=1, le=8760)
     max_backups: Optional[int] = Field(None, ge=1, le=100)
     enabled: Optional[bool] = None

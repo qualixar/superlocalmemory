@@ -182,8 +182,7 @@ class LearningDatabase:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM learning_signals "
-                "WHERE profile_id = ?",
+                "SELECT COUNT(*) AS cnt FROM learning_signals WHERE profile_id = ?",
                 (profile_id,),
             ).fetchone()
             return int(row["cnt"]) if row else 0
@@ -229,9 +228,7 @@ class LearningDatabase:
             finally:
                 conn.close()
 
-    def get_training_data(
-        self, profile_id: str, limit: int = 5000
-    ) -> list[dict[str, Any]]:
+    def get_training_data(self, profile_id: str, limit: int = 5000) -> list[dict[str, Any]]:
         """Retrieve labeled feature vectors for model training.
 
         Returns newest examples first.  Each dict contains:
@@ -292,8 +289,7 @@ class LearningDatabase:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT state_bytes FROM learning_model_state "
-                "WHERE profile_id = ?",
+                "SELECT state_bytes FROM learning_model_state WHERE profile_id = ?",
                 (profile_id,),
             ).fetchone()
             return bytes(row["state_bytes"]) if row else None
@@ -328,8 +324,7 @@ class LearningDatabase:
                 if existing:
                     new_value = float(existing["value"]) + value
                     conn.execute(
-                        "UPDATE engagement_metrics SET value = ?, updated_at = ? "
-                        "WHERE id = ?",
+                        "UPDATE engagement_metrics SET value = ?, updated_at = ? WHERE id = ?",
                         (new_value, self._now(), existing["id"]),
                     )
                 else:
@@ -357,8 +352,7 @@ class LearningDatabase:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT metric_type, value FROM engagement_metrics "
-                "WHERE profile_id = ?",
+                "SELECT metric_type, value FROM engagement_metrics WHERE profile_id = ?",
                 (profile_id,),
             ).fetchall()
             return {row["metric_type"]: float(row["value"]) for row in rows}
@@ -378,8 +372,7 @@ class LearningDatabase:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM learning_signals "
-                "WHERE profile_id = ?",
+                "SELECT COUNT(*) AS cnt FROM learning_signals WHERE profile_id = ?",
                 (profile_id,),
             ).fetchone()
             return int(row["cnt"]) if row else 0
@@ -580,7 +573,8 @@ class LearningDatabase:
             except sqlite3.Error as exc:
                 logger.warning(
                     "fetch_training_examples failed (m006=%s): %s",
-                    m006_applied, exc,
+                    m006_applied,
+                    exc,
                 )
                 return []
             out: list[dict] = []
@@ -602,6 +596,10 @@ class LearningDatabase:
             profile_id: If provided, only erase data for that profile.
                         If None, erase ALL learning data.
         """
+        if profile_id:
+            from superlocalmemory.storage.agent_experience import purge_profile_receipts
+
+            purge_profile_receipts(self._db_path, profile_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -611,6 +609,15 @@ class LearningDatabase:
                     "learning_model_state",
                     "engagement_metrics",
                 ]
+                receipt_tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name IN ('agent_experiences', 'cognitive_turn_receipts')"
+                    )
+                }
+                if profile_id is None:
+                    tables.extend(sorted(receipt_tables))
                 for table in tables:
                     if profile_id:
                         conn.execute(

@@ -30,6 +30,7 @@ from . import (
     M030_entity_explorer_indexes,
     M038_learning_feedback_channel,
     M039_scene_fact_members,
+    M040_agent_experience_receipts,
 )
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ __all__ = (
     "M030_entity_explorer_indexes",
     "M038_learning_feedback_channel",
     "M039_scene_fact_members",
+    "M040_agent_experience_receipts",
     # Legacy re-exports (backward compat):
     "CURRENT_SCHEMA_VERSION",
     "get_schema_version",
