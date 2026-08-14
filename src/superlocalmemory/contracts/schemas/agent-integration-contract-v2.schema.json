@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superlocalmemory.com/schemas/agent-integration-contract-v2.schema.json",
+  "title": "SLM Agent Integration Contract v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "host", "stage", "lifecycle", "artifact_digest", "evidence"],
+  "properties": {
+    "schema_version": {"const": "v2"},
+    "host": {"type": "string", "minLength": 1},
+    "stage": {"$ref": "#/$defs/certification_stage"},
+    "lifecycle": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "INSTALL", "CONFIG_PARSE", "PROCESS_START", "MCP_DISCOVERY", "SESSION_OPEN",
+          "TARGETED_RECALL", "CONTEXT_INJECTION", "MEMORY_WRITE", "OUTCOME_CAPTURE",
+          "RECONNECT", "SESSION_CLOSE", "UNINSTALL", "CONFIG_PRESERVATION", "SECRET_BOUNDARY"
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 14,
+      "maxItems": 14
+    },
+    "artifact_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "digest", "reference"],
+        "properties": {
+          "kind": {"enum": ["test_run", "artifact", "receipt", "manual_check"]},
+          "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "reference": {"type": "string", "minLength": 1, "maxLength": 1024}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "certification_stage": {
+      "enum": ["STATIC", "CONFIG_PROVEN", "LOCAL_RUNTIME", "END_TO_END", "RELEASE_GATED"]
+    }
+  }
+}

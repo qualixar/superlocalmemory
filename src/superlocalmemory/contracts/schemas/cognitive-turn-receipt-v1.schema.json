@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superlocalmemory.com/schemas/cognitive-turn-receipt-v1.schema.json",
+  "title": "SLM Cognitive Turn Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receipt_id",
+    "task_id",
+    "profile_id",
+    "project_scope",
+    "query_digest",
+    "fact_decisions",
+    "state"
+  ],
+  "properties": {
+    "receipt_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "profile_id": {"type": "string", "minLength": 1},
+    "project_scope": {"type": "string", "minLength": 1},
+    "query_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "fact_decisions": {
+      "description": "One decision per opaque fact identifier. An object, rather than an array, makes conflicting duplicate decisions structurally impossible for every schema consumer.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        ".+": {"enum": ["considered", "used", "rejected", "corrected"]}
+      }
+    },
+    "outcome": {"$ref": "#/$defs/outcome"},
+    "state": {"enum": ["open", "finalized", "abandoned", "reconciled"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "finalized"}}, "required": ["state"]},
+      "then": {"required": ["outcome"]}
+    }
+  ],
+  "$defs": {
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "receipt_digest", "reference"],
+      "properties": {
+        "authority": {
+          "enum": [
+            "deterministic_gate",
+            "bounded_loop_receipt",
+            "human_approval",
+            "independent_model_audit"
+          ]
+        },
+        "receipt_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "reference": {"type": "string", "minLength": 1, "maxLength": 1024}
+      }
+    }
+  }
+}

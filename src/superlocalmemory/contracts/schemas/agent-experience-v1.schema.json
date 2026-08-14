@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superlocalmemory.com/schemas/agent-experience-v1.schema.json",
+  "title": "SLM Agent Experience v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "experience_id",
+    "profile_id",
+    "occurred_at",
+    "task_class",
+    "project_scope",
+    "route",
+    "verification",
+    "producer_claim",
+    "terminal_status"
+  ],
+  "properties": {
+    "experience_id": {"type": "string", "minLength": 1},
+    "profile_id": {"type": "string", "minLength": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "task_class": {"type": "string", "minLength": 1},
+    "project_scope": {"type": "string", "minLength": 1},
+    "complexity_band": {"type": "string"},
+    "risk": {"type": "string"},
+    "route": {"$ref": "#/$defs/route_identity"},
+    "bounds": {"$ref": "#/$defs/bounds"},
+    "usage": {"$ref": "#/$defs/usage"},
+    "verification": {"$ref": "#/$defs/verification"},
+    "producer_claim": {"enum": ["success", "failure", "partial", "unknown"]},
+    "terminal_status": {"enum": ["succeeded", "failed", "cancelled", "timed_out"]},
+    "failure_class": {"type": "string"},
+    "human_intervention": {"type": "boolean"},
+    "lessons": {"type": "string", "maxLength": 2000},
+    "receipt_digest": {"$ref": "#/$defs/sha256"},
+    "artifact_digests": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/sha256"},
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "route_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "provider", "model", "effort", "machine"],
+      "properties": {
+        "harness": {"type": "string", "minLength": 1},
+        "provider": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "effort": {"type": "string", "minLength": 1},
+        "machine": {"type": "string", "minLength": 1}
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {"type": "integer", "minimum": 1},
+        "max_wallclock_ms": {"type": "integer", "minimum": 1},
+        "max_cost_usd_micros": {"type": "integer", "minimum": 0}
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "wallclock_ms": {"type": "integer", "minimum": 0}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "evidence_digest"],
+      "properties": {
+        "authority": {
+          "enum": [
+            "deterministic_gate",
+            "bounded_loop_receipt",
+            "human_approval",
+            "independent_model_audit"
+          ]
+        },
+        "evidence_digest": {"$ref": "#/$defs/sha256"},
+        "reference": {"type": "string", "maxLength": 1024}
+      }
+    }
+  }
+}

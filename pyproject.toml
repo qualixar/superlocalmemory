@@ -37,6 +37,7 @@ dependencies = [
     "scipy==1.17.1",
     "networkx==3.6.1",
     "mcp==2.0.0",
+    "jsonschema==4.26.0",
     "python-dateutil==2.9.0.post0",
     "rank-bm25==0.2.2",
     "vadersentiment==3.3.2",
@@ -170,7 +171,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-superlocalmemory = ["ui/**/*", "optimize/NOTICE"]
+superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json"]
 
 [tool.setuptools.data-files]
 "share/superlocalmemory/codex/skills/slm-cache" = ["plugin-src/skills/slm-cache/SKILL.md"]
