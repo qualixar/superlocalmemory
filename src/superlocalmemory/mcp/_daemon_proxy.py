@@ -84,6 +84,9 @@ class DaemonPoolProxy:
         include_shared: bool | None = None,
         window: str | None = None,
         as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> dict[str, Any]:
         if self._unavailable:
             return self._unavailable_response()
@@ -108,6 +111,12 @@ class DaemonPoolProxy:
             _params["window"] = window
         if as_of:
             _params["as_of"] = as_of
+        if known_as_of:
+            _params["known_as_of"] = known_as_of
+        if valid_at:
+            _params["valid_at"] = valid_at
+        if include_unknown:
+            _params["include_unknown"] = "true"
         params = urllib.parse.urlencode(_params)
         try:
             from superlocalmemory.cli.daemon import daemon_request

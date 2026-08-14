@@ -79,6 +79,157 @@ logger = logging.getLogger(__name__)
 _EVENT_TIME_DEMOTION_FACTOR: float = 0.5
 
 
+def _normalized_as_of(as_of: str | None) -> str | None:
+    """Normalize an optional transaction-time boundary at one boundary.
+
+    The MCP/HTTP adapters already reject invalid non-blank values.  Engine
+    callers are also public, however, so an invalid direct value must degrade
+    to current recall rather than turn a read into an exception.
+    """
+    if as_of is None:
+        return None
+    from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+    return normalize_as_of(as_of)
+
+
+def _invalidated_candidate_ids(
+    db: DatabaseManager,
+    fact_ids: set[str],
+    profile_id: str,
+    *,
+    as_of: str | None = None,
+    include_global: bool = False,
+    include_shared: bool = False,
+) -> set[str] | None:
+    """Return admissibility failures, or ``None`` when the lookup is unhealthy.
+
+    ``None`` deliberately preserves the established fail-open availability
+    contract.  It is distinct from an empty set: a bad/mocked return value must
+    not accidentally exclude arbitrary candidates.
+    """
+    if not fact_ids:
+        return set()
+    try:
+        kwargs: dict[str, Any] = {"as_of": _normalized_as_of(as_of)}
+        if include_global:
+            kwargs["include_global"] = True
+        if include_shared:
+            kwargs["include_shared"] = True
+        invalid = db.get_invalidated_fact_ids(list(fact_ids), profile_id, **kwargs)
+    except Exception as exc:
+        logger.warning("Correction admission lookup failed: %s", exc)
+        return None
+    return invalid if isinstance(invalid, set) else None
+
+
+def _strict_temporal_candidate_ids(
+    db: DatabaseManager,
+    fact_ids: set[str],
+    profile_id: str,
+    *,
+    known_as_of: str | None = None,
+    valid_at: str | None = None,
+    include_unknown: bool = False,
+    include_global: bool = False,
+    include_shared: bool = False,
+) -> set[str] | None:
+    """Return strict two-clock admission failures, fail-open on lookup error."""
+    if not fact_ids or (known_as_of is None and valid_at is None):
+        return set()
+    try:
+        invalid = db.get_strict_temporal_inadmissible_fact_ids(
+            list(fact_ids), profile_id,
+            known_as_of=_normalized_as_of(known_as_of),
+            valid_at=_normalized_as_of(valid_at),
+            include_unknown=include_unknown,
+            include_global=include_global,
+            include_shared=include_shared,
+        )
+    except Exception as exc:
+        logger.warning("Strict temporal admission lookup failed: %s", exc)
+        return None
+    return invalid if isinstance(invalid, set) else None
+
+
+def admit_correction_candidates(
+    all_results: dict[str, list[tuple[str, float]]],
+    profile_id: str,
+    db: DatabaseManager,
+    *,
+    as_of: str | None = None,
+    known_as_of: str | None = None,
+    valid_at: str | None = None,
+    include_unknown: bool = False,
+    include_global: bool = False,
+    include_shared: bool = False,
+) -> dict[str, list[tuple[str, float]]]:
+    """Hard-exclude system-superseded facts before candidate fusion.
+
+    This is the SLM 4.0.2 Brain Core admission invariant.  Ranking is unable to
+    enforce a correction because a high-scoring stale fact can still win.  The
+    historical ``as_of`` boundary preserves facts that had not yet been
+    superseded at that point, so current corrections do not rewrite history.
+    """
+    fact_ids = {
+        fact_id
+        for channel_results in all_results.values()
+        for fact_id, _ in channel_results
+    }
+    invalid = _invalidated_candidate_ids(
+        db, fact_ids, profile_id, as_of=as_of,
+        include_global=include_global, include_shared=include_shared,
+    )
+    strict = _strict_temporal_candidate_ids(
+        db, fact_ids, profile_id,
+        known_as_of=known_as_of, valid_at=valid_at,
+        include_unknown=include_unknown,
+        include_global=include_global, include_shared=include_shared,
+    )
+    if strict:
+        invalid = (invalid or set()) | strict
+    if not invalid:
+        return all_results
+    return {
+        channel_name: [
+            (fact_id, score)
+            for fact_id, score in channel_results
+            if fact_id not in invalid
+        ]
+        for channel_name, channel_results in all_results.items()
+    }
+
+
+def admit_correction_fusion_results(
+    fused_results: list[Any],
+    profile_id: str,
+    db: DatabaseManager,
+    *,
+    as_of: str | None = None,
+    known_as_of: str | None = None,
+    valid_at: str | None = None,
+    include_unknown: bool = False,
+    include_global: bool = False,
+    include_shared: bool = False,
+) -> list[Any]:
+    """Re-apply correction admission after graph/scene candidate expansion."""
+    fact_ids = {result.fact_id for result in fused_results}
+    invalid = _invalidated_candidate_ids(
+        db, fact_ids, profile_id, as_of=as_of,
+        include_global=include_global, include_shared=include_shared,
+    )
+    strict = _strict_temporal_candidate_ids(
+        db, fact_ids, profile_id,
+        known_as_of=known_as_of, valid_at=valid_at,
+        include_unknown=include_unknown,
+        include_global=include_global, include_shared=include_shared,
+    )
+    if strict:
+        invalid = (invalid or set()) | strict
+    if not invalid:
+        return fused_results
+    return [result for result in fused_results if result.fact_id not in invalid]
+
+
 class TemporalValidityFilter:
     """Demotes bi-temporally invalid facts in retrieval candidates.
 

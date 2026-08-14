@@ -104,4 +104,19 @@ def normalize_as_of(s: object) -> Optional[str]:
         return None
 
 
-__all__ = ("normalize_as_of",)
+def normalize_strict_boundary(value: object, name: str) -> Optional[str]:
+    """Normalize an optional strict boundary or reject an invalid supplied value.
+
+    Unlike legacy ``as_of`` direct calls, explicit two-clock queries cannot
+    quietly degrade to current recall: doing so would make a malformed history
+    request appear authoritative.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    normalized = normalize_as_of(value)
+    if normalized is None:
+        raise ValueError(f"{name} must be an ISO-8601 timestamp")
+    return normalized
+
+
+__all__ = ("normalize_as_of", "normalize_strict_boundary")

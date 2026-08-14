@@ -38,3 +38,21 @@ CREATE INDEX IF NOT EXISTS idx_facts_pinned
     ON atomic_facts(profile_id, pinned);
 COMMIT;
 """
+
+
+def apply(conn: sqlite3.Connection) -> None:
+    """Apply M015 safely when a fresh schema already contains ``pinned``.
+
+    New installations are created from the current base schema, whereas
+    upgrades need the additive ALTER. SQLite has no ``ADD COLUMN IF NOT
+    EXISTS``, so the old static migration failed on fresh databases.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(atomic_facts)")}
+    if "pinned" not in cols:
+        conn.execute(
+            "ALTER TABLE atomic_facts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_facts_pinned "
+        "ON atomic_facts(profile_id, pinned)"
+    )

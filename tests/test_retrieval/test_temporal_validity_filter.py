@@ -19,6 +19,7 @@ import pytest
 from superlocalmemory.core.config import TemporalValidatorConfig
 from superlocalmemory.retrieval.temporal_validity_filter import (
     TemporalValidityFilter,
+    admit_correction_candidates,
     register_temporal_validity_filter,
 )
 
@@ -168,6 +169,56 @@ def test_filter_does_not_mutate_input() -> None:
     snapshot = {"semantic": [("keep", 0.9), ("gone", 0.8)]}
     filt.filter(original, "default", None)
     assert original == snapshot  # original untouched
+
+
+# ---- SLM 4.0.2 Brain Core: correction admission is a hard gate ----
+
+def test_correction_admission_removes_superseded_facts_from_every_channel() -> None:
+    """A corrected-away fact is not merely reranked; it cannot reach fusion."""
+    db = _make_mock_db({"stale"})
+    original = {
+        "semantic": [("live", 0.9), ("stale", 0.99)],
+        "bm25": [("stale", 0.95)],
+    }
+
+    admitted = admit_correction_candidates(original, "default", db)
+
+    assert admitted == {"semantic": [("live", 0.9)], "bm25": []}
+    assert original["semantic"][-1] == ("stale", 0.99)  # immutable input
+
+
+def test_correction_admission_keeps_fact_before_its_supersession() -> None:
+    """Historical recall must not let a later correction rewrite its past."""
+    db = MagicMock()
+
+    def invalidated(ids: list[str], _profile: str, *, as_of: str | None = None) -> set[str]:
+        return {"stale"} if as_of and as_of >= "2026-01-01T00:00:00+00:00" else set()
+
+    db.get_invalidated_fact_ids.side_effect = invalidated
+    original = {"semantic": [("stale", 0.9)]}
+
+    admitted = admit_correction_candidates(
+        original, "default", db, as_of="2024-01-01T00:00:00Z",
+    )
+
+    assert admitted == original
+
+
+def test_correction_admission_excludes_future_knowledge_in_strict_mode() -> None:
+    db = MagicMock()
+    db.get_invalidated_fact_ids.return_value = set()
+    db.get_strict_temporal_inadmissible_fact_ids.return_value = {"future"}
+    original = {"semantic": [("future", 0.9), ("known", 0.8)]}
+
+    admitted = admit_correction_candidates(
+        original, "default", db,
+        known_as_of="2026-01-01T00:00:00+00:00",
+    )
+
+    assert admitted == {"semantic": [("known", 0.8)]}
+    assert db.get_strict_temporal_inadmissible_fact_ids.call_args.kwargs["known_as_of"] == (
+        "2026-01-01T00:00:00+00:00"
+    )
 
 
 # ---- T1-8: register gating ----

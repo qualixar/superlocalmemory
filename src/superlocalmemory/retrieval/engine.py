@@ -28,6 +28,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 from superlocalmemory.core.config import ChannelWeights, RetrievalConfig
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
+from superlocalmemory.retrieval.temporal_validity_filter import (
+    admit_correction_candidates,
+    admit_correction_fusion_results,
+)
 from superlocalmemory.retrieval.time_window import (
     in_window,
     infer_window_from_query,
@@ -156,6 +160,9 @@ class RetrievalEngine:
         include_shared: bool = False,
         window: str | tuple[str, str] | None = None,
         as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> RecallResponse:
         """Full retrieval pipeline: strategy -> channels -> RRF -> rerank.
 
@@ -172,6 +179,9 @@ class RetrievalEngine:
         not-yet-valid and already-expired facts are demoted. Default ``None``
         leaves all existing behaviour unchanged.
         """
+        from superlocalmemory.retrieval.temporal_utils import normalize_strict_boundary
+        known_as_of = normalize_strict_boundary(known_as_of, "known_as_of")
+        valid_at = normalize_strict_boundary(valid_at, "valid_at")
         t0 = time.monotonic()
         # NOTE: extra_disabled_channels is passed as an explicit local argument
         # to _run_channels() — it is NOT stored on self.  Storing it as a shared
@@ -218,11 +228,20 @@ class RetrievalEngine:
             query, profile_id, strat,
             extra_disabled_channels=extra_disabled_channels,
             include_global=include_global, include_shared=include_shared,
-            as_of=as_of,
+            as_of=as_of, known_as_of=known_as_of, valid_at=valid_at,
+            include_unknown=include_unknown,
         )
         _em("run_channels")
         if profile_hits:
             ch_results["profile"] = profile_hits
+        # The profile shortcut bypasses _run_channels(), so it needs the same
+        # admission before it can influence fusion or seed graph expansion.
+        ch_results = admit_correction_candidates(
+            ch_results, profile_id, self._db, as_of=as_of,
+            known_as_of=known_as_of, valid_at=valid_at,
+            include_unknown=include_unknown,
+            include_global=include_global, include_shared=include_shared,
+        )
         total = sum(len(v) for v in ch_results.values())
 
         # 3. Single-pass RRF fusion
@@ -329,6 +348,16 @@ class RetrievalEngine:
                     fused = sorted(boosted, key=lambda r: r.fused_score, reverse=True)
             except Exception as exc:
                 logger.warning("Entity graph signal enhancement: %s", exc)
+
+        # Brain Core S402: bridge and scene expansion append candidates after
+        # the channel boundary. Reapply the same hard correction-admission rule
+        # immediately before any candidate can be materialized or reranked.
+        fused = admit_correction_fusion_results(
+            fused, profile_id, self._db, as_of=as_of,
+            known_as_of=known_as_of, valid_at=valid_at,
+            include_unknown=include_unknown,
+            include_global=include_global, include_shared=include_shared,
+        )
 
         _em("expand+entity_enh")
 
@@ -773,6 +802,9 @@ class RetrievalEngine:
         include_global: bool = False,
         include_shared: bool = False,
         as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> dict[str, list[tuple[str, float]]]:
         """Run active retrieval channels.
 
@@ -916,6 +948,16 @@ class RetrievalEngine:
                     out = fn(out, profile_id, _filter_context)
                 except Exception as exc:
                     logger.warning("Post-retrieval filter failed: %s", exc)
+
+        # The legacy temporal filter preserves its score-demotion semantics for
+        # compatibility. Admission is separate and hard: no current
+        # system-superseded fact may seed fusion, bridge discovery, or rerank.
+        out = admit_correction_candidates(
+            out, profile_id, self._db, as_of=as_of,
+            known_as_of=known_as_of, valid_at=valid_at,
+            include_unknown=include_unknown,
+            include_global=include_global, include_shared=include_shared,
+        )
 
         return out
 

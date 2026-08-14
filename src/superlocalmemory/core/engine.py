@@ -707,6 +707,9 @@ class MemoryEngine:
         include_shared: bool | None = None,
         window: str | tuple[str, str] | None = None,
         as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> RecallResponse:
         """Recall relevant facts for a query.
 
@@ -744,6 +747,10 @@ class MemoryEngine:
         if include_shared is None:
             include_shared = bool(getattr(_scope_cfg, "recall_include_shared", False))
 
+        from superlocalmemory.retrieval.temporal_utils import normalize_strict_boundary
+        known_as_of = normalize_strict_boundary(known_as_of, "known_as_of")
+        valid_at = normalize_strict_boundary(valid_at, "valid_at")
+
         pid = profile_id or self._profile_id
 
         from superlocalmemory.core.recall_pipeline import run_recall
@@ -763,6 +770,9 @@ class MemoryEngine:
                 include_shared=include_shared,
                 window=window,
                 as_of=as_of,
+                known_as_of=known_as_of,
+                valid_at=valid_at,
+                include_unknown=include_unknown,
             )
         except Exception:
             # Diagnostics are intentionally not recorded here.  A recall is a

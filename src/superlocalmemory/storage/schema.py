@@ -171,6 +171,8 @@ CREATE TABLE IF NOT EXISTS atomic_facts (
     importance         REAL NOT NULL DEFAULT 0.5,
     evidence_count     INTEGER NOT NULL DEFAULT 1,
     access_count       INTEGER NOT NULL DEFAULT 0,
+    -- Core-memory injection priority (M015 on upgraded databases)
+    pinned             INTEGER NOT NULL DEFAULT 0,
 
     -- Source tracing
     source_turn_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -213,6 +215,8 @@ CREATE INDEX IF NOT EXISTS idx_facts_type
     ON atomic_facts (profile_id, fact_type);
 CREATE INDEX IF NOT EXISTS idx_facts_lifecycle
     ON atomic_facts (profile_id, lifecycle);
+CREATE INDEX IF NOT EXISTS idx_facts_pinned
+    ON atomic_facts (profile_id, pinned);
 CREATE INDEX IF NOT EXISTS idx_facts_session
     ON atomic_facts (profile_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_facts_referenced_date

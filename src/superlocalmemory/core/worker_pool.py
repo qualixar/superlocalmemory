@@ -71,6 +71,10 @@ class WorkerPool:
         include_global: bool | None = None,
         include_shared: bool | None = None,
         window: str | None = None,
+        as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> dict:
         """Run recall in worker subprocess. Returns result dict.
 
@@ -96,6 +100,14 @@ class WorkerPool:
             msg["include_shared"] = bool(include_shared)
         if window:
             msg["window"] = window
+        if as_of:
+            msg["as_of"] = as_of
+        if known_as_of:
+            msg["known_as_of"] = known_as_of
+        if valid_at:
+            msg["valid_at"] = valid_at
+        if include_unknown:
+            msg["include_unknown"] = True
         return self._send(msg)
 
     def store(self, content: str, metadata: dict | None = None) -> dict:

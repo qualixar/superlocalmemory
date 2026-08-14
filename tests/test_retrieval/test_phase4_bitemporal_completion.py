@@ -458,6 +458,22 @@ class TestRecallTraceMcpWithAsOf:
             result = await recall_trace(query="hello world", limit=3)
         assert result.get("success") is True
 
+    async def test_recall_trace_forwards_strict_two_clock_boundaries(self):
+        recall_trace = self._get_recall_trace()
+        pool = MagicMock()
+        pool.recall.return_value = {"results": [], "ok": True}
+        with patch(
+            "superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool,
+        ):
+            result = await recall_trace(
+                query="historical", known_as_of="2026-01-01T00:00:00Z",
+                valid_at="2025-01-01T00:00:00Z", include_unknown=True,
+            )
+        assert result["success"] is True
+        assert pool.recall.call_args.kwargs["known_as_of"] == "2026-01-01T00:00:00+00:00"
+        assert pool.recall.call_args.kwargs["valid_at"] == "2025-01-01T00:00:00+00:00"
+        assert pool.recall.call_args.kwargs["include_unknown"] is True
+
 
 # ============================================================================
 # Group 6: recall_trace HTTP endpoint with as_of
@@ -509,6 +525,24 @@ class TestRecallTraceHttpWithAsOf:
             assert response.status_code != 400
         else:
             assert response.get("error") != "invalid_as_of"
+
+    async def test_invalid_strict_json_types_return_400(self):
+        from superlocalmemory.server.routes.v3_api import recall_trace
+        from starlette.responses import JSONResponse
+        request = self._make_request({"query": "hello", "known_as_of": 42})
+        response = await recall_trace(request)
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
+        assert json.loads(response.body)["error"] == "invalid_known_as_of"
+
+    async def test_include_unknown_requires_json_boolean(self):
+        from superlocalmemory.server.routes.v3_api import recall_trace
+        from starlette.responses import JSONResponse
+        request = self._make_request({"query": "hello", "include_unknown": "false"})
+        response = await recall_trace(request)
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
+        assert json.loads(response.body)["error"] == "invalid_include_unknown"
 
 
 # ============================================================================

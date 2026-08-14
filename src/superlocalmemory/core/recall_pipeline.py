@@ -787,6 +787,9 @@ def run_recall(
     include_shared: bool = False,
     window: str | tuple[str, str] | None = None,
     as_of: str | None = None,
+    known_as_of: str | None = None,
+    valid_at: str | None = None,
+    include_unknown: bool = False,
 ) -> RecallResponse:
     """Recall relevant facts for a query.
 
@@ -836,6 +839,9 @@ def run_recall(
         include_shared=include_shared,
         window=window,
         as_of=as_of,
+        known_as_of=known_as_of,
+        valid_at=valid_at,
+        include_unknown=include_unknown,
     )
     _mark("retrieval(chan+rerank)")
 

@@ -395,6 +395,18 @@ def main() -> None:
              "snapshot. Default: current-state recall.",
     )
     recall_p.add_argument(
+        "--known-as-of", dest="known_as_of", default="",
+        help="Strict transaction-time boundary: return only facts SLM knew by this ISO-8601 time.",
+    )
+    recall_p.add_argument(
+        "--valid-at", dest="valid_at", default="",
+        help="Strict event-time boundary: return only facts valid at this ISO-8601 time.",
+    )
+    recall_p.add_argument(
+        "--include-unknown", action="store_true",
+        help="Include pre-4.0.2 facts with unknown temporal provenance in strict time-travel.",
+    )
+    recall_p.add_argument(
         "--fast", action="store_true",
         help="Force-skip the internal agentic verification round (all six retrieval "
              "channels + reranker still run). This is already the default (client-driven "

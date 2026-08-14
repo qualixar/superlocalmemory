@@ -1486,10 +1486,27 @@ def cmd_recall(args: Namespace) -> None:
                     _sys.exit(1)
                 _as_of = _as_of_norm
             as_of_qs = f"&as_of={quote(_as_of)}" if _as_of else ""
+            def _strict_time_qs(attr: str, parameter: str) -> str:
+                raw = getattr(args, attr, "") or ""
+                if not raw:
+                    return ""
+                from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+                normalized = normalize_as_of(raw)
+                if normalized is None:
+                    import sys as _sys
+                    _sys.stderr.write(
+                        f"Error: invalid --{attr.replace('_', '-')} value: {raw!r}\n"
+                    )
+                    _sys.exit(1)
+                return f"&{parameter}={quote(normalized)}"
+            known_as_of_qs = _strict_time_qs("known_as_of", "known_as_of")
+            valid_at_qs = _strict_time_qs("valid_at", "valid_at")
+            unknown_qs = "&include_unknown=true" if getattr(args, "include_unknown", False) else ""
             result = daemon_request(
                 "GET",
                 f"/recall?q={quote(args.query)}&limit={args.limit}"
-                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}{as_of_qs}",
+                f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}{as_of_qs}"
+                f"{known_as_of_qs}{valid_at_qs}{unknown_qs}",
             )
             if result and "results" in result:
                 # Format daemon response same as engine response

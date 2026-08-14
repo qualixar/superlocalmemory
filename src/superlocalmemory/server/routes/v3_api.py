@@ -830,6 +830,17 @@ async def recall_trace(request: Request):
         limit = body.get("limit", 10)
         window = body.get("window", "") or ""
         as_of_raw = (body.get("as_of", "") or "").strip()
+        raw_known_as_of = body.get("known_as_of", "")
+        raw_valid_at = body.get("valid_at", "")
+        if raw_known_as_of is not None and not isinstance(raw_known_as_of, str):
+            return JSONResponse({"error": "invalid_known_as_of"}, status_code=400)
+        if raw_valid_at is not None and not isinstance(raw_valid_at, str):
+            return JSONResponse({"error": "invalid_valid_at"}, status_code=400)
+        known_as_of_raw = (raw_known_as_of or "").strip()
+        valid_at_raw = (raw_valid_at or "").strip()
+        include_unknown = body.get("include_unknown", False)
+        if not isinstance(include_unknown, bool):
+            return JSONResponse({"error": "invalid_include_unknown"}, status_code=400)
 
         # Normalize as_of at HTTP boundary. Invalid → 400.
         _as_of: str | None = None
@@ -840,6 +851,20 @@ async def recall_trace(request: Request):
                 return JSONResponse(
                     {"error": "invalid_as_of", "raw": as_of_raw}, status_code=400
                 )
+        def _normalize_named_time(raw: str, error: str) -> str | None | JSONResponse:
+            if not raw:
+                return None
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+            normalized = normalize_as_of(raw)
+            if normalized is None:
+                return JSONResponse({"error": error, "raw": raw}, status_code=400)
+            return normalized
+        _known_as_of = _normalize_named_time(known_as_of_raw, "invalid_known_as_of")
+        if isinstance(_known_as_of, JSONResponse):
+            return _known_as_of
+        _valid_at = _normalize_named_time(valid_at_raw, "invalid_valid_at")
+        if isinstance(_valid_at, JSONResponse):
+            return _valid_at
 
         # Use daemon engine — already loaded, shares warm page cache.
         # run_in_executor keeps event loop alive so browser doesn't abort.
@@ -855,6 +880,8 @@ async def recall_trace(request: Request):
             lambda: engine.recall(
                 query, limit=limit, fast=False,
                 window=window or None, as_of=_as_of,
+                known_as_of=_known_as_of, valid_at=_valid_at,
+                include_unknown=include_unknown,
             ),
         )
         elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)

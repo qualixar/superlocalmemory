@@ -63,6 +63,10 @@ def _handle_recall(
     query: str, limit: int, session_id: str = "", fast: bool = False,
     include_global: bool | None = None, include_shared: bool | None = None,
     window: str | None = None,
+    as_of: str | None = None,
+    known_as_of: str | None = None,
+    valid_at: str | None = None,
+    include_unknown: bool = False,
 ) -> dict:
     engine = _get_engine()
     # v3.6.15 multi-scope: None flags let engine.recall resolve the configured
@@ -72,6 +76,10 @@ def _handle_recall(
         query, limit=limit, session_id=session_id or None, fast=bool(fast),
         include_global=include_global, include_shared=include_shared,
         window=window or None,
+        as_of=as_of or None,
+        known_as_of=known_as_of or None,
+        valid_at=valid_at or None,
+        include_unknown=include_unknown,
     )
 
     # Batch-fetch original memory text for all results. Retrieval already
@@ -322,6 +330,10 @@ def _worker_main() -> None:
                     include_global=req.get("include_global"),
                     include_shared=req.get("include_shared"),
                     window=req.get("window"),
+                    as_of=req.get("as_of"),
+                    known_as_of=req.get("known_as_of"),
+                    valid_at=req.get("valid_at"),
+                    include_unknown=bool(req.get("include_unknown", False)),
                 )
                 _respond(result)
             elif cmd == "store":

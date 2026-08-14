@@ -122,3 +122,27 @@ class TestEngineRecallThreadsAsOf:
         assert received_as_of[0] is None, (
             "Default recall must not mutate as_of behavior; expected None"
         )
+
+    def test_recall_threads_independent_two_clock_boundaries(
+        self, engine_with_mock_deps: MemoryEngine, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            "superlocalmemory.core.recall_pipeline.run_recall",
+            lambda *args, **kwargs: captured.update(kwargs) or _make_stub_response(),
+        )
+
+        engine_with_mock_deps.recall(
+            "state", known_as_of="2026-01-01T00:00:00+00:00",
+            valid_at="2025-01-01T00:00:00+00:00", include_unknown=True,
+        )
+
+        assert captured["known_as_of"] == "2026-01-01T00:00:00+00:00"
+        assert captured["valid_at"] == "2025-01-01T00:00:00+00:00"
+        assert captured["include_unknown"] is True
+
+    def test_recall_rejects_invalid_strict_boundary(
+        self, engine_with_mock_deps: MemoryEngine,
+    ) -> None:
+        with pytest.raises(ValueError, match="known_as_of"):
+            engine_with_mock_deps.recall("state", known_as_of="not-a-time")

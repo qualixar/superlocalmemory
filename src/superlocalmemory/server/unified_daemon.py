@@ -3729,6 +3729,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         include_shared: bool | None = None,
         window: str = "",
         as_of: str = "",
+        known_as_of: str = "",
+        valid_at: str = "",
+        include_unknown: bool = False,
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -3754,6 +3757,25 @@ def _register_daemon_routes(application: FastAPI) -> None:
             as_of = _as_of_norm
         else:
             as_of = ""
+        def _normalize_temporal_query(value: str, error_code: str):
+            raw = value.strip() if value else ""
+            if not raw:
+                return ""
+            from superlocalmemory.retrieval.temporal_utils import normalize_as_of
+            normalized = normalize_as_of(raw)
+            if normalized is None:
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    {"error": error_code, "message": f"Cannot parse {error_code}: {raw!r}"},
+                    status_code=400,
+                )
+            return normalized
+        known_as_of = _normalize_temporal_query(known_as_of, "invalid_known_as_of")
+        if not isinstance(known_as_of, str):
+            return known_as_of
+        valid_at = _normalize_temporal_query(valid_at, "invalid_valid_at")
+        if not isinstance(valid_at, str):
+            return valid_at
         # v3.8.2: resolve the client-driven-agentic default now so the concrete
         # bool drives BOTH the full-recall semaphore below and engine.recall().
         from superlocalmemory.core.recall_pipeline import resolve_hot_path_fast
@@ -3813,6 +3835,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     include_shared=include_shared,
                     window=window or None,
                     as_of=as_of or None,
+                    known_as_of=known_as_of or None,
+                    valid_at=valid_at or None,
+                    include_unknown=include_unknown,
                 ),
             )
             _budget = _recall_budget_s()

@@ -127,7 +127,7 @@ class TestRecallTool:
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
             fast=None, include_global=None, include_shared=None, window=None,
-            as_of=None,
+            as_of=None, known_as_of=None, valid_at=None, include_unknown=False,
         )
 
     def test_recall_forwards_fast_flag(self):
@@ -147,7 +147,7 @@ class TestRecallTool:
         pool.recall.assert_called_once_with(
             "architecture patterns", limit=5, session_id="mcp:mcp_client",
             fast=True, include_global=None, include_shared=None, window=None,
-            as_of=None,
+            as_of=None, known_as_of=None, valid_at=None, include_unknown=False,
         )
 
     def test_recall_emits_no_persistent_event(self):
@@ -212,7 +212,7 @@ class TestRecallEdgeCases:
         pool.recall.assert_called_once_with(
             "", limit=CANONICAL_RECALL_LIMIT, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
-            as_of=None,
+            as_of=None, known_as_of=None, valid_at=None, include_unknown=False,
         )
 
     def test_recall_limit_forwarded(self):
@@ -232,7 +232,7 @@ class TestRecallEdgeCases:
         pool.recall.assert_called_once_with(
             "limit test", limit=5, session_id="mcp:mcp_client", fast=None,
             include_global=None, include_shared=None, window=None,
-            as_of=None,
+            as_of=None, known_as_of=None, valid_at=None, include_unknown=False,
         )
 
     def test_recall_returns_even_when_no_implicit_feedback_exists(self):
@@ -252,3 +252,21 @@ class TestRecallEdgeCases:
 
         assert result["success"] is True
         assert result["count"] == 1
+
+    def test_recall_forwards_explicit_two_clock_boundaries(self):
+        pool = MagicMock()
+        pool.recall.return_value = {"ok": True, "results": [], "result_count": 0, "query_type": "factual"}
+        recall, _ = _get_recall_tool()
+
+        with patch("superlocalmemory.mcp._daemon_proxy.choose_pool", return_value=pool):
+            result = asyncio.run(recall(
+                "historical state",
+                known_as_of="2026-01-01T00:00:00Z",
+                valid_at="2025-06-01T00:00:00Z",
+                include_unknown=True,
+            ))
+
+        assert result["success"] is True
+        assert pool.recall.call_args.kwargs["known_as_of"] == "2026-01-01T00:00:00+00:00"
+        assert pool.recall.call_args.kwargs["valid_at"] == "2025-06-01T00:00:00+00:00"
+        assert pool.recall.call_args.kwargs["include_unknown"] is True

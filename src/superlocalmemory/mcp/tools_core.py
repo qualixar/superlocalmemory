@@ -272,6 +272,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
         include_shared: bool | None = None,
         window: str = "",
         as_of: str | None = None,
+        known_as_of: str | None = None,
+        valid_at: str | None = None,
+        include_unknown: bool = False,
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
@@ -369,13 +372,26 @@ def register_core_tools(server, get_engine: Callable) -> None:
             # Audit P2: treat empty/whitespace as_of as ABSENT (like HTTP does),
             # not as an invalid value — only a non-blank unparseable string is
             # rejected.
-            if as_of is not None and str(as_of).strip():
+            def _normalize_temporal(value: str | None) -> str | None:
+                if value is None or not str(value).strip():
+                    return None
                 from superlocalmemory.retrieval.temporal_utils import normalize_as_of
-                as_of = normalize_as_of(as_of)
-                if as_of is None:
-                    return {"success": False, "error": "invalid_as_of"}
-            else:
-                as_of = None
+                return normalize_as_of(value)
+
+            raw_as_of, raw_known_as_of, raw_valid_at = as_of, known_as_of, valid_at
+            as_of = _normalize_temporal(raw_as_of)
+            known_as_of = _normalize_temporal(raw_known_as_of)
+            valid_at = _normalize_temporal(raw_valid_at)
+            # Preserve backwards-compatible as_of validation while exposing
+            # named two-clock boundaries. A supplied non-blank invalid value
+            # is rejected rather than silently becoming current recall.
+            for raw, normalized, code in (
+                (raw_as_of, as_of, "invalid_as_of"),
+                (raw_known_as_of, known_as_of, "invalid_known_as_of"),
+                (raw_valid_at, valid_at, "invalid_valid_at"),
+            ):
+                if raw is not None and str(raw).strip() and normalized is None:
+                    return {"success": False, "error": code}
 
             from superlocalmemory.core.admission import enforce_read_scope
             _incl_global, _incl_shared = enforce_read_scope(include_global, include_shared)
@@ -387,6 +403,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     fast=fast, include_global=_incl_global,
                     include_shared=_incl_shared, window=window or None,
                     as_of=as_of,
+                    known_as_of=known_as_of,
+                    valid_at=valid_at,
+                    include_unknown=include_unknown,
                 )
 
             result = await asyncio.to_thread(
