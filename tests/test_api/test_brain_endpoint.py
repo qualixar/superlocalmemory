@@ -175,7 +175,7 @@ def test_living_brain_is_an_honest_observation_read_model(
     assert living["is_real"] is True
     assert living["control_plane"] == "observation_only"
     assert set(living) >= {
-        "connected_clients", "feedback", "source_quality", "graph",
+        "connected_clients", "feedback", "source_quality", "graph", "agent_experience",
     }
     # A fresh install must stay honest: no connected host and no observed
     # source quality are fabricated merely because adapters are available.
@@ -183,6 +183,7 @@ def test_living_brain_is_an_honest_observation_read_model(
     assert living["connected_clients"]["scope"] == "profile"
     assert living["source_quality"]["observed_sources"] == 0
     assert living["source_quality"]["mean_quality"] is None
+    assert living["agent_experience"]["experiences_total"] == 0
 
 
 def test_feedback_loop_uses_canonical_signal_rows(

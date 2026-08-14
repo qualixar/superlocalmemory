@@ -131,6 +131,7 @@ def test_shipped_living_brain_uses_canonical_client_evidence() -> None:
     assert "Configured integrations" in js
     assert "tool-event activity over time (proxy metric)" not in js
     assert "No source-quality evidence has settled yet" in js
+    assert "Verified agent experiences" in js
 
 
 def test_brain_js_fetches_behavioral_status() -> None:

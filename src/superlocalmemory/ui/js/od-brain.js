@@ -229,6 +229,7 @@
     var pCount = ((beh.patterns) || []).length;
     var feedback = (living && living.feedback) || {};
     var graph = (living && living.graph) || {};
+    var experience = (living && living.agent_experience) || {};
 
     // KPI strip
     var strip = EL('div', { className: 'kpi-strip', style: 'margin-bottom:16px' });
@@ -314,6 +315,9 @@
       ['Sources tracked',   String(stats.tracked_sources || 0)],
       ['Explicit feedback', String(feedback.explicit_signals || 0)],
       ['Settled outcomes',  String(feedback.settled_outcomes || 0)],
+      ['Verified agent experiences', String(experience.verified_experiences || 0)],
+      ['Cognitive turns', String(experience.turns_total || 0) +
+        ' · ' + String((experience.turns_by_state || {}).finalized || 0) + ' finalized'],
       ['Graph evidence', String(graph.fact_nodes || 0) + ' nodes · ' +
         String(graph.association_edges || 0) + ' edges'],
     ].forEach(function (row) {
