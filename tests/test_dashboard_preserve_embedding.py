@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -48,6 +49,7 @@ def _make_request(body: dict):
     request = MagicMock()
     request.json = AsyncMock(return_value=body)
     request.app.state = MagicMock(spec=[])  # no .engine attribute
+    request.client = SimpleNamespace(host="127.0.0.1")
     return request
 
 
@@ -118,7 +120,164 @@ class TestSetFullConfig:
         assert saved["embedding"]["provider"] == "openai"
         assert saved["embedding"]["api_endpoint"] == "https://custom-embedding.example.com/v1"
         assert saved["embedding"]["model_name"] == "nomic-ai/nomic-embed-text-v1.5"
+
+    def test_embedding_only_save_preserves_the_entire_llm_block(self, isolated_config):
+        """An embeddings-panel save must never reset LLM mode/provider/model."""
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({
+            "embedding_provider": "default",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["mode"] == "c"
+        assert saved["llm"] == _BASE_CONFIG["llm"]
+
+    def test_blank_llm_credentials_and_endpoint_mean_unchanged(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({
+            "mode": "c", "provider": "openrouter", "model": "anthropic/claude-sonnet-4",
+            "api_key": "", "base_url": "", "endpoint": "",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"] == _BASE_CONFIG["llm"]
+
+    def test_uppercase_mode_remains_accepted(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        response = asyncio.run(set_full_config(_make_request({"mode": "B"})))
+        assert response["mode"] == "b"
+        assert _read_config(isolated_config)["mode"] == "b"
+
+    def test_non_string_llm_field_is_a_client_error(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        response = asyncio.run(set_full_config(_make_request({"api_key": 7})))
+        assert response.status_code == 400
+        assert _read_config(isolated_config)["llm"] == _BASE_CONFIG["llm"]
+
+    @pytest.mark.parametrize(
+        ("body", "field"),
+        [
+            ({"api_key": "sk-replace", "clear_api_key": True}, "api_key"),
+            ({"base_url": "https://new.example/v1", "clear_base_url": True}, "base_url"),
+        ],
+    )
+    def test_llm_replace_and_clear_is_rejected(self, isolated_config, body, field):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        response = asyncio.run(set_full_config(_make_request(body)))
+
+        assert response.status_code == 400
+        assert _read_config(isolated_config)["llm"] == _BASE_CONFIG["llm"], field
+
+    def test_clear_base_url_does_not_resurrect_ollama_default(self, isolated_config):
+        _write_config(isolated_config, {
+            **_BASE_CONFIG,
+            "mode": "b",
+            "llm": {"provider": "ollama", "model": "llama3.2", "api_key": "", "base_url": "http://custom.local:11434"},
+        })
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({"clear_base_url": True})))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["base_url"] == ""
         assert saved["embedding"]["dimension"] == 768
+
+    def test_new_ollama_selection_keeps_the_local_default(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({
+            "mode": "b", "provider": "ollama", "model": "llama3.2",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["base_url"] == "http://localhost:11434"
+
+    def test_explicit_llm_clears_are_isolated_to_the_requested_field(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({"clear_api_key": True})))
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["api_key"] == ""
+        assert saved["llm"]["base_url"] == _BASE_CONFIG["llm"]["base_url"]
+
+        asyncio.run(set_full_config(_make_request({"clear_base_url": True})))
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["api_key"] == ""
+        assert saved["llm"]["base_url"] == ""
+
+    def test_endpoint_change_cannot_relay_an_existing_api_key(self, isolated_config, monkeypatch):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        import superlocalmemory.server.routes.v3_api as v3_api
+
+        monkeypatch.setattr(v3_api, "_validate_provider_url", lambda *_: None)
+        asyncio.run(v3_api.set_full_config(_make_request({
+            "base_url": "https://replacement.example/v1",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["base_url"] == "https://replacement.example/v1"
+        assert saved["llm"]["api_key"] == ""
+
+    def test_provider_change_cannot_reuse_an_existing_api_key(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({
+            "provider": "anthropic", "model": "claude-sonnet-4",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["provider"] == "anthropic"
+        assert saved["llm"]["api_key"] == ""
+
+    def test_equivalent_endpoint_spelling_keeps_the_existing_api_key(
+        self, isolated_config, monkeypatch
+    ):
+        _write_config(isolated_config, {
+            **_BASE_CONFIG,
+            "llm": {**_BASE_CONFIG["llm"], "base_url": "https://openrouter.example.com/v1"},
+        })
+
+        import superlocalmemory.server.routes.v3_api as v3_api
+
+        monkeypatch.setattr(v3_api, "_validate_provider_url", lambda *_: None)
+        asyncio.run(v3_api.set_full_config(_make_request({
+            "base_url": "https://OPENROUTER.example.com/v1/",
+        })))
+
+        saved = _read_config(isolated_config)
+        assert saved["llm"]["api_key"] == "sk-existing"
+
+    def test_host_only_endpoint_is_rejected_before_persistence(self, isolated_config):
+        _write_config(isolated_config, _BASE_CONFIG)
+
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        response = asyncio.run(set_full_config(_make_request({"base_url": "host-only"})))
+        assert response.status_code == 400
+        assert _read_config(isolated_config)["llm"] == _BASE_CONFIG["llm"]
 
     def test_forgetting_preserved_when_omitted(self, isolated_config):
         """User-tuned forgetting config survives a dashboard settings save."""
@@ -246,6 +405,28 @@ class TestSetFullConfig:
         assert saved["mode"] == "c"
         assert saved["llm"]["provider"] == "openrouter"
         assert saved["llm"]["api_key"] == "sk-firsttime"
+
+
+def test_settings_render_redacted_endpoints_as_hints_not_replacements():
+    """A GET response containing only a redacted host must be safe to re-save."""
+    root = Path(__file__).resolve().parents[1]
+    operations = (root / "src/superlocalmemory/ui/js/od-settings.js").read_text()
+    automatic = (root / "src/superlocalmemory/ui/js/auto-settings.js").read_text()
+
+    assert "ep.value = d.endpoint" not in operations
+    assert "ep.placeholder = d.endpoint" in operations
+    assert "epEl.value = data.endpoint" not in automatic
+    assert "epEl.placeholder = data.endpoint" in automatic
+
+
+def test_settings_omit_blank_api_keys_from_save_payloads():
+    root = Path(__file__).resolve().parents[1]
+    operations = (root / "src/superlocalmemory/ui/js/od-settings.js").read_text()
+    automatic = (root / "src/superlocalmemory/ui/js/auto-settings.js").read_text()
+
+    assert "if (k)  { body.api_key = k; }" in operations
+    assert "Object.assign({mode: mode, provider: provider, model: model, api_key: apiKey}" not in automatic
+    assert "if (apiKey) payload.api_key = apiKey;" in automatic
 
 
 # ── set_mode (PUT /api/v3/mode) ──────────────────────────────────────────────

@@ -302,7 +302,14 @@
         var mi = q('model'); if (mi) mi.value = d.model || '';
         var k = q('apikey');
         if (k) k.placeholder = d.has_key ? '(key saved — enter new to replace)' : 'sk-...';
-        var ep = q('endpoint'); if (ep) ep.value = d.endpoint || '';
+        // GET /mode deliberately returns only a redacted host.  Showing that
+        // host as the editable value would turn a passive reload + save into a
+        // destructive replacement of the real URL, so it is display-only.
+        var ep = q('endpoint');
+        if (ep) {
+          ep.value = '';
+          ep.placeholder = d.endpoint || 'http://localhost:11434';
+        }
       }).catch(function () {});
   }
   function saveMode() {

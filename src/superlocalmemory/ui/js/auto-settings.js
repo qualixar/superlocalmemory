@@ -222,19 +222,20 @@ async function loadModeSettings() {
         // Show provider panel and populate model dropdown
         updateModeUI();
 
-        // v3.6.12 (issue #39/#40): populate the endpoint field from the SAVED
-        // config endpoint. updateProviderUI() above sets the field to the
-        // provider's DEFAULT (e.g. https://api.openai.com/v1), which hides the
-        // user's real custom endpoint (llama.cpp/LM Studio) and makes Test
-        // Connection probe the wrong URL → 401. Override with data.endpoint here.
-        if (data.endpoint) {
-            setTimeout(function() {
-                var epEl = document.getElementById('settings-endpoint');
-                if (epEl) epEl.value = data.endpoint;
-                var epRow = document.getElementById('settings-endpoint-row');
-                if (epRow) epRow.style.display = 'block';
-            }, 0);
-        }
+        // GET /mode deliberately exposes only a redacted endpoint host.
+        // updateProviderUI() sets a provider default as an editable value;
+        // clear it after a reload and expose the redacted host as a hint only.
+        // Otherwise a user who changes nothing can overwrite a full saved URL
+        // with the host-only display value on the next Save.
+        setTimeout(function() {
+            var epEl = document.getElementById('settings-endpoint');
+            if (epEl) {
+                epEl.value = '';
+                epEl.placeholder = data.endpoint || 'Custom endpoint (optional)';
+            }
+            var epRow = document.getElementById('settings-endpoint-row');
+            if (epRow && data.endpoint) epRow.style.display = 'block';
+        }, 0);
 
         // After provider UI updates, set the saved model value
         if (model) {
@@ -432,7 +433,10 @@ async function saveAllSettings() {
     try {
         // V3.4.24: Include embedding params in save payload
         var embParams = getEmbeddingParams();
-        var payload = Object.assign({mode: mode, provider: provider, model: model, api_key: apiKey}, embParams);
+        // Password-style fields reload blank.  Omit blanks so the API can
+        // distinguish "unchanged" from an explicit clear request.
+        var payload = Object.assign({mode: mode, provider: provider, model: model}, embParams);
+        if (apiKey) payload.api_key = apiKey;
         if (endpoint) { payload.base_url = endpoint; payload.endpoint = endpoint; }
         var modeResp = await fetch('/api/v3/mode/set', {
             method: 'POST',
