@@ -18,6 +18,7 @@ import pytest
 
 
 _UI_JS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "js" / "brain.js"
+_OD_BRAIN_JS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "js" / "od-brain.js"
 _UI_CSS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "css" / "brain.css"
 _INDEX_HTML = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "index.html"
 
@@ -98,6 +99,7 @@ def test_brain_js_renders_all_sections() -> None:
     """Post-v3.4.22: all ML / behavioral / adapter state on one view."""
     js = _UI_JS.read_text(encoding="utf-8")
     for card in (
+        "cardLivingBrain",
         "cardLearning",
         "cardLegacyMigration",
         "cardBandit",
@@ -111,6 +113,24 @@ def test_brain_js_renders_all_sections() -> None:
         "cardDangerZone",
     ):
         assert card in js, f"brain.js must render {card} section"
+
+
+def test_living_brain_distinguishes_activity_from_configuration() -> None:
+    js = _UI_JS.read_text(encoding="utf-8")
+    assert "Configured integrations" in js
+    assert "Recent client activity is shown separately in Living Brain" in js
+    assert "control_plane" not in js, (
+        "the UI must not present the observation-only read model as a control"
+    )
+
+
+def test_shipped_living_brain_uses_canonical_client_evidence() -> None:
+    js = _OD_BRAIN_JS.read_text(encoding="utf-8")
+    assert "/api/v3/brain" in js
+    assert "Recent client activity" in js
+    assert "Configured integrations" in js
+    assert "tool-event activity over time (proxy metric)" not in js
+    assert "No source-quality evidence has settled yet" in js
 
 
 def test_brain_js_fetches_behavioral_status() -> None:

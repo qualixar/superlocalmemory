@@ -32,12 +32,31 @@
       });
   }
 
+  function fetchLivingBrain() {
+    // The canonical Living Brain read model is install-token gated.  The
+    // browser obtains that token only from the local same-origin endpoint;
+    // it is never rendered, stored, or sent to another origin.
+    return apiFetch('/internal/token').then(function (tokenBody) {
+      var token = tokenBody && typeof tokenBody.token === 'string'
+        ? tokenBody.token.trim() : '';
+      if (!token) throw new Error('/internal/token → missing token');
+      return fetch('/api/v3/brain', {
+        credentials: 'same-origin',
+        headers: { 'X-Install-Token': token },
+      }).then(function (r) {
+        if (!r.ok) throw new Error('/api/v3/brain → ' + r.status);
+        return r.json();
+      });
+    });
+  }
+
   function fetchAll() {
     return Promise.all([
       apiFetch('/api/learning/status'),
       apiFetch('/api/behavioral/status'),
       apiFetch('/api/behavioral/assertions?category=skill_performance&limit=50'),
       apiFetch('/api/behavioral/tool-events?limit=500'),
+      fetchLivingBrain(),
     ]);
   }
 
@@ -184,7 +203,7 @@
   // ======================================================================
   // Tab: OVERVIEW
   // ======================================================================
-  function buildOverview(learning, behavioral, dateMap) {
+  function buildOverview(learning, behavioral, dateMap, living) {
     var sec = EL('section', { className: 'tabpane active', 'data-p': 'overview' });
     var stats = (learning && learning.stats) || {};
     var eng = (learning && learning.engagement) || {};
@@ -208,6 +227,8 @@
     var healthColor = healthStatus === 'HEALTHY' ? 'var(--ok)'
       : healthStatus === 'ACTIVE' ? 'var(--cyan)' : undefined;
     var pCount = ((beh.patterns) || []).length;
+    var feedback = (living && living.feedback) || {};
+    var graph = (living && living.graph) || {};
 
     // KPI strip
     var strip = EL('div', { className: 'kpi-strip', style: 'margin-bottom:16px' });
@@ -291,6 +312,10 @@
       ['Models trained',    String(stats.models_trained || 0)],
       ['Verified active models', String(stats.models_active_verified || 0)],
       ['Sources tracked',   String(stats.tracked_sources || 0)],
+      ['Explicit feedback', String(feedback.explicit_signals || 0)],
+      ['Settled outcomes',  String(feedback.settled_outcomes || 0)],
+      ['Graph evidence', String(graph.fact_nodes || 0) + ' nodes · ' +
+        String(graph.association_edges || 0) + ' edges'],
     ].forEach(function (row) {
       var r = EL('div', { className: 'list-row' });
       r.appendChild(EL('span', { className: 'muted', style: 'flex:1', text: row[0] }));
@@ -589,54 +614,54 @@
   // ======================================================================
   // Tab: CONNECTED CLIENTS
   // ======================================================================
-  function buildClients(dateMap) {
+  function buildClients(living, configured) {
     var sec = EL('section', { className: 'tabpane', 'data-p': 'clients' });
+    var clients = ((living && living.connected_clients) || {}).clients || [];
+    var configuredData = configured || {};
 
-    // Sparkline from tool-event activity (last 22 data-points matching design)
+    // Activity is presence reported by host lifecycle hooks, not the old
+    // tool-event proxy.  A configured adapter and a recent client are two
+    // different truths, rendered as separate cards.
     var evc = EL('div', { className: 'card', style: 'margin-bottom:16px' });
     var evh = EL('div', { className: 'card-head' });
-    evh.appendChild(EL('h3', { text: 'Connected-client evolution' }));
-    evh.appendChild(EL('span', { className: 'sub', text: 'tool-event activity over time (proxy metric)' }));
+    evh.appendChild(EL('h3', { text: 'Recent client activity' }));
+    evh.appendChild(EL('span', { className: 'sub', text: 'host lifecycle presence · last 5 minutes' }));
     evc.appendChild(evh);
     var evb = EL('div', { className: 'card-pad' });
-    var today = new Date(); today.setHours(0, 0, 0, 0);
-    var cVals = [];
-    for (var ci = 21; ci >= 0; ci--) {
-      var cd = new Date(today); cd.setDate(today.getDate() - ci);
-      cVals.push((dateMap && dateMap[cd.toISOString().slice(0, 10)]) || 0);
-    }
-    var evSp = EL('div', { id: 'od-brain-sp-clients' });
-    var hasData = cVals.some(function (v) { return v > 0; });
-    if (hasData && typeof window.slmSpark === 'function') {
-      evSp.innerHTML = window.slmSpark(cVals, { w: 600, h: 150, color: 'var(--cyan)' });
-      var sv2 = evSp.querySelector('svg'); if (sv2) sv2.style.height = '150px';
+    if (clients.length === 0) {
+      evb.appendChild(EL('p', { className: 'muted', style: 'padding:16px;text-align:center',
+        text: 'No host activity in the last 5 minutes. This does not mean an integration is uninstalled.',
+      }));
     } else {
-      evSp.appendChild(EL('p', { className: 'muted', style: 'padding:32px;text-align:center',
-        text: 'No event history in this period.' }));
+      clients.forEach(function (client) {
+        var row = EL('div', { className: 'list-row' });
+        row.appendChild(EL('b', { style: 'flex:1', text: String(client.kind || 'other') }));
+        row.appendChild(EL('span', { className: 'muted',
+          text: 'active ' + Number(client.last_seen_seconds_ago || 0) + 's ago',
+        }));
+        evb.appendChild(row);
+      });
     }
-    evb.appendChild(evSp);
-    // TODO: GET /api/clients — no live connected-client session data available via these endpoints.
-    // tool-events captures tool invocations but not distinct client identities or session counts.
-    evb.appendChild(EL('p', {
-      className: 'muted',
-      style: 'margin-top:12px;font-size:13px',
-      text: 'Bars above represent all tool invocations logged to this daemon. ' +
-            'A dedicated client-session endpoint is not yet exposed via the public API.',
-    }));
     evc.appendChild(evb);
     sec.appendChild(evc);
 
-    // Empty-state clients table
+    // Configured integrations are installation/sync state, not client activity.
     var tc = EL('div', { className: 'card' });
     var tch = EL('div', { className: 'card-head' });
-    tch.appendChild(EL('h3', { text: 'Clients' }));
+    tch.appendChild(EL('h3', { text: 'Configured integrations' }));
+    tch.appendChild(EL('span', { className: 'sub', text: 'installation and sync availability' }));
     tc.appendChild(tch);
     var tcb = EL('div', { className: 'card-pad' });
-    tcb.appendChild(EL('p', {
-      className: 'muted',
-      style: 'padding:16px;text-align:center;font-size:13px',
-      text: 'Client details are not yet available via API. Coming in a future daemon release.',
-    }));
+    Object.keys(configuredData).sort().forEach(function (kind) {
+      var state = configuredData[kind] || {};
+      var row = EL('div', { className: 'list-row' });
+      row.appendChild(EL('span', { style: 'flex:1', text: kind.replace(/_/g, ' ') }));
+      row.appendChild(EL('span', {
+        className: 'badge ' + (state.active ? 'ok' : 'warn'),
+        text: state.active ? 'available' : (state.reason || 'not available'),
+      }));
+      tcb.appendChild(row);
+    });
     tc.appendChild(tcb);
     sec.appendChild(tc);
     return sec;
@@ -645,7 +670,7 @@
   // ======================================================================
   // Tab: SOURCE QUALITY
   // ======================================================================
-  function buildSourceQuality(learning) {
+  function buildSourceQuality(learning, living) {
     var sec = EL('section', { className: 'tabpane', 'data-p': 'sources' });
     var scores = (learning && learning.source_scores) || {};
     var entries = Object.keys(scores).sort(function (a, b) {
@@ -657,13 +682,27 @@
     ch.appendChild(EL('span', { className: 'sub', text: 'persisted source-outcome posterior · 0.0–1.0' }));
     card.appendChild(ch);
     var cb = EL('div', { className: 'card-pad' });
-    if (entries.length === 0) {
+    var aggregate = (living && living.source_quality) || {};
+    var observedSources = Number(aggregate.observed_sources || 0);
+    if (observedSources === 0) {
       cb.appendChild(EL('p', {
         className: 'muted',
         style: 'padding:16px;text-align:center;font-size:13px',
-        text: 'No source-quality observations yet. Recall hits alone do not establish source quality.',
+        text: 'No source-quality evidence has settled yet. Recall hits alone do not establish source quality.',
+      }));
+    } else if (entries.length === 0) {
+      cb.appendChild(EL('p', {
+        className: 'muted',
+        style: 'padding:16px;text-align:center;font-size:13px',
+        text: String(observedSources) + ' sources have evidence, but no per-source posterior is available yet.',
       }));
     } else {
+      cb.appendChild(EL('p', {
+        className: 'muted',
+        style: 'font-size:13px;margin-bottom:16px',
+        text: String(observedSources) + ' sources with observed mean quality ' +
+          Number(aggregate.mean_quality).toFixed(3) + '.',
+      }));
       entries.forEach(function (k) {
         var v = Number(scores[k]);
         var row = EL('div', { style: 'margin-bottom:14px' });
@@ -765,6 +804,8 @@
       var learning = results[0] || {};
       var behavioral = results[1] || {};
       var events = ((results[3] && results[3].events) || []);
+      var brain = results[4] || {};
+      var living = brain.living_brain || {};
       var dateMap = buildDateMap(events);
       var pCount = ((behavioral.patterns) || []).length;
 
@@ -778,11 +819,11 @@
       container.replaceChildren(
         head,
         buildTabRow(pCount),
-        buildOverview(learning, behavioral, dateMap),
+        buildOverview(learning, behavioral, dateMap, living),
         buildReward(behavioral),
         buildBehaviour(learning, behavioral),
-        buildClients(dateMap),
-        buildSourceQuality(learning)
+        buildClients(living, brain.cross_platform),
+        buildSourceQuality(learning, living)
       );
       wireTabs(container);
     }).catch(function (err) { showError(container, err); });

@@ -687,6 +687,161 @@ def _compute_cross_platform() -> dict:
     return out
 
 
+def _compute_active_clients(profile_id: str) -> dict:
+    """Return recent host presence without leaking session identifiers.
+
+    ``cross_platform`` describes configured integration targets.  This
+    separate read-model answers the different question users actually ask:
+    which host clients have recently interacted with this local brain?
+    """
+    try:
+        from superlocalmemory.hooks.session_registry import active_client_summary
+        clients = active_client_summary(profile_id, within_seconds=300)
+    except Exception:
+        clients = []
+    return {
+        "is_real": True,
+        "scope": "profile",
+        "window_seconds": 300,
+        "clients": clients,
+        "source": "session_registry (ephemeral, profile-scoped)",
+    }
+
+
+def _compute_feedback_loop(profile_id: str, lrn_db: LearningDatabase) -> dict:
+    """Expose only durable feedback evidence that already drives learning."""
+    empty = {
+        "is_real": True,
+        "signals_by_type": {},
+        "explicit_signals": 0,
+        "implicit_signals": 0,
+        "settled_outcomes": 0,
+        "mean_settled_reward": None,
+        "source": "learning_signals + memory.db:action_outcomes",
+    }
+    signal_rows: list[sqlite3.Row] = []
+    try:
+        learning_conn = lrn_db.ro_connection()
+        try:
+            signal_rows = learning_conn.execute(
+                "SELECT signal_type, COUNT(*) AS count FROM learning_signals "
+                "WHERE profile_id = ? GROUP BY signal_type ORDER BY signal_type",
+                (profile_id,),
+            ).fetchall()
+        finally:
+            learning_conn.close()
+    except sqlite3.Error:
+        return empty
+    by_type = {
+        str(row["signal_type"]): int(row["count"] or 0)
+        for row in signal_rows
+    }
+    explicit_types = {
+        "user_positive", "user_negative", "user_correction", "user_pin",
+        "legacy_feedback",
+    }
+    explicit = sum(count for kind, count in by_type.items() if kind in explicit_types)
+    implicit = sum(count for kind, count in by_type.items() if kind not in explicit_types)
+    settled, mean_reward = 0, None
+    db_path = _memory_db_path()
+    if db_path.exists():
+        try:
+            memory_conn = ReadConnectionFactory(db_path).open()
+            try:
+                row = memory_conn.execute(
+                    "SELECT COUNT(*) AS count, AVG(reward) AS mean_reward "
+                    "FROM action_outcomes WHERE profile_id = ? AND settled = 1 "
+                    "AND reward IS NOT NULL",
+                    (profile_id,),
+                ).fetchone()
+                if row:
+                    settled = int(row["count"] or 0)
+                    mean_reward = (
+                        float(row["mean_reward"])
+                        if row["mean_reward"] is not None else None
+                    )
+            finally:
+                memory_conn.close()
+        except sqlite3.Error:
+            pass
+    return {
+        **empty,
+        "signals_by_type": by_type,
+        "explicit_signals": explicit,
+        "implicit_signals": implicit,
+        "settled_outcomes": settled,
+        "mean_settled_reward": mean_reward,
+    }
+
+
+def _compute_source_quality(profile_id: str) -> dict:
+    """Summarize observed provenance quality; neutral priors are not evidence."""
+    empty = {
+        "is_real": True,
+        "observed_sources": 0,
+        "mean_quality": None,
+        "source": "learning.db:source_quality_observations",
+    }
+    db_path = _learning_db_path()
+    if not db_path.exists():
+        return empty
+    try:
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT source_id) AS sources, AVG(reward) AS mean_quality "
+                "FROM source_quality_observations WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return empty
+        return {
+            **empty,
+            "observed_sources": int(row["sources"] or 0),
+            "mean_quality": float(row["mean_quality"]) if row["mean_quality"] is not None else None,
+        }
+    except sqlite3.Error:
+        return empty
+
+
+def _compute_graph_summary(profile_id: str) -> dict:
+    """Return graph evidence counts, never a decorative graph surrogate."""
+    empty = {
+        "is_real": True,
+        "fact_nodes": 0,
+        "association_edges": 0,
+        "source": "memory.db:atomic_facts + association_edges",
+    }
+    db_path = _memory_db_path()
+    if not db_path.exists():
+        return empty
+    try:
+        conn = ReadConnectionFactory(db_path).open()
+        try:
+            facts = conn.execute(
+                "SELECT COUNT(*) AS count FROM atomic_facts "
+                "WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+            edges = conn.execute(
+                "SELECT COUNT(*) AS count FROM association_edges "
+                "WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return {
+            **empty,
+            "fact_nodes": int(facts["count"] or 0) if facts else 0,
+            "association_edges": int(edges["count"] or 0) if edges else 0,
+        }
+    except sqlite3.Error:
+        return empty
+
+
 def _meta_now() -> dict:
     return {
         "generated_at": datetime.now(timezone.utc)
@@ -963,7 +1118,8 @@ async def get_brain(request: Request, profile_id: str | None = None) -> dict:
 
     (
         preferences, learning, usage, bandit_snap, cache,
-        cross_platform, outcomes_preview, evolution,
+        cross_platform, outcomes_preview, evolution, active_clients,
+        feedback_loop, source_quality, graph_summary,
     ) = await asyncio.gather(
         asyncio.to_thread(_compute_preferences, profile_id),
         asyncio.to_thread(_compute_learning_status, profile_id, lrn_db),
@@ -976,6 +1132,10 @@ async def get_brain(request: Request, profile_id: str | None = None) -> dict:
             _compute_evolution_timeseries, profile_id, lrn_db,
             days=_EVOLUTION_DEFAULT_DAYS,
         ),
+        asyncio.to_thread(_compute_active_clients, profile_id),
+        asyncio.to_thread(_compute_feedback_loop, profile_id, lrn_db),
+        asyncio.to_thread(_compute_source_quality, profile_id),
+        asyncio.to_thread(_compute_graph_summary, profile_id),
         return_exceptions=True,
     )
 
@@ -985,6 +1145,20 @@ async def get_brain(request: Request, profile_id: str | None = None) -> dict:
         if isinstance(value, Exception):
             return fallback
         return value
+
+    active_clients = _ok(active_clients, {"is_real": True, "scope": "profile", "clients": [],
+                                          "window_seconds": 300,
+                                          "source": "session_registry unavailable"})
+    feedback_loop = _ok(feedback_loop, {"is_real": True, "signals_by_type": {},
+                                         "explicit_signals": 0, "implicit_signals": 0,
+                                         "settled_outcomes": 0, "mean_settled_reward": None,
+                                         "source": "feedback data unavailable"})
+    source_quality = _ok(source_quality, {"is_real": True, "observed_sources": 0,
+                                           "mean_quality": None,
+                                           "source": "source-quality data unavailable"})
+    graph_summary = _ok(graph_summary, {"is_real": True, "fact_nodes": 0,
+                                         "association_edges": 0,
+                                         "source": "graph data unavailable"})
 
     return {
         "profile_id": profile_id,
@@ -1005,6 +1179,19 @@ async def get_brain(request: Request, profile_id: str | None = None) -> dict:
                                         "db_size_bytes": 0,
                                         "entry_count": 0}),
         "cross_platform":   _ok(cross_platform, {}),
+        # One canonical, transport-neutral read model for the non-technical
+        # Living Brain.  Existing top-level sections stay intact for the CLI,
+        # MCP and older dashboard clients.  This is observation only: it never
+        # changes retrieval or model routing.
+        "living_brain": {
+            "is_real": True,
+            "control_plane": "observation_only",
+            "connected_clients": active_clients,
+            "feedback": feedback_loop,
+            "source_quality": source_quality,
+            "graph": graph_summary,
+            "source": "local durable stores + ephemeral session registry",
+        },
         "evolution_preview": _ok(evolution, {
             "is_real": True, "source": "learning_signals",
             "days": _EVOLUTION_DEFAULT_DAYS, "total_signals": 0, "points": [],

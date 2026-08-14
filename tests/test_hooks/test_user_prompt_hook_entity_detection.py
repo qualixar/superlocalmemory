@@ -140,6 +140,36 @@ def test_user_prompt_hook_budget_unchanged(monkeypatch):
     assert p95 < 50.0, f"hook p95 {p95:.2f} ms exceeds 50 ms I1 budget"
 
 
+def test_user_prompt_hook_records_the_canonical_active_profile(monkeypatch):
+    """Profile-scoped presence must not depend on a host environment value."""
+    from superlocalmemory.core import context_cache as cc
+    from superlocalmemory.hooks import session_registry
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(cc, "read_entry_fast", lambda _session, _topic: None)
+    monkeypatch.setattr(session_registry, "resolve_active_profile", lambda: "research")
+    monkeypatch.setattr(
+        session_registry,
+        "mark_active",
+        lambda session_id, agent_type, profile_id: captured.update({
+            "session_id": session_id,
+            "agent_type": agent_type,
+            "profile_id": profile_id,
+        }),
+    )
+
+    _invoke_hook(
+        monkeypatch,
+        {"session_id": "sess-profile", "prompt": "profile scoped recall"},
+    )
+
+    assert captured == {
+        "session_id": "sess-profile",
+        "agent_type": "claude",
+        "profile_id": "research",
+    }
+
+
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------

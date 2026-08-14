@@ -20,8 +20,9 @@ lost (reaper finalizes everything at neutral 0.5).
 
 **Fix (this module).** A simple file-based registry:
 
-* ``mark_active(session_id, agent_type)`` — called by hooks on every
-  prompt/tool event. Writes ``(session_id, agent_type, ts_ns, pid)``
+* ``mark_active(session_id, agent_type, profile_id)`` — called by hooks on
+  every prompt/tool event. Writes ``(session_id, agent_type, profile_id,
+  ts_ns, pid)``
   to ``~/.superlocalmemory/.active_sessions.json``.
 * ``most_recent_active(agent_type, within_seconds=60)`` — queries the
   registry for the most recently seen session of the named agent.
@@ -56,11 +57,89 @@ logger = logging.getLogger(__name__)
 
 _PRUNE_AFTER_SEC = 3600  # 1h — anything older is dead
 
+# Keep the public host vocabulary small and stable.  Callers can still use an
+# unknown value internally, but the Living Brain must not turn arbitrary hook
+# input into a new UI label or expose a host identifier verbatim.
+_PUBLIC_CLIENT_KINDS = {
+    "claude": "claude_code",
+    "claude_code": "claude_code",
+    "codex": "codex",
+    "cursor": "cursor",
+    "antigravity": "antigravity",
+    "copilot": "copilot",
+    "cli": "cli",
+    "mcp": "mcp",
+}
+
 
 def _registry_file() -> Path:
     from superlocalmemory.infra.data_root import state_path
 
     return state_path(".active_sessions.json")
+
+
+def _profiles_file() -> Path:
+    """Return the profile cache updated atomically by daemon switches."""
+    from superlocalmemory.infra.data_root import state_path
+
+    return state_path("profiles.json")
+
+
+def resolve_active_profile() -> str | None:
+    """Read the canonical active profile without relying on host env wiring.
+
+    Hooks are separate host processes, so daemon-managed profile changes are
+    not reliably reflected in their environment.  The profile runtime writes
+    this compatibility cache atomically on every successful switch; using it
+    keeps ephemeral presence scoped like the durable memory stores.
+    """
+    try:
+        payload = json.loads(_profiles_file().read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        modern_pointer = payload.get("active_profile")
+        legacy_pointer = payload.get("active")
+        pointer = (
+            modern_pointer.strip()
+            if isinstance(modern_pointer, str) and modern_pointer.strip()
+            else legacy_pointer.strip()
+            if isinstance(legacy_pointer, str) and legacy_pointer.strip()
+            else None
+        )
+        if pointer is None:
+            return None
+        profiles = payload.get("profiles")
+        catalog_present = "profiles" in payload
+        entries = []
+        if isinstance(profiles, list):
+            entries = [(None, profile) for profile in profiles]
+        elif isinstance(profiles, dict):
+            entries = list(profiles.items())
+        canonical: list[tuple[str, str | None]] = []
+        for key, profile in entries:
+            if not isinstance(profile, dict):
+                continue
+            profile_id = profile.get("profile_id")
+            if not isinstance(profile_id, str) or not profile_id.strip():
+                profile_id = key if isinstance(key, str) and key.strip() else None
+            name = profile.get("name")
+            if isinstance(profile_id, str) and profile_id.strip():
+                canonical.append((profile_id.strip(), name if isinstance(name, str) else None))
+        id_matches = {profile_id for profile_id, _name in canonical if profile_id == pointer}
+        if len(id_matches) == 1:
+            return id_matches.pop()
+        name_matches = {profile_id for profile_id, name in canonical if name == pointer}
+        if len(name_matches) == 1:
+            return name_matches.pop()
+        # The current runtime writes an ``active_profile`` ID even when its
+        # catalog has not been materialized yet. With no catalog at all it is
+        # the only available authority; a partially present catalog instead
+        # fails closed to avoid treating an unmapped display name as an ID.
+        if not catalog_present and isinstance(modern_pointer, str) and modern_pointer.strip():
+            return modern_pointer.strip()
+    except (OSError, TypeError, ValueError):
+        pass
+    return None
 
 
 def _now_ns() -> int:
@@ -105,6 +184,7 @@ def _prune(data: dict) -> dict:
 def mark_active(
     session_id: str,
     agent_type: str = "claude",
+    profile_id: str | None = None,
 ) -> None:
     """Record ``session_id`` keyed by the CALLING process PID.
 
@@ -122,11 +202,14 @@ def mark_active(
     try:
         data = _load()
         key = str(os.getpid())  # the IDE / hook process PID
-        data[key] = {
+        row = {
             "session_id": session_id,
             "agent_type": agent_type or "unknown",
             "ts_ns": _now_ns(),
         }
+        if isinstance(profile_id, str) and profile_id.strip():
+            row["profile_id"] = profile_id.strip()
+        data[key] = row
         data = _prune(data)
         _save(data)
     except Exception as exc:  # pragma: no cover — defensive
@@ -187,6 +270,56 @@ def most_recent_active(
         return candidates[0][1]
     except Exception:
         return None
+
+
+def active_client_summary(
+    profile_id: str | None = None,
+    within_seconds: int = 60,
+) -> list[dict[str, object]]:
+    """Return privacy-safe, recently active hosts for the Living Brain.
+
+    This is deliberately a *presence* signal, not durable product analytics:
+    registry entries expire within an hour and session identifiers never leave
+    the local registry.  The dashboard therefore distinguishes these active
+    clients from configured adapters, which only prove installation.
+    """
+    # Compatibility-safe default for any out-of-tree caller that used the
+    # original no-argument helper: no profile means no visibility, never a
+    # silent cross-profile aggregate.
+    if not profile_id:
+        return []
+    try:
+        cutoff_ns = _now_ns() - (max(0, int(within_seconds)) * 1_000_000_000)
+        newest_by_kind: dict[str, int] = {}
+        for row in _load().values():
+            if not isinstance(row, dict):
+                continue
+            # Entries written before profile attribution are intentionally
+            # invisible here: guessing a profile would leak client metadata.
+            if str(row.get("profile_id", "")) != profile_id:
+                continue
+            try:
+                ts_ns = int(row.get("ts_ns", 0))
+            except (TypeError, ValueError):
+                continue
+            if ts_ns < cutoff_ns:
+                continue
+            raw_kind = str(row.get("agent_type", "")).strip().lower()
+            kind = _PUBLIC_CLIENT_KINDS.get(raw_kind, "other")
+            newest_by_kind[kind] = max(newest_by_kind.get(kind, 0), ts_ns)
+        now_ns = _now_ns()
+        return [
+            {
+                "kind": kind,
+                "active": True,
+                "last_seen_seconds_ago": max(0, int((now_ns - ts_ns) / 1_000_000_000)),
+                "source": "session_registry",
+                "is_real": True,
+            }
+            for kind, ts_ns in sorted(newest_by_kind.items())
+        ]
+    except Exception:
+        return []
 
 
 def _reset_for_testing() -> None:

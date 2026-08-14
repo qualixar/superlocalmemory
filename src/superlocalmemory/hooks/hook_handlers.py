@@ -200,6 +200,22 @@ def _apply_codex_session(payload: dict) -> str:
         # Shared handlers use this neutral lifecycle identity despite its
         # historical environment-variable name.  It is never sent to a host.
         os.environ["CLAUDE_SESSION_ID"] = session_id
+        # Presence is separate from memory correctness and is deliberately
+        # fail-open.  It lets the portable Living Brain show that Codex is
+        # genuinely active, rather than pretending an installed hook is a
+        # connected client.
+        try:
+            from superlocalmemory.hooks.session_registry import (
+                mark_active,
+                resolve_active_profile,
+            )
+            mark_active(
+                session_id,
+                agent_type="codex",
+                profile_id=resolve_active_profile(),
+            )
+        except Exception:
+            pass
     return project_dir
 
 

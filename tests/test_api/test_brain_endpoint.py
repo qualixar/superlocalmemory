@@ -157,8 +157,80 @@ def test_brain_returns_all_sections(
     body = r.json()
     for section in ("profile_id", "preferences", "learning", "usage",
                     "bandit", "cache", "cross_platform",
-                    "evolution_preview", "outcomes_preview", "meta"):
+                    "living_brain", "evolution_preview", "outcomes_preview", "meta"):
         assert section in body, f"missing section: {section}"
+
+
+def test_living_brain_is_an_honest_observation_read_model(
+    client: TestClient, install_token: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(brain_mod, "_compute_active_clients", lambda _profile_id: {
+        "is_real": True, "scope": "profile", "clients": [], "window_seconds": 300,
+        "source": "test session registry",
+    })
+    body = client.get(
+        "/api/v3/brain", headers={"X-Install-Token": install_token},
+    ).json()
+    living = body["living_brain"]
+    assert living["is_real"] is True
+    assert living["control_plane"] == "observation_only"
+    assert set(living) >= {
+        "connected_clients", "feedback", "source_quality", "graph",
+    }
+    # A fresh install must stay honest: no connected host and no observed
+    # source quality are fabricated merely because adapters are available.
+    assert living["connected_clients"]["clients"] == []
+    assert living["connected_clients"]["scope"] == "profile"
+    assert living["source_quality"]["observed_sources"] == 0
+    assert living["source_quality"]["mean_quality"] is None
+
+
+def test_feedback_loop_uses_canonical_signal_rows(
+    client: TestClient, install_token: str, tmp_learning_db: Path,
+) -> None:
+    from superlocalmemory.learning.database import LearningDatabase
+
+    db = LearningDatabase(tmp_learning_db)
+    db.store_signal("default", "private query", "f1", "user_positive", 1.0)
+    db.store_signal("default", "private query", "f2", "recall_hit", 0.7)
+
+    body = client.get(
+        "/api/v3/brain", headers={"X-Install-Token": install_token},
+    ).json()
+    feedback = body["living_brain"]["feedback"]
+    assert feedback["signals_by_type"] == {
+        "recall_hit": 1, "user_positive": 1,
+    }
+    assert feedback["explicit_signals"] == 1
+    assert feedback["implicit_signals"] == 1
+
+
+def test_graph_summary_counts_atomic_facts_and_edges(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    memory_db = tmp_path / "memory.db"
+    conn = sqlite3.connect(memory_db)
+    try:
+        conn.executescript("""
+            CREATE TABLE atomic_facts (
+                fact_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL
+            );
+            CREATE TABLE association_edges (
+                edge_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL
+            );
+        """)
+        conn.execute("INSERT INTO atomic_facts VALUES ('f1', 'default')")
+        conn.execute("INSERT INTO atomic_facts VALUES ('f2', 'default')")
+        conn.execute("INSERT INTO association_edges VALUES ('e1', 'default')")
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(brain_mod, "_memory_dir", lambda: tmp_path)
+
+    graph = brain_mod._compute_graph_summary("default")
+
+    assert graph["fact_nodes"] == 2
+    assert graph["association_edges"] == 1
 
 
 def test_brain_honesty_labels_present(

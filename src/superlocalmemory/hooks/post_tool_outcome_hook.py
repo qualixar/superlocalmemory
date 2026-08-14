@@ -35,14 +35,13 @@ from pathlib import Path
 from superlocalmemory.hooks._outcome_common import (
     emit_empty_json,
     log_perf,
-    memory_db_path as _memory_db_path_fn,
-    now_ms,
-    open_memory_db,
     read_stdin_json,
     session_state_file,
     summarize_response,
 )
-
+from superlocalmemory.hooks._outcome_common import (
+    memory_db_path as _memory_db_path_fn,
+)
 
 _HOOK_NAME = "post_tool_outcome"
 
@@ -98,8 +97,15 @@ def _inner_main() -> str:
     # S9-DASH-10: keep registry fresh on every PostToolUse so the MCP
     # server can pick up the current session even mid-turn.
     try:
-        from superlocalmemory.hooks.session_registry import mark_active
-        mark_active(session_id, agent_type="claude")
+        from superlocalmemory.hooks.session_registry import (
+            mark_active,
+            resolve_active_profile,
+        )
+        mark_active(
+            session_id,
+            agent_type="claude",
+            profile_id=resolve_active_profile(),
+        )
     except Exception:
         pass
 

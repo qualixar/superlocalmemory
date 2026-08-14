@@ -825,7 +825,11 @@
   function cardCrossPlatform(cp) {
     const data = cp || {};
     const wrap = EL('section', {className: 'brain-section'});
-    wrap.appendChild(EL('h4', {text: 'Connected clients'}));
+    wrap.appendChild(EL('h4', {text: 'Configured integrations'}));
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: 'Installation and sync availability. Recent client activity is shown separately in Living Brain.',
+    }));
 
     const grid = EL('div', {className: 'brain-adapter-grid'});
     const order = [
@@ -1096,6 +1100,7 @@
   function renderAll(brain, behavioral) {
     const b = brain || {};
     const nodes = [
+      cardLivingBrain(b.living_brain),
       cardLearning(b.learning),
     ];
     // Only shows when there are legacy rows pending migration; hidden
@@ -1123,6 +1128,57 @@
     nodes.push(cardEvolution(b.evolution_preview));
     nodes.push(cardDangerZone());
     return nodes;
+  }
+
+  // --------------------------------------------------------------------
+  // Card: Living Brain — portable evidence, never an automatic control
+  // --------------------------------------------------------------------
+  function cardLivingBrain(snapshot) {
+    const data = snapshot || {};
+    const feedback = data.feedback || {};
+    const clients = (data.connected_clients || {}).clients || [];
+    const quality = data.source_quality || {};
+    const graph = data.graph || {};
+    const wrap = EL('section', {className: 'brain-section'});
+    wrap.appendChild(EL('h4', {text: 'Living Brain'}));
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: 'A local evidence view of what SLM has observed. It does not automatically change your model, tools, or memories.',
+    }));
+
+    const clientText = clients.length
+      ? clients.map((client) => {
+        const seconds = Number(client.last_seen_seconds_ago || 0);
+        return String(client.kind || 'other') + ' active ' + seconds + 's ago';
+      }).join(' · ')
+      : 'No client activity in the last 5 minutes';
+    const grid = EL('div', {className: 'brain-stat-grid'});
+    grid.appendChild(statRow('Recent clients', clientText));
+    grid.appendChild(statRow('Explicit feedback', feedback.explicit_signals || 0));
+    grid.appendChild(statRow('Implicit signals', feedback.implicit_signals || 0));
+    grid.appendChild(statRow('Settled outcomes', feedback.settled_outcomes || 0));
+    grid.appendChild(statRow(
+      'Observed source quality',
+      quality.mean_quality == null ? 'No evidence yet' : Number(quality.mean_quality).toFixed(3),
+    ));
+    grid.appendChild(statRow('Sources with evidence', quality.observed_sources || 0));
+    grid.appendChild(statRow('Memory graph nodes', graph.fact_nodes || 0));
+    grid.appendChild(statRow('Memory graph edges', graph.association_edges || 0));
+    wrap.appendChild(grid);
+
+    const byType = feedback.signals_by_type || {};
+    const signalKinds = Object.keys(byType).sort();
+    wrap.appendChild(EL('p', {
+      className: 'brain-help',
+      text: signalKinds.length
+        ? 'Signals: ' + signalKinds.map((kind) => kind + ' (' + Number(byType[kind] || 0) + ')').join(', ')
+        : 'No feedback signals recorded yet. Report outcomes or use memory feedback to start the loop.',
+    }));
+    wrap.appendChild(badge(
+      data.is_real ? 'real' : 'stub',
+      data.source || 'local evidence',
+    ));
+    return wrap;
   }
 
   // --------------------------------------------------------------------

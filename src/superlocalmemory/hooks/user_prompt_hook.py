@@ -63,8 +63,15 @@ def main() -> int:
     # the MCP protocol doesn't thread the session_id through tool
     # arguments. Fail-soft — never raises on the hot path.
     try:
-        from superlocalmemory.hooks.session_registry import mark_active
-        mark_active(session_id, agent_type="claude")
+        from superlocalmemory.hooks.session_registry import (
+            mark_active,
+            resolve_active_profile,
+        )
+        mark_active(
+            session_id,
+            agent_type="claude",
+            profile_id=resolve_active_profile(),
+        )
     except Exception:
         pass
 
