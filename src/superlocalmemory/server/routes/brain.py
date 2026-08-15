@@ -61,6 +61,7 @@ from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.features import FEATURE_DIM
 from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.storage.read_connection import ReadConnectionFactory
+from superlocalmemory.storage.agent_experience import get_profile_receipt_summary
 from .helpers import get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.brain")
@@ -326,45 +327,7 @@ def _compute_agent_experience(profile_id: str) -> dict:
     Receipt rows record observation and verification evidence only; this read
     model never alters retrieval, ranking, or model routing.
     """
-    empty = {
-        "is_real": True,
-        "experiences_total": 0,
-        "turns_total": 0,
-        "turns_by_state": {},
-        "verified_experiences": 0,
-        "source": "learning.db:agent_experiences,cognitive_turn_receipts",
-    }
-    db_path = _learning_db_path()
-    if not db_path.exists():
-        return empty
-    try:
-        conn = ReadConnectionFactory(db_path).open()
-        try:
-            experiences = conn.execute(
-                "SELECT COUNT(*) FROM agent_experiences WHERE profile_id=?", (profile_id,)
-            ).fetchone()
-            verified = conn.execute(
-                "SELECT COUNT(*) FROM agent_experiences "
-                "WHERE profile_id=? AND verification_authority != 'bounded_loop_receipt'",
-                (profile_id,),
-            ).fetchone()
-            turns = conn.execute(
-                "SELECT state, COUNT(*) FROM cognitive_turn_receipts "
-                "WHERE profile_id=? GROUP BY state",
-                (profile_id,),
-            ).fetchall()
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return empty
-    by_state = {str(row[0]): int(row[1]) for row in turns}
-    return {
-        **empty,
-        "experiences_total": int(experiences[0]) if experiences else 0,
-        "turns_total": sum(by_state.values()),
-        "turns_by_state": by_state,
-        "verified_experiences": int(verified[0]) if verified else 0,
-    }
+    return get_profile_receipt_summary(_learning_db_path(), profile_id)
 
 
 def _resolve_phase(signals: int, model_active: bool,

@@ -402,3 +402,53 @@ def purge_profile_receipts(learning_db_path: str | Path, profile_id: str) -> int
     if tables != expected:
         raise sqlite3.OperationalError("incomplete Agent Experience receipt schema")
     return AgentExperienceStore(path, is_profile_active=lambda _: True).erase_profile(profile_id)
+
+
+def get_profile_receipt_summary(
+    learning_db_path: str | Path, profile_id: str
+) -> dict[str, Any]:
+    """Return the small, read-only receipt view used by every host surface.
+
+    This intentionally performs only indexed aggregates against ``learning.db``.
+    It is safe to call from MCP, CLI, HTTP, and the dashboard without opening a
+    memory engine or entering the recall/remember writer domains.
+    """
+    empty: dict[str, Any] = {
+        "is_real": True,
+        "experiences_total": 0,
+        "turns_total": 0,
+        "turns_by_state": {},
+        "verified_experiences": 0,
+        "source": "learning.db:agent_experiences,cognitive_turn_receipts",
+    }
+    path = Path(learning_db_path)
+    if not path.exists():
+        return empty
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        try:
+            experience = conn.execute(
+                "SELECT COUNT(*) FROM agent_experiences WHERE profile_id=?", (profile_id,)
+            ).fetchone()
+            verified = conn.execute(
+                "SELECT COUNT(*) FROM agent_experiences "
+                "WHERE profile_id=? AND verification_authority != 'bounded_loop_receipt'",
+                (profile_id,),
+            ).fetchone()
+            rows = conn.execute(
+                "SELECT state, COUNT(*) FROM cognitive_turn_receipts "
+                "WHERE profile_id=? GROUP BY state",
+                (profile_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return empty
+    turns_by_state = {str(state): int(count) for state, count in rows}
+    return {
+        **empty,
+        "experiences_total": int(experience[0]) if experience else 0,
+        "verified_experiences": int(verified[0]) if verified else 0,
+        "turns_total": sum(turns_by_state.values()),
+        "turns_by_state": turns_by_state,
+    }

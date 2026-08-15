@@ -97,6 +97,9 @@ _ESSENTIAL_TOOLS: set[str] = {
     # Feedback / learning signals — reachable Dash-Core path for
     # thumbs-up / pin / drift signals.
     "report_feedback",
+    # v4.0.2 portable Brain evidence: profile-scoped receipt reads/writes.
+    "get_brain_evidence_status", "record_agent_experience",
+    "record_cognitive_turn", "finalize_cognitive_turn",
     # Memory management (2)
     "forget", "run_maintenance",
     # NOTE: prestage_context IS registered (see register_prestage_tool below)
@@ -272,6 +275,8 @@ from superlocalmemory.mcp.tools_loops import register_loop_tools
 register_loop_tools(_target, get_engine)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
 from superlocalmemory.mcp.tools_ops import register_ops_tools
 register_ops_tools(_target, get_engine)  # Wave-3: operational recovery & admin remediation
+from superlocalmemory.mcp.tools_brain import register_brain_tools
+register_brain_tools(_target, get_engine)  # v4.0.2 portable Brain receipts
 from superlocalmemory.mcp.tools_context import register_prestage_tool
 
 

@@ -349,6 +349,7 @@ def dispatch(args: Namespace) -> None:
         "delete": cmd_delete,
         "update": cmd_update,
         "status": cmd_status,
+        "brain": cmd_brain,
         "health": cmd_health,
         "doctor": cmd_doctor,
         "trace": cmd_trace,
@@ -3695,6 +3696,47 @@ def cmd_session_context(args: Namespace) -> None:
 
     except Exception as exc:
         logger.debug("session-context (fast) failed: %s", exc)
+
+
+def cmd_brain(args: Namespace) -> None:
+    """Read the portable, profile-scoped Agent Experience evidence summary.
+
+    This command deliberately opens no memory engine and starts no daemon. It
+    is an indexed ``learning.db`` read, so support scripts and non-technical
+    users can inspect the Living Brain without affecting recall latency.
+    """
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.infra.data_root import state_path
+    from superlocalmemory.storage.agent_experience import get_profile_receipt_summary
+
+    config = SLMConfig.load()
+    profile_id = config.active_profile
+    data = {
+        "profile_id": profile_id,
+        "agent_experience": get_profile_receipt_summary(
+            state_path("learning.db"), profile_id
+        ),
+        "control_plane": "observation_only",
+    }
+    if getattr(args, "json", False):
+        from superlocalmemory.cli.json_output import json_print
+
+        json_print("brain", data=data, next_actions=[
+            {"command": "slm dashboard", "description": "Open the Living Brain dashboard"},
+        ])
+        return
+    evidence = data["agent_experience"]
+    print("SuperLocalMemory Living Brain")
+    print(f"  Profile: {profile_id}")
+    print(f"  Agent experiences: {evidence['experiences_total']}")
+    print(f"  Evidence-backed experiences: {evidence['verified_experiences']}")
+    print(f"  Cognitive turns: {evidence['turns_total']}")
+    if evidence["turns_by_state"]:
+        states = ", ".join(
+            f"{state}: {count}" for state, count in sorted(evidence["turns_by_state"].items())
+        )
+        print(f"  Turn states: {states}")
+    print("  Retrieval control: observation only")
 
 
 def cmd_observe(args: Namespace) -> None:
