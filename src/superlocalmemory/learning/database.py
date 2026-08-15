@@ -599,7 +599,7 @@ class LearningDatabase:
         if profile_id:
             from superlocalmemory.storage.agent_experience import purge_profile_receipts
 
-            purge_profile_receipts(self._db_path, profile_id)
+            purge_profile_receipts(self._db_path, profile_id, close_profile=False)
         with self._lock:
             conn = self._connect()
             try:
@@ -613,7 +613,8 @@ class LearningDatabase:
                     row[0]
                     for row in conn.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' "
-                        "AND name IN ('agent_experiences', 'cognitive_turn_receipts')"
+                        "AND name IN ('agent_experiences', 'cognitive_turn_receipts', "
+                        "'agent_receipt_profile_closures')"
                     )
                 }
                 if profile_id is None:

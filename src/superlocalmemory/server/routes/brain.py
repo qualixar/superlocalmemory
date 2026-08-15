@@ -1171,8 +1171,9 @@ async def get_brain(request: Request, profile_id: str | None = None) -> dict:
                                          "association_edges": 0,
                                          "source": "graph data unavailable"})
     agent_experience = _ok(agent_experience, {
-        "is_real": True, "experiences_total": 0, "turns_total": 0,
-        "turns_by_state": {}, "verified_experiences": 0,
+        "is_real": False, "availability": "unavailable",
+        "experiences_total": 0, "turns_total": 0,
+        "turns_by_state": {}, "claimed_evidence_experiences": 0,
         "source": "receipt data unavailable",
     })
 

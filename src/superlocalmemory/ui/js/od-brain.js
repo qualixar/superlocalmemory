@@ -315,7 +315,7 @@
       ['Sources tracked',   String(stats.tracked_sources || 0)],
       ['Explicit feedback', String(feedback.explicit_signals || 0)],
       ['Settled outcomes',  String(feedback.settled_outcomes || 0)],
-      ['Verified agent experiences', String(experience.verified_experiences || 0)],
+      ['Claimed evidence authority', String(experience.claimed_evidence_experiences || 0)],
       ['Cognitive turns', String(experience.turns_total || 0) +
         ' · ' + String((experience.turns_by_state || {}).finalized || 0) + ' finalized'],
       ['Graph evidence', String(graph.fact_nodes || 0) + ' nodes · ' +
@@ -354,9 +354,9 @@
     evGrid.appendChild(kpiCard('fact_check', 'Recorded experiences',
       fmtNum(experience.experiences_total || 0), 'profile-scoped durable receipts',
       Number(experience.experiences_total || 0) > 0, undefined, true));
-    evGrid.appendChild(kpiCard('verified', 'Evidence-backed',
-      fmtNum(experience.verified_experiences || 0), 'declared verification authority',
-      Number(experience.verified_experiences || 0) > 0, undefined, true));
+    evGrid.appendChild(kpiCard('verified', 'Claimed evidence authority',
+      fmtNum(experience.claimed_evidence_experiences || 0), 'declared by the producing host',
+      Number(experience.claimed_evidence_experiences || 0) > 0, undefined, true));
     evGrid.appendChild(kpiCard('account_tree', 'Cognitive turns',
       fmtNum(experience.turns_total || 0),
       fmtNum((experience.turns_by_state || {}).open || 0) + ' open · ' +

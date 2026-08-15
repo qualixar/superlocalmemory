@@ -78,3 +78,4 @@ def test_brain_tools_are_profile_scoped_and_have_honest_busy_contract(
     assert status["profile_id"] == "alpha"
     assert status["agent_experience"]["experiences_total"] == 1
     assert status["agent_experience"]["turns_by_state"] == {"open": 1}
+    assert status["agent_experience"]["claimed_evidence_experiences"] == 1

@@ -106,6 +106,7 @@ class AgentExperienceStore:
         _, digest = _canonical(payload)
 
         def write(conn: sqlite3.Connection) -> bool:
+            self._assert_profile_open(conn, profile_id)
             row = self._experience_row(payload, digest)
             cursor = conn.execute(
                 "INSERT INTO agent_experiences ("
@@ -148,6 +149,7 @@ class AgentExperienceStore:
         _, digest = _canonical(payload)
 
         def write(conn: sqlite3.Connection) -> bool:
+            self._assert_profile_open(conn, profile_id)
             cursor = conn.execute(
                 "INSERT INTO cognitive_turn_receipts ("
                 "profile_id, receipt_id, task_id, project_scope, query_digest, "
@@ -192,6 +194,7 @@ class AgentExperienceStore:
         self._admit(profile_id)
 
         def write(conn: sqlite3.Connection) -> bool:
+            self._assert_profile_open(conn, profile_id)
             current = self._get_turn_conn(conn, profile_id, receipt_id)
             if current is None:
                 raise CognitiveTurnTransitionError("cognitive turn not found for this profile")
@@ -216,11 +219,26 @@ class AgentExperienceStore:
         finally:
             self._gate.release(profile_id)
 
-    def erase_profile(self, profile_id: str) -> int:
-        """Purge all receipt tables and prove no local receipt residue remains."""
-        self._gate.close_and_drain(profile_id)
+    def erase_profile(self, profile_id: str, *, close_profile: bool = True) -> int:
+        """Purge all receipts, permanently closing admission for profile erasure.
+
+        A standalone learning reset can opt out of closing because the memory
+        profile remains active and should be able to collect new evidence.
+        """
+        if close_profile:
+            self._gate.close_and_drain(profile_id)
 
         def erase(conn: sqlite3.Connection) -> int:
+            # This durable closure is checked inside every receipt write
+            # transaction. SQLite's writer serialization makes an erasure
+            # followed by a stale process's write fail closed across processes.
+            if close_profile:
+                conn.execute(
+                    "INSERT INTO agent_receipt_profile_closures (profile_id, closed_at) "
+                    "VALUES (?, ?) ON CONFLICT(profile_id) "
+                    "DO UPDATE SET closed_at=excluded.closed_at",
+                    (profile_id, _now()),
+                )
             experience_count = conn.execute(
                 "DELETE FROM agent_experiences WHERE profile_id=?", (profile_id,)
             ).rowcount
@@ -243,6 +261,14 @@ class AgentExperienceStore:
 
     def _admit(self, profile_id: str) -> None:
         self._gate.admit(profile_id, self._is_profile_active)
+
+    @staticmethod
+    def _assert_profile_open(conn: sqlite3.Connection, profile_id: str) -> None:
+        closed = conn.execute(
+            "SELECT 1 FROM agent_receipt_profile_closures WHERE profile_id=?", (profile_id,)
+        ).fetchone()
+        if closed is not None:
+            raise ProfileAdmissionError("profile is inactive or closing for erasure")
 
     def _write(self, operation: Callable[[sqlite3.Connection], _T]) -> _T:
         deadline = time.monotonic() + _WRITE_DEADLINE_SECONDS
@@ -378,7 +404,9 @@ class AgentExperienceStore:
         return result
 
 
-def purge_profile_receipts(learning_db_path: str | Path, profile_id: str) -> int:
+def purge_profile_receipts(
+    learning_db_path: str | Path, profile_id: str, *, close_profile: bool = True
+) -> int:
     """Purge M040 evidence for a profile before its memory profile is deleted.
 
     A database from an older release simply has no receipt tables and is
@@ -393,15 +421,20 @@ def purge_profile_receipts(learning_db_path: str | Path, profile_id: str) -> int
             row[0]
             for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name IN ('agent_experiences', 'cognitive_turn_receipts')"
+                "AND name IN ('agent_experiences', 'cognitive_turn_receipts', "
+                "'agent_receipt_profile_closures')"
             )
         }
     if not tables:
         return 0
-    expected = {"agent_experiences", "cognitive_turn_receipts"}
+    expected = {
+        "agent_experiences", "cognitive_turn_receipts", "agent_receipt_profile_closures"
+    }
     if tables != expected:
         raise sqlite3.OperationalError("incomplete Agent Experience receipt schema")
-    return AgentExperienceStore(path, is_profile_active=lambda _: True).erase_profile(profile_id)
+    return AgentExperienceStore(
+        path, is_profile_active=lambda _: True
+    ).erase_profile(profile_id, close_profile=close_profile)
 
 
 def get_profile_receipt_summary(
@@ -413,24 +446,25 @@ def get_profile_receipt_summary(
     It is safe to call from MCP, CLI, HTTP, and the dashboard without opening a
     memory engine or entering the recall/remember writer domains.
     """
-    empty: dict[str, Any] = {
-        "is_real": True,
+    unavailable: dict[str, Any] = {
+        "is_real": False,
+        "availability": "unavailable",
         "experiences_total": 0,
         "turns_total": 0,
         "turns_by_state": {},
-        "verified_experiences": 0,
+        "claimed_evidence_experiences": 0,
         "source": "learning.db:agent_experiences,cognitive_turn_receipts",
     }
     path = Path(learning_db_path)
     if not path.exists():
-        return empty
+        return unavailable
     try:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
         try:
             experience = conn.execute(
                 "SELECT COUNT(*) FROM agent_experiences WHERE profile_id=?", (profile_id,)
             ).fetchone()
-            verified = conn.execute(
+            claimed = conn.execute(
                 "SELECT COUNT(*) FROM agent_experiences "
                 "WHERE profile_id=? AND verification_authority != 'bounded_loop_receipt'",
                 (profile_id,),
@@ -443,12 +477,14 @@ def get_profile_receipt_summary(
         finally:
             conn.close()
     except sqlite3.Error:
-        return empty
+        return unavailable
     turns_by_state = {str(state): int(count) for state, count in rows}
     return {
-        **empty,
+        **unavailable,
+        "is_real": True,
+        "availability": "available",
         "experiences_total": int(experience[0]) if experience else 0,
-        "verified_experiences": int(verified[0]) if verified else 0,
+        "claimed_evidence_experiences": int(claimed[0]) if claimed else 0,
         "turns_total": sum(turns_by_state.values()),
         "turns_by_state": turns_by_state,
     }

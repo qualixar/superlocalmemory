@@ -17,6 +17,7 @@ from superlocalmemory.storage.agent_experience import (
     CognitiveTurnTransitionError,
     LearningWriteBusyError,
     ProfileAdmissionError,
+    get_profile_receipt_summary,
     purge_profile_receipts,
 )
 from superlocalmemory.storage.database import DatabaseManager
@@ -80,6 +81,13 @@ def test_m040_is_eager_learning_only_and_never_creates_receipts_in_memory(tmp_pa
             ).fetchone()
             is None
         )
+
+
+def test_absent_receipt_store_is_honestly_unavailable(tmp_path: Path) -> None:
+    summary = get_profile_receipt_summary(tmp_path / "missing-learning.db", "alpha")
+    assert summary["is_real"] is False
+    assert summary["availability"] == "unavailable"
+    assert summary["experiences_total"] == 0
 
 
 def test_experience_is_profile_scoped_idempotent_and_reconstructs_contract(
@@ -158,6 +166,29 @@ def test_closed_profile_rejects_new_receipts_after_purge(store: AgentExperienceS
     assert store.erase_profile("alpha") == 1
     with pytest.raises(ProfileAdmissionError, match="closing"):
         store.record_experience(_experience())
+
+
+def test_durable_closure_blocks_a_fresh_store_after_profile_erasure(tmp_path: Path) -> None:
+    """The durable sidecar closes the race a process-local gate cannot see."""
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        m040.apply(conn)
+    first = AgentExperienceStore(path, is_profile_active=lambda _: True)
+    second = AgentExperienceStore(path, is_profile_active=lambda _: True)
+    assert first.record_experience(_experience())
+    assert first.erase_profile("alpha") == 1
+    with pytest.raises(ProfileAdmissionError, match="inactive or closing"):
+        second.record_experience(_experience())
+
+
+def test_learning_reset_purges_receipts_without_closing_active_profile(
+    store: AgentExperienceStore,
+) -> None:
+    from superlocalmemory.learning.database import LearningDatabase
+
+    assert store.record_experience(_experience())
+    LearningDatabase(store._path).reset("alpha")
+    assert store.record_experience(_experience())
 
 
 def test_learning_reset_purges_agent_receipts_when_m040_exists(store: AgentExperienceStore) -> None:
@@ -297,3 +328,20 @@ def test_m040_refuses_malformed_populated_tables_but_repairs_an_index_atomically
         conn.execute("ALTER TABLE agent_experiences ADD COLUMN unsafe TEXT")
         with pytest.raises(sqlite3.OperationalError, match="malformed"):
             m040.repair(conn)
+
+
+def test_m040_rebuilds_same_named_index_from_the_wrong_table(tmp_path: Path) -> None:
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE stale (profile_id TEXT, occurred_at TEXT)")
+        conn.execute(
+            "CREATE INDEX idx_agent_experiences_profile_occurred "
+            "ON stale (profile_id, occurred_at)"
+        )
+        m040.apply(conn)
+        assert m040.verify(conn) is True
+        owner = conn.execute(
+            "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?",
+            ("idx_agent_experiences_profile_occurred",),
+        ).fetchone()
+        assert owner == ("agent_experiences",)

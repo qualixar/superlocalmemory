@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS cognitive_turn_receipts (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, receipt_id)
 );
+CREATE TABLE IF NOT EXISTS agent_receipt_profile_closures (
+    profile_id TEXT PRIMARY KEY,
+    closed_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_agent_experiences_profile_occurred
     ON agent_experiences (profile_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_experiences_profile_project_occurred
@@ -94,10 +98,12 @@ _TABLE_COLUMNS = {
         "created_at",
         "updated_at",
     ),
+    "agent_receipt_profile_closures": ("profile_id", "closed_at"),
 }
 _PRIMARY_KEYS = {
     "agent_experiences": ("profile_id", "experience_id"),
     "cognitive_turn_receipts": ("profile_id", "receipt_id"),
+    "agent_receipt_profile_closures": ("profile_id",),
 }
 _COLUMN_TYPES = {
     "agent_experiences": (
@@ -121,6 +127,7 @@ _COLUMN_TYPES = {
         "TEXT",
     ),
     "cognitive_turn_receipts": ("TEXT",) * len(_TABLE_COLUMNS["cognitive_turn_receipts"]),
+    "agent_receipt_profile_closures": ("TEXT", "TEXT"),
 }
 _REQUIRED_NOT_NULL = {
     "agent_experiences": frozenset(_TABLE_COLUMNS["agent_experiences"])
@@ -133,6 +140,7 @@ _REQUIRED_NOT_NULL = {
     },
     "cognitive_turn_receipts": frozenset(_TABLE_COLUMNS["cognitive_turn_receipts"])
     - {"outcome_json"},
+    "agent_receipt_profile_closures": frozenset(_TABLE_COLUMNS["agent_receipt_profile_closures"]),
 }
 _INDEXES = {
     "idx_agent_experiences_profile_occurred": ("agent_experiences", ("profile_id", "occurred_at")),
@@ -157,7 +165,15 @@ def apply(conn: sqlite3.Connection) -> None:
         return
     if _tables_are_malformed(conn):
         raise sqlite3.OperationalError("M040 receipt tables are malformed; refusing rebuild")
+    if all(name in _tables(conn) for name in _TABLE_COLUMNS):
+        repair(conn)
+        return
     conn.executescript(DDL)
+    if not verify(conn):
+        # A pre-existing same-named index can make CREATE INDEX IF NOT EXISTS
+        # a no-op even though that index belongs to another table. Rebuild the
+        # derived index set transactionally after all required tables exist.
+        repair(conn)
     if not verify(conn):
         raise sqlite3.OperationalError("M040 schema did not reach its required end-state")
 
@@ -214,9 +230,10 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 
 def _index_columns(conn: sqlite3.Connection, name: str) -> tuple[str, ...] | None:
     row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (name,)
+        "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?", (name,)
     ).fetchone()
-    if row is None:
+    expected = _INDEXES.get(name)
+    if row is None or expected is None or row[0] != expected[0]:
         return None
     return tuple(
         row[2]
@@ -232,4 +249,6 @@ def _required_checks_present(conn: sqlite3.Connection, table: str) -> bool:
     sql = "" if sql_row is None or sql_row[0] is None else "".join(str(sql_row[0]).lower().split())
     if table == "agent_experiences":
         return "check(human_interventionin(0,1))" in sql
-    return "check(statein('open','finalized','abandoned','reconciled'))" in sql
+    if table == "cognitive_turn_receipts":
+        return "check(statein('open','finalized','abandoned','reconciled'))" in sql
+    return True

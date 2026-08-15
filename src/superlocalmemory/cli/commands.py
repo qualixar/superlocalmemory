@@ -3729,7 +3729,7 @@ def cmd_brain(args: Namespace) -> None:
     print("SuperLocalMemory Living Brain")
     print(f"  Profile: {profile_id}")
     print(f"  Agent experiences: {evidence['experiences_total']}")
-    print(f"  Evidence-backed experiences: {evidence['verified_experiences']}")
+    print(f"  Claimed evidence authority: {evidence['claimed_evidence_experiences']}")
     print(f"  Cognitive turns: {evidence['turns_total']}")
     if evidence["turns_by_state"]:
         states = ", ".join(
