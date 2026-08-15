@@ -245,17 +245,28 @@ class AgentExperienceStore:
             turn_count = conn.execute(
                 "DELETE FROM cognitive_turn_receipts WHERE profile_id=?", (profile_id,)
             ).rowcount
+            external_count = 0
+            has_external = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_evidence_receipts'"
+            ).fetchone() is not None
+            if has_external:
+                external_count = conn.execute(
+                    "DELETE FROM external_evidence_receipts WHERE profile_id=?", (profile_id,)
+                ).rowcount
+            receipt_tables = ["agent_experiences", "cognitive_turn_receipts"]
+            if has_external:
+                receipt_tables.append("external_evidence_receipts")
             residue = sum(
                 int(
                     conn.execute(
                         f"SELECT COUNT(*) FROM {table} WHERE profile_id=?", (profile_id,)
                     ).fetchone()[0]
                 )
-                for table in ("agent_experiences", "cognitive_turn_receipts")
+                for table in receipt_tables
             )
             if residue:
                 raise RuntimeError("learning receipt erasure left profile residue")
-            return experience_count + turn_count
+            return experience_count + turn_count + external_count
 
         return self._write(erase)
 
@@ -422,7 +433,7 @@ def purge_profile_receipts(
             for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name IN ('agent_experiences', 'cognitive_turn_receipts', "
-                "'agent_receipt_profile_closures')"
+                "'agent_receipt_profile_closures', 'external_evidence_receipts')"
             )
         }
     if not tables:
@@ -431,6 +442,14 @@ def purge_profile_receipts(
         "agent_experiences", "cognitive_turn_receipts", "agent_receipt_profile_closures"
     }
     if tables != expected:
+        if tables == expected | {"external_evidence_receipts"}:
+            from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
+
+            with sqlite3.connect(path) as conn:
+                if m041.verify(conn):
+                    return AgentExperienceStore(
+                        path, is_profile_active=lambda _: True
+                    ).erase_profile(profile_id, close_profile=close_profile)
         raise sqlite3.OperationalError("incomplete Agent Experience receipt schema")
     return AgentExperienceStore(
         path, is_profile_active=lambda _: True

@@ -230,6 +230,7 @@
     var feedback = (living && living.feedback) || {};
     var graph = (living && living.graph) || {};
     var experience = (living && living.agent_experience) || {};
+    var externalEvidence = experience.external_graph_evidence || {};
 
     // KPI strip
     var strip = EL('div', { className: 'kpi-strip', style: 'margin-bottom:16px' });
@@ -318,6 +319,8 @@
       ['Claimed evidence authority', String(experience.claimed_evidence_experiences || 0)],
       ['Cognitive turns', String(experience.turns_total || 0) +
         ' · ' + String((experience.turns_by_state || {}).finalized || 0) + ' finalized'],
+      ['Bounded Loop observations', String(externalEvidence.total || 0) +
+        (externalEvidence.is_real ? ' terminal receipts' : ' unavailable')],
       ['Graph evidence', String(graph.fact_nodes || 0) + ' nodes · ' +
         String(graph.association_edges || 0) + ' edges'],
     ].forEach(function (row) {
@@ -362,6 +365,12 @@
       fmtNum((experience.turns_by_state || {}).open || 0) + ' open · ' +
         fmtNum((experience.turns_by_state || {}).finalized || 0) + ' finalized',
       Number(experience.turns_total || 0) > 0, undefined, true));
+    evGrid.appendChild(kpiCard('account_tree', 'Bounded Loop observations',
+      fmtNum(externalEvidence.total || 0),
+      externalEvidence.is_real
+        ? fmtNum(externalEvidence.demonstrations || 0) + ' demonstrations · no automatic learning'
+        : 'connect Bounded Loops to observe terminal runs',
+      Number(externalEvidence.total || 0) > 0, undefined, true));
     evb.appendChild(evGrid);
     evc.appendChild(evb);
     sec.appendChild(evc);

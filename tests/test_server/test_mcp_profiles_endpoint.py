@@ -20,9 +20,9 @@ _ENDPOINT = "/api/v3/mcp/profiles"
 
 _EXPECTED_COUNTS = {
     "core": 14,
-    "code": 28,   # v4.0.3: portable Brain receipts + code graph/loops
-    "full": 46,   # v4.0.3: everyday memory, Brain, optimize, and mesh
-    "power": 58,  # v4.0.3: full plus governance/lifecycle diagnostics
+    "code": 29,   # v4.0.4: Brain bridge + code graph/loops
+    "full": 47,   # v4.0.4: everyday memory, Brain, optimize, and mesh
+    "power": 59,  # v4.0.4: full plus governance/lifecycle diagnostics
     "mesh": 8,
 }
 

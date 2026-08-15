@@ -1,6 +1,6 @@
-# SuperLocalMemory V4.0.3
+# SuperLocalMemory V4.0.4
 
-> **V4.0.3 — governed local-first agent memory control plane built on the V3.8 foundation:
+> **V4.0.4 — governed local-first agent memory control plane built on the V3.8 foundation:
 > local-first agent memory, 5-channel retrieval, cache, compression, trusted-peer
 > coordination, team workspaces, roles, and governance controls.**
 
@@ -11,15 +11,22 @@ canonical local store. The product also includes an explicit Scale Engine for
 CozoDB graph and LanceDB vector projections, a cache/compression module, and
 **SLM-Mesh** coordination controls.
 
-> **V4.0.3 is the current release** (see [CHANGELOG](https://github.com/qualixar/superlocalmemory/blob/main/CHANGELOG.md) and `src/superlocalmemory/__init__.py`). Every Current page in this Wiki describes V4. Historical V3 research pages are labeled as historical and carried forward where still accurate.
+> **V4.0.4 is the current release** (see [CHANGELOG](https://github.com/qualixar/superlocalmemory/blob/main/CHANGELOG.md) and `src/superlocalmemory/__init__.py`). Every Current page in this Wiki describes V4. Historical V3 research pages are labeled as historical and carried forward where still accurate.
 
-## What changed in V4.0.3
+## What changed in V4.0.4
 
-V4.0.3 adds consented host-integration upgrades. `slm upgrade-hosts` is always a
+V4.0.4 keeps consented host-integration upgrades. `slm upgrade-hosts` is always a
 read-only preview until an operator selects named hosts (or explicitly approves
 all detected hosts) with `--apply`. It preserves existing MCP blocks and only
 refreshes SLM-owned Codex assets. Normal CLI and MCP startup never silently
 installs or updates Claude Code hooks. See [Host Upgrades](Host-Upgrades).
+
+It also adds an optional Bounded Loops MCP 2 evidence bridge. When the separate
+`bounded-loops-mcp` product is installed, an agent can explicitly observe a
+workspace's terminal graph receipts. SLM stores compatible v1 receipts in its
+profile-scoped `learning.db` and shows them in Living Brain. This is not an
+automatic learning path: the evidence never changes recall, ranking, routing,
+or reward. See [MCP Tools](MCP-Tools).
 
 V4 keeps the multi-channel retrieval and local-first store from the V3 research line, and productizes governed writes, **SLM-Mesh** peer coordination, multi-scope profiles, cache/compress, Entity Explorer and skill evolution, Modes A/B/C, and GDPR-oriented retention/audit controls. Operating mode is not legal certification under the EU AI Act — deployment context decides legal duties.
 

@@ -35,6 +35,7 @@ def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
     assert "M038_learning_feedback_channel" in eager_names
     assert "M039_scene_fact_members" in deferred_names
     assert "M040_agent_experience_receipts" in eager_names
+    assert "M041_external_evidence_receipts" in eager_names
     assert len(all_names) == len(set(all_names))
     targets = {
         migration.name: migration.db_target
@@ -43,7 +44,8 @@ def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
     assert targets["M033_projection_transactions"] == "memory"
     assert targets["M038_learning_feedback_channel"] == "learning"
     assert targets["M040_agent_experience_receipts"] == "learning"
-    assert SUPPORTED_SCHEMA_VERSION == 40
+    assert targets["M041_external_evidence_receipts"] == "learning"
+    assert SUPPORTED_SCHEMA_VERSION == 41
 
 
 def test_schema_40_is_stamped_only_after_m040_completes(tmp_path: Path) -> None:

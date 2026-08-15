@@ -82,10 +82,10 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 
 ## Tool reference (core profile — 14 tools)
 
-> The MCP config ships `SLM_MCP_PROFILE=code` (28 tools): the 14 core memory tools below
+> The MCP config ships `SLM_MCP_PROFILE=code` (29 tools): the 14 core memory tools below
 > **plus** 6 code-graph tools (`build_code_graph`, `get_blast_radius`, `query_graph`,
 > `semantic_search_code`, `get_review_context`, `detect_changes`) and `switch_profile`.
-> Use `full` (46 tools) to add mesh coordination. Use `power` (58 tools) for governance
+> Use `full` (47 tools) to add mesh coordination. Use `power` (59 tools) for governance
 > and audit tools. See slm-profile for profile switching.
 
 | Tool               | Signature (key params)                                                                       | Notes                                  |
@@ -128,4 +128,4 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 - **slm-optimize-advisor** — context compression and KV cache
 - **slm-governance-advisor** — scope/role compliance, retention policies, GDPR
 
-SuperLocalMemory v4.0.3 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.4 · Qualixar · AGPL-3.0-or-later

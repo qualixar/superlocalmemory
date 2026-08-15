@@ -1,7 +1,7 @@
 ---
 name: slm-graph
 description: >
-version: "4.0.3"
+version: "4.0.4"
 agent: agent
 tools:
   - build_code_graph
@@ -306,4 +306,4 @@ profile. See `slm-profile` for the full profile switching workflow.
 
 ---
 
-SuperLocalMemory v4.0.3 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.4 · Qualixar · AGPL-3.0-or-later

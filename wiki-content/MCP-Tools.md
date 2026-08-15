@@ -1,4 +1,4 @@
-# MCP Tools — V4.0.3 (91 whole)
+# MCP Tools — V4.0.4 (92 whole)
 
 SuperLocalMemory exposes profile-selected tools and resources through the Model
 Context Protocol (MCP). The installed profile registry (`src/superlocalmemory/mcp/profiles.py` and `src/superlocalmemory/mcp/server.py`) is the source of truth
@@ -6,7 +6,7 @@ for names and counts. An MCP-compatible client still decides when to call a
 tool.
 
 > **Current V4 profile counts (from `CHANGELOG.md` and the MCP exposure contract `tests/test_mcp/test_mcp_exposure_contract.py` / `tests/mcp/test_profile_selector.py`):**
-> `core` **14**, `code` **28** (installed coding agents), `full` **46**, `power` **58**, `whole` **91** (all registered), plus `mesh` **8**. The unrestricted default surface is **46** with mesh enabled. See also `src/superlocalmemory/mcp/profiles.py`.
+> `core` **14**, `code` **29** (installed coding agents), `full` **47**, `power` **59**, `whole` **92** (all registered), plus `mesh` **8**. The unrestricted default surface is **47** with mesh enabled. See also `src/superlocalmemory/mcp/profiles.py`.
 
 > **Optimize tools:** `slm_compress`, `slm_retrieve`, `slm_cache_set`,
 > `slm_cache_get`, and `slm_optimize_stats` provide explicit compression and
@@ -130,7 +130,7 @@ boundary.
 
 > **Hard constraint:** Surfaces B and C cache results you explicitly route through SLM — not the Claude conversation turn. Full-turn caching requires Surface A (proxy).
 
-## MCP Profiles (V4.0.3 — whole is 91)
+## MCP Profiles (V4.0.4 — whole is 92)
 
 A profile is a named, fixed subset of tools exposed to the connecting client.
 Set the active profile via the `SLM_MCP_PROFILE` environment variable (or `SLM_MCP_ALL_TOOLS`/`SLM_MCP_TOOLS` overrides — see `src/superlocalmemory/mcp/server.py` precedence: `ALL > TOOLS > PROFILE > default`). `whole` exposes the raw server with all registered tools; `switch_profile` tool switches the active workspace profile (separate concept).
@@ -138,15 +138,29 @@ Set the active profile via the `SLM_MCP_PROFILE` environment variable (or `SLM_M
 | Profile | Tool count | Included surfaces |
 |---|---|---|
 | `core` | **14** | Store, recall, search, sessions, optimize (5 tools) |
-| `code` | **28** | Core + portable Brain evidence + code graph + `switch_profile` + 3 bounded-loop tools |
-| `full` | **46** | All everyday memory, portable Brain evidence, optimize, and mesh tools |
-| `power` | **58** | Full + governance and behavioral analysis tools |
+| `code` | **29** | Core + portable Brain evidence + code graph + `switch_profile` + 3 bounded-loop tools |
+| `full` | **47** | All everyday memory, portable Brain evidence, optimize, and mesh tools |
+| `power` | **59** | Full + governance and behavioral analysis tools |
 | `mesh` | **8** | SLM-Mesh coordination only |
-| `whole` | **91** | All registered tools (raw server) — verified by `tests/test_mcp/test_mcp_exposure_contract.py` `whole == 91` |
+| `whole` | **92** | All registered tools (raw server) — verified by `tests/test_mcp/test_mcp_exposure_contract.py` `whole == 92` |
 
-> **Why 91 not 87:** V4.0.3 exposes four portable Brain evidence tools to installed coding agents and every named everyday profile. Earlier `whole81`/`whole84` aliases still resolve to `whole`; `whole91` names the current registered surface.
+> **Why 92 not 91:** V4.0.4 adds one explicit Bounded Loops observation tool to the portable Brain surface. Earlier `whole81`/`whole84`/`whole91` aliases still resolve to `whole`; `whole92` names the current registered surface.
 
-Legacy count-suffixed aliases (`core14`, `code20`/`code21`/`code24`/`code28`, `full38`/`full39`/`full42`/`full46`, `power50`/`power51`/`power54`/`power58`, `mesh8`, and `whole81`/`whole84`/`whole91`) resolve to their canonical name for backward compatibility and emit a migration warning.
+Legacy count-suffixed aliases (`core14`, `code20`/`code21`/`code24`/`code28`/`code29`, `full38`/`full39`/`full42`/`full46`/`full47`, `power50`/`power51`/`power54`/`power58`/`power59`, `mesh8`, and `whole81`/`whole84`/`whole91`/`whole92`) resolve to their canonical name for backward compatibility and emit a migration warning.
+
+### Optional Bounded Loops evidence bridge
+
+`observe_bounded_loop_evidence(workspace)` is available in the default,
+`code`, `full`, `power`, and `whole` surfaces when the separate
+`bounded-loops-mcp` executable is installed. It negotiates the producer's
+`bounded-loops.dev/slm-bridge/v1` capability, lists terminal runs, and uses
+each returned `run_ref` to fetch one sanitized receipt. It never accepts an
+agent-supplied command or shell arguments.
+
+Receipts enter SLM's active profile in `learning.db` and appear in Living Brain
+as Bounded Loop observations. They are observation-only: compatible v1
+evidence has `eligible_for_learning: false`, so it cannot alter recall,
+ranking, routing, reward, or automatic behavioural learning.
 
 The three bounded-loop tools (`slm_loop_run`, `slm_loop_history`,
 `slm_loop_show`) are included in `code`, `full`, `power`, and `whole`.

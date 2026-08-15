@@ -123,9 +123,9 @@ def _register_every_tool(target) -> None:
     (
         # Portable Brain evidence is deliberately reachable from default MCP
         # clients; prestage_context remains a raw-server-only tool.
-        ("essential", "", 46),
+        ("essential", "", 47),
         ("named-core", "core", 14),
-        ("whole", "whole", 91),
+        ("whole", "whole", 92),
     ),
 )
 def test_registration_exposure_is_exact_and_duplicate_free(
@@ -236,14 +236,14 @@ async def test_attribution_reports_current_product_identity(
 def test_imported_server_exposes_product_name_and_whole_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Imported MCP server keeps product identity and whole surface at 91."""
+    """Imported MCP server keeps product identity and whole surface at 92."""
     mod = _fresh_server(monkeypatch, "whole")
     # Public SLMFastMCP/MCPServer attribute — do not assert private internals.
     assert mod.server.name == "SuperLocalMemory V4"
     strict = _StrictToolServer()
     _register_every_tool(strict)
-    assert len(strict.tools) == 91
+    assert len(strict.tools) == 92
     actual_names = [tool.name for tool in mod.server._tool_manager.list_tools()]
-    assert len(actual_names) == 91
+    assert len(actual_names) == 92
     assert len(actual_names) == len(set(actual_names))
     assert set(actual_names) == set(strict.tools)

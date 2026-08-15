@@ -327,7 +327,12 @@ def _compute_agent_experience(profile_id: str) -> dict:
     Receipt rows record observation and verification evidence only; this read
     model never alters retrieval, ranking, or model routing.
     """
-    return get_profile_receipt_summary(_learning_db_path(), profile_id)
+    from superlocalmemory.storage.external_evidence import get_profile_external_evidence_summary
+    path = _learning_db_path()
+    return {
+        **get_profile_receipt_summary(path, profile_id),
+        "external_graph_evidence": get_profile_external_evidence_summary(path, profile_id),
+    }
 
 
 def _resolve_phase(signals: int, model_active: bool,

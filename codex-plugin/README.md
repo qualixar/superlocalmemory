@@ -2,7 +2,7 @@
 
 Local-first agent memory + reversible context compression for OpenAI Codex CLI.
 
-SuperLocalMemory v4.0.3 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.4 · Qualixar · AGPL-3.0-or-later
 
 ---
 
@@ -11,7 +11,7 @@ SuperLocalMemory v4.0.3 · Qualixar · AGPL-3.0-or-later
 | Capability         | How                                            |
 |--------------------|------------------------------------------------|
 | Agent rules        | `AGENTS.md` — loaded automatically per project |
-| MCP memory tools   | `.codex/config.toml` — 28-tool code profile with portable Brain evidence |
+| MCP memory tools   | `.codex/config.toml` — 29-tool code profile with portable Brain evidence |
 | Lifecycle hooks    | `hooks/hooks.json` — session start/stop/prompt |
 | Slash skills       | `skills/*/SKILL.md` — 11 skills via `/skills`  |
 | Venv launcher      | `scripts/slm-launch` — optional isolated mode  |
@@ -190,4 +190,4 @@ root (not inside a subdirectory), then restart Codex.
 
 ---
 
-SuperLocalMemory v4.0.3 · Qualixar · https://github.com/qualixar/superlocalmemory
+SuperLocalMemory v4.0.4 · Qualixar · https://github.com/qualixar/superlocalmemory

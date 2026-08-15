@@ -100,6 +100,9 @@ _ESSENTIAL_TOOLS: set[str] = {
     # v4.0.2 portable Brain evidence: profile-scoped receipt reads/writes.
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
+    # v4.0.4: explicit, optional observation from the separately installed
+    # Bounded Loops MCP producer. It never participates in recall/ranking.
+    "observe_bounded_loop_evidence",
     # Memory management (2)
     "forget", "run_maintenance",
     # NOTE: prestage_context IS registered (see register_prestage_tool below)

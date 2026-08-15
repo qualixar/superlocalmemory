@@ -185,6 +185,8 @@ def test_living_brain_is_an_honest_observation_read_model(
     assert living["source_quality"]["mean_quality"] is None
     assert living["agent_experience"]["experiences_total"] == 0
     assert living["agent_experience"]["claimed_evidence_experiences"] == 0
+    assert living["agent_experience"]["external_graph_evidence"]["is_real"] is False
+    assert living["agent_experience"]["external_graph_evidence"]["total"] == 0
 
 
 def test_feedback_loop_uses_canonical_signal_rows(

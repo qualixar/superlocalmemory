@@ -5,6 +5,28 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.4] - 2026-08-15 — Optional Bounded Loops evidence bridge
+
+### Added
+- An optional MCP 2 bridge discovers the separately installed
+  `bounded-loops-mcp` producer at call time and negotiates the public
+  `bounded-loops.dev/slm-bridge/v1` capability rather than pinning a producer
+  package version.
+- `observe_bounded_loop_evidence(workspace)` explicitly imports sanitized
+  terminal graph evidence using the producer's `run_ref` address. It is
+  available in the default, `code`, `full`, and `power` MCP surfaces.
+- M041 stores typed, profile-scoped external evidence in `learning.db`; Living
+  Brain displays honest Bounded Loop observation totals and documentation
+  explains the independent-product contract.
+
+### Safety
+- The bridge accepts no caller-supplied executable or shell arguments, has a
+  five-second producer timeout, validates the exact v1 evidence shape, and
+  preserves `eligible_for_learning: false`.
+- External receipts never enter recall, ranking, routing, reward, or automatic
+  learning. Profile erasure removes them and a durable tombstone blocks stale
+  processes from recreating them.
+
 ## [4.0.3] - 2026-08-15 — Consented host integration upgrades
 
 ### Added

@@ -1,6 +1,6 @@
 ---
 
-**SuperLocalMemory V4.0.3** — Local-first memory with explicit data-path controls. Current docs: [Home](Home) · [Installation](Installation) · [CLI](CLI-Reference) · [MCP whole 91 (full 46)](MCP-Tools) · [FAQ](FAQ)
+**SuperLocalMemory V4.0.4** — Local-first memory with explicit data-path controls. Current docs: [Home](Home) · [Installation](Installation) · [CLI](CLI-Reference) · [MCP whole 92 (full 47)](MCP-Tools) · [FAQ](FAQ)
 
 Part of [Qualixar](https://qualixar.com) | Created by [Varun Pratap Bhardwaj](https://varunpratap.com) | [GitHub](https://github.com/qualixar/superlocalmemory) · [CHANGELOG](https://github.com/qualixar/superlocalmemory/blob/main/CHANGELOG.md)
 

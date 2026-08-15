@@ -154,6 +154,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M040_agent_experience_receipts as _M040,
 )
+from superlocalmemory.storage.migrations import (
+    M041_external_evidence_receipts as _M041,
+)
 from superlocalmemory.storage._schema_version import (
     SUPPORTED_SCHEMA_VERSION,
     SchemaVersionError,
@@ -234,6 +237,8 @@ MIGRATIONS: list[Migration] = [
     # lifecycle performs explicit cross-store erasure rather than an FK.
     Migration(name=_M040.NAME, db_target="learning", ddl=_M040.DDL,
               dependencies=(_M003.NAME,)),
+    Migration(name=_M041.NAME, db_target="learning", ddl=_M041.DDL,
+              dependencies=(_M040.NAME,)),
     # M006 + M011 are deliberately NOT here — see DEFERRED_MIGRATIONS below.
 ]
 

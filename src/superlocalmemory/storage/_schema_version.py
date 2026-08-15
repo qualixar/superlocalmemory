@@ -21,9 +21,9 @@ import sqlite3
 from pathlib import Path
 
 #: Highest schema_version this runner can write.  Matches the trailing serial
-#: of the latest migration (M040).  Increment when adding new migrations or
+#: of the latest migration (M041).  Increment when adding new migrations or
 #: table-level breaking changes.
-SUPPORTED_SCHEMA_VERSION: int = 40
+SUPPORTED_SCHEMA_VERSION: int = 41
 
 
 class SchemaVersionError(RuntimeError):

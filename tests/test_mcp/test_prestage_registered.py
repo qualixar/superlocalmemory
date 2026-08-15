@@ -32,7 +32,7 @@ def _load_server():
 def test_prestage_context_absent_from_counted_profiles():
     """prestage_context is registered but must NOT grow the counted profiles.
 
-    Brain evidence deliberately grew the named profiles in V4.0.3; this test
+    Brain evidence deliberately grew the named profiles in V4.0.4; this test
     only guards that prestage_context remains raw-server-only. Reachability is
     covered by ``test_prestage_context_registered_on_server``.
     """
@@ -40,9 +40,9 @@ def test_prestage_context_absent_from_counted_profiles():
     assert "prestage_context" not in mod._ESSENTIAL_TOOLS
     assert "prestage_context" not in mod._PROFILE_DEFINITIONS["full"]
     assert "prestage_context" not in mod._PROFILE_DEFINITIONS["power"]
-    assert len(mod._ESSENTIAL_TOOLS) == 46
-    assert len(mod._PROFILE_DEFINITIONS["full"]) == 46
-    assert len(mod._PROFILE_DEFINITIONS["power"]) == 58
+    assert len(mod._ESSENTIAL_TOOLS) == 47
+    assert len(mod._PROFILE_DEFINITIONS["full"]) == 47
+    assert len(mod._PROFILE_DEFINITIONS["power"]) == 59
 
 
 def test_prestage_context_registered_on_server():

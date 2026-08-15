@@ -32,7 +32,7 @@ if "OMP_NUM_THREADS" not in os.environ:
     os.environ["OMP_NUM_THREADS"] = "2"
 # ---------------------------------------------------------------------------
 
-__version__ = "4.0.3"
+__version__ = "4.0.4"
 
 _REQUIRED_VERSIONS = {
     "sentence_transformers": "5.3.0",

@@ -28,9 +28,10 @@ _PROFILE_CORE: frozenset[str] = frozenset({  # 14
 _PROFILE_BRAIN: frozenset[str] = frozenset({
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
+    "observe_bounded_loop_evidence",
 })
 
-_PROFILE_CODE: frozenset[str] = _PROFILE_CORE | _PROFILE_BRAIN | frozenset({  # 28
+_PROFILE_CODE: frozenset[str] = _PROFILE_CORE | _PROFILE_BRAIN | frozenset({  # 29
     "build_code_graph", "get_blast_radius", "query_graph",
     "semantic_search_code", "get_review_context", "detect_changes",
     # switch_profile lets a plugin/IDE session change the active workspace over
@@ -47,21 +48,22 @@ _PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 8
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
 })
 
-_PROFILE_FULL: frozenset[str] = frozenset({  # 38 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
+_PROFILE_FULL: frozenset[str] = frozenset({  # 39 base — EXPLICIT literal, NOT runtime _ESSENTIAL_TOOLS (OQ-2)
     "remember", "recall", "search", "fetch", "list_recent", "delete_memory", "update_memory",
     "get_status", "session_init", "observe", "close_session", "report_feedback", "forget",
     "run_maintenance", "consolidate_cognitive", "get_soft_prompts", "set_mode", "report_outcome",
     "log_tool_event", "get_assertions", "reinforce_assertion", "contradict_assertion",
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
+    "observe_bounded_loop_evidence",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # v3.8.0: bounded-loop tools (CLI + /slm-loop command + MCP).
     "slm_loop_run", "slm_loop_history", "slm_loop_show",
     # prestage_context remains registered but deliberately raw-server-only.
-}) | _PROFILE_FULL_MESH  # 46
+}) | _PROFILE_FULL_MESH  # 47
 
-_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 58
+_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 59
     "get_version", "get_mode", "health", "consistency_check", "recall_trace",
     "get_lifecycle_status", "set_retention_policy", "compact_memories",
     "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",
@@ -84,25 +86,29 @@ _PROFILE_DEFINITIONS: dict[str, frozenset[str]] = {
 # at server startup.  Any other value is a configuration error (fail closed).
 _PROFILE_ALIASES: dict[str, str] = {
     "core14": "core",
-    # 3.8.0: switch_profile (+1) then bounded-loop tools (+3) grew code/full/
+    # 3.8.0 and later additions grew code/full/power; every historical count
     # power. Every historical count-suffixed name is kept so a v3.6/3.7/early-
     # 3.8 config still resolves (back-compat); new 3.8.0 counts added alongside.
     "code20": "code",
     "code21": "code",
     "code24": "code",
     "code28": "code",
+    "code29": "code",
     "full38": "full",
     "full39": "full",
     "full42": "full",
     "full46": "full",
+    "full47": "full",
     "power50": "power",
     "power51": "power",
     "power54": "power",
     "power58": "power",
+    "power59": "power",
     "mesh8": "mesh",
     "whole81": "whole",
     "whole84": "whole",
     "whole91": "whole",
+    "whole92": "whole",
 }
 
 # Plain-English descriptions for UI display.

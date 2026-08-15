@@ -31,9 +31,9 @@ project, a client engagement, a production vs staging environment.
 | Profile | Tools | When to use |
 |---------|-------|-------------|
 | `core` | 14 tools — remember, recall, search, session, optimize | Minimal footprint, no code tools |
-| `code` | 28 tools — core + portable Brain evidence + code graph + profile switching + bounded loops | Default for IDE/coding agents |
-| `full` | 46 tools — code + all memory ops + mesh + bounded loops | Multi-session, team workflows |
-| `power` | 58 tools — full + governance + behavioral tools | Enterprise, admin, audit use cases |
+| `code` | 29 tools — core + portable Brain evidence + code graph + profile switching + bounded loops | Default for IDE/coding agents |
+| `full` | 47 tools — code + all memory ops + mesh + bounded loops | Multi-session, team workflows |
+| `power` | 59 tools — full + governance + behavioral tools | Enterprise, admin, audit use cases |
 | `mesh` | 8 tools — mesh coordination only | Lightweight cross-session signalling |
 
 The profile is set at MCP server startup via `SLM_MCP_PROFILE` in the MCP config.
@@ -145,4 +145,4 @@ Name them differently in your MCP config (e.g. `superlocalmemory-personal` and
 
 ---
 
-*SuperLocalMemory v4.0.3 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.0.4 · Qualixar · AGPL-3.0-or-later*

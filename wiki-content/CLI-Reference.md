@@ -1,8 +1,8 @@
-# CLI Reference — V4.0.3
+# CLI Reference — V4.0.4
 
 The installed CLI is the command source of truth. Use `slm --help` and
 `slm <command> --help`; commands that advertise `--json` provide structured
-output. This page describes **V4.0.3**; the installed `--help` wins if prose drifts.
+output. This page describes **V4.0.4**; the installed `--help` wins if prose drifts.
 
 ## Setup & Status
 

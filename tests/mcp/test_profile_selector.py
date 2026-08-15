@@ -68,12 +68,13 @@ def test_profile_core_exact():
 
 
 # ---------------------------------------------------------------------------
-# RED-3: code == core | Brain + code-graph + switch_profile + loops (==28)
+# RED-3: code == core | Brain + code-graph + switch_profile + loops (==29)
 # ---------------------------------------------------------------------------
 
 _CODE_EXTRA = frozenset({
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
+    "observe_bounded_loop_evidence",
     "build_code_graph", "get_blast_radius", "query_graph",
     "semantic_search_code", "get_review_context", "detect_changes",
     # 3.8.0: plugin (code profile) can switch the active workspace over MCP.
@@ -90,11 +91,11 @@ def test_profile_code_exact():
     assert code == expected, (
         f"code diff — extra: {code - expected}, missing: {expected - code}"
     )
-    assert len(code) == 28, f"code must be 28 names, got {len(code)}"
+    assert len(code) == 29, f"code must be 29 names, got {len(code)}"
 
 
 # ---------------------------------------------------------------------------
-# RED-4: full == 46 and ⊇ core memory names; built from explicit 38+8 literal
+# RED-4: full == 47 and ⊇ core memory names; built from explicit 39+8 literal
 # ---------------------------------------------------------------------------
 
 _EXPECTED_FULL_MESH = frozenset({
@@ -110,6 +111,7 @@ _EXPECTED_FULL_BASE = frozenset({
     "get_assertions", "reinforce_assertion", "contradict_assertion",
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
+    "observe_bounded_loop_evidence",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # 3.8.0: bounded-loop tools (CLI + command + MCP).
@@ -126,14 +128,14 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 46, f"full must be 46 names, got {len(full)}"
+    assert len(full) == 47, f"full must be 47 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
 
 
 # ---------------------------------------------------------------------------
-# RED-5: power == 58 and ⊇ full
+# RED-5: power == 59 and ⊇ full
 # ---------------------------------------------------------------------------
 
 _POWER_EXTRA = frozenset({
@@ -151,7 +153,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 58, f"power must be 58 names, got {len(power)}"
+    assert len(power) == 59, f"power must be 59 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 

@@ -152,6 +152,30 @@ def test_profile_erasure_removes_all_learning_receipts_and_checks_residue(
     assert store.get_experience("beta", "experience-1") == _experience("beta")
 
 
+def test_profile_purger_removes_m041_external_evidence_when_present(tmp_path: Path) -> None:
+    from superlocalmemory.storage.external_evidence import ExternalEvidenceStore
+    from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
+
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        m040.apply(conn)
+        m041.apply(conn)
+    evidence = {
+        "contract": "bounded-loops.dev/slm-bridge/v1", "profile_id": "alpha",
+        "workspace_id": "sha256:" + "a" * 64, "run_ref": "nightly-1", "run_id": "run-1",
+        "outcome": "SUCCEEDED", "run_state": "SUCCEEDED", "demonstration": False,
+        "eligible_for_learning": False, "terminal_at": "2026-08-15T00:00:00Z",
+        "graph_digest": "sha256:" + "b" * 64, "plan_digest": "sha256:" + "c" * 64,
+        "policy_digest": "sha256:" + "d" * 64,
+        "receipt": {"sequence": 1, "head_digest": "sha256:" + "e" * 64, "trust": "local_hash_chain_only"},
+        "nodes": [],
+    }
+    external = ExternalEvidenceStore(path, is_profile_active=lambda _: True)
+    assert external.record(evidence)
+    assert purge_profile_receipts(path, "alpha") == 1
+    assert external.get("alpha", evidence["workspace_id"], evidence["run_ref"]) is None
+
+
 def test_profile_receipt_purger_is_legacy_safe_and_stops_half_schema(tmp_path: Path) -> None:
     path = tmp_path / "learning.db"
     assert purge_profile_receipts(path, "alpha") == 0

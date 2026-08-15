@@ -380,7 +380,7 @@ Find and optionally terminate orphaned SLM daemon or MCP processes. Safe to call
 
 ## Code-Graph Tools
 
-Available in profiles `code` (28 tools), `full` (46 tools), and `power` (58 tools). Not available in `core` or `mesh` profiles.
+Available in profiles `code` (29 tools), `full` (47 tools), and `power` (59 tools). Not available in `core` or `mesh` profiles.
 
 These tools build and query a structural code graph over a local repository. The graph maps functions, classes, modules, call sites, imports, and dependencies. It is built on demand from the repository path and persisted in SLM's database.
 
@@ -624,6 +624,21 @@ Return compression and cache statistics for the current session.
 ## Bounded-Loop Tools (v3.8.0)
 
 Available in the default exposure and in the `code`, `full`, and `power` profiles. Bounded loops ship on three surfaces — the `slm loop` CLI, the `/slm-loop` command, and these MCP tools — all driving the same engine and the same durable ledger.
+
+## Optional Bounded Loops evidence bridge (v4.0.4)
+
+`observe_bounded_loop_evidence(workspace)` is available in the default, `code`,
+`full`, and `power` profiles when the separate `bounded-loops-mcp` executable is
+installed. It performs one explicit, read-only capability negotiation and
+imports compatible terminal receipts into profile-scoped `learning.db` evidence.
+It accepts a workspace path, never an executable command or shell arguments.
+
+The bridge requires `bounded-loops.dev/slm-bridge/v1`, uses the producer's
+`run_ref` address for each receipt, and fails closed if the capability or shape
+does not match. Imported records are visible in Living Brain but are
+observation-only: they do not alter recall, ranking, routing, rewards, or
+automatic learning. See [Bounded Loops observation bridge](bounded-loops-bridge.md)
+for lifecycle, privacy, and compatibility details.
 
 A bounded loop finishes only when an **independent gate** passes, never when the agent claims it is done. Over MCP the gate is an SLM recall: the loop converges the first lap a memory matching the gate query becomes retrievable with confidence. This makes it a safe, shell-free coordination primitive — one agent can wait, under strict bounds, for a memory another agent will write.
 

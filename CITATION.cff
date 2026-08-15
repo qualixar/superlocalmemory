@@ -6,7 +6,7 @@ authors:
   - family-names: "Bhardwaj"
     given-names: "Varun Pratap"
     orcid: "https://orcid.org/0009-0002-8726-4289"
-version: "4.0.3"
+version: "4.0.4"
 date-released: "2026-08-15"
 license: AGPL-3.0-or-later
 url: "https://superlocalmemory.com"
