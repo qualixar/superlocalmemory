@@ -481,7 +481,7 @@ def get_profile_receipt_summary(
     if not path.exists():
         return unavailable
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=0.5)
         try:
             experience = conn.execute(
                 "SELECT COUNT(*) FROM agent_experiences WHERE profile_id=?", (profile_id,)

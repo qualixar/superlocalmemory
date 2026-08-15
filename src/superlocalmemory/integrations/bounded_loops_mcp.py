@@ -116,7 +116,9 @@ async def observe_from_stdio(*, command: str, cwd: str, profile_id: str) -> list
         mode = executable.stat().st_mode
     except OSError as exc:
         raise BridgeUnavailable("bounded-loops bridge path is unavailable") from exc
-    if not stat.S_ISREG(mode) or mode & (stat.S_IWGRP | stat.S_IWOTH):
+    if not stat.S_ISREG(mode) or (
+        os.name != "nt" and mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
         raise BridgeUnavailable("bounded-loops executable is not a trusted regular file")
     if executable.stat().st_uid not in {0, os.geteuid()}:
         raise BridgeUnavailable("bounded-loops executable owner is not trusted")
@@ -156,7 +158,9 @@ async def observe_from_stdio(*, command: str, cwd: str, profile_id: str) -> list
 
                     return await observe_terminal_runs(call, profile_id=profile_id)
                 return await asyncio.wait_for(observe(), timeout=_OBSERVATION_TIMEOUT_SECONDS)
-    except (OSError, TimeoutError) as exc:
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
         raise BridgeUnavailable("bounded-loops observation timed out or could not start") from exc
 
 

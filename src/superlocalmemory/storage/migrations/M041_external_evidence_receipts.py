@@ -87,10 +87,11 @@ _TYPES = (
 _PRIMARY_KEY = ("profile_id", "contract_id", "workspace_id", "run_ref")
 _INDEXES = {
     "idx_external_evidence_profile_terminal": (
-        "external_evidence_receipts", ("profile_id", "terminal_at"),
+        "external_evidence_receipts", (("profile_id", False), ("terminal_at", True)),
     ),
     "idx_external_evidence_profile_workspace": (
-        "external_evidence_receipts", ("profile_id", "workspace_id", "terminal_at"),
+        "external_evidence_receipts",
+        (("profile_id", False), ("workspace_id", False), ("terminal_at", True)),
     ),
 }
 
@@ -119,7 +120,7 @@ def repair(conn: sqlite3.Connection) -> None:
         return
     drops = "\n".join(f"DROP INDEX IF EXISTS {name};" for name in _INDEXES)
     creates = "\n".join(
-        f"CREATE INDEX {name} ON {table} ({', '.join(columns)});"
+        f"CREATE INDEX {name} ON {table} ({_index_sql_columns(columns)});"
         for name, (table, columns) in _INDEXES.items()
     )
     conn.executescript(f"BEGIN IMMEDIATE;\n{drops}\n{creates}\nCOMMIT;")
@@ -137,7 +138,7 @@ def verify(conn: sqlite3.Connection) -> bool:
         if row is None or row[0] != table:
             return False
         actual = tuple(
-            item[2]
+            (item[2], bool(item[3]))
             for item in conn.execute(f"PRAGMA index_xinfo({name})")
             if item[5] and item[2] is not None
         )
@@ -182,3 +183,7 @@ def _required_checks_present(conn: sqlite3.Connection) -> bool:
         "check(demonstrationin(0,1))" in sql
         and "check(eligible_for_learningin(0,1))" in sql
     )
+
+
+def _index_sql_columns(columns: tuple[tuple[str, bool], ...]) -> str:
+    return ", ".join(column + (" DESC" if desc else "") for column, desc in columns)

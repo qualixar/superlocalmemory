@@ -30,6 +30,8 @@ _MAX_NODES = 256
 _MAX_ARTIFACTS_PER_NODE = 64
 _MAX_ARTIFACTS_TOTAL = 2_048
 _MAX_NODES_JSON_BYTES = 64 * 1024
+_MAX_TIMESTAMP_BYTES = 128
+_MAX_RECEIPT_SEQUENCE = (1 << 63) - 1
 _INSERT = (
     "INSERT INTO external_evidence_receipts (profile_id, contract_id, workspace_id, "
     "run_ref, run_id, outcome, run_state, demonstration, "
@@ -200,7 +202,10 @@ def _validate(payload: dict[str, Any]) -> None:
         raise ExternalEvidenceValidationError("outcome or run_state is unsupported")
     if payload["run_state"] == "SUCCEEDED" and payload["outcome"] != "SUCCEEDED":
         raise ExternalEvidenceValidationError("SUCCEEDED run_state must keep its outcome")
-    if not isinstance(payload["terminal_at"], str):
+    if (
+        not isinstance(payload["terminal_at"], str)
+        or len(payload["terminal_at"].encode("utf-8")) > _MAX_TIMESTAMP_BYTES
+    ):
         raise ExternalEvidenceValidationError("terminal_at must be an RFC3339 timestamp")
     try:
         datetime.fromisoformat(payload["terminal_at"].replace("Z", "+00:00"))
@@ -221,6 +226,7 @@ def _validate(payload: dict[str, Any]) -> None:
     if (
         not isinstance(receipt["sequence"], int)
         or receipt["sequence"] < 1
+        or receipt["sequence"] > _MAX_RECEIPT_SEQUENCE
         or receipt["trust"] != "local_hash_chain_only"
     ):
         raise ExternalEvidenceValidationError("receipt metadata is invalid")
