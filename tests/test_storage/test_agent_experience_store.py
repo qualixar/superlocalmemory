@@ -191,6 +191,22 @@ def test_learning_reset_purges_receipts_without_closing_active_profile(
     assert store.record_experience(_experience())
 
 
+def test_full_learning_reset_does_not_reopen_erased_receipt_profile(
+    tmp_path: Path,
+) -> None:
+    from superlocalmemory.learning.database import LearningDatabase
+
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        m040.apply(conn)
+    store = AgentExperienceStore(path, is_profile_active=lambda _: True)
+    assert store.record_experience(_experience())
+    assert store.erase_profile("alpha") == 1
+    LearningDatabase(path).reset()
+    with pytest.raises(ProfileAdmissionError, match="inactive or closing"):
+        store.record_experience(_experience())
+
+
 def test_learning_reset_purges_agent_receipts_when_m040_exists(store: AgentExperienceStore) -> None:
     from superlocalmemory.learning.database import LearningDatabase
 

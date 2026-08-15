@@ -613,8 +613,7 @@ class LearningDatabase:
                     row[0]
                     for row in conn.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' "
-                        "AND name IN ('agent_experiences', 'cognitive_turn_receipts', "
-                        "'agent_receipt_profile_closures')"
+                        "AND name IN ('agent_experiences', 'cognitive_turn_receipts')"
                     )
                 }
                 if profile_id is None:
