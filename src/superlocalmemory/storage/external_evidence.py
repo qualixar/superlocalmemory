@@ -6,14 +6,19 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from superlocalmemory.storage.agent_experience import (
+    _PROCESS_LOCKS,
+    _PROCESS_LOCKS_GUARD,
+    _PROFILE_GATES,
     LearningWriteBusyError,
     ProfileAdmissionError,
+    _ProfileAdmissionGate,
 )
 
 _CONTRACT = "bounded-loops.dev/slm-bridge/v1"
@@ -21,6 +26,10 @@ _SHA256 = re.compile(r"\Asha256:[a-f0-9]{64}\Z")
 _IDENTIFIER = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _RUN_STATES = frozenset({"SUCCEEDED", "FAILED", "HALTED", "CANCELLED", "EXPIRED"})
 _OUTCOMES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
+_MAX_NODES = 256
+_MAX_ARTIFACTS_PER_NODE = 64
+_MAX_ARTIFACTS_TOTAL = 2_048
+_MAX_NODES_JSON_BYTES = 64 * 1024
 _INSERT = (
     "INSERT INTO external_evidence_receipts (profile_id, contract_id, workspace_id, "
     "run_ref, run_id, outcome, run_state, demonstration, "
@@ -46,58 +55,69 @@ class ExternalEvidenceStore:
     def __init__(self, path: str | Path, *, is_profile_active: Callable[[str], bool]) -> None:
         self._path = Path(path)
         self._is_profile_active = is_profile_active
+        resolved = str(self._path.resolve())
+        with _PROCESS_LOCKS_GUARD:
+            self._lock = _PROCESS_LOCKS.setdefault(resolved, threading.Lock())
+            self._gate = _PROFILE_GATES.setdefault(resolved, _ProfileAdmissionGate())
 
     def record(self, payload: dict[str, Any]) -> bool:
         _validate(payload)
         profile_id = payload["profile_id"]
-        if not self._is_profile_active(profile_id):
-            raise ExternalEvidenceValidationError("profile is inactive or closing for erasure")
+        self._gate.admit(profile_id, self._is_profile_active)
         digest = _payload_digest(payload)
         deadline = time.monotonic() + 0.90
-        while True:
-            conn: sqlite3.Connection | None = None
-            try:
-                conn = sqlite3.connect(str(self._path), timeout=0, isolation_level=None)
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA busy_timeout=0")
-                conn.execute("BEGIN IMMEDIATE")
-                _assert_profile_open(conn, profile_id)
-                row = _row(payload, digest)
-                cursor = conn.execute(_INSERT, row)
-                if cursor.rowcount:
-                    conn.execute("COMMIT")
-                    return True
-                existing = _get_conn(
-                    conn,
-                    profile_id,
-                    payload["contract"],
-                    payload["workspace_id"],
-                    payload["run_ref"],
-                )
-                conn.execute("ROLLBACK")
-                if existing == payload:
-                    return False
-                raise ExternalEvidenceConflictError(
-                    "external run address has a different receipt head"
-                )
-            except sqlite3.OperationalError as exc:
-                if conn is not None and conn.in_transaction:
+        if not self._lock.acquire(timeout=0.90):
+            self._gate.release(profile_id)
+            raise LearningWriteBusyError("external evidence write deadline exceeded")
+        try:
+            while True:
+                conn: sqlite3.Connection | None = None
+                try:
+                    conn = sqlite3.connect(str(self._path), timeout=0, isolation_level=None)
+                    conn.row_factory = sqlite3.Row
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA busy_timeout=0")
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    conn.execute("BEGIN IMMEDIATE")
+                    _assert_profile_open(conn, profile_id)
+                    row = _row(payload, digest)
+                    cursor = conn.execute(_INSERT, row)
+                    if cursor.rowcount:
+                        conn.execute("COMMIT")
+                        return True
+                    existing = _get_conn(
+                        conn,
+                        profile_id,
+                        payload["contract"],
+                        payload["workspace_id"],
+                        payload["run_ref"],
+                    )
                     conn.execute("ROLLBACK")
-                busy = "locked" in str(exc).lower() or "busy" in str(exc).lower()
-                if not busy or time.monotonic() >= deadline:
-                    if busy:
-                        raise LearningWriteBusyError(
-                            "external evidence write deadline exceeded"
-                        ) from exc
-                    raise
-                time.sleep(0.02)
-            finally:
-                if conn is not None:
-                    conn.close()
+                    if _payload_digest(existing) == digest:
+                        return False
+                    raise ExternalEvidenceConflictError(
+                        "external run address has a different receipt head"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if conn is not None and conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    busy = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                    if not busy or time.monotonic() >= deadline:
+                        if busy:
+                            raise LearningWriteBusyError(
+                                "external evidence write deadline exceeded"
+                            ) from exc
+                        raise
+                    time.sleep(0.02)
+                finally:
+                    if conn is not None:
+                        conn.close()
+        finally:
+            self._lock.release()
+            self._gate.release(profile_id)
 
     def get(self, profile_id: str, workspace_id: str, run_ref: str) -> dict[str, Any] | None:
-        conn = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(f"{self._path.resolve().as_uri()}?mode=ro", uri=True, timeout=0.5)
         conn.row_factory = sqlite3.Row
         try:
             return _get_conn(conn, profile_id, _CONTRACT, workspace_id, run_ref)
@@ -119,7 +139,7 @@ def get_profile_external_evidence_summary(path: str | Path, profile_id: str) -> 
         return empty
     conn: sqlite3.Connection | None = None
     try:
-        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(f"{target.resolve().as_uri()}?mode=ro", uri=True, timeout=0.5)
         total = conn.execute(
             "SELECT COUNT(*) FROM external_evidence_receipts WHERE profile_id=?", (profile_id,)
         ).fetchone()[0]
@@ -208,6 +228,9 @@ def _validate(payload: dict[str, Any]) -> None:
         raise ExternalEvidenceValidationError("receipt head digest is invalid")
     if not isinstance(payload["nodes"], list):
         raise ExternalEvidenceValidationError("nodes must be a list")
+    if len(payload["nodes"]) > _MAX_NODES:
+        raise ExternalEvidenceValidationError("node count exceeds v1 safety limit")
+    artifact_count = 0
     for node in payload["nodes"]:
         if not isinstance(node, dict) or set(node) != {
             "node_id",
@@ -233,6 +256,13 @@ def _validate(payload: dict[str, Any]) -> None:
             for item in node["artifact_digests"]
         ):
             raise ExternalEvidenceValidationError("node artifact digests are invalid")
+        if len(node["artifact_digests"]) > _MAX_ARTIFACTS_PER_NODE:
+            raise ExternalEvidenceValidationError("node artifact count exceeds v1 safety limit")
+        artifact_count += len(node["artifact_digests"])
+        if artifact_count > _MAX_ARTIFACTS_TOTAL:
+            raise ExternalEvidenceValidationError("artifact count exceeds v1 safety limit")
+    if len(_json(payload["nodes"]).encode("utf-8")) > _MAX_NODES_JSON_BYTES:
+        raise ExternalEvidenceValidationError("node evidence exceeds v1 size limit")
 
 
 def _row(payload: dict[str, Any], digest: str) -> tuple[Any, ...]:

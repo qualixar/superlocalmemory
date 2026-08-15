@@ -48,4 +48,6 @@ stale processes from writing it again after erasure.
 
 Observation is an explicit MCP operation and has a five-second producer timeout.
 Recall and remember never launch Bounded Loops or open this evidence store;
-they remain outside its SQLite writer domain.
+they never enter its recall or ranking logic. Observation writes use the
+bounded learning-db receipt gate and can return a retryable refusal under
+contention rather than delaying a memory answer.

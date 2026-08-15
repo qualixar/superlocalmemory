@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import stat
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 CONTRACT_ID = "bounded-loops.dev/slm-bridge/v1"
+_OBSERVATION_TIMEOUT_SECONDS = 5.0
+_MAX_MCP_TEXT_BYTES = 2 * 1024 * 1024
 _ADVERTISEMENT = {
     "id": CONTRACT_ID,
     "tool": "bl_graph_evidence",
@@ -76,6 +81,9 @@ async def observe_terminal_runs(
     runs = listing.get("runs")
     if not isinstance(runs, list):
         raise BridgeUnavailable("bounded-loops terminal listing is malformed")
+    # The producer's limit is advisory.  Keep this explicit operation bounded
+    # even against a compatible but faulty/malicious producer.
+    runs = runs[:100]
     observed: list[dict[str, Any]] = []
     for run in runs:
         if not isinstance(run, dict) or not isinstance(run.get("run_ref"), str):
@@ -97,38 +105,59 @@ async def observe_from_stdio(*, command: str, cwd: str, profile_id: str) -> list
         or not executable.is_file()
         or not workspace.is_absolute()
         or not workspace.is_dir()
+        or workspace.is_symlink()
     ):
         raise BridgeUnavailable(
             "bounded-loops bridge requires an approved executable and workspace"
         )
+    try:
+        executable = executable.resolve(strict=True)
+        workspace = workspace.resolve(strict=True)
+        mode = executable.stat().st_mode
+    except OSError as exc:
+        raise BridgeUnavailable("bounded-loops bridge path is unavailable") from exc
+    if not stat.S_ISREG(mode) or mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise BridgeUnavailable("bounded-loops executable is not a trusted regular file")
+    if executable.stat().st_uid not in {0, os.geteuid()}:
+        raise BridgeUnavailable("bounded-loops executable owner is not trusted")
+
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    async with stdio_client(
-        StdioServerParameters(command=str(executable), args=[], cwd=str(workspace))
-    ) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    try:
+        parameters = StdioServerParameters(
+            command=str(executable), args=[], cwd=str(workspace)
+        )
+        async with stdio_client(parameters) as (read, write):
+            async with ClientSession(
+                read,
+                write,
+                read_timeout_seconds=timedelta(seconds=_OBSERVATION_TIMEOUT_SECONDS),
+            ) as session:
+                async def observe() -> list[dict[str, Any]]:
+                    await session.initialize()
 
-            async def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-                result = await session.call_tool(name, arguments)
-                texts = [item.text for item in result.content if hasattr(item, "text")]
-                if len(texts) != 1:
-                    raise BridgeUnavailable("bounded-loops returned an invalid MCP payload")
-                try:
-                    payload = json.loads(texts[0])
-                except json.JSONDecodeError as exc:
-                    raise BridgeUnavailable("bounded-loops returned invalid JSON") from exc
-                if not isinstance(payload, dict):
-                    raise BridgeUnavailable("bounded-loops returned an invalid MCP payload")
-                return payload
+                    async def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+                        result = await session.call_tool(name, arguments)
+                        if result.isError:
+                            raise BridgeUnavailable(
+                                "bounded-loops rejected the observation request"
+                            )
+                        texts = [item.text for item in result.content if hasattr(item, "text")]
+                        if len(texts) != 1 or len(texts[0].encode("utf-8")) > _MAX_MCP_TEXT_BYTES:
+                            raise BridgeUnavailable("bounded-loops returned an invalid MCP payload")
+                        try:
+                            payload = json.loads(texts[0])
+                        except json.JSONDecodeError as exc:
+                            raise BridgeUnavailable("bounded-loops returned invalid JSON") from exc
+                        if not isinstance(payload, dict):
+                            raise BridgeUnavailable("bounded-loops returned an invalid MCP payload")
+                        return payload
 
-            try:
-                return await asyncio.wait_for(
-                    observe_terminal_runs(call, profile_id=profile_id), timeout=5.0
-                )
-            except TimeoutError as exc:
-                raise BridgeUnavailable("bounded-loops observation timed out") from exc
+                    return await observe_terminal_runs(call, profile_id=profile_id)
+                return await asyncio.wait_for(observe(), timeout=_OBSERVATION_TIMEOUT_SECONDS)
+    except (OSError, TimeoutError) as exc:
+        raise BridgeUnavailable("bounded-loops observation timed out or could not start") from exc
 
 
 async def observe_installed(*, workspace: str, profile_id: str) -> list[dict[str, Any]]:
@@ -142,6 +171,10 @@ async def observe_installed(*, workspace: str, profile_id: str) -> list[dict[str
     command = shutil.which("bounded-loops-mcp")
     if command is None:
         raise BridgeUnavailable("bounded-loops-mcp is not installed")
+    if not Path(command).is_absolute():
+        raise BridgeUnavailable("bounded-loops-mcp discovery returned an unsafe path")
+    if Path(command).resolve().name not in {"bounded-loops-mcp", "bounded-loops-mcp.exe"}:
+        raise BridgeUnavailable("bounded-loops-mcp discovery returned an unsafe executable")
     return await observe_from_stdio(
         command=str(Path(command).resolve()), cwd=workspace, profile_id=profile_id
     )

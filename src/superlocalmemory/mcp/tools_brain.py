@@ -9,6 +9,8 @@ or changes a memory answer.
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
@@ -55,6 +57,27 @@ def _require_active_profile(engine: Any, payload: dict[str, Any]) -> str | None:
     if supplied != engine.profile_id:
         return "profile_id must equal the active MCP profile"
     return None
+
+
+class _ExternalEvidenceWriteError(Exception):
+    """Preserve committed receipt count when a later snapshot item fails."""
+
+    def __init__(self, created: int, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.created = created
+        self.cause = cause
+
+
+def _record_external_evidence(store: ExternalEvidenceStore, observed: list[dict[str, Any]]) -> int:
+    """Write bounded evidence off the async MCP loop; return durable inserts."""
+    created = 0
+    for payload in observed:
+        try:
+            if store.record(payload):
+                created += 1
+        except Exception as exc:
+            raise _ExternalEvidenceWriteError(created, exc) from exc
+    return created
 
 
 def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
@@ -157,17 +180,32 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
         never changes recall, ranking, routing, or learned behaviour.
         """
         engine = get_engine()
+        created = 0
         try:
             observed = await observe_installed(workspace=workspace, profile_id=engine.profile_id)
             store = _external_store_for(engine)
-            created = sum(1 for payload in observed if store.record(payload))
+            created = await asyncio.to_thread(_record_external_evidence, store, observed)
+        except _ExternalEvidenceWriteError as exc:
+            return {
+                "success": False,
+                "durable": exc.created > 0,
+                "created": exc.created,
+                "retryable": isinstance(exc.cause, LearningWriteBusyError),
+                "error": str(exc.cause),
+            }
         except (
             BridgeUnavailable,
             ExternalEvidenceConflictError,
             ExternalEvidenceValidationError,
             ProfileAdmissionError,
+            sqlite3.Error,
         ) as exc:
-            return {"success": False, "durable": False, "error": str(exc)}
+            return {
+                "success": False,
+                "durable": created > 0,
+                "created": created,
+                "error": str(exc),
+            }
         except LearningWriteBusyError as exc:
             return {"success": False, "durable": False, "retryable": True, "error": str(exc)}
         return {

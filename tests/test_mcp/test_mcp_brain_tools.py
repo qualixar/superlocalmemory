@@ -151,3 +151,22 @@ def test_bounded_loop_observation_is_explicit_and_never_changes_recall_plane(
     status = asyncio.run(server.tools["get_brain_evidence_status"]())
     assert status["external_graph_evidence"]["total"] == 1
     assert status["external_graph_evidence"]["control_plane"] == "observation_only"
+
+
+def test_bounded_loop_observation_refuses_cleanly_when_m041_is_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    with sqlite3.connect(tmp_path / "learning.db") as conn:
+        m040.apply(conn)
+
+    async def observe(*, workspace: str, profile_id: str) -> list[dict]:
+        return [_external()]
+
+    monkeypatch.setattr("superlocalmemory.mcp.tools_brain.observe_installed", observe)
+    server = _Server()
+    register_brain_tools(server, lambda: _Engine())
+    result = asyncio.run(server.tools["observe_bounded_loop_evidence"](str(tmp_path)))
+    assert result["success"] is False
+    assert result["durable"] is False
+    assert result["created"] == 0

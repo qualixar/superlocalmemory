@@ -48,8 +48,8 @@ def test_v4_ports_mainline_migrations_under_unique_serials() -> None:
     assert SUPPORTED_SCHEMA_VERSION == 41
 
 
-def test_schema_40_is_stamped_only_after_m040_completes(tmp_path: Path) -> None:
-    """A version-40 marker must prove Agent Experience receipt storage exists."""
+def test_schema_41_is_stamped_only_after_receipt_storage_completes(tmp_path: Path) -> None:
+    """A version-41 marker must prove both typed learning receipt tables exist."""
     from superlocalmemory.storage import schema
 
     learning_db = tmp_path / "learning.db"
@@ -70,6 +70,10 @@ def test_schema_40_is_stamped_only_after_m040_completes(tmp_path: Path) -> None:
         assert conn.execute(
             "SELECT 1 FROM sqlite_master "
             "WHERE type='table' AND name='agent_experiences'"
+        ).fetchone() == (1,)
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='external_evidence_receipts'"
         ).fetchone() == (1,)
 
 

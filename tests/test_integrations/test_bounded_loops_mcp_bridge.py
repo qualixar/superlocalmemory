@@ -130,3 +130,30 @@ async def test_poller_fetches_only_terminal_run_refs_and_skips_normal_unavailabi
         ("bl_graph_evidence", {"run_ref": "nightly-1"}),
         ("bl_graph_evidence", {"run_ref": "gone"}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_poller_enforces_its_own_terminal_run_bound() -> None:
+    evidence_calls = 0
+
+    async def call(name: str, arguments: dict) -> dict:
+        nonlocal evidence_calls
+        if name == "bl_capabilities":
+            return {"status": "ok", "capabilities": {"evidence_contracts": [{
+                "id": "bounded-loops.dev/slm-bridge/v1",
+                "tool": "bl_graph_evidence",
+                "operation": "observe_terminal_run",
+            }]}}
+        if name == "bl_graph_terminal_runs":
+            return {
+                "status": "ok", "contract": "bounded-loops.dev/slm-bridge/v1",
+                "runs": [{"run_ref": f"run-{i}"} for i in range(101)],
+            }
+        evidence_calls += 1
+        result = _evidence()
+        result["run_ref"] = arguments["run_ref"]
+        return {"status": "ok", "evidence": result}
+
+    observed = await observe_terminal_runs(call, profile_id="alpha")
+    assert len(observed) == 100
+    assert evidence_calls == 100

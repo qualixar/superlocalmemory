@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from superlocalmemory.storage.agent_experience import AgentExperienceStore, ProfileAdmissionError
 from superlocalmemory.storage.external_evidence import (
     ExternalEvidenceConflictError,
     ExternalEvidenceStore,
+    ExternalEvidenceValidationError,
 )
-from superlocalmemory.storage.agent_experience import AgentExperienceStore, ProfileAdmissionError
 from superlocalmemory.storage.migrations import M040_agent_experience_receipts as m040
 from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
 
@@ -123,6 +124,50 @@ def test_m041_refuses_a_preexisting_malformed_table(tmp_path: Path) -> None:
         conn.execute("CREATE TABLE external_evidence_receipts (profile_id TEXT)")
         with pytest.raises(sqlite3.OperationalError, match="malformed"):
             m041.apply(conn)
+
+
+def test_m041_repairs_missing_derived_index_without_rebuilding_evidence(tmp_path: Path) -> None:
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        m041.apply(conn)
+        conn.execute("DROP INDEX idx_external_evidence_profile_workspace")
+        assert not m041.verify(conn)
+        m041.repair(conn)
+        assert m041.verify(conn)
+
+
+def test_erasure_does_not_depend_on_m041_performance_indexes(tmp_path: Path) -> None:
+    path = tmp_path / "learning.db"
+    with sqlite3.connect(path) as conn:
+        m040.apply(conn)
+        m041.apply(conn)
+        conn.execute("DROP INDEX idx_external_evidence_profile_workspace")
+    external = ExternalEvidenceStore(path, is_profile_active=lambda _: True)
+    assert external.record(_evidence())
+    assert AgentExperienceStore(path, is_profile_active=lambda _: True).erase_profile("alpha") == 1
+
+
+def test_evidence_limits_protect_the_learning_writer(store: ExternalEvidenceStore) -> None:
+    too_many_nodes = _evidence()
+    too_many_nodes["nodes"] *= 257
+    with pytest.raises(ExternalEvidenceValidationError, match="node count"):
+        store.record(too_many_nodes)
+
+    too_many_artifacts = _evidence()
+    too_many_artifacts["nodes"][0]["artifact_digests"] *= 65
+    with pytest.raises(ExternalEvidenceValidationError, match="artifact count"):
+        store.record(too_many_artifacts)
+
+
+def test_read_only_uri_handles_reserved_path_characters(tmp_path: Path) -> None:
+    path = tmp_path / "learning#brain.db"
+    with sqlite3.connect(path) as conn:
+        m040.apply(conn)
+        m041.apply(conn)
+    evidence = ExternalEvidenceStore(path, is_profile_active=lambda _: True)
+    payload = _evidence()
+    assert evidence.record(payload)
+    assert evidence.get("alpha", payload["workspace_id"], payload["run_ref"]) == payload
 
 
 def test_concurrent_external_observations_complete_without_deadlock(

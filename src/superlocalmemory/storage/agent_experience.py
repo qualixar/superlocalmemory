@@ -247,7 +247,8 @@ class AgentExperienceStore:
             ).rowcount
             external_count = 0
             has_external = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_evidence_receipts'"
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='external_evidence_receipts'"
             ).fetchone() is not None
             if has_external:
                 external_count = conn.execute(
@@ -446,7 +447,9 @@ def purge_profile_receipts(
             from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
 
             with sqlite3.connect(path) as conn:
-                if m041.verify(conn):
+                # Erasure needs a valid table, not its optional performance indexes.
+                # A damaged index must never strand profile-scoped evidence.
+                if m041._table_is_valid(conn):
                     return AgentExperienceStore(
                         path, is_profile_active=lambda _: True
                     ).erase_profile(profile_id, close_profile=close_profile)

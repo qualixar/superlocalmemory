@@ -85,6 +85,14 @@ _TYPES = (
     "TEXT",
 )
 _PRIMARY_KEY = ("profile_id", "contract_id", "workspace_id", "run_ref")
+_INDEXES = {
+    "idx_external_evidence_profile_terminal": (
+        "external_evidence_receipts", ("profile_id", "terminal_at"),
+    ),
+    "idx_external_evidence_profile_workspace": (
+        "external_evidence_receipts", ("profile_id", "workspace_id", "terminal_at"),
+    ),
+}
 
 
 def apply(conn: sqlite3.Connection) -> None:
@@ -95,21 +103,38 @@ def apply(conn: sqlite3.Connection) -> None:
         )
     conn.executescript(DDL)
     if not verify(conn):
+        repair(conn)
+    if not verify(conn):
         raise sqlite3.OperationalError("M041 external evidence schema did not reach its end-state")
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Restore only M041's derived indexes without touching stored evidence."""
+    if _table_exists(conn) and not _table_is_valid(conn):
+        raise sqlite3.OperationalError(
+            "M041 external evidence table is malformed; refusing rebuild"
+        )
+    if not _table_exists(conn):
+        apply(conn)
+        return
+    drops = "\n".join(f"DROP INDEX IF EXISTS {name};" for name in _INDEXES)
+    creates = "\n".join(
+        f"CREATE INDEX {name} ON {table} ({', '.join(columns)});"
+        for name, (table, columns) in _INDEXES.items()
+    )
+    conn.executescript(f"BEGIN IMMEDIATE;\n{drops}\n{creates}\nCOMMIT;")
+    if not verify(conn):
+        raise sqlite3.OperationalError("M041 index repair did not restore required end-state")
 
 
 def verify(conn: sqlite3.Connection) -> bool:
     if not _table_is_valid(conn):
         return False
-    expected = {
-        "idx_external_evidence_profile_terminal": ("profile_id", "terminal_at"),
-        "idx_external_evidence_profile_workspace": ("profile_id", "workspace_id", "terminal_at"),
-    }
-    for name, columns in expected.items():
+    for name, (table, columns) in _INDEXES.items():
         row = conn.execute(
             "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?", (name,)
         ).fetchone()
-        if row is None or row[0] != "external_evidence_receipts":
+        if row is None or row[0] != table:
             return False
         actual = tuple(
             item[2]
@@ -144,4 +169,16 @@ def _table_is_valid(conn: sqlite3.Connection) -> bool:
         and primary_key == _PRIMARY_KEY
         and not_null == set(_COLUMNS)
         and conn.execute(f"PRAGMA foreign_key_list({_TABLE})").fetchone() is None
+        and _required_checks_present(conn)
+    )
+
+
+def _required_checks_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (_TABLE,)
+    ).fetchone()
+    sql = "" if row is None or row[0] is None else "".join(str(row[0]).lower().split())
+    return (
+        "check(demonstrationin(0,1))" in sql
+        and "check(eligible_for_learningin(0,1))" in sql
     )
