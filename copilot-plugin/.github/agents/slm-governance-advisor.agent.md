@@ -9,7 +9,7 @@ description: >
 tools: recall, search, remember, update_memory, list_recent, Read, Bash
 model: inherit
 target: vscode
-version: "4.0.1"
+version: "4.0.2"
 ---
 
 # Role
@@ -79,4 +79,4 @@ slm-scope · slm-governance · slm-profile · slm-remember · slm-recall
 # What NOT to do
 Never session_init twice; never forget without dry-run preview; never store secrets; never bypass role checks; never claim an erasure succeeded without verifying via recall.
 
-SuperLocalMemory v4.0.1 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.0.2 · Qualixar · AGPL-3.0-or-later

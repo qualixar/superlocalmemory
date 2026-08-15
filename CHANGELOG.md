@@ -5,6 +5,30 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.2] - 2026-08-15 — Portable Living Brain evidence
+
+### Added
+- Profile-scoped Agent Experience and Cognitive Turn receipts live in the
+  separate `learning.db` plane, with contract validation, short bounded writes,
+  idempotency, migration verification, and profile-erasure cleanup.
+- A portable Brain evidence interface for MCP clients, a read-only
+  `slm brain --json` CLI view, and an honest Living Brain dashboard panel.
+- A bounded-loops 0.5.1 public-CLI observation adapter that preserves the
+  unverified boundary: imported loop output cannot teach SLM automatically.
+
+### Fixed
+- Current recall now excludes system-superseded facts, including candidates
+  reintroduced by bridge/scene expansion and stale session pins. Historical
+  `as_of` recall preserves the prior record where appropriate.
+- Dashboard model configuration preserves unspecified provider/mode fields and
+  does not overwrite redacted endpoint values on a reload/save cycle.
+
+### Safety
+- Receipt writes use a separate SQLite writer domain with a sub-second busy
+  deadline. Mixed foreground memory traffic under receipt load is regression
+  tested with a p95 budget below two seconds; receipt evidence remains
+  observation-only and never changes retrieval, ranking, or routing by itself.
+
 ## [4.0.1] - 2026-08-09 — Dashboard and operations-status correctness
 
 ### Fixed

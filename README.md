@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V4.0.1</h1>
+<h1 align="center">SuperLocalMemory V4.0.2</h1>
 
 <h2 align="center">Rent the LLM. Own the memory.</h2>
 
@@ -27,12 +27,12 @@ guarantee here is stated as a falsifiable invariant, tested under an adversarial
 negative control, and shipped with the harness that regenerates the evidence:
 <code>python benchmark/run_all.py --trials 200 --output-dir results/</code>. What each experiment
 does <em>not</em> exercise is stated too.</p>
-<p align="center"><code>v4.0.1</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
+<p align="center"><code>v4.0.2</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>Four public arXiv preprints</strong> · V4: <a href="https://arxiv.org/abs/2608.08253">arXiv:2608.08253</a> · companion archive: <a href="https://zenodo.org/records/21853302">Zenodo 21853302</a> (<a href="https://doi.org/10.5281/zenodo.21853302">DOI 10.5281/zenodo.21853302</a>) · prior preprints: <a href="https://arxiv.org/abs/2603.02240">2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">2604.04514</a>.</p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v4.0.1-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v4.0.1 — Current Release"/></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v4.0.2-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v4.0.2 — Current Release"/></a>
   <a href="https://arxiv.org/abs/2608.08253"><img src="https://img.shields.io/badge/arXiv-2608.08253-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="SuperLocalMemory 4.0 paper on arXiv:2608.08253"/></a>
   <a href="https://zenodo.org/records/21853302"><img src="https://img.shields.io/badge/Zenodo-10.5281%2Fzenodo.21853302-1682D4?style=for-the-badge&logo=zenodo&logoColor=white" alt="V4 paper on Zenodo: 10.5281/zenodo.21853302"/></a>
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
@@ -62,7 +62,7 @@ SuperLocalMemory V4 combines conventional dense and lexical retrieval with graph
 
 **Memory with a sense of time.** SLM does not only store *what* an agent learned — it records *when*. Every fact carries ingestion timing and provenance; recall runs a dedicated temporal candidate channel alongside semantic, lexical, and associative retrieval; scenes and entity timelines reconstruct sequence; and the lifecycle lets neglected memory decay and self-archive instead of growing without bound. Time is a first-class ranking and lifecycle signal rather than a timestamp column an agent never reads — which is what lets a long-lived agent reason about how its context changed, not only what it currently holds.
 
-**What V4.0.1 ships.** V4 is a *governed* local-first control plane — every canonical write is admitted, policy-authorized, tracked as durable per-store obligations (lexical, temporal, vector), and sealed by a completion manifest, so it is either fully applied or explicitly marked degraded, never silently half-done. Flagship surfaces in this release:
+**What V4.0.2 ships.** V4 is a *governed* local-first control plane — every canonical write is admitted, policy-authorized, tracked as durable per-store obligations (lexical, temporal, vector), and sealed by a completion manifest, so it is either fully applied or explicitly marked degraded, never silently half-done. Flagship surfaces in this release:
 
 - **[SLM-Mesh](#slm-mesh-cross-session--cross-machine-coordination)** — authenticated cross-session and cross-machine peer coordination (messages, locks, shared state, inbox/outbox, optional discovery). Coordination only — not automatic replicated memory.
 - **Multi-scope memory & profiles** — workspaces (profiles) plus `personal` / `shared` / `global` scopes; cross-profile recall is default-deny.
@@ -707,11 +707,9 @@ SuperLocalMemory has a V4 arXiv preprint with a companion Zenodo archive, plus t
 Use the citation metadata on the linked arXiv or Zenodo records.
 
 ## Support / License / Qualixar
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. [Wiki](https://github.com/qualixar/superlocalmemory/wiki) for detailed documentation.
-GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, the [Wiki](https://github.com/qualixar/superlocalmemory/wiki) for detailed documentation, and [LICENSE](LICENSE) for the GNU Affero General Public License v3.0 (AGPL-3.0).
 For commercial licensing (closed-source, proprietary, or hosted use), see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) or contact varun.pratap.bhardwaj@gmail.com.
-Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar.
-Part of [Qualixar](https://qualixar.com) · Author: [Varun Pratap Bhardwaj](https://varunpratap.com)
+Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar · Part of [Qualixar](https://qualixar.com) · Author: [Varun Pratap Bhardwaj](https://varunpratap.com)
 Acknowledgments: [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) informed skill observation; [HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace) informed skill-evolution verification.
 Qualixar builds open-source infrastructure for AI reliability engineering. Start at [qualixar.com](https://qualixar.com) or browse the [research archive](https://huggingface.co/Qualixar).
 

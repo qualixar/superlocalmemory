@@ -3113,7 +3113,7 @@ wheels = [
 
 [[package]]
 name = "superlocalmemory"
-version = "4.0.1"
+version = "4.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -3121,6 +3121,7 @@ dependencies = [
     { name = "fastapi", extra = ["all"] },
     { name = "httpx" },
     { name = "huggingface-hub" },
+    { name = "jsonschema" },
     { name = "lancedb" },
     { name = "lightgbm" },
     { name = "llmlingua" },
@@ -3245,6 +3246,7 @@ requires-dist = [
     { name = "httpx2", marker = "extra == 'dev'", specifier = "==2.5.0" },
     { name = "huggingface-hub", specifier = "==1.5.0" },
     { name = "icalendar", marker = "extra == 'ingestion'", specifier = ">=6.0.0" },
+    { name = "jsonschema", specifier = "==4.26.0" },
     { name = "keyring", marker = "extra == 'ingestion'", specifier = ">=25.0.0" },
     { name = "lancedb", specifier = "==0.30.2" },
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = "==0.30.2" },
