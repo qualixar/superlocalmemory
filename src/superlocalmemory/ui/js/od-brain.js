@@ -337,6 +337,35 @@
     grid.appendChild(priv);
     sec.appendChild(grid);
 
+    // Keep evidence distinct from ranking or reward so a non-technical user
+    // can see what SLM observed without inferring an automatic behavior change.
+    var evc = EL('div', { className: 'card', style: 'margin-top:16px' });
+    var evh = EL('div', { className: 'card-head' });
+    evh.appendChild(EL('h3', { text: 'Agent evidence' }));
+    evh.appendChild(EL('span', { className: 'sub', text: 'local receipts · observation only' }));
+    evc.appendChild(evh);
+    var evb = EL('div', { className: 'card-pad' });
+    evb.appendChild(EL('p', {
+      className: 'muted',
+      style: 'margin:0 0 14px;font-size:12px;line-height:1.55',
+      text: 'SLM records completed work when an integration supplies evidence. These records do not change recall, ranking, or model routing by themselves.',
+    }));
+    var evGrid = EL('div', { className: 'kpi-strip', style: 'margin:0' });
+    evGrid.appendChild(kpiCard('fact_check', 'Recorded experiences',
+      fmtNum(experience.experiences_total || 0), 'profile-scoped durable receipts',
+      Number(experience.experiences_total || 0) > 0, undefined, true));
+    evGrid.appendChild(kpiCard('verified', 'Evidence-backed',
+      fmtNum(experience.verified_experiences || 0), 'declared verification authority',
+      Number(experience.verified_experiences || 0) > 0, undefined, true));
+    evGrid.appendChild(kpiCard('account_tree', 'Cognitive turns',
+      fmtNum(experience.turns_total || 0),
+      fmtNum((experience.turns_by_state || {}).open || 0) + ' open · ' +
+        fmtNum((experience.turns_by_state || {}).finalized || 0) + ' finalized',
+      Number(experience.turns_total || 0) > 0, undefined, true));
+    evb.appendChild(evGrid);
+    evc.appendChild(evb);
+    sec.appendChild(evc);
+
     // Activity heatmap (tool events are activity, never reward labels)
     var hmc = EL('div', { className: 'card', style: 'margin-top:16px' });
     var hmh = EL('div', { className: 'card-head' });

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import superlocalmemory.storage.migration_runner as migration_runner
+from superlocalmemory.storage import schema
 from superlocalmemory.storage.agent_experience import (
     AgentExperienceConflictError,
     AgentExperienceStore,
@@ -18,7 +19,9 @@ from superlocalmemory.storage.agent_experience import (
     ProfileAdmissionError,
     purge_profile_receipts,
 )
+from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.migrations import M040_agent_experience_receipts as m040
+from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
 
 
 def _experience(profile_id: str = "alpha") -> dict:
@@ -216,6 +219,56 @@ def test_concurrent_receipt_writes_complete_without_deadlock(store: AgentExperie
         outcomes = list(executor.map(write, range(32)))
     assert outcomes == [True] * 32
     assert time.monotonic() - started < 2.0
+
+
+def test_receipt_load_does_not_block_memory_remember_or_recall(tmp_path: Path) -> None:
+    """Separate DB domains keep foreground memory operations inside 2 seconds.
+
+    This is intentionally a mixed workload, not a microbenchmark of one
+    SQLite statement: concurrent receipt writes hit ``learning.db`` while
+    foreground remembers and recalls use ``memory.db``.  A deadlock or an
+    accidental cross-database write would surface as a timeout or outlier.
+    """
+    learning_db = tmp_path / "learning.db"
+    memory_db = tmp_path / "memory.db"
+    with sqlite3.connect(learning_db) as conn:
+        m040.apply(conn)
+    receipt_store = AgentExperienceStore(
+        learning_db, is_profile_active=lambda profile_id: profile_id == "default"
+    )
+    memory = DatabaseManager(memory_db)
+    memory.initialize(schema)
+    durations: list[float] = []
+
+    def receipt(number: int) -> bool:
+        payload = _experience("default")
+        payload["experience_id"] = f"load-{number}"
+        return receipt_store.record_experience(payload)
+
+    def foreground(number: int) -> int:
+        started = time.monotonic()
+        record = MemoryRecord(profile_id="default", content=f"foreground {number}")
+        memory.store_memory(record)
+        memory.store_fact(
+            AtomicFact(
+                profile_id="default", memory_id=record.memory_id,
+                content=f"foreground fact {number}", fact_type=FactType.SEMANTIC,
+            )
+        )
+        count = len(memory.get_all_facts("default"))
+        durations.append(time.monotonic() - started)
+        return count
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        receipt_futures = [executor.submit(receipt, number) for number in range(48)]
+        foreground_futures = [executor.submit(foreground, number) for number in range(20)]
+        assert [future.result(timeout=5) for future in receipt_futures] == [True] * 48
+        counts = [future.result(timeout=5) for future in foreground_futures]
+
+    assert all(count >= 1 for count in counts)
+    # Nearest-rank p95: users care about the slow tail, not just average speed.
+    p95 = sorted(durations)[int(len(durations) * 0.95) - 1]
+    assert p95 < 2.0, f"foreground remember+recall p95 {p95:.3f}s exceeded 2s"
 
 
 def test_m040_refuses_malformed_populated_tables_but_repairs_an_index_atomically(
