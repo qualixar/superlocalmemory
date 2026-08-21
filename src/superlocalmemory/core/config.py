@@ -1376,6 +1376,39 @@ class SLMConfig:
                     "Ignoring invalid auto_invoke config (%s) — using defaults", exc
                 )
 
+        # Restore math and channel_weights so mode-switch presets
+        # survive a restart (mirrors the save() typed-section merge).
+        m_raw = data.get("math", {})
+        if isinstance(m_raw, dict) and m_raw:
+            try:
+                # langevin_weight_range is a tuple in-memory; JSON round-trips
+                # it as a list, so coerce back before constructing.
+                if isinstance(m_raw.get("langevin_weight_range"), list):
+                    m_raw["langevin_weight_range"] = tuple(
+                        m_raw["langevin_weight_range"]
+                    )
+                config.math = MathConfig(**{
+                    k: v for k, v in m_raw.items()
+                    if k in MathConfig.__dataclass_fields__
+                })
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid math config (%s) — using defaults", exc
+                )
+
+        cw_raw = data.get("channel_weights", {})
+        if isinstance(cw_raw, dict) and cw_raw:
+            try:
+                config.channel_weights = ChannelWeights(**{
+                    k: v for k, v in cw_raw.items()
+                    if k in ChannelWeights.__dataclass_fields__
+                })
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid channel_weights config (%s) — using defaults",
+                    exc,
+                )
+
         rt = data.get("retrieval", {})
         if rt:
             # V3.3.2 migration: add ONNX cross-encoder backend field.
@@ -1659,6 +1692,13 @@ class SLMConfig:
             ("quantization", self.quantization),
             ("sagq", self.sagq),
             ("auto_invoke", self.auto_invoke),
+            # math and channel_weights are mode-tunable structural
+            # fields consumed by engine wiring (sheaf checker threshold,
+            # retrieval strategy base weights). Omitting them here meant
+            # mode-switch presets silently reverted to dataclass defaults on
+            # the next restart.
+            ("math", self.math),
+            ("channel_weights", self.channel_weights),
         ):
             _base = existing.get(_section)
             _merged = dict(_base) if isinstance(_base, dict) else {}

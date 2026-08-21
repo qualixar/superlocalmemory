@@ -86,7 +86,7 @@ def test_mode_c_default_embedding_is_local_nomic():
 
 def test_mode_c_honors_disk_embedding_model_name():
     """Mode C must honour embedding_model_name passed in by load() from
-    config.json, instead of discarding it. Regression for AIDEV-86 load path:
+    config.json, instead of discarding it. Regression for the load path:
     the on-disk model_name was silently overwritten by the hardcoded default."""
     config = SLMConfig.for_mode(
         Mode.C,
@@ -114,3 +114,65 @@ def test_provider_presets_have_required_fields():
         assert "base_url" in preset, f"{name} missing base_url"
         assert "model" in preset, f"{name} missing model"
         assert "env_key" in preset, f"{name} missing env_key"
+
+
+# --- save()/load() must round-trip math and channel_weights ---
+
+def test_save_persists_math_and_channel_weights(tmp_path):
+    """save() must serialise the math and channel_weights sections — they are
+    mode-tunable structural fields consumed by engine wiring, not internal
+    defaults. Regression test."""
+    config = SLMConfig.for_mode(Mode.A)
+    config.math.sheaf_contradiction_threshold = 0.61
+    config.channel_weights.semantic = 2.0
+    config.channel_weights.hopfield = 0.4
+
+    config.save(tmp_path / "config.json")
+    data = json.loads((tmp_path / "config.json").read_text())
+
+    assert data["math"]["sheaf_contradiction_threshold"] == 0.61
+    assert data["channel_weights"]["semantic"] == 2.0
+    assert data["channel_weights"]["hopfield"] == 0.4
+
+
+def test_load_restores_math_and_channel_weights(tmp_path):
+    """A mode-switch preset written by save() must still be active after a
+    restart (load()) — previously both sections reverted to dataclass
+    defaults. Regression test."""
+    config = SLMConfig.for_mode(Mode.B)
+    config.math.sheaf_contradiction_threshold = 0.61
+    config.math.fisher_temperature = 12.5
+    config.channel_weights.semantic = 2.0
+    config.save(tmp_path / "config.json")
+
+    reloaded = SLMConfig.load(tmp_path / "config.json")
+    assert reloaded.math.sheaf_contradiction_threshold == 0.61
+    assert reloaded.math.fisher_temperature == 12.5
+    assert reloaded.channel_weights.semantic == 2.0
+
+
+def test_math_langevin_weight_range_survives_roundtrip(tmp_path):
+    """langevin_weight_range is a tuple in-memory; JSON serialises it as a
+    list. load() must coerce it back so downstream consumers see a tuple."""
+    config = SLMConfig.for_mode(Mode.A)
+    config.save(tmp_path / "config.json")
+
+    reloaded = SLMConfig.load(tmp_path / "config.json")
+    assert isinstance(reloaded.math.langevin_weight_range, tuple)
+    assert reloaded.math.langevin_weight_range == config.math.langevin_weight_range
+
+
+def test_invalid_math_and_channel_weights_fall_back_to_defaults(tmp_path):
+    """Corrupt section values must fail open to dataclass defaults, not brick
+    every slm invocation."""
+    path = tmp_path / "config.json"
+    config = SLMConfig.for_mode(Mode.A)
+    config.save(path)
+    data = json.loads(path.read_text())
+    data["math"] = ["not", "a", "dict"]
+    data["channel_weights"] = "also not a dict"
+    path.write_text(json.dumps(data))
+
+    reloaded = SLMConfig.load(path)
+    assert reloaded.math == SLMConfig.for_mode(Mode.A).math
+    assert reloaded.channel_weights == SLMConfig.for_mode(Mode.A).channel_weights
