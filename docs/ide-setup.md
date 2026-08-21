@@ -14,13 +14,13 @@ SLM ships with **two MCP transports**. Pick the one that fits your tool.
 |-----------|-------------|----------|-------------|
 | **HTTP** (recommended) | All clients share one daemon process | ~2 GB once, flat forever | `slm serve` must be running |
 | **stdio** (universal) | One `slm mcp` subprocess per connection | ~90–110 MB × connections | None — works offline |
-| **`mcp-remote` bridge** | stdio wrapper that tunnels to HTTP | ~50 MB bridge + HTTP pool | npm `@modelcontextprotocol/client-cli` |
+| **`mcp-remote` bridge** | stdio wrapper that tunnels to HTTP | ~50 MB bridge + HTTP pool | npm `mcp-remote` |
 
 **Quick rule:** use HTTP if your tool supports it. Use `mcp-remote` if your tool is stdio-only but you want shared RAM. Fall back to pure stdio if you are offline or running daemon-free.
 
 The `mcp-remote` bridge package:
 ```bash
-npm install -g @modelcontextprotocol/client-cli
+npm install -g mcp-remote
 ```
 
 ---
@@ -322,7 +322,7 @@ Restart Antigravity IDE after editing. The `agy` CLI picks up changes on next in
 Grok CLI supports stdio only. Use the `mcp-remote` bridge to connect via HTTP:
 
 ```bash
-npm install -g @modelcontextprotocol/client-cli
+npm install -g mcp-remote
 ```
 
 Add to `~/.grok/config.toml`:
