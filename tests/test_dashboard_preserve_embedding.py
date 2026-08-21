@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Barry Gausden / GFO-X
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 
-"""Regression tests for AIDEV-86 (broadened): dashboard config saves must not
+"""Regression tests (broadened): dashboard config saves must not
 wipe user-tuned config blocks that are absent from the dashboard payload.
 
 The dashboard's /api/v3/mode/set and PUT /api/v3/mode endpoints only send the

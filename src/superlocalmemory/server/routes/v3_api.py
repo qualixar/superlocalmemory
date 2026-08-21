@@ -491,7 +491,7 @@ async def set_full_config(request: Request):
         config.mode = Mode(new_mode)
 
         # Update embedding only when the dashboard explicitly sent those fields;
-        # absence means "leave it alone" (AIDEV-86 / broader fix).
+        # absence means "leave it alone" (dashboard-preserve fix).
         _emb_fields = ("embedding_provider", "embedding_endpoint", "embedding_key",
                        "embedding_model", "embedding_dimension")
         if any(k in body for k in _emb_fields):
