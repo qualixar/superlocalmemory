@@ -3218,6 +3218,22 @@ async def lifespan(application: FastAPI):
         _profile_runtime = profile_runtime
         _engine = engine
 
+        # Boot sweep for wedged enrichment leases (#131): a killed daemon
+        # leaves rows stuck in enriching; the materializer loop reclaims
+        # them only once it cycles, and its reap used to sit behind the
+        # embedder-warmth gate. Run the pure-SQL reap deterministically
+        # here so recovery never depends on worker warmth. Fail-soft by
+        # construction (the helper never raises).
+        try:
+            _swept = _reap_stuck_ingestion(getattr(engine, "_db", None))
+            if _swept:
+                logger.warning(
+                    "Boot sweep terminalized %d stuck ingestion operation(s)",
+                    len(_swept),
+                )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("ingestion boot sweep failed: %s", exc)
+
         # Uvicorn enters this lifespan only after it has bound the listener.
         # Publishing ``ready`` here prevents a failed competing process from
         # overwriting the live daemon descriptor before it owns the port.
@@ -5978,6 +5994,26 @@ def _ops_failure_counts(engine, application) -> dict:
     return result
 
 
+def _reap_stuck_ingestion(db) -> list[str]:
+    """Terminalize expired enrichment leases that exhausted retries.
+
+    Pure-SQL compare-and-swap transitions: needs no embedder, no LLM, and
+    no recall quiescence — so it runs unconditionally at daemon boot and
+    at the top of every materializer pass, ahead of the warmth/recall
+    gates that must never gate recovery (#131). Under-attempt rows need
+    no reset here; the pass reclaims them through list_materializable.
+    Never raises: recovery failing must not fail startup or the pass.
+    """
+    try:
+        from superlocalmemory.core.ingestion_command import (
+            IngestionOperationRepository,
+        )
+        return IngestionOperationRepository(db).reap_stuck_enriching()
+    except Exception as exc:
+        logger.warning("ingestion stuck-lease sweep failed (non-fatal): %s", exc)
+        return []
+
+
 def _materialize_ingestion_one_pass(
     engine,
     *,
@@ -5985,6 +6021,17 @@ def _materialize_ingestion_one_pass(
     min_queryable_age_seconds: float = 1.0,
 ) -> tuple[int, int]:
     """Materialize durable M018 work once; return ``(complete, failed)``."""
+    # Recovery first, unconditionally: terminalizing exhausted leases is
+    # pure SQL and must never wait on recall quiescence or embedder
+    # warmth — a cold embedder blocked the reap forever on one operator
+    # box, wedging the write pipeline until manual DB surgery (#131).
+    db = getattr(engine, "_db", None)
+    reaped = _reap_stuck_ingestion(db) if db is not None else []
+    if reaped:
+        logger.warning(
+            "Materializer terminalized %d exhausted ingestion operation(s)",
+            len(reaped),
+        )
     # The durable queue shares the embedder/LLM with foreground recall just
     # like the legacy pending queue.  Yield before even constructing/claiming
     # work so an active user recall cannot suffer priority inversion.
@@ -6008,17 +6055,6 @@ def _materialize_ingestion_one_pass(
     from superlocalmemory.core.ingestion_command import IngestionState
 
     command = build_engine_ingestion_command(engine)
-    reap = getattr(command.repository, "reap_stuck_enriching", None)
-    try:
-        reaped = reap() if callable(reap) else []
-    except Exception as exc:
-        logger.warning("ingestion reaper failed; materializer pass continues: %s", exc)
-        reaped = []
-    if reaped:
-        logger.warning(
-            "Materializer terminalized %d exhausted ingestion operation(s)",
-            len(reaped),
-        )
     completed = failed = 0
     for operation in command.repository.list_materializable(
         limit=limit,
