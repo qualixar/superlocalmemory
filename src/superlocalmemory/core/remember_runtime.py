@@ -742,7 +742,12 @@ class CanonicalRememberRuntime:
         )
 
         if not self._profile_exists_locked(profile_id):
-            raise ValueError("admission command targets an unknown profile")
+            from superlocalmemory.core.ingestion_command import (
+                UnknownProfileError,
+            )
+            raise UnknownProfileError(
+                "admission command targets an unknown profile"
+            )
         writer = build_immediate_admission_handler(
             self._db,
             profile_id=profile_id,

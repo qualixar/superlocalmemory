@@ -52,7 +52,8 @@ def _require_known_profile(engine: "MemoryEngine", profile_id: str) -> None:
         "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
     )
     if not rows:
-        raise ValueError(
+        from superlocalmemory.core.ingestion_command import UnknownProfileError
+        raise UnknownProfileError(
             f"unknown profile {profile_id!r}: per-request routing never "
             "creates a profile implicitly"
         )
@@ -450,11 +451,13 @@ def canonical_store_fact(
     from superlocalmemory.core.ingestion_command import IngestionRequest, IngestionState
     from superlocalmemory.core.injection import is_low_quality
 
-    if is_low_quality(fact.content):
-        return fact.fact_id
-    # 4.1.14 audit: same entry normalization as canonical_store.
+    # 4.1.14 audit: guard BEFORE the low-quality early return — otherwise a
+    # routed write to a missing profile with junk content reports success
+    # while persisting nothing.
     profile_id = (profile_id or "").strip() or None
     _require_known_profile(engine, profile_id or engine._profile_id)
+    if is_low_quality(fact.content):
+        return fact.fact_id
     command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
         content=fact.content,

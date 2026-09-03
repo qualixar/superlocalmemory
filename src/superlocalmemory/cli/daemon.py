@@ -740,20 +740,40 @@ def ensure_daemon(*, port: int | None = None) -> bool:
             if occupant is not None and not _health_is_owned(
                 occupant, port=probe_port,
             ):
+                # 4.1.14 audit: when the occupant PID matches this
+                # namespace's stale daemon.pid, say so — the owned daemon
+                # likely moved ports, and "foreign service" would send the
+                # operator hunting the wrong process.
+                _stale_hint = ""
+                try:
+                    _pid_text = (
+                        descriptor_path().with_name("daemon.pid").read_text().strip()
+                    )
+                    if _pid_text and str(occupant.get("pid")) == _pid_text:
+                        _stale_hint = (
+                            " The occupant PID matches this namespace's stale "
+                            "daemon.pid — the owned daemon likely moved ports; "
+                            "run `slm restart` instead of hunting a foreign process."
+                        )
+                except (OSError, ValueError):
+                    pass
                 logger.error(
                     "SLM daemon will not start: port %d is occupied by a "
-                    "foreign service (answered HTTP without SLM identity). "
+                    "foreign service (answered HTTP without SLM identity).%s "
                     "Free the port or point this namespace elsewhere, then "
                     "run `slm restart`.",
                     probe_port,
+                    _stale_hint,
                 )
                 return False
             return _wait_for_daemon(timeout=30)
 
         # Start unified daemon in background — delegated to helper so the
         # same logic can be reused by callers that already hold the lock.
-        # 4.1.14 audit: the probed port travels with the spawn.
-        return _start_daemon_subprocess(port=port)
+        # 4.1.14 audit: the probed port travels with the spawn — probing a
+        # custom port and spawning the default would serve elsewhere than
+        # verified.
+        return _start_daemon_subprocess(port=probe_port)
 
     except Exception as exc:
         # Daemon auto-start is the entry point for dashboard / mesh /

@@ -809,8 +809,11 @@ def cmd_restart(args: Namespace) -> None:
     # fall into its lock-fail branch and time out after 60s while the
     # actual daemon never gets started. Calling the helper directly
     # bypasses that self-deadlock and starts the daemon as intended.
-    from superlocalmemory.cli.daemon import _start_daemon_subprocess
-    started = _start_daemon_subprocess()
+    # 4.1.14 audit: restart on the OWNED port — spawning the default
+    # after stopping a custom-port daemon serves elsewhere than stopped.
+    from superlocalmemory.cli.daemon import _get_port, _start_daemon_subprocess
+    _restart_port = getattr(owned_descriptor, "port", None) or _get_port()
+    started = _start_daemon_subprocess(port=_restart_port)
 
     # Release restart lock — daemon is now running with its own lock
     if restart_lock_fd:

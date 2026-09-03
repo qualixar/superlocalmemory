@@ -65,6 +65,16 @@ class LeaseLost(OperationInProgress):
     """The materializer no longer owns its durable operation lease."""
 
 
+class UnknownProfileError(ValueError):
+    """A write was routed to a profile that does not exist.
+
+    Distinct from generic ValueError on purpose: coordinator wrapping
+    preserves it through ``__cause__`` chains, and the daemon HTTP
+    boundary unwraps it back into a 404 unknown_profile envelope instead
+    of a 503 retryable — a deleted profile never heals by retrying.
+    """
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 

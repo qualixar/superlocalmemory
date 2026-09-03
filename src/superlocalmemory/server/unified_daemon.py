@@ -5137,6 +5137,30 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 IdempotencyConflict,
             )
 
+            # 4.1.14 audit: an unknown profile surfacing late (deleted
+            # between the existence gate and admission) must stay a 404,
+            # not a 503 retryable — a deleted profile never heals by
+            # retrying. The coordinator wraps failures, so walk the cause
+            # chain for the distinctive type instead of matching strings.
+            from superlocalmemory.core.ingestion_command import (
+                UnknownProfileError,
+            )
+            _cause: BaseException | None = exc
+            _unknown = False
+            _seen: set[int] = set()
+            while _cause is not None and id(_cause) not in _seen:
+                _seen.add(id(_cause))
+                if isinstance(_cause, UnknownProfileError):
+                    _unknown = True
+                    break
+                _cause = _cause.__cause__ or _cause.__context__
+            if _unknown:
+                from starlette.responses import JSONResponse
+
+                return JSONResponse(
+                    _unknown_profile_body(req_profile or write_profile),
+                    status_code=404,
+                )
             if isinstance(exc, CanonicalRememberUnavailable) or (
                 isinstance(exc, AdmissionRejected) and exc.retryable
             ):

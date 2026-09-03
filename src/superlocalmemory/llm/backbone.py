@@ -191,6 +191,7 @@ class LLMBackbone:
         url, headers, payload = self._build_request(prompt, system, tokens, temp, think)
 
         last_error: Exception | None = None
+        think_downgraded = False
         for attempt in range(_MAX_RETRIES):
             try:
                 response = self._send(url, headers, payload)
@@ -198,6 +199,23 @@ class LLMBackbone:
             except httpx.HTTPStatusError as exc:
                 # Azure content filter returns 400 — not retryable.
                 if exc.response.status_code == 400:
+                    # 4.1.14 audit: except ONE case — a 400 on a request
+                    # carrying an explicit think:false is plausibly an old
+                    # server rejecting the field, not a content filter.
+                    # Downgrade once to the model default and retry; a
+                    # second 400 is a real refusal and returns empty.
+                    # Keyed off the payload (covers both the think=False
+                    # argument and the SLM_OLLAMA_DISABLE_THINK env flag).
+                    if (
+                        not think_downgraded
+                        and payload.pop("think", None) is not None
+                    ):
+                        think_downgraded = True
+                        logger.info(
+                            "Ollama rejected think:false (HTTP 400); "
+                            "retrying once with model defaults.",
+                        )
+                        continue
                     logger.warning("Content filter or bad request (400). Returning empty.")
                     return ""
                 last_error = exc
@@ -384,19 +402,19 @@ class LLMBackbone:
             content = content.strip() if isinstance(content, str) else ""
             thinking = message.get("thinking", "")
             thinking = thinking.strip() if isinstance(thinking, str) else ""
-            if content:
-                # 4.1.14 audit: prose-only content ("Here are the facts:")
-                # can never parse as the JSON array the callers need — fall
-                # through to the thinking trace instead of discarding a
-                # good answer for a content field with no '[' in it.
-                if "[" not in content and thinking:
-                    logger.debug(
-                        "Ollama response content has no JSON array; "
-                        "extracting from message.thinking (%d chars).",
-                        len(thinking),
-                    )
-                    return thinking
-                return content
+            if content and thinking:
+                # 4.1.14 audit: feed BOTH fields to the parser instead of
+                # guessing which holds the answer. Prose-only content and
+                # bracket noise in either field are both recoverable by
+                # array selection; dropping either field discards answers
+                # (prose content hid good thinking traces; incidental
+                # brackets in content hid good thinking answers).
+                logger.debug(
+                    "Ollama thinking response carries both fields; "
+                    "extracting from content+thinking (%d+%d chars).",
+                    len(content), len(thinking),
+                )
+                return content + "\n" + thinking
             if thinking:
                 # DEBUG, not INFO: for thinking models empty content is the
                 # normal response shape and generate() sits on the store hot
@@ -407,7 +425,7 @@ class LLMBackbone:
                     "extracting from message.thinking (%d chars).",
                     len(thinking),
                 )
-            return thinking
+            return thinking or content
         # OpenAI / Azure share response format.
         choices = data.get("choices", [{}])
         return choices[0].get("message", {}).get("content", "").strip()

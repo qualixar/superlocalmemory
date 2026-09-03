@@ -799,10 +799,13 @@ class FactExtractor:
                     built.append(fact)
             if not built:
                 continue
+            # 4.1.14 audit: score with the same keys the parser accepts —
+            # _item_to_fact takes `type` as a fact_type alias, so the fit
+            # must too, or an aliased real array loses to a decoy.
             fit = sum(
                 1 for item in items[:10]
                 if isinstance(item, dict) and item.get("text")
-                and "fact_type" in item
+                and ("fact_type" in item or "type" in item)
             )
             if fit > best_fit:
                 best_fit = fit

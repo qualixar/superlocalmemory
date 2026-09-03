@@ -828,6 +828,42 @@ class TestAuditHardening:
                 runtime._routed_writer_locked("b")
         assert "b" not in runtime._routed_writers
 
+    def test_late_unknown_profile_stays_404_not_503(
+        self, daemon, monkeypatch,
+    ) -> None:
+        """4.1.14 audit: a profile deleted between the existence gate and
+        admission must stay a 404 unknown_profile, never a 503 retryable —
+        the coordinator wraps failures, so the HTTP boundary unwraps the
+        cause chain for the distinctive type."""
+        import superlocalmemory.server.unified_daemon as _ud
+
+        client, app = daemon
+        engine = app.state.engine
+
+        engine._db.execute("DELETE FROM atomic_facts WHERE profile_id = 'b'")
+        engine._db.execute("DELETE FROM memories WHERE profile_id = 'b'")
+        engine._db.execute(
+            "DELETE FROM ingestion_operations WHERE profile_id = 'b'"
+        )
+        engine._db.execute("DELETE FROM profiles WHERE profile_id = 'b'")
+        monkeypatch.setattr(
+            _ud, "_daemon_profile_exists", lambda engine, pid: True,
+        )
+
+        response = client.post(
+            "/remember",
+            json={
+                "content": "LateDelete probes the check-to-admit race window.",
+                "profile_id": "b",
+                "idempotency_key": "audit-late-unknown-1",
+            },
+        )
+
+        assert response.status_code == 404, response.text
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "unknown_profile"
+
     def test_routed_writer_cache_is_bounded(
         self, daemon, engine_with_mock_deps, monkeypatch,
     ) -> None:

@@ -496,6 +496,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "query_type": result.get("query_type", "unknown"),
                     "channel_weights": result.get("channel_weights", {}),
                     "retrieval_time_ms": result.get("retrieval_time_ms", 0),
+                    # 4.1.14 audit: the served namespace travels with the
+                    # answer — a routed recall must not look active-profiled
+                    # at the MCP boundary either.
+                    "profile": result.get("profile", ""),
+                    "profile_generation": result.get("profile_generation"),
+                    "retrieval_mode": result.get("retrieval_mode", ""),
                     # v3.6.6: surface evidence-floor signal to MCP clients.
                     "no_confident_match": result.get("no_confident_match", False),
                     "score_contract_version": result.get("score_contract_version", "2"),
@@ -507,6 +513,17 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "answer_confidence": result.get("answer_confidence"),
                     "abstained": result.get("abstained", False),
                     "abstention_reason": result.get("abstention_reason"),
+                }
+            # 4.1.14 audit: structured daemon answers (unknown_profile)
+            # pass through with code and retryability intact — collapsing
+            # them to a bare error string repeats the DAEMON_UNAVAILABLE
+            # mislabel one layer down.
+            if isinstance(result, dict) and result.get("code"):
+                return {
+                    "success": False,
+                    "code": result.get("code"),
+                    "retryable": bool(result.get("retryable", False)),
+                    "error": result.get("error", "Recall failed"),
                 }
             return {"success": False, "error": result.get("error", "Recall failed")}
         except Exception as exc:

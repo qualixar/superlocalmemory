@@ -136,7 +136,7 @@ def _thinking_model_backbone() -> LLMBackbone:
 
 def test_ollama_extract_text_prefers_content():
     backbone = _thinking_model_backbone()
-    data = {"message": {"content": '[{"text": "hi"}]', "thinking": "trace"}}
+    data = {"message": {"content": '[{"text": "hi"}]'}}
     assert backbone._extract_text(data) == '[{"text": "hi"}]'
 
 
@@ -154,25 +154,30 @@ def test_ollama_extract_text_falls_back_to_thinking(caplog):
 def test_ollama_prose_content_falls_through_to_thinking():
     backbone = _thinking_model_backbone()
     trace = 'Reasoning... [{"text": "Alice works at Google"}]'
+    content = "Here are the facts:"
     data = {
         "message": {
             "role": "assistant",
-            "content": "Here are the facts:",
+            "content": content,
             "thinking": trace,
         }
     }
-    assert backbone._extract_text(data) == trace
+    # 4.1.14 audit: both fields feed the parser — prose content no longer
+    # discards the thinking trace, bracket noise no longer discards content.
+    assert backbone._extract_text(data) == content + "\n" + trace
 
 
 def test_ollama_content_with_brackets_wins():
     backbone = _thinking_model_backbone()
+    content = '[{"text": "hi"}]'
+    thinking = "other trace"
     data = {
         "message": {
-            "content": '[{"text": "hi"}]',
-            "thinking": "other trace",
+            "content": content,
+            "thinking": thinking,
         }
     }
-    assert backbone._extract_text(data) == '[{"text": "hi"}]'
+    assert backbone._extract_text(data) == content + "\n" + thinking
 
 
 def test_ollama_extract_text_hardening():
@@ -212,3 +217,40 @@ def test_generate_threads_think_flag_to_ollama():
     assert off_payload["think"] is False
     _, _, on_payload = backbone._build_request("hi", "", 100, 0.0, True)
     assert "think" not in on_payload
+
+
+def test_generate_downgrades_think_once_on_400(monkeypatch):
+    import httpx
+
+    backbone = _thinking_model_backbone()
+    seen_payloads: list[dict] = []
+
+    def _flaky_send(url, headers, payload):
+        seen_payloads.append(dict(payload))
+        if "think" in payload:
+            request = httpx.Request("POST", url)
+            raise httpx.HTTPStatusError(
+                "bad request", request=request,
+                response=httpx.Response(400, request=request),
+            )
+        return {"message": {"content": "downgraded answer"}}
+
+    monkeypatch.setattr(backbone, "_send", _flaky_send)
+    assert backbone.generate("hi", think=False) == "downgraded answer"
+    assert [("think" in payload) for payload in seen_payloads] == [True, False]
+
+
+def test_generate_second_400_returns_empty(monkeypatch):
+    import httpx
+
+    backbone = _thinking_model_backbone()
+
+    def _always_400(url, headers, payload):
+        request = httpx.Request("POST", url)
+        raise httpx.HTTPStatusError(
+            "bad request", request=request,
+            response=httpx.Response(400, request=request),
+        )
+
+    monkeypatch.setattr(backbone, "_send", _always_400)
+    assert backbone.generate("hi", think=False) == ""

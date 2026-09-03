@@ -482,6 +482,29 @@ class TestFactExtractorModeLLM:
             == "Alice works at Google as a software engineer"
         )
 
+    def test_llm_type_alias_counts_for_schema_fit(self) -> None:
+        # _item_to_fact accepts `type` as a fact_type alias, so the fit
+        # score must too — otherwise an aliased real array loses to noise.
+        final = json.dumps([
+            {"text": "Alice works at Google as a software engineer",
+             "type": "semantic", "entities": ["Alice", "Google"],
+             "importance": 7, "confidence": 0.95},
+        ])
+        trace = (
+            "Candidates [Alice, Google] ranked [1]. "
+            f"Final: {final}"
+        )
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+
     def test_llm_empty_response_warns(self, caplog) -> None:
         llm = self._mock_llm("")
         ext = FactExtractor(
