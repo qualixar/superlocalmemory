@@ -126,7 +126,6 @@ def test_npm_candidate_verifier_reads_the_exact_tarball(tmp_path: Path) -> None:
             }
         ).encode(),
         "package/bin/slm-npm": b"#!/bin/sh\n",
-        "package/src/superlocalmemory/__init__.py": b'__version__ = "3.7.0"\n',
         "package/LICENSE": b"AGPL\n",
         "package/NOTICE": b"notice\n",
     }
@@ -137,6 +136,34 @@ def test_npm_candidate_verifier_reads_the_exact_tarball(tmp_path: Path) -> None:
             archive.addfile(info, io.BytesIO(payload))
 
     assert verify_npm_tarball(tarball, "3.7.0") == []
+
+
+def test_npm_candidate_verifier_rejects_bundled_python(tmp_path: Path) -> None:
+    """4.1.14 single-source: a package/src tree fails the gate."""
+    tarball = tmp_path / "superlocalmemory-3.7.0.tgz"
+    members = {
+        "package/package.json": json.dumps(
+            {
+                "name": "superlocalmemory",
+                "version": "3.7.0",
+                "license": "AGPL-3.0-or-later",
+                "bin": {"slm": "bin/slm-npm"},
+            }
+        ).encode(),
+        "package/bin/slm-npm": b"#!/bin/sh\n",
+        "package/src/superlocalmemory/__init__.py": b'__version__ = "3.7.0"\n',
+        "package/LICENSE": b"AGPL\n",
+        "package/NOTICE": b"notice\n",
+    }
+    with tarfile.open(tarball, "w:gz") as archive:
+        for name, payload in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+
+    errors = verify_npm_tarball(tarball, "3.7.0")
+
+    assert any("single-source violation" in error for error in errors)
 
 
 def test_npm_candidate_verifier_rejects_version_drift(tmp_path: Path) -> None:
@@ -164,7 +191,8 @@ def _write_python_artifacts(
     *,
     wheel_sources: dict[str, bytes],
     sdist_sources: dict[str, bytes],
-    npm_sources: dict[str, bytes],
+    npm_version: str = "3.8.11",
+    wheel_version: str = "3.8.11",
 ) -> tuple[Path, Path, Path]:
     wheel = root / "superlocalmemory-3.8.11-py3-none-any.whl"
     sdist = root / "superlocalmemory-3.8.11.tar.gz"
@@ -174,6 +202,10 @@ def _write_python_artifacts(
     with zipfile.ZipFile(wheel, "w") as archive:
         for path, payload in wheel_sources.items():
             archive.writestr(f"superlocalmemory/{path}", payload)
+        archive.writestr(
+            "superlocalmemory-3.8.11.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: superlocalmemory\nVersion: {wheel_version}\n",
+        )
     with tarfile.open(sdist, "w:gz") as archive:
         for path, payload in sdist_sources.items():
             info = tarfile.TarInfo(
@@ -182,12 +214,17 @@ def _write_python_artifacts(
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
     with tarfile.open(npm, "w:gz") as archive:
-        for path, payload in npm_sources.items():
-            info = tarfile.TarInfo(
-                f"package/src/superlocalmemory/{path}"
-            )
-            info.size = len(payload)
-            archive.addfile(info, io.BytesIO(payload))
+        payload = json.dumps(
+            {
+                "name": "superlocalmemory",
+                "version": npm_version,
+                "license": "AGPL-3.0-or-later",
+                "bin": {"slm": "bin/slm-npm"},
+            }
+        ).encode()
+        info = tarfile.TarInfo("package/package.json")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
     return wheel, sdist, npm
 
 
@@ -202,7 +239,6 @@ def test_python_source_parity_accepts_identical_release_archives(
         tmp_path,
         wheel_sources=sources,
         sdist_sources=sources,
-        npm_sources=sources,
     )
 
     assert verify_python_source_parity(wheel, sdist, npm) == []
@@ -217,7 +253,6 @@ def test_python_source_parity_rejects_stale_wheel_modules(
         tmp_path,
         wheel_sources=wheel_sources,
         sdist_sources=sources,
-        npm_sources=sources,
     )
 
     errors = verify_python_source_parity(wheel, sdist, npm)
@@ -231,7 +266,6 @@ def test_python_source_parity_rejects_byte_drift(tmp_path: Path) -> None:
         tmp_path,
         wheel_sources={"core/runtime.py": b"READY = True\n"},
         sdist_sources={"core/runtime.py": b"READY = False\n"},
-        npm_sources={"core/runtime.py": b"READY = True\n"},
     )
 
     errors = verify_python_source_parity(wheel, sdist, npm)
@@ -239,12 +273,27 @@ def test_python_source_parity_rejects_byte_drift(tmp_path: Path) -> None:
     assert any("content mismatch" in error for error in errors)
 
 
+def test_python_source_parity_rejects_npm_wheel_skew(tmp_path: Path) -> None:
+    """4.1.14 single-source: npm X + wheel Y must fail, not ship."""
+    sources = {"__init__.py": b'__version__ = "3.8.11"\n'}
+    wheel, sdist, npm = _write_python_artifacts(
+        tmp_path,
+        wheel_sources=sources,
+        sdist_sources=sources,
+        npm_version="3.8.12",
+        wheel_version="3.8.11",
+    )
+
+    errors = verify_python_source_parity(wheel, sdist, npm)
+
+    assert any("version skew" in error for error in errors)
+
+
 def test_python_source_parity_rejects_empty_archives(tmp_path: Path) -> None:
     wheel, sdist, npm = _write_python_artifacts(
         tmp_path,
         wheel_sources={},
         sdist_sources={},
-        npm_sources={},
     )
 
     errors = verify_python_source_parity(wheel, sdist, npm)

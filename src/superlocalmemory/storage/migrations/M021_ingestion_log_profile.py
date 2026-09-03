@@ -61,22 +61,12 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     ).fetchone() is not None
 
 
-def apply(conn: sqlite3.Connection) -> None:
-    """Rebuild ingestion_log with a profile-scoped dedup constraint.
+def _copy_from_old(conn: sqlite3.Connection) -> None:
+    """Copy legacy rows under the 'default' profile from ``_ingestion_log_old``.
 
-    No-op on a fresh install (table already has profile_id) or when the table
-    doesn't exist yet. Existing rows backfill to the 'default' profile.
+    Column set matches the pre-migration schema (id, source_type,
+    dedup_key, fact_ids, metadata, status, ingested_at).
     """
-    if not _table_exists(conn, "ingestion_log"):
-        return
-    if "profile_id" in _cols(conn, "ingestion_log"):
-        return
-
-    conn.execute("ALTER TABLE ingestion_log RENAME TO _ingestion_log_old")
-    conn.executescript(_NEW_TABLE)
-    # Copy legacy rows under the 'default' profile. Column set matches the
-    # pre-migration schema (id, source_type, dedup_key, fact_ids, metadata,
-    # status, ingested_at).
     old_cols = _cols(conn, "_ingestion_log_old")
     has_meta = "metadata" in old_cols
     if has_meta:
@@ -94,16 +84,101 @@ def apply(conn: sqlite3.Connection) -> None:
             "SELECT id, 'default', source_type, dedup_key, fact_ids, "
             " status, ingested_at FROM _ingestion_log_old"
         )
-    conn.execute("DROP TABLE _ingestion_log_old")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ingestion_dedup "
-        "ON ingestion_log(profile_id, source_type, dedup_key)"
-    )
+
+
+def _rebuild_from_old(conn: sqlite3.Connection) -> None:
+    """Complete an interrupted rebuild: the only copy lives in ``_old``."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(_NEW_TABLE)
+        _copy_from_old(conn)
+        conn.execute("DROP TABLE _ingestion_log_old")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingestion_dedup "
+            "ON ingestion_log(profile_id, source_type, dedup_key)"
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:  # pragma: no cover — best-effort
+            pass
+        raise
+
+
+def apply(conn: sqlite3.Connection) -> None:
+    """Rebuild ingestion_log with a profile-scoped dedup constraint.
+
+    4.1.14 audit: the whole rebuild is ONE transaction (a crash between
+    RENAME and DROP previously left the only copy in ``_old`` with no
+    path back), and a leftover ``_old`` table resumes instead of
+    restarting — restarting would RENAME a table that no longer exists.
+    No-op on a fresh install (table already has profile_id) or when the
+    table doesn't exist yet. Existing rows backfill to the 'default'
+    profile.
+    """
+    table_exists = _table_exists(conn, "ingestion_log")
+    old_exists = _table_exists(conn, "_ingestion_log_old")
+    if not table_exists:
+        if old_exists:
+            _rebuild_from_old(conn)
+        return
+    if "profile_id" in _cols(conn, "ingestion_log"):
+        if old_exists:
+            # A duplicate from an ancient interrupted run: drop it only
+            # when the canonical table holds every row, otherwise fail
+            # loudly for manual review — never silently drop user data.
+            new_count = conn.execute(
+                "SELECT COUNT(*) FROM ingestion_log"
+            ).fetchone()[0]
+            old_count = conn.execute(
+                "SELECT COUNT(*) FROM _ingestion_log_old"
+            ).fetchone()[0]
+            if int(new_count) >= int(old_count):
+                conn.execute("DROP TABLE _ingestion_log_old")
+            else:
+                raise sqlite3.OperationalError(
+                    "M021 leftover _ingestion_log_old holds rows missing "
+                    "from ingestion_log; refusing automatic cleanup"
+                )
+        return
+    if old_exists:
+        # Table present in old shape AND a leftover: external interference
+        # (no path in this module produces that combination). Fail loudly.
+        raise sqlite3.OperationalError(
+            "M021 found ingestion_log without profile_id alongside a "
+            "leftover _ingestion_log_old; refusing automatic rebuild"
+        )
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("ALTER TABLE ingestion_log RENAME TO _ingestion_log_old")
+        conn.execute(_NEW_TABLE)
+        _copy_from_old(conn)
+        conn.execute("DROP TABLE _ingestion_log_old")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingestion_dedup "
+            "ON ingestion_log(profile_id, source_type, dedup_key)"
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:  # pragma: no cover — best-effort
+            pass
+        raise
 
 
 def verify(conn: sqlite3.Connection) -> bool:
-    """Applied once ingestion_log carries profile_id (or is absent on fresh DB)."""
+    """Applied once ingestion_log carries profile_id (or is absent on fresh DB).
+
+    4.1.14 audit: a leftover ``_old`` table with no canonical table is an
+    interrupted rebuild, NOT a fresh install — it must verify False so the
+    runner resumes instead of recording success over stranded data.
+    """
     if not _table_exists(conn, "ingestion_log"):
+        if _table_exists(conn, "_ingestion_log_old"):
+            return False
         return True  # nothing to migrate; fresh install creates it correctly
     return "profile_id" in _cols(conn, "ingestion_log")
 

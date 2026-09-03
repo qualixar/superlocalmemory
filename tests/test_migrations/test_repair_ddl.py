@@ -70,3 +70,70 @@ def test_repair_add_column_on_missing_table_raises(conn) -> None:
     # and the framework reports it instead of claiming success.
     with pytest.raises(sqlite3.OperationalError):
         repair_ddl(conn, "ALTER TABLE no_such_table ADD COLUMN c TEXT;")
+
+
+def test_splitter_respects_semicolons_in_literals() -> None:
+    from superlocalmemory.storage.migrations._repair_util import (
+        _split_statements,
+    )
+
+    ddl = (
+        "ALTER TABLE t ADD COLUMN note TEXT DEFAULT 'a;b';\n"
+        "CREATE INDEX IF NOT EXISTS i ON t(note);"
+    )
+    parts = _split_statements(ddl)
+    assert len(parts) == 2
+    assert "DEFAULT 'a;b'" in parts[0]
+
+
+def test_splitter_respects_comments() -> None:
+    from superlocalmemory.storage.migrations._repair_util import (
+        _split_statements,
+        repair_ddl,
+    )
+
+    # A semicolon inside a comment is NOT a boundary: comment and
+    # statement travel as one chunk, and repair executes it (SQLite
+    # skips leading comments itself).
+    ddl = "-- rebuild for UNIQUE(a, b);\nALTER TABLE t ADD COLUMN c TEXT;"
+    parts = [p for p in _split_statements(ddl) if p.strip()]
+    assert len(parts) == 1
+    assert parts[0].startswith("--")
+
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    repair_ddl(conn, ddl)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(t)")}
+    assert "c" in cols
+    conn.close()
+
+
+def test_repair_skips_comment_only_chunks(conn) -> None:
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    repair_ddl(conn, "-- just a note;\nALTER TABLE t ADD COLUMN c TEXT;")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(t)")}
+    assert "c" in cols
+
+
+def test_repair_skips_transaction_variants(conn) -> None:
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    repair_ddl(
+        conn,
+        "BEGIN TRANSACTION;\n"
+        "ALTER TABLE t ADD COLUMN c TEXT;\n"
+        "COMMIT TRANSACTION;",
+    )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(t)")}
+    assert "c" in cols
+
+
+def test_repair_quoted_table_in_pragma(conn) -> None:
+    conn.execute('CREATE TABLE "odd table" (id INTEGER PRIMARY KEY)')
+    repair_ddl(conn, 'ALTER TABLE "odd table" ADD COLUMN c TEXT;')
+    repair_ddl(conn, 'ALTER TABLE "odd table" ADD COLUMN c TEXT;')
+    cols = {
+        row[1] for row in conn.execute('PRAGMA table_info("odd table")')
+    }
+    assert "c" in cols

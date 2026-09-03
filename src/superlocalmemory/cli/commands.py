@@ -3126,9 +3126,13 @@ def cmd_doctor(args: Namespace) -> None:
                 "No additional SLM installs detected on this machine",
             )
         elif len(_versions) > 1:
-            _detail = "Version divergence: " + ", ".join(
-                f"{i['type']}={i['version']}" for i in _installs
-            )
+            _parts = []
+            for i in _installs:
+                _label = f"{i['type']}={i['version']}"
+                if i.get("resolved"):
+                    _label += f" [{i['resolved']}]"
+                _parts.append(_label)
+            _detail = "Version divergence: " + ", ".join(_parts)
             _check(
                 "install_versions",
                 "WARN",
@@ -3136,7 +3140,9 @@ def cmd_doctor(args: Namespace) -> None:
                 fix="Upgrade all installs: "
                     "pipx upgrade superlocalmemory  |  "
                     "npm rebuild superlocalmemory (refreshes its pinned wheel; "
-                    "never pip-install inside .slm-venv by hand)",
+                    "never pip-install inside an npm-owned .slm-venv by hand)  |  "
+                    "standalone ~/.slm-venv: activate it, then "
+                    "pip install -U superlocalmemory",
             )
         else:
             _unified = next(iter(_versions))
@@ -3146,6 +3152,27 @@ def cmd_doctor(args: Namespace) -> None:
                 "PASS",
                 f"All installs at {_unified} ({_types})",
             )
+        # 4.1.14 single-source (#134): the npm wrapper version must agree
+        # with the wheel actually installed in its package-owned venv. A
+        # stale venv under a fresh wrapper is the Bug-2 hazard persisting
+        # past an upgrade without rebuild.
+        for i in _installs:
+            if i.get("type") != "npm":
+                continue
+            _wheel_version = i.get("wheel_version")
+            if _wheel_version is None:
+                continue  # venv not yet installed; postinstall covers it
+            if _wheel_version != i.get("version"):
+                _check(
+                    "install_versions",
+                    "WARN",
+                    f"npm wrapper is {i.get('version')} but its private venv "
+                    f"still holds wheel {_wheel_version} "
+                    f"({i.get('resolved') or 'unresolved path'})",
+                    fix="npm rebuild superlocalmemory "
+                        "(refreshes the pinned wheel; never pip-install "
+                        "inside an npm-owned .slm-venv by hand)",
+                )
     except Exception as _inst_exc:  # noqa: BLE001 — never break doctor
         _check("install_versions", "WARN", f"could not probe installs: {_inst_exc}")
 

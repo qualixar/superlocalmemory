@@ -124,12 +124,16 @@ def build_cyclonedx_sbom(
 
 
 def verify_npm_tarball(tarball: Path, expected_version: str) -> list[str]:
-    """Verify the exact npm candidate archive without running install hooks."""
+    """Verify the exact npm candidate archive without running install hooks.
+
+    4.1.14 single-source contract (#134): the tarball carries NO Python
+    sources — the package-owned venv installs the pinned wheel. A bundled
+    ``package/src/`` tree is a second copy and fails the gate.
+    """
     errors: list[str] = []
     required = {
         "package/package.json",
         "package/bin/slm-npm",
-        "package/src/superlocalmemory/__init__.py",
         "package/LICENSE",
         "package/NOTICE",
     }
@@ -146,6 +150,14 @@ def verify_npm_tarball(tarball: Path, expected_version: str) -> list[str]:
                     errors.append(f"unsafe npm archive member type: {name}")
                 if name.endswith((".pyc", ".pyo")) or "__pycache__" in pure.parts:
                     errors.append(f"compiled cache in npm archive: {name}")
+                if (
+                    name.startswith("package/src/superlocalmemory/")
+                    and name.endswith(".py")
+                ):
+                    errors.append(
+                        "bundled Python source in npm archive "
+                        f"(single-source violation): {name}"
+                    )
 
             missing = sorted(required - names)
             if missing:
@@ -212,12 +224,44 @@ def _tar_python_sources(
     return sources
 
 
+def _wheel_version(wheel: Path) -> str:
+    """Read Version from the wheel's dist-info METADATA."""
+    with zipfile.ZipFile(wheel) as archive:
+        for name in archive.namelist():
+            if name.endswith(".dist-info/METADATA"):
+                for line in archive.read(name).decode().splitlines():
+                    if line.startswith("Version:"):
+                        return line.split(":", 1)[1].strip()
+    raise ValueError("wheel has no dist-info METADATA with a Version field")
+
+
+def _npm_tarball_version(npm_tarball: Path) -> str:
+    """Read version from the npm tarball's package.json."""
+    with tarfile.open(npm_tarball, "r:gz") as archive:
+        for member in archive.getmembers():
+            name = member.name.removeprefix("./")
+            if name != "package/package.json":
+                continue
+            stream = archive.extractfile(member)
+            if stream is None:
+                break
+            return str(json.load(stream).get("version", "")).strip()
+    raise ValueError("npm tarball has no readable package/package.json")
+
+
 def verify_python_source_parity(
     wheel: Path,
     sdist: Path,
     npm_tarball: Path,
 ) -> list[str]:
-    """Verify all three release archives contain identical Python sources."""
+    """Verify the wheel and sdist hold identical Python sources.
+
+    4.1.14 single-source contract (#134): the npm tarball is NOT a
+    Python source holder, so parity is wheel-vs-sdist only. The npm
+    archive participates through VERSION agreement instead — the venv
+    installs ``superlocalmemory==<npm version>``, so a skewed pair
+    (npm X, wheel Y) must fail the gate rather than ship.
+    """
     try:
         sources = {
             "wheel": _wheel_python_sources(wheel),
@@ -226,29 +270,22 @@ def verify_python_source_parity(
                 marker="/src/superlocalmemory/",
                 label="sdist",
             ),
-            "npm": _tar_python_sources(
-                npm_tarball,
-                marker="package/src/superlocalmemory/",
-                label="npm",
-            ),
         }
     except (OSError, tarfile.TarError, zipfile.BadZipFile, ValueError) as exc:
         return [f"invalid release source archive: {exc}"]
 
     errors: list[str] = []
-    reference_paths = set(sources["npm"])
+    reference_paths = set(sources["wheel"])
     if not reference_paths:
         errors.append("release archives contain no SuperLocalMemory Python sources")
         return errors
 
-    for label in ("wheel", "sdist"):
-        candidate_paths = set(sources[label])
-        if candidate_paths == reference_paths:
-            continue
+    candidate_paths = set(sources["sdist"])
+    if candidate_paths != reference_paths:
         missing = sorted(reference_paths - candidate_paths)
         extra = sorted(candidate_paths - reference_paths)
         errors.append(
-            f"{label}/npm Python source set mismatch: "
+            "sdist/wheel Python source set mismatch: "
             f"missing={missing[:10]}, extra={extra[:10]}"
         )
 
@@ -259,6 +296,18 @@ def verify_python_source_parity(
         }
         if len(set(digests.values())) != 1:
             errors.append(f"Python source content mismatch for {path}: {digests}")
+
+    try:
+        wheel_version = _wheel_version(wheel)
+        npm_version = _npm_tarball_version(npm_tarball)
+    except (OSError, tarfile.TarError, zipfile.BadZipFile, ValueError) as exc:
+        return errors + [f"invalid release version metadata: {exc}"]
+    if wheel_version != npm_version:
+        errors.append(
+            "npm/wheel version skew (single-source violation): "
+            f"npm={npm_version!r} wheel={wheel_version!r}; postinstall would "
+            "install a different release than the npm wrapper names"
+        )
     return errors
 
 

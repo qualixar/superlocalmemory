@@ -30,22 +30,85 @@ _ADD_COLUMN_RE = re.compile(
     re.IGNORECASE,
 )
 _TXN_RE = re.compile(
-    r"^\s*(BEGIN(?:\s+(?:IMMEDIATE|EXCLUSIVE|DEFERRED))?|COMMIT|ROLLBACK)\s*$",
+    r"^\s*(BEGIN(?:\s+(?:IMMEDIATE|EXCLUSIVE|DEFERRED|TRANSACTION))?"
+    r"|COMMIT(?:\s+TRANSACTION)?|END(?:\s+TRANSACTION)?|ROLLBACK)\s*$",
     re.IGNORECASE,
 )
 _TOLERATED_RE = re.compile(r"already exists|duplicate column", re.IGNORECASE)
+_COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 
 
 def _existing_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    # 4.1.14 audit: the table name is quoted — an unquoted PRAGMA breaks
+    # on legacy names with spaces or keywords.
+    quoted = '"' + table.replace('"', '""') + '"'
     try:
         return {
             row[1]
             for row in conn.execute(
-                f"PRAGMA table_info({table})"
+                f"PRAGMA table_info({quoted})"
             ).fetchall()
         }
     except sqlite3.Error:
         return set()
+
+
+def _split_statements(ddl: str) -> list[str]:
+    """Split DDL on statement boundaries, respecting quotes and comments.
+
+    4.1.14 audit: a naive ``split(";")`` dies on semicolons inside string
+    literals (DEFAULT values) or comments, turning one statement into two
+    invalid fragments. This splitter tracks single/double-quoted regions
+    plus ``--`` line comments and ``/* */`` block comments.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    line_comment = False
+    block_comment = False
+    i = 0
+    while i < len(ddl):
+        two = ddl[i:i + 2]
+        char = ddl[i]
+        if line_comment:
+            current.append(char)
+            if char == "\n":
+                line_comment = False
+        elif block_comment:
+            current.append(char)
+            if two == "*/":
+                current.append(ddl[i + 1])
+                i += 1
+                block_comment = False
+        elif quote is not None:
+            current.append(char)
+            if char == quote:
+                if ddl[i + 1:i + 2] == quote:
+                    current.append(quote)
+                    i += 1
+                else:
+                    quote = None
+        elif two == "--":
+            current.append(two)
+            i += 1
+            line_comment = True
+        elif two == "/*":
+            current.append(two)
+            i += 1
+            block_comment = True
+        elif char in ("'", '"'):
+            current.append(char)
+            quote = char
+        elif char == ";":
+            statements.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        i += 1
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
 
 
 def repair_ddl(conn: sqlite3.Connection, ddl: str) -> None:
@@ -57,10 +120,12 @@ def repair_ddl(conn: sqlite3.Connection, ddl: str) -> None:
     raises, honestly — repair cannot invent tables the migration never
     owned; use the migration's own ``apply`` path for those).
     """
-    for chunk in ddl.split(";"):
+    for chunk in _split_statements(ddl):
         stmt = chunk.strip()
         if not stmt:
             continue
+        if not _COMMENT_RE.sub("", stmt).strip():
+            continue  # comment-only chunk (e.g. "-- rebuild for ...")
         if _TXN_RE.match(stmt):
             continue
         match = _ADD_COLUMN_RE.match(stmt)

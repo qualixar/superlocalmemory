@@ -130,6 +130,7 @@ def _detect_all_installs() -> list[dict]:
             "path": str(_PIPX_ROOT) + "/",
             "version": pipx_version,
             "type": "pipx",
+            "resolved": _resolve_package_dir(_PIPX_ROOT),
         })
 
     # --- ~/.slm-venv ---
@@ -148,12 +149,18 @@ def _detect_all_installs() -> list[dict]:
         npm_version = _read_npm_version(npm_root)
         if npm_version is not None:
             npm_venv = npm_root / "superlocalmemory" / ".slm-venv"
-            results.append({
+            # 4.1.14 single-source (#134): the npm manifest version must
+            # agree with the wheel actually installed in the package-owned
+            # venv. A rebuilt-or-not npm wrapper over a stale venv is the
+            # Bug-2 hazard persisting — doctor warns on it below.
+            npm_entry: dict = {
                 "path": str(npm_root / "superlocalmemory") + "/",
                 "version": npm_version,
                 "type": "npm",
                 "resolved": _resolve_package_dir(npm_venv),
-            })
+                "wheel_version": _read_python_version(npm_venv),
+            }
+            results.append(npm_entry)
 
     return results
 

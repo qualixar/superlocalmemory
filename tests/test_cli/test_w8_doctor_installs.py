@@ -93,6 +93,37 @@ class TestDoctorInstallVersions:
         for line in lines:
             assert "WARN" not in line
 
+    def test_doctor_warns_on_stale_npm_venv_wheel(self, tmp_path):
+        """4.1.14 single-source: npm wrapper over a stale venv wheel WARNs."""
+        installs = [
+            {
+                "path": "/usr/local/node_modules/slm/",
+                "version": "4.1.14",
+                "type": "npm",
+                "resolved": "/usr/local/node_modules/slm/.slm-venv/lib/python3.13/site-packages/superlocalmemory",
+                "wheel_version": "4.1.13",
+            },
+        ]
+        output = _run_doctor(tmp_path=tmp_path, installs=installs)
+        assert "WARN" in output
+        assert "npm rebuild" in output
+        assert "4.1.13" in output
+
+    def test_doctor_silent_when_npm_venv_matches(self, tmp_path):
+        installs = [
+            {
+                "path": "/usr/local/node_modules/slm/",
+                "version": "4.1.14",
+                "type": "npm",
+                "resolved": "/usr/local/node_modules/slm/.slm-venv/lib/python3.13/site-packages/superlocalmemory",
+                "wheel_version": "4.1.14",
+            },
+        ]
+        output = _run_doctor(tmp_path=tmp_path, installs=installs)
+        lines = [l for l in output.splitlines() if "install_versions" in l.lower()]
+        for line in lines:
+            assert "WARN" not in line
+
     def test_doctor_reports_migration_error_log(self, tmp_path):
         """doctor reports ERROR when migration-error-*.log exists."""
         error_log = tmp_path / "migration-error-20260819-120000.log"

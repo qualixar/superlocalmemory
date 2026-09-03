@@ -71,7 +71,9 @@ class TestDaemonPoolProxy:
             or "q=what%20did%20we%20ship" in captured["path"]
         assert "limit=3" in captured["path"]
         assert "session_id=s-1" in captured["path"]
-        assert captured["kwargs"] == {"timeout_seconds": 30.0}
+        assert captured["kwargs"] == {
+            "timeout_seconds": 30.0, "preserve_not_found": True,
+        }
 
     def test_recall_forwards_fast_flag(self, monkeypatch):
         captured = {}
@@ -137,7 +139,7 @@ class TestDaemonPoolProxy:
         assert captured == {
             "method": "POST",
             "path": "/remember",
-            "kwargs": {"preserve_conflict": True},
+            "kwargs": {"preserve_conflict": True, "preserve_not_found": True},
             "body": {
                 "content": "identity-bound content",
                 "tags": "audit",

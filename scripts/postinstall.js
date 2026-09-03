@@ -90,12 +90,23 @@ function runtimePythonPath(packageRoot, platform = os.platform()) {
  * populated from the pinned PyPI wheel `superlocalmemory==<npm version>`,
  * so there is exactly one copy of the package and patching any other
  * tree cannot shadow it. `SLM_LOCAL_WHEEL=/path/to/file.whl` overrides
- * the specifier for air-gapped installs; it is still a wheel and still
- * passes the version identity check below — never a source tree.
+ * the specifier for air-gapped installs: it must be an existing local
+ * `.whl` file (directories, sdists and URLs are refused) and it still
+ * passes the version identity check below. Note the boundary honestly:
+ * the wheel itself comes from the file, but pip still resolves its
+ * *dependencies* from the index unless PIP_FIND_LINKS/PIP_NO_INDEX say
+ * otherwise — never a source tree, but not fully offline either.
  */
 function pypiSpecifier(packageRoot) {
   const localWheel = String(process.env.SLM_LOCAL_WHEEL || '').trim();
-  if (localWheel) return localWheel;
+  if (localWheel) {
+    if (!localWheel.toLowerCase().endsWith('.whl') || !fs.existsSync(localWheel)) {
+      throw new Error(
+        `SLM_LOCAL_WHEEL must be an existing local .whl file, got: ${localWheel || '(empty)'}`,
+      );
+    }
+    return localWheel;
+  }
   const packageVersion = require(path.join(packageRoot, 'package.json')).version;
   return `superlocalmemory==${packageVersion}`;
 }
@@ -162,6 +173,17 @@ function main(argv = process.argv.slice(2)) {
 
   console.log(`  Python ${python.version.join('.')} (${[python.command, ...python.prefixArgs].join(' ')})`);
 
+  // Fail fast on a bad package source BEFORE creating any venv, so a
+  // misconfigured SLM_LOCAL_WHEEL never leaves a half-built runtime behind.
+  let packageSource;
+  try {
+    packageSource = pypiSpecifier(packageRoot);
+  } catch (error) {
+    console.error(`SuperLocalMemory: ${error.message}`);
+    console.error('Unset SLM_LOCAL_WHEEL to install from PyPI, or point it at a real wheel file.');
+    return 1;
+  }
+
   const createVenv = spawnSync(
     python.command,
     [...python.prefixArgs, '-m', 'venv', venvRoot],
@@ -179,7 +201,6 @@ function main(argv = process.argv.slice(2)) {
   }
 
   const runtimePython = runtimePythonPath(packageRoot);
-  const packageSource = pypiSpecifier(packageRoot);
   const installPackage = spawnSync(
     runtimePython,
     [
@@ -220,8 +241,10 @@ function main(argv = process.argv.slice(2)) {
   }
 
   console.log(`SuperLocalMemory ${packageVersion}: isolated runtime verified.`);
-  console.log(`Single source of truth: the PyPI wheel superlocalmemory==${packageVersion} in .slm-venv;`);
+  console.log(`Single source of truth for this npm installation: the PyPI wheel superlocalmemory==${packageVersion} in .slm-venv;`);
   console.log('the npm tarball carries no Python sources, so no second copy can shadow it.');
+  console.log('(The Claude Code plugin keeps its own separate pinned runtime for its host;');
+  console.log(' that scope is independent of this npm installation — see plugin/requirements.txt.)');
   console.log('No memory database, IDE hooks, daemon, configuration, or models were changed.');
   console.log('');
   console.log('  Your database will be automatically migrated on first run.');

@@ -107,7 +107,15 @@ def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
     assert result.returncode == 0, result.stderr
     artifact = json.loads(result.stdout)[0]
     paths = {entry["path"] for entry in artifact["files"]}
-    assert {"bin/slm-npm", "scripts/postinstall.js", "pyproject.toml"} <= paths
+    assert {"bin/slm-npm", "scripts/postinstall.js"} <= paths
+    # 4.1.14 single-source (#134): no Python sources and no pyproject in
+    # the tarball — `pip install <npm-root>` is a dead surface, and the
+    # venv resolves only its pinned wheel.
+    assert "pyproject.toml" not in paths
+    assert not any(
+        path.startswith("src/superlocalmemory/") and path.endswith(".py")
+        for path in paths
+    )
     with (ROOT / "pyproject.toml").open("rb") as stream:
         data_files = tomllib.load(stream)["tool"]["setuptools"]["data-files"]
     required_build_sources = {

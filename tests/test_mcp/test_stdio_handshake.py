@@ -120,7 +120,16 @@ class _HandshakeClient:
 
 
 def test_notifications_initialized_is_gracefully_absorbed(tmp_path) -> None:
-    """#128 Bug 7: initialized notification draws no -32601 and kills nothing."""
+    """#128 Bug 7: initialized notification draws no -32601 and kills nothing.
+
+    4.1.14 audit: the stderr log the child writes is INSPECTED (a -32601
+    on stderr, or a child that dies right after the notification, fails
+    even if stdout stays quiet); readiness is polled via tools/list
+    instead of a fixed sleep; and the PYTHONPATH choice is deliberate —
+    this lane tests the REPO checkout, while the shipped npm launcher
+    strips PYTHONPATH and resolves only its venv (see
+    test_npm_runtime_isolation).
+    """
     data_root = tmp_path / "slm-data"
     home = tmp_path / "home"
     data_root.mkdir()
@@ -145,10 +154,25 @@ def test_notifications_initialized_is_gracefully_absorbed(tmp_path) -> None:
         # The exact reporter shape: a bare notification, no id, so a
         # compliant server answers nothing and stays alive.
         client.notify("notifications/initialized")
-        time.sleep(2.0)
-        assert proc.poll() is None, "mcp child died on notifications/initialized"
 
-        listed = client.call("tools/list", {})
+        # Poll for post-notification readiness instead of sleeping: the
+        # first tools/list that answers proves the connection survived.
+        listed = None
+        deadline = time.monotonic() + 60.0
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                listed = client.call("tools/list", {}, timeout=10.0)
+                break
+            except AssertionError as exc:
+                last_error = exc
+        assert proc.poll() is None, (
+            "mcp child died on notifications/initialized; "
+            f"stderr tail: {stderr_path.read_text(errors='replace')[-1500:]}"
+        )
+        assert listed is not None, f"tools/list never answered: {last_error}"
         assert "result" in listed, listed
         tool_names = {tool["name"] for tool in listed["result"]["tools"]}
         assert {"remember", "recall"} <= tool_names, tool_names
@@ -156,6 +180,9 @@ def test_notifications_initialized_is_gracefully_absorbed(tmp_path) -> None:
         for message in client._seen:
             error = message.get("error") or {}
             assert error.get("code") != -32601, message
+        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+        assert "-32601" not in stderr_text, stderr_text[-1500:]
+        assert "Method not found" not in stderr_text, stderr_text[-1500:]
     finally:
         client.close()
         assert proc.poll() is not None, "mcp child must exit after stdin EOF"

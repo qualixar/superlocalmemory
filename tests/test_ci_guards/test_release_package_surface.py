@@ -61,14 +61,20 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall/validation.js",
         "scripts/preuninstall.js",
     }
-    # The package intentionally bundles the Python runtime (src/superlocalmemory/)
-    # for a network-free install; the 4.0 module set brings the shipped tree to
-    # ~1.25k files / ~16 MB. These ceilings sit just above that so they still
-    # catch an accidentally shipped build/test surface while allowing the bundled
-    # runtime. The excluded-surface assertions above remain the primary guard
-    # against shipping tests, caches, or build tooling.
-    assert artifact["entryCount"] <= 1350
-    assert artifact["unpackedSize"] <= 18 * 1024 * 1024
+    # 4.1.14 single-source (#134): the tarball carries NO Python sources —
+    # the package-owned venv installs the pinned wheel. A bundled
+    # src/superlocalmemory/ tree is a second copy and fails the gate here
+    # (and in verify_npm_tarball at publish time).
+    assert not any(
+        path.startswith("src/superlocalmemory/") and path.endswith(".py")
+        for path in paths
+    ), "bundled Python source in npm archive (single-source violation)"
+    # Without the ~1.25k-file bundled runtime the shipped tree is ~80
+    # files / <1 MB. These ceilings sit well above that so they still
+    # catch an accidentally shipped build/test surface — and a smuggled
+    # src tree (~1.2k files / ~16 MB) trips both by a wide margin.
+    assert artifact["entryCount"] <= 300
+    assert artifact["unpackedSize"] <= 4 * 1024 * 1024
 
 
 def test_dmg_distribution_contract_is_absent_from_supported_surfaces() -> None:

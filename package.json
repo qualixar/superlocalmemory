@@ -94,7 +94,6 @@
     "plugin-src/agents/slm-optimize-advisor.md",
     "plugin-src/rules/AGENTS.md",
     "docs/pi-dev-integration.md",
-    "pyproject.toml",
     "README.md",
     "LICENSE",
     "NOTICE",

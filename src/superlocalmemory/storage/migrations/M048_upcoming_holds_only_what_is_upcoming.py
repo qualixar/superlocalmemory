@@ -229,10 +229,15 @@ def blocks_serving(conn: sqlite3.Connection) -> bool:
     return False
 
 
-def repair(conn: sqlite3.Connection) -> None:
-    """Re-run the deterministic demotion pass as repair (4.1.14 #133).
-
-    The pass re-reads wording and demotes only misfiled plans, so
-    re-running on already-demoted rows is a no-op by construction.
-    """
-    apply(conn=conn)
+#: No runner repair for this migration, by design (4.1.14 #133).
+#: M048's verify is a DATA check that re-fails by routine date rollover,
+#: and its own contract says the maintenance cycle (not migration replay)
+#: converges the drift. blocks_serving() is False, so drift is listed
+#: without refusing writes. Re-running the demotion pass from the runner
+#: would UPDATE fact rows on every drifted boot — schema self-heal must
+#: never mutate user data.
+REPAIR_NOT_APPLICABLE = (
+    "data-quality drift converged by the maintenance cycle "
+    "(core/maintenance_scheduler); blocks_serving is False so drift "
+    "never refuses writes; runner replay would UPDATE user rows"
+)

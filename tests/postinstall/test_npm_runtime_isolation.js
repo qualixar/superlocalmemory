@@ -161,8 +161,9 @@ test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', (
     return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
   };
   const originalExistsSync = fs.existsSync;
-  fs.existsSync = () => false;
-  process.env.SLM_LOCAL_WHEEL = '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl';
+  const wheelPath = '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl';
+  fs.existsSync = (target) => String(target) === wheelPath;
+  process.env.SLM_LOCAL_WHEEL = wheelPath;
   try {
     clearModule(POSTINSTALL);
     const { main } = require(POSTINSTALL);
@@ -180,6 +181,27 @@ test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', (
     pipCalls[0].args[pipCalls[0].args.length - 1],
     '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl',
   );
+});
+
+test('SLM_LOCAL_WHEEL refuses non-wheel and missing paths (#134)', () => {
+  const originalEnv = process.env.SLM_LOCAL_WHEEL;
+  const originalExistsSync = fs.existsSync;
+  fs.existsSync = () => false;
+  try {
+    clearModule(POSTINSTALL);
+    const { main, pypiSpecifier } = require(POSTINSTALL);
+    for (const bad of ['/tmp/pkg/', 'https://example.com/x.whl', 'pkg.tar.gz', '/tmp/missing.whl']) {
+      process.env.SLM_LOCAL_WHEEL = bad;
+      assert.throws(() => pypiSpecifier(REPO_ROOT), /existing local .whl file/);
+    }
+    process.env.SLM_LOCAL_WHEEL = '/tmp/pkg/';
+    assert.equal(main(), 1);
+  } finally {
+    fs.existsSync = originalExistsSync;
+    if (originalEnv === undefined) delete process.env.SLM_LOCAL_WHEEL;
+    else process.env.SLM_LOCAL_WHEEL = originalEnv;
+    clearModule(POSTINSTALL);
+  }
 });
 
 test('postinstall never auto-runs setup, hooks, daemon, or model downloads', () => {

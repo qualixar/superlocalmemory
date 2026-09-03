@@ -287,7 +287,7 @@ class TestRememberWriteThrough:
         monkeypatch.setattr(_d, "is_daemon_running", lambda *a, **k: True)
         monkeypatch.setattr(
             _d, "daemon_request",
-            lambda method, path, body=None: {
+            lambda method, path, body=None, **kwargs: {
                 "ok": True, "fact_ids": ["abc123"], "count": 1, "status": "stored",
             },
         )
@@ -357,7 +357,7 @@ class TestRememberWriteThrough:
         monkeypatch.setattr(
             _d,
             "daemon_request",
-            lambda method, path, body=None: {
+            lambda method, path, body=None, **kwargs: {
                 "ok": True,
                 "fact_ids": [],
                 "count": 0,
