@@ -69,12 +69,6 @@
   ],
   "files": [
     "bin/slm-npm",
-    "src/superlocalmemory/",
-    "!src/**/__pycache__/",
-    "!src/**/*.pyc",
-    "!src/**/*.pyo",
-    "!src/superlocalmemory/graphify-out/",
-    "!src/**/graphify-out/**",
     "ide/completions/",
     "ide/configs/",
     "ide/hooks/",

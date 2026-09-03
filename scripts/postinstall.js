@@ -83,6 +83,23 @@ function runtimePythonPath(packageRoot, platform = os.platform()) {
     : path.join(packageRoot, '.slm-venv', 'bin', 'python');
 }
 
+/**
+ * Single source of truth for the Python payload (4.1.14 #134, Option A).
+ *
+ * The npm tarball carries NO Python sources. The package-owned venv is
+ * populated from the pinned PyPI wheel `superlocalmemory==<npm version>`,
+ * so there is exactly one copy of the package and patching any other
+ * tree cannot shadow it. `SLM_LOCAL_WHEEL=/path/to/file.whl` overrides
+ * the specifier for air-gapped installs; it is still a wheel and still
+ * passes the version identity check below — never a source tree.
+ */
+function pypiSpecifier(packageRoot) {
+  const localWheel = String(process.env.SLM_LOCAL_WHEEL || '').trim();
+  if (localWheel) return localWheel;
+  const packageVersion = require(path.join(packageRoot, 'package.json')).version;
+  return `superlocalmemory==${packageVersion}`;
+}
+
 function validateRuntimeLocation(venvRoot) {
   if (!fs.existsSync(venvRoot)) return { ok: true };
   try {
@@ -162,6 +179,7 @@ function main(argv = process.argv.slice(2)) {
   }
 
   const runtimePython = runtimePythonPath(packageRoot);
+  const packageSource = pypiSpecifier(packageRoot);
   const installPackage = spawnSync(
     runtimePython,
     [
@@ -169,12 +187,15 @@ function main(argv = process.argv.slice(2)) {
       '--disable-pip-version-check',
       '--no-input',
       '--upgrade',
-      packageRoot,
+      packageSource,
     ],
     { stdio: 'inherit', timeout: INSTALL_TIMEOUT_MS, env: process.env },
   );
   if (installPackage.status !== 0) {
     console.error(`SuperLocalMemory: private-runtime installation failed (${failureDetail(installPackage)}).`);
+    console.error(`Tried Python source: ${packageSource}`);
+    console.error('This install needs network access to PyPI, or set SLM_LOCAL_WHEEL=/path/to/superlocalmemory-<version>-py3-none-any.whl for air-gapped installs, then run:');
+    console.error('  npm rebuild superlocalmemory');
     console.error('Check network access, available disk space, and Python build prerequisites, then run:');
     console.error('  npm rebuild superlocalmemory');
     console.error('No system Python packages or SLM durable data were modified.');
@@ -199,6 +220,8 @@ function main(argv = process.argv.slice(2)) {
   }
 
   console.log(`SuperLocalMemory ${packageVersion}: isolated runtime verified.`);
+  console.log(`Single source of truth: the PyPI wheel superlocalmemory==${packageVersion} in .slm-venv;`);
+  console.log('the npm tarball carries no Python sources, so no second copy can shadow it.');
   console.log('No memory database, IDE hooks, daemon, configuration, or models were changed.');
   console.log('');
   console.log('  Your database will be automatically migrated on first run.');
@@ -228,6 +251,7 @@ module.exports = {
   isSupportedPython,
   main,
   parsePythonVersion,
+  pypiSpecifier,
   pythonCandidates,
   runtimePythonPath,
   validateRuntimeLocation,

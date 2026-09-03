@@ -49,6 +49,25 @@ def _read_python_version(base: Path) -> Optional[str]:
     where multi-install divergence between pip and npm is most likely, and where
     the version-mismatch error would then name no installations at all.
     """
+    found = _find_package_init(base)
+    if found is None:
+        return None
+    try:
+        text = found.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("__version__"):
+            # __version__ = "4.1.0"  or  __version__ = '4.1.0'
+            parts = line.split("=", 1)
+            if len(parts) == 2:
+                return parts[1].strip().strip("\"'") or None
+    return None
+
+
+def _find_package_init(base: Path) -> Optional[Path]:
+    """Locate the installed ``superlocalmemory/__init__.py`` under ``base``."""
     patterns = [
         str(base / "lib" / "python*" / "site-packages" / "superlocalmemory" / "__init__.py"),
         str(base / "Lib" / "site-packages" / "superlocalmemory" / "__init__.py"),
@@ -58,18 +77,23 @@ def _read_python_version(base: Path) -> Optional[str]:
     for pattern in patterns:
         matches.extend(glob.glob(pattern))
     for init_path in sorted(set(matches)):
-        try:
-            text = Path(init_path).read_text(encoding="utf-8", errors="replace")
-            for line in text.splitlines():
-                line = line.strip()
-                if line.startswith("__version__"):
-                    # __version__ = "4.1.0"  or  __version__ = '4.1.0'
-                    parts = line.split("=", 1)
-                    if len(parts) == 2:
-                        return parts[1].strip().strip("\"'")
-        except OSError:
-            continue
+        return Path(init_path)
     return None
+
+
+def _resolve_package_dir(base: Path) -> Optional[str]:
+    """Return the directory holding the resolved package (4.1.14 #134).
+
+    This is the answer to "which copy actually loads": the venv
+    interpreter resolves exactly this ``superlocalmemory/`` directory.
+    A stale ``src/`` tree beside an npm install can never shadow it —
+    the launcher strips ``PYTHONPATH`` — but naming the authority in
+    doctor output ends the confusion class from #128 Bug 2.
+    """
+    found = _find_package_init(base)
+    if found is None:
+        return None
+    return str(found.parent)
 
 
 def _read_npm_version(npm_root: Path) -> Optional[str]:
@@ -89,6 +113,9 @@ def _detect_all_installs() -> list[dict]:
       - ``path``    (str) — directory of the install
       - ``version`` (str) — version string read from package metadata
       - ``type``    (str) — one of "pipx", "venv", "npm"
+      - ``resolved`` (str, optional) — the package directory the install's
+        interpreter actually loads (4.1.14 #134: names the single source
+        of truth so a stale tree can never silently shadow it).
 
     Detection is read-only and best-effort. A missing or unreadable install
     produces no entry rather than an error. Subprocess calls are bounded to
@@ -112,6 +139,7 @@ def _detect_all_installs() -> list[dict]:
             "path": str(_VENV_ROOT) + "/",
             "version": venv_version,
             "type": "venv",
+            "resolved": _resolve_package_dir(_VENV_ROOT),
         })
 
     # --- npm global ---
@@ -119,10 +147,12 @@ def _detect_all_installs() -> list[dict]:
     if npm_root is not None:
         npm_version = _read_npm_version(npm_root)
         if npm_version is not None:
+            npm_venv = npm_root / "superlocalmemory" / ".slm-venv"
             results.append({
                 "path": str(npm_root / "superlocalmemory") + "/",
                 "version": npm_version,
                 "type": "npm",
+                "resolved": _resolve_package_dir(npm_venv),
             })
 
     return results

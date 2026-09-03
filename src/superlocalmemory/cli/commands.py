@@ -3135,8 +3135,8 @@ def cmd_doctor(args: Namespace) -> None:
                 _detail,
                 fix="Upgrade all installs: "
                     "pipx upgrade superlocalmemory  |  "
-                    "pip install -U superlocalmemory (in ~/.slm-venv)  |  "
-                    "npm install -g superlocalmemory@latest",
+                    "npm rebuild superlocalmemory (refreshes its pinned wheel; "
+                    "never pip-install inside .slm-venv by hand)",
             )
         else:
             _unified = next(iter(_versions))

@@ -129,6 +129,59 @@ test('postinstall creates only a package-owned venv and installs through its pip
   assert.equal(pipCalls[0].args.includes('--break-system-packages'), false);
 });
 
+test('postinstall installs the pinned PyPI wheel, never the bundled tree (#134)', () => {
+  const { calls } = capturePostinstall();
+  const pipCalls = calls.filter(({ args }) => args.includes('-m') && args.includes('pip'));
+  assert.equal(pipCalls.length, 1);
+  const installArg = pipCalls[0].args[pipCalls[0].args.length - 1];
+  assert.equal(
+    installArg,
+    `superlocalmemory==${PACKAGE_VERSION}`,
+    'the venv must be populated from the pinned PyPI wheel (single source of truth)',
+  );
+  assert.doesNotMatch(
+    pipCalls[0].args.join(' '),
+    /src\/superlocalmemory|\bsrc\b/,
+    'the bundled source tree must never be pip-installed',
+  );
+});
+
+test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalEnv = process.env.SLM_LOCAL_WHEEL;
+  const calls = [];
+  childProcess.spawnSync = (command, args = []) => {
+    calls.push({ command, args: [...args] });
+    if (args.includes('--version')) {
+      return { status: 0, stdout: Buffer.from('Python 3.12.8\n'), stderr: Buffer.from('') };
+    }
+    if (args.includes('-c')) {
+      return { status: 0, stdout: Buffer.from(PACKAGE_VERSION + '\n'), stderr: Buffer.from('') };
+    }
+    return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
+  };
+  const originalExistsSync = fs.existsSync;
+  fs.existsSync = () => false;
+  process.env.SLM_LOCAL_WHEEL = '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl';
+  try {
+    clearModule(POSTINSTALL);
+    const { main } = require(POSTINSTALL);
+    assert.equal(main(), 0);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    fs.existsSync = originalExistsSync;
+    if (originalEnv === undefined) delete process.env.SLM_LOCAL_WHEEL;
+    else process.env.SLM_LOCAL_WHEEL = originalEnv;
+    clearModule(POSTINSTALL);
+  }
+  const pipCalls = calls.filter(({ args }) => args.includes('-m') && args.includes('pip'));
+  assert.equal(pipCalls.length, 1);
+  assert.equal(
+    pipCalls[0].args[pipCalls[0].args.length - 1],
+    '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl',
+  );
+});
+
 test('postinstall never auto-runs setup, hooks, daemon, or model downloads', () => {
   const { calls } = capturePostinstall();
   const flattened = calls.flatMap(({ args }) => args).join(' ');
