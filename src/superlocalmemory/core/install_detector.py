@@ -80,6 +80,26 @@ def _find_package_init(base: Path) -> Optional[Path]:
     return None
 
 
+def canonicalize_version(value: object) -> tuple:
+    """Normalize a version string for cross-scheme comparison (4.1.14 #134).
+
+    npm-semver (``4.1.14-rc.1``) and PEP 440 (``4.1.14rc1``) spell the same
+    release differently; a raw ``!=`` fails good wheels on pre-releases,
+    while stripping all separators collides distinct releases (``4.1.14``
+    vs ``4.11.4``). Split into a numeric core compared part-wise plus an
+    exact suffix: ``4.1.14-rc.1`` == ``4.1.14rc1`` != ``4.1.14``.
+    """
+    text = str(value or "").strip().lower()
+    if text.startswith("v"):
+        text = text[1:]
+    match = re.match(r"^(\d+(?:\.\d+)*)(.*)$", text)
+    if not match:
+        return ((), text)
+    core = tuple(int(part) for part in match.group(1).split("."))
+    suffix = re.sub(r"[-_.]+", "", match.group(2).strip())
+    return (core, suffix)
+
+
 def _resolve_package_dir(base: Path) -> Optional[str]:
     """Return the directory holding the resolved package (4.1.14 #134).
 

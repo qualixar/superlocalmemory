@@ -338,6 +338,28 @@ class TestWindowsSitePackagesLayout:
         assert _read_python_version(tmp_path) == "4.1.14"
 
 
+class TestCanonicalizeVersion:
+    """4.1.14 audit: npm-semver and PEP 440 spellings must agree."""
+
+    @staticmethod
+    def _canon(value):
+        from superlocalmemory.core.install_detector import canonicalize_version
+
+        return canonicalize_version(value)
+
+    def test_prerelease_spellings_agree(self):
+        assert self._canon("4.1.14-rc.1") == self._canon("4.1.14rc1")
+
+    def test_distinct_releases_differ(self):
+        assert self._canon("4.1.14") != self._canon("4.11.4")
+        assert self._canon("4.1.14-1") != self._canon("4.1.141")
+        assert self._canon("4.1.14") != self._canon("4.1.14-rc.1")
+
+    def test_identical_versions_agree(self):
+        assert self._canon("4.1.14") == self._canon("4.1.14")
+        assert self._canon("v4.1.14") == self._canon("4.1.14")
+
+
 class TestResolvedPackageAuthority:
     """Entries name the package directory that actually loads (4.1.14 #134)."""
 

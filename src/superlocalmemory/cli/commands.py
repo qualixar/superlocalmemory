@@ -3158,14 +3158,18 @@ def cmd_doctor(args: Namespace) -> None:
         # 4.1.14 single-source (#134): the npm wrapper version must agree
         # with the wheel actually installed in its package-owned venv. A
         # stale venv under a fresh wrapper is the Bug-2 hazard persisting
-        # past an upgrade without rebuild.
+        # past an upgrade without rebuild. Compared canonically so
+        # npm-semver and PEP 440 spellings of one release agree.
+        from superlocalmemory.core.install_detector import (
+            canonicalize_version as _canon_ver,
+        )
         for i in _installs:
             if i.get("type") != "npm":
                 continue
             _wheel_version = i.get("wheel_version")
             if _wheel_version is None:
                 continue  # venv not yet installed; postinstall covers it
-            if _wheel_version != i.get("version"):
+            if _canon_ver(_wheel_version) != _canon_ver(i.get("version")):
                 _check(
                     "install_versions",
                     "WARN",

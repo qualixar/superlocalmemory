@@ -62,23 +62,21 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def _old_row_ids(conn: sqlite3.Connection) -> set:
-    try:
-        return {
-            r[0]
-            for r in conn.execute("SELECT id FROM _ingestion_log_old").fetchall()
-        }
-    except sqlite3.Error:
-        return set()
+    """Row ids in the leftover table. DB errors propagate — callers only
+    invoke this where the table provably exists, and an unreadable
+    leftover must fail loudly, never read as an empty (dropped) set."""
+    return {
+        r[0]
+        for r in conn.execute("SELECT id FROM _ingestion_log_old").fetchall()
+    }
 
 
 def _new_row_ids(conn: sqlite3.Connection) -> set:
-    try:
-        return {
-            r[0]
-            for r in conn.execute("SELECT id FROM ingestion_log").fetchall()
-        }
-    except sqlite3.Error:
-        return set()
+    """Row ids in the canonical table. DB errors propagate (see above)."""
+    return {
+        r[0]
+        for r in conn.execute("SELECT id FROM ingestion_log").fetchall()
+    }
 
 
 def _copy_from_old(conn: sqlite3.Connection) -> None:

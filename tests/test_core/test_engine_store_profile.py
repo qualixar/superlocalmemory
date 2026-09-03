@@ -379,6 +379,15 @@ class TestAuditUnknownProfile:
                 "Ghost content must never land anywhere.", profile_id="ghost",
             )
 
+    def test_junk_content_to_ghost_still_rejects(self, engine_with_mock_deps):
+        """4.1.14 audit: the profile guard precedes the content gate — junk
+        to a missing profile raises instead of returning [] silently."""
+        from superlocalmemory.core.ingestion_command import UnknownProfileError
+
+        eng = engine_with_mock_deps
+        with pytest.raises(UnknownProfileError, match="unknown profile"):
+            eng.store("x", profile_id="ghost")
+
     def test_prebuilt_junk_content_still_rejects_unknown_profile(
         self, engine_with_mock_deps,
     ):

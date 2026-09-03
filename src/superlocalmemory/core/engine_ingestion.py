@@ -334,6 +334,13 @@ def canonical_store(
 
     started = time.monotonic()
 
+    # 4.1.14 audit: normalize the anchor and fail closed on unknown
+    # profiles FIRST — before the content gate below. Otherwise a routed
+    # write to a missing profile with low-information content returns []
+    # and looks like a successful no-op while persisting nothing.
+    profile_id = (profile_id or "").strip() or None
+    _require_known_profile(engine, profile_id or engine._profile_id)
+
     # Preserve the long-standing Python/API contract for rejected content:
     # low-information input is a no-op and never becomes an M018 operation.
     if not content_passes_admission(content):
@@ -364,11 +371,7 @@ def canonical_store(
             content = scrubbed
             logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
     try:
-        # 4.1.14 audit: normalize the anchor once at entry — whitespace-only
-        # means the active profile, padded ids route stripped. Every
-        # downstream (journal row, receipt, materialization) inherits it.
-        profile_id = (profile_id or "").strip() or None
-        _require_known_profile(engine, profile_id or engine._profile_id)
+        # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
         receipt = command.submit(IngestionRequest(
             content=content,
