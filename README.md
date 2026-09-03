@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V4.1.12</h1>
+<h1 align="center">SuperLocalMemory V4.1.13</h1>
 
 <h2 align="center">Rent the LLM. Own the memory.</h2>
 
@@ -27,12 +27,12 @@ guarantee here is stated as a falsifiable invariant, tested under an adversarial
 negative control, and shipped with the harness that regenerates the evidence:
 <code>python benchmark/run_all.py --trials 200 --output-dir results/</code>. What each experiment
 does <em>not</em> exercise is stated too.</p>
-<p align="center"><code>v4.1.12</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
+<p align="center"><code>v4.1.13</code> — one control plane: <strong>SLM-Mesh</strong> peer coordination · multi-scope memory (personal / shared / global) · profiles · Cache · Compress · 7-layer retrieval · code graph · Entity Explorer · skill evolution · Modes A/B/C · GDPR retention &amp; audit chain · bounded loops — across CLI, MCP, dashboard, the <strong>Claude plugin</strong>, the <strong>Codex add-on</strong>, and documented IDE integrations.<br/>
 Proxy: <code>slm wrap claude</code> &nbsp;·&nbsp; MCP: add <code>slm_compress</code> to your config &nbsp;·&nbsp; Skill: zero-config</p>
 <p align="center"><strong>Four public arXiv preprints</strong> · V4: <a href="https://arxiv.org/abs/2608.08253">arXiv:2608.08253</a> · companion archive: <a href="https://zenodo.org/records/21853302">Zenodo 21853302</a> (<a href="https://doi.org/10.5281/zenodo.21853302">DOI 10.5281/zenodo.21853302</a>) · prior preprints: <a href="https://arxiv.org/abs/2603.02240">2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">2604.04514</a>.</p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v4.1.12-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v4.1.12 — Current Release"/></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/v4.1.13-Current_Release-2ea44f?style=for-the-badge&logo=checkmarx&logoColor=white" alt="v4.1.13 — Current Release"/></a>
   <a href="https://arxiv.org/abs/2608.08253"><img src="https://img.shields.io/badge/arXiv-2608.08253-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="SuperLocalMemory 4.0 paper on arXiv:2608.08253"/></a>
   <a href="https://zenodo.org/records/21853302"><img src="https://img.shields.io/badge/Zenodo-10.5281%2Fzenodo.21853302-1682D4?style=for-the-badge&logo=zenodo&logoColor=white" alt="V4 paper on Zenodo: 10.5281/zenodo.21853302"/></a>
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
@@ -491,7 +491,7 @@ Hermes users get the same SLM skills and advisor roles through a native
 `plugin.yaml` package, plus `/slm <command>` and generated `/slm-<command>`
 aliases for the public CLI surface. The plugin is intentionally separate from
 the PyPI/npm runtime: install the owning SLM runtime first, then install the
-reviewed pinned pack from the `v4.1.12` GitHub release. It is additive and does
+reviewed pinned pack from the `v4.1.13` GitHub release. It is additive and does
 not replace Hermes's selected memory provider or existing configuration. See
 [the Hermes integration guide](docs/hermes.md).
 

@@ -1,24 +1,24 @@
 # Hermes native integration
 
-SuperLocalMemory 4.1.12 ships a native Hermes plugin. It is a companion to,
+SuperLocalMemory 4.1.13 ships a native Hermes plugin. It is a companion to,
 not a replacement for, Hermes's built-in memory provider and configuration.
 
 Install the owning runtime first:
 
 ```bash
-python -m pip install --upgrade superlocalmemory==4.1.12
+python -m pip install --upgrade superlocalmemory==4.1.13
 slm doctor
 ```
 
-Then download the reviewed, immutable plugin pack from the `v4.1.12` GitHub
+Then download the reviewed, immutable plugin pack from the `v4.1.13` GitHub
 release. Hermes packs pin each monorepo plugin with its repository, subdirectory,
 and exact 40-character commit SHA; the pack cannot grant capabilities or MCP
 access on your behalf:
 
 ```bash
-curl -LO https://raw.githubusercontent.com/qualixar/superlocalmemory/main/hermes-pack-v1.yaml
-hermes plugins pack show qualixar-agent-reliability-hermes-pack-v1.yaml
-hermes plugins pack install qualixar-agent-reliability-hermes-pack-v1.yaml
+curl -LO https://github.com/qualixar/superlocalmemory/releases/download/v4.1.13/qualixar-agent-reliability-hermes-pack.yaml
+hermes plugins pack show qualixar-agent-reliability-hermes-pack.yaml
+hermes plugins pack install qualixar-agent-reliability-hermes-pack.yaml
 ```
 
 The plugin registers 12 namespaced skills, four on-demand Hermes child-agent

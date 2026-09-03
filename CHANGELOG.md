@@ -5,6 +5,16 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.13] — Hermes public-install compatibility repair
+
+### Fixed
+
+- **Public Hermes installation.** The native plugin now uses Hermes manifest v1,
+  compatible with the current Hermes installer. The release includes a tested,
+  immutable two-plugin pack asset. Upgrade with `pip install --upgrade
+  superlocalmemory==4.1.13`; users of 4.1.12 should upgrade before attempting
+  the Hermes-native install.
+
 ## [4.1.12] — Native Hermes lifecycle and verified execution learning
 
 ### Added

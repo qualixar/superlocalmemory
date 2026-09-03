@@ -1,5 +1,5 @@
 name: superlocalmemory
-version: 4.1.12
+version: 4.1.13
 description: "Native, additive SuperLocalMemory lifecycle, skills, commands, and advisors for Hermes."
 author: Qualixar
 manifest_version: 1
