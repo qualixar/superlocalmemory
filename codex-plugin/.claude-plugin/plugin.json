@@ -15,5 +15,5 @@
   "mcpServers": "./.mcp.json",
   "name": "superlocalmemory-codex",
   "repository": "https://github.com/qualixar/superlocalmemory",
-  "version": "4.1.13"
+  "version": "4.1.14"
 }

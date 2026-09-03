@@ -2,7 +2,7 @@
 
 Built by `scripts/build-copilot-plugin.mjs` from the single source in `plugin-src/` (+ `ide/configs/vscode-copilot-mcp.json`, `plugin/CLAUDE.md`). Version stamped from `plugin-src/manifest.json`.
 
-Version: **4.1.13**
+Version: **4.1.14**
 
 | Output | Source |
 |---|---|
