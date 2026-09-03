@@ -55,3 +55,28 @@ forms documented by the individual tool.
 Fields: `ok` (always `false`), `error_code` (from the table above),
 `error` (human-readable), `request_id` (if applicable),
 `retry_after_ms` (only for `RATE_LIMITED`).
+
+## Storage Notes
+
+### sqlite-vec (`fact_embeddings`) row deletes vs full-table deletes
+
+Row-targeted deletes work: `DELETE FROM fact_embeddings WHERE rowid = ?`
+is the supported primitive (used by the vector store's per-fact delete and
+by GDPR erasure, which deletes vectors fact by fact). A bare full-table
+`DELETE FROM fact_embeddings` with no `WHERE` clause is rejected by
+sqlite-vec with `database disk image is malformed` — that error is
+misleading: the database is NOT corrupt, and `PRAGMA integrity_check` /
+`quick_check` correctly keep reporting `ok`. Do not nuke the database over
+it.
+
+Supported ways to clear vector data:
+
+- Per-fact removal through the product APIs (GDPR erase paths), which
+  delete the vec0 row, the metadata row, and the row-map row together.
+- Full rebuild through the embedding migration path, which drops and
+  recreates the virtual table (`DROP TABLE` + `CREATE VIRTUAL TABLE ...
+  USING vec0(...)`) rather than deleting from it.
+
+Never hand-edit the database with raw SQL against the `fact_embeddings*`
+virtual tables; their shadow-table layout is a sqlite-vec internal and is
+not a stable API.
