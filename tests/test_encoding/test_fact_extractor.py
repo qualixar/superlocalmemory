@@ -356,6 +356,122 @@ class TestFactExtractorModeLLM:
         )
         assert len(facts) > 0
 
+    def test_llm_thinking_trace_yields_real_facts(self) -> None:
+        # Issue #128: a thinking model's answer arrives wrapped in its
+        # reasoning trace (content empty, thinking populated). The JSON
+        # array inside the trace must still extract — and the assertion
+        # below must ONLY pass when the LLM path ran: the expected
+        # content string ("...as a software engineer") never appears in
+        # the input turns, so Mode-A fallback can never produce it.
+        trace = (
+            "Let me think step by step. Alice is the subject, Google the "
+            "employer. Final answer: "
+            + json.dumps([
+                {"text": "Alice works at Google as a software engineer",
+                 "fact_type": "semantic", "entities": ["Alice", "Google"],
+                 "importance": 7, "confidence": 0.95},
+            ])
+        )
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+        assert "Alice" in facts[0].entities
+        assert "Google" in facts[0].entities
+        assert facts[0].importance == 0.7
+
+    def test_llm_thinking_trace_with_bracket_noise(self) -> None:
+        # Real qwen traces interleave bracket noise ([Alice, Google],
+        # [1]) before the answer. The legacy first-[-to-last-] span is
+        # not valid JSON there; array recovery must skip the noise and
+        # still extract the answer.
+        trace = (
+            "Candidates [Alice, Google] ranked [1] and [2]. "
+            "Trial parse failed. Final answer: "
+            + json.dumps([
+                {"text": "Alice works at Google as a software engineer",
+                 "fact_type": "semantic", "entities": ["Alice", "Google"],
+                 "importance": 7, "confidence": 0.95},
+            ])
+            + " Done."
+        )
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+
+    def test_llm_trial_payload_does_not_shadow_final_answer(self) -> None:
+        # A mid-trace trial array is itself viable — first-wins would
+        # store the draft as a real memory. Last-viable must store the
+        # final answer instead.
+        trial = json.dumps([
+            {"text": "Alice drinks coffee every morning",
+             "fact_type": "habit", "entities": ["Alice"],
+             "importance": 3, "confidence": 0.8},
+        ])
+        final = json.dumps([
+            {"text": "Alice works at Google as a software engineer",
+             "fact_type": "semantic", "entities": ["Alice", "Google"],
+             "importance": 7, "confidence": 0.95},
+        ])
+        trace = f"Draft attempt: {trial} On reflection, better: Final: {final}"
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+
+    def test_llm_trailing_decoy_falls_through_to_answer(self) -> None:
+        # A trailing decoy yielding zero facts ([{"name": ...}] has no
+        # text) must not shadow the real answer above it.
+        final = json.dumps([
+            {"text": "Alice works at Google as a software engineer",
+             "fact_type": "semantic", "entities": ["Alice", "Google"],
+             "importance": 7, "confidence": 0.95},
+        ])
+        trace = f"Final: {final} Metadata: [{{\"name\": \"Alice\"}}]"
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+
+    def test_llm_empty_response_warns(self, caplog) -> None:
+        llm = self._mock_llm("")
+        ext = FactExtractor(
+            config=EncodingConfig(min_fact_confidence=0.0),
+            llm=llm, mode=Mode.B,
+        )
+        with caplog.at_level("WARNING"):
+            facts = ext.extract_facts(
+                ["Alice Smith works at Google as an engineer."],
+                session_id="s1",
+            )
+        assert len(facts) > 0  # Falls back to Mode A
+        assert "empty response text" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Deduplication

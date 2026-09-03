@@ -720,6 +720,33 @@ class FactExtractor:
             logger.debug("Entity reflexion skipped: %s", exc)
             return facts
 
+    @staticmethod
+    def _find_json_arrays(raw: str) -> list[list]:
+        """All answer-candidate JSON arrays inside ``raw``, in trace order.
+
+        Thinking-model traces interleave bracket noise (``[Alice,
+        Google]``, ``[1]``, trial fragments) before the answer, so the
+        legacy first-``[``-to-last-``]`` span is not valid JSON on real
+        traces (#128). Every ``[`` candidate is decoded with
+        ``raw_decode`` — which stops at the value's own end, ignoring
+        trailing text. A plain single-array response yields exactly the
+        array the old span produced.
+        """
+        decoder = json.JSONDecoder()
+        found: list[list] = []
+        for match in re.finditer(r"\[", raw):
+            try:
+                value, _ = decoder.raw_decode(raw, match.start())
+            except json.JSONDecodeError:
+                continue
+            if (
+                isinstance(value, list)
+                and value
+                and any(isinstance(item, dict) for item in value)
+            ):
+                found.append(value)
+        return found
+
     def _parse_llm_response(
         self,
         raw: str,
@@ -728,29 +755,40 @@ class FactExtractor:
     ) -> list[AtomicFact]:
         """Parse JSON array from LLM response into AtomicFact list."""
         if not raw or not raw.strip():
+            # #128: this used to fail silently, making Mode B look working
+            # while pure Mode A ran underneath. Warn so the degradation
+            # is visible in daemon.log.
+            logger.warning(
+                "LLM fact extraction got empty response text; nothing to parse.",
+            )
             return []
 
-        # Extract JSON array from potentially wrapped response
+        # Extract JSON array from potentially wrapped response.
+        # Last viable candidate wins: reasoning traces reason first and
+        # answer last, so a mid-trace trial payload must never shadow the
+        # final answer — while a trailing decoy that yields zero facts
+        # (e.g. [{"name": ...}]) falls through to the real answer above.
         try:
-            match = re.search(r"\[.*\]", raw, re.DOTALL)
-            if not match:
+            candidates = self._find_json_arrays(raw)
+            if not candidates:
                 logger.warning("No JSON array found in LLM response.")
-                return []
-            items = json.loads(match.group())
-            if not isinstance(items, list):
                 return []
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("JSON parse error in LLM fact response: %s", exc)
             return []
 
         facts: list[AtomicFact] = []
-        for item in items[:10]:  # Hard cap at 10 per chunk
-            if not isinstance(item, dict):
-                continue
-            fact = self._item_to_fact(item, session_id, session_date)
-            if fact is not None:
-                facts.append(fact)
-
+        for items in reversed(candidates):
+            built: list[AtomicFact] = []
+            for item in items[:10]:  # Hard cap at 10 per chunk
+                if not isinstance(item, dict):
+                    continue
+                fact = self._item_to_fact(item, session_id, session_date)
+                if fact is not None:
+                    built.append(fact)
+            if built:
+                facts = built
+                break
         return facts
 
     def _item_to_fact(

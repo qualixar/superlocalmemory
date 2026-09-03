@@ -123,3 +123,58 @@ def test_mode_a_config_has_no_llm():
     config = SLMConfig.for_mode(Mode.A)
     assert config.llm.provider == ""
     assert not config.llm.is_available
+
+
+# ---------------------------------------------------------------------------
+# Issue #128 — thinking models (qwen3.x, DeepSeek-R1 class)
+# ---------------------------------------------------------------------------
+
+def _thinking_model_backbone() -> LLMBackbone:
+    config = LLMConfig(provider="ollama", model="qwen3.5:9b")
+    return LLMBackbone(config)
+
+
+def test_ollama_extract_text_prefers_content():
+    backbone = _thinking_model_backbone()
+    data = {"message": {"content": '[{"text": "hi"}]', "thinking": "trace"}}
+    assert backbone._extract_text(data) == '[{"text": "hi"}]'
+
+
+def test_ollama_extract_text_falls_back_to_thinking(caplog):
+    backbone = _thinking_model_backbone()
+    trace = 'Reasoning... [{"text": "Alice works at Google"}]'
+    data = {"message": {"role": "assistant", "content": "", "thinking": trace}}
+    # INFO, not WARNING: for thinking models this is the normal shape,
+    # and generate() sits on the store hot path (#128 review).
+    with caplog.at_level("INFO", logger="superlocalmemory.llm.backbone"):
+        assert backbone._extract_text(data) == trace
+    assert "message.thinking" in caplog.text
+
+
+def test_ollama_extract_text_hardening():
+    backbone = _thinking_model_backbone()
+    assert backbone._extract_text({"message": None}) == ""
+    assert backbone._extract_text({"message": ["not", "a", "dict"]}) == ""
+    assert backbone._extract_text({"message": "a string"}) == ""
+    # Non-string fields never crash the hot path.
+    data = {"message": {"content": 42, "thinking": 7}}
+    assert backbone._extract_text(data) == ""
+
+
+def test_ollama_extract_text_empty_both_returns_empty():
+    backbone = _thinking_model_backbone()
+    assert backbone._extract_text({"message": {"content": "", "thinking": ""}}) == ""
+    assert backbone._extract_text({}) == ""
+
+
+def test_ollama_payload_omits_think_by_default():
+    backbone = _thinking_model_backbone()
+    _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
+    assert "think" not in payload
+
+
+def test_ollama_payload_disables_think_when_env_set(monkeypatch):
+    monkeypatch.setenv("SLM_OLLAMA_DISABLE_THINK", "1")
+    backbone = _thinking_model_backbone()
+    _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
+    assert payload["think"] is False

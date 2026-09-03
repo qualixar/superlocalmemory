@@ -289,6 +289,17 @@ class LLMBackbone:
                 "num_ctx": 4096,
             },
         }
+        # #128: thinking-capable models (qwen3.x family) answer inside
+        # message.thinking, leaving content empty. The _extract_text
+        # fallback plus the extractor's array recovery cover that by
+        # default; operators who prefer plain content-only answers can
+        # opt out of thinking entirely with SLM_OLLAMA_DISABLE_THINK=1.
+        # Opt-in only and omitted by default: thinking support varies
+        # across model families, so the key is never sent unasked.
+        if os.environ.get(
+            "SLM_OLLAMA_DISABLE_THINK", "",
+        ).strip().lower() in {"1", "true", "yes"}:
+            payload["think"] = False
         return self._base_url, headers, payload
 
     def _build_anthropic(
@@ -347,7 +358,30 @@ class LLMBackbone:
             return data.get("content", [{}])[0].get("text", "").strip()
         if self._provider == "ollama":
             # Native /api/chat: {"message": {"content": "..."}}
-            return data.get("message", {}).get("content", "").strip()
+            # Thinking models (qwen3.x, DeepSeek-R1 class) put the whole
+            # generation in message.thinking and leave content empty when
+            # the task triggers reasoning — without the fallback below,
+            # Mode B silently degrades to Mode A (#128). The extractor's
+            # array recovery parses the answer out of the trace.
+            message = data.get("message", {})
+            if not isinstance(message, dict):
+                return ""
+            content = message.get("content", "")
+            content = content.strip() if isinstance(content, str) else ""
+            if content:
+                return content
+            thinking = message.get("thinking", "")
+            thinking = thinking.strip() if isinstance(thinking, str) else ""
+            if thinking:
+                # INFO, not WARNING: for thinking models this is the
+                # normal response shape, and generate() sits on the
+                # store hot path — WARNING here would spam daemon.log.
+                logger.info(
+                    "Ollama thinking model returned empty content; "
+                    "extracting from message.thinking (%d chars).",
+                    len(thinking),
+                )
+            return thinking
         # OpenAI / Azure share response format.
         choices = data.get("choices", [{}])
         return choices[0].get("message", {}).get("content", "").strip()
