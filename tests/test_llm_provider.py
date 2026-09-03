@@ -164,7 +164,9 @@ def test_ollama_prose_content_falls_through_to_thinking():
     }
     # 4.1.14 audit: both fields feed the parser — prose content no longer
     # discards the thinking trace, bracket noise no longer discards content.
-    assert backbone._extract_text(data) == content + "\n" + trace
+    # Thinking goes first so content wins schema-fit ties (it is the
+    # model's primary answer channel).
+    assert backbone._extract_text(data) == trace + "\n" + content
 
 
 def test_ollama_content_with_brackets_wins():
@@ -177,7 +179,11 @@ def test_ollama_content_with_brackets_wins():
             "thinking": thinking,
         }
     }
-    assert backbone._extract_text(data) == content + "\n" + thinking
+    # 4.1.14 audit: both fields feed the parser — prose content no longer
+    # discards the thinking trace, bracket noise no longer discards content.
+    # Thinking goes first so content wins schema-fit ties (it is the
+    # model's primary answer channel).
+    assert backbone._extract_text(data) == thinking + "\n" + content
 
 
 def test_ollama_extract_text_hardening():

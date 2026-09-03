@@ -404,17 +404,18 @@ class LLMBackbone:
             thinking = thinking.strip() if isinstance(thinking, str) else ""
             if content and thinking:
                 # 4.1.14 audit: feed BOTH fields to the parser instead of
-                # guessing which holds the answer. Prose-only content and
-                # bracket noise in either field are both recoverable by
-                # array selection; dropping either field discards answers
-                # (prose content hid good thinking traces; incidental
-                # brackets in content hid good thinking answers).
+                # guessing which holds the answer. Thinking goes FIRST:
+                # selection prefers later arrays on schema-fit ties, and
+                # the content channel is the model's primary answer —
+                # thinking-trace trials must never outrank it. Prose-only
+                # content and bracket noise in either field stay
+                # recoverable through array selection.
                 logger.debug(
                     "Ollama thinking response carries both fields; "
-                    "extracting from content+thinking (%d+%d chars).",
-                    len(content), len(thinking),
+                    "extracting from thinking+content (%d+%d chars).",
+                    len(thinking), len(content),
                 )
-                return content + "\n" + thinking
+                return thinking + "\n" + content
             if thinking:
                 # DEBUG, not INFO: for thinking models empty content is the
                 # normal response shape and generate() sits on the store hot

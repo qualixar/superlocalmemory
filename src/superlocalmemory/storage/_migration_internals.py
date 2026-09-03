@@ -350,6 +350,35 @@ def _why_unmet(mod, conn) -> str:
         return ""
 
 
+def _justified_skip(conn, mod, migration_name: str, justification: str) -> tuple[str, str]:
+    """Skip a justified module, or fail it when it blocks serving.
+
+    4.1.14 audit: REPAIR_NOT_APPLICABLE excuses the module from automatic
+    repair, NOT from the serving gate. A module whose own blocks_serving()
+    answers False (M048 data drift) skips quietly; anything else —
+    including M002 schema holes with no blocks_serving answer — keeps
+    failing with the justification attached, so nothing boots silently.
+    Unknown means blocking, mirroring _serving_blocked_by.
+    """
+    decide = getattr(mod, "blocks_serving", None)
+    if callable(decide):
+        try:
+            if not bool(decide(conn)):
+                logger.info(
+                    "schema incomplete for completed migration %s; "
+                    "no automatic repair by design: %s",
+                    migration_name, justification,
+                )
+                return ("skipped", f"no automatic repair by design: {justification}")
+        except Exception:  # noqa: BLE001 — unknown means blocking
+            pass
+    return (
+        "failed",
+        f"schema incomplete for completed migration {migration_name}; "
+        f"automatic replay is disabled; {justification}",
+    )
+
+
 def _apply_single(
     conn: sqlite3.Connection,
     migration: Migration,
@@ -456,9 +485,8 @@ def _apply_single(
                         if mod is not None else ""
                     )
                     if isinstance(justification, str) and justification.strip():
-                        return (
-                            "skipped",
-                            f"no automatic repair by design: {justification.strip()}",
+                        return _justified_skip(
+                            conn, mod, migration.name, justification.strip(),
                         )
                 detail = (
                     f"DDL drift detected for {migration.name}: "
@@ -504,17 +532,17 @@ def _apply_single(
                 # data-quality drift owned by maintenance). That is a SKIP
                 # with a reason, not a failure — failing here wrote
                 # migration-error logs and doctor FAILs for routine,
-                # by-design drift.
+                # by-design drift. The skip still honors blocks_serving:
+                # a justified module without an explicit non-blocking
+                # answer keeps failing, so M002-style schema holes never
+                # boot silently.
                 justification = (
                     getattr(mod, "REPAIR_NOT_APPLICABLE", "") if mod is not None else ""
                 )
                 if isinstance(justification, str) and justification.strip():
-                    logger.info(
-                        "schema incomplete for completed migration %s; "
-                        "no automatic repair by design: %s",
-                        migration.name, justification.strip(),
+                    return _justified_skip(
+                        conn, mod, migration.name, justification.strip(),
                     )
-                    return ("skipped", f"no automatic repair by design: {justification.strip()}")
                 detail = (
                     f"schema incomplete for completed migration "
                     f"{migration.name}; automatic replay is disabled"

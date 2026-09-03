@@ -493,3 +493,34 @@ def test_unjustified_drift_still_fails(monkeypatch) -> None:
 
     assert outcome == "failed"
     conn.close()
+
+
+def test_justified_blocking_drift_still_fails(monkeypatch) -> None:
+    """4.1.14 audit (critical): justification excuses repair, not the
+    serving gate — a justified module without a non-blocking answer
+    (M002 schema holes) keeps failing instead of booting silently."""
+    import types
+
+    from superlocalmemory.storage import _migration_internals as mi
+    from superlocalmemory.storage.migrations import M003_migration_log
+
+    justified = types.SimpleNamespace(
+        NAME="MXXX_justified_blocking",
+        DDL="-- nothing",
+        REPAIR_NOT_APPLICABLE="destructive rebuild; restore from snapshot",
+        verify=lambda conn: False,
+    )
+    monkeypatch.setitem(mi._MODULES, justified.NAME, justified)
+
+    conn = __import__("sqlite3").connect(":memory:")
+    conn.executescript(M003_migration_log.DDL)
+    mi._upsert_log(
+        conn, justified.NAME, mi._ddl_hash(justified.DDL), "complete",
+    )
+    mig = mi.Migration(name=justified.NAME, db_target="memory", ddl=justified.DDL)
+
+    outcome, detail = mi._apply_single(conn, mig, dry_run=False)
+
+    assert outcome == "failed", detail
+    assert "destructive rebuild" in detail
+    conn.close()
