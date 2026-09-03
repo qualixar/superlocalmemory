@@ -345,6 +345,26 @@ def _get_port() -> int:
     return _DEFAULT_PORT
 
 
+def _health_is_owned(health: dict) -> bool:
+    """Return whether an answering health payload belongs to this namespace.
+
+    Descriptor present: the payload must echo the descriptor's identity
+    (namespace, instance, capability, PID, port). No descriptor: only a
+    verified legacy same-root daemon counts — anything else answering is
+    foreign by definition.
+    """
+    descriptor = read_descriptor()
+    if descriptor is not None:
+        try:
+            return bool(descriptor_matches_health(descriptor, health))
+        except Exception:
+            return False
+    try:
+        return _verified_legacy_health() is not None
+    except Exception:
+        return False
+
+
 class DaemonRefused(RuntimeError):
     """The daemon answered, and the answer was no.
 
@@ -659,14 +679,27 @@ def ensure_daemon(*, port: int | None = None) -> bool:
         # has bound the port but hasn't written a PID file yet (e.g. different
         # HOME for the service user vs. the SSH user).  If the port is already
         # bound, don't start a second daemon — wait for HTTP readiness instead.
-        try:
-            import socket as _socket
-            with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as _s:
-                _s.settimeout(1)
-                if _s.connect_ex(("127.0.0.1", _DEFAULT_PORT)) == 0:
-                    return _wait_for_daemon(timeout=30)
-        except Exception:
-            pass
+        #
+        # 4.1.14 (#132): probe the CONFIGURED port, not the default constant —
+        # a foreign squatter on 8765 must not divert startup when this
+        # namespace serves elsewhere. And when the occupant answers HTTP
+        # with non-SLM identity, fail fast and loud instead of burning a
+        # 30 s wait: an answering foreign service can never become our
+        # daemon. Silence (nothing answering) keeps the old wait — a slow
+        # starter is indistinguishable from a raw squat.
+        probe_port = port if port is not None else _get_port()
+        if _has_tcp_listener(probe_port):
+            occupant = _fetch_health(probe_port)
+            if occupant is not None and not _health_is_owned(occupant):
+                logger.error(
+                    "SLM daemon will not start: port %d is occupied by a "
+                    "foreign service (answered HTTP without SLM identity). "
+                    "Free the port or point this namespace elsewhere, then "
+                    "run `slm restart`.",
+                    probe_port,
+                )
+                return False
+            return _wait_for_daemon(timeout=30)
 
         # Start unified daemon in background — delegated to helper so the
         # same logic can be reused by callers that already hold the lock.
