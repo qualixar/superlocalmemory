@@ -16,7 +16,7 @@ and exact 40-character commit SHA; the pack cannot grant capabilities or MCP
 access on your behalf:
 
 ```bash
-curl -LO https://github.com/qualixar/superlocalmemory/releases/download/v4.1.12/qualixar-agent-reliability-hermes-pack-v1.yaml
+curl -LO https://raw.githubusercontent.com/qualixar/superlocalmemory/main/hermes-pack-v1.yaml
 hermes plugins pack show qualixar-agent-reliability-hermes-pack-v1.yaml
 hermes plugins pack install qualixar-agent-reliability-hermes-pack-v1.yaml
 ```

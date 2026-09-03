@@ -1,0 +1,12 @@
+name: qualixar-agent-reliability-hermes
+description: Native SuperLocalMemory and bounded-loops support for Hermes v1 manifest hosts.
+author: Qualixar
+version: 4.1.12-0.7.4
+plugins:
+  - repo: qualixar/superlocalmemory
+    ref: 0dbc36811c945b61da488636cab7d1566e83dc58
+    subdir: hermes-plugin
+  - repo: qualixar/bounded-loops
+    ref: 24d024770991e96254cb4232403c3bd13b040e11
+    subdir: plugins/hermes
+skills: []
