@@ -11,9 +11,11 @@ Do not edit by hand — regenerate instead.
 - `agents/slm-memory-advisor.md`
 - `agents/slm-optimize-advisor.md`
 - `commands/slm-loop.md`
+- `hooks.json`
 - `hooks/hooks.json`
 - `mcp_config.json`
 - `plugin.json`
+- `scripts/antigravity_hook_adapter.py`
 - `skills/slm-cache/SKILL.md`
 - `skills/slm-compress/SKILL.md`
 - `skills/slm-governance/SKILL.md`

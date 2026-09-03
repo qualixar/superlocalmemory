@@ -1,0 +1,42 @@
+{
+  "slm-lifecycle": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/antigravity_hook_adapter.py pre-invocation",
+        "timeout": 15
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "web_search|web_fetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/antigravity_hook_adapter.py pre-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "view_file|write_to_file|replace_file_content|run_command|search_files|web_fetch|web_search|invoke_subagent|generate_image",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/antigravity_hook_adapter.py post-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/antigravity_hook_adapter.py stop",
+        "timeout": 10
+      }
+    ]
+  }
+}
