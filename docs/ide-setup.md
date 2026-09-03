@@ -14,14 +14,33 @@ SLM ships with **two MCP transports**. Pick the one that fits your tool.
 |-----------|-------------|----------|-------------|
 | **HTTP** (recommended) | All clients share one daemon process | ~2 GB once, flat forever | `slm serve` must be running |
 | **stdio** (universal) | One `slm mcp` subprocess per connection | ~90–110 MB × connections | None — works offline |
-| **`mcp-remote` bridge** | stdio wrapper that tunnels to HTTP | ~50 MB bridge + HTTP pool | npm `mcp-remote` |
+| **`mcp-remote` bridge** | stdio wrapper that tunnels to HTTP | ~50 MB bridge + HTTP pool | npm `mcp-remote`, global **or** via `npx` |
 
 **Quick rule:** use HTTP if your tool supports it. Use `mcp-remote` if your tool is stdio-only but you want shared RAM. Fall back to pure stdio if you are offline or running daemon-free.
 
-The `mcp-remote` bridge package:
+The `mcp-remote` bridge package. There are two ways to get it, and the config has to
+match the one you pick — they are not interchangeable.
+
+**Global install.** Required if you let `slm connect --transport http-mcp-remote` write the
+config for you: it writes `"command": "mcp-remote"`, so that binary has to be on your `PATH`.
+
 ```bash
 npm install -g mcp-remote
 ```
+
+**No global install.** `npx` fetches the same package on demand, but it leaves no `mcp-remote`
+binary on `PATH` — so a hand-written config has to go through `npx` itself:
+
+```json
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "http://127.0.0.1:8765/mcp/"]
+}
+```
+
+A config that names `mcp-remote` directly will fail to start with `ENOENT` / `command not
+found` unless the global install above has been done.
 
 ---
 
@@ -331,6 +350,22 @@ Add to `~/.grok/config.toml`:
 [mcp_servers.superlocalmemory]
 command = "mcp-remote"
 args = [
+    "http://127.0.0.1:8765/mcp/",
+    "--allow-http",
+    "--transport",
+    "http-only",
+]
+```
+
+**Without the global install**, invoke the same bridge through `npx` — `command` changes too,
+not just the install line:
+
+```toml
+[mcp_servers.superlocalmemory]
+command = "npx"
+args = [
+    "-y",
+    "mcp-remote",
     "http://127.0.0.1:8765/mcp/",
     "--allow-http",
     "--transport",
