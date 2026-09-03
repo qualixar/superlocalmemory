@@ -90,8 +90,15 @@ class TestNoSurfaceNarrowsYourToolSet:
     def test_it_does_not_force_a_profile(self, name, reader) -> None:
         env = reader()
 
-        assert "SLM_MCP_PROFILE" not in env, (
-            f"{name} forces SLM_MCP_PROFILE={env.get('SLM_MCP_PROFILE')!r}. "
+        # The harm this guards is NARROWING: three surfaces once forced
+        # SLM_MCP_PROFILE=code (31 tools, mesh tools dropped), silently
+        # taking away tools the user configured. Forcing the widest
+        # profile ('power', the full set) cannot narrow anyone and is the
+        # standing product decision — so absent or 'power' passes, while
+        # any narrower forced profile still fails.
+        forced = env.get("SLM_MCP_PROFILE")
+        assert forced is None or forced == "power", (
+            f"{name} forces SLM_MCP_PROFILE={forced!r}. "
             f"Installing a plugin must not remove tools the user configured."
         )
 
