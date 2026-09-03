@@ -2,7 +2,7 @@ name: superlocalmemory
 version: 4.1.12
 description: "Native, additive SuperLocalMemory lifecycle, skills, commands, and advisors for Hermes."
 author: Qualixar
-manifest_version: 2
+manifest_version: 1
 api_version: 1
 license: AGPL-3.0-or-later
 homepage: https://github.com/qualixar/superlocalmemory

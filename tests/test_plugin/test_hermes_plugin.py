@@ -26,7 +26,7 @@ def _runtime() -> str:
 def test_native_hermes_plugin_declares_additive_contract() -> None:
     manifest = _manifest()
     assert "name: superlocalmemory" in manifest
-    assert "manifest_version: 2" in manifest
+    assert "manifest_version: 1" in manifest
     assert "api_version: 1" in manifest
     assert "python_dependencies: []" in manifest
     assert "superlocalmemory" in manifest
