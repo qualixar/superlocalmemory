@@ -144,11 +144,35 @@ def test_ollama_extract_text_falls_back_to_thinking(caplog):
     backbone = _thinking_model_backbone()
     trace = 'Reasoning... [{"text": "Alice works at Google"}]'
     data = {"message": {"role": "assistant", "content": "", "thinking": trace}}
-    # INFO, not WARNING: for thinking models this is the normal shape,
-    # and generate() sits on the store hot path (#128 review).
-    with caplog.at_level("INFO", logger="superlocalmemory.llm.backbone"):
+    # DEBUG, not INFO/WARNING: for thinking models this is the normal
+    # shape, and generate() sits on the store hot path (#128 review).
+    with caplog.at_level("DEBUG", logger="superlocalmemory.llm.backbone"):
         assert backbone._extract_text(data) == trace
     assert "message.thinking" in caplog.text
+
+
+def test_ollama_prose_content_falls_through_to_thinking():
+    backbone = _thinking_model_backbone()
+    trace = 'Reasoning... [{"text": "Alice works at Google"}]'
+    data = {
+        "message": {
+            "role": "assistant",
+            "content": "Here are the facts:",
+            "thinking": trace,
+        }
+    }
+    assert backbone._extract_text(data) == trace
+
+
+def test_ollama_content_with_brackets_wins():
+    backbone = _thinking_model_backbone()
+    data = {
+        "message": {
+            "content": '[{"text": "hi"}]',
+            "thinking": "other trace",
+        }
+    }
+    assert backbone._extract_text(data) == '[{"text": "hi"}]'
 
 
 def test_ollama_extract_text_hardening():
@@ -178,3 +202,13 @@ def test_ollama_payload_disables_think_when_env_set(monkeypatch):
     backbone = _thinking_model_backbone()
     _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
     assert payload["think"] is False
+
+
+def test_generate_threads_think_flag_to_ollama():
+    backbone = _thinking_model_backbone()
+    _, _, default_payload = backbone._build_request("hi", "", 100, 0.0)
+    assert "think" not in default_payload
+    _, _, off_payload = backbone._build_request("hi", "", 100, 0.0, False)
+    assert off_payload["think"] is False
+    _, _, on_payload = backbone._build_request("hi", "", 100, 0.0, True)
+    assert "think" not in on_payload

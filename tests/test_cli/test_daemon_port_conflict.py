@@ -85,7 +85,9 @@ def test_configured_port_is_probed_not_the_default(
         return False
 
     monkeypatch.setattr(daemon_mod, "_has_tcp_listener", recording_probe)
-    monkeypatch.setattr(daemon_mod, "_start_daemon_subprocess", lambda: True)
+    monkeypatch.setattr(
+        daemon_mod, "_start_daemon_subprocess", lambda *, port=None: True
+    )
 
     custom = _ephemeral_port()
     assert daemon_mod.ensure_daemon(port=custom) is True
@@ -109,3 +111,40 @@ def test_silent_port_keeps_legacy_wait(isolated_root, monkeypatch) -> None:
     finally:
         listener.close()
     assert waited == [30], waited
+
+
+def test_spawn_binds_the_probed_port(isolated_root, monkeypatch) -> None:
+    """Audit: ensure_daemon(port=) travels into the spawn, not the default."""
+    from superlocalmemory.cli import daemon as daemon_mod
+
+    monkeypatch.setattr(daemon_mod, "_has_tcp_listener", lambda port: False)
+    spawned: dict = {}
+
+    def _record_spawn(*, port=None):
+        spawned["port"] = port
+        return True
+
+    monkeypatch.setattr(
+        daemon_mod,
+        "_start_daemon_subprocess",
+        _record_spawn,
+    )
+    custom = _ephemeral_port()
+    assert daemon_mod.ensure_daemon(port=custom) is True
+    assert spawned.get("port") == custom, spawned
+
+
+def test_health_owned_rejects_legacy_mismatch(isolated_root, monkeypatch) -> None:
+    """Audit: no-descriptor occupant must BE the verified legacy daemon."""
+    from superlocalmemory.cli import daemon as daemon_mod
+
+    monkeypatch.setattr(daemon_mod, "read_descriptor", lambda: None)
+    monkeypatch.setattr(
+        daemon_mod,
+        "_verified_legacy_health",
+        lambda: {"pid": 1234, "_legacy_port": 9999},
+    )
+    foreign = {"pid": 9999, "ok": True}
+    assert daemon_mod._health_is_owned(foreign, port=9999) is False
+    assert daemon_mod._health_is_owned({"pid": 1234}, port=7777) is False
+    assert daemon_mod._health_is_owned({"pid": 1234}, port=9999) is True

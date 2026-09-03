@@ -130,3 +130,17 @@ def test_materializer_pass_reaps_with_cold_embedder(repository) -> None:
 def test_boot_sweep_never_raises_without_ingestion_tables(tmp_path) -> None:
     db = DatabaseManager(tmp_path / "fresh.db")
     assert _reap_stuck_ingestion(db) == []
+
+
+def test_double_reap_is_idempotent(repository) -> None:
+    """Audit: the boot sweep racing the first materializer pass is benign —
+    CAS terminalization means the second reap finds nothing to do."""
+    now = time.time()
+    operation_id = _stuck_operation(
+        repository,
+        key="131:double-reap",
+        lease_expires_at=now - 60,
+        attempts=_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS,
+    )
+    assert _reap_stuck_ingestion(repository.db) == [operation_id]
+    assert _reap_stuck_ingestion(repository.db) == []

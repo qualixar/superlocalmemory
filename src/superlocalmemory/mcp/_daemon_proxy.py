@@ -100,8 +100,9 @@ class DaemonPoolProxy:
         # serialized when the caller set it — an unset profile_id keeps the
         # legacy query string byte-identical, exactly like the scope flags
         # above. The daemon serves this one recall against that profile.
-        if profile_id:
-            _params["profile_id"] = profile_id
+        # 4.1.14 audit: stripped (whitespace-only is legacy).
+        if (profile_id or "").strip():
+            _params["profile_id"] = profile_id.strip()
         # v3.8.2 client-driven agentic: only send ``fast`` when the caller set it
         # explicitly. Unset (None) lets the daemon resolve the configured
         # client-driven-agentic default — the same way scope flags are handled.
@@ -132,8 +133,22 @@ class DaemonPoolProxy:
                 "GET",
                 f"/recall?{params}",
                 timeout_seconds=self._timeout,
+                preserve_not_found=True,
             )
         except Exception as exc:
+            # 4.1.14 audit: a live daemon refusing an unknown profile is
+            # an answer, not an outage — surface it instead of collapsing
+            # to DAEMON_UNAVAILABLE. Never retried: 404s don't heal.
+            # Discriminated by shape, not by name, so a failed import can
+            # never hit an unbound reference here.
+            if type(exc).__name__ == "DaemonNotFound" and hasattr(exc, "code"):
+                return {
+                    "ok": False,
+                    "success": False,
+                    "code": getattr(exc, "code"),
+                    "retryable": False,
+                    "error": getattr(exc, "message", "daemon returned 404"),
+                }
             logger.warning("daemon /recall failed: %s", exc)
             return self._unavailable_response()
         if not isinstance(data, dict):
@@ -172,6 +187,7 @@ class DaemonPoolProxy:
                 "/remember",
                 body,
                 preserve_conflict=True,
+                preserve_not_found=True,
             )
         except DaemonConflict as exc:
             return {
@@ -181,6 +197,17 @@ class DaemonPoolProxy:
                 "error": str(exc),
             }
         except Exception as exc:
+            # 4.1.14 audit: surface a live daemon's unknown-profile 404
+            # instead of collapsing it to DAEMON_UNAVAILABLE. Shaped check
+            # (see recall above) — never retried, 404s don't heal.
+            if type(exc).__name__ == "DaemonNotFound" and hasattr(exc, "code"):
+                return {
+                    "ok": False,
+                    "success": False,
+                    "code": getattr(exc, "code"),
+                    "retryable": False,
+                    "error": getattr(exc, "message", "daemon returned 404"),
+                }
             logger.warning("daemon /remember failed: %s", exc)
             return self._unavailable_response()
         if not isinstance(data, dict):

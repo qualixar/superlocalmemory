@@ -458,6 +458,30 @@ class TestFactExtractorModeLLM:
             == "Alice works at Google as a software engineer"
         )
 
+    def test_llm_trailing_citation_loses_to_schema_fit(self) -> None:
+        # A trailing citation array carries text but not the fact schema.
+        # Schema fit (text + fact_type) outranks position: the earlier
+        # full-schema answer wins even though it is not last.
+        final = json.dumps([
+            {"text": "Alice works at Google as a software engineer",
+             "fact_type": "semantic", "entities": ["Alice", "Google"],
+             "importance": 7, "confidence": 0.95},
+        ])
+        trace = (
+            f"Final: {final} Sources: "
+            + json.dumps([{"text": "Source biography of Alice", "url": "x"}])
+        )
+        llm = self._mock_llm(trace)
+        ext = FactExtractor(config=EncodingConfig(), llm=llm, mode=Mode.B)
+        facts = ext.extract_facts(
+            ["Alice works at Google"], session_id="s1",
+        )
+        assert len(facts) == 1
+        assert (
+            facts[0].content
+            == "Alice works at Google as a software engineer"
+        )
+
     def test_llm_empty_response_warns(self, caplog) -> None:
         llm = self._mock_llm("")
         ext = FactExtractor(

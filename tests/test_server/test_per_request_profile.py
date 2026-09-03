@@ -750,3 +750,99 @@ class TestRoutedInlineEnrichment:
         ]
         assert len(routing_lines) == 2, routing_lines
         assert all(m.endswith("profile=b") for m in routing_lines), routing_lines
+
+
+class TestAuditHardening:
+    """Regression tests for the 4.1.14 independent-audit findings."""
+
+    def test_whitespace_profile_id_is_legacy_no_409(self, daemon) -> None:
+        client, app = daemon
+        engine = app.state.engine
+        active = client.get("/status").json()["profile"]
+
+        response = client.post(
+            "/remember",
+            json={
+                "content": "Whitespace anchor must behave as legacy input.",
+                "profile_id": "   ",
+                "idempotency_key": "audit-ws-legacy-1",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert _facts_in(engine, active, "Whitespace anchor") != []
+        assert response.json()["profile"] == active
+
+    def test_empty_recall_echoes_served_profile(self, daemon) -> None:
+        client, _ = daemon
+        status = client.get("/status").json()
+
+        response = client.get("/recall", params={"profile_id": "b"})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["profile"] == "b", body
+        assert body["profile_generation"] == status["profile_generation"]
+
+    def test_keyword_fallback_echoes_served_profile(
+        self, engine_with_mock_deps,
+    ) -> None:
+        from superlocalmemory.server.unified_daemon import (
+            _recall_keyword_fallback,
+        )
+
+        body = _recall_keyword_fallback(
+            engine_with_mock_deps, "Harbor crane", 5,
+            profile_id="b", profile="b", profile_generation=7,
+        )
+
+        assert body["profile"] == "b", body
+        assert body["profile_generation"] == 7, body
+        assert body["retrieval_mode"] == "degraded_lexical"
+
+    def test_deleted_profile_fails_closed_after_cache(self, daemon) -> None:
+        client, app = daemon
+        engine = app.state.engine
+        runtime = app.state.canonical_remember_runtime
+
+        warmed = client.post(
+            "/remember",
+            json={
+                "content": "CacheWarm caches a handler for profile b first.",
+                "profile_id": "b",
+                "idempotency_key": "audit-cache-warm-1",
+            },
+        )
+        assert warmed.status_code == 200, warmed.text
+        assert "b" in runtime._routed_writers
+
+        engine._db.execute("DELETE FROM atomic_facts WHERE profile_id = 'b'")
+        engine._db.execute("DELETE FROM memories WHERE profile_id = 'b'")
+        engine._db.execute(
+            "DELETE FROM ingestion_operations WHERE profile_id = 'b'"
+        )
+        engine._db.execute("DELETE FROM profiles WHERE profile_id = 'b'")
+
+        with runtime._binding_lock:
+            with pytest.raises(ValueError, match="unknown profile"):
+                runtime._routed_writer_locked("b")
+        assert "b" not in runtime._routed_writers
+
+    def test_routed_writer_cache_is_bounded(
+        self, daemon, engine_with_mock_deps, monkeypatch,
+    ) -> None:
+        from superlocalmemory.core import remember_runtime as _rr
+
+        client, app = daemon
+        runtime = app.state.canonical_remember_runtime
+        monkeypatch.setattr(_rr, "_ROUTED_WRITERS_CAP", 3)
+        for name in ("p1", "p2", "p3", "p4"):
+            engine_with_mock_deps._db.execute(
+                "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",
+                (name, name),
+            )
+        with runtime._binding_lock:
+            for name in ("p1", "p2", "p3", "p4"):
+                runtime._routed_writer_locked(name)
+            assert len(runtime._routed_writers) <= 3
+            assert set(runtime._routed_writers) <= {"p2", "p3", "p4"}

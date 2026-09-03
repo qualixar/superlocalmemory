@@ -55,6 +55,7 @@ class LLMBackboneProtocol(Protocol):
         system: str = "",
         temperature: float | None = None,
         max_tokens: int | None = None,
+        think: bool | None = None,
     ) -> str: ...
 
 
@@ -684,11 +685,17 @@ class FactExtractor:
         )
 
         try:
+            # 4.1.14 audit: structured JSON extraction asks for content-only
+            # answers (think=False). Thinking models otherwise burn the
+            # token budget on chain-of-thought and return truncated traces
+            # with empty content; the thinking fallback below still covers
+            # every other caller and any model that ignores the flag.
             raw = self._llm.generate(  # type: ignore[union-attr]
                 prompt=prompt,
                 system=_SYSTEM_PROMPT,
                 temperature=0.0,
                 max_tokens=1024,
+                think=False,
             )
             facts = self._parse_llm_response(raw, session_id, session_date)
             return self._reflexion_refine(conversation_text, facts)
@@ -764,10 +771,13 @@ class FactExtractor:
             return []
 
         # Extract JSON array from potentially wrapped response.
-        # Last viable candidate wins: reasoning traces reason first and
-        # answer last, so a mid-trace trial payload must never shadow the
-        # final answer — while a trailing decoy that yields zero facts
-        # (e.g. [{"name": ...}]) falls through to the real answer above.
+        # Last-viable-with-best-schema-fit wins. Reasoning traces reason
+        # first and answer last, so a mid-trace trial payload must never
+        # shadow the final answer — but a trailing decoy must not win
+        # either. Candidates score by fact-schema fit (dicts carrying both
+        # text and fact_type); ties break toward the later array, which is
+        # where models put the final answer. A trailing zero-fact decoy
+        # (e.g. [{"name": ...}]) still falls through to the real answer.
         try:
             candidates = self._find_json_arrays(raw)
             if not candidates:
@@ -778,6 +788,7 @@ class FactExtractor:
             return []
 
         facts: list[AtomicFact] = []
+        best_fit = -1
         for items in reversed(candidates):
             built: list[AtomicFact] = []
             for item in items[:10]:  # Hard cap at 10 per chunk
@@ -786,9 +797,16 @@ class FactExtractor:
                 fact = self._item_to_fact(item, session_id, session_date)
                 if fact is not None:
                     built.append(fact)
-            if built:
+            if not built:
+                continue
+            fit = sum(
+                1 for item in items[:10]
+                if isinstance(item, dict) and item.get("text")
+                and "fact_type" in item
+            )
+            if fit > best_fit:
+                best_fit = fit
                 facts = built
-                break
         return facts
 
     def _item_to_fact(

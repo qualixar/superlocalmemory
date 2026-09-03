@@ -167,12 +167,18 @@ class LLMBackbone:
         system: str = "",
         temperature: float | None = None,
         max_tokens: int | None = None,
+        think: bool | None = None,
     ) -> str:
         """Send prompt to the LLM and return generated text.
 
         Returns empty string on content-filter errors (Azure 400)
         instead of crashing — lets callers continue gracefully.
         Retries up to 3 times with exponential backoff on transient errors.
+
+        ``think`` — Ollama-only reasoning control: explicit ``False``
+        sends ``think: false`` (content-only answers from thinking
+        models); ``None``/``True`` omit the key and keep model defaults.
+        ``True`` is never sent: non-thinking models reject it.
         """
         if not self.is_available():
             raise LLMUnavailableError(
@@ -182,7 +188,7 @@ class LLMBackbone:
 
         temp = temperature if temperature is not None else self._default_temperature
         tokens = max_tokens if max_tokens is not None else self._default_max_tokens
-        url, headers, payload = self._build_request(prompt, system, tokens, temp)
+        url, headers, payload = self._build_request(prompt, system, tokens, temp, think)
 
         last_error: Exception | None = None
         for attempt in range(_MAX_RETRIES):
@@ -237,6 +243,7 @@ class LLMBackbone:
 
     def _build_request(
         self, prompt: str, system: str, max_tokens: int, temperature: float,
+        think: bool | None = None,
     ) -> tuple[str, dict[str, str], dict]:
         """Build provider-specific (url, headers, payload)."""
         builders = {
@@ -245,6 +252,8 @@ class LLMBackbone:
             "azure": self._build_azure,
         }
         builder = builders.get(self._provider, self._build_openai)
+        if self._provider == "ollama":
+            return builder(prompt, system, max_tokens, temperature, think=think)
         return builder(prompt, system, max_tokens, temperature)
 
     def _build_openai(
@@ -272,6 +281,7 @@ class LLMBackbone:
 
     def _build_ollama(
         self, prompt: str, system: str, max_tokens: int, temperature: float,
+        think: bool | None = None,
     ) -> tuple[str, dict[str, str], dict]:
         messages = self._make_messages(system, prompt)
         headers = {"Content-Type": "application/json"}
@@ -289,6 +299,10 @@ class LLMBackbone:
                 "num_ctx": 4096,
             },
         }
+        # Only an explicit False is ever sent (generate(think=False));
+        # True/None omit the key and keep model defaults.
+        if think is False:
+            payload["think"] = False
         # #128: thinking-capable models (qwen3.x family) answer inside
         # message.thinking, leaving content empty. The _extract_text
         # fallback plus the extractor's array recovery cover that by
@@ -368,15 +382,27 @@ class LLMBackbone:
                 return ""
             content = message.get("content", "")
             content = content.strip() if isinstance(content, str) else ""
-            if content:
-                return content
             thinking = message.get("thinking", "")
             thinking = thinking.strip() if isinstance(thinking, str) else ""
+            if content:
+                # 4.1.14 audit: prose-only content ("Here are the facts:")
+                # can never parse as the JSON array the callers need — fall
+                # through to the thinking trace instead of discarding a
+                # good answer for a content field with no '[' in it.
+                if "[" not in content and thinking:
+                    logger.debug(
+                        "Ollama response content has no JSON array; "
+                        "extracting from message.thinking (%d chars).",
+                        len(thinking),
+                    )
+                    return thinking
+                return content
             if thinking:
-                # INFO, not WARNING: for thinking models this is the
-                # normal response shape, and generate() sits on the
-                # store hot path — WARNING here would spam daemon.log.
-                logger.info(
+                # DEBUG, not INFO: for thinking models empty content is the
+                # normal response shape and generate() sits on the store hot
+                # path — INFO here would write a line per Mode B store into
+                # daemon.log. True emptiness still warns downstream.
+                logger.debug(
                     "Ollama thinking model returned empty content; "
                     "extracting from message.thinking (%d chars).",
                     len(thinking),

@@ -893,7 +893,8 @@ class MemoryEngine:
         # looks exactly like "there was nothing to enrich".
         self._require_full("enrich_new_facts_now")
         self._ensure_init()
-        pid = profile_id or self._profile_id
+        # 4.1.14 audit: normalize the anchor once at entry (see canonical_store).
+        pid = (profile_id or "").strip() or self._profile_id
         # Matches the default the write path uses for its own embedding attempt;
         # the two were allowed to drift apart, so a direct caller got half the
         # budget the daemon gives.
@@ -999,7 +1000,10 @@ class MemoryEngine:
         """
         self._require_full("store_fast")
         self._ensure_init()
-        pid = profile_id or self._profile_id
+        # 4.1.14 audit: normalize the anchor once at entry (see canonical_store).
+        pid = (profile_id or "").strip() or self._profile_id
+        from superlocalmemory.core.engine_ingestion import _require_known_profile
+        _require_known_profile(self, pid)
         import re as _re
         import uuid as _uuid
         from datetime import datetime, timezone

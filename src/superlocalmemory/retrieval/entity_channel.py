@@ -664,9 +664,11 @@ class EntityGraphChannel:
 
         v3.4.1: Enables graph-enhanced retrieval (P0).
         Called alongside adjacency loading. Same staleness lifecycle.
+
+        4.1.14 audit: always reloads — the old early-return on
+        profile-match served stale PageRank/community after edge changes
+        whenever a slot rebuild re-hit the previously live profile.
         """
-        if self._graph_metrics_profile == profile_id and self._graph_metrics:
-            return
         self._graph_metrics = {}
         self._graph_metrics_profile = profile_id
         try:
@@ -692,20 +694,28 @@ class EntityGraphChannel:
             self._graph_metrics = {}
 
     def invalidate_cache(self) -> None:
-        """Clear all caches. Call after adding/removing edges or facts."""
-        self._adj_slots.clear()
-        # The in-place clears below now operate on the evicted slots' dicts;
-        # dropping the slots above is what actually invalidates them.
-        self._adj.clear()
-        self._adj_profile = ""
-        self._adj_scope_key = None
-        self._adj_edge_count = 0
-        self._adj_fact_count = 0
-        self._entity_to_facts = defaultdict(list)
-        self._fact_to_entities = defaultdict(list)
-        self._visible_fact_ids.clear()
-        self._graph_metrics.clear()
-        self._graph_metrics_profile = ""
+        """Clear all caches. Call after adding/removing edges or facts.
+
+        4.1.14 audit: takes the cache lock like every other cache
+        accessor — clearing aliased slot dicts in place while a routed
+        recall walks them is a teardown race (RuntimeError or an empty
+        graph served for the wrong reason).
+        """
+        with self._cache_lock:
+            self._adj_slots.clear()
+            # The in-place clears below now operate on the evicted slots'
+            # dicts; dropping the slots above is what actually invalidates
+            # them.
+            self._adj.clear()
+            self._adj_profile = ""
+            self._adj_scope_key = None
+            self._adj_edge_count = 0
+            self._adj_fact_count = 0
+            self._entity_to_facts = defaultdict(list)
+            self._fact_to_entities = defaultdict(list)
+            self._visible_fact_ids.clear()
+            self._graph_metrics.clear()
+            self._graph_metrics_profile = ""
 
     def search(self, query: str, profile_id: str, top_k: int = 50) -> list[tuple[str, float]]:
         """Serialize access to the scope-keyed graph/entity cache."""

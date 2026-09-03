@@ -1031,6 +1031,7 @@ def _recall_budget_s() -> float:
 
 def _recall_keyword_fallback(
     engine, query: str, limit: int, *, profile_id: str | None = None,
+    profile: str | None = None, profile_generation: int | None = None,
 ) -> dict:
     """Fast profile-scoped keyword (LIKE) fallback for /recall.
 
@@ -1038,6 +1039,10 @@ def _recall_keyword_fallback(
     a bounded response instead of hanging. Mirrors the dashboard /api/search
     fallback shape (retrieval_mode=degraded_lexical). ``profile_id`` follows
     the per-request routing convention: None/"" means the active profile.
+
+    4.1.14 audit: the envelope echoes the SERVED namespace (profile +
+    profile_generation), exactly like the success path — a degraded routed
+    recall must never be readable as an active-profile answer.
     """
     results = []
     try:
@@ -1064,6 +1069,8 @@ def _recall_keyword_fallback(
         "query_type": "text_search",
         "retrieval_mode": "degraded_lexical",
         "degraded_reason": "recall_budget_exceeded",
+        "profile": profile if profile else engine.profile_id,
+        "profile_generation": profile_generation,
         "result_count": len(results),
         "results": results,
         "count": len(results),
@@ -4562,6 +4569,16 @@ def _register_daemon_routes(application: FastAPI) -> None:
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
         engine = _get_engine_or_503()
         req_profile = (profile_id or "").strip()
+        # 4.1.14 audit: permission before existence on the read path, the
+        # same order the write path enforces. Existence-first lets a caller
+        # without READ probe which profile ids exist (404 vs data); READ on
+        # the served namespace comes first so present-but-forbidden reads
+        # 403 without confirming existence.
+        from superlocalmemory.access.rbac import Permission
+        from superlocalmemory.server.rbac_enforce import require_permission
+        require_permission(
+            request, Permission.READ, profile=req_profile or engine._profile_id,
+        )
         if req_profile and not _daemon_profile_exists(engine, req_profile):
             from starlette.responses import JSONResponse
 
@@ -4577,7 +4594,16 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "GET", "/recall", req_profile,
             )
         if not search_query:
-            return {"results": [], "count": 0, "query_type": "none", "retrieval_time_ms": 0}
+            from superlocalmemory.server.profile_runtime import get_profile_runtime
+            _empty_snapshot = get_profile_runtime(application.state).snapshot
+            return {
+                "results": [], "count": 0, "query_type": "none",
+                "retrieval_time_ms": 0,
+                # 4.1.14 audit: even the empty-query shape echoes the served
+                # namespace — never let a routed call look active-profiled.
+                "profile": req_profile or _empty_snapshot.profile_id,
+                "profile_generation": _empty_snapshot.generation,
+            }
         # Phase 4b: normalize as_of at HTTP boundary. Invalid → return error.
         _as_of_raw = as_of.strip() if as_of else ""
         if _as_of_raw:
@@ -4691,8 +4717,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     "recall: semantic recall exceeded %.0fs budget for %r — "
                     "serving keyword fallback", _budget, (search_query or "")[:80],
                 )
+                from superlocalmemory.server.profile_runtime import get_profile_runtime
+                fallback_snapshot = get_profile_runtime(application.state).snapshot
                 return _recall_keyword_fallback(
                     engine, search_query, limit, profile_id=req_profile or None,
+                    profile=req_profile or fallback_snapshot.profile_id,
+                    profile_generation=fallback_snapshot.generation,
                 )
             response = _rf.result()
             # v3.4.26: return the same field shape as recall_worker so
@@ -4789,7 +4819,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # is trivially satisfied and unreachable for routed requests.
         req_profile = (req.profile_id or "").strip()
         if not req_profile:
-            _require_remember_profile(req.profile_id, engine._profile_id)
+            # Pass the STRIPPED value: whitespace-only input normalizes to
+            # the empty legacy shape, so the guard stays a no-op for it
+            # instead of 409ing on a truthy-but-blank string (#audit).
+            _require_remember_profile(req_profile, engine._profile_id)
         # Single write-target id for everything below: the routed profile,
         # or the engine's active profile on the legacy path. Never a 409.
         write_profile = req_profile or engine._profile_id

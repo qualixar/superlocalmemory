@@ -189,14 +189,33 @@ def register_core_tools(server, get_engine: Callable) -> None:
                         "session_date": session_date,
                         "idempotency_key": effective_idempotency_key or None,
                     }
-                    if profile_id:
+                    if (profile_id or "").strip():
                         # Per-request profile routing (spec section 3/5): the
                         # anchor is only put on the wire when the caller set
                         # it, so an unset profile_id keeps the legacy request
                         # byte-identical. The daemon routes THIS one write to
                         # that profile without moving the active pointer.
-                        body["profile_id"] = profile_id
-                    resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", body)
+                        # 4.1.14 audit: stripped — whitespace-only is legacy,
+                        # padded ids travel canonical.
+                        body["profile_id"] = profile_id.strip()
+                    resp = None
+                    try:
+                        resp = await _asyncio.to_thread(
+                            daemon_request, "POST", "/remember", body,
+                            preserve_not_found=True,
+                        )
+                    except Exception as exc:
+                        # 4.1.14 audit: a live daemon's unknown-profile 404
+                        # surfaces immediately — neither the 3x retry below
+                        # nor the pool fallback can heal a 404.
+                        if type(exc).__name__ == "DaemonNotFound" and hasattr(exc, "code"):
+                            return {
+                                "success": False,
+                                "code": getattr(exc, "code"),
+                                "retryable": False,
+                                "error": getattr(exc, "message", "daemon returned 404"),
+                            }
+                        raise
                     if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
                         fids = resp.get("fact_ids") or []
                         materialization_state = resp.get("materialization_state")
@@ -256,12 +275,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     or "mcp:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
                 ),
             }
-            if profile_id:
+            if (profile_id or "").strip():
                 # DaemonPoolProxy.store forwards metadata["profile_id"] as
                 # the per-request routing anchor on POST /remember. Kept out
                 # of the metadata entirely when unset so the legacy fallback
-                # call stays byte-identical.
-                worker_meta["profile_id"] = profile_id
+                # call stays byte-identical. 4.1.14 audit: stripped.
+                worker_meta["profile_id"] = profile_id.strip()
 
             def _store_via_daemon_pool():
                 pool = choose_pool()
@@ -278,6 +297,17 @@ def register_core_tools(server, get_engine: Callable) -> None:
                             "error",
                             daemon_unavailable_error(),
                         ),
+                    }
+                # 4.1.14 audit: structured non-retryable answers from the
+                # pool (unknown_profile, PROFILE_MISMATCH) pass through
+                # verbatim — mislabeling them DAEMON_UNAVAILABLE retryable
+                # would send clients into a hopeless retry loop.
+                if isinstance(stored, dict) and stored.get("code"):
+                    return {
+                        "success": False,
+                        "code": stored.get("code"),
+                        "retryable": bool(stored.get("retryable", False)),
+                        "error": stored.get("error", "daemon request failed"),
                     }
                 return {
                     "success": False,
@@ -450,8 +480,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     # Per-request profile routing (spec section 3/5): threaded
                     # only when set, so an unset anchor keeps the legacy call
                     # byte-identical and pool shapes that predate the
-                    # parameter are never asked for it.
-                    **({"profile_id": profile_id} if profile_id else {}),
+                    # parameter are never asked for it. 4.1.14 audit:
+                    # stripped (whitespace-only is legacy).
+                    **({"profile_id": profile_id.strip()} if (profile_id or "").strip() else {}),
                 )
 
             result = await asyncio.to_thread(

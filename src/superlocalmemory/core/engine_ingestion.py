@@ -36,6 +36,28 @@ _PREBUILT_FACT_KEY = "_slm_prebuilt_fact_v1"
 _DERIVATION_VERSION = "v3.7-ingestion-1"
 
 
+def _require_known_profile(engine: "MemoryEngine", profile_id: str) -> None:
+    """Fail closed on a write routed to a profile that does not exist.
+
+    4.1.14 audit: the daemon gates existence before the engine, but direct
+    Python-API callers bypass the daemon. Without this, a routed write
+    dies later as an IntegrityError inside the M018 transaction instead
+    of a clear rejection. DB errors propagate: on a real store the
+    profiles table always exists, and a write there would FK-fail anyway.
+    """
+    db = engine._db
+    if db is None:
+        raise ValueError("engine is not initialized")
+    rows = db.execute(
+        "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
+    )
+    if not rows:
+        raise ValueError(
+            f"unknown profile {profile_id!r}: per-request routing never "
+            "creates a profile implicitly"
+        )
+
+
 class _ImmediateAdmissionDatabase(Protocol):
     """The deliberately tiny persistence surface used by receipt admission.
 
@@ -341,6 +363,11 @@ def canonical_store(
             content = scrubbed
             logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
     try:
+        # 4.1.14 audit: normalize the anchor once at entry — whitespace-only
+        # means the active profile, padded ids route stripped. Every
+        # downstream (journal row, receipt, materialization) inherits it.
+        profile_id = (profile_id or "").strip() or None
+        _require_known_profile(engine, profile_id or engine._profile_id)
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
         receipt = command.submit(IngestionRequest(
             content=content,
@@ -425,6 +452,9 @@ def canonical_store_fact(
 
     if is_low_quality(fact.content):
         return fact.fact_id
+    # 4.1.14 audit: same entry normalization as canonical_store.
+    profile_id = (profile_id or "").strip() or None
+    _require_known_profile(engine, profile_id or engine._profile_id)
     command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
         content=fact.content,

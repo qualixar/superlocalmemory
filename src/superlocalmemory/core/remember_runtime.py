@@ -111,6 +111,12 @@ class CanonicalMutationConflict(WriteCoordinatorError, ValueError):
 
 _MUTATION_IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 
+# 4.1.14 audit: bound on cached per-profile admission handlers. Profile
+# counts are small; the cap is a backstop against unbounded growth, not a
+# tuner — eviction is plain FIFO and a rebuild is one indexed SELECT plus
+# a handler construction.
+_ROUTED_WRITERS_CAP = 32
+
 
 def validate_deterministic_admission(
     content: str,
@@ -699,6 +705,16 @@ class CanonicalRememberRuntime:
                 "canonical mutation is temporarily unavailable"
             ) from exc
 
+    def _profile_exists_locked(self, profile_id: str) -> bool:
+        """Whether ``profile_id`` still names a live profile row.
+
+        Caller must hold ``self._binding_lock``. A single indexed point
+        lookup — cheap enough to run on every routed admission.
+        """
+        return bool(self._db.execute(
+            "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
+        ))
+
     def _routed_writer_locked(self, profile_id: str) -> QueryableWriter:
         """Return the admission handler bound to a non-active profile.
 
@@ -708,18 +724,24 @@ class CanonicalRememberRuntime:
         lock. Fail-closed on a profile that does not exist, so not even a
         journal replay can invent one.
 
+        4.1.14 audit: the cache is BOUNDED (FIFO eviction past the cap —
+        profile counts are small; the cap is a backstop, not a tuner) and
+        every hit revalidates existence, so a profile deleted after its
+        first route fails closed instead of admitting from a stale
+        handler.
+
         Caller must hold ``self._binding_lock``.
         """
         writer = self._routed_writers.get(profile_id)
         if writer is not None:
-            return writer
+            if self._profile_exists_locked(profile_id):
+                return writer
+            del self._routed_writers[profile_id]
         from superlocalmemory.core.engine_ingestion import (
             build_immediate_admission_handler,
         )
 
-        if not self._db.execute(
-            "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
-        ):
+        if not self._profile_exists_locked(profile_id):
             raise ValueError("admission command targets an unknown profile")
         writer = build_immediate_admission_handler(
             self._db,
@@ -728,6 +750,8 @@ class CanonicalRememberRuntime:
             max_ingest_bytes=self._max_ingest_bytes,
         )
         self._routed_writers[profile_id] = writer
+        while len(self._routed_writers) > _ROUTED_WRITERS_CAP:
+            self._routed_writers.pop(next(iter(self._routed_writers)))
         return writer
 
     def _handle_admission(
