@@ -323,4 +323,4 @@ before recalling, then switch back. See `slm-profile` for workspace switching.
 
 ---
 
-*SuperLocalMemory v4.1.13 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.14 · Qualixar · AGPL-3.0-or-later*
