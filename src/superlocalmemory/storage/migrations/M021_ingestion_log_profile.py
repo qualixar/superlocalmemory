@@ -61,6 +61,26 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     ).fetchone() is not None
 
 
+def _old_row_ids(conn: sqlite3.Connection) -> set:
+    try:
+        return {
+            r[0]
+            for r in conn.execute("SELECT id FROM _ingestion_log_old").fetchall()
+        }
+    except sqlite3.Error:
+        return set()
+
+
+def _new_row_ids(conn: sqlite3.Connection) -> set:
+    try:
+        return {
+            r[0]
+            for r in conn.execute("SELECT id FROM ingestion_log").fetchall()
+        }
+    except sqlite3.Error:
+        return set()
+
+
 def _copy_from_old(conn: sqlite3.Connection) -> None:
     """Copy legacy rows under the 'default' profile from ``_ingestion_log_old``.
 
@@ -125,22 +145,44 @@ def apply(conn: sqlite3.Connection) -> None:
         return
     if "profile_id" in _cols(conn, "ingestion_log"):
         if old_exists:
-            # A duplicate from an ancient interrupted run: drop it only
-            # when the canonical table holds every row, otherwise fail
-            # loudly for manual review — never silently drop user data.
-            new_count = conn.execute(
-                "SELECT COUNT(*) FROM ingestion_log"
-            ).fetchone()[0]
-            old_count = conn.execute(
-                "SELECT COUNT(*) FROM _ingestion_log_old"
-            ).fetchone()[0]
-            if int(new_count) >= int(old_count):
-                conn.execute("DROP TABLE _ingestion_log_old")
-            else:
+            # A leftover alongside a canonical table: resume by copying any
+            # ids the canonical table is missing (the mid-rebuild crash
+            # shape: RENAME+CREATE done, copy interrupted), then drop the
+            # leftover only when every one of its rows exists canonically.
+            # Row-identity subset, never a COUNT heuristic — a larger
+            # disjoint set must fail loudly for manual review instead of
+            # silently dropping user data.
+            missing = _old_row_ids(conn) - _new_row_ids(conn)
+            if missing:
+                _old_has_meta = "metadata" in _cols(conn, "_ingestion_log_old")
+                _meta_select = (
+                    "metadata, " if _old_has_meta else "'{}', "
+                )
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    for row_id in sorted(missing):
+                        conn.execute(
+                            "INSERT INTO ingestion_log "
+                            "(id, profile_id, source_type, dedup_key, "
+                            " fact_ids, metadata, status, ingested_at) "
+                            "SELECT id, 'default', source_type, dedup_key, "
+                            f" fact_ids, {_meta_select}status, ingested_at "
+                            "FROM _ingestion_log_old WHERE id = ?",
+                            (row_id,),
+                        )
+                    conn.execute("COMMIT")
+                except Exception:
+                    try:
+                        conn.execute("ROLLBACK")
+                    except sqlite3.Error:  # pragma: no cover — best-effort
+                        pass
+                    raise
+            if _old_row_ids(conn) - _new_row_ids(conn):
                 raise sqlite3.OperationalError(
                     "M021 leftover _ingestion_log_old holds rows missing "
                     "from ingestion_log; refusing automatic cleanup"
                 )
+            conn.execute("DROP TABLE _ingestion_log_old")
         return
     if old_exists:
         # Table present in old shape AND a leftover: external interference
@@ -172,13 +214,14 @@ def apply(conn: sqlite3.Connection) -> None:
 def verify(conn: sqlite3.Connection) -> bool:
     """Applied once ingestion_log carries profile_id (or is absent on fresh DB).
 
-    4.1.14 audit: a leftover ``_old`` table with no canonical table is an
-    interrupted rebuild, NOT a fresh install — it must verify False so the
+    4.1.14 audit: ANY leftover ``_old`` table means unfinished business —
+    whether the canonical table is missing (interrupted rebuild) or present
+    (interrupted copy or ancient duplicate). Both verify False so the
     runner resumes instead of recording success over stranded data.
     """
+    if _table_exists(conn, "_ingestion_log_old"):
+        return False
     if not _table_exists(conn, "ingestion_log"):
-        if _table_exists(conn, "_ingestion_log_old"):
-            return False
         return True  # nothing to migrate; fresh install creates it correctly
     return "profile_id" in _cols(conn, "ingestion_log")
 

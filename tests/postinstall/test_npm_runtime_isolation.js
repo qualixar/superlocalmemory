@@ -161,8 +161,13 @@ test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', (
     return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
   };
   const originalExistsSync = fs.existsSync;
+  const originalStatSync = fs.statSync;
   const wheelPath = '/tmp/wheels/superlocalmemory-4.1.14-py3-none-any.whl';
-  fs.existsSync = (target) => String(target) === wheelPath;
+  fs.existsSync = () => false;
+  fs.statSync = (target) => {
+    if (String(target) === wheelPath) return { isFile: () => true };
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  };
   process.env.SLM_LOCAL_WHEEL = wheelPath;
   try {
     clearModule(POSTINSTALL);
@@ -171,6 +176,7 @@ test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', (
   } finally {
     childProcess.spawnSync = originalSpawnSync;
     fs.existsSync = originalExistsSync;
+    fs.statSync = originalStatSync;
     if (originalEnv === undefined) delete process.env.SLM_LOCAL_WHEEL;
     else process.env.SLM_LOCAL_WHEEL = originalEnv;
     clearModule(POSTINSTALL);
@@ -185,8 +191,8 @@ test('SLM_LOCAL_WHEEL overrides the specifier for air-gapped installs (#134)', (
 
 test('SLM_LOCAL_WHEEL refuses non-wheel and missing paths (#134)', () => {
   const originalEnv = process.env.SLM_LOCAL_WHEEL;
-  const originalExistsSync = fs.existsSync;
-  fs.existsSync = () => false;
+  const originalStatSync = fs.statSync;
+  fs.statSync = () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); };
   try {
     clearModule(POSTINSTALL);
     const { main, pypiSpecifier } = require(POSTINSTALL);
@@ -197,7 +203,24 @@ test('SLM_LOCAL_WHEEL refuses non-wheel and missing paths (#134)', () => {
     process.env.SLM_LOCAL_WHEEL = '/tmp/pkg/';
     assert.equal(main(), 1);
   } finally {
-    fs.existsSync = originalExistsSync;
+    fs.statSync = originalStatSync;
+    if (originalEnv === undefined) delete process.env.SLM_LOCAL_WHEEL;
+    else process.env.SLM_LOCAL_WHEEL = originalEnv;
+    clearModule(POSTINSTALL);
+  }
+});
+
+test('SLM_LOCAL_WHEEL refuses a directory named like a wheel (#134)', () => {
+  const originalEnv = process.env.SLM_LOCAL_WHEEL;
+  const originalStatSync = fs.statSync;
+  fs.statSync = () => ({ isFile: () => false });
+  try {
+    clearModule(POSTINSTALL);
+    const { pypiSpecifier } = require(POSTINSTALL);
+    process.env.SLM_LOCAL_WHEEL = '/tmp/fake-4.1.14-py3-none-any.whl';
+    assert.throws(() => pypiSpecifier(REPO_ROOT), /existing local .whl file/);
+  } finally {
+    fs.statSync = originalStatSync;
     if (originalEnv === undefined) delete process.env.SLM_LOCAL_WHEEL;
     else process.env.SLM_LOCAL_WHEEL = originalEnv;
     clearModule(POSTINSTALL);

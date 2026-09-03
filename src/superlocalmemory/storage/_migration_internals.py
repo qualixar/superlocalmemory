@@ -449,6 +449,17 @@ def _apply_single(
                                 "failed",
                                 f"safe repair failed for {migration.name}: {exc}",
                             )
+                    # 4.1.14 audit: same by-design skip as the end-state
+                    # branch below — a justified module never fails here.
+                    justification = (
+                        getattr(mod, "REPAIR_NOT_APPLICABLE", "")
+                        if mod is not None else ""
+                    )
+                    if isinstance(justification, str) and justification.strip():
+                        return (
+                            "skipped",
+                            f"no automatic repair by design: {justification.strip()}",
+                        )
                 detail = (
                     f"DDL drift detected for {migration.name}: "
                     f"logged={logged_hash[:8]}... current={ddl_hash[:8]}..."
@@ -488,6 +499,22 @@ def _apply_single(
                 getattr(mod, "repair", None) if mod is not None else None
             )
             if not callable(repair_fn):
+                # 4.1.14 audit: a module may deliberately decline automatic
+                # repair with REPAIR_NOT_APPLICABLE (destructive rebuilds,
+                # data-quality drift owned by maintenance). That is a SKIP
+                # with a reason, not a failure — failing here wrote
+                # migration-error logs and doctor FAILs for routine,
+                # by-design drift.
+                justification = (
+                    getattr(mod, "REPAIR_NOT_APPLICABLE", "") if mod is not None else ""
+                )
+                if isinstance(justification, str) and justification.strip():
+                    logger.info(
+                        "schema incomplete for completed migration %s; "
+                        "no automatic repair by design: %s",
+                        migration.name, justification.strip(),
+                    )
+                    return ("skipped", f"no automatic repair by design: {justification.strip()}")
                 detail = (
                     f"schema incomplete for completed migration "
                     f"{migration.name}; automatic replay is disabled"

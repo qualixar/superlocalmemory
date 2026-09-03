@@ -326,6 +326,17 @@ class TestWindowsSitePackagesLayout:
 
         assert _read_python_version(tmp_path) is None
 
+    def test_version_info_does_not_shadow_version(self, tmp_path):
+        """4.1.14 audit: `__version_info__` must not win over `__version__`."""
+        from superlocalmemory.core.install_detector import _read_python_version
+
+        pkg = tmp_path / "lib" / "python3.13" / "site-packages" / "superlocalmemory"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text(
+            '__version_info__ = (4, 1, 99)\n__version__ = "4.1.14"\n'
+        )
+        assert _read_python_version(tmp_path) == "4.1.14"
+
 
 class TestResolvedPackageAuthority:
     """Entries name the package directory that actually loads (4.1.14 #134)."""

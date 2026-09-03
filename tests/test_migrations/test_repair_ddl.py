@@ -137,3 +137,20 @@ def test_repair_quoted_table_in_pragma(conn) -> None:
         row[1] for row in conn.execute('PRAGMA table_info("odd table")')
     }
     assert "c" in cols
+
+
+def test_splitter_respects_bracket_and_backtick_identifiers() -> None:
+    """4.1.14 audit: a semicolon inside a bracketed/backticked identifier
+    is not a boundary (SQLite has no dollar-quoting to worry about)."""
+    from superlocalmemory.storage.migrations._repair_util import (
+        _split_statements,
+    )
+
+    ddl = (
+        "ALTER TABLE [odd;table] ADD COLUMN c TEXT;\n"
+        "ALTER TABLE `other;table` ADD COLUMN d TEXT;"
+    )
+    parts = [p.strip() for p in _split_statements(ddl) if p.strip()]
+    assert len(parts) == 2
+    assert parts[0].startswith("ALTER TABLE [odd;table]")
+    assert parts[1].startswith("ALTER TABLE `other;table`")

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import glob
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -56,13 +57,11 @@ def _read_python_version(base: Path) -> Optional[str]:
         text = found.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("__version__"):
-            # __version__ = "4.1.0"  or  __version__ = '4.1.0'
-            parts = line.split("=", 1)
-            if len(parts) == 2:
-                return parts[1].strip().strip("\"'") or None
+    # 4.1.14 audit: anchor on the full assignment — a bare startswith
+    # would let `__version_info__` win over the real version line.
+    match = re.search(r"(?m)^__version__\s*=\s*[\"']([^\"']+)[\"']", text)
+    if match:
+        return match.group(1).strip() or None
     return None
 
 

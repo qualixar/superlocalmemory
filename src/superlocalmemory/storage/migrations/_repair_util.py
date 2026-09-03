@@ -64,6 +64,7 @@ def _split_statements(ddl: str) -> list[str]:
     statements: list[str] = []
     current: list[str] = []
     quote: str | None = None
+    bracket_depth = 0
     line_comment = False
     block_comment = False
     i = 0
@@ -88,6 +89,14 @@ def _split_statements(ddl: str) -> list[str]:
                     i += 1
                 else:
                     quote = None
+        elif bracket_depth > 0:
+            # 4.1.14 audit: [bracketed] identifiers may legally contain
+            # semicolons; only the closing bracket ends the region.
+            current.append(char)
+            if char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
         elif two == "--":
             current.append(two)
             i += 1
@@ -96,9 +105,13 @@ def _split_statements(ddl: str) -> list[str]:
             current.append(two)
             i += 1
             block_comment = True
-        elif char in ("'", '"'):
+        elif char in ("'", '"', "`"):
+            # 4.1.14 audit: backticks quote identifiers like quotes do.
             current.append(char)
             quote = char
+        elif char == "[":
+            current.append(char)
+            bracket_depth = 1
         elif char == ";":
             statements.append("".join(current))
             current = []

@@ -98,11 +98,24 @@ function runtimePythonPath(packageRoot, platform = os.platform()) {
  * otherwise — never a source tree, but not fully offline either.
  */
 function pypiSpecifier(packageRoot) {
-  const localWheel = String(process.env.SLM_LOCAL_WHEEL || '').trim();
-  if (localWheel) {
-    if (!localWheel.toLowerCase().endsWith('.whl') || !fs.existsSync(localWheel)) {
+  const rawWheel = String(process.env.SLM_LOCAL_WHEEL || '').trim();
+  if (rawWheel) {
+    // 4.1.14 audit: resolve relative paths against the package root (not
+    // the caller's cwd), require an existing FILE (a directory named
+    // *.whl is refused), and require the .whl suffix (sdists, URLs and
+    // directories cannot pass).
+    const localWheel = path.isAbsolute(rawWheel)
+      ? rawWheel
+      : path.resolve(packageRoot, rawWheel);
+    let isFile = false;
+    try {
+      isFile = fs.statSync(localWheel).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!localWheel.toLowerCase().endsWith('.whl') || !isFile) {
       throw new Error(
-        `SLM_LOCAL_WHEEL must be an existing local .whl file, got: ${localWheel || '(empty)'}`,
+        `SLM_LOCAL_WHEEL must be an existing local .whl file, got: ${rawWheel}`,
       );
     }
     return localWheel;
@@ -232,7 +245,16 @@ function main(argv = process.argv.slice(2)) {
     { stdio: 'pipe', timeout: 15000, env: process.env },
   );
   const installedVersion = (verify.stdout || '').toString().trim();
-  if (verify.status !== 0 || installedVersion !== packageVersion) {
+  // 4.1.14 audit: normalize across npm-semver and PEP 440 spellings
+  // ("4.1.14-rc.1" vs "4.1.14rc1") before comparing — a strict strcmp
+  // would fail a good wheel on pre-releases.
+  const normalizeVersion = (value) => String(value || '')
+    .trim().toLowerCase().replace(/^v/, '')
+    .replace(/[-_.]+/g, '');
+  if (
+    verify.status !== 0
+    || normalizeVersion(installedVersion) !== normalizeVersion(packageVersion)
+  ) {
     console.error(
       `SuperLocalMemory: runtime identity check failed (npm=${packageVersion}, python=${installedVersion || 'unavailable'}).`,
     );

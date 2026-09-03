@@ -102,6 +102,47 @@ def test_m021_duplicate_old_table_cleaned_when_safe() -> None:
     conn.close()
 
 
+def test_m021_mid_copy_crash_resumes_missing_rows() -> None:
+    """4.1.14 audit (blocker): RENAME+CREATE done, copy interrupted — the
+    canonical table exists WITH profile_id but is empty while _old holds
+    the only copy. verify must be False and repair must restore the rows,
+    never record success over the stranded ledger."""
+    conn = _conn()
+    conn.executescript(_LEGACY_LOG)
+    M021_ingestion_log_profile.apply(conn)
+    # Simulate the crash: empty new-shape table, full _old table.
+    conn.execute("DELETE FROM ingestion_log")
+    conn.execute(
+        "CREATE TABLE _ingestion_log_old ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT NOT NULL, "
+        "dedup_key TEXT NOT NULL, fact_ids TEXT DEFAULT '[]', "
+        "metadata TEXT DEFAULT '{}', status TEXT DEFAULT 'ingested', "
+        "ingested_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO _ingestion_log_old "
+        "(source_type, dedup_key, fact_ids, metadata, status, ingested_at) "
+        "VALUES ('cli', 'k1', '[\"f1\"]', '{}', 'ingested', '2026-01-01'), "
+        "('cli', 'k2', '[\"f2\"]', '{}', 'ingested', '2026-01-02')"
+    )
+    conn.commit()
+
+    assert not M021_ingestion_log_profile.verify(conn)
+    M021_ingestion_log_profile.repair(conn)
+    assert M021_ingestion_log_profile.verify(conn)
+
+    rows = conn.execute(
+        "SELECT profile_id, COUNT(*) FROM ingestion_log GROUP BY profile_id"
+    ).fetchall()
+    assert [(r[0], r[1]) for r in rows] == [("default", 2)]
+    leftovers = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='_ingestion_log_old'"
+    ).fetchall()
+    assert leftovers == []
+    conn.close()
+
+
 # --- M026: old shape without FK ------------------------------------------
 
 _OLD_MEMBERSHIPS = """
@@ -389,4 +430,66 @@ def test_m022_backfill_uses_parent_profile_orphans_default() -> None:
     assert rows == {"a1": "work", "a2": "default"}
     M022_entity_aliases_profile.repair(conn)  # idempotent re-run
     assert M022_entity_aliases_profile.verify(conn)
+    conn.close()
+
+
+# --- Framework: justified drift skips instead of failing ----------------------
+
+def _justified_drift_db() -> "sqlite3.Connection":
+    import sqlite3
+
+    from superlocalmemory.storage.migrations import (
+        M003_migration_log,
+        M048_upcoming_holds_only_what_is_upcoming as M048,
+    )
+    from superlocalmemory.storage import _migration_internals as mi
+
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(M003_migration_log.DDL)
+    conn.execute(
+        "CREATE TABLE atomic_facts (fact_id TEXT PRIMARY KEY, content TEXT, "
+        "fact_type TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO atomic_facts VALUES ('f1', 'The sky is blue', 'prospective')"
+    )
+    conn.commit()
+    assert not M048.verify(conn)
+    ddl_hash = mi._ddl_hash(M048.DDL)
+    mi._upsert_log(conn, M048.NAME, ddl_hash, "complete")
+    return conn
+
+
+def test_justified_drift_skips_with_reason() -> None:
+    """4.1.14 audit (critical): a justified module's routine drift is a
+    SKIP, not a failure — failing here wrote migration-error logs and
+    doctor FAILs for by-design drift."""
+    from superlocalmemory.storage import _migration_internals as mi
+    from superlocalmemory.storage.migrations import (
+        M048_upcoming_holds_only_what_is_upcoming as M048,
+    )
+
+    conn = _justified_drift_db()
+    mig = mi.Migration(name=M048.NAME, db_target="memory", ddl=M048.DDL)
+
+    outcome, detail = mi._apply_single(conn, mig, dry_run=False)
+
+    assert outcome == "skipped", detail
+    assert "by design" in detail
+    conn.close()
+
+
+def test_unjustified_drift_still_fails(monkeypatch) -> None:
+    from superlocalmemory.storage import _migration_internals as mi
+    from superlocalmemory.storage.migrations import (
+        M048_upcoming_holds_only_what_is_upcoming as M048,
+    )
+
+    conn = _justified_drift_db()
+    monkeypatch.delattr(M048, "REPAIR_NOT_APPLICABLE", raising=True)
+    mig = mi.Migration(name=M048.NAME, db_target="memory", ddl=M048.DDL)
+
+    outcome, _ = mi._apply_single(conn, mig, dry_run=False)
+
+    assert outcome == "failed"
     conn.close()
