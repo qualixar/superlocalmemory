@@ -5,6 +5,54 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.14] — Profile-correctness and reliability release
+
+### Added
+
+- **Per-request profile routing.** `remember`/`recall` (engine, daemon, MCP)
+  accept an optional `profile_id` that routes one request to that profile
+  without moving the machine-wide active pointer — two clients on one data
+  root can no longer silently redirect each other. Unknown profiles get
+  `404 unknown_profile`, never implicit creation; the adjacency cache is a
+  profile-keyed LRU. Every response echoes the profile that served it,
+  including degraded and empty paths.
+- **Thinking-model extraction.** Ollama reasoning models (qwen3 family) that
+  answer inside `message.thinking` no longer silently degrade Mode B to
+  Mode A: the trace is parsed for the answer array (schema-fit selection),
+  extraction requests content-only answers with a one-shot downgrade on
+  servers that reject the flag, and empty responses warn instead of
+  vanishing.
+- **Ingestion lease self-healing.** Expired enrichment leases are reaped
+  unconditionally at daemon boot and at the top of every materializer pass
+  — recovery no longer waits on embedder warmth. Kill-simulation tests
+  prove the wedged pipeline unblocks itself.
+- **Migration self-heal.** Every migration ships `repair()` or a written
+  `REPAIR_NOT_APPLICABLE` justification (enforced by a coverage guard);
+  justified drift skips instead of failing while blocking modules still
+  refuse to serve; destructive repairs carry crash-resume round-trip proof.
+  `slm db migrate` runs the same path the daemon uses at startup.
+- **npm single source of truth.** The npm tarball no longer bundles Python
+  sources; the package-owned venv installs the pinned
+  `superlocalmemory==X` wheel (`SLM_LOCAL_WHEEL` override for air-gapped
+  installs). `slm doctor` names the resolved package directory per install
+  and warns when the npm wrapper and its venv wheel disagree.
+
+### Fixed
+
+- Port-conflict startup now probes the configured port and fails fast and
+  loud on an answering foreign occupant (including a stale-pid diagnosis);
+  the probed port travels into the spawned daemon, and restart reuses the
+  owned port.
+- MCP `unknown_profile` answers surface end-to-end instead of collapsing
+  into `DAEMON_UNAVAILABLE`, with no hopeless retries.
+- RABAC `READ` is enforced on routed recalls, permission-before-existence,
+  closing the profile-existence oracle.
+- Daemon identity checks reject stale descriptors on PID reuse; status
+  never reports success without identity agreement.
+- vec0 operator guidance: row deletes by `rowid` are supported, bare
+  full-table `DELETE` is a sqlite-vec limitation (not corruption); the
+  error reference documents the supported clearing paths.
+
 ## [4.1.13] — Hermes public-install compatibility repair
 
 ### Fixed
