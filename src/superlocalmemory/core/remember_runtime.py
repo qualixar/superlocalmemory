@@ -228,12 +228,22 @@ class CanonicalRememberRuntime:
         journal_path: str | Path,
         materialize: Materializer | None = None,
         owner_id: str | None = None,
+        max_verbatim_chars: int = 24_000,
+        max_ingest_bytes: int = 1_048_576,
     ) -> None:
         if not profile_id:
             raise ValueError("profile_id is required")
         self._db = db
         self._profile_id = profile_id
         self._writer = writer
+        # Writer bounds retained so handlers built later for routed profiles
+        # (per-request profile routing) carry the same deterministic limits
+        # the active-profile handler was built with.
+        self._max_verbatim_chars = int(max_verbatim_chars)
+        self._max_ingest_bytes = int(max_ingest_bytes)
+        # Per-request profile routing: admission handlers bound to non-active
+        # profiles, keyed by profile_id. Built on first use, cleared on rebind.
+        self._routed_writers: dict[str, QueryableWriter] = {}
         self._materialize = materialize or _materialization_is_not_available
         self._binding_lock = threading.RLock()
         self._generation = 0
@@ -254,16 +264,24 @@ class CanonicalRememberRuntime:
 
         db = engine._db
         store_config = getattr(engine._config, "store", None)
+        max_verbatim_chars = getattr(
+            store_config, "max_verbatim_chars", 24_000,
+        )
+        max_ingest_bytes = getattr(
+            store_config, "max_ingest_bytes", 1_048_576,
+        )
         return cls(
             db=db,
             profile_id=engine._profile_id,
             writer=build_immediate_admission_handler(
                 db,
                 profile_id=engine._profile_id,
-                max_verbatim_chars=getattr(store_config, "max_verbatim_chars", 24_000),
-                max_ingest_bytes=getattr(store_config, "max_ingest_bytes", 1_048_576),
+                max_verbatim_chars=max_verbatim_chars,
+                max_ingest_bytes=max_ingest_bytes,
             ),
             journal_path=state_path("admission_journal.db"),
+            max_verbatim_chars=max_verbatim_chars,
+            max_ingest_bytes=max_ingest_bytes,
         )
 
     def start(self) -> None:
@@ -381,23 +399,45 @@ class CanonicalRememberRuntime:
         if not profile_id:
             raise CanonicalRememberUnavailable("reconfigured engine has no profile")
         store_config = getattr(getattr(engine, "_config", None), "store", None)
+        max_verbatim_chars = getattr(
+            store_config, "max_verbatim_chars", 24_000,
+        )
+        max_ingest_bytes = getattr(
+            store_config, "max_ingest_bytes", 1_048_576,
+        )
         writer = build_immediate_admission_handler(
             db,
             profile_id=profile_id,
-            max_verbatim_chars=getattr(store_config, "max_verbatim_chars", 24_000),
-            max_ingest_bytes=getattr(store_config, "max_ingest_bytes", 1_048_576),
+            max_verbatim_chars=max_verbatim_chars,
+            max_ingest_bytes=max_ingest_bytes,
         )
         with self._binding_lock:
-            previous = (self._db, self._profile_id, self._writer)
+            previous = (
+                self._db, self._profile_id, self._writer,
+                self._max_verbatim_chars, self._max_ingest_bytes,
+            )
             self._db = db
             self._profile_id = profile_id
             self._writer = writer
+            self._max_verbatim_chars = max_verbatim_chars
+            self._max_ingest_bytes = max_ingest_bytes
+            # Routed handlers close over the previous binding; drop them so
+            # the next routed request rebuilds against the new one.
+            self._routed_writers.clear()
             self._generation += 1
         try:
             self.replay_pending()
         except BaseException:
             with self._binding_lock:
-                self._db, self._profile_id, self._writer = previous
+                # Roll back the WHOLE binding, not just the writer triple: a
+                # stale limits pair or a routed-handler cache built against
+                # the failed binding would outlive the rebind that never
+                # happened.
+                (
+                    self._db, self._profile_id, self._writer,
+                    self._max_verbatim_chars, self._max_ingest_bytes,
+                ) = previous
+                self._routed_writers.clear()
                 self._generation -= 1
             raise
 
@@ -659,6 +699,37 @@ class CanonicalRememberRuntime:
                 "canonical mutation is temporarily unavailable"
             ) from exc
 
+    def _routed_writer_locked(self, profile_id: str) -> QueryableWriter:
+        """Return the admission handler bound to a non-active profile.
+
+        Per-request profile routing: a request carrying a different
+        profile_id must reach a handler bound to THAT profile, never a 409.
+        The handler is built once per profile and cached under the binding
+        lock. Fail-closed on a profile that does not exist, so not even a
+        journal replay can invent one.
+
+        Caller must hold ``self._binding_lock``.
+        """
+        writer = self._routed_writers.get(profile_id)
+        if writer is not None:
+            return writer
+        from superlocalmemory.core.engine_ingestion import (
+            build_immediate_admission_handler,
+        )
+
+        if not self._db.execute(
+            "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
+        ):
+            raise ValueError("admission command targets an unknown profile")
+        writer = build_immediate_admission_handler(
+            self._db,
+            profile_id=profile_id,
+            max_verbatim_chars=self._max_verbatim_chars,
+            max_ingest_bytes=self._max_ingest_bytes,
+        )
+        self._routed_writers[profile_id] = writer
+        return writer
+
     def _handle_admission(
         self,
         conn,
@@ -673,8 +744,13 @@ class CanonicalRememberRuntime:
         request = RememberRequest.from_payload(raw_request)
         with self._binding_lock:
             db = self._db
-            if request.profile_id != self._profile_id:
-                raise ValueError("admission command targets a different profile")
+            # Per-request profile routing: the active-profile handler serves
+            # the daemon's binding; any other existing profile gets (and
+            # caches) a handler bound to itself.
+            if request.profile_id == self._profile_id:
+                writer = self._writer
+            else:
+                writer = self._routed_writer_locked(request.profile_id)
             expected = admitted_epoch(request.profile_id, request.idempotency_key)
             if expected is not None and expected != self._generation:
                 raise ValueError("admission command epoch is stale")
@@ -698,7 +774,7 @@ class CanonicalRememberRuntime:
             with db._bind_coordinator_connection(conn, capability):
                 command_impl = IngestionCommand(
                     IngestionOperationRepository(db),
-                    write_queryable=self._writer,
+                    write_queryable=writer,
                     materialize=self._materialize,
                 )
                 try:

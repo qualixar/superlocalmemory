@@ -1361,6 +1361,9 @@ def test_public_python_store_routes_through_canonical_ingestion_and_preserves_co
         speaker="Dana",
         role="assistant",
         require_complete=False,
+        # Per-request profile routing (spec §4): the public entry forwards
+        # its kwarg; None resolves to the engine's active profile.
+        profile_id=None,
     )
 
 

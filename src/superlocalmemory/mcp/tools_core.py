@@ -87,6 +87,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         shared_with: str = "",
         idempotency_key: str = "",
         session_date: str = "",
+        profile_id: str = "",
     ) -> dict:
         """Store content to memory with intelligent indexing.
 
@@ -101,6 +102,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
         was written. Omit it and the memory is dated today, which is what every
         memory got before 4.0.10 because there was no way to say otherwise.
         Accepts YYYY-MM-DD or a full ISO 8601 timestamp.
+
+        ``profile_id`` is an explicit namespace anchor: a non-empty value
+        routes this one write to that profile (which must already exist —
+        an unknown id is rejected, never created); empty = the active
+        profile, byte-identical to the legacy call. Routing never moves
+        the active-profile pointer.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -175,13 +182,21 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 # support. Retry the canonical path, then return an explicit
                 # retryable result to the MCP client.
                 for attempt in range(3):
-                    resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", {
+                    body = {
                         "content": content, "tags": tags, "metadata": meta,
                         "scope": scope, "shared_with": _shared_list,
                         "session_id": session_id,
                         "session_date": session_date,
                         "idempotency_key": effective_idempotency_key or None,
-                    })
+                    }
+                    if profile_id:
+                        # Per-request profile routing (spec section 3/5): the
+                        # anchor is only put on the wire when the caller set
+                        # it, so an unset profile_id keeps the legacy request
+                        # byte-identical. The daemon routes THIS one write to
+                        # that profile without moving the active pointer.
+                        body["profile_id"] = profile_id
+                    resp = await _asyncio.to_thread(daemon_request, "POST", "/remember", body)
                     if resp and (resp.get("fact_ids") is not None or resp.get("ok")):
                         fids = resp.get("fact_ids") or []
                         materialization_state = resp.get("materialization_state")
@@ -241,6 +256,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     or "mcp:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
                 ),
             }
+            if profile_id:
+                # DaemonPoolProxy.store forwards metadata["profile_id"] as
+                # the per-request routing anchor on POST /remember. Kept out
+                # of the metadata entirely when unset so the legacy fallback
+                # call stays byte-identical.
+                worker_meta["profile_id"] = profile_id
 
             def _store_via_daemon_pool():
                 pool = choose_pool()
@@ -314,6 +335,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         known_as_of: str | None = None,
         valid_at: str | None = None,
         include_unknown: bool = False,
+        profile_id: str = "",
     ) -> dict:
         """Search memories through hybrid retrieval, RRF fusion, and reranking.
 
@@ -351,6 +373,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
         Point-in-time: optional ``as_of`` (ISO-8601 string, e.g.
         ``"2026-01-01T00:00:00+00:00"``) pins recall to a temporal snapshot;
         omit or pass ``None`` for current-state recall.
+
+        ``profile_id`` is an explicit namespace anchor: a non-empty value
+        serves this one recall against that profile (which must already
+        exist); empty = the active profile, byte-identical to the legacy
+        call. The active-profile pointer is never read or moved by it.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -420,6 +447,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     known_as_of=known_as_of,
                     valid_at=valid_at,
                     include_unknown=include_unknown,
+                    # Per-request profile routing (spec section 3/5): threaded
+                    # only when set, so an unset anchor keeps the legacy call
+                    # byte-identical and pool shapes that predate the
+                    # parameter are never asked for it.
+                    **({"profile_id": profile_id} if profile_id else {}),
                 )
 
             result = await asyncio.to_thread(

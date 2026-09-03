@@ -87,6 +87,7 @@ class DaemonPoolProxy:
         known_as_of: str | None = None,
         valid_at: str | None = None,
         include_unknown: bool = False,
+        profile_id: str = "",
     ) -> dict[str, Any]:
         if self._unavailable:
             return self._unavailable_response()
@@ -95,6 +96,12 @@ class DaemonPoolProxy:
             "limit": limit,
             "session_id": session_id or "",
         }
+        # Per-request profile routing (spec section 3/5): the anchor is only
+        # serialized when the caller set it — an unset profile_id keeps the
+        # legacy query string byte-identical, exactly like the scope flags
+        # above. The daemon serves this one recall against that profile.
+        if profile_id:
+            _params["profile_id"] = profile_id
         # v3.8.2 client-driven agentic: only send ``fast`` when the caller set it
         # explicitly. Unset (None) lets the daemon resolve the configured
         # client-driven-agentic default — the same way scope flags are handled.

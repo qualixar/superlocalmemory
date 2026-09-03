@@ -18,7 +18,8 @@ import logging
 import os
 import re
 import threading
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from superlocalmemory.retrieval import spreading
@@ -54,6 +55,45 @@ def _adj_ttl_seconds() -> float:
         return max(0.0, float(os.environ.get("SLM_ENTITY_ADJ_TTL_S", "3600")))
     except (TypeError, ValueError):
         return 3600.0
+
+
+def _adj_cache_profiles() -> int:
+    """How many profile scopes the adjacency LRU keeps warm (>= 1).
+
+    The cache used to hold a single slot, so interleaved per-request profiles
+    rebuilt the whole graph (edges + entity maps + metrics + snapshot) on every
+    switch. The LRU keeps the last N (profile, include_global, include_shared)
+    scopes instead. Set SLM_ADJ_CACHE_PROFILES to tune; each slot costs roughly
+    the old single cache (~18 MB on a 232K-edge store), so the default of 3
+    bounds the worst case at ~3x that. Read at call time, same convention as
+    SLM_ENTITY_ADJ_TTL_S above, so a test or operator can retune without a
+    re-import.
+    """
+    try:
+        return max(1, int(os.environ.get("SLM_ADJ_CACHE_PROFILES", "3")))
+    except (TypeError, ValueError):
+        return 3
+
+
+@dataclass(frozen=True)
+class _AdjSlot:
+    """One cached adjacency load for one (profile, include_global, include_shared).
+
+    Groups the instance attributes that used to form the single-slot cache, so
+    the LRU can hand them back to readers exactly as a fresh load left them.
+    """
+
+    adj: dict[str, list[tuple[str, float]]]
+    entity_to_facts: dict[str, list[str]]
+    fact_to_entities: dict[str, list[str]]
+    visible_fact_ids: set[str]
+    edge_count: int
+    fact_count: int
+    loaded_at: float
+    graph_metrics: dict[str, dict]
+    graph_metrics_profile: str
+    adjacency_source_name: str
+    snapshot: Any  # graph_adjacency view; typed loosely to avoid an import cycle
 
 
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]{1,}\b")
@@ -215,6 +255,10 @@ class EntityGraphChannel:
     Replaces per-node SQLite queries (23ms each) with dict lookup (<0.001ms).
     The cache is loaded once per profile and invalidated on store/edge changes.
     Memory cost: ~18 MB for 232K edges. Zero quality change — same algorithm.
+
+    Per-request profiles: the cache holds the last SLM_ADJ_CACHE_PROFILES
+    (default 3) profile scopes in an LRU, so alternating requests do not
+    thrash a single slot into a full graph rebuild each time.
     """
 
     def __init__(
@@ -235,12 +279,18 @@ class EntityGraphChannel:
         # v3.4.5: Optional CozoDB graph backend (Sprint 2)
         self._cozo = cozo_backend
         self._cache_lock = threading.RLock()
+        # Profile-keyed LRU of adjacency loads, oldest first. Keyed by the full
+        # scope (profile, include_global, include_shared) because each scope is
+        # a different graph. The legacy single-slot attributes below always
+        # mirror the scope served by the most recent _ensure_adjacency call.
+        self._adj_slots: OrderedDict[tuple[str, bool, bool], _AdjSlot] = OrderedDict()
         # In-memory adjacency: {node_id -> [(neighbor_id, weight), ...]}
         self._adj: dict[str, list[tuple[str, float]]] = {}
         self._adj_profile: str = ""  # Track which profile is loaded
         self._adj_scope_key: tuple[str, bool, bool] | None = None
         self._adj_edge_count: int = 0  # Track edge count for staleness detection
         self._adj_fact_count: int = 0
+        self._adj_loaded_at: float = 0.0  # TTL reference for the current slot
         self._entity_to_facts: dict[str, list[str]] = defaultdict(list)
         self._fact_to_entities: dict[str, list[str]] = defaultdict(list)
         self._visible_fact_ids: set[str] = set()
@@ -257,9 +307,10 @@ class EntityGraphChannel:
     ) -> None:
         """Load graph adjacency into memory for fast spreading activation.
 
-        Loads ALL edges for a profile into a bidirectional dict.
-        Called once per profile switch or when edge count changes (new store).
-        Cost: ~1s for 232K edges, ~18 MB RAM.
+        Loads ALL edges for a profile into a bidirectional dict. Cost: ~1s for
+        232K edges, ~18 MB RAM. The last ``SLM_ADJ_CACHE_PROFILES`` scopes
+        (default 3) stay warm in an LRU, so interleaved per-request profiles do
+        not rebuild the graph on every switch.
         """
         # Check staleness: profile changed or new edges added since last load
         scope_key = (profile_id, bool(include_global), bool(include_shared))
@@ -276,25 +327,86 @@ class EntityGraphChannel:
             )
         except Exception:
             current_fact_count = -1
+        import time as _t_ec
+
+        _now_ec = _t_ec.monotonic()
         # memory-bounding-01: also reload if the cache is older than the TTL,
         # even when the edge COUNT is unchanged. Edge weights/pruning can mutate
         # the graph without changing the count (e.g. store_edge MAX-merge), and a
         # count-stable window would otherwise serve a stale adjacency map.
-        import time as _t_ec
-
-        _now_ec = _t_ec.monotonic()
-        _ttl = _adj_ttl_seconds()
         # TTL=0 disables the time-based reload entirely (count-based correctness
-        # reload still applies); otherwise the cache is fresh within the TTL.
-        _fresh = _ttl <= 0.0 or ((_now_ec - getattr(self, "_adj_loaded_at", 0.0)) < _ttl)
-        if (
-            self._adj_scope_key == scope_key
-            and (self._adj or self._visible_fact_ids)
-            and self._adj_edge_count == current_count
-            and self._adj_fact_count == current_fact_count
-            and _fresh
-        ):
-            return
+        # reload still applies); otherwise the slot is fresh within the TTL.
+        _ttl = _adj_ttl_seconds()
+        slot = self._adj_slots.get(scope_key)
+        if slot is not None:
+            _fresh = _ttl <= 0.0 or ((_now_ec - slot.loaded_at) < _ttl)
+            if (
+                (slot.adj or slot.visible_fact_ids)
+                and slot.edge_count == current_count
+                and slot.fact_count == current_fact_count
+                and _fresh
+            ):
+                self._adj_slots.move_to_end(scope_key)
+                self._restore_slot(scope_key, slot)
+                return
+        slot = self._load_adjacency_from_db(
+            profile_id,
+            include_global=include_global,
+            include_shared=include_shared,
+            current_count=current_count,
+            current_fact_count=current_fact_count,
+            now=_now_ec,
+        )
+        # Replacing an existing key keeps its old position, so the reload also
+        # counts as a use for LRU ordering.
+        self._adj_slots[scope_key] = slot
+        self._adj_slots.move_to_end(scope_key)
+        while len(self._adj_slots) > _adj_cache_profiles():
+            self._adj_slots.popitem(last=False)
+
+    def _restore_slot(
+        self,
+        scope_key: tuple[str, bool, bool],
+        slot: _AdjSlot,
+    ) -> None:
+        """Point the legacy single-slot attributes at a cached LRU slot.
+
+        Everything downstream of _ensure_adjacency (search, score_candidates,
+        _resolve_entities) reads these attributes; refreshing them per call is
+        what keeps those readers untouched by the multi-slot cache.
+        """
+        self._adj = slot.adj
+        self._adj_profile = scope_key[0]
+        self._adj_scope_key = scope_key
+        self._adj_edge_count = slot.edge_count
+        self._adj_fact_count = slot.fact_count
+        self._adj_loaded_at = slot.loaded_at
+        self._entity_to_facts = slot.entity_to_facts
+        self._fact_to_entities = slot.fact_to_entities
+        self._visible_fact_ids = slot.visible_fact_ids
+        self._graph_metrics = slot.graph_metrics
+        self._graph_metrics_profile = slot.graph_metrics_profile
+        self._adjacency_source_name = slot.adjacency_source_name
+        self._snapshot = slot.snapshot
+
+    def _load_adjacency_from_db(
+        self,
+        profile_id: str,
+        *,
+        include_global: bool = False,
+        include_shared: bool = False,
+        current_count: int = 0,
+        current_fact_count: int = -1,
+        now: float = 0.0,
+    ) -> _AdjSlot:
+        """Fetch one scope's graph from the stores and build its cache slot.
+
+        The DB-loading half of the former _ensure_adjacency; the LRU and
+        staleness bookkeeping live in the caller. Leaves the legacy instance
+        attributes describing this scope (exactly as the single-slot cache did)
+        and returns them grouped as a slot for the LRU to hold.
+        """
+        scope_key = (profile_id, bool(include_global), bool(include_shared))
         adj: dict[str, list[tuple[str, float]]] = defaultdict(list)
         # The graph projection, when there is one, answers this in 395 ms where
         # SQLite takes 2,477 ms on the same 208k-edge store (hand-measured, see
@@ -370,7 +482,7 @@ class EntityGraphChannel:
         self._adj_scope_key = scope_key
         self._adj_edge_count = current_count
         self._adj_fact_count = current_fact_count
-        self._adj_loaded_at = _now_ec  # memory-bounding-01: TTL reference
+        self._adj_loaded_at = now  # memory-bounding-01: TTL reference
         # v3.4.1: Load graph intelligence metrics (P0)
         self._load_graph_metrics(profile_id)
 
@@ -406,6 +518,19 @@ class EntityGraphChannel:
             sum(len(v) for v in self._adj.values()) // 2,
             len(self._entity_to_facts),
             profile_id,
+        )
+        return _AdjSlot(
+            adj=self._adj,
+            entity_to_facts=self._entity_to_facts,
+            fact_to_entities=self._fact_to_entities,
+            visible_fact_ids=self._visible_fact_ids,
+            edge_count=current_count,
+            fact_count=current_fact_count,
+            loaded_at=now,
+            graph_metrics=self._graph_metrics,
+            graph_metrics_profile=self._graph_metrics_profile,
+            adjacency_source_name=self._adjacency_source_name,
+            snapshot=self._snapshot,
         )
 
     def _projection_is_caught_up(self, profile_id: str) -> bool:
@@ -568,6 +693,9 @@ class EntityGraphChannel:
 
     def invalidate_cache(self) -> None:
         """Clear all caches. Call after adding/removing edges or facts."""
+        self._adj_slots.clear()
+        # The in-place clears below now operate on the evicted slots' dicts;
+        # dropping the slots above is what actually invalidates them.
         self._adj.clear()
         self._adj_profile = ""
         self._adj_scope_key = None

@@ -337,7 +337,9 @@ def _open_enrichment_pool() -> None:
         _enrichment_semaphore = threading.Semaphore(_ENRICHMENT_WORKERS)
 
 
-def _enrich_and_release(engine, fact_ids: list[str], budget: float) -> int:
+def _enrich_and_release(
+    engine, fact_ids: list[str], budget: float, profile_id: str | None = None,
+) -> int:
     """Run inline enrichment, releasing the permit only when it is really done.
 
     The permit has to be released here rather than by the caller. A caller that
@@ -345,9 +347,18 @@ def _enrich_and_release(engine, fact_ids: list[str], budget: float) -> int:
     still holding a pool thread — so releasing on the caller's timeout would let
     the next request submit into a pool that is still fully occupied, which is
     the unbounded queueing this permit exists to prevent.
+
+    ``profile_id`` is the write-target of the request these facts came from: a
+    per-request routed write names a profile the engine's active pointer does
+    not point at, and the enrichment lookups are tenant-scoped — without the
+    routed profile the facts resolve to None and every routed write reports
+    "findable by wording" no matter what. ``None`` (legacy path) enriches the
+    active profile.
     """
     try:
-        return engine.enrich_new_facts_now(fact_ids, timeout_s=budget)
+        return engine.enrich_new_facts_now(
+            fact_ids, timeout_s=budget, profile_id=profile_id,
+        )
     finally:
         _enrichment_semaphore.release()
 
@@ -630,9 +641,13 @@ class RememberRequest(BaseModel):
     metadata: dict | None = None  # v3.4.26: pass-through from MCP pool_store
     idempotency_key: str | None = None
     session_id: str = ""
-    # Optional compare-and-write guard for profile-sensitive clients. The
-    # daemon remains single-profile, so a stale MCP client must fail instead
-    # of silently writing into whichever profile another client selected.
+    # Per-request profile routing (spec section 3/5): a non-empty profile_id
+    # routes THIS ONE write to that profile — pure routing, the ProfileRuntime
+    # active pointer never moves, and an unknown id is a 404 (never an
+    # implicit creation). Empty/absent keeps the legacy path: the active
+    # profile. The old 409 stale-client guard remains in place only for that
+    # empty legacy shape and is unreachable for routed requests (routing
+    # replaced the guard for them).
     profile_id: str = ""
     #: WHEN this memory is about, as distinct from when it was written.
     #:
@@ -707,6 +722,35 @@ def _require_remember_profile(requested: str, active: str) -> None:
                 f"the daemon currently serves '{active}'"
             ),
         )
+
+
+def _daemon_profile_exists(engine, profile_id: str) -> bool:
+    """Whether ``profile_id`` names a profile row the daemon already serves."""
+    rows = engine._db.execute(
+        "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (profile_id,),
+    )
+    return bool(rows)
+
+
+def _unknown_profile_body(profile_id: str) -> dict:
+    """Error body for a per-request route to a profile that does not exist.
+
+    Spec section 3/5: unknown means 404, no implicit creation, no engine call.
+    This is the daemon's existing route-local structured-error shape (same
+    pattern as the ``invalid_as_of`` 400 on /recall) — the global FastAPI
+    ``{"detail": ...}`` format is deliberately untouched.
+    """
+    return {
+        "success": False,
+        "error": {
+            "code": "unknown_profile",
+            "profile_id": profile_id,
+            "message": (
+                f"profile {profile_id!r} does not exist; per-request routing "
+                "never creates a profile implicitly"
+            ),
+        },
+    }
 
 
 class SessionOpenRequest(BaseModel):
@@ -985,12 +1029,15 @@ def _recall_budget_s() -> float:
         return 25.0
 
 
-def _recall_keyword_fallback(engine, query: str, limit: int) -> dict:
+def _recall_keyword_fallback(
+    engine, query: str, limit: int, *, profile_id: str | None = None,
+) -> dict:
     """Fast profile-scoped keyword (LIKE) fallback for /recall.
 
     Used only when semantic recall exceeds its budget, so CLI/MCP callers get
     a bounded response instead of hanging. Mirrors the dashboard /api/search
-    fallback shape (retrieval_mode=degraded_lexical).
+    fallback shape (retrieval_mode=degraded_lexical). ``profile_id`` follows
+    the per-request routing convention: None/"" means the active profile.
     """
     results = []
     try:
@@ -998,7 +1045,7 @@ def _recall_keyword_fallback(engine, query: str, limit: int) -> dict:
             "SELECT fact_id, content, confidence FROM atomic_facts "
             "WHERE profile_id = ? AND content LIKE ? "
             "ORDER BY confidence DESC LIMIT ?",
-            (engine.profile_id, f"%{query}%", limit),
+            (profile_id or engine.profile_id, f"%{query}%", limit),
         )
         for pos, r in enumerate(rows, start=1):
             d = dict(r)
@@ -4470,6 +4517,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
         request: Request,
         q: str = "", query: str = "", limit: int = CANONICAL_RECALL_LIMIT,
         session_id: str = "",
+        # Per-request profile routing (spec section 3/5): a non-empty
+        # profile_id serves this one recall against THAT profile — same
+        # existence check and same 404 envelope as POST /remember — without
+        # reading or moving the ProfileRuntime active pointer. Empty keeps
+        # the legacy active-profile path byte-identical.
+        profile_id: str = "",
         # v3.8.2 client-driven agentic: ``fast`` is left UNSET (None) by default
         # so the daemon resolves the configured policy (retrieval.client_driven_agentic,
         # ships True). The agent hot path is consumed by a frontier LLM that
@@ -4492,6 +4545,21 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
         engine = _get_engine_or_503()
+        req_profile = (profile_id or "").strip()
+        if req_profile and not _daemon_profile_exists(engine, req_profile):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                _unknown_profile_body(req_profile), status_code=404,
+            )
+        if req_profile:
+            # Same one-line-per-routed-request contract as POST /remember:
+            # the recall served a named namespace, silently as far as the
+            # active pointer is concerned.
+            logger.info(
+                "per-request profile routing: %s %s profile=%s",
+                "GET", "/recall", req_profile,
+            )
         if not search_query:
             return {"results": [], "count": 0, "query_type": "none", "retrieval_time_ms": 0}
         # Phase 4b: normalize as_of at HTTP boundary. Invalid → return error.
@@ -4587,6 +4655,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     search_query, limit=limit, session_id=effective_sid,
                     agent_id=recall_actor,
                     fast=fast,
+                    profile_id=req_profile or None,
                     include_global=include_global,
                     include_shared=include_shared,
                     window=window or None,
@@ -4606,7 +4675,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     "recall: semantic recall exceeded %.0fs budget for %r — "
                     "serving keyword fallback", _budget, (search_query or "")[:80],
                 )
-                return _recall_keyword_fallback(engine, search_query, limit)
+                return _recall_keyword_fallback(
+                    engine, search_query, limit, profile_id=req_profile or None,
+                )
             response = _rf.result()
             # v3.4.26: return the same field shape as recall_worker so
             # MCP processes proxying through the daemon get recall_trace-
@@ -4617,7 +4688,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             })
             memory_map = (
                 engine._db.get_memory_content_batch(
-                    memory_ids, engine.profile_id,
+                    memory_ids, req_profile or engine.profile_id,
                     include_global=True, include_shared=True,
                 )
                 if memory_ids else {}
@@ -4649,7 +4720,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
             profile_snapshot = get_profile_runtime(application.state).snapshot
             return {
                 "ok": True,
-                "profile": profile_snapshot.profile_id,
+                # The profile that actually served this recall: the routed
+                # profile when ?profile_id= named one, else the active one.
+                # Reporting the active profile for a routed request would
+                # tell the caller their b-profile answer came from "default".
+                # profile_generation stays from the snapshot — it describes
+                # global switch state, which per-request routing never moves.
+                "profile": req_profile or profile_snapshot.profile_id,
                 "profile_generation": profile_snapshot.generation,
                 "query": search_query,
                 "query_type": response.query_type,
@@ -4687,7 +4764,19 @@ def _register_daemon_routes(application: FastAPI) -> None:
         trusted_actor_id = _require_write_actor(request)
         _update_activity()
         engine = _get_engine_or_503()
-        _require_remember_profile(req.profile_id, engine._profile_id)
+        # Per-request profile routing (spec section 3/5): a non-empty
+        # profile_id is PURE ROUTING — this one write is served against that
+        # profile while the ProfileRuntime active pointer and its generation
+        # stay untouched. Routing replaces the stale-client guard for these
+        # requests (the daemon is no longer single-profile for them); the
+        # guard keeps its legacy slot below for an empty profile_id, where it
+        # is trivially satisfied and unreachable for routed requests.
+        req_profile = (req.profile_id or "").strip()
+        if not req_profile:
+            _require_remember_profile(req.profile_id, engine._profile_id)
+        # Single write-target id for everything below: the routed profile,
+        # or the engine's active profile on the legacy path. Never a 409.
+        write_profile = req_profile or engine._profile_id
 
         # v3.6.15 multi-scope: resolve the write scope. ``None`` (not specified
         # by the caller) → the configured default_scope (personal). Shared
@@ -4707,9 +4796,30 @@ def _register_daemon_routes(application: FastAPI) -> None:
             resolve_actor_roles,
         )
 
-        require_permission(request, Permission.WRITE, profile=engine._profile_id)
+        require_permission(request, Permission.WRITE, profile=write_profile)
         if scope in {"shared", "global"}:
-            require_permission(request, Permission.SHARE, profile=engine._profile_id)
+            require_permission(request, Permission.SHARE, profile=write_profile)
+        # Unknown-profile rejection comes AFTER the permission gate. With
+        # existence checked first, a company-mode caller without WRITE could
+        # probe which profile ids exist: 404 for an absent one vs 403 for a
+        # present-but-forbidden one. Permission first keeps both codes intact
+        # while closing the oracle.
+        if req_profile and not _daemon_profile_exists(engine, req_profile):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                _unknown_profile_body(req_profile), status_code=404,
+            )
+        if req_profile:
+            # One line per routed request, nothing on the legacy path. A
+            # daemon serving a multi-client fleet is otherwise a black box
+            # about which namespace each write actually went to — the
+            # routing is invisible in both the response envelope and the
+            # pointer, which never moves.
+            logger.info(
+                "per-request profile routing: %s %s profile=%s",
+                "POST", "/remember", req_profile,
+            )
         runtime = getattr(application.state, "canonical_remember_runtime", None)
         if runtime is None:
             raise HTTPException(
@@ -4751,7 +4861,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             engine._hooks.run_pre("store", {
                 "operation": "store",
                 "agent_id": trusted_actor_id,
-                "profile_id": engine._profile_id,
+                "profile_id": write_profile,
                 "content_preview": req.content[:100],
             })
 
@@ -4797,7 +4907,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
             _http_actor = _ActorContext(
                 principal_id=trusted_actor_id,
-                roles=resolve_actor_roles(request, profile=engine._profile_id),
+                roles=resolve_actor_roles(request, profile=write_profile),
+                # The daemon's ACTIVE profile stays truthful here: per-request
+                # routing does not move it, and policy evaluates the caller
+                # against the profile it is actually serving.
                 active_profile_id=engine._profile_id,
                 transport=_Transport.HTTP,
                 client_host=_client_host,
@@ -4815,7 +4928,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
             admission = RememberRequest(
                 content=req.content,
-                profile_id=engine._profile_id,
+                profile_id=write_profile,
                 source_type="http",
                 idempotency_key=req.idempotency_key or uuid.uuid4().hex,
                 metadata=meta,
@@ -4827,7 +4940,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             )
             actor = Actor(
                 principal_id=trusted_actor_id,
-                allowed_profiles=frozenset({engine._profile_id}),
+                allowed_profiles=frozenset({write_profile}),
                 allowed_scopes=frozenset({scope}),
             )
             # The whole request has a 1.5 s ceiling, and the two phases below
@@ -4906,6 +5019,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                         functools.partial(
                             _enrich_and_release,
                             engine, fact_ids, enrich_budget,
+                            profile_id=write_profile,
                         ),
                     )
                 except BaseException:
@@ -4934,6 +5048,11 @@ def _register_daemon_routes(application: FastAPI) -> None:
             searchable = "meaning" if enriched == len(fact_ids) and fact_ids else "wording"
             return {
                 "ok": True,
+                # The profile this write actually landed in: the routed
+                # profile when the request named one, else the active one.
+                # A routed caller must not be told the daemon's active
+                # profile served their write.
+                "profile": write_profile,
                 "fact_ids": fact_ids,
                 "count": len(fact_ids),
                 # Storing a memory and being able to find it again are different

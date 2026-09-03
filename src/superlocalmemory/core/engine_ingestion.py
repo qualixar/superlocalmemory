@@ -288,6 +288,7 @@ def canonical_store(
     idempotency_key: str = "",
     require_complete: bool = True,
     return_receipt: bool = False,
+    profile_id: str | None = None,
 ) -> list[str] | IngestionOperation:
     """Submit canonical evidence, optionally waiting for enrichment completion.
 
@@ -296,6 +297,12 @@ def canonical_store(
     durable receipt without invoking any LLM, embedding, or graph work.  The
     daemon materializer owns that expensive, retryable enrichment.  Explicit
     complete callers retain the historical synchronous contract.
+
+    ``profile_id`` follows the ``engine.recall`` convention: ``None``/``""``
+    targets the engine's active profile; an explicit value routes this one
+    submission (journal row, queryable receipt, and every downstream
+    materialization stage, which all read the profile from the durable
+    operation record) without mutating the engine's active profile.
     """
     import time
 
@@ -334,10 +341,10 @@ def canonical_store(
             content = scrubbed
             logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
     try:
-        command = build_engine_ingestion_command(engine)
+        command = build_engine_ingestion_command(engine, profile_id=profile_id)
         receipt = command.submit(IngestionRequest(
             content=content,
-            profile_id=engine._profile_id,
+            profile_id=profile_id or engine._profile_id,
             source_type=source_type,
             idempotency_key=idempotency_key or uuid.uuid4().hex,
             metadata=dict(metadata or {}),
@@ -402,17 +409,26 @@ def canonical_store_fact(
     fact: AtomicFact,
     *,
     trusted_actor_id: str,
+    profile_id: str | None = None,
 ) -> str:
-    """Durably ingest a caller-built fact without changing its public ID."""
+    """Durably ingest a caller-built fact without changing its public ID.
+
+    ``profile_id`` follows the ``engine.recall`` convention: ``None`` or an
+    empty string targets the engine's active profile; an explicit value
+    routes this one ingestion without mutating the engine's active profile.
+    The prebuilt fact's own ``profile_id`` field is not authoritative — the
+    request's profile wins at the queryable-receipt write, exactly as for
+    any other canonical submission.
+    """
     from superlocalmemory.core.ingestion_command import IngestionRequest, IngestionState
     from superlocalmemory.core.injection import is_low_quality
 
     if is_low_quality(fact.content):
         return fact.fact_id
-    command = build_engine_ingestion_command(engine)
+    command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
         content=fact.content,
-        profile_id=engine._profile_id,
+        profile_id=profile_id or engine._profile_id,
         source_type="python-api-prebuilt",
         idempotency_key=f"prebuilt:{fact.fact_id}",
         metadata={_PREBUILT_FACT_KEY: _prebuilt_fact_payload(fact)},
@@ -433,15 +449,25 @@ def canonical_store_fact(
     return fact.fact_id
 
 
-def build_engine_ingestion_command(engine: MemoryEngine) -> IngestionCommand:
-    """Bind one initialized engine to the durable ingestion command."""
+def build_engine_ingestion_command(
+    engine: MemoryEngine, *, profile_id: str | None = None,
+) -> IngestionCommand:
+    """Bind one initialized engine to the durable ingestion command.
+
+    ``profile_id`` scopes the immediate queryable-admission writer for the
+    commands this binding produces.  ``None``/``""`` (the default, used by
+    every pre-existing caller) binds the engine's active profile.  The
+    materializer side never reads this binding: every enrichment stage
+    takes its profile from the durable ``IngestionOperation`` record, so a
+    per-request profile survives journal replay and daemon restarts.
+    """
     engine._require_full("canonical_ingestion")
     engine._ensure_init()
     repository = IngestionOperationRepository(engine._db)
     store_config = getattr(engine._config, "store", None)
     write_queryable = build_immediate_admission_handler(
         engine._db,
-        profile_id=engine._profile_id,
+        profile_id=profile_id or engine._profile_id,
         max_verbatim_chars=getattr(store_config, "max_verbatim_chars", 24_000),
         max_ingest_bytes=getattr(store_config, "max_ingest_bytes", 1_048_576),
     )
