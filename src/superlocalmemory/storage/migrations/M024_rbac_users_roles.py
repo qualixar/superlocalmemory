@@ -85,3 +85,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         for t in ("rbac_users", "rbac_memberships", "rbac_sessions",
                   "rbac_settings")
     )
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

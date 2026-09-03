@@ -50,3 +50,8 @@ def apply(conn: sqlite3.Connection) -> None:
             "UPDATE learning_model_state SET bytes_sha256 = ? WHERE id = ?",
             updates,
         )
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent backfill as end-state repair (4.1.14 #133)."""
+    apply(conn)

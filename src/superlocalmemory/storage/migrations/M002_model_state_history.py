@@ -105,3 +105,16 @@ CREATE INDEX idx_model_profile_time
 
 COMMIT;
 """
+
+#: No automatic repair exists for this migration, by design (4.1.14 #133).
+#: M002 rebuilds the table with a data copy (INSERT ... SELECT), then
+#: DROPs the live table and renames the copy. Replaying that against a
+#: drifted schema would duplicate rows and drop the live table — the
+#: canonical case for why automatic replay is disabled. A drifted
+#: learning_model_state must be restored from a pre-migration snapshot
+#: (see ~/.superlocalmemory/pre-migration-snapshots/), never re-migrated.
+REPAIR_NOT_APPLICABLE = (
+    "table rebuild with data copy (INSERT...SELECT, DROP, RENAME); "
+    "replay would duplicate rows and drop the live table; restore from "
+    "a pre-migration snapshot instead"
+)

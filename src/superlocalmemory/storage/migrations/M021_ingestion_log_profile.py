@@ -106,3 +106,8 @@ def verify(conn: sqlite3.Connection) -> bool:
     if not _table_exists(conn, "ingestion_log"):
         return True  # nothing to migrate; fresh install creates it correctly
     return "profile_id" in _cols(conn, "ingestion_log")
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

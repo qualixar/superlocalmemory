@@ -161,3 +161,8 @@ def verify(conn: sqlite3.Connection) -> bool:
     if "profile_id" not in _cols(conn, "transferable_patterns"):
         return False
     return _unique_index_covers_profile(conn)
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

@@ -92,3 +92,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_model_active_one
 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_candidate_one
     ON learning_model_state(profile_id) WHERE is_candidate=1;
 """
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

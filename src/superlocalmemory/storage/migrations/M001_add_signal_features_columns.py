@@ -65,3 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_features_synthetic
 
 COMMIT;
 """
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-apply missing end-state idempotently (4.1.14 #133)."""
+    from superlocalmemory.storage.migrations._repair_util import repair_ddl
+    repair_ddl(conn, DDL)

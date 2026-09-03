@@ -192,3 +192,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         if _table_exists(conn, table) and "profile_id" not in _cols(conn, table):
             return False
     return True
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

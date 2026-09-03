@@ -227,3 +227,12 @@ def blocks_serving(conn: sqlite3.Connection) -> bool:
     thing the check is for. Same reasoning as ``M043.blocks_serving``.
     """
     return False
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the deterministic demotion pass as repair (4.1.14 #133).
+
+    The pass re-reads wording and demotes only misfiled plans, so
+    re-running on already-demoted rows is a no-op by construction.
+    """
+    apply(conn=conn)

@@ -77,3 +77,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         (f"idx_{TABLE}_scope",),
     ).fetchone()
     return idx is not None
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

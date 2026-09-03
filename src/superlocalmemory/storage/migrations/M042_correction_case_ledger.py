@@ -243,3 +243,12 @@ def _index_matches(
     if where_clause is None:
         return True
     return row[1] is not None and where_clause in "".join(str(row[1]).lower().split())
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133).
+
+    A malformed ledger raises instead of rebuilding: the framework
+    reports it honestly rather than claiming a repaired end-state.
+    """
+    apply(conn)

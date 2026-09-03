@@ -36,3 +36,9 @@ CREATE TABLE IF NOT EXISTS migration_log (
     status         TEXT NOT NULL
 );
 """
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-apply missing end-state idempotently (4.1.14 #133)."""
+    from superlocalmemory.storage.migrations._repair_util import repair_ddl
+    repair_ddl(conn, DDL)

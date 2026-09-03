@@ -88,3 +88,8 @@ def verify(conn: sqlite3.Connection) -> bool:
     if _table_exists(conn, "mesh_events"):
         ok = ok and "idx_mesh_events_created_at" in names
     return ok
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

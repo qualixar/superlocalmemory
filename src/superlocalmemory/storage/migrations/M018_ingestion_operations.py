@@ -118,3 +118,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         for row in conn.execute("PRAGMA index_list(ingestion_operations)").fetchall()
     }
     return "idx_ingestion_operations_state" in indexes
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-run the idempotent apply as end-state repair (4.1.14 #133)."""
+    apply(conn)

@@ -70,3 +70,9 @@ CREATE INDEX IF NOT EXISTS idx_shadow_obs_candidate
 CREATE INDEX IF NOT EXISTS idx_shadow_obs_profile
     ON shadow_observations(profile_id, recorded_at);
 """
+
+
+def repair(conn: sqlite3.Connection) -> None:
+    """Re-apply missing end-state idempotently (4.1.14 #133)."""
+    from superlocalmemory.storage.migrations._repair_util import repair_ddl
+    repair_ddl(conn, DDL)
