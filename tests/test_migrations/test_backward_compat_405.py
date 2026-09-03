@@ -154,7 +154,7 @@ import pytest
 #: This constant sat at 48 while M049 shipped, so the whole file was failing —
 #: nothing noticed because the full suite had not been run since. Keep it equal
 #: to the trailing serial of the last migration.
-_EXPECTED_SCHEMA_VERSION: int = 49
+_EXPECTED_SCHEMA_VERSION: int = 50
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -171,7 +171,7 @@ _EXPECTED_SCHEMA_VERSION: int = 49
 # bandit_plays.shown_fact_ids) and +M045_fact_outcome_score (memory.db, the
 # per-fact outcome score). Both additive columns/tables; neither rewrites an
 # existing row, so 4.0.5 forward-compat is unaffected.
-_EXPECTED_MIGRATION_COUNT: int = 48
+_EXPECTED_MIGRATION_COUNT: int = 49
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:

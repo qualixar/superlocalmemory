@@ -1,0 +1,6 @@
+{
+  "skills": ["slm-cache", "slm-compress", "slm-governance", "slm-graph", "slm-loop", "slm-mesh", "slm-profile", "slm-recall", "slm-remember", "slm-scope", "slm-session", "slm-status"],
+  "primary_commands": ["init", "setup", "mode", "provider", "connect", "upgrade-hosts", "migrate", "db", "mesh", "remember", "recall", "forget", "delete", "update", "review-correction", "list", "status", "health", "trace", "doctor", "help", "wrap", "mcp", "warmup", "dashboard", "serve", "restart", "profile", "hooks", "codex", "session-context", "session", "observe", "brain", "decay", "quantize", "consolidate", "soft-prompts", "reap", "adapters", "ingest", "config", "evolve", "disable", "enable", "clear-cache", "reconfigure", "benchmark", "evidence", "diagnostics", "rotate-token", "optimize", "cache", "compress", "proxy", "help-optimize", "loop", "summary", "gdpr", "ops"],
+  "aliases": {"search": "recall"},
+  "high_impact": ["forget", "delete", "review-correction", "migrate", "db", "profile", "hooks", "restart", "disable", "clear-cache", "reconfigure", "evidence", "rotate-token", "config", "gdpr", "ops"]
+}

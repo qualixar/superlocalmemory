@@ -15,11 +15,14 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 from mcp.types import ToolAnnotations
@@ -31,6 +34,72 @@ from superlocalmemory.mcp.shared import authorize_mcp_mutation
 logger = logging.getLogger(__name__)
 
 _MAX_SUMMARY_LEN = 500  # Truncate input/output summaries
+
+
+def settle_pending_session_outcomes(
+    memory_db_path: str | Path,
+    *,
+    profile_id: str,
+    session_id: str,
+    evidence_only: bool = False,
+) -> dict[str, int]:
+    """Finalize real pending recalls for one host-owned session.
+
+    This is deliberately a narrow adapter around ``EngagementRewardModel``:
+    it selects only pending rows belonging to the supplied active profile and
+    exact host session, then delegates every state transition and reward
+    calculation to the established finalizer.  No feedback is inferred here.
+    Repeating the call is a no-op because settled rows are not selected.
+    """
+    session_id = session_id.strip()
+    if not session_id:
+        return {"selected": 0, "settled": 0}
+
+    path = Path(memory_db_path)
+    try:
+        with sqlite3.connect(str(path), timeout=2.0) as conn:
+            rows = conn.execute(
+                "SELECT outcome_id, signals_json FROM pending_outcomes "
+                "WHERE profile_id=? AND session_id=? AND status='pending'",
+                (profile_id, session_id),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError("pending outcome lookup failed") from exc
+
+    if evidence_only:
+        from superlocalmemory.learning.reward import _carries_evidence
+
+        rows = [
+            row for row in rows
+            if _carries_evidence(json.loads(row[1] or "{}"))
+        ]
+
+    if not rows:
+        return {"selected": 0, "settled": 0}
+
+    from superlocalmemory.learning.reward import EngagementRewardModel
+
+    model = EngagementRewardModel(memory_db_path=str(path))
+    try:
+        for outcome_id, _signals_json in rows:
+            # Preserve the established keyword-only finalization contract.
+            model.finalize_outcome(outcome_id=outcome_id)
+    finally:
+        model.close()
+
+    outcome_ids = [row[0] for row in rows]
+    placeholders = ",".join("?" for _ in outcome_ids)
+    try:
+        with sqlite3.connect(str(path), timeout=2.0) as conn:
+            settled = conn.execute(
+                "SELECT COUNT(*) FROM pending_outcomes "
+                "WHERE profile_id=? AND session_id=? AND status='settled' "
+                f"AND outcome_id IN ({placeholders})",
+                (profile_id, session_id, *outcome_ids),
+            ).fetchone()[0]
+    except sqlite3.Error as exc:
+        raise RuntimeError("pending outcome settlement verification failed") from exc
+    return {"selected": len(outcome_ids), "settled": int(settled)}
 
 
 def register_learning_tools(server, get_engine: Callable) -> None:
@@ -45,6 +114,9 @@ def register_learning_tools(server, get_engine: Callable) -> None:
         output_summary: str = "",
         duration_ms: int = 0,
         metadata: str = "{}",
+        session_id: str = "",
+        agent_id: str = "",
+        project_path: str = "",
     ) -> dict:
         """Log a tool usage event for behavioral learning.
 
@@ -62,8 +134,11 @@ def register_learning_tools(server, get_engine: Callable) -> None:
         """
         engine = get_engine()
         now = datetime.now(timezone.utc).isoformat()
-        session_id = os.environ.get("CLAUDE_SESSION_ID", "unknown")
-        project_path = (
+        from superlocalmemory.mcp.session_binding import resolve_session_id
+        effective_session_id = resolve_session_id(
+            session_id, agent_id=agent_id or "mcp_client", allow_agent_fallback=True,
+        )
+        effective_project_path = project_path or (
             os.environ.get("CLAUDE_PROJECT_DIR")
             or os.environ.get("PROJECT_PATH")
             or os.getcwd()
@@ -86,13 +161,57 @@ def register_learning_tools(server, get_engine: Callable) -> None:
                 "(session_id, profile_id, project_path, tool_name, event_type, "
                 " input_summary, output_summary, duration_ms, metadata, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (session_id, engine.profile_id, project_path, tool_name,
+                (effective_session_id, engine.profile_id, effective_project_path, tool_name,
                  event_type, input_clean, output_clean, duration_ms, metadata, now),
             )
             authorization.complete()
-            return {"success": True, "tool": tool_name, "event": event_type}
+            return {"success": True, "tool": tool_name, "event": event_type,
+                    "session_id": effective_session_id}
         except Exception as exc:
             logger.debug("log_tool_event failed: %s", exc)
+            return {"success": False, "error": str(exc)}
+
+    @server.tool()
+    @admits(OperationKind.REMEMBER)
+    async def settle_session_outcomes(
+        session_id: str, agent_id: str = "", finalize: bool = False,
+    ) -> dict:
+        """Settle pending recall outcomes for one exact host session.
+
+        Native hosts call this after each turn and at finalization. Per-turn
+        calls settle only recalls that have actual evidence; finalization also
+        clears evidence-free pending rows. The operation never treats a hook
+        boundary itself as feedback. ``session_id`` must be explicit.
+        """
+        if not session_id or not session_id.strip():
+            return {"success": False, "error": "session_id is required"}
+        engine = get_engine()
+        try:
+            authorization = authorize_mcp_mutation(
+                engine,
+                "update",
+                mutation_source="mcp-settle-session-outcomes",
+                profile_id=engine.profile_id,
+                content_preview=agent_id[:100],
+            )
+            from superlocalmemory.hooks._outcome_common import memory_db_path
+
+            result = await asyncio.to_thread(
+                settle_pending_session_outcomes,
+                memory_db_path(),
+                profile_id=engine.profile_id,
+                session_id=session_id,
+                evidence_only=not finalize,
+            )
+            authorization.complete()
+            return {
+                "success": True,
+                "session_id": session_id.strip(),
+                "agent_id": agent_id.strip(),
+                **result,
+            }
+        except Exception as exc:
+            logger.debug("settle_session_outcomes failed: %s", exc)
             return {"success": False, "error": str(exc)}
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))

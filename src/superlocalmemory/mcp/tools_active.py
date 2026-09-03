@@ -318,6 +318,8 @@ def register_active_tools(server, get_engine: Callable) -> None:
         query: str = "",
         max_results: int = 10,
         max_age_days: int = 30,
+        session_id: str = "",
+        agent_id: str = "",
     ) -> dict:
         """Initialize session with relevant memory context.
 
@@ -563,18 +565,24 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 )
                 feedback_count = 0
 
-            # v3.6.9 (#35): generate a stable session_id so clients can pass it
-            # to remember() and close_session() for proper session aggregation.
-            session_id = (
+            # A gateway can serve concurrent host conversations.  An explicit
+            # host id therefore always wins; generating one is retained only
+            # for older clients that cannot supply lifecycle identity.
+            effective_session_id = session_id.strip() or (
                 f"slm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d}"
                 f"-{uuid.uuid4().hex[:8]}"
             )
+            effective_agent_id = agent_id.strip() or _get_agent_id()
+            # Backward-compatible default for legacy close_session() callers;
+            # native hosts must pass their explicit id when sessions overlap.
+            engine._last_session_id = effective_session_id
 
             _upcoming_events = _upcoming_scheduled_facts(engine, _now)
 
             return {
                 "success": True,
-                "session_id": session_id,
+                "session_id": effective_session_id,
+                "agent_id": effective_agent_id,
                 "context": context,
                 "memories": memories[:max_results],
                 "memory_count": len(memories),
@@ -623,6 +631,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
     async def observe(
         content: str,
         agent_id: str | None = None,
+        session_id: str = "",
     ) -> dict:
         """Observe conversation content for automatic memory capture.
 
@@ -673,11 +682,16 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # Auto-store via engine.
             # pool_store uses blocking urllib (DaemonPoolProxy) — run in
             # thread so the MCP event loop stays unblocked (#34 class).
+            from superlocalmemory.mcp.session_binding import resolve_session_id
+            effective_session_id = resolve_session_id(
+                session_id, agent_id=agent_id, allow_agent_fallback=False,
+            )
             stored = await asyncio.to_thread(
                 auto.capture,
                 content,
                 category=decision.category,
-                metadata={"agent_id": agent_id, "source": "auto-observe"},
+                metadata={"agent_id": agent_id, "session_id": effective_session_id,
+                          "source": "auto-observe"},
             )
 
             if stored:
@@ -693,6 +707,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 "category": decision.category,
                 "confidence": round(decision.confidence, 3),
                 "reason": decision.reason,
+                "session_id": effective_session_id,
             }
         except Exception as exc:
             logger.exception("observe failed")

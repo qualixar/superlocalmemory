@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from superlocalmemory.integrations.bounded_loops_mcp import (
@@ -74,6 +76,29 @@ def test_unknown_contract_is_refused_without_a_compatibility_fallback() -> None:
     bad["contract"] = "bounded-loops.dev/slm-bridge/v2"
     with pytest.raises(BridgeUnavailable, match="unsupported"):
         bridge_payload(bad, profile_id="alpha")
+
+
+def test_producer_identity_binds_the_console_launcher_to_its_package_source(
+    tmp_path: Path,
+) -> None:
+    """Changing bounded_loops source changes the v2 producer identity."""
+    from superlocalmemory.integrations.bounded_loops_mcp import _producer_identity
+
+    venv = tmp_path / "venv"
+    launcher = venv / "bin" / "bounded-loops-mcp"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text(f"#!{venv / 'bin' / 'python'}\n")
+    (venv / "bin" / "python").write_text("#!/bin/sh\n")
+    source = venv / "lib" / "python3.13" / "site-packages" / "bounded_loops" / "mcp_server.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def main(): return 0\n")
+
+    original = _producer_identity(launcher)
+    source.write_text("def main(): return 1\n")
+    changed = _producer_identity(launcher)
+
+    assert original.startswith("sha256:")
+    assert original != changed
 
 
 @pytest.mark.asyncio

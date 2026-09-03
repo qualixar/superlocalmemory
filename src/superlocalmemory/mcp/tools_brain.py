@@ -20,7 +20,15 @@ from superlocalmemory.brain.truth import BrainTruthService
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
-from superlocalmemory.integrations.bounded_loops_mcp import BridgeUnavailable, observe_installed
+from superlocalmemory.integrations.bounded_loops_mcp import (
+    BridgeUnavailable,
+    observe_installed,
+    observe_installed_v2,
+)
+from superlocalmemory.storage.execution_learning import (
+    ExecutionLearningStore,
+    ExecutionLearningValidationError,
+)
 from superlocalmemory.storage.agent_experience import (
     AgentExperienceConflictError,
     AgentExperienceStore,
@@ -46,6 +54,14 @@ def _store_for(engine: Any) -> AgentExperienceStore:
 def _external_store_for(engine: Any) -> ExternalEvidenceStore:
     active_profile = engine.profile_id
     return ExternalEvidenceStore(
+        Path(state_path("learning.db")),
+        is_profile_active=lambda profile_id: profile_id == active_profile,
+    )
+
+
+def _execution_store_for(engine: Any) -> ExecutionLearningStore:
+    active_profile = engine.profile_id
+    return ExecutionLearningStore(
         Path(state_path("learning.db")),
         is_profile_active=lambda profile_id: profile_id == active_profile,
     )
@@ -259,3 +275,24 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             "created": created,
             "control_plane": "observation_only",
         }
+
+    @server.tool()
+    @admits(OperationKind.REMEMBER)
+    async def observe_bounded_loop_execution_learning(workspace: str) -> dict[str, Any]:
+        """Ingest negotiated bridge-v2 terminal evidence into the execution plane.
+
+        The producer is reached only through the installed bounded-loops MCP
+        capability handshake.  This never writes semantic facts or preferences.
+        """
+        engine = get_engine()
+        try:
+            observed = await observe_installed_v2(workspace=workspace, profile_id=engine.profile_id)
+            store = _execution_store_for(engine)
+            created = 0
+            for payload in observed:
+                created += int(await asyncio.to_thread(store.ingest, payload))
+            return {"success": True, "durable": True, "observed": len(observed),
+                    "created": created, "control_plane": "execution_reliability_only"}
+        except (BridgeUnavailable, ExecutionLearningValidationError, ProfileAdmissionError,
+                sqlite3.Error) as exc:
+            return {"success": False, "durable": False, "error": str(exc)}

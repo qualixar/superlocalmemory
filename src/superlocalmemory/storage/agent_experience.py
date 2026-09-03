@@ -254,9 +254,33 @@ class AgentExperienceStore:
                 external_count = conn.execute(
                     "DELETE FROM external_evidence_receipts WHERE profile_id=?", (profile_id,)
                 ).rowcount
+            execution_count = 0
+            execution_tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('execution_learning_receipts', 'execution_learning_events')"
+                )
+            }
+            if execution_tables and execution_tables != {
+                "execution_learning_receipts", "execution_learning_events"
+            }:
+                raise sqlite3.OperationalError("incomplete execution-learning receipt schema")
+            has_execution = bool(execution_tables)
+            if has_execution:
+                execution_count += conn.execute(
+                    "DELETE FROM execution_learning_events WHERE profile_id=?", (profile_id,)
+                ).rowcount
+                execution_count += conn.execute(
+                    "DELETE FROM execution_learning_receipts WHERE profile_id=?", (profile_id,)
+                ).rowcount
             receipt_tables = ["agent_experiences", "cognitive_turn_receipts"]
             if has_external:
                 receipt_tables.append("external_evidence_receipts")
+            if has_execution:
+                receipt_tables.extend([
+                    "execution_learning_receipts", "execution_learning_events",
+                ])
             residue = sum(
                 int(
                     conn.execute(
@@ -267,7 +291,7 @@ class AgentExperienceStore:
             )
             if residue:
                 raise RuntimeError("learning receipt erasure left profile residue")
-            return experience_count + turn_count + external_count
+            return experience_count + turn_count + external_count + execution_count
 
         return self._write(erase)
 
@@ -434,7 +458,8 @@ def purge_profile_receipts(
             for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name IN ('agent_experiences', 'cognitive_turn_receipts', "
-                "'agent_receipt_profile_closures', 'external_evidence_receipts')"
+                "'agent_receipt_profile_closures', 'external_evidence_receipts', "
+                "'execution_learning_receipts', 'execution_learning_events')"
             )
         }
     if not tables:
@@ -443,13 +468,22 @@ def purge_profile_receipts(
         "agent_experiences", "cognitive_turn_receipts", "agent_receipt_profile_closures"
     }
     if tables != expected:
-        if tables == expected | {"external_evidence_receipts"}:
+        optional = {"external_evidence_receipts"}
+        execution = {"execution_learning_receipts", "execution_learning_events"}
+        if tables in (expected | optional, expected | execution, expected | optional | execution):
             from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
 
             with sqlite3.connect(path) as conn:
                 # Erasure needs a valid table, not its optional performance indexes.
                 # A damaged index must never strand profile-scoped evidence.
-                if m041._table_is_valid(conn):
+                external_ok = (
+                    "external_evidence_receipts" not in tables or m041._table_is_valid(conn)
+                )
+                execution_ok = (
+                    not execution.intersection(tables)
+                    or execution <= tables
+                )
+                if external_ok and execution_ok:
                     return AgentExperienceStore(
                         path, is_profile_active=lambda _: True
                     ).erase_profile(profile_id, close_profile=close_profile)

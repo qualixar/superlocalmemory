@@ -33,6 +33,7 @@ from . import (
     M040_agent_experience_receipts,
     M041_external_evidence_receipts,
     M042_correction_case_ledger,
+    M050_execution_learning_v2,
 )
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,7 @@ __all__ = (
     "M040_agent_experience_receipts",
     "M041_external_evidence_receipts",
     "M042_correction_case_ledger",
+    "M050_execution_learning_v2",
     # Legacy re-exports (backward compat):
     "CURRENT_SCHEMA_VERSION",
     "get_schema_version",

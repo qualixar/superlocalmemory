@@ -5,6 +5,33 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.12] — Native Hermes lifecycle and verified execution learning
+
+### Added
+
+- **Native Hermes plugin.** The release ships 12 namespaced SLM skills, four
+  real Hermes child-agent roles, the complete SLM command router and generated
+  aliases, and lifecycle hooks that preserve one exact Hermes session across
+  recall, tool telemetry, optional turn capture, outcome settlement, reset,
+  and finalization. It installs additively from the immutable GitHub release
+  commit; it never replaces Hermes's memory provider, model, configuration, or
+  existing hooks.
+- **Explicit host session identity.** `session_init`, `observe`, and
+  `log_tool_event` now accept additive host session/agent identifiers, and
+  `settle_session_outcomes` settles only one exact session's pending outcomes.
+  Concurrent Hermes conversations cannot share attribution.
+- **`bounded-loops.dev/slm-bridge/v2`.** V2 is negotiated beside unchanged
+  observation-only v1. It stores validated, bounded execution receipts and
+  derives reversible execution-reliability learning only; it never writes
+  semantic user memory or preferences from a gate result.
+
+### Fixed
+
+- Profile erasure and global learning reset now remove bridge-v2 receipts and
+  derived events. V2 evidence validation rejects demonstrations, cancellations,
+  malformed digests, unknown nested fields, and oversized payloads before any
+  data is persisted.
+
 ## [4.1.11] — MCP loops use the owned runtime
 
 ### Fixed

@@ -83,6 +83,27 @@ class TestSessionInitTool:
     @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
     @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
     @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
+    def test_session_init_preserves_explicit_host_identity(
+        self, mock_pool_recall, MockRulesEngine, mock_register, mock_emit,
+    ):
+        """A shared Hermes MCP process must never manufacture a session id."""
+        engine = _make_engine_mock()
+        MockRulesEngine.return_value = _make_rules_mock()
+        mock_pool_recall.return_value = _make_response(0)
+        session_init, get_engine = _get_session_init_tool()
+        get_engine.return_value = engine
+
+        result = asyncio.run(session_init(
+            project_path="/workspace", session_id="hermes-a", agent_id="hermes",
+        ))
+
+        assert result["session_id"] == "hermes-a"
+        assert result["agent_id"] == "hermes"
+
+    @patch("superlocalmemory.mcp.tools_active._emit_event")
+    @patch("superlocalmemory.mcp.tools_active._register_agent", create=True)
+    @patch("superlocalmemory.hooks.rules_engine.RulesEngine")
+    @patch("superlocalmemory.mcp._pool_adapter.pool_recall")
     def test_session_init_returns_context_and_memories_from_one_fast_recall(
         self, mock_pool_recall, MockRulesEngine, mock_register, mock_emit,
     ):

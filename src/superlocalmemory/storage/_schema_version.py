@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 
 #: Highest schema_version this runner can write.  Matches the trailing serial of
-#: the latest migration (M049).  Increment when adding new migrations or
+#: the latest migration (M050).  Increment when adding new migrations or
 #: table-level breaking changes.
 #:
 #: This sat at 42 while M043, M044 and M045 shipped, so for three migrations the
@@ -44,7 +44,7 @@ from pathlib import Path
 #: be additive is a silent bad write.  Those are not comparable, and judging
 #: additivity per migration is exactly the judgement that let it fall three
 #: behind.
-SUPPORTED_SCHEMA_VERSION: int = 49
+SUPPORTED_SCHEMA_VERSION: int = 50
 
 
 class SchemaVersionError(RuntimeError):

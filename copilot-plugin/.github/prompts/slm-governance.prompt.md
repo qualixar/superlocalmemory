@@ -1,7 +1,7 @@
 ---
 name: slm-governance
 description: Enterprise compliance and governed workspace behavior for SuperLocalMemory. Covers role-based access (admin/member/viewer), retention policies, audit trail, GDPR data export/erase, and how agents must behave when operating under workspace governance. Requires power MCP profile for audit/retention tools. Agents must never bypass governance controls.
-version: "4.1.11"
+version: "4.1.12"
 agent: agent
 tools:
   - audit_trail
@@ -246,4 +246,4 @@ Before running any destructive operation (`forget`, `compact_memories`):
 
 ---
 
-*SuperLocalMemory v4.1.11 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.12 · Qualixar · AGPL-3.0-or-later*

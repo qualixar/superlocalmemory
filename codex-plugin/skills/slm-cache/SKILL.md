@@ -145,4 +145,4 @@ These subcommands control daemon-level cache settings. They do not read or write
 
 ---
 
-SuperLocalMemory v4.1.11 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.1.12 · Qualixar · AGPL-3.0-or-later

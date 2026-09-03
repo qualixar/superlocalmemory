@@ -1,0 +1,20 @@
+name: superlocalmemory
+version: 4.1.12
+description: "Native, additive SuperLocalMemory lifecycle, skills, commands, and advisors for Hermes."
+author: Qualixar
+manifest_version: 2
+api_version: 1
+license: AGPL-3.0-or-later
+homepage: https://github.com/qualixar/superlocalmemory
+tags: [memory, local-first, mcp, agent-reliability]
+python_dependencies: []
+provides_tools: [slm_agent, slm_agent_status, slm_agent_cancel, slm_agent_result]
+provides_hooks: [on_session_start, pre_llm_call, post_tool_call, post_llm_call, on_session_end, on_session_finalize, on_session_reset, on_skill_lifecycle, subagent_start, subagent_stop]
+config_schema:
+  mcp_allowlist:
+    type: list
+    description: "Explicit MCP servers this plugin may call; include only superlocalmemory."
+  capture_turns:
+    type: bool
+    default: false
+    description: "Explicit opt-in: observe redacted completed turns through the configured SLM MCP server."

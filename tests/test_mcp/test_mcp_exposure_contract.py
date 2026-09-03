@@ -132,7 +132,10 @@ def _register_every_tool(target) -> None:
         # surface (issue #113). Counts bumped deliberately, which is what
         # this contract exists to force.
         ("named-core", "core", 18),
-        ("whole", "whole", 95),
+        # v4.1.12: +settle_session_outcomes and
+        # +observe_bounded_loop_execution_learning. Both are whole-profile
+        # tools; smaller profiles retain their explicit allowlists.
+        ("whole", "whole", 97),
     ),
 )
 def test_registration_exposure_is_exact_and_duplicate_free(
@@ -260,14 +263,14 @@ async def test_attribution_reports_current_product_identity(
 def test_imported_server_exposes_product_name_and_whole_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Imported MCP server keeps product identity and whole surface at 95."""
+    """Imported MCP server keeps product identity and whole surface at 97."""
     mod = _fresh_server(monkeypatch, "whole")
     # Public SLMFastMCP/MCPServer attribute — do not assert private internals.
     assert mod.server.name == "SuperLocalMemory V4"
     strict = _StrictToolServer()
     _register_every_tool(strict)
-    assert len(strict.tools) == 95
+    assert len(strict.tools) == 97
     actual_names = [tool.name for tool in mod.server._tool_manager.list_tools()]
-    assert len(actual_names) == 95
+    assert len(actual_names) == 97
     assert len(actual_names) == len(set(actual_names))
     assert set(actual_names) == set(strict.tools)
