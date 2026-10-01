@@ -5,11 +5,35 @@
   </picture>
 </p>
 
-<h1 align="center">SuperLocalMemory V4.1.17</h1>
+<h1 align="center">SuperLocalMemory V4.1.17 — local-first memory for AI agents</h1>
 
 <h2 align="center">Rent the LLM. Own the memory.</h2>
 
 <p align="center"><em>Rent an LLM — but own the memory, for your company and for your industry.</em></p>
+
+Store context once and recall it across agent sessions through the CLI or MCP. Start with local memory, then choose the operating mode and integrations your workspace needs. SuperLocalMemory is part of Qualixar's AI Reliability Engineering work.
+
+**[Research and evidence](https://www.superlocalmemory.com/research)** · **[Qualixar product overview](https://qualixar.com/products/superlocalmemory)** · **[Author and research context](https://varunpratap.com/products/superlocalmemory)**
+
+**[Install](https://www.superlocalmemory.com/install)** · **[Product walkthrough](https://www.superlocalmemory.com/demo)** · **[CLI proof](docs/QUICK_PROOF.md)** · **[Release notes](CHANGELOG.md)**
+
+```bash
+npm install -g superlocalmemory  # Primary CLI install path
+slm setup  # Select mode A for local-only operation; review integration choices.
+slm doctor
+slm remember "Synthetic demo: the release checklist requires a human approval after tests pass." --tags demo --json --sync
+slm recall "release checklist human approval" --json
+```
+
+The synthetic CLI proof returned the stored sentence in mode A on version 4.1.17. It tests store-and-recall behavior; it is not a retrieval accuracy benchmark.
+[See the commands, scope and isolation settings](docs/QUICK_PROOF.md).
+
+If the proof is useful for your agent workflow, [star the repository](https://github.com/qualixar/superlocalmemory) to find the project again. Stars are optional; installation and documentation are open without one.
+
+**Release maintenance:** dependency updates are being reviewed separately in [PR #143](https://github.com/qualixar/superlocalmemory/pull/143). This documentation update does not change already published packages.
+
+## Governance, architecture and research
+
 
 <p align="center"><strong>The governed memory layer for AI agents: local-first, auditable, and built for the compliance obligations teams now actually carry.</strong><br/>
 Models are interchangeable and rented by the token. What your agents <em>remember</em> is
