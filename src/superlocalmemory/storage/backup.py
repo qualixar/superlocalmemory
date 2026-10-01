@@ -206,7 +206,9 @@ def _backup_via_sqlite_api(src: Path, dest: Path) -> None:
     # Verify and durably flush BEFORE the rename, so the final name never
     # appears over incomplete or corrupt content.
     try:
-        fd = os.open(str(staging), os.O_RDONLY)
+        # Windows durable flush requires write access. This is our temporary
+        # snapshot, not the source database; do not suppress a failed flush.
+        fd = os.open(str(staging), os.O_RDWR | getattr(os, "O_BINARY", 0))
         try:
             os.fsync(fd)
         finally:

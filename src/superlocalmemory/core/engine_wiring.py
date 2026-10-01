@@ -331,9 +331,9 @@ def _init_vector_store(config: SLMConfig) -> Any | None:
         if vs.available:
             logger.info("VectorStore initialized (sqlite-vec KNN enabled)")
             return vs
-        logger.debug("VectorStore unavailable; using ANNIndex fallback")
+        logger.warning("VectorStore unavailable; using ANNIndex fallback")
     except Exception as exc:
-        logger.debug("VectorStore init failed: %s", exc)
+        logger.warning("VectorStore init failed: %s", exc)
     return None
 
 

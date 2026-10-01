@@ -243,7 +243,7 @@ class VectorStore:
                 conn.execute(row_map_idx)
                 conn.commit()
         except Exception as exc:
-            logger.debug("vec0 table creation failed: %s", exc)
+            logger.warning("vec0 table creation failed: %s", exc)
             self._available = False
 
     # -- Serialization ------------------------------------------------------
