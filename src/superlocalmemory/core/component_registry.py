@@ -368,6 +368,15 @@ def probe_cozo() -> Component:
 
 
 def probe_llmlingua() -> Component:
+    from superlocalmemory.optimize.compress.prose_llmlingua import backend_restriction
+
+    restriction = backend_restriction()
+    if restriction is not None:
+        return Component(
+            key="llmlingua", label="LLMLingua compressor lib",
+            category=CATEGORY_OPTIONAL, status=STATUS_DEGRADED,
+            detail=restriction, fix_cmd="", auto_fixable=False, last_checked=time.time(),
+        )
     return _probe_optional_pkg(
         "llmlingua", "LLMLingua compressor lib", "llmlingua", "llmlingua",
         "not installed (optional prose compression)",

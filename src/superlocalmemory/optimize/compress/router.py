@@ -369,8 +369,8 @@ class CompressRouter:
             try:
                 from superlocalmemory.optimize.compress.prose_llmlingua import LLMLinguaCompressor
                 self._llmlingua_compressor = LLMLinguaCompressor()
-            except ImportError:
-                logger.warning("LLMLinguaCompressor not available — prose compression disabled")
+            except ImportError as exc:
+                logger.warning("LLMLinguaCompressor unavailable — using lossless compression: %s", exc)
                 return None
         return self._llmlingua_compressor
 

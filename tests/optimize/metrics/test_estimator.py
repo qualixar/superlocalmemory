@@ -2,6 +2,8 @@
 # Licensed under AGPL-3.0-or-later
 """Tests for SavingsEstimator (optimize/metrics/estimator.py)."""
 
+from datetime import date, timedelta
+
 import pytest
 
 from superlocalmemory.optimize.metrics.estimator import SavingsEstimator
@@ -54,7 +56,16 @@ def test_estimate_unknown_provider_falls_back():
     assert result["usd"] == 3.00  # anthropic fallback
 
 
-def test_is_stale():
-    est = SavingsEstimator()
-    # Pricing date is 2026-06-07, so it's not stale yet
-    assert est._is_stale() is False
+@pytest.mark.parametrize("age, expected", [(0, False), (90, False), (91, True)])
+def test_is_stale(monkeypatch, age, expected):
+    from superlocalmemory.optimize.metrics import estimator
+
+    table_date = date.fromisoformat(SavingsEstimator._PRICING_DATE)
+
+    class ClockDate(date):
+        @classmethod
+        def today(cls):
+            return table_date + timedelta(days=age)
+
+    monkeypatch.setattr(estimator, "date", ClockDate)
+    assert SavingsEstimator()._is_stale() is expected

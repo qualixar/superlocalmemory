@@ -37,7 +37,7 @@ def _resolve_slm_home() -> Path:
     return canonical_data_root()
 _EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
-# v3.6.10: compulsory LLMLingua-2 prose compression model (~560MB, aggressive mode).
+# Selected optional LLMLingua model; backend restricted pending dependency review.
 _COMPRESSOR_MODEL = "microsoft/llmlingua-2-xlm-roberta-large-meetingbank"
 
 
@@ -211,17 +211,16 @@ def _download_compressor(model_name: str) -> bool:
     """Download the LLMLingua-2 prose compression model (v3.6.10).
 
     Mirrors _download_reranker: a subprocess forces the HF download with visible
-    progress. Fail-open — a network hiccup must NOT break setup; the model also
-    lazy-downloads on first use in prose_llmlingua.py.
+    progress. The shared backend guard runs before model loading; a restricted
+    backend stays unavailable and does not trigger an automatic dependency install.
     """
     print(f"\n  Downloading compression model: {model_name}")
     print(f"  (LLMLingua-2 prose compressor, ~560MB — aggressive mode only)\n")
 
     # H-03: model name via argv, never interpolated into executed source.
     script = (
-        "import sys; from llmlingua import PromptCompressor; "
-        "PromptCompressor(model_name=sys.argv[1], use_llmlingua2=True, "
-        "device_map='cpu'); "
+        "import sys; from superlocalmemory.optimize.compress.prose_llmlingua import LLMLinguaCompressor; "
+        "LLMLinguaCompressor(model_name=sys.argv[1], device_map='cpu'); "
         "print('OK')"
     )
 
@@ -241,10 +240,10 @@ def _download_compressor(model_name: str) -> bool:
         if result.returncode == 0:
             print(f"  ✓ Compression model ready")
             return True
-        print(f"  ✗ Compression model download failed (will lazy-download on first use)")
+        print(f"  ✗ Compression backend unavailable; default/lossless compression remains available")
         return False
     except ImportError:
-        print(f"  ⚠ llmlingua not installed — compression model will download on first use")
+        print(f"  ⚠ Compression backend not shipped pending upstream security fix; lossless compression remains available")
         return False
     except Exception as exc:
         print(f"  ✗ Compression model error: {exc}")

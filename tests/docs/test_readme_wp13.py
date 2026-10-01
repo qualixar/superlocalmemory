@@ -8,7 +8,6 @@ These tests run against README.md in the repo root.
 from __future__ import annotations
 
 import re
-import os
 import tomllib
 from pathlib import Path
 
@@ -94,9 +93,7 @@ LANDSCAPE_FIGURATIVE_PATTERNS = [
 def test_line_count_le_720():
     """AC1: README must be ≤720 lines (was 953)."""
     lines = _readme_lines()
-    assert len(lines) <= 720, (
-        f"README has {len(lines)} lines — hard ceiling is 720 (LLD AC1)."
-    )
+    assert len(lines) <= 720, f"README has {len(lines)} lines — hard ceiling is 720 (LLD AC1)."
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +106,7 @@ def test_single_quick_start():
     text = _readme_text()
     h2_matches = re.findall(r"^## Quick Start", text, re.MULTILINE)
     h3_matches = re.findall(r"^### Quick Start", text, re.MULTILINE)
-    assert len(h2_matches) == 1, (
-        f"Expected exactly 1 '## Quick Start', found {len(h2_matches)}."
-    )
+    assert len(h2_matches) == 1, f"Expected exactly 1 '## Quick Start', found {len(h2_matches)}."
     assert len(h3_matches) == 0, (
         f"Expected zero '### Quick Start', found {len(h3_matches)} "
         "(duplicate accordion Quick Start must be deleted — LLD AC2)."
@@ -140,15 +135,21 @@ def test_current_version_in_hero():
     assert current_version in text, (
         f"README must contain current project version {current_version!r} (LLD AC3)."
     )
-    # h1 check — first heading
-    lines = _readme_lines()
-    h1_lines = [l for l in lines if l.startswith("# ") or l.startswith("<h1")]
-    assert any(
-        current_version in l or f"V{current_version}" in l
-        for l in h1_lines[:5]
-    ), (
-        f"h1 / hero must reference V{current_version} (LLD AC3)."
+    # Evergreen category headline, with exact current release in a visible badge.
+    assert '<h1 align="center">SuperLocalMemory — local-first memory for AI agents</h1>' in text
+    assert f'alt="v{current_version} — Current Release"' in text
+
+
+def test_current_release_badge_rejects_a_stale_version(monkeypatch):
+    current = _project_version()
+    text = _readme_text().replace(
+        f'alt="v{current} — Current Release"', 'alt="v0.0.0 — Current Release"'
     )
+    monkeypatch.setattr(
+        __import__(__name__, fromlist=["_readme_text"]), "_readme_text", lambda: text
+    )
+    with pytest.raises(AssertionError):
+        test_current_version_in_hero()
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +207,7 @@ def test_internal_links_resolve():
         if not full_path.exists():
             broken.append(rel_path)
 
-    assert not broken, (
-        f"Broken internal links found: {broken} (LLD AC5 — resolve or remove)."
-    )
+    assert not broken, f"Broken internal links found: {broken} (LLD AC5 — resolve or remove)."
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +251,7 @@ def test_evidence_safe_positioning_near_hero():
         "carried into the release (LLD AC7)."
     )
     assert "not a claim of a newly rerun v4 package benchmark" in opening, (
-        "Opening copy must preserve the protocol boundary of the published evidence "
-        "(LLD AC7)."
+        "Opening copy must preserve the protocol boundary of the published evidence (LLD AC7)."
     )
     assert "different products solve different boundaries" in opening, (
         "Opening copy must frame the comparison by product boundary, not an "
@@ -274,7 +272,8 @@ def test_four_install_paths():
             "npm i -g superlocalmemory" in text or "npm install -g superlocalmemory" in text
         ),
         "pip install superlocalmemory": "pip install superlocalmemory" in text,
-        "/plugin install superlocalmemory@qualixar": "/plugin install superlocalmemory@qualixar" in text,
+        "/plugin install superlocalmemory@qualixar": "/plugin install superlocalmemory@qualixar"
+        in text,
         "slm connect": "slm connect" in text,
         "slm wrap claude": "slm wrap claude" in text,
     }
@@ -306,7 +305,7 @@ def test_claim_audit_dropped_absent():
 
 
 def test_section_order():
-    """LLD §6: Why SLM < Quick Start < Three Pillars < Papers (no Support-before-Why regressions)."""
+    """Preserve Why SLM < Quick Start < Three Pillars < Papers section order."""
     text = _readme_text()
     positions: dict[str, int] = {}
     # Use first match position for each section

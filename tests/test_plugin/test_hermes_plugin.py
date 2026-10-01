@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import pathlib
 import re
 import subprocess
 import sys
 import types
-
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PLUGIN = REPO / "hermes-plugin"
@@ -62,10 +61,10 @@ def test_inventory_matches_the_real_slm_parser_tree() -> None:
     """A CLI addition cannot ship without Hermes reachability."""
     inventory = json.loads((PLUGIN / "command-inventory.json").read_text(encoding="utf-8"))
     result = subprocess.run(
-        [str(REPO / ".venv" / "bin" / "slm"), "--help"],
+        [sys.executable, "-c", "from superlocalmemory.cli.main import main; main()", "--help"],
         text=True, capture_output=True, check=True, timeout=30,
     )
-    match = re.search(r"\{([^}]+)\} \.\.\.", result.stdout)
+    match = re.search(r"\{([^}]+)\}\s+\.\.\.", result.stdout)
     assert match, result.stdout[:500]
     parser_commands = set(match.group(1).split(","))
     expected = set(inventory["primary_commands"]) | set(inventory["aliases"])

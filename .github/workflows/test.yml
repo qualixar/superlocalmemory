@@ -33,9 +33,7 @@ jobs:
             --output-file /tmp/slm-runtime-requirements.txt
           uvx --from pip-audit==2.9.0 pip-audit \
             --requirement /tmp/slm-runtime-requirements.txt \
-            --no-deps --disable-pip \
-            --ignore-vuln GHSA-rrmf-rvhw-rf47 \
-            --ignore-vuln PYSEC-2026-3447
+            --no-deps --disable-pip
       - name: Reject high-confidence high-severity Python findings
         run: uvx --from bandit==1.8.6 bandit -r src/superlocalmemory -q -lll -iii
 

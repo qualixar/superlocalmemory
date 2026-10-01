@@ -207,6 +207,6 @@ def test_packaging_uses_pep639_license_metadata() -> None:
         for classifier in metadata["project"]["classifiers"]
     )
     assert any(
-        requirement.startswith("setuptools>=77.0.3")
+        requirement.startswith("setuptools>=83.0.0")
         for requirement in metadata["build-system"]["requires"]
     )

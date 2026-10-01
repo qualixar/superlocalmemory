@@ -35,7 +35,7 @@ if "OMP_NUM_THREADS" not in os.environ:
 __version__ = "4.1.17"
 
 _REQUIRED_VERSIONS = {
-    "sentence_transformers": "5.3.0",
+    "sentence_transformers": "5.6.0",
     "onnxruntime": "1.24.4",
 }
 

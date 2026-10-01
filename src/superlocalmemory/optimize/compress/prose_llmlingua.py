@@ -18,13 +18,38 @@ SAFETY RULES (NON-NEGOTIABLE):
 from __future__ import annotations
 
 import logging
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger("slm.optimize.compress.llmlingua")
 
 _DEFAULT_RATE: float = 0.5
 _MODEL_BERT: str = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 _MODEL_XLM: str = "microsoft/llmlingua-2-xlm-roberta-large-meetingbank"
+
+
+# Empty until an upstream patched release has been independently reviewed.
+_REVIEWED_NLTK_VERSIONS: frozenset[str] = frozenset()
+
+
+def backend_restriction() -> str | None:
+    """Check metadata only; never import model code or download a model."""
+    try:
+        installed = Version(version("nltk"))
+    except (PackageNotFoundError, InvalidVersion):
+        return "Optional LLMLingua backend unavailable: NLTK safety version cannot be verified."
+    if (
+        installed.is_prerelease
+        or installed.is_devrelease
+        or str(installed) not in _REVIEWED_NLTK_VERSIONS
+    ):
+        return (
+            "Optional LLMLingua backend restricted pending a reviewed NLTK fix "
+            "for GHSA-8mgp-746c-j5xp. Default/lossless compression remains available."
+        )
+    return None
 
 
 class LLMLinguaCompressor:
@@ -36,11 +61,15 @@ class LLMLinguaCompressor:
         device_map: str = "cpu",
         rate: float = _DEFAULT_RATE,
     ) -> None:
+        restriction = backend_restriction()
+        if restriction is not None:
+            raise ImportError(restriction)
         try:
             from llmlingua import PromptCompressor  # type: ignore[import]
         except ImportError as e:
             raise ImportError(
-                "llmlingua package not installed. Install: pip install llmlingua."
+                "LLMLingua backend is not shipped while its NLTK dependency has an "
+                "unpatched High advisory. Default/lossless compression remains available."
             ) from e
 
         logger.info("Loading LLMLingua-2 model=%s device=%s", model_name, device_map)

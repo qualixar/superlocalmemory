@@ -68,12 +68,12 @@ dependencies = [
     # sentence-transformers[onnx] — its extras pull optimum which
     # overrides the sentence-transformers pin via transitive deps.
     # Pin all three explicitly instead.
-    "sentence-transformers==5.3.0",
+    "sentence-transformers==5.6.0",
     "optimum==2.1.0",
     "onnxruntime==1.24.4",
-    "transformers==5.5.4",
+    "transformers==5.10.1",
     "huggingface_hub==1.5.0",
-    "torch==2.11.0",
+    "torch==2.13.0",
     "scikit-learn==1.8.0",
     # Vector KNN extension for the semantic channel.
     "sqlite-vec==0.1.9",
@@ -86,14 +86,18 @@ dependencies = [
     # bindings. Existing SLM graph stores were created by 0.3.0; upgrading the
     # wheel without an export/import migration makes daemon startup panic.
     "pycozo[embedded]==0.3.0",
-    # v3.6.10: LLMLingua-2 prose compression (aggressive mode, opt-in at runtime).
-    # Hard dependency so `pip install superlocalmemory` ships compression-ready;
-    # the ~560MB model downloads on first setup/warmup (fail-open). Verified the
-    # pin does NOT disturb the transformers/torch/numpy pins above.
-    "llmlingua==0.2.2",
-    # LLMLingua pulls NLTK transitively. Pin above the disclosed traversal
-    # advisories so clean installs cannot resolve to the vulnerable 3.9.x line.
-    "nltk==3.10.0",
+    # LLMLingua/NLTK are temporarily not shipped: the latest NLTK has an
+    # unpatched High advisory. Default/lossless compression stays available.
+    # See docs/dependency-security.md before restoring this optional backend.
+    "packaging>=24.0",
+    # Security floors apply to pip installations as well as the uv lock.
+    "accelerate>=1.15.0,<2",
+    "anyio==4.14.2",
+    "httpcore2>=2.10.0,<3",
+    "httpx2>=2.12.0,<3",
+    "pyjwt>=2.15.1,<3",
+    "urllib3>=2.8.0,<3",
+    "setuptools>=83.0.0",
 ]
 
 [project.optional-dependencies]
@@ -102,10 +106,10 @@ dependencies = [
 # works but installs nothing extra.
 search = [
     # Same hard pin as core deps — no [onnx] extra.
-    "sentence-transformers==5.3.0",
+    "sentence-transformers==5.6.0",
     "optimum==2.1.0",
     "einops==0.8.2",
-    "torch==2.11.0",
+    "torch==2.13.0",
     "scikit-learn==1.8.0",
     "onnxruntime==1.24.4",
 ]
@@ -139,7 +143,10 @@ ingestion = [
     "keyring>=25.0.0",
     "google-auth-oauthlib>=1.2.0",
     "google-api-python-client>=2.100.0",
-    "icalendar>=6.0.0",
+    "icalendar>=7.1.3",
+    "httplib2>=0.32.0",
+    "oauthlib>=4.0.0,<5",
+    "pyasn1>=0.6.4",
 ]
 full = [
     "superlocalmemory[search,ui,learning,performance,ingestion,injection,scale]",
@@ -151,7 +158,7 @@ dev = [
     "sqlite-vec>=0.1.6",
     # Starlette TestClient's maintained synchronous backend. Test-only: the
     # product runtime continues to use the separately pinned httpx client.
-    "httpx2==2.5.0",
+    "httpx2==2.13.1",
 ]
 
 [project.urls]
@@ -164,7 +171,7 @@ Issues = "https://github.com/qualixar/superlocalmemory/issues"
 slm = "superlocalmemory.cli.main:main"
 
 [build-system]
-requires = ["setuptools>=77.0.3", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -242,7 +249,7 @@ select = ["E", "F", "I", "W"]
 [dependency-groups]
 dev = [
     "build>=1.4.0",
-    "httpx2==2.5.0",
+    "httpx2==2.13.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.21",
     "twine>=6.2.0",
