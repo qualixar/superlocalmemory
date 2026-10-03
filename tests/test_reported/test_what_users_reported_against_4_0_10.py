@@ -122,6 +122,42 @@ class TestTheBridgeInstallNamesAPackageThatExists:
         # from the package of the same name.
         assert "`mcp-remote`" in text
 
+    @pytest.mark.skipif(
+        not (REPO / "docs" / "ide-setup.md").is_file(),
+        reason="docs not present in this layout",
+    )
+    def test_the_npx_alternative_changes_the_command_not_just_the_install(
+        self,
+    ) -> None:
+        """`npx -y mcp-remote` leaves no `mcp-remote` binary on PATH.
+
+        So offering npx as the no-global-install route is only correct if the
+        config offered with it invokes npx as well. Swapping the install line
+        alone would recreate the original defect in a new shape: a documented
+        install that cannot produce the command the documented config names.
+        """
+        text = self.DOC.read_text(encoding="utf-8")
+        if "npx" not in text:
+            pytest.skip("docs do not offer the npx route")
+
+        assert '"command": "npx"' in text or 'command = "npx"' in text, (
+            "docs offer npx but every config still names the bare mcp-remote "
+            "binary, which npx does not install"
+        )
+        # Every fenced block that runs mcp-remote through npx has to pass -y.
+        # On a terminal, a cold cache makes npx stop on "Ok to proceed? (y)"
+        # and wait, which is exactly what someone trying the command by hand
+        # hits first. (Spawned by an IDE, with no tty, npm 11 installs without
+        # asking - so -y is the guarantee, not the observed default.)
+        blocks = text.split("```")[1::2]
+        npx_blocks = [b for b in blocks if "npx" in b and "mcp-remote" in b]
+        assert npx_blocks, "the npx route is described but never shown"
+        for block in npx_blocks:
+            assert "-y" in block, (
+                f"an npx invocation of mcp-remote omits -y, so a first run on "
+                f"a terminal stops on the install prompt:\n{block}"
+            )
+
 
 class TestTuningTwoSettingsSurvivesARestart:
     """`math` and `channel_weights` were never written and never restored.
