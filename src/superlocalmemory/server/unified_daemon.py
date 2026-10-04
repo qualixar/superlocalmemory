@@ -6296,6 +6296,7 @@ def _reconcile_pending_projections(
             build_transaction_service,
         )
         from superlocalmemory.core.transactions.obligations import ObligationLedger
+        from superlocalmemory.core.transactions.owners import ObligationKind
 
         db = getattr(engine, "_db", None)
         profile_id = getattr(engine, "_profile_id", None)
@@ -6317,12 +6318,22 @@ def _reconcile_pending_projections(
         done = 0
         for operation_id in sorted(op_ids):
             try:
-                context = _context_for_operation(engine, operation_id)
-                if context is None:
-                    _terminalize_orphan_operation(engine, operation_id)
+                kinds = _pending_obligation_kinds(db, operation_id)
+                if not kinds:
+                    # Terminal (or already-driven) obligations surface here via
+                    # operations_missing_manifest, which has no state filter.
+                    # Nothing pending means nothing to do; skipping keeps one
+                    # completed op from occupying a redrive slot every pass.
                     continue
-                service.reconcile_operation(db, context)
-                done += 1
+                if ObligationKind.ERASE in kinds:
+                    done += _reconcile_erase_operation(engine, db, ledger, operation_id)
+                if kinds - {ObligationKind.ERASE}:
+                    context = _context_for_operation(engine, operation_id)
+                    if context is None:
+                        _terminalize_orphan_operation(engine, operation_id)
+                        continue
+                    service.reconcile_operation(db, context)
+                    done += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "projection redrive failed for %s: %s", operation_id, exc,
@@ -6333,9 +6344,134 @@ def _reconcile_pending_projections(
         return 0
 
 
+def _pending_obligation_kinds(db, operation_id: str) -> set[str]:
+    """Kinds with non-terminal obligations for one operation.
+
+    The redrive fans out by kind: ``apply`` belongs to the ingestion
+    reconciler, ``erase`` to the erasure reconciler below. Reading kinds
+    first is what stops an erasure id (no ingestion row by design) from
+    being misread as an orphaned ingestion.
+    """
+    from superlocalmemory.core.transactions.owners import ObligationState
+
+    try:
+        rows = db.execute(
+            "SELECT DISTINCT kind FROM projection_obligations "
+            "WHERE operation_id = ? AND state NOT IN (?, ?)",
+            (operation_id, str(ObligationState.VERIFIED), str(ObligationState.ERASED)),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Fail open for visibility: an empty set skips this op for one pass
+        # only (it stays pending and is retried in 30s), but must be loud.
+        logger.warning(
+            "erase/apply kind lookup failed for %s: %s", operation_id, exc,
+        )
+        return set()
+    return {str(dict(r).get("kind")) for r in rows}
+
+
+def _reconcile_erase_operation(engine, db, ledger, operation_id: str) -> int:
+    """Drive one erase-kind obligation set toward ERASED without failing it.
+
+    Read-only re-proof: an obligation is marked ERASED (no attempt bump)
+    only when its fact is canonically absent, its tombstone is present, and
+    its owner proves no residue. Anything else is left pending for the
+    erasure service — this path never marks FAILED and never bumps attempts,
+    so a slow purge cannot be mistaken for an orphan.
+    """
+    from superlocalmemory.core.transactions.concrete_owners import (
+        build_erasure_service,
+    )
+    from superlocalmemory.core.transactions.owners import (
+        ObligationKind,
+        ObligationState,
+    )
+
+    with db.raw_connection() as conn:
+        pending = [
+            o for o in ledger.fetch(conn, operation_id)
+            if o.kind == ObligationKind.ERASE
+            and o.state not in (ObligationState.VERIFIED, ObligationState.ERASED)
+        ]
+    if not pending:
+        return 0
+    service = build_erasure_service(engine)
+    done = 0
+    # Group by (profile, subject): one erase request normally names one fact,
+    # but entity/profile erasures fan out. A group that cannot be proven is
+    # left pending without affecting the groups that can.
+    groups: dict[tuple[str, str], list] = {}
+    for ob in pending:
+        groups.setdefault((ob.profile_id, ob.subject_id), []).append(ob)
+    for (profile_id, subject_id), obs in groups.items():
+        done += _reconcile_erase_group(
+            db, ledger, service, operation_id, profile_id, subject_id, obs,
+        )
+    return 1 if done == len(groups) and groups else 0
+
+
+def _reconcile_erase_group(
+    db, ledger, service, operation_id: str,
+    profile_id: str, subject_id: str, obs: list,
+) -> int:
+    """Prove and close one erase group. Returns 1 iff the group completed."""
+    from superlocalmemory.core.transactions.erasure import is_tombstoned
+    from superlocalmemory.core.transactions.owners import (
+        ObligationKind,
+        ObligationState,
+        OperationContext,
+    )
+
+    # NOTE: fact-shaped erasures only. Entity/profile erasures name subjects
+    # that are not fact_ids and carry multi-fact contexts this redrive cannot
+    # reconstruct; the tombstone gate below fails those closed (pending).
+    if db.execute(
+        "SELECT 1 FROM atomic_facts WHERE fact_id = ? AND profile_id = ? LIMIT 1",
+        (subject_id, profile_id),
+    ):
+        return 0
+    with db.raw_connection() as conn:
+        if not is_tombstoned(conn, profile_id, subject_id):
+            return 0
+    context = OperationContext(
+        operation_id=operation_id,
+        profile_id=profile_id,
+        subject_id=subject_id,
+        fact_ids=(subject_id,),
+    )
+    # Collect proofs before opening the write transaction: proofs are
+    # read-only, and a mark must never interleave with a later proof read.
+    proven: list[tuple[str, str | None]] = []
+    for ob in obs:
+        try:
+            proof = service.prove_erased(context, ob.owner)
+        except Exception:  # noqa: BLE001
+            return 0
+        if not proof.erased:
+            return 0
+        proven.append((ob.owner, proof.checksum or None))
+    with db.raw_connection() as conn:
+        for owner, checksum in proven:
+            ledger.mark(
+                conn, operation_id, owner, ObligationKind.ERASE,
+                ObligationState.ERASED,
+                checksum=checksum,
+                detail={"phase": "redrive-proven"},
+            )
+        # Close the loop for the missing-manifest feed: erase ops never had
+        # a manifest writer, so without this they would be re-fetched every
+        # 30s forever and crowd out ingestion redrives.
+        from superlocalmemory.core.transactions.reconciler import Reconciler
+
+        Reconciler(ledger).reconcile(
+            conn, operation_id, profile_id, canonical_committed=False,
+        )
+    return 1
+
+
 def _terminalize_orphan_operation(engine, operation_id: str) -> None:
     from superlocalmemory.core.transactions.obligations import ObligationLedger
-    from superlocalmemory.core.transactions.owners import ObligationState
+    from superlocalmemory.core.transactions.owners import ObligationKind, ObligationState
     from superlocalmemory.core.transactions.reconciler import Reconciler
     from superlocalmemory.core.transactions.service import MAX_APPLY_ATTEMPTS
 
@@ -6346,12 +6482,17 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
     ledger = ObligationLedger()
     with db.raw_connection() as conn:
         for obligation in ledger.fetch(conn, operation_id):
+            if obligation.kind != ObligationKind.APPLY:
+                # Erase obligations have no ingestion row by design; the
+                # erase reconciler above owns them. Failing them here as
+                # orphans is the bug this guard removes.
+                continue
             if obligation.attempts >= MAX_APPLY_ATTEMPTS:
                 continue
             ledger.mark(
                 conn, operation_id, obligation.owner, obligation.kind,
                 ObligationState.FAILED,
-                detail={"phase": "orphan", "error": "canonical record missing"},
+                detail={"phase": "orphan", "error": "ingestion record missing"},
                 bump_attempts=True,
             )
         Reconciler(ledger).reconcile(

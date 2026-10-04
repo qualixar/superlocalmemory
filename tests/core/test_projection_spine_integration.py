@@ -250,6 +250,108 @@ def test_redrive_reconciles_orphaned_obligations(stored_engine) -> None:
     assert manifest["state"] == ManifestState.DEGRADED.value, manifest["state"]
 
 
+def test_redrive_does_not_orphan_erase_obligations(stored_engine) -> None:
+    """Erase obligations without an ingestion row must never be orphan-FAILED.
+
+    Regression for the dashboard-DELETE incident: deleting a fact creates
+    kind=erase obligations whose operation_id is an erasure id, so there is
+    no ingestion_operations row. The 30s redrive fed them to the
+    ingestion-only _context_for_operation and _terminalize_orphan_operation
+    FAILED them with 'canonical record missing' until exhausted.
+    """
+    from superlocalmemory.server.unified_daemon import (
+        _reconcile_pending_projections,
+    )
+
+    engine, _operation = stored_engine
+    op_id, subject = "erase-op-regression-1", "fact-erased-regression-1"
+    _seed_erase_op(engine, op_id, subject, tombstone=True)
+
+    _reconcile_pending_projections(engine, force=True)
+
+    by_owner = _erase_states(engine, op_id)
+    assert set(by_owner) == {"bm25", "temporal", "vector"}
+    for owner, row in by_owner.items():
+        assert row["state"] == "erased", f"{owner}: {row}"
+        assert row["attempts"] == 0, f"{owner}: {row}"
+    manifest = engine._db.execute(
+        "SELECT state FROM completion_manifests WHERE operation_id = ?",
+        (op_id,),
+    )
+    assert manifest, "erase close must write a manifest (missing-manifest feed)"
+
+
+def _seed_erase_op(engine, op_id: str, subject: str, *, tombstone: bool) -> None:
+    import time as _time
+
+    profile_id = engine._profile_id
+    now = _time.time()
+    with engine._db.raw_connection() as conn:
+        if tombstone:
+            conn.execute(
+                "INSERT INTO projection_tombstones "
+                "(profile_id, fact_id, erasure_id, created_at) VALUES (?, ?, ?, ?)",
+                (profile_id, subject, op_id, now),
+            )
+        for owner in ("bm25", "temporal", "vector"):
+            conn.execute(
+                "INSERT INTO projection_obligations "
+                "(operation_id, profile_id, owner, kind, subject_id, state, "
+                "attempts, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'erase', ?, 'pending', 0, ?, ?)",
+                (op_id, profile_id, owner, subject, now, now),
+            )
+
+
+def _erase_states(engine, op_id: str) -> dict:
+    rows = engine._db.execute(
+        "SELECT owner, state, attempts FROM projection_obligations "
+        "WHERE operation_id = ?",
+        (op_id,),
+    )
+    return {dict(r)["owner"]: dict(r) for r in rows}
+
+
+def test_redrive_leaves_erase_pending_when_residue_remains(stored_engine) -> None:
+    """A bm25 row for the subject must block ERASED (no vacuous proof)."""
+    from superlocalmemory.server.unified_daemon import (
+        _reconcile_pending_projections,
+    )
+
+    engine, _operation = stored_engine
+    op_id, subject = "erase-op-residue-1", "fact-erased-residue-1"
+    _seed_erase_op(engine, op_id, subject, tombstone=True)
+    with engine._db.raw_connection() as conn:
+        conn.execute(
+            "INSERT INTO bm25_tokens (fact_id, profile_id, tokens) VALUES (?, ?, '[]')",
+            (subject, engine._profile_id),
+        )
+
+    _reconcile_pending_projections(engine, force=True)
+
+    for owner, row in _erase_states(engine, op_id).items():
+        assert row["state"] == "pending", f"{owner}: {row}"
+        assert row["attempts"] == 0, f"{owner}: {row}"
+
+
+def test_redrive_leaves_erase_pending_without_tombstone(stored_engine) -> None:
+    """No tombstone means the delete never ran: never mark ERASED."""
+    from superlocalmemory.server.unified_daemon import (
+        _reconcile_pending_projections,
+    )
+
+    engine, _operation = stored_engine
+    op_id, subject = "erase-op-notomb-1", "fact-erased-notomb-1"
+    _seed_erase_op(engine, op_id, subject, tombstone=False)
+
+    _reconcile_pending_projections(engine, force=True)
+    _reconcile_pending_projections(engine, force=True)
+
+    for owner, row in _erase_states(engine, op_id).items():
+        assert row["state"] == "pending", f"{owner}: {row}"
+        assert row["attempts"] == 0, f"{owner}: {row}"
+
+
 def test_manifest_is_reverifiable(stored_engine) -> None:
     from superlocalmemory.core.transactions import Reconciler
     from superlocalmemory.server.unified_daemon import (

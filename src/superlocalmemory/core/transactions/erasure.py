@@ -352,6 +352,17 @@ class ErasureService:
             persisted=persisted,
         )
 
+    def prove_erased(
+        self, context: OperationContext, owner: str,
+    ) -> ErasureProofRecord:
+        """Read-only re-proof that one owner's projection holds no residue.
+
+        Used by the background redrive to complete erase obligations whose
+        purge already happened. Never writes: callers decide whether and how
+        to record the proof.
+        """
+        return self._prove_owner(context, owner)
+
     def _prove_owner(
         self, context: OperationContext, name: str,
     ) -> ErasureProofRecord:
