@@ -532,13 +532,14 @@ def test_extract_messages_edge_cases():
     assert _extract_system({"system": "hello"}) == "hello"
 
 
-def test_apply_latency_padding_zero():
-    """apply_latency_padding with <=0 → no-op (lines 570-571)."""
+@pytest.mark.parametrize("pad_ms", [0.0, -5.0])
+def test_apply_latency_padding_zero(monkeypatch, pad_ms):
+    """apply_latency_padding with <=0 → no-op: it never sleeps (lines 570-571)."""
     from superlocalmemory.optimize.cache.semantic import apply_latency_padding
-    import time
-    start = time.time()
-    apply_latency_padding(0.0)
-    assert time.time() - start < 0.1  # essentially instant
+    sleeps = []
+    monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+    apply_latency_padding(pad_ms)
+    assert sleeps == []
 
 
 def test_apply_latency_padding_positive(monkeypatch):

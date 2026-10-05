@@ -644,19 +644,32 @@ def test_status_reports_progress(db: DatabaseManager) -> None:
     assert runner.status("default")["active_run"] is None
 
 
-def test_runner_thread_stops_within_5s_and_leaves_no_thread(db: DatabaseManager) -> None:
+def test_runner_thread_stops_within_5s_and_leaves_no_thread(
+    db: DatabaseManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     for t in TEXTS:
         _fact(db, t)
     runner = _runner(_engine(db))
     runner.create_run("default", mode="untyped", requested_by="test")
+    # Set once the thread has yielded to the recall: it is now waiting, which
+    # is the state stop() must be able to end.
+    yielded = threading.Event()
+    real_run_once = runner.run_once
+
+    def run_once():
+        step = real_run_once()
+        if step.action == "yield":
+            yielded.set()
+        return step
+    monkeypatch.setattr(runner, "run_once", run_once)
     recall_gate.begin_recall()        # a recall that never ends: the runner just waits
     try:
         runner.start()
-        time.sleep(0.3)
+        assert yielded.wait(timeout=5.0), "the runner never yielded to the recall"
         assert any(t.name == "slm-kind-backfill" for t in threading.enumerate())
-        started = time.monotonic()
+        # stop() itself enforces the 5 s bound: True means the thread joined
+        # within it, so no stopwatch is needed on top.
         assert runner.stop(timeout_s=5.0) is True
-        assert time.monotonic() - started < 5.0
     finally:
         recall_gate.end_recall()
     assert not any(t.name == "slm-kind-backfill" for t in threading.enumerate())

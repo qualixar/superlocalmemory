@@ -163,20 +163,37 @@ def test_prune_chunks_hold_lock_briefly(learning_db, monkeypatch) -> None:
     assert max(sizes) <= store.PRUNE_CHUNK and len(sizes) >= 3
 
 
-def test_writer_flushes_on_interval_and_on_wake(learning_db) -> None:
+#: Liveness bound for a poll, NOT a performance claim: generous so a loaded
+#: host cannot make a flush that does happen look like one that did not.
+_FLUSH_SEEN_S = 10.0
+#: The interval while only a wake can explain a flush: far past any poll here.
+_TIMER_OUT_OF_REACH_S = 3600.0
+
+
+def _wait_for_count(db: Path, n: int, timeout_s: float) -> int:
+    deadline = time.monotonic() + timeout_s
+    while _count(db) < n and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return _count(db)
+
+
+def test_writer_flushes_on_interval_and_on_wake(learning_db, monkeypatch) -> None:
+    # The interval: one unsaved check is below the wake threshold, so only the
+    # timer can save it.
     store.start_writer(learning_db)
     h.record_recall_verdict(make_response(), profile_id="default")
-    deadline = time.monotonic() + 2.5
-    while _count(learning_db) < 1 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert _count(learning_db) == 1, "idle flush within the 2 s interval"
-    started = time.monotonic()
+    assert _wait_for_count(learning_db, 1, store.FLUSH_INTERVAL_S + _FLUSH_SEEN_S) == 1, (
+        "idle flush on the interval")
+    # The wake: restart with the timer out of reach and the wake flag clear
+    # (stop_writer sets it), so a flush seen now can only be the wake's doing.
+    store.stop_writer()
+    h.wake_event().clear()
+    monkeypatch.setattr(store, "FLUSH_INTERVAL_S", _TIMER_OUT_OF_REACH_S)
+    store.start_writer(learning_db)
     for _ in range(h.WAKE_AT_UNSAVED):
         h.record_recall_verdict(make_response(), profile_id="default")
-    while _count(learning_db) < 129 and time.monotonic() - started < 1.5:
-        time.sleep(0.01)
-    assert _count(learning_db) == 129
-    assert time.monotonic() - started < 1.5, "woken early, not on the 2 s timer"
+    assert _wait_for_count(learning_db, 129, _FLUSH_SEEN_S) == 129, (
+        "woken early, not on the timer")
 
 
 def test_writer_survives_locked_db(learning_db, monkeypatch) -> None:
@@ -245,10 +262,23 @@ def test_a_writer_stopped_mid_save_stays_stopped(learning_db, monkeypatch) -> No
     stopped = _writers()
     assert len(stopped) == 1
     store.stop_writer(timeout_s=0.1)          # gives up waiting: the save is stuck
+    # Set when the successor starts waiting for the stuck writer to finish.
+    successor_waits = threading.Event()
+    real_join = stopped[0].join
+
+    def join(timeout=None):
+        successor_waits.set()
+        return real_join(timeout)
+    monkeypatch.setattr(stopped[0], "join", join)
     store.start_writer(learning_db)
     try:
         h.wake_event().set()                  # the new writer would save now
-        time.sleep(0.3)
+        # Release the stuck save only once the new writer has settled: either
+        # waiting on its predecessor (correct) or inside a save of its own (the
+        # defect, which `peak` then reports). A bounded poll, not a guessed sleep.
+        deadline = time.monotonic() + 5
+        while not (successor_waits.is_set() or peak[0] > 1) and time.monotonic() < deadline:
+            time.sleep(0.01)
         release.set()
         stopped[0].join(5)
         assert not stopped[0].is_alive(), "the stopped writer was revived"

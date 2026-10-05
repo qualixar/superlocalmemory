@@ -59,25 +59,45 @@ def test_refcount_drains_before_removal() -> None:
 
 
 def test_fail_open_on_lock_timeout() -> None:
-    """F7: lock timeout yields WITHOUT raising."""
+    """F7: lock timeout yields WITHOUT raising, and without waiting for the holder.
+
+    The holder keeps the lock until the contender has finished, so the
+    contender can only get through by failing open after its own timeout.
+    """
+    # Liveness guard, NOT a performance claim: only a contender that waits
+    # for the holder (ignoring its 0.1 s timeout) can run into it.
+    liveness_timeout_s = 15.0
     shield = StampedeShield(timeout=0.1)
-    started = threading.Event()
-    finished = threading.Event()
+    held = threading.Event()
+    release_holder = threading.Event()
+    holder_released = threading.Event()
+    ran_while_held: list[bool] = []
+    errors: list[BaseException] = []
 
     def holder():
         with shield.lock("k1"):
-            started.set()
-            time.sleep(0.5)  # hold longer than timeout
+            held.set()
+            # Bounded far past the join below, so a broken run cannot leak.
+            release_holder.wait(timeout=4 * liveness_timeout_s)
+        holder_released.set()
 
-    t1 = threading.Thread(target=holder)
+    def contender():
+        try:
+            with shield.lock("k1"):  # timeout 0.1s → yields without acquiring
+                ran_while_held.append(not holder_released.is_set())
+        except BaseException as exc:  # noqa: BLE001 - asserted on below
+            errors.append(exc)
+
+    t1 = threading.Thread(target=holder, daemon=True)
     t1.start()
-    started.wait()
-
-    # This thread will fail-open: yield without acquiring.
-    t2_start = time.time()
-    with shield.lock("k1"):  # timeout 0.1s
-        elapsed = time.time() - t2_start
-    # The yielded block ran without acquiring the lock.
-    assert elapsed < 0.3, f"lock timeout took too long: {elapsed}s"
-
-    t1.join()
+    assert held.wait(timeout=liveness_timeout_s)
+    t2 = threading.Thread(target=contender, daemon=True)
+    t2.start()
+    try:
+        t2.join(timeout=liveness_timeout_s)
+        assert not t2.is_alive(), "lock() waited for the holder instead of failing open"
+    finally:
+        release_holder.set()
+        t1.join(timeout=liveness_timeout_s)
+    assert errors == []
+    assert ran_while_held == [True]

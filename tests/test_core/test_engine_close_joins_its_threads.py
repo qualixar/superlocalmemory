@@ -22,6 +22,12 @@ from superlocalmemory.core import thread_join
 from superlocalmemory.core.engine import MemoryEngine
 
 _POOL_PREFIXES = ("slm-sg-embed", "slm-recall-channel", "slm-query-embed")
+#: How long the wedged worker below holds out if nothing releases it.
+_WEDGE_SECONDS = 30.0
+#: Real-time bound on close(): its own join budget plus slack for the rest of
+#: close() on a loaded host. A close held hostage by the wedge lasts ~30 s, so
+#: a few seconds of slack cannot hide one.
+_CLOSE_SLACK_SECONDS = 4.0
 
 
 def _warm_embedder(block: threading.Event | None = None) -> MagicMock:
@@ -29,7 +35,7 @@ def _warm_embedder(block: threading.Event | None = None) -> MagicMock:
 
     def _embed(text: str) -> list[float]:
         if block is not None:
-            block.wait(30)
+            block.wait(_WEDGE_SECONDS)
         rng = np.random.RandomState(abs(hash(text)) % 2**31)
         v = rng.randn(768).astype(np.float32)
         return (v / np.linalg.norm(v)).tolist()
@@ -86,7 +92,8 @@ def test_close_is_bounded_when_a_worker_is_wedged(mode_a_config, caplog) -> None
     finally:
         block.set()
 
-    assert elapsed < thread_join.CLOSE_JOIN_SECONDS + 1.0, f"close took {elapsed:.2f}s"
+    assert elapsed < thread_join.CLOSE_JOIN_SECONDS + _CLOSE_SLACK_SECONDS, (
+        f"close took {elapsed:.2f}s")
     assert any("still running" in r.getMessage() for r in caplog.records)
     deadline = time.monotonic() + 5
     while _pool_threads(before) and time.monotonic() < deadline:

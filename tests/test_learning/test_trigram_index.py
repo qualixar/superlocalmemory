@@ -316,9 +316,24 @@ def test_lookup_fast_fail_on_db_lock(index, cache_db: Path):
             pass
         w.close()
 
+    from superlocalmemory.learning.trigram_index import _BUSY_TIMEOUT_MS
+
+    # A deliberate real-time bound on the product's own busy_timeout. A locked
+    # lookup waits at most twice (cached connection, then the fresh-connect
+    # fallback), each capped by _BUSY_TIMEOUT_MS. The 900 ms on top is
+    # scheduling slack for a loaded host, not a speed claim; the regression
+    # this guards (waiting on the writer) lasts until the writer's 5 s release.
+    # The bound follows the constant, so the constant is pinned to its
+    # fast-fail contract (module docstring: busy_timeout=50) on its own:
+    # raising it would otherwise raise this bound with it.
+    assert _BUSY_TIMEOUT_MS <= 50, f"hot-path busy_timeout is {_BUSY_TIMEOUT_MS} ms"
+    hang_bound_ms = 2 * _BUSY_TIMEOUT_MS + 900
+
     t = threading.Thread(target=_writer, daemon=True)
     t.start()
-    hold_lock.wait(timeout=2.0)
+    # Without the lock actually held this test exercises nothing; say so
+    # instead of failing later on a confusing non-empty result.
+    assert hold_lock.wait(timeout=5.0), "writer never took the EXCLUSIVE lock"
 
     try:
         t0 = time.perf_counter()
@@ -326,9 +341,10 @@ def test_lookup_fast_fail_on_db_lock(index, cache_db: Path):
         elapsed_ms = (time.perf_counter() - t0) * 1000
         # Graceful fallback: empty list.
         assert out == []
-        # Must fast-fail, not hang. 50 ms busy_timeout + generous CI slack
-        # (macOS GitHub runners routinely hit 400-500ms under load).
-        assert elapsed_ms < 1000, f"lookup hung under lock: {elapsed_ms:.1f} ms"
+        assert elapsed_ms < hang_bound_ms, (
+            f"lookup hung under lock: {elapsed_ms:.1f} ms "
+            f"(busy_timeout {_BUSY_TIMEOUT_MS} ms)"
+        )
     finally:
         release.set()
         t.join(timeout=2.0)

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from superlocalmemory.core import answer_check_history as h
-from superlocalmemory.core import judge_selection, recall_pipeline
+from superlocalmemory.core import answer_check_stage, judge_selection, recall_pipeline
 from superlocalmemory.retrieval import answer_check_status as acs
 from superlocalmemory.retrieval.sufficiency import SufficiencyVerdict
 from superlocalmemory.server.recall_serializer import recall_response_metadata
@@ -42,12 +42,31 @@ class _SlowJudge:
     backend = "laya"
     top_k = 3
 
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
     def assess(self, query, documents, *, deadline=None):
+        self.asked.append(query)
         time.sleep(0.05)
         return acs.JudgeOutcome(SufficiencyVerdict((0.2,), 0.5, "laya:test"),
                                 acs.STATUS_JUDGED)
 
     def shutdown(self) -> None: ...
+
+
+def _judge_waits(monkeypatch) -> list[str]:
+    """Record every entry into the two paths where the check waits on a judge.
+
+    "No wait" is then a fact about what ran, not a stopwatch reading: timing a
+    few attribute reads proves nothing a loaded host cannot push past a bound.
+    """
+    entered: list[str] = []
+    for name in ("_plain_check", "rerank_and_judge"):
+        def spy(*args, _name=name, _real=getattr(answer_check_stage, name), **kwargs):
+            entered.append(_name)
+            return _real(*args, **kwargs)
+        monkeypatch.setattr(answer_check_stage, name, spy)
+    return entered
 
 
 def _run(judge, config, monkeypatch, n: int = 5):
@@ -74,16 +93,20 @@ def test_judge_time_is_measured(mode_a_config, monkeypatch) -> None:
 
 
 def test_no_judge_means_no_backend_and_no_wait(mode_a_config, monkeypatch) -> None:
+    waited_on = _judge_waits(monkeypatch)
     out = _run(None, mode_a_config, monkeypatch)
     trace = out.answer_check_trace
-    assert trace.backend == "" and trace.judge_ms < 5.0
+    assert trace.backend == ""
+    assert waited_on == [], "a recall with no judge waited on one"
     assert out.answer_check_status == acs.STATUS_OFF
 
 
 def test_no_results_is_explained(mode_a_config, monkeypatch) -> None:
-    out = _run(_SlowJudge(), mode_a_config, monkeypatch, n=0)
+    judge = _SlowJudge()
+    waited_on = _judge_waits(monkeypatch)
+    out = _run(judge, mode_a_config, monkeypatch, n=0)
     assert out.answer_check_trace.detail == acs.DETAIL_NO_RESULTS
-    assert out.answer_check_trace.judge_ms < 5.0
+    assert judge.asked == [] and waited_on == [], "the judge was asked about nothing"
 
 
 def test_envelope_adds_only_the_check_explanation(mode_a_config, monkeypatch) -> None:

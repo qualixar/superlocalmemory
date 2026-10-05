@@ -88,17 +88,33 @@ def _make_query_embedding(dim: int = 768, seed: int = 99) -> list[float]:
     return q.tolist()
 
 
+#: Each timing below is the best of this many identical searches. A single
+#: shot measured the host as much as the code: on a loaded machine one
+#: descheduling pushed the Fisher/cosine ratio past its bound (measured 2x-5x
+#: from run to run). The fastest repeat is the code's own cost; a regression
+#: that adds real work slows every repeat, so the minimum still catches it.
+_TIMING_REPEATS = 5
+
+
 def _timed_search(
     channel: SemanticChannel,
     query: list[float],
     profile_id: str = "default",
     top_k: int = 50,
 ) -> tuple[list[tuple[str, float]], float]:
-    """Run channel.search() and return (results, elapsed_ms)."""
-    t0 = time.monotonic()
-    results = channel.search(query, profile_id, top_k=top_k)
-    elapsed_ms = (time.monotonic() - t0) * 1000.0
-    return results, elapsed_ms
+    """Run channel.search() and return (results, best elapsed_ms).
+
+    The searches are identical (same channel, same query), so the results of
+    every repeat are the same and the first is returned.
+    """
+    first: list[tuple[str, float]] | None = None
+    best_ms = float("inf")
+    for _ in range(_TIMING_REPEATS):
+        t0 = time.monotonic()
+        results = channel.search(query, profile_id, top_k=top_k)
+        best_ms = min(best_ms, (time.monotonic() - t0) * 1000.0)
+        first = results if first is None else first
+    return first, best_ms
 
 
 # ---------------------------------------------------------------------------

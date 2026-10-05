@@ -14,6 +14,7 @@ request was already durable in the admission journal.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -23,10 +24,20 @@ from superlocalmemory.core.remember_runtime import (
     CanonicalRememberRuntime,
     CanonicalRememberUnavailable,
 )
+from superlocalmemory.server.unified_daemon import _REMEMBER_JOURNAL_DEADLINE_MS
 from superlocalmemory.storage.admission_journal import Actor, RememberRequest
 
 _ACTOR = "contention-accept-daemon"
 _SHORT_DEADLINE_MS = 300
+# A deliberate real-time bound: a remember under a held lock must answer near
+# the caller's _SHORT_DEADLINE_MS, not after the full 2 s journal deadline it
+# would wait if the caller's deadline were ignored. Midway between the two is
+# the widest margin on both sides (~0.85 s of slack for a loaded host).
+_HONOURED_DEADLINE_CEILING_S = (_SHORT_DEADLINE_MS + _REMEMBER_JOURNAL_DEADLINE_MS) / 2 / 1000
+# Liveness guard for a background thread, NOT a performance claim: only a
+# wait that never ends can reach it.
+_LIVENESS_TIMEOUT_S = 15.0
+_SWITCH_THREAD_NAME = "contention-test-profile-switch"
 
 
 def _build(data_dir: Path, owner: str = "contention-runtime") -> CanonicalRememberRuntime:
@@ -131,7 +142,9 @@ def test_remember_under_held_write_lock_is_accepted_not_refused(runtime, data_di
         assert payload["fact_ids"] == []
         assert payload["idempotency_key"] == "held-1"
         assert payload["admission_id"]
-        assert elapsed < _SHORT_DEADLINE_MS / 1000 + 0.5
+        assert elapsed < _HONOURED_DEADLINE_CEILING_S, (
+            f"accepted after {elapsed:.2f}s: the {_SHORT_DEADLINE_MS} ms deadline was not honoured"
+        )
         assert _count(db_path, "SELECT COUNT(*) FROM atomic_facts") == 0
     finally:
         lock.release()
@@ -284,15 +297,37 @@ def test_accepted_save_for_a_deleted_profile_ends_with_a_recorded_failure(
     assert _count(db_path, "SELECT COUNT(*) FROM write_commits") == 0
 
 
-def test_profile_switch_with_a_pending_save_hands_it_off_cleanly(runtime, data_dir):
+def _record_calls_from_switch(real, name: str, calls: list[str]):
+    """Pass ``real`` through, noting each call made on the switching thread."""
+    def call(*args, **kwargs):
+        if threading.current_thread().name == _SWITCH_THREAD_NAME:
+            calls.append(name)
+        return real(*args, **kwargs)
+    return call
+
+
+def test_profile_switch_with_a_pending_save_hands_it_off_cleanly(
+    runtime, data_dir, monkeypatch,
+):
     """Switching to a profile whose accepted save is still pending never fails.
 
-    The switch completes at once; the save is committed in the background
-    once the writer is free, exactly once.
+    The switch never touches the busy writer itself; the save is committed in
+    the background once the writer is free, exactly once.
     """
     from types import SimpleNamespace
 
     db_path = data_dir / "memory.db"
+    writer_calls_from_switch: list[str] = []
+    switch_errors: list[BaseException] = []
+
+    def _switch() -> None:
+        try:
+            runtime.rebind_engine(
+                SimpleNamespace(_db=runtime._db, _profile_id="other", _config=None)
+            )
+        except BaseException as exc:  # noqa: BLE001 - asserted on below
+            switch_errors.append(exc)
+
     lock = _HeldWriteLock(db_path)
     try:
         receipt = runtime.remember(
@@ -300,15 +335,26 @@ def test_profile_switch_with_a_pending_save_hands_it_off_cleanly(runtime, data_d
             deadline_ms=_SHORT_DEADLINE_MS,
         )
         assert receipt.payload["status"] == "accepted"
-        started = time.monotonic()
-        runtime.rebind_engine(
-            SimpleNamespace(_db=runtime._db, _profile_id="other", _config=None)
+        coordinator = runtime.coordinator
+        for name in ("submit", "execute"):
+            monkeypatch.setattr(coordinator, name, _record_calls_from_switch(
+                getattr(coordinator, name), name, writer_calls_from_switch,
+            ))
+        switch = threading.Thread(target=_switch, name=_SWITCH_THREAD_NAME, daemon=True)
+        switch.start()
+        # The lock stays held for this whole join, so a switch that waits for
+        # the save to land can never finish inside it.
+        switch.join(timeout=_LIVENESS_TIMEOUT_S)
+        assert not switch.is_alive(), "the switch is waiting on the busy writer"
+        assert switch_errors == []
+        # A bounded wait would still finish; this catches it: the switch must
+        # hand the save off, never call the writer that is busy right now.
+        assert writer_calls_from_switch == [], (
+            f"the switch called the busy writer itself: {writer_calls_from_switch}"
         )
-        switch_seconds = time.monotonic() - started
         assert runtime._profile_id == "other"
     finally:
         lock.release()
-    assert switch_seconds < 0.5, f"switch waited {switch_seconds:.2f}s on the save"
     assert runtime.wait_for_deferred(timeout=15.0)
     assert runtime.journal.get(receipt.payload["admission_id"]).state == "committed"
     assert _count(db_path, "SELECT COUNT(*) FROM write_commits") == 1

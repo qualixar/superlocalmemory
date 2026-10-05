@@ -93,13 +93,17 @@ def test_30_day_sim_completes_under_5min(tmp_path: Path) -> None:
     bench = EvoMemoryBenchmark(
         profile_id="bench_v1", data_dir=tmp_path,
     )
+    # A deliberate real-time bound: the harness's own documented budget
+    # (LLD-14 §1 #3). The harness checks it only between simulated days; this
+    # covers the measurement phase too. Typical runs take seconds, not minutes.
+    budget_s = EvoMemoryBenchmark.MAX_WALL_SECONDS
     t0 = time.perf_counter()
     result = bench.run_full_30_day_simulation()
     wall = time.perf_counter() - t0
-    assert wall < 300.0, (
-        f"30-day sim took {wall:.1f}s > 300s budget"
+    assert wall < budget_s, (
+        f"30-day sim took {wall:.1f}s > {budget_s}s budget"
     )
-    assert result["wall_seconds"] < 300.0
+    assert result["wall_seconds"] < budget_s
     assert result["days_measured"] == [1, 7, 14, 30]
     assert "comparison" in result
 

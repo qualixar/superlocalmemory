@@ -25,6 +25,7 @@ from superlocalmemory.core.config import EmbeddingConfig
 from superlocalmemory.core.embeddings import EmbeddingService
 from superlocalmemory.retrieval import channel_status as chstat
 from superlocalmemory.retrieval.answer_check_status import RECALL_CEILING_S
+from superlocalmemory.retrieval.engine import COLD_QUERY_EMBED_WAIT_SECONDS
 from superlocalmemory.server.recall_serializer import recall_response_metadata
 from tests.helpers import fake_embedding_worker as fake
 
@@ -64,7 +65,16 @@ def test_the_first_recall_is_inside_the_ceiling_and_says_it_is_warming(cold_engi
     assert any("Lisbon" in r.fact.content for r in response.results)
     # Which stage used the time travels with the answer.
     stages = response.stage_ms
-    assert 900 <= stages["query_embedding"] <= 1600, stages
+    # The embed stage is the product's cold wait: the recall gave a loading
+    # model its full chance (an Event wait never returns early, so 100 ms
+    # below is only clock rounding) and then stopped -- not at the 6 s model
+    # load, nor the 8 s hang guard. The 600 ms above it is scheduling slack;
+    # the hard limit on the whole recall is the ceiling asserted above. The
+    # bound follows the constant, so the constant's own contract is pinned:
+    # a real chance for the model, and room left inside the ceiling.
+    assert 0 < COLD_QUERY_EMBED_WAIT_SECONDS < RECALL_CEILING_S
+    cold_wait_ms = COLD_QUERY_EMBED_WAIT_SECONDS * 1000.0
+    assert cold_wait_ms - 100 <= stages["query_embedding"] <= cold_wait_ms + 600, stages
     assert stages["channels"] >= stages["query_embedding"]
     # The transport envelope carries the honest flags.
     meta = recall_response_metadata(response)

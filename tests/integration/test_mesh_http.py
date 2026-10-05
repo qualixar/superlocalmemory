@@ -209,29 +209,40 @@ def test_send_endpoint_bearer_auth() -> None:
 
 def test_send_does_not_block_event_loop() -> None:
     """M01 regression: a slow remote-peer delivery must NOT stall the daemon
-    event loop for everyone else. send_message is offloaded via
-    asyncio.to_thread, so a concurrent /peers call still returns promptly while
-    /send is mid-flight in a blocking network call."""
+    event loop for everyone else. send_message runs off the event loop, so a
+    concurrent /peers call still returns while /send is mid-flight in a
+    blocking network call.
+
+    The delivery blocks until /peers has answered, so the order is the proof:
+    with a blocked loop /peers can only answer after the delivery returned.
+    """
     import asyncio
-    import time
+    import threading
 
     httpx = pytest.importorskip("httpx")
     app, broker = _app_with_broker()
+    # Liveness guard, NOT a performance claim: bounds the waits below so a
+    # blocked loop fails the test instead of hanging it.
+    liveness_timeout_s = 10.0
+    send_entered = threading.Event()
+    send_returned = threading.Event()
+    release_send = threading.Event()
 
-    # Simulate a slow remote delivery (blocking I/O, like an httpx timeout).
+    # A delivery stuck in blocking I/O until the test lets it go.
     def slow_send(*args, **kwargs):
-        time.sleep(0.5)
+        send_entered.set()
+        release_send.wait(timeout=liveness_timeout_s)
+        send_returned.set()
         return {"ok": True, "id": 1, "target_type": "peer"}
 
     broker.send_message = slow_send  # type: ignore[assignment]
 
-    async def run() -> float:
+    async def run() -> bool:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as client:
-            start = time.monotonic()
-            peers_elapsed: dict[str, float] = {}
+            observed: dict[str, bool] = {}
 
             async def do_send() -> None:
                 await client.post(
@@ -242,17 +253,24 @@ def test_send_does_not_block_event_loop() -> None:
                 )
 
             async def do_peers() -> None:
-                await asyncio.sleep(0.05)  # let /send start first
-                await client.get("/mesh/peers", headers=DAEMON_HEADERS)
-                peers_elapsed["t"] = time.monotonic() - start
+                try:
+                    # /send is really in flight before /peers is asked.
+                    assert await asyncio.to_thread(
+                        send_entered.wait, liveness_timeout_s,
+                    ), "/mesh/send never reached the delivery"
+                    await client.get("/mesh/peers", headers=DAEMON_HEADERS)
+                    observed["send_in_flight"] = not send_returned.is_set()
+                finally:
+                    release_send.set()
 
             await asyncio.gather(do_send(), do_peers())
-            return peers_elapsed["t"]
+            return observed["send_in_flight"]
 
-    peers_completed_at = asyncio.run(run())
-    # Blocked loop → /peers can't finish until the 0.5s send returns (~0.5s).
-    # Offloaded → /peers finishes right after its 0.05s pre-sleep.
-    assert peers_completed_at < 0.3, (
-        f"/mesh/peers completed {peers_completed_at:.2f}s in — event loop is "
-        "blocked behind a slow /send (M01 regression)"
+    try:
+        peers_answered_mid_send = asyncio.run(run())
+    finally:
+        release_send.set()
+    assert peers_answered_mid_send, (
+        "/mesh/peers only answered after the slow /send returned — event loop "
+        "is blocked behind a slow /send (M01 regression)"
     )

@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import socket
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -61,14 +60,29 @@ def foreign_http_port():
 
 
 def test_foreign_http_occupant_fails_fast_and_loud(
-    isolated_root, foreign_http_port, caplog
+    isolated_root, foreign_http_port, caplog, monkeypatch
 ) -> None:
-    """#132: answering squatter — fast False plus a loud error, no 30 s wait."""
-    started = time.monotonic()
+    """#132: answering squatter — fast False plus a loud error, no 30 s wait.
+
+    "Fast" is proven by the path taken, not a stopwatch: the 30 s readiness
+    wait and the spawn are the only slow exits, and neither may be entered.
+    Both are stubbed to report success, so entering either also shows up as
+    a false True.
+    """
+    waited: list[int] = []
+    spawned: list[int | None] = []
+    monkeypatch.setattr(
+        daemon_mod, "_wait_for_daemon", lambda timeout=60: waited.append(timeout) or True
+    )
+    monkeypatch.setattr(
+        daemon_mod,
+        "_start_daemon_subprocess",
+        lambda *, port=None: spawned.append(port) or True,
+    )
     with caplog.at_level("ERROR", logger="superlocalmemory.cli.daemon"):
         assert daemon_mod.ensure_daemon(port=foreign_http_port) is False
-    elapsed = time.monotonic() - started
-    assert elapsed < 12.0, f"foreign occupant burned {elapsed:.1f}s"
+    assert waited == [], f"foreign occupant entered the {waited} s readiness wait"
+    assert spawned == [], "foreign occupant triggered a daemon spawn"
     assert "foreign service" in caplog.text
     assert str(foreign_http_port) in caplog.text
 

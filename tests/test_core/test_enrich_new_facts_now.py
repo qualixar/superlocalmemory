@@ -219,13 +219,24 @@ class TestItCannotHarmTheWrite:
         This daemon serves many sessions, so a slow embedder must cost the caller
         a bounded wait and nothing more.
         """
+        import threading
         import time as _time
 
+        # Real-time bound on the caller's wait. The embed holds out for 30 s
+        # unless released, so a caller that ignored its 0.2 s deadline would wait
+        # ~30 s; a third of that is slack no loaded host can use up honestly.
+        slow_embed_s, deadline_s = 30.0, 0.2
+        caller_bound_s = slow_embed_s / 3
         fact_id = _fact_without_a_vector(engine, "A note recorded while the embedder is slow.")
+        release = threading.Event()
         slow = _local_embedder_mock()
         slow._available = True
-        slow.embed.side_effect = lambda _t: (_time.sleep(1.5), [0.1] * 768)[1]
+        slow.embed.side_effect = lambda _t: (release.wait(slow_embed_s), [0.1] * 768)[1]
         engine._embedder = slow
         started = _time.monotonic()
-        assert engine.enrich_new_facts_now([fact_id], timeout_s=0.2) == 0
-        assert _time.monotonic() - started < 1.2, "the deadline was not enforced"
+        try:
+            assert engine.enrich_new_facts_now([fact_id], timeout_s=deadline_s) == 0
+            assert _time.monotonic() - started < caller_bound_s, (
+                "the deadline was not enforced")
+        finally:
+            release.set()  # let the abandoned embed finish so close() is prompt

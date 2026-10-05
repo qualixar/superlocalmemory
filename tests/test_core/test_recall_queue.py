@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -164,17 +165,20 @@ def test_poll_result_returns_completed(tmp_path: Path) -> None:
     q.close()
 
 
-def test_poll_result_raises_dead_letter_fast(tmp_path: Path) -> None:
+def test_poll_result_raises_dead_letter_fast(tmp_path: Path, monkeypatch) -> None:
     rq = _imports()
     q = _make_queue(tmp_path)
     rid = q.enqueue(query="x", limit_n=10, mode="B", agent_id="a", session_id="s")
     q.claim_pending(priority="high", stall_timeout_s=25.0)
     q.mark_dead_letter(rid, reason="max_receives_exceeded")
-    t0 = time.monotonic()
+    # Fast-fail means raising on the first read, before any poll sleep. Count
+    # the sleeps instead of timing them: the count does not drift under load.
+    slept: list[float] = []
+    monkeypatch.setattr(rq, "time", SimpleNamespace(
+        time=time.time, monotonic=time.monotonic, sleep=slept.append))
     with pytest.raises(rq.DeadLetterError) as exc:
         q.poll_result(rid, timeout_s=5.0)
-    elapsed = time.monotonic() - t0
-    assert elapsed < 0.5, f"DLQ did not fast-fail; waited {elapsed:.2f}s"
+    assert slept == [], f"DLQ did not fast-fail; slept {slept} on the poll schedule"
     assert exc.value.request_id == rid
     assert "max_receives" in exc.value.reason
     q.close()

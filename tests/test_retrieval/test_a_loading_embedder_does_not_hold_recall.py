@@ -21,11 +21,21 @@ from superlocalmemory.retrieval import engine as engine_mod
 from superlocalmemory.retrieval.query_embedding import QueryEmbedder
 
 
+#: How long a cold model stays "loading" when a test needs it never to finish
+#: on its own. A liveness bound, NOT a performance claim: the test releases it
+#: as soon as the recall returns, so only a recall that really waits on the
+#: model ever sits it out.
+_MODEL_LOAD_HOLD_S = 30.0
+
+
 class _ColdEmbedder:
     """Blocks like a model that is still loading, until released."""
 
     def __init__(self, *, report_warm: bool | None = False, hold: float = 5.0) -> None:
         self.release = threading.Event()
+        # Set once any embed call has come back: lets a test observe whether
+        # a recall returned before or after the model answered.
+        self.answered = threading.Event()
         self.calls = 0
         self._hold = hold
         self._report_warm = report_warm
@@ -39,6 +49,7 @@ class _ColdEmbedder:
     def embed(self, text):
         self.calls += 1
         self.release.wait(self._hold)
+        self.answered.set()
         return [0.1] * 8
 
 
@@ -196,17 +207,27 @@ def _run(eng):
     return out, status, dropped
 
 
-def test_keyword_search_answers_while_the_model_loads(monkeypatch) -> None:
-    monkeypatch.setattr(engine_mod, "CHANNEL_HANG_GUARD_SECONDS", 0.3)
-    cold = _ColdEmbedder(report_warm=False, hold=5.0)
+def test_keyword_search_answers_while_the_model_loads() -> None:
+    # The hang guard keeps its real value: it no longer bounds the cold embed
+    # wait (COLD_QUERY_EMBED_WAIT_SECONDS does), so shrinking it only gave the
+    # keyword channel a 0.3 s window that a loaded host can miss.
+    cold = _ColdEmbedder(report_warm=False, hold=_MODEL_LOAD_HOLD_S)
     eng = _engine(cold)
     t0 = time.monotonic()
     out, status, dropped = _run(eng)
     elapsed = time.monotonic() - t0
+    model_answered = cold.answered.is_set()
     cold.release.set()
     eng.close()
 
-    assert elapsed < 2.0, f"recall waited {elapsed:.1f}s on a loading model"
+    # Observed, not timed: the channels answered while the model was still
+    # loading, so the recall did not wait for it.
+    assert not model_answered, (
+        f"recall returned only after the loading model answered ({elapsed:.1f}s)")
+    # Nor did it sit out the hang guard: waiting the guard takes at least the
+    # guard, by construction.
+    assert elapsed < engine_mod.CHANNEL_HANG_GUARD_SECONDS, (
+        f"recall waited {elapsed:.1f}s on a loading model")
     assert out.get("bm25") == [("exact", 3.0)]
     for name in ("semantic", "hopfield", "spreading_activation"):
         assert status[name] == chstat.WARMING

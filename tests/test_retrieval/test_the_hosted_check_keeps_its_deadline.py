@@ -123,37 +123,55 @@ def slow_server(monkeypatch):
 # M-4: one total deadline, not one per phase
 # ---------------------------------------------------------------------------
 
+#: Scheduling allowance on top of a deadline the product itself enforces
+#: (``HostedTransport.post`` waits ``deadline - now`` and abandons the rest).
+#: Deliberately generous for a loaded host; each test below keeps its
+#: regression several times further away than deadline + slack.
+_DEADLINE_SLACK_S = 1.5
+
+
 class TestOneTotalDeadline:
     def test_a_provider_that_trickles_its_reply_is_cut_off_at_the_deadline(
         self, key_store, slow_server,
     ) -> None:
-        # ~420 bytes at 8 bytes every 0.15 s is ~8 s of trickle; every single
-        # read arrives well inside any per-phase timeout.
-        slow_server(chunk=8, chunk_delay=0.15)
-        judge = JevSufficiencyJudge(provider="typesafe", key_store=key_store, timeout_s=0.6)
+        # The one-memory reply is 86 bytes; at 2 bytes every 0.2 s that is
+        # ~8.6 s of trickle, every single read well inside any per-phase
+        # timeout. (It was 8 bytes every 0.15 s: ~1.6 s, too close to the
+        # deadline + slack below for the clock to tell the two apart.) That
+        # ~8.6 s is what a per-phase deadline costs.
+        timeout_s = 0.6
+        slow_server(chunk=2, chunk_delay=0.2)
+        judge = JevSufficiencyJudge(provider="typesafe", key_store=key_store,
+                                    timeout_s=timeout_s)
         try:
             started = time.monotonic()
             outcome = judge.assess("q?", [JudgeDocument("the answer")])
             wall = time.monotonic() - started
         finally:
             judge.shutdown()
-        assert wall < 1.2, f"one hosted check took {wall:.1f}s against a 0.6s timeout"
+        assert wall < timeout_s + _DEADLINE_SLACK_S, (
+            f"one hosted check took {wall:.1f}s against a {timeout_s}s timeout")
         assert outcome.verdict is None and outcome.status == acs.STATUS_UNAVAILABLE
 
     def test_the_recalls_deadline_wins_over_the_configured_timeout(
         self, key_store, slow_server,
     ) -> None:
-        slow_server(head_delay=1.5)
-        judge = JevSufficiencyJudge(provider="typesafe", key_store=key_store, timeout_s=2.0)
+        # The provider answers only after head_delay, well past the recall's
+        # deadline + slack. Honouring the configured 5 s timeout instead would
+        # get that answer: status JUDGED, not UNAVAILABLE, whatever the clock.
+        recall_budget_s, head_delay_s = 0.3, 3.0
+        slow_server(head_delay=head_delay_s)
+        judge = JevSufficiencyJudge(provider="typesafe", key_store=key_store, timeout_s=5.0)
         try:
             started = time.monotonic()
             outcome = judge.assess("q?", [JudgeDocument("the answer")],
-                                   deadline=time.monotonic() + 0.3)
+                                   deadline=time.monotonic() + recall_budget_s)
             wall = time.monotonic() - started
         finally:
             judge.shutdown()
-        assert wall < 0.7
         assert outcome.status == acs.STATUS_UNAVAILABLE
+        assert wall < recall_budget_s + _DEADLINE_SLACK_S < head_delay_s, (
+            f"took {wall:.1f}s against a {recall_budget_s}s recall deadline")
 
     def test_a_prompt_provider_is_judged(self, key_store, slow_server) -> None:
         slow_server()

@@ -86,28 +86,31 @@ class TestTheWriteDeclinesInsteadOfWaiting:
         return engine
 
     def test_a_cold_model_costs_the_write_nothing(self) -> None:
-        """Reverting the fix makes this fail on the clock: the guard submits to
-        the pool and waits out its full deadline before giving up."""
+        """Reverting the fix submits the embed to the pool and waits out its full
+        deadline before giving up. That wait can only happen on the pool, so the
+        proof is that the pool was never created and the model never asked --
+        not a stopwatch, which a loaded host can push past any bound."""
+        asked = threading.Event()
+
         class ColdService:
             _available = True          # what the constructor sets
             is_warm = False            # what is actually true
             _config = type("C", (), {"is_cloud": False, "is_openai_compatible": False})()
 
             def embed(self, text):
+                asked.set()
                 time.sleep(10.0)       # a real cold start is 9.9-11.0 s
                 return [0.1] * 768
 
         engine = self._engine_with(ColdService())
 
-        started = time.perf_counter()
         emb, fmean, fvar = engine._warm_guard_embed("a memory worth keeping")
-        elapsed_ms = (time.perf_counter() - started) * 1000
 
         assert emb is None, "a cold model cannot produce a vector in time"
-        assert elapsed_ms < 100, (
-            f"the write waited {elapsed_ms:.0f} ms to be told what it could "
-            f"have known immediately; the deadline is 1,000 ms and paying it "
-            f"buys nothing"
+        assert engine._store_fast_embed_pool is None and not asked.is_set(), (
+            "the write handed a cold model its embed and waited on the deadline "
+            "to be told what it could have known immediately; paying the "
+            "1,000 ms deadline buys nothing"
         )
 
     def test_a_warm_model_is_still_used(self) -> None:

@@ -47,6 +47,17 @@ import pytest
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+#: Liveness bound for waits only a broken build ever sits out (every held
+#: lease is released by the test itself). NOT a performance claim; it keeps a
+#: holder from letting go on its own while a loaded host is slow to get the
+#: test to the switch.
+_LIVENESS_GUARD_S = 30.0
+
+#: Scheduling allowance on top of a drain timeout the runtime enforces itself.
+#: A drain that ignored the shortened timeout would take the stock 5 s, or
+#: wait out the whole lease.
+_DRAIN_SLACK_S = 1.5
+
 
 def _add_profile(engine, profile_id: str) -> None:
     engine._db.execute(
@@ -101,21 +112,23 @@ def test_transition_raises_TransitionDrainTimeout_when_lease_is_held() -> None:
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=5.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0), "holder thread did not acquire in time"
+    assert lease_held.wait(_LIVENESS_GUARD_S), "holder thread did not acquire in time"
 
+    drain_s = 0.3
     try:
-        with _short_drain_timeout(0.3):
+        with _short_drain_timeout(drain_s):
             t0 = time.monotonic()
             with pytest.raises(TransitionDrainTimeout) as exc_info:
                 runtime.transition("beta", lambda p, t: None)
             elapsed = time.monotonic() - t0
 
-        # The timeout should fire promptly — within 2× the drain timeout.
-        assert elapsed < 1.0, (
+        # A real, enforced deadline: the timeout must fire at drain_s, plus
+        # scheduling slack for a loaded host.
+        assert elapsed < drain_s + _DRAIN_SLACK_S, (
             f"transition() took {elapsed:.2f}s — drain timeout was not respected."
         )
         assert "beta" in str(exc_info.value) or "in-flight" in str(exc_info.value), (
@@ -123,7 +136,7 @@ def test_transition_raises_TransitionDrainTimeout_when_lease_is_held() -> None:
         )
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)
 
 
 def test_transitioning_flag_is_cleared_after_drain_timeout() -> None:
@@ -145,11 +158,11 @@ def test_transitioning_flag_is_cleared_after_drain_timeout() -> None:
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=5.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0)
+    assert lease_held.wait(_LIVENESS_GUARD_S)
 
     try:
         with _short_drain_timeout(0.3):
@@ -162,7 +175,7 @@ def test_transitioning_flag_is_cleared_after_drain_timeout() -> None:
         )
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)
 
 
 def test_operations_succeed_after_drain_timeout() -> None:
@@ -182,11 +195,11 @@ def test_operations_succeed_after_drain_timeout() -> None:
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=5.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0)
+    assert lease_held.wait(_LIVENESS_GUARD_S)
 
     try:
         with _short_drain_timeout(0.3):
@@ -194,7 +207,7 @@ def test_operations_succeed_after_drain_timeout() -> None:
                 runtime.transition("beta", lambda p, t: None)
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)
 
     # Release the held lease — _active_operations drops to 0.
     # Now a fresh operation should succeed immediately.
@@ -204,12 +217,14 @@ def test_operations_succeed_after_drain_timeout() -> None:
     def _new_op() -> None:
         with runtime.operation() as snap:
             result.append(snap.profile_id)
-            barrier.wait(timeout=2.0)
+            barrier.wait(timeout=_LIVENESS_GUARD_S)
 
     t = threading.Thread(target=_new_op, daemon=True)
     t.start()
-    barrier.wait(timeout=2.0)
-    t.join(2.0)
+    # A wedged runtime blocks _new_op forever; the guard turns that into a
+    # BrokenBarrierError here instead of a hung suite.
+    barrier.wait(timeout=_LIVENESS_GUARD_S)
+    t.join(_LIVENESS_GUARD_S)
 
     assert result == ["alpha"], (
         f"New operation after timeout saw profile={result!r}. "
@@ -235,11 +250,11 @@ def test_successful_transition_after_lease_release() -> None:
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=5.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0)
+    assert lease_held.wait(_LIVENESS_GUARD_S)
 
     # First attempt: timed out because lease is held.
     with _short_drain_timeout(0.3):
@@ -248,7 +263,7 @@ def test_successful_transition_after_lease_release() -> None:
 
     # Release the lease.
     release_lease.set()
-    holder.join(2.0)
+    holder.join(_LIVENESS_GUARD_S)
 
     # Second attempt (no timeout override needed): should succeed.
     seen: list[str] = []
@@ -298,14 +313,15 @@ def test_http_switch_returns_503_when_drain_times_out(engine_with_mock_deps) -> 
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=10.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0), "holder did not acquire in time"
+    assert lease_held.wait(_LIVENESS_GUARD_S), "holder did not acquire in time"
 
+    drain_s = 0.5
     try:
-        with _short_drain_timeout(0.5):
+        with _short_drain_timeout(drain_s):
             client = TestClient(app, raise_server_exceptions=False)
             headers = _daemon_headers(app)
 
@@ -320,8 +336,9 @@ def test_http_switch_returns_503_when_drain_times_out(engine_with_mock_deps) -> 
         assert resp.status_code == 503, (
             f"Expected 503, got {resp.status_code}. Body: {resp.text[:200]}"
         )
-        # Must respond PROMPTLY — within 3× the drain timeout (0.5 s).
-        assert elapsed < 2.0, (
+        # Must respond PROMPTLY — the drain timeout plus slack for the HTTP
+        # round trip on a loaded host, far short of the 12 s+ hang it fixed.
+        assert elapsed < drain_s + _DRAIN_SLACK_S, (
             f"Switch took {elapsed:.2f}s — drain timeout was not enforced."
         )
         body = resp.json()
@@ -331,7 +348,7 @@ def test_http_switch_returns_503_when_drain_times_out(engine_with_mock_deps) -> 
         )
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)
 
 
 def test_daemon_responsive_during_switch_with_timeout(engine_with_mock_deps) -> None:
@@ -362,11 +379,11 @@ def test_daemon_responsive_during_switch_with_timeout(engine_with_mock_deps) -> 
     def _hold_lease() -> None:
         with runtime.operation():
             lease_held.set()
-            release_lease.wait(timeout=10.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold_lease, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0)
+    assert lease_held.wait(_LIVENESS_GUARD_S)
 
     try:
         with _short_drain_timeout(0.4):
@@ -388,4 +405,4 @@ def test_daemon_responsive_during_switch_with_timeout(engine_with_mock_deps) -> 
             )
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)

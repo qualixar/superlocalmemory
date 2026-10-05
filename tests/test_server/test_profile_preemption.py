@@ -56,6 +56,23 @@ import pytest
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+#: Liveness bound for waits only a broken build ever sits out: a held lease is
+#: always released by the test, and a pending switch always gets this long to
+#: drain so it cannot expire while a test is still observing it. NOT a
+#: performance claim -- a loaded host may take seconds to schedule a thread.
+_LIVENESS_GUARD_S = 30.0
+
+#: Scheduling allowance on top of a drain timeout the runtime enforces itself.
+_DRAIN_SLACK_S = 1.5
+
+
+def _wait_until_transitioning(runtime) -> bool:
+    """Bounded poll until a switch thread has set ``_transitioning``."""
+    deadline = time.monotonic() + _LIVENESS_GUARD_S
+    while not runtime.transitioning and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return runtime.transitioning
+
 
 def _add_profile(engine, profile_id: str) -> None:
     engine._db.execute(
@@ -147,42 +164,39 @@ def test_operation_nowait_yields_none_when_transition_is_pending() -> None:
     def _hold():
         with runtime.operation():
             held.set()
-            release.wait(timeout=5.0)
+            release.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold, daemon=True)
     holder.start()
-    assert held.wait(2.0)
+    assert held.wait(_LIVENESS_GUARD_S)
 
     # Start a transition — this sets _transitioning=True and waits for drain.
     switch_started = threading.Event()
 
     def _switch():
         switch_started.set()
-        with _short_drain_timeout(5.0):
+        with _short_drain_timeout(_LIVENESS_GUARD_S):
             runtime.transition("beta", lambda p, t: None)
 
     switch_thread = threading.Thread(target=_switch, daemon=True)
     switch_thread.start()
-    # Give the transition thread enough time to set _transitioning=True.
-    switch_started.wait(1.0)
-    deadline = time.monotonic() + 1.0
-    while not runtime.transitioning and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert runtime.transitioning, "_transitioning must be True at this point"
+    assert switch_started.wait(_LIVENESS_GUARD_S)
+    assert _wait_until_transitioning(runtime), "_transitioning must be True at this point"
 
     # operation_nowait() must yield None immediately (not block waiting).
-    t0 = time.monotonic()
     with runtime.operation_nowait() as snap:
-        elapsed = time.monotonic() - t0
         assert snap is None, (
             f"Expected operation_nowait() to yield None when transitioning, got {snap!r}"
         )
-        assert elapsed < 0.1, f"operation_nowait() took {elapsed:.3f}s — it must return immediately"
+        # Observed, not timed: the switch is still pending (the held lease is
+        # only released below, and its drain cannot expire first), so
+        # operation_nowait() answered without waiting for the switch.
+        assert runtime.transitioning, "operation_nowait() waited for the switch to end"
 
     # Clean up.
     release.set()
-    holder.join(2.0)
-    switch_thread.join(2.0)
+    holder.join(_LIVENESS_GUARD_S)
+    switch_thread.join(_LIVENESS_GUARD_S)
 
 
 def test_operation_nowait_does_not_leave_orphaned_lease_on_preemption() -> None:
@@ -196,26 +210,23 @@ def test_operation_nowait_does_not_leave_orphaned_lease_on_preemption() -> None:
     def _hold():
         with runtime.operation():
             held.set()
-            release.wait(timeout=5.0)
+            release.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold, daemon=True)
     holder.start()
-    assert held.wait(2.0)
+    assert held.wait(_LIVENESS_GUARD_S)
 
     transition_started = threading.Event()
 
     def _switch():
         transition_started.set()
-        with _short_drain_timeout(5.0):
+        with _short_drain_timeout(_LIVENESS_GUARD_S):
             runtime.transition("beta", lambda p, t: None)
 
     switch_thread = threading.Thread(target=_switch, daemon=True)
     switch_thread.start()
-    transition_started.wait(1.0)
-    deadline = time.monotonic() + 1.0
-    while not runtime.transitioning and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert runtime.transitioning
+    assert transition_started.wait(_LIVENESS_GUARD_S)
+    assert _wait_until_transitioning(runtime)
 
     # operation_nowait() preempts — must not increment active_operations.
     with runtime.operation_nowait() as snap:
@@ -223,8 +234,9 @@ def test_operation_nowait_does_not_leave_orphaned_lease_on_preemption() -> None:
 
     # Release the real lease — transition should now complete cleanly.
     release.set()
-    holder.join(2.0)
-    switch_thread.join(2.0)
+    holder.join(_LIVENESS_GUARD_S)
+    switch_thread.join(_LIVENESS_GUARD_S)
+    assert not switch_thread.is_alive(), "the switch never drained"
 
     # If there was an orphaned lease, this transition would timeout.
     final_snap = runtime.snapshot
@@ -243,7 +255,7 @@ def test_cooperative_background_op_yields_and_switch_succeeds(
 
     RED: operation_nowait() does not exist → AttributeError.
     GREEN: operation_nowait() is added → background op detects _transitioning
-           and releases the lease → switch commits in <2.5s.
+           and releases the lease → switch commits inside the drain window.
     """
     from superlocalmemory.server.profile_runtime import bind_profile_runtime
     from superlocalmemory.server.unified_daemon import create_app
@@ -305,24 +317,24 @@ def test_cooperative_background_op_yields_and_switch_succeeds(
             name="test-bg-op",
         )
         bg_thread.start()
-        assert op_lease_acquired.wait(2.0), "Background op did not acquire its lease"
+        assert op_lease_acquired.wait(_LIVENESS_GUARD_S), (
+            "Background op did not acquire its lease"
+        )
 
         # Issue the profile switch.  Because the background op will yield via the
         # transitioning check, the drain completes and this returns 200.
-        t0 = time.monotonic()
         switch_resp = client.post("/api/profiles/work/switch", headers=headers)
-        elapsed = time.monotonic() - t0
 
+        # 200 is itself the timing proof: the runtime answers 503 once its own
+        # drain timeout (_DRAIN_TIMEOUT_SECS, 5 s) expires, and without
+        # preemption this op holds the lease for 10 s. The old extra
+        # "elapsed < 2.5 s" check only measured the host on top of that.
         assert switch_resp.status_code == 200, (
             f"Expected HTTP 200 from profile switch (cooperative preemption), "
             f"got {switch_resp.status_code}.  Body: {switch_resp.text[:300]}"
         )
-        assert elapsed < 2.5, (
-            f"Profile switch took {elapsed:.2f}s — cooperative preemption should "
-            f"allow the drain to complete well within the 5s window."
-        )
 
-        bg_thread.join(2.0)
+        bg_thread.join(_LIVENESS_GUARD_S)
         assert op_yielded_early.is_set(), (
             "Background op did not signal early yield — preemption mechanism missing."
         )
@@ -366,21 +378,25 @@ def test_drain_timeout_still_fires_for_uncooperative_ops() -> None:
     def _stubborn_op() -> None:
         with runtime.operation():  # Regular operation — no preemption
             lease_held.set()
-            release_lease.wait(timeout=10.0)
+            release_lease.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_stubborn_op, daemon=True)
     holder.start()
-    assert lease_held.wait(2.0)
+    assert lease_held.wait(_LIVENESS_GUARD_S)
 
+    drain_s = 0.3
     try:
-        with _short_drain_timeout(0.3):
+        with _short_drain_timeout(drain_s):
             t0 = time.monotonic()
             with pytest.raises(TransitionDrainTimeout):
                 runtime.transition("beta", lambda p, t: None)
             elapsed = time.monotonic() - t0
 
-        assert elapsed < 1.0, (
-            f"Drain timeout took {elapsed:.2f}s — should fire within 2× the "
+        # A real, enforced deadline: the drain gives up at drain_s. The slack
+        # is for a loaded host; a drain that ignored the shortened timeout
+        # would take the stock 5 s, or wait out the lease.
+        assert elapsed < drain_s + _DRAIN_SLACK_S, (
+            f"Drain timeout took {elapsed:.2f}s against a {drain_s}s "
             f"_DRAIN_TIMEOUT_SECS window."
         )
         assert not runtime.transitioning, (
@@ -388,7 +404,7 @@ def test_drain_timeout_still_fires_for_uncooperative_ops() -> None:
         )
     finally:
         release_lease.set()
-        holder.join(2.0)
+        holder.join(_LIVENESS_GUARD_S)
 
 
 # ── regression: production background ops honour preemption ──────────────────
@@ -411,26 +427,23 @@ def test_run_health_tick_skips_when_transition_is_pending() -> None:
     def _hold():
         with runtime.operation():
             held.set()
-            release.wait(timeout=5.0)
+            release.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold, daemon=True)
     holder.start()
-    assert held.wait(2.0)
+    assert held.wait(_LIVENESS_GUARD_S)
 
     transition_started = threading.Event()
 
     def _switch():
         transition_started.set()
-        with _short_drain_timeout(5.0):
+        with _short_drain_timeout(_LIVENESS_GUARD_S):
             runtime.transition("beta", lambda p, t: None)
 
     switch_thread = threading.Thread(target=_switch, daemon=True)
     switch_thread.start()
-    transition_started.wait(1.0)
-    deadline = time.monotonic() + 1.0
-    while not runtime.transitioning and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert runtime.transitioning, "Transition must be in progress"
+    assert transition_started.wait(_LIVENESS_GUARD_S)
+    assert _wait_until_transitioning(runtime), "Transition must be in progress"
 
     # run_health_tick() should skip (not call engine.recall) when transitioning.
     engine = MagicMock()
@@ -444,8 +457,8 @@ def test_run_health_tick_skips_when_transition_is_pending() -> None:
 
     # Clean up.
     release.set()
-    holder.join(2.0)
-    switch_thread.join(2.0)
+    holder.join(_LIVENESS_GUARD_S)
+    switch_thread.join(_LIVENESS_GUARD_S)
 
 
 def test_materializer_operation_skips_when_transition_is_pending() -> None:
@@ -464,26 +477,23 @@ def test_materializer_operation_skips_when_transition_is_pending() -> None:
     def _hold():
         with runtime.operation():
             held.set()
-            release.wait(timeout=5.0)
+            release.wait(timeout=_LIVENESS_GUARD_S)
 
     holder = threading.Thread(target=_hold, daemon=True)
     holder.start()
-    assert held.wait(2.0)
+    assert held.wait(_LIVENESS_GUARD_S)
 
     transition_started = threading.Event()
 
     def _switch():
         transition_started.set()
-        with _short_drain_timeout(5.0):
+        with _short_drain_timeout(_LIVENESS_GUARD_S):
             runtime.transition("beta", lambda p, t: None)
 
     switch_thread = threading.Thread(target=_switch, daemon=True)
     switch_thread.start()
-    transition_started.wait(1.0)
-    deadline = time.monotonic() + 1.0
-    while not runtime.transitioning and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert runtime.transitioning, "Transition must be in progress"
+    assert transition_started.wait(_LIVENESS_GUARD_S)
+    assert _wait_until_transitioning(runtime), "Transition must be in progress"
 
     # _run_materializer_operation must skip (return None) when transitioning.
     operation_called = []
@@ -505,5 +515,5 @@ def test_materializer_operation_skips_when_transition_is_pending() -> None:
 
     # Clean up.
     release.set()
-    holder.join(2.0)
-    switch_thread.join(2.0)
+    holder.join(_LIVENESS_GUARD_S)
+    switch_thread.join(_LIVENESS_GUARD_S)

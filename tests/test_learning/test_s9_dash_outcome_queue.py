@@ -48,16 +48,24 @@ def test_enqueue_recall_is_microseconds() -> None:
         fact_ids=("f1", "f2", "f3"),
         query_id="qid-123",
     )
-    t0 = time.perf_counter()
-    for _ in range(1000):
-        enqueue_recall(evt)
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    _reset_for_testing()
+    # Best of several batches, not one: a single 20 ms scheduler stall on a
+    # loaded host used to fail the one-shot timing (measured 2-4 ms per batch,
+    # so the margin was 5x). The fastest batch is the code's own cost; added
+    # I/O or a DB call slows EVERY batch, so the minimum still catches it.
+    batch_ms: list[float] = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        for _ in range(1000):
+            enqueue_recall(evt)
+        batch_ms.append((time.perf_counter() - t0) * 1000.0)
+        _reset_for_testing()
+    elapsed_ms = min(batch_ms)
 
     # 20 ms for 1000 calls → 20 µs per call budget. Very generous.
     assert elapsed_ms < 20.0, (
-        f"enqueue_recall too slow: {elapsed_ms:.2f}ms for 1000 calls "
-        f"(budget 20ms total). Did someone add I/O to the hot path?"
+        f"enqueue_recall too slow: best {elapsed_ms:.2f}ms for 1000 calls "
+        f"(budget 20ms total; batches {batch_ms}). Did someone add I/O to the "
+        f"hot path?"
     )
 
 

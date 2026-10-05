@@ -220,31 +220,43 @@ class TestSlowEmbedderTimeout:
     """embed() takes >500ms → TimeoutError caught; store_fast returns with emb=None."""
 
     def test_slow_embed_falls_back_to_async(self, tmp_path: Path) -> None:
-        """embed() sleeps 600ms — well over the 500ms cap.
+        """An embed that never finishes on its own must not hold store_fast().
 
-        store_fast() must return without raising, and the embedding must be
-        NULL (deferred to materializer).
+        The embed blocks until the test releases it, which happens only after
+        store_fast() has returned. So store_fast() can finish only by honouring
+        its own embed deadline — no stopwatch needed.
         """
         import os
+        import threading
+
+        # Liveness guard, NOT a performance claim: only a store_fast() that
+        # waits for the blocked embed itself can run into it.
+        liveness_timeout_s = 15.0
+        release_embed = threading.Event()
         engine = _make_engine(tmp_path)
-        # Use 200ms timeout so the test runs fast; embed takes 400ms
-        with patch.dict(os.environ, {"SLM_STORE_FAST_EMBED_TIMEOUT_MS": "200"}):
-            # Recreate the constant inside the module or rely on the engine picking it up
-            embedder = _make_mock_embedder(
-                available=True,
-                vector=[1.0, 2.0, 3.0],
-                latency_s=0.4,  # 400ms > 200ms timeout
-            )
-            engine._embedder = embedder
+        embedder = _make_mock_embedder(available=True, vector=[1.0, 2.0, 3.0])
+        # Bounded only so a broken run cannot leak a stuck pool thread forever.
+        embedder.embed.side_effect = lambda _text: (
+            release_embed.wait(timeout=4 * liveness_timeout_s) and [1.0, 2.0, 3.0]
+        )
+        engine._embedder = embedder
+        outcome: dict = {}
 
-            t0 = time.monotonic()
-            fact_ids = engine.store_fast("slow embed content")
-            elapsed = time.monotonic() - t0
+        def _store() -> None:
+            outcome["fact_ids"] = engine.store_fast("slow embed content")
 
-        assert fact_ids, "store_fast must still return fact_ids on embed timeout"
-        # Should not have waited the full 400ms embed latency (timeout = 200ms)
-        # Allow generous headroom (×3) for CI scheduling jitter
-        assert elapsed < 1.5, f"store_fast spent {elapsed:.2f}s on a timed-out embed"
+        try:
+            with patch.dict(os.environ, {"SLM_STORE_FAST_EMBED_TIMEOUT_MS": "200"}):
+                store = threading.Thread(target=_store, daemon=True)
+                store.start()
+                store.join(timeout=liveness_timeout_s)
+                assert not store.is_alive(), (
+                    "store_fast is waiting on an embed past its own deadline"
+                )
+        finally:
+            release_embed.set()
+
+        assert outcome.get("fact_ids"), "store_fast must still return fact_ids on embed timeout"
 
     def test_slow_embed_leaves_embedding_null(self, tmp_path: Path) -> None:
         """Timed-out embed → embedding NULL; materializer fills later."""

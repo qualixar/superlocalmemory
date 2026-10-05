@@ -31,6 +31,17 @@ from superlocalmemory.storage.models import AtomicFact
 
 RECALL_CEILING_S = 2.0
 
+#: Scheduling allowance on top of a deadline the product enforces itself
+#: (``remote_rerank_guard.call_within`` waits at most the deadline, then
+#: abandons the request). Generous for a loaded host on purpose: the defect
+#: these tests reproduce (H-2) cost 15-30 s, an order of magnitude away.
+_DEADLINE_SLACK_S = 1.5
+
+#: Liveness bound for waits that only a broken build ever sits out (a held
+#: gate is always released by the test, a finished request always signals).
+#: NOT a performance claim.
+_LIVENESS_GUARD_S = 30.0
+
 
 def _candidates() -> list[tuple[AtomicFact, float]]:
     return [
@@ -146,6 +157,36 @@ def _wait_for(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
     return predicate()
 
 
+@contextmanager
+def _tracked_requests(rr: RemoteReranker) -> Iterator[tuple[Any, threading.Event]]:
+    """Count every POST attempt, and signal when a request's attempts end.
+
+    The attempts run on ``call_within``'s worker thread, which the recall may
+    already have abandoned; ``finished`` is how a test knows that thread is
+    done -- and so that the POST count is final -- without sleeping on it.
+    """
+    finished = threading.Event()
+    real_attempts = rr._attempts
+
+    def _attempts(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return real_attempts(*args, **kwargs)
+        finally:
+            finished.set()
+
+    with patch.object(rr, "_post", wraps=rr._post) as post, \
+            patch.object(rr, "_attempts", side_effect=_attempts):
+        yield post, finished
+
+
+def _join_threads_named(name: str) -> list[threading.Thread]:
+    """Join every live thread called ``name``; return the ones still alive."""
+    threads = [t for t in threading.enumerate() if t.name == name]
+    for t in threads:
+        t.join(timeout=_LIVENESS_GUARD_S)
+    return [t for t in threads if t.is_alive()]
+
+
 # ---------------------------------------------------------------------------
 # H-2: the measured failure, reproduced on a real socket
 # ---------------------------------------------------------------------------
@@ -162,7 +203,8 @@ class TestAHungEndpointIsBounded:
         assert applied is False
         assert status == "remote_unavailable"
         assert [f.fact_id for f, _ in results] == ["f0", "f1", "f2"]
-        assert wall < 0.5 + 0.4, f"recall waited {wall:.2f}s on a hung endpoint"
+        assert wall < rr.deadline_seconds + _DEADLINE_SLACK_S, (
+            f"recall waited {wall:.2f}s on a hung endpoint")
 
     def test_a_slow_drip_reply_cannot_stretch_the_deadline(self) -> None:
         with _silent_server("drip") as (url, _accepted):
@@ -172,28 +214,45 @@ class TestAHungEndpointIsBounded:
             wall = time.monotonic() - t0
             rr.shutdown()
         assert applied is False
-        assert wall < 0.5 + 0.4, f"a trickling reply held the recall {wall:.2f}s"
+        # Each byte resets a per-read timeout, so without the one total
+        # deadline this trickle lasts its whole 4 kB body: ~800 s.
+        assert wall < rr.deadline_seconds + _DEADLINE_SLACK_S, (
+            f"a trickling reply held the recall {wall:.2f}s")
 
     def test_a_read_timeout_is_not_retried(self) -> None:
         with _silent_server("hang") as (url, accepted):
             rr = RemoteReranker("m", url, deadline_seconds=0.4)
-            rr.rerank_with_status("q", _candidates())
-            time.sleep(0.6)
+            with _tracked_requests(rr) as (post, finished):
+                rr.rerank_with_status("q", _candidates())
+                # The recall has moved on; wait for the abandoned request
+                # itself to end, so any retry it was going to make is made.
+                assert finished.wait(_LIVENESS_GUARD_S), "the request never ended"
+            assert _wait_for(lambda: len(accepted) >= 1), "the endpoint was never reached"
             rr.shutdown()
+        assert post.call_count == 1, f"{post.call_count} attempts for one recall"
         assert len(accepted) == 1, f"{len(accepted)} connections for one recall"
 
     def test_after_a_timeout_the_next_recalls_do_not_wait(self) -> None:
         with _silent_server("hang") as (url, accepted):
-            rr = RemoteReranker("m", url, deadline_seconds=0.4)
-            rr.rerank_with_status("q", _candidates())
-            walls = []
-            for _ in range(5):
-                t0 = time.monotonic()
-                _, applied, status = rr.rerank_with_status("q", _candidates())
-                walls.append(time.monotonic() - t0)
-                assert applied is False and status == "remote_unavailable"
+            rr = RemoteReranker("m", url, deadline_seconds=1.0)
+            with patch.object(rr, "_request_scores",
+                              wraps=rr._request_scores) as requested:
+                rr.rerank_with_status("q", _candidates())
+                assert requested.call_count == 1
+                walls = []
+                for _ in range(5):
+                    t0 = time.monotonic()
+                    _, applied, status = rr.rerank_with_status("q", _candidates())
+                    walls.append(time.monotonic() - t0)
+                    assert applied is False and status == "remote_unavailable"
             rr.shutdown()
-        assert max(walls) < 0.05, f"later recalls still waited: {walls}"
+        # Observed, not timed: the paused breaker sent nothing (counted on the
+        # recall's own thread, so there is no lag to race).
+        assert requested.call_count == 1, "the endpoint was called again while paused"
+        # A recall that did call the endpoint here would wait at least the
+        # whole deadline, by construction; the old 50 ms bound measured the
+        # host, not this.
+        assert max(walls) < rr.deadline_seconds, f"later recalls still waited: {walls}"
         assert len(accepted) == 1, "the endpoint was called again while paused"
 
     def test_the_default_deadline_fits_inside_the_recall_ceiling(self) -> None:
@@ -232,22 +291,33 @@ class TestTheBreaker:
         self,
     ) -> None:
         clock = _FakeClock()
-        rr = self._rr(clock)
+        # A probe deadline no host stall can reach: with the stock 1 s one, a
+        # main thread slower than 1 s to release the gate made the probe give
+        # up and re-open the breaker, failing the TRIAL wait below.
+        rr = RemoteReranker(
+            "m", "https://rr.example.test/v1",
+            breaker=guard.CircuitBreaker(clock=clock),
+            deadline_seconds=_LIVENESS_GUARD_S,
+        )
         with _mock_http(_down, rr):
             for _ in range(guard.FAILURE_THRESHOLD):
                 rr.rerank_with_status("q", _candidates())
         assert rr._breaker.state == guard.CircuitBreaker.OPEN
         clock.now += guard.BASE_COOLDOWN_S + 1
         gate = threading.Event()
+        probe_answered = threading.Event()
 
         def _slow_ok(request: httpx.Request) -> httpx.Response:
-            gate.wait(5)
+            gate.wait(_LIVENESS_GUARD_S)
+            probe_answered.set()
             return _ok(request)
 
         with _mock_http(_slow_ok, rr) as requests:
-            t0 = time.monotonic()
             _, applied, _ = rr.rerank_with_status("q", _candidates())
-            assert time.monotonic() - t0 < 0.1, "the recall waited on the probe"
+            # Observed, not timed: the probe cannot answer before the gate
+            # opens, and the gate opens only below -- so a recall that came
+            # back has not waited on it.
+            assert not probe_answered.is_set(), "the recall waited on the probe"
             assert applied is False
             assert _wait_for(lambda: len(requests) == 1), "no probe was sent"
             gate.set()
@@ -294,8 +364,12 @@ class TestTheBreaker:
         with _mock_http(_held, rr) as requests:
             for _ in range(20):
                 rr.rerank_with_status("q", _candidates())
-            time.sleep(0.1)
             gate.set()
+            # Instead of sleeping and hoping every probe has reached the
+            # endpoint: join every probe thread, then every request worker it
+            # started, so each request a probe ever made is already counted.
+            assert _join_threads_named("remote-rerank-probe") == []
+            assert _join_threads_named("remote-rerank") == []
             assert _wait_for(lambda: not rr._breaker._probing)
         assert len(requests) <= 2, f"{len(requests)} probes for one cooldown"
 

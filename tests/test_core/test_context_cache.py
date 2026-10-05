@@ -331,6 +331,14 @@ def test_cleanup_global_lru_frees_to_target_under_pressure(
 # Perf (ballpark — p95 < 10 ms budget per LLD-01 R1/PERF-01-03)
 # ---------------------------------------------------------------------------
 
+#: The read path's documented budget (module docstring: "read-path <10 ms").
+_READ_BUDGET_S = 0.010
+#: Deliberate real-time bound: five times the budget. Measured on a host at
+#: load ~16 on 14 cores, a read costs ~1 ms median / ~2 ms p95, so this leaves
+#: ~25x for scheduler noise while a regression to a full scan or a model call
+#: (tens to hundreds of ms per read) still fails it.
+_READ_TEST_CEILING_S = 5 * _READ_BUDGET_S
+
 
 def test_read_entry_fast_under_budget(home: Path,
                                         cache: "cc.ContextCache") -> None:
@@ -343,9 +351,8 @@ def test_read_entry_fast_under_budget(home: Path,
         cc.read_entry_fast("sess-1", "abcd1234deadbeef",
                             db_path=home / "active_brain_cache.db", home_dir=home)
     avg = (time.perf_counter() - start) / 10
-    # Wall clock is noisy in CI; use a generous bound. The fast-path budget
-    # is <10 ms p95 but we allow 50 ms in the test to avoid flakiness.
-    assert avg < 0.05, f"avg {avg*1000:.2f} ms"
+    # Wall clock is noisy in CI; use a generous bound (see _READ_TEST_CEILING_S).
+    assert avg < _READ_TEST_CEILING_S, f"avg {avg*1000:.2f} ms"
 
 
 def test_current_admission_cache_backstop_stays_under_hot_path_budget(
@@ -388,7 +395,9 @@ def test_current_admission_cache_backstop_stays_under_hot_path_budget(
         ) is not None
         timings.append(time.perf_counter() - started)
     p95 = sorted(timings)[int(len(timings) * 0.95) - 1]
-    assert p95 < 0.05, f"current-admission cache p95 {p95 * 1000:.2f} ms"
+    # Same deliberate bound as the plain read: the admission check is one more
+    # read-only lookup and must keep the hit inside the read path's budget.
+    assert p95 < _READ_TEST_CEILING_S, f"current-admission cache p95 {p95 * 1000:.2f} ms"
 
 
 # ---------------------------------------------------------------------------

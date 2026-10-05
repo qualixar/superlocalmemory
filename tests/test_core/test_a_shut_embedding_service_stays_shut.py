@@ -33,6 +33,13 @@ from tests.helpers import fake_embedding_worker as fake
 
 REPO_SRC = str(Path(__file__).resolve().parents[2] / "src")
 
+#: The response timeout every in-process test here runs under.
+_PATCHED_RESPONSE_TIMEOUT_S = 60
+#: Liveness bound, NOT a performance claim. An embed that shutdown fails to
+#: wake is still waiting on its 60 s response timeout long after this; one that
+#: is woken ends within a ``_CANCEL_POLL_SECONDS`` poll. The gap is the margin.
+_WAKE_BOUND_S = _PATCHED_RESPONSE_TIMEOUT_S / 4
+
 
 @pytest.fixture()
 def spawner(monkeypatch):
@@ -44,7 +51,7 @@ def spawner(monkeypatch):
         return sp
 
     # Long enough that only a wake-up -- never the timeout -- can end a wait.
-    monkeypatch.setattr(emb_mod, "_SUBPROCESS_RESPONSE_TIMEOUT", 60)
+    monkeypatch.setattr(emb_mod, "_SUBPROCESS_RESPONSE_TIMEOUT", _PATCHED_RESPONSE_TIMEOUT_S)
     yield install
     for sp in made:
         sp.reap()
@@ -54,30 +61,39 @@ def _service() -> EmbeddingService:
     return EmbeddingService(EmbeddingConfig(dimension=4))
 
 
-def test_an_embed_in_flight_stops_at_shutdown_and_spawns_nothing(spawner) -> None:
+def _signal_when_waiting(monkeypatch) -> threading.Event:
+    """Set once an embed has written its request and starts waiting on the worker."""
+    waiting = threading.Event()
+    real = EmbeddingService._readline_with_timeout
+
+    def _readline(stream, timeout_seconds, *, cancelled=None):
+        waiting.set()
+        return real(stream, timeout_seconds, cancelled=cancelled)
+
+    monkeypatch.setattr(EmbeddingService, "_readline_with_timeout", staticmethod(_readline))
+    return waiting
+
+
+def test_an_embed_in_flight_stops_at_shutdown_and_spawns_nothing(spawner, monkeypatch) -> None:
     sp = spawner()
+    waiting = _signal_when_waiting(monkeypatch)
     svc = _service()
     out: dict = {}
 
     def _embed() -> None:
         out["v"] = svc.embed("in flight")
-        out["at"] = time.monotonic()
 
-    th = threading.Thread(target=_embed, name="in-flight-embed")
+    th = threading.Thread(target=_embed, name="in-flight-embed", daemon=True)
     th.start()
-    deadline = time.monotonic() + 10
-    while not sp.procs and time.monotonic() < deadline:
-        time.sleep(0.01)
-    time.sleep(0.2)  # the request is written and the embed is waiting
+    # The request is written and the embed is waiting on the silent worker.
+    assert waiting.wait(timeout=_WAKE_BOUND_S), "the embed never reached the worker"
     assert len(sp.procs) == 1
 
-    t_shutdown = time.monotonic()
     svc.shutdown(timeout=1.0)
-    th.join(timeout=10)
+    th.join(timeout=_WAKE_BOUND_S)
 
-    assert not th.is_alive(), "the in-flight embed kept waiting after shutdown"
+    assert not th.is_alive(), "the in-flight embed sat out its timeout after shutdown"
     assert out["v"] is None
-    assert out["at"] - t_shutdown < 1.5, "the in-flight embed sat out its timeout"
     assert len(sp.procs) == 1, "a worker was respawned after shutdown"
     assert sp.alive() == []
 
@@ -86,11 +102,18 @@ def test_an_embed_after_shutdown_returns_at_once_and_spawns_nothing(spawner) -> 
     sp = spawner()
     svc = _service()
     svc.shutdown(timeout=0.1)
+    out: dict = {}
 
-    t0 = time.monotonic()
-    assert svc.embed("after") is None
-    assert svc.embed_batch(["a", "b"]) == [None, None]
-    assert time.monotonic() - t0 < 0.5
+    def _embed_after_shutdown() -> None:
+        out["one"] = svc.embed("after")
+        out["batch"] = svc.embed_batch(["a", "b"])
+
+    th = threading.Thread(target=_embed_after_shutdown, daemon=True)
+    th.start()
+    th.join(timeout=_WAKE_BOUND_S)
+
+    assert not th.is_alive(), "an embed after shutdown waited on a worker"
+    assert out == {"one": None, "batch": [None, None]}
     assert sp.procs == []
     assert svc.is_closed is True
 
@@ -122,59 +145,77 @@ def test_a_shutdown_while_the_child_starts_leaves_no_orphan(spawner) -> None:
     assert svc._worker_proc is None
 
 
-def test_a_ready_response_is_not_delayed_by_the_shutdown_poll() -> None:
+#: The shutdown poll, stretched so a read it delays would take this long.
+_AMPLIFIED_POLL_S = 30.0
+#: Real-time bound: a ready line is read at once. A read held back by even one
+#: poll interval takes ``_AMPLIFIED_POLL_S``, six times this, so host load
+#: cannot push a correct read past it nor pull a delayed one under it.
+_READY_BOUND_S = _AMPLIFIED_POLL_S / 6
+
+
+def test_a_ready_response_is_not_delayed_by_the_shutdown_poll(monkeypatch) -> None:
+    monkeypatch.setattr(emb_mod, "_CANCEL_POLL_SECONDS", _AMPLIFIED_POLL_S)
     r, w = os.pipe()
     with os.fdopen(r, "r") as reader, os.fdopen(w, "w") as writer:
         writer.write('{"ok": true}\n')
         writer.flush()
         t0 = time.monotonic()
         line = EmbeddingService._readline_with_timeout(
-            reader, 5.0, cancelled=lambda: False,
+            reader, _AMPLIFIED_POLL_S * 2, cancelled=lambda: False,
         )
     assert line == '{"ok": true}\n'
-    assert time.monotonic() - t0 < 0.05
+    assert time.monotonic() - t0 < _READY_BOUND_S
+
+
+#: The child's response timeout: what an embed nobody wakes would wait out.
+_CHILD_RESPONSE_TIMEOUT_S = 120
+#: Liveness bound, NOT a performance claim: an exit held by the in-flight embed
+#: lasts the whole 120 s response timeout, so half of it separates the two.
+_EXIT_BOUND_S = _CHILD_RESPONSE_TIMEOUT_S / 2
 
 
 def test_interpreter_exit_is_not_held_by_an_embed_in_flight(tmp_path) -> None:
     """No close() at all: the process must still exit promptly."""
     script = textwrap.dedent(
         f"""
-        import concurrent.futures, subprocess, sys, time
+        import concurrent.futures, subprocess, sys, threading
         from types import SimpleNamespace
         from superlocalmemory.core import embeddings as E
         from superlocalmemory.core.config import EmbeddingConfig
 
-        procs = []
         def _popen(argv, *a, **k):
-            p = subprocess.Popen([sys.executable, "-c", {fake.SILENT_WORKER!r}], *a, **k)
-            procs.append(p)
-            return p
+            return subprocess.Popen([sys.executable, "-c", {fake.SILENT_WORKER!r}], *a, **k)
         E.subprocess = SimpleNamespace(
             Popen=_popen, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL)
         E.EmbeddingService._check_memory_pressure = staticmethod(lambda: True)
+        waiting = threading.Event()
+        _real_readline = E.EmbeddingService._readline_with_timeout
+        def _readline(stream, timeout_seconds, *, cancelled=None):
+            waiting.set()  # the request is written and the embed is waiting
+            return _real_readline(stream, timeout_seconds, cancelled=cancelled)
+        E.EmbeddingService._readline_with_timeout = staticmethod(_readline)
         svc = E.EmbeddingService(EmbeddingConfig(dimension=4))
         pool = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="slm-sg-embed")
         pool.submit(svc.embed, "in flight at exit")
-        while not procs:
-            time.sleep(0.01)
-        time.sleep(0.2)
+        if not waiting.wait(30):
+            sys.exit("the embed never reached the worker")
         print("exiting", flush=True)
         """
     )
     env = {
         **os.environ,
         "PYTHONPATH": REPO_SRC,
-        "SLM_EMBED_RESPONSE_TIMEOUT": "120",
+        "SLM_EMBED_RESPONSE_TIMEOUT": str(_CHILD_RESPONSE_TIMEOUT_S),
         "SLM_DATA_DIR": str(tmp_path),
         "HOME": str(tmp_path),
     }
-    t0 = time.monotonic()
-    proc = subprocess.run(
-        [sys.executable, "-c", script], env=env, capture_output=True,
-        text=True, timeout=60,
-    )
-    elapsed = time.monotonic() - t0
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True,
+            text=True, timeout=_EXIT_BOUND_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"exit was held past {_EXIT_BOUND_S:.0f}s by the in-flight embed")
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "exiting" in proc.stdout
-    assert elapsed < 15, f"exit was held for {elapsed:.1f}s by the in-flight embed"
     assert "did not respond" not in proc.stderr

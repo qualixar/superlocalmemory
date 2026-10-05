@@ -111,10 +111,21 @@ def test_storage_aggression_still_keeps_the_new_shapes() -> None:
         assert redact_secrets(text) == text, text
 
 
+#: A deliberate bound, in CPU seconds of this thread rather than wall-clock.
+#: The linear scan of this 140 kB input costs ~0.27 s of CPU (doubling cleanly
+#: with the input), but measured 0.65-0.76 s of wall-clock on a loaded host --
+#: against the old 1.0 s wall-clock bound. CPU time does not grow while the
+#: host deschedules the thread, so the same 1.0 s now has ~4x headroom, and a
+#: rule that goes quadratic over even one 40 kB run of this input (~2 s of
+#: CPU) still fails it.
+_HOSTILE_CPU_CEILING_S = 1.0
+
+
 def test_the_new_rules_stay_linear_on_hostile_input() -> None:
     import time
 
     hostile = ("A_" * 20000) + "=" + ("password is " * 5000) + ("x_" * 20000)
-    started = time.perf_counter()
+    started = time.thread_time()
     redact_for_hosted_judge(hostile)
-    assert time.perf_counter() - started < 1.0
+    spent = time.thread_time() - started
+    assert spent < _HOSTILE_CPU_CEILING_S, f"{spent:.2f}s of CPU on hostile input"
