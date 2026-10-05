@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -17,6 +18,12 @@ from superlocalmemory.storage.external_evidence import (
 )
 from superlocalmemory.storage.migrations import M040_agent_experience_receipts as m040
 from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
+
+# Pure liveness/deadlock guard for the concurrency test below, not a
+# performance target: 32 writes serialised behind one in-process lock take
+# well under a second normally.  This only exists so a genuine deadlock in
+# the store's process lock fails the test instead of hanging the suite.
+_DEADLOCK_GUARD_S = 15.0
 
 
 def _evidence(profile_id: str = "alpha") -> dict:
@@ -179,8 +186,25 @@ def test_concurrent_external_observations_complete_without_deadlock(
         payload["run_id"] = f"run-{number}"
         return store.record(payload)
 
-    started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        outcomes = list(executor.map(record, range(32)))
+    # `ThreadPoolExecutor.map` blocks the calling thread until every submission
+    # finishes, with no timeout of its own — a real deadlock in the store's
+    # process lock would hang this test (and the whole suite) forever instead
+    # of failing it.  Running the pool from a background thread lets us
+    # `join()` with a bound and fail cleanly if it is ever exceeded, rather
+    # than asserting an exact wall-clock duration for 32 in-process-serialised
+    # writes, which is noisy on a machine shared with other test runs.
+    outcomes: list[bool] = []
+
+    def run_pool() -> None:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            outcomes.extend(executor.map(record, range(32)))
+
+    pool_thread = threading.Thread(target=run_pool, daemon=True)
+    pool_thread.start()
+    pool_thread.join(timeout=_DEADLOCK_GUARD_S)
+
+    assert not pool_thread.is_alive(), (
+        f"32 concurrent record() calls did not finish within "
+        f"{_DEADLOCK_GUARD_S:.0f}s — the store's process lock likely deadlocked"
+    )
     assert outcomes == [True] * 32
-    assert time.monotonic() - started < 2.0

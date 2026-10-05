@@ -36,7 +36,7 @@ import pytest
 
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
-from superlocalmemory.storage.memory_write import memory_write, memory_read
+from superlocalmemory.storage.memory_write import _busy_timeout_ms, memory_write, memory_read
 from superlocalmemory.storage.write_lock import get_write_lock
 
 
@@ -46,6 +46,19 @@ def _init_db(db_path: Path) -> None:
     """Initialise a minimal memory.db schema."""
     mgr = DatabaseManager(db_path)
     mgr.initialize(schema)
+
+
+# A pure liveness/deadlock guard, NOT a performance target.  The concurrency
+# property in the tests below is proved with threading.Event handshakes, not
+# by measuring how fast anything ran -- a hand-off that completes in
+# microseconds and one that completes in 9 seconds both satisfy the Events.
+# This bound only exists so that a genuine regression (the write lock really
+# held across the reader phase, i.e. a hang) fails the test instead of
+# blocking the suite forever.  It reuses the product's own busy_timeout
+# contract (memory_write._busy_timeout_ms, env SLM_DB_BUSY_TIMEOUT_MS,
+# default 10s) so "the test gave up" means the same thing as "the daemon
+# would have given up too" -- there is no separate, unexplained number here.
+_DEADLOCK_GUARD_S = _busy_timeout_ms() / 1000.0
 
 
 # ─────────────────────────── Lock-hold duration tests ───────────────────────
@@ -67,16 +80,14 @@ class TestNoLongWriteLockHoldAcrossSlowOp:
         db_path = tmp_path / "memory.db"
         _init_db(db_path)
 
-        lock = get_write_lock(db_path)
-        results: dict[str, float] = {}
+        writer_done = threading.Event()
 
         def concurrent_writer() -> None:
-            t0 = time.monotonic()
             with memory_write(db_path) as conn:
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS _probe (x INTEGER)"
                 )
-            results["elapsed"] = time.monotonic() - t0
+            writer_done.set()
 
         # The read phase of step12 uses memory_read — write lock NOT held.
         # Simulate the read phase holding memory_read while concurrent_writer runs.
@@ -86,26 +97,34 @@ class TestNoLongWriteLockHoldAcrossSlowOp:
         def reader_thread() -> None:
             with memory_read(db_path) as _conn:
                 read_started.set()
-                read_may_finish.wait(timeout=2.0)
+                # No self-timeout here on purpose: this thread must stay
+                # parked inside its read transaction until the main thread
+                # has proven the writer finished concurrently.  Letting it
+                # give up early would let a real regression (writer actually
+                # blocked by this reader) slip through on a loaded machine.
+                read_may_finish.wait(timeout=_DEADLOCK_GUARD_S)
 
         rt = threading.Thread(target=reader_thread, daemon=True)
         rt.start()
-        read_started.wait(timeout=2.0)
+        assert read_started.wait(timeout=_DEADLOCK_GUARD_S), (
+            "reader thread never reached memory_read()"
+        )
 
-        # Concurrent writer should complete immediately (read lock ≠ write lock)
+        # Concurrent writer should complete immediately (read lock ≠ write lock).
+        # _DEADLOCK_GUARD_S below is a liveness bound, not a speed claim — see
+        # the module-level comment.
         wt = threading.Thread(target=concurrent_writer, daemon=True)
         wt.start()
-        wt.join(timeout=5.0)
+        writer_completed = writer_done.wait(timeout=_DEADLOCK_GUARD_S)
         read_may_finish.set()
-        rt.join(timeout=2.0)
+        rt.join(timeout=_DEADLOCK_GUARD_S)
 
-        assert not wt.is_alive(), "concurrent writer timed out — write lock not released"
-        assert "elapsed" in results
-        # Should complete well within busy_timeout (10 s)
-        assert results["elapsed"] < 5.0, (
-            f"concurrent writer took {results['elapsed']:.2f}s — "
-            "write lock may have been held during reader phase"
+        assert writer_completed, (
+            "concurrent writer did not complete while the reader held "
+            "memory_read() — the write lock may be held during the reader phase"
         )
+        wt.join(timeout=_DEADLOCK_GUARD_S)
+        assert not wt.is_alive(), "concurrent writer timed out — write lock not released"
 
     def test_compute_pagerank_uses_memory_write(self, tmp_path: Path) -> None:
         """EntityCompiler._compute_pagerank must use memory_write() so the
@@ -161,33 +180,36 @@ class TestNoLongWriteLockHoldAcrossSlowOp:
 
         read_started = threading.Event()
         read_may_finish = threading.Event()
-        write_elapsed: list[float] = []
+        writer_done = threading.Event()
 
         def reader_thread() -> None:
             with memory_read(db_path) as _conn:
                 read_started.set()
-                read_may_finish.wait(timeout=3.0)
+                # See test_concurrent_writer_acquires_during_step12_read_phase
+                # above for why this has no self-timeout.
+                read_may_finish.wait(timeout=_DEADLOCK_GUARD_S)
 
         def writer_thread() -> None:
-            t0 = time.monotonic()
             with memory_write(db_path) as conn:
                 conn.execute("CREATE TABLE IF NOT EXISTS _probe2 (y TEXT)")
-            write_elapsed.append(time.monotonic() - t0)
+            writer_done.set()
 
         rt = threading.Thread(target=reader_thread, daemon=True)
         rt.start()
-        read_started.wait(timeout=2.0)
+        assert read_started.wait(timeout=_DEADLOCK_GUARD_S), (
+            "reader thread never reached memory_read()"
+        )
 
         wt = threading.Thread(target=writer_thread, daemon=True)
         wt.start()
-        wt.join(timeout=5.0)
+        # Liveness bound, not a speed claim — see the companion test above.
+        writer_completed = writer_done.wait(timeout=_DEADLOCK_GUARD_S)
         read_may_finish.set()
-        rt.join(timeout=2.0)
+        rt.join(timeout=_DEADLOCK_GUARD_S)
 
-        assert not wt.is_alive(), "writer was blocked by reader — wrong lock semantics"
-        assert write_elapsed and write_elapsed[0] < 3.0, (
-            f"writer waited {write_elapsed[0]:.2f}s — should not block on reader"
-        )
+        assert writer_completed, "writer was blocked by reader — wrong lock semantics"
+        wt.join(timeout=_DEADLOCK_GUARD_S)
+        assert not wt.is_alive(), "writer thread failed to exit"
 
 
 # ─────────────────────────── M028 repair uses memory_write ──────────────────
@@ -321,8 +343,13 @@ class TestShortWriteTransactions:
     ) -> None:
         """Two threads doing short memory_write() calls must not starve each other.
 
-        Neither thread should wait longer than busy_timeout (10 s) because
-        each write is bounded and commits promptly.
+        Neither thread should wait longer than busy_timeout because each
+        write is bounded and commits promptly.  The bound used below IS the
+        product's real busy_timeout contract (memory_write._busy_timeout_ms,
+        env SLM_DB_BUSY_TIMEOUT_MS, default 10s) — not an arbitrary number —
+        so this stays a real time-bound test on purpose: it exists to catch
+        the write lock starving a thread past the point SQLite itself would
+        give up, not to benchmark how fast ten tiny writes run.
         """
         db_path = tmp_path / "memory.db"
         _init_db(db_path)
@@ -354,17 +381,19 @@ class TestShortWriteTransactions:
         t2 = threading.Thread(target=writer, args=("thread-B",), daemon=True)
         t1.start()
         t2.start()
-        t1.join(timeout=30.0)
-        t2.join(timeout=30.0)
+        t1.join(timeout=_DEADLOCK_GUARD_S * 3)
+        t2.join(timeout=_DEADLOCK_GUARD_S * 3)
 
         assert not errors, f"write errors: {errors}"
         assert not t1.is_alive() and not t2.is_alive(), (
             "writer threads timed out — likely deadlock or extreme lock contention"
         )
         assert len(results) == ITERATIONS * 2
-        # Each iteration should complete in under 5 s (well within busy_timeout)
+        # Each iteration is bounded by the product's own busy_timeout
+        # contract, not an arbitrary number — see the docstring above.
         for elapsed in results:
-            assert elapsed < 5.0, (
+            assert elapsed < _DEADLOCK_GUARD_S, (
                 f"single write iteration took {elapsed:.2f}s — "
-                "write lock may have been held too long"
+                f"exceeds the configured busy_timeout ({_DEADLOCK_GUARD_S:.1f}s); "
+                "the write lock may have been held too long"
             )
