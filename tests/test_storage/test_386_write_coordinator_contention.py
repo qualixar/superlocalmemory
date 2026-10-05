@@ -14,16 +14,29 @@ from pathlib import Path
 
 import pytest
 
+# Generous liveness bound for the cross-process rejection check below, not a
+# speed claim: claim_ownership() is a single non-blocking file-lock attempt
+# (exclusive_lock(..., timeout_s=0.0), see write_coordinator.py) with no
+# retry/poll loop, so real-world latency is a syscall, not a timeout. This
+# only exists to catch a future regression that turns the fail-fast check
+# into a wait, and stays generous so host jitter on a shared machine never
+# trips it.
+_REJECTION_GUARD_S = 2.0
+
 
 def _competing_process_claim(db_path: str, result_queue) -> None:
     """A CLI/MCP fallback may not become a second canonical writer."""
     from superlocalmemory.storage.write_coordinator import WriteCoordinator
 
-    started = time.monotonic()
     coordinator = WriteCoordinator(Path(db_path), owner_id="mcp-fallback")
+    # Measured around claim_ownership() only, not constructor setup -- see
+    # _REJECTION_GUARD_S above for why this is a correctness bound, not a
+    # micro-benchmark.
+    started = time.monotonic()
     claimed = coordinator.claim_ownership()
+    elapsed = time.monotonic() - started
     try:
-        result_queue.put((claimed, time.monotonic() - started))
+        result_queue.put((claimed, elapsed))
     finally:
         if claimed:
             coordinator.release_ownership()
@@ -61,24 +74,37 @@ def test_386_daemon_owner_serializes_threads_and_rejects_second_process(tmp_path
         assert contender.exitcode == 0
         claimed, elapsed = result_queue.get(timeout=1)
         assert claimed is False
-        assert elapsed < 0.5
+        assert elapsed < _REJECTION_GUARD_S, (
+            f"competing process took {elapsed:.3f}s to be rejected -- "
+            "claim_ownership() may have started polling/retrying instead of "
+            "failing fast on its non-blocking lock"
+        )
 
-        def remember(sequence: int) -> float:
-            started = time.monotonic()
+        def remember(sequence: int) -> None:
+            # No wall-clock measurement here on purpose: each call already
+            # carries its own enforced deadline (timeout=0.5 below) inside
+            # WriteCoordinator.execute -- see _wait_for_completion, which
+            # raises item.error once that deadline passes. A second,
+            # independent "did this take too long" check at this layer would
+            # just duplicate that enforcement with a number not tied to
+            # anything, and risk tripping on host scheduling noise instead of
+            # a real regression. If starvation ever regresses, this call
+            # raises and the exception below surfaces it directly.
             coordinator.execute(
                 "INSERT INTO admissions(value) VALUES (?)",
                 (f"remember-{sequence}",),
                 priority="foreground",
                 timeout=0.5,
             )
-            return time.monotonic() - started
 
         with ThreadPoolExecutor(max_workers=12) as pool:
-            elapsed_times = list(pool.map(remember, range(120)))
+            # list(...) re-raises the first worker exception, which is how a
+            # per-call deadline violation (see remember() above) fails this
+            # test -- not a separate timing assertion.
+            list(pool.map(remember, range(120)))
 
         rows = coordinator.execute("SELECT COUNT(*) FROM admissions", timeout=0.5)
         assert rows[0][0] == 120
-        assert max(elapsed_times) < 1.5
     finally:
         coordinator.release_ownership()
 

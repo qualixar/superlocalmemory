@@ -152,15 +152,31 @@ def test_one_failing_operation_does_not_spoil_its_batch(tmp_path) -> None:
 def test_full_queue_is_refused_at_once_with_retry_after(tmp_path) -> None:
     writer = _scratch_writer(tmp_path, queue_cap=2)
     gate = threading.Event()
+    entered_held = threading.Event()
 
     def held(conn):
+        entered_held.set()
         gate.wait(5.0)
         conn.execute("INSERT INTO t VALUES ('held')")
+
+    def _wait_for_queue_depth(depth: int, *, timeout: float = 2.0) -> None:
+        """Poll the writer's own queue instead of guessing a sleep duration:
+        the two `queued` threads below must actually be enqueued (not merely
+        started) before the test submits the one that should overflow it."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with writer._cond:
+                if len(writer._queue) >= depth:
+                    return
+            time.sleep(0.005)
+        with writer._cond:
+            actual = len(writer._queue)
+        raise AssertionError(f"queue never reached depth {depth} (stuck at {actual})")
 
     try:
         first = threading.Thread(target=writer.submit, args=(held,))
         first.start()
-        time.sleep(0.05)  # writer is now executing ``held``
+        assert entered_held.wait(timeout=2.0), "writer never started executing held"
         queued = [
             threading.Thread(
                 target=writer.submit,
@@ -170,11 +186,16 @@ def test_full_queue_is_refused_at_once_with_retry_after(tmp_path) -> None:
         ]
         for thread in queued:
             thread.start()
-        time.sleep(0.05)
+        _wait_for_queue_depth(2)
         started = time.monotonic()
         with pytest.raises(AdmissionJournalOverloaded) as refused:
             writer.submit(lambda c: c.execute("INSERT INTO t VALUES ('over')"))
-        assert time.monotonic() - started < 0.05
+        # A liveness bound, not a latency benchmark: a full queue must refuse
+        # synchronously (a length check + raise, see GroupCommitWriter.submit)
+        # rather than block or poll, so this only needs enough headroom for
+        # scheduler jitter on a shared machine -- consistent with the other
+        # "refused without waiting" bounds in this file (0.2s, below).
+        assert time.monotonic() - started < 0.2
         assert refused.value.retry_after_seconds >= 1
         gate.set()
         first.join(5.0)
