@@ -1,0 +1,44 @@
+{
+  "checkpoint": "GREEN",
+  "scope": "PRE-01 permission domain and ENR-01 state reducer only",
+  "red_commit": "5b566967",
+  "typecheck": "pass",
+  "executed_tests": 98,
+  "passed": 98,
+  "failed": 0,
+  "coverage": {
+    "lines_percent": 100,
+    "functions_percent": 100,
+    "branches_percent": 98.2,
+    "modules": [
+      "src/request-policy.ts",
+      "src/enrollment.ts"
+    ]
+  },
+  "environment": "minimal PATH-only test subprocesses; no inherited credentials",
+  "reviews": {
+    "code-reviewer": "APPROVE isolated GREEN checkpoint; no blockers",
+    "typescript-reviewer": "no blocking findings"
+  },
+  "code_intelligence": {
+    "index": "slm423-gateway-domain",
+    "edited_symbols": [
+      "authorizeRequest",
+      "createEnrollment",
+      "transitionEnrollment"
+    ],
+    "risk": "LOW",
+    "indexed_production_callers": 0,
+    "note": "root index emitted Python scope warnings; isolated gateway index used for edited symbols"
+  },
+  "remaining_gates": [
+    "schema/token and wire validation",
+    "atomic registry admission/CAS",
+    "authenticated callbacks",
+    "idempotent provider journal",
+    "secure connector delivery and native lifecycle",
+    "SLM UI integration",
+    "native host acceptance",
+    "accepted M4 4.1.22 base"
+  ]
+}

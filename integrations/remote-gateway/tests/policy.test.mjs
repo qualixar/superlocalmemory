@@ -46,3 +46,17 @@ test('missing grant or connection fails closed', () => { for (const key of ['aut
 test('consent audience must match resource', () => { const f = fixture(); f.authorization.audience = 'https://other.example/mcp'; deny(f, 'INVALID_PRINCIPAL'); });
 test('sharing string cannot bypass permission', () => { const f = fixture(); f.request.arguments = { include_shared: 'true' }; deny(f, 'SHARING_DENIED'); });
 test('null profile cannot fall through', () => { const f = fixture(); f.request.arguments = { profile_id: null }; deny(f, 'PROFILE_DENIED'); });
+
+test('consent cannot select another connection', () => { const f = fixture(); f.authorization.connectionId = 'connection-b'; deny(f, 'BINDING_MISMATCH'); });
+test('blank verified identity is invalid', () => { const f = fixture(); f.actor.ownerId = ''; deny(f, 'INVALID_PRINCIPAL'); });
+test('unknown token scope is not returned as effective scope', () => { const f = fixture(); f.actor.scopes.push('admin'); f.authorization.consentedScopes.push('admin'); assert.deepEqual(run(f).grant.allowedScopes, ['slm:read', 'slm:write', 'slm:session']); });
+test('tool discovery omits tools without actual operation scopes', () => { const f = fixture(); f.actor.scopes = ['slm:read']; f.request.rpcMethod = 'tools/list'; const r = run(f); assert.equal(r.allowed, true); assert.deepEqual(r.grant.allowedTools, ['recall']); });
+for (const [argument, consentKey, policyKey] of [['include_shared','consentedSharedRead','allowSharedRead'], ['include_global','consentedGlobalRead','allowGlobalRead']]) {
+  test(`${argument} requires connection policy too`, () => { const f = fixture(); f.authorization[consentKey] = true; f.request.arguments = { [argument]: true }; deny(f, 'SHARING_DENIED'); });
+  test(`${argument} explicit two-sided consent allowed`, () => { const f = fixture(); f.authorization[consentKey] = true; f.connection[policyKey] = true; f.request.arguments = { [argument]: true }; assert.equal(run(f).allowed, true); });
+  test(`${argument} explicit false stays personal`, () => { const f = fixture(); f.request.arguments = { [argument]: false }; assert.equal(run(f).allowed, true); });
+}
+test('correction also requires connection policy', () => { const f = fixture(); f.authorization.consentedCorrection = true; f.request.toolName = 'remember'; f.request.arguments = { replaces: 'fact-a' }; deny(f, 'CORRECTION_DENIED'); });
+test('grant snapshot is detached from input permissions', () => { const f = fixture(); const r = run(f); f.connection.allowedTools.length = 0; f.authorization.consentedTools.length = 0; assert.deepEqual(r.grant.connection.allowedTools, ['recall', 'remember', 'session_init']); assert.deepEqual(r.grant.authorization.consentedTools, ['recall', 'remember', 'session_init']); });
+test('missing tool cannot be called', () => { const f = fixture(); delete f.request.toolName; deny(f, 'TOOL_DENIED'); });
+test('prototype property is not a tool', () => { const f = fixture(); f.request.toolName = '__proto__'; f.authorization.consentedTools.push('__proto__'); f.connection.allowedTools.push('__proto__'); deny(f, 'TOOL_DENIED'); });

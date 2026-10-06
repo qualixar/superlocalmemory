@@ -25,3 +25,11 @@ test('retryable provider failure can resume provisioning', () => { const r = rec
 test('terminal failure can disconnect but cannot resume', () => { const r = record('failed_terminal'); denied(r, 'start_provision', context(r), 'INVALID_TRANSITION'); assert.equal(transitionEnrollment(r, 'disconnect', context(r)).ok, true); });
 test('invalid clocks fail closed', () => { const r = record(); denied(r, 'authorize', { ...context(r), now: NaN }, 'INVALID_ENROLLMENT'); });
 test('transition never mutates source record', () => { const r = Object.freeze(record()); const before = JSON.stringify(r); const next = transitionEnrollment(r, 'authorize', context(r)); assert.equal(next.ok, true); assert.equal(JSON.stringify(r), before); });
+
+for (const state of ['disconnecting', 'cleanup_pending', 'revoked', 'failed_terminal']) {
+  for (const event of ['verified', 'retryable_failure', 'connector_arrived', 'provisioned']) test(`${state} cannot be revived by ${event}`, () => { const r = record(state); denied(r, event, context(r), 'INVALID_TRANSITION'); });
+}
+for (const state of ['requested', 'authorized', 'provisioning', 'awaiting_connector', 'verifying', 'ready', 'failed_retryable', 'failed_terminal']) test(`${state} can disconnect without waiting for provider`, () => { const r = record(state); const result = transitionEnrollment(r, 'disconnect', context(r)); assert.equal(result.ok, true); assert.equal(result.enrollment.status, 'disconnecting'); assert.equal(result.enrollment.connectorGeneration, 2); });
+test('unknown event or status cannot use object prototype transitions', () => { const r = record(); denied(r, '__proto__', context(r), 'INVALID_TRANSITION'); const wrong = { ...r, status: 'future' }; denied(wrong, 'authorize', context(wrong), 'INVALID_TRANSITION'); });
+test('version and generation overflow fail closed', () => { for (const key of ['version','connectorGeneration']) { const r = { ...record(), [key]: Number.MAX_SAFE_INTEGER }; denied(r, 'authorize', context(r), 'INVALID_ENROLLMENT'); } });
+test('extra credential-like fields never enter persisted enrollment', () => { const s = { ...seed(), connectorToken: 'synthetic-only' }; const r = createEnrollment(s, 'owner-a', now); assert.equal(r.ok, true); assert.equal('connectorToken' in r.enrollment, false); });
