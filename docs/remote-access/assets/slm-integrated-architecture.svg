@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" width="1600" height="1600" role="img" aria-labelledby="t d">
+  <title id="t">SuperLocalMemory integrated memory architecture</title>
+  <desc id="d">Three modes feed an eight-layer local pipeline: governed admission, canonical SQLite store, enrichment, learning and lifecycle, multi-channel retrieval, answer check with Laya or Jev, safe context, and operations. Beside it: governance and compliance, the parity-gated Scale Engine, SLM-Mesh and bounded loops. Below: delivery surfaces, opt-in adapters and an authenticated web gateway connected to the existing local MCP engine.</desc>
+  <defs>
+    <style>
+      .bg{fill:#0b1020}
+      .panel{fill:#111830;stroke-width:2;rx:14}
+      .h1{font:700 40px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#f5f7ff}
+      .sub{font:400 20px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#b8c0e0}
+      .ph{font:700 19px system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:1px}
+      .lt{font:700 21px system-ui,-apple-system,"Segoe UI",sans-serif}
+      .ld{font:400 15.5px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#d6dbf2}
+      .sm{font:400 14.5px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#d6dbf2}
+      .tag{font:600 13px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#0b1020}
+      .num{font:700 20px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#0b1020;text-anchor:middle}
+      .chip{font:600 15px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#e9ecfb;text-anchor:middle}
+      .foot{font:400 14px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#9aa3c7}
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7d89b8"/></marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1600"/>
+  <text class="h1" x="800" y="58" text-anchor="middle">SuperLocalMemory — Integrated Architecture</text>
+  <text class="sub" x="800" y="90" text-anchor="middle">Governed, local-first memory for AI agents. SQLite is canonical; everything else is opt-in and gated.</text>
+
+  <!-- MODES -->
+  <rect class="panel" x="30" y="120" width="300" height="600" stroke="#3b82f6"/>
+  <text class="ph" x="180" y="152" text-anchor="middle" fill="#60a5fa">MODES</text>
+  <g>
+    <rect x="48" y="172" width="264" height="160" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="lt" x="64" y="204" fill="#60a5fa">A · Local core</text>
+    <text class="sm" x="64" y="232">• Remember and recall make</text>
+    <text class="sm" x="76" y="252">no model-provider call</text>
+    <text class="sm" x="64" y="276">• Zero-LLM retrieval + learning</text>
+    <text class="sm" x="64" y="300">• Default for privacy</text>
+  </g>
+  <g>
+    <rect x="48" y="350" width="264" height="160" rx="10" fill="#17142e" stroke="#8b5cf6"/>
+    <text class="lt" x="64" y="382" fill="#a78bfa" style="font-size:19px">B · Model on this machine</text>
+    <text class="sm" x="64" y="410">• Ollama by default, or any local</text>
+    <text class="sm" x="76" y="430">OpenAI-compatible server</text>
+    <text class="sm" x="76" y="454">(llama.cpp, vLLM, LM Studio)</text>
+    <text class="sm" x="64" y="478">• LLM fact extraction</text>
+  </g>
+  <g>
+    <rect x="48" y="528" width="264" height="172" rx="10" fill="#0f2420" stroke="#10b981"/>
+    <text class="lt" x="64" y="560" fill="#34d399" style="font-size:19px">C · Your endpoint or cloud</text>
+    <text class="sm" x="64" y="588">• Any OpenAI-compatible endpoint,</text>
+    <text class="sm" x="76" y="608">key optional for your own server</text>
+    <text class="sm" x="64" y="632">• Cloud providers by choice</text>
+    <text class="sm" x="64" y="656">• What leaves is documented</text>
+    <text class="sm" x="76" y="680">per data type</text>
+  </g>
+  <line x1="330" y1="252" x2="402" y2="252" stroke="#7d89b8" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="330" y1="430" x2="402" y2="430" stroke="#7d89b8" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="330" y1="612" x2="402" y2="612" stroke="#7d89b8" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- PIPELINE -->
+  <g id="layers">
+    <rect x="410" y="120" width="640" height="68" rx="10" fill="#0f1a33" stroke="#38bdf8"/>
+    <circle cx="446" cy="154" r="18" fill="#38bdf8"/><text class="num" x="446" y="161">1</text>
+    <text class="lt" x="478" y="148" fill="#38bdf8">Governed admission</text>
+    <text class="ld" x="478" y="172">identity, role and scope checks, write gate, journal with group commit</text>
+
+    <rect x="410" y="196" width="640" height="68" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <circle cx="446" cy="230" r="18" fill="#3b82f6"/><text class="num" x="446" y="237">2</text>
+    <text class="lt" x="478" y="224" fill="#60a5fa">Canonical store</text>
+    <text class="ld" x="478" y="248">SQLite + sqlite-vec + FTS5, durable receipts, restore points before upgrades</text>
+
+    <rect x="410" y="272" width="640" height="68" rx="10" fill="#15142e" stroke="#8b5cf6"/>
+    <circle cx="446" cy="306" r="18" fill="#8b5cf6"/><text class="num" x="446" y="313">3</text>
+    <text class="lt" x="478" y="300" fill="#a78bfa">Enrichment</text>
+    <text class="ld" x="478" y="324">facts, entities, time, nine memory kinds, knowledge graph, code graph</text>
+
+    <rect x="410" y="348" width="640" height="68" rx="10" fill="#1b132e" stroke="#c084fc"/>
+    <circle cx="446" cy="382" r="18" fill="#c084fc"/><text class="num" x="446" y="389">4</text>
+    <text class="lt" x="478" y="376" fill="#d8b4fe">Learning and lifecycle</text>
+    <text class="ld" x="478" y="400">bandit + LightGBM ranker, shadow tests, rollback, retention</text>
+
+    <rect x="410" y="424" width="640" height="68" rx="10" fill="#0e2128" stroke="#14b8a6"/>
+    <circle cx="446" cy="458" r="18" fill="#14b8a6"/><text class="num" x="446" y="465">5</text>
+    <text class="lt" x="478" y="452" fill="#2dd4bf">Multi-channel retrieval</text>
+    <text class="ld" x="478" y="476">semantic, BM25, temporal, Hopfield, spreading activation → fusion → rerank</text>
+
+    <rect x="410" y="500" width="640" height="68" rx="10" fill="#2a1a10" stroke="#f97316"/>
+    <circle cx="446" cy="534" r="18" fill="#f97316"/><text class="num" x="446" y="541">6</text>
+    <text class="lt" x="478" y="528" fill="#fb923c">Answer check — Laya / Jev</text>
+    <text class="ld" x="478" y="552">Laya locally on Mac or Jev online · Selected provider checks answerability</text>
+
+    <rect x="410" y="576" width="640" height="68" rx="10" fill="#10241a" stroke="#22c55e"/>
+    <circle cx="446" cy="610" r="18" fill="#22c55e"/><text class="num" x="446" y="617">7</text>
+    <text class="lt" x="478" y="604" fill="#4ade80">Safe context</text>
+    <text class="ld" x="478" y="628">secret redaction, provenance, boundary markers, token budget</text>
+
+    <rect x="410" y="652" width="640" height="68" rx="10" fill="#2a2310" stroke="#eab308"/>
+    <circle cx="446" cy="686" r="18" fill="#eab308"/><text class="num" x="446" y="693">8</text>
+    <text class="lt" x="478" y="680" fill="#facc15">Operations</text>
+    <text class="ld" x="478" y="704">health, hash-chained audit, encrypted backup, cache + reversible compression</text>
+  </g>
+
+  <!-- RIGHT COLUMN -->
+  <rect class="panel" x="1080" y="120" width="490" height="196" stroke="#ef4444"/>
+  <text class="ph" x="1325" y="152" text-anchor="middle" fill="#f87171">GOVERNANCE AND COMPLIANCE</text>
+  <text class="sm" x="1100" y="184">• Roles per workspace, company mode with login</text>
+  <text class="sm" x="1100" y="208">• Personal / shared / global scopes, default-deny</text>
+  <text class="sm" x="1100" y="232">• GDPR export and erase with verifiable receipts</text>
+  <text class="sm" x="1100" y="256">• Retention rules, audit trail, EU AI Act posture report</text>
+  <text class="sm" x="1100" y="280">• Reviewed corrections with rollback</text>
+  <text class="sm" x="1100" y="304">• Remote keys: one profile each, read or write</text>
+
+  <rect class="panel" x="1080" y="330" width="490" height="132" stroke="#14b8a6"/>
+  <text class="ph" x="1325" y="362" text-anchor="middle" fill="#2dd4bf">SCALE ENGINE (PARITY-GATED)</text>
+  <rect x="1100" y="378" width="215" height="66" rx="8" fill="#0e2128" stroke="#14b8a6"/>
+  <text class="chip" x="1207" y="406">CozoDB graph</text><text class="sm" x="1207" y="428" text-anchor="middle">projection</text>
+  <rect x="1335" y="378" width="215" height="66" rx="8" fill="#0e2128" stroke="#14b8a6"/>
+  <text class="chip" x="1442" y="406">LanceDB vectors</text><text class="sm" x="1442" y="428" text-anchor="middle">projection</text>
+
+  <rect class="panel" x="1080" y="476" width="238" height="244" stroke="#f59e0b"/>
+  <text class="ph" x="1199" y="508" text-anchor="middle" fill="#fbbf24">SLM-MESH</text>
+  <text class="sm" x="1096" y="540">• Authenticated peers</text>
+  <text class="sm" x="1096" y="564">• Messages and inbox</text>
+  <text class="sm" x="1096" y="588">• Locks and shared state</text>
+  <text class="sm" x="1096" y="612">• Agent attribution</text>
+  <text class="sm" x="1096" y="636">• Trust scores vs.</text>
+  <text class="sm" x="1108" y="656">memory poisoning</text>
+  <text class="tag" x="1199" y="700" text-anchor="middle" style="fill:#fbbf24">coordination, not replication</text>
+
+  <rect class="panel" x="1332" y="476" width="238" height="244" stroke="#a3e635"/>
+  <text class="ph" x="1451" y="508" text-anchor="middle" fill="#bef264">BOUNDED LOOPS</text>
+  <text class="sm" x="1348" y="540">• Repeat until an</text>
+  <text class="sm" x="1360" y="560">independent gate passes</text>
+  <text class="sm" x="1348" y="584">• Tests, schema, linter,</text>
+  <text class="sm" x="1360" y="604">recall condition</text>
+  <text class="sm" x="1348" y="628">• DONE · HALT · PAUSE</text>
+  <text class="sm" x="1360" y="648">KILLED · ERROR</text>
+  <text class="tag" x="1451" y="700" text-anchor="middle" style="fill:#bef264">every lap stored as memory</text>
+
+  <line x1="1050" y1="230" x2="1076" y2="230" stroke="#7d89b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <line x1="1050" y1="410" x2="1076" y2="410" stroke="#7d89b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <line x1="730" y1="720" x2="730" y2="758" stroke="#7d89b8" stroke-width="2" marker-end="url(#arr)"/>
+
+
+  <!-- DELIVERY -->
+  <rect class="panel" x="30" y="766" width="1110" height="262" stroke="#3b82f6"/>
+  <text class="ph" x="585" y="798" text-anchor="middle" fill="#60a5fa">DELIVERY SURFACES</text>
+  <g>
+    <rect x="50" y="816" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="150" y="852">MCP server</text><text class="sm" x="150" y="878" text-anchor="middle">stdio or HTTP, 8–103 tools</text>
+    <rect x="266" y="816" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="366" y="852">CLI</text><text class="sm" x="366" y="878" text-anchor="middle">human and JSON output</text>
+    <rect x="482" y="816" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="582" y="852">Dashboard</text><text class="sm" x="582" y="878" text-anchor="middle">Answer Check, graph, ops</text>
+    <rect x="698" y="816" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="798" y="852">Editor plugins</text><text class="sm" x="798" y="878" text-anchor="middle">Claude Code, Codex, Hermes</text>
+    <rect x="914" y="816" width="206" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="1017" y="852">slm connect</text><text class="sm" x="1017" y="878" text-anchor="middle">Cursor, Zed and 10 more</text>
+
+    <rect x="50" y="920" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="150" y="956">Framework adapters</text><text class="sm" x="150" y="982" text-anchor="middle">LangGraph, CrewAI + 7</text>
+    <rect x="266" y="920" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="366" y="956">Python SDK + REST</text><text class="sm" x="366" y="982" text-anchor="middle">MemoryEngine, local API</text>
+    <rect x="482" y="920" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="582" y="956">Direct HTTP access</text><text class="sm" x="582" y="982" text-anchor="middle">TLS, revocable keys</text>
+    <rect x="698" y="920" width="200" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="798" y="956">Views + summaries</text><text class="sm" x="798" y="982" text-anchor="middle">saved queries, day, project</text>
+    <rect x="914" y="920" width="206" height="88" rx="10" fill="#0f1a33" stroke="#3b82f6"/>
+    <text class="chip" x="1017" y="956">Hooks + skills</text><text class="sm" x="1017" y="982" text-anchor="middle">auto-capture, 12 skills</text>
+  </g>
+
+  <!-- ADAPTERS -->
+  <rect class="panel" x="1160" y="766" width="410" height="262" stroke="#22c55e"/>
+  <text class="ph" x="1365" y="798" text-anchor="middle" fill="#4ade80">OPT-IN ADAPTERS</text>
+  <rect x="1180" y="830" width="118" height="88" rx="10" fill="#10241a" stroke="#22c55e"/>
+  <text class="chip" x="1239" y="880">Gmail</text>
+  <rect x="1306" y="830" width="118" height="88" rx="10" fill="#10241a" stroke="#22c55e"/>
+  <text class="chip" x="1365" y="880">Calendar</text>
+  <rect x="1432" y="830" width="118" height="88" rx="10" fill="#10241a" stroke="#22c55e"/>
+  <text class="chip" x="1491" y="880">Transcripts</text>
+  <text class="sm" x="1365" y="960" text-anchor="middle">Off until you connect them.</text>
+  <text class="sm" x="1365" y="984" text-anchor="middle">Credentials stay in your OS keychain.</text>
+
+  <text class="foot" x="800" y="1548" text-anchor="middle">Research: V2 (arXiv 2603.02240) · V3 (2603.14588) · V3.3 (2604.04514) · V4 governed memory (2608.08253)</text>
+  <text class="foot" x="800" y="1576" text-anchor="middle">Part of Qualixar's AI Reliability Engineering work · superlocalmemory.com</text>
+
+  <!-- OPTIONAL INTERNET ACCESS: uses the existing local MCP entry point. -->
+  
+  <rect class="panel" x="30" y="1070" width="1540" height="428" stroke="#a78bfa"/>
+  <text class="ph" x="800" y="1107" text-anchor="middle" fill="#c4b5fd">OPTIONAL WEB CONNECTION · THE SAME LOCAL MEMORY ENGINE</text>
+  <line x1="470" y1="1250" x2="560" y2="1250" stroke="#a78bfa" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1130" y1="1250" x2="1040" y2="1250" stroke="#a78bfa" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="50" y="1140" width="420" height="224" rx="12" fill="#0f1a33" stroke="#38bdf8"/>
+  <text class="lt" x="74" y="1177" fill="#38bdf8">Web agents and bots</text>
+  <text class="ld" x="74" y="1213">Compatible HTTP MCP clients</text>
+  <text class="ld" x="74" y="1243">HTTPS requests and tool results</text>
+  <text class="ld" x="74" y="1273">User sign-in and explicit permissions</text>
+  <text class="ld" x="74" y="1303">Read / save within the granted profile</text>
+  <text class="ld" x="74" y="1333">Revocable access</text>
+  <rect x="560" y="1140" width="480" height="224" rx="12" fill="#20192b" stroke="#a78bfa"/>
+  <text class="lt" x="584" y="1177" fill="#c4b5fd">Cloudflare connection gateway</text>
+  <text class="ld" x="584" y="1213">Public MCP Worker + OAuth authorization</text>
+  <text class="ld" x="584" y="1243">Owner, client, profile and tool permission checks</text>
+  <text class="ld" x="584" y="1273">Durable Object relay + hibernating WebSocket</text>
+  <text class="ld" x="584" y="1303">Connection and consent state</text>
+  <text class="ld" x="584" y="1333">Canonical memories remain on the laptop</text>
+  <rect x="1130" y="1140" width="420" height="224" rx="12" fill="#10241a" stroke="#22c55e"/>
+  <text class="lt" x="1154" y="1177" fill="#4ade80">Local SLM companion</text>
+  <text class="ld" x="1154" y="1213">Enable from the existing dashboard</text>
+  <text class="ld" x="1154" y="1243">Authenticated outbound WSS</text>
+  <text class="ld" x="1154" y="1273">Fixed local MCP origin; existing write path</text>
+  <text class="ld" x="1154" y="1303">Reconnect, deadlines and cancellation</text>
+  <text class="ld" x="1154" y="1333">No end-user Cloudflare or tunnel setup</text>
+  <text class="sub" x="800" y="1410" text-anchor="middle">Free local core · Local and web clients share one canonical memory system</text>
+  <text class="sm" x="800" y="1446" text-anchor="middle">Remote access is opt-in. Requests and results transit the gateway; the laptop must be online.</text>
+  <text class="sm" x="800" y="1474" text-anchor="middle">SLM-Mesh coordinates trusted peers. The web gateway provides access, not database replication.</text>
+
+<path d="M1350 1140V1048H1150V914H150V904" fill="none" stroke="#a78bfa" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+</svg>

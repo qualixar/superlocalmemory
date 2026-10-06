@@ -133,9 +133,20 @@ Claude Code memory in two commands: `claude plugin marketplace add qualixar/supe
 
 ## Architecture
 
-![SuperLocalMemory 4.1.21 architecture: modes, eight-layer pipeline, governance, Scale Engine, SLM-Mesh, bounded loops](docs/assets/slm-4.1.21-architecture.svg)
+<picture>
+  <source media="(max-width: 640px)" srcset="docs/remote-access/assets/slm-local-and-remote-mobile.svg">
+  <img src="docs/remote-access/assets/slm-integrated-architecture.svg" alt="SuperLocalMemory integrated architecture: modes, governed memory, canonical storage, retrieval, Laya/Jev answer checks, mesh, bounded loops, delivery surfaces and optional Cloudflare web connectivity." width="1600">
+</picture>
 
-*SQLite + sqlite-vec are canonical; CozoDB and LanceDB are parity-gated projections; SLM-Mesh coordinates trusted peers rather than replicating a distributed database; connectors are opt-in.* [Architecture docs](docs/ARCHITECTURE.md).
+**The free local core stays complete.** npm/PyPI installations, Claude Code, Codex, local MCP tools, SLM-Mesh and configured Laya/Jev answer checks keep their existing paths. SQLite + sqlite-vec remain canonical; CozoDB and LanceDB are parity-gated projections. [Local engine architecture](docs/ARCHITECTURE.md) · [Detailed local pipeline diagram](docs/assets/slm-4.1.21-architecture.svg).
+
+### Optional internet access for web agents
+
+SLM's remote-access architecture connects compatible web MCP clients to the same local memory engine: **web client → authenticated Cloudflare gateway → outbound laptop connector → local SLM**. The existing dashboard manages the connection and its profile/tool permissions. Local Claude Code, Codex and other local clients retain their existing access paths.
+
+Remote access is opt-in. End users do not configure Cloudflare, DNS or tunnel commands. The free local core operates independently of hosted-service accounts and entitlements. The canonical database stays on your machine; remote tool arguments and results pass through the gateway and selected AI host. Your laptop must be online for remote calls.
+
+[Remote-access documentation](docs/remote-access/README.md) · [Architecture and boundaries](docs/remote-access/architecture.md) · [Dashboard onboarding](docs/remote-access/onboarding.md) · [Cloudflare operator guide](docs/remote-access/cloudflare-pilot.md) · [Acceptance procedures](docs/remote-access/acceptance.md).
 
 ## Everything SLM does
 
@@ -295,7 +306,7 @@ Cite the V4 paper with [CITATION.cff](CITATION.cff) or GitHub's "Cite this repos
 
 **Reference:** [CLI](docs/cli-reference.md) · [MCP tools](docs/mcp-tools.md) · [Configuration](docs/configuration.md) · [Errors](docs/errors.md) · [Troubleshooting](docs/troubleshooting.md) · [Distributed deployment](docs/distributed-deployment.md) · [Privacy diagnostics](docs/privacy-diagnostics.md)
 
-**Design:** [Architecture](docs/ARCHITECTURE.md) · [Score contract](docs/retrieval-score-contract.md) · [Compliance](docs/compliance.md) · [Benchmarks](docs/benchmarks.md)
+**Design:** [Architecture](docs/ARCHITECTURE.md) · [Optional remote access](docs/remote-access/README.md) · [Score contract](docs/retrieval-score-contract.md) · [Compliance](docs/compliance.md) · [Benchmarks](docs/benchmarks.md)
 
 ## Upgrade
 

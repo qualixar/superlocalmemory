@@ -4,6 +4,14 @@
 
 A high-level overview of how SuperLocalMemory V4 stores, organizes, and retrieves your memories.
 
+## Local core and optional internet gateway
+
+![Integrated SLM architecture: local memory capabilities, Laya/Jev answer checks and optional web connection](remote-access/assets/slm-integrated-architecture.svg)
+
+The existing free local core remains the foundation. The remote-access architecture adds an optional dashboard-managed internet connection for compatible web MCP clients. It uses the existing local engine and canonical database, preserves local tools and configuration, and keeps hosted entitlement separate from local use. Remote payloads transit the gateway; keeping the database local does not mean remote results never leave the laptop.
+
+See [remote-access architecture and trust boundaries](remote-access/architecture.md), [onboarding](remote-access/onboarding.md), [operator pilot](remote-access/cloudflare-pilot.md) and [release acceptance](remote-access/acceptance.md). The existing ingestion/retrieval design below remains the local engine reference.
+
 Published V3 LoCoMo evidence carried into V4 (from the V3 paper / V3.7 package) is maintained in
 [Benchmark Evidence](benchmarks.md), including the original model, judge, and
 sample disclosures required to interpret each result.
