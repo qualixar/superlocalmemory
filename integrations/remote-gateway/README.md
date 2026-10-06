@@ -1,6 +1,6 @@
 # SLM remote gateway — preparatory domain package
 
-Implemented: PRE-01 permission intersection and the ENR-01 enrollment state reducer, with synthetic tests. This private package is not a deployed HTTP server, an installer, a finished UI feature or a release artifact. Engine/UI integration awaits accepted M4 4.1.22 and its verdict.
+Implemented: PRE-01 permission intersection and the ENR-01 enrollment state reducer, with synthetic tests. This private package is not a deployed HTTP server, an installer, a finished UI feature or a release artifact. Engine/UI integration may develop on the current baseline now; merge and verify M4's completed 4.1.22 before final release. See docs/release-plans/4.1.23/UPSTREAM-RECONCILIATION.md in the repository.
 
 ## Approved user journey
 
@@ -21,3 +21,11 @@ Not yet implemented: schema/token/wire validation, atomic Durable Object admissi
 Use Node >=22.18.0; TypeScript7.0.2 is pinned in package-lock. From this directory install dependencies with `npm ci --ignore-scripts --no-audit --no-fund`. Run `npm run typecheck`, `npm test`, and `npm run test:coverage`. For release evidence use a minimal process environment and the direct pinned compiler/test runner, as done for the GREEN checkpoint. Tests use only synthetic identifiers and reserved example.com hostnames; they make no network/database/provider calls.
 
 The committed RED evidence records57 expected assertion failures before implementation. GREEN evidence records98 passing tests, with100% source lines/functions and98.20% branches in these two executable domain modules. Coverage is not a live-security or end-to-end certification.
+
+## Approved relay transport and codec checkpoint
+
+The user adopted Cloudflare shared outbound WSS relay with hibernating installation objects. Public clients retain HTTPS Streamable HTTP/OAuth; no per-installation Cloudflare named Tunnel/DNS/cloudflared. Free supports local development and bounded synthetic evaluation; Paid activation is not a local build prerequisite.
+
+`src/relay-protocol.ts` implements a private v1 whole-message codec, not WebSocket delivery or a public MCP parser. Exact compact JSON.stringify-compatible envelopes carry original MCP payload bytes in canonical padded base64. Request/response body caps are1MiB/4MiB, outerframe8MiB. Caller supplies exact schema-validated annotated request header names via RelayCodecOptions; unapproved and response-direction parameter headers are denied. Outer UTF8 BOM, duplicate/noncanonical frames, unknown fields and forbidden credential headers reject safely. Python connector serialization must match this private contract; public MCP JSON is not constrained to this canonical formatting.
+
+Final packet has148passing tests total (98prior+50codec), strict typecheck and100%lines/functions,97.14%totalbranches. Both required reviews approved after fixes. Runtime stream framing/closure, generation/request correlation, authentication, deadline/cancel delivery, actual hibernation and native host/UI proof remain pending. There is no deployable production relay in this checkpoint.

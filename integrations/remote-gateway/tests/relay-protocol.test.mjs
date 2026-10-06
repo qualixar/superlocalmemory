@@ -19,3 +19,26 @@ test('empty bodies and headers permitted for transport semantics', () => { asser
 test('response cannot forward Set-Cookie', () => reject({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[['Set-Cookie','synthetic-only']],bodyBase64:''}));
 test('invalid HTTP status refused', () => { for (const status of [101,600,200.5]) reject({v:1,kind:'response',id:'response-a',generation:1,status,headers:[],bodyBase64:''}); });
 test('returned header snapshot frozen and detached', () => { const f=request(); const r=decode(f); assert.equal(r.ok,true); f.headers[0][1]='changed'; assert.equal(r.frame.headers[0][1],'application/json'); assert.equal(Object.isFrozen(r.frame),true); assert.equal(Object.isFrozen(r.frame.headers[0]),true); });
+
+test('request maximum body boundary accepted', () => { assert.equal(decode({...request(),bodyBase64:Buffer.alloc(MAX_REQUEST_BYTES).toString('base64')}).ok,true); });
+test('response maximum body boundary accepted', () => { assert.equal(decode({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[],bodyBase64:Buffer.alloc(MAX_RESPONSE_BYTES).toString('base64')}).ok,true); });
+test('request cannot carry response-only Retry-After', () => reject({...request(),headers:[['Retry-After','1']]}));
+test('response cannot carry request routing headers', () => reject({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[['Mcp-Method','tools/call']],bodyBase64:''}));
+test('response cannot contain a request deadline', () => reject({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[],bodyBase64:'',deadlineAt:123}));
+test('cancellation cannot carry payload or headers', () => reject({v:1,kind:'cancel',id:'response-a',generation:1,bodyBase64:''}));
+test('excess header count and value length refused', () => { reject({...request(),headers:Array.from({length:33},()=>['Accept','application/json'])}); reject({...request(),headers:[['Accept','a'.repeat(8193)]]}); });
+test('deep invalid JSON shape fails closed without stringify recursion', () => { const nested='['.repeat(20000)+'0'+']'.repeat(20000); const text=JSON.stringify(request()).replace('"headers":[["Content-Type","application/json"],["Mcp-Method","tools/call"]]','"headers":'+nested); assert.deepEqual(decodeRelayFrame(text),{ok:false,code:'INVALID_FRAME'}); });
+test('malformed runtime input returns a safe error', () => { assert.deepEqual(decodeRelayFrame(null),{ok:false,code:'INVALID_FRAME'}); });
+test('encoder refuses malformed runtime frame', () => { assert.deepEqual(encodeRelayFrame({...request(),v:2}),{ok:false,code:'INVALID_FRAME'}); const cycle={};cycle.self=cycle;assert.deepEqual(encodeRelayFrame(cycle),{ok:false,code:'INVALID_FRAME'}); });
+
+test('UTF8 BOM byte and string representations both refused', () => { const text='\ufeff'+JSON.stringify(request()); assert.deepEqual(decodeRelayFrame(text),{ok:false,code:'INVALID_FRAME'}); assert.deepEqual(decodeRelayFrame(new TextEncoder().encode(text)),{ok:false,code:'INVALID_FRAME'}); });
+test('schema-approved parameter header roundtrip supported', () => { const f={...request(),headers:[['Mcp-Param-query','project-a']]};const options={requestParamHeaders:['Mcp-Param-query']};const encoded=encodeRelayFrame(f,options);assert.equal(encoded.ok,true);assert.deepEqual(decodeRelayFrame(encoded.text,options).frame,f); });
+for (const [label,header,options] of [
+ ['unapproved parameter',['Mcp-Param-query','x'],{}],
+ ['invalid suffix',['Mcp-Param-','x'],{requestParamHeaders:['Mcp-Param-']}],
+ ['credential disguised as schema',['Authorization','x'],{requestParamHeaders:['Authorization']}],
+ ['parameter injection',['Mcp-Param-query','x\r\ny'],{requestParamHeaders:['Mcp-Param-query']}],
+ ['parameter excessive length',['Mcp-Param-query','x'.repeat(8193)],{requestParamHeaders:['Mcp-Param-query']}],
+]) test(label,()=>assert.deepEqual(decodeRelayFrame(JSON.stringify({...request(),headers:[header]}),options),{ok:false,code:'INVALID_FRAME'}));
+test('parameter case-duplicates rejected',()=>{const f={...request(),headers:[['Mcp-Param-query','x'],['mcp-param-query','y']]};assert.deepEqual(decodeRelayFrame(JSON.stringify(f),{requestParamHeaders:['Mcp-Param-query']}),{ok:false,code:'INVALID_FRAME'});});
+test('schema param never permitted on response',()=>{const f={v:1,kind:'response',id:'r',generation:1,status:200,headers:[['Mcp-Param-query','x']],bodyBase64:''};assert.deepEqual(decodeRelayFrame(JSON.stringify(f),{requestParamHeaders:['Mcp-Param-query']}),{ok:false,code:'INVALID_FRAME'});});

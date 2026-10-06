@@ -1,0 +1,34 @@
+{
+  "checkpoint": "RLY-01 GREEN codec",
+  "red_commit": "b2b3b1a1",
+  "total_tests": 148,
+  "passed": 148,
+  "failed": 0,
+  "relay_codec_tests": 50,
+  "typecheck": "pass",
+  "coverage": {
+    "lines_percent": 100,
+    "functions_percent": 100,
+    "total_branches_percent": 97.14,
+    "relay_branches_percent": 95.96
+  },
+  "reviews": {
+    "code-reviewer": "APPROVE; annotated-header finding resolved",
+    "typescript-reviewer": "no blockers; BOM parity finding resolved"
+  },
+  "regressions_fixed": [
+    "nested base64 regex stack exhaustion at large boundary",
+    "UTF8 BOM byte/string mismatch",
+    "missing schema-approved parameter header preservation"
+  ],
+  "environment": "minimal PATH-only; synthetic inputs; no network/provider/database calls",
+  "remaining": [
+    "actual workerd RelayDO",
+    "authentication/admission",
+    "correlation/generation runtime",
+    "stream framing/closure and cancellation delivery",
+    "local connector and SLM UI",
+    "native host proof",
+    "deployed cost/hibernation measurements"
+  ]
+}
