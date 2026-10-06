@@ -467,6 +467,8 @@
 
     // Show loading state immediately
     pane.textContent = '';
+    var connections = typeof window.odCreateAiConnectionsCard === 'function' ? window.odCreateAiConnectionsCard() : null;
+    if (connections) pane.appendChild(connections);
     pane.appendChild(buildLoading());
 
     apiFetch('/api/v3/mcp/profiles')
@@ -484,6 +486,7 @@
         root.appendChild(pageHead);
 
         root.appendChild(buildIntro());
+        if (connections) root.appendChild(connections);
         root.appendChild(buildCurrentCard(data));
         root.appendChild(buildProfilesCard(data));
         root.appendChild(buildHowToCard());
@@ -492,6 +495,7 @@
       })
       .catch(function (err) {
         pane.textContent = '';
+        if (connections) pane.appendChild(connections);
         pane.appendChild(buildError(
           'Could not load MCP profile data. Is the daemon running?',
           function () { window.odRenderMcp(pane); }

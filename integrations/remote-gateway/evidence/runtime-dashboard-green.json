@@ -1,0 +1,53 @@
+{
+  "checkpoint": "RLY-02 private runtime and existing-dashboard initiation UI",
+  "runtime": {
+    "engine": "real local workerd / Cloudflare Vitest pool0.19",
+    "tests": 18,
+    "passed": 18,
+    "strict_source_and_fixture_typecheck": "pass",
+    "proofs": [
+      "authenticated connector acceptance",
+      "correlated byte delivery",
+      "real forced eviction with retained socket",
+      "generation replacement",
+      "revocation and pre-binding cancellation restoration",
+      "credential expiry/rotation",
+      "timeouts and cancel frames",
+      "duplicate caller ID and wrong reply ID/generation rejection",
+      "HTTP204 semantics",
+      "synthetic JSONRPC remember/recall over socket"
+    ]
+  },
+  "node": {
+    "tests": 166,
+    "passed": 166,
+    "includes": {
+      "prior_domain_and_codec": 148,
+      "dashboard_dom": 18
+    }
+  },
+  "ui": {
+    "location": "existing MCP & Integrations pane",
+    "desktop_visual": "inspected with native styles in synthetic API preview",
+    "mobile_visual": "390px; no body overflow; consent/save start unchecked",
+    "initiation_api": "local /api/v3/connections/initiate via existing slmFetch installation auth",
+    "recovery": "installation/profile-scoped sessionStorage non-secret intent; host/save restored; fresh opt-in required"
+  },
+  "reviews": {
+    "code-reviewer": "approved; restoration/idempotency/hydration findings fixed",
+    "typescript-reviewer": "approved; typed runtime fixtures and hydration fixed"
+  },
+  "remaining": [
+    "production public OAuth/admission composition",
+    "local enrollment/status API implementation",
+    "real supervised local connector",
+    "real SLM engine delivery",
+    "deployed Free-tier synthetic pilot",
+    "native AI-host and signed-installer acceptance"
+  ],
+  "not_claimed": [
+    "end-to-end user delivery",
+    "live Cloudflare billing/connection",
+    "production memory modification"
+  ]
+}
