@@ -1,0 +1,9 @@
+{
+  "checkpoint": "RLY-01 RED",
+  "tested": 31,
+  "failed": 31,
+  "typecheck": "pass",
+  "cause": "intended NOT_IMPLEMENTED codec; behavioral assertions executed",
+  "source": "relay-protocol.ts",
+  "scope": "internal codec only, not live WebSocket/runtime/OAuth"
+}
