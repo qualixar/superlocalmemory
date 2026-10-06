@@ -1,0 +1,10 @@
+{
+  "checkpoint": "existing dashboard UI RED",
+  "scope": "connection card behavior with local API fixtures; not live service",
+  "source": "src/superlocalmemory/ui/js/od-connections.js",
+  "reason": "disabled renderer scaffold, behavioral assertions executed",
+  "tests": 10,
+  "failed": 9,
+  "passed": 1,
+  "reviews": "code-reviewer and TypeScript reviewer: scaffold checkpoint no blockers"
+}
