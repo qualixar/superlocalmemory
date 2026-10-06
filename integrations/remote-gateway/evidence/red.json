@@ -1,0 +1,20 @@
+{
+  "checkpoint": "RED",
+  "scope": "PRE-01 and ENR-01 synthetic domain assertions",
+  "typecheck": "pass",
+  "executed_tests": 57,
+  "passed": 0,
+  "failed": 57,
+  "reason": "intended NOT_IMPLEMENTED admission and enrollment reducer scaffolds; assertions executed",
+  "command": "node --test integrations/remote-gateway/tests/*.test.mjs",
+  "reviews": {
+    "code-reviewer": "no blockers",
+    "typescript-reviewer": "no blockers"
+  },
+  "not_evidence_of": [
+    "native host support",
+    "cloudflare provisioning",
+    "UI integration",
+    "4.1.22 acceptance"
+  ]
+}
