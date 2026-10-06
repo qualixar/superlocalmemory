@@ -10,5 +10,8 @@
   },
   "include": [
     "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/relay-do.ts"
   ]
 }

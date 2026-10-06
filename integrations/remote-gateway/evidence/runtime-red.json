@@ -1,0 +1,12 @@
+{
+  "checkpoint": "RLY-02 RED",
+  "runtime": "local workerd through pinned Cloudflare Vitest pool",
+  "tests": 9,
+  "failed": 8,
+  "passed": 1,
+  "reason": "intentional disabled socket/forwarding scaffolds; actual test assertions executed",
+  "typecheck": "worker-specific configuration pass",
+  "remote_bindings": false,
+  "paid_deployment": false,
+  "production_database_access": false
+}
