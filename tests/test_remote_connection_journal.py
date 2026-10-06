@@ -103,6 +103,8 @@ def test_cancel_requires_current_version(journal):
 @pytest.mark.parametrize("change", [
     lambda x: x.update(remote_opt_in=False),
     lambda x: x.update(host="evil"),
+    lambda x: x.update(host=[]),
+    lambda x: x.update(host={}),
     lambda x: x.update(profile_id="other"),
     lambda x: x.update(unknown="value"),
     lambda x: x["permissions"].update(write="yes"),
@@ -130,3 +132,36 @@ def test_owner_only_files_and_symlink_rejection(journal, tmp_path):
     link = tmp_path / "link"; link.symlink_to(journal.path.parent, target_is_directory=True)
     with pytest.raises(ValueError, match="unsafe_journal_path"):
         EnrollmentJournal(link)
+
+
+def test_expired_dispatch_receipt_is_not_authoritative(tmp_path):
+    assert EnrollmentJournal is not None
+    clock = [100.0]
+    journal = EnrollmentJournal(tmp_path / "remote", clock=lambda: clock[0])
+    row = journal.begin("owner", "default", "a" * 32, intent())
+    lease = journal.claim("owner", "default", row.connection_id)
+    clock[0] = 131.0
+    assert not journal.acknowledge("owner", "default", row.connection_id, lease.token, lease.version, "late")
+
+
+def test_invalid_idempotency_keys_and_owners(journal):
+    for key in [None, "bad", "z" * 32]:
+        with pytest.raises(ValueError):
+            journal.begin("owner", "default", key, intent())
+    with pytest.raises(ValueError):
+        journal.begin("not an owner", "default", "a" * 32, intent())
+
+
+def test_pending_capacity_does_not_prevent_safe_retry(journal):
+    for index in range(32):
+        journal.begin("owner", "default", f"{index:032x}", intent())
+    assert journal.begin("owner", "default", "0" * 32, intent()).state == "pending"
+    with pytest.raises(JournalConflict, match="capacity_exhausted"):
+        journal.begin("owner", "default", "f" * 32, intent())
+
+
+def test_cancel_before_dispatch_needs_no_remote_cleanup(journal):
+    row = journal.begin("owner", "default", "a" * 32, intent())
+    cancelled = journal.cancel("owner", "default", row.connection_id, 1)
+    assert not cancelled.cleanup_pending
+    assert journal.cancel("owner", "default", row.connection_id, 1) == cancelled

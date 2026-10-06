@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-06",
+  "stage": "WIP checkpoint at user-requested stop",
+  "python_tests": {
+    "passed": 49,
+    "failed": 1,
+    "failure": "test_actual_daemon_registers_disabled_connection_routes: HTTP404 because router is not mounted"
+  },
+  "journal_tests_passed": 27,
+  "api_tests_passed": 22,
+  "review": "initial review identified WindowsACL/malformedhost gaps; fixes and regressions added; final review of those fixes/service/routes pending",
+  "native_windows": "not verified; ACL tests mocked",
+  "global_runtime": "4.1.21; unchanged",
+  "real_cloud_muse_acceptance": "not run",
+  "release_complete": false
+}

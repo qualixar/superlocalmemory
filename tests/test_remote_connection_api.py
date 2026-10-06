@@ -137,3 +137,67 @@ def test_provider_errors_are_sanitized_and_leave_pending_intent(configured):
     result = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
     assert result.status_code == 503 and "SECRET" not in result.text
     assert client.get("/api/v3/connections/status").json()["connections"][0]["state"] == "pending"
+
+
+def test_sign_in_receipt_is_bound_and_survives_service_restart(configured):
+    client, provider, app = configured
+    async def enroll(**args):
+        provider.calls += 1
+        return GatewayReceipt(args["connection_id"], "https://auth.superlocalmemory.com/owner-login?connection_id=" + args["connection_id"])
+    provider.enroll = enroll
+    first = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
+    assert first.status_code == 200 and first.json()["authorization_url"]
+    service = app.state.remote_connections
+    app.state.remote_connections = RemoteConnectionService(EnrollmentJournal(service.journal.path.parent), provider, hosts=("muse",))
+    second = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
+    assert second.json() == first.json() and provider.calls == 1
+
+
+@pytest.mark.parametrize("url", ["https://evil.example/owner-login?connection_id=x", "https://auth.superlocalmemory.com/owner-login?connection_id=foreign", "https://auth.superlocalmemory.com/owner-login?connection_id=x&token=SECRET"])
+def test_untrusted_provider_receipt_is_not_exposed(configured, url):
+    client, provider, _ = configured
+    async def enroll(**args):
+        return GatewayReceipt(args["connection_id"], url)
+    provider.enroll = enroll
+    result = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
+    assert result.status_code >= 400 and "SECRET" not in result.text and url not in result.text
+
+
+def test_cancelled_intent_and_late_provider_receipt_never_ack_connected(configured):
+    client, provider, app = configured
+    service = app.state.remote_connections
+    async def enroll(**args):
+        row = service.journal.get(args["owner"], args["profile"], args["connection_id"])
+        service.journal.cancel(args["owner"], args["profile"], row.connection_id, row.version)
+        return GatewayReceipt(row.connection_id)
+    provider.enroll = enroll
+    first = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
+    assert first.status_code == 409
+    assert client.post("/api/v3/connections/initiate", headers=headers(), json=payload()).status_code == 409
+    status = client.get("/api/v3/connections/status").json()["connections"][0]
+    assert status["state"] == "cancelled" and status["verified"] is False and status["cleanup_pending"] is True
+
+
+def test_sec_fetch_site_and_missing_retry_key_are_denied(configured):
+    client, provider, _ = configured
+    assert client.post("/api/v3/connections/initiate", headers=headers(**{"Sec-Fetch-Site": "cross-site"}), json=payload()).status_code == 403
+    assert client.post("/api/v3/connections/initiate", headers={"X-Install-Token": "synthetic-local-token"}, json=payload()).status_code == 400
+    assert provider.calls == 0
+
+
+def test_no_service_and_broken_service_do_not_enable_remote(configured):
+    client, _, app = configured
+    app.state.remote_connections = None
+    assert client.post("/api/v3/connections/initiate", headers=headers(), json=payload()).status_code == 503
+    app.state.remote_connections = object()
+    assert client.get("/api/v3/connections/status").status_code == 503
+
+
+def test_actual_daemon_registers_disabled_connection_routes():
+    from superlocalmemory.server.unified_daemon import create_app
+    app = create_app()
+    client = TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 5000))
+    # No lifespan start: this tests the real app/middleware registration without
+    # launching background providers, mesh or memory engine workers.
+    result = client.get("/api/v3/connections/status")
+    assert result.status_code == 200 and result.json()["available"] is False
