@@ -63,6 +63,8 @@ export class LocalRelaySession {
   private stopped=false;
   private operations=new Map<string,Operation>();
 
+  get ready():boolean {return !this.stopped && this.generation!==null;}
+
   constructor(options:ConnectorOptions) {
     const url=new URL(options.origin);
     if(url.protocol!=='http:' || url.hostname!=='127.0.0.1' ||
