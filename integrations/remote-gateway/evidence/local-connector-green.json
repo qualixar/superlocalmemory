@@ -1,0 +1,18 @@
+{
+  "stage": "scoped connector GREEN",
+  "date": "2026-10-06",
+  "source_commit": "17c7dbc4",
+  "red_commits": ["713e46ab", "2a0050c7"],
+  "node_passed": 214,
+  "local_workerd_passed": 18,
+  "strict_runtime_typecheck": "pass",
+  "connector_request_cases": 22,
+  "supervisor_and_wire_cases": 26,
+  "request_coverage": {"lines": 100, "branches": 91.59, "functions": 94.12},
+  "supervisor_coverage": {"lines": 99.24, "branches": 84.88, "functions": 90.48},
+  "reviews": {"code_review": "approved scoped connector components", "typescript_review": "no remaining scoped blockers"},
+  "verified_transport": "real loopback WebSocket-to-HTTP with synthetic credentials/data",
+  "not_verified": ["native SLM engine through connector", "protected enrollment loading", "automatic companion packaging", "OAuth and public gateway", "live Cloudflare", "Musebot", "local installer regression", "billing"],
+  "global_installation_changed": false,
+  "release_complete": false
+}
