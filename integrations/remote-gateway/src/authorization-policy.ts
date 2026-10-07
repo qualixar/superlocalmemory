@@ -3,11 +3,18 @@ export const AUTH_ISSUER='https://auth.superlocalmemory.com';
 export const MCP_RESOURCE='https://mcp.superlocalmemory.com/mcp';
 export const OWNER_RESOURCE=AUTH_ISSUER+'/owner';
 const MEMORY_SCOPES=new Set(['slm:read','slm:write','slm:session']);
-/** Extra pilot checks after the maintained provider has validated client and callback. */
+/** Resource-bound checks after the maintained provider has validated client and callback. */
 export function validateAuthorizationRequest(request:AuthRequest):boolean {
  if(!request||request.issuer!==AUTH_ISSUER||request.responseType!=='code'||request.codeChallengeMethod!=='S256'||typeof request.codeChallenge!=='string'||!/^[-A-Za-z0-9_]{43}$/.test(request.codeChallenge)||typeof request.state!=='string'||!request.state||request.state.length>1024||!Array.isArray(request.scope)||new Set(request.scope).size!==request.scope.length)return false;
  if(request.resource===OWNER_RESOURCE)return request.scope.length===1&&request.scope[0]==='slm:connect';
  return request.resource===MCP_RESOURCE&&request.scope.includes('slm:read')&&request.scope.every(s=>MEMORY_SCOPES.has(s));
+}
+/** RFC 6749 section3.3 permits narrowing a requested grant. Resource-bound
+ * memory consent never includes the separate native enrollment capability. */
+export function memoryAuthorizationRequest(request:AuthRequest):AuthRequest|null {
+ if(!request||request.resource!==MCP_RESOURCE||!Array.isArray(request.scope)||new Set(request.scope).size!==request.scope.length||!request.scope.every(scope=>MEMORY_SCOPES.has(scope)||scope==='slm:connect'))return null;
+ const narrowed={...request,scope:request.scope.filter(scope=>MEMORY_SCOPES.has(scope))};
+ return validateAuthorizationRequest(narrowed)?narrowed:null;
 }
 export function selectedScopes(requested:readonly string[],ceiling:{read:boolean;write:boolean;session:boolean}):string[]{
  if(!ceiling.read||!requested.includes('slm:read'))return [];

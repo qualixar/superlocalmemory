@@ -9,7 +9,7 @@ import {WorkerEntrypoint} from 'cloudflare:workers';
 import type {AuthRequest} from '@cloudflare/workers-oauth-provider';
 import {calculateJwkThumbprint} from 'jose';
 import {authorizationServer,type AuthorizationEnv,type NativeAuthProps} from './authorization-server.ts';
-import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,validateAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
+import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,validateAuthorizationRequest,memoryAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
 import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage} from './auth-flow.ts';
 import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
@@ -107,8 +107,8 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
   }
 
   if(url.pathname==='/authorize'&&request.method==='GET'){
-   const parsed=await authorizationServer.getOAuthApi(env).parseAuthRequest(request);
-   if(!validateAuthorizationRequest(parsed)||parsed.resource!==MCP_RESOURCE)return response(400,'invalid_authorization');
+   const parsed=memoryAuthorizationRequest(await authorizationServer.getOAuthApi(env).parseAuthRequest(request));
+   if(!parsed)return response(400,'invalid_authorization');
    return await beginConsent(parsed,env);
   }
   if(url.pathname==='/owner-login'&&request.method==='GET'){
