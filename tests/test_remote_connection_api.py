@@ -201,3 +201,38 @@ def test_actual_daemon_registers_disabled_connection_routes():
     # launching background providers, mesh or memory engine workers.
     result = client.get("/api/v3/connections/status")
     assert result.status_code == 200 and result.json()["available"] is False
+
+
+def test_cancel_route_is_authenticated_versioned_and_idempotent(configured):
+    client, provider, _ = configured
+    identifier = client.post("/api/v3/connections/initiate", headers=headers(), json=payload()).json()["connection_id"]
+    row = client.get("/api/v3/connections/status").json()["connections"][0]
+    path = f"/api/v3/connections/{identifier}/cancel"
+    body = {"profile_id": "default", "expected_version": row["version"]}
+    assert client.post(path, json=body).status_code == 403
+    stale = dict(body, expected_version=row["version"] - 1)
+    assert client.post(path, headers=headers(), json=stale).status_code == 409
+    first = client.post(path, headers=headers(), json=body)
+    assert first.status_code == 200
+    assert first.json()["state"] == "cancelled"
+    assert first.json()["cleanup_pending"] is True
+    assert first.json()["verified"] is False
+    assert client.post(path, headers=headers(), json=body).json() == first.json()
+    assert provider.calls == 1
+    assert client.post("/api/v3/connections/initiate", headers=headers(), json=payload()).status_code == 409
+
+
+@pytest.mark.parametrize("version", [True, "2", -1])
+def test_cancel_schema_rejects_coerced_or_negative_version(configured, version):
+    client, _, _ = configured
+    result = client.post("/api/v3/connections/" + "b" * 32 + "/cancel", headers=headers(),
+                         json={"profile_id": "default", "expected_version": version})
+    assert result.status_code == 422
+
+
+def test_cancel_cannot_cross_profile_or_discover_foreign_connections(configured):
+    client, _, _ = configured
+    path = "/api/v3/connections/" + "b" * 32 + "/cancel"
+    assert client.post(path, headers=headers(), json={"profile_id": "other", "expected_version": 0}).status_code == 409
+    result = client.post(path, headers=headers(), json={"profile_id": "default", "expected_version": 0})
+    assert result.status_code == 404 and result.json()["detail"] == "not_found"
