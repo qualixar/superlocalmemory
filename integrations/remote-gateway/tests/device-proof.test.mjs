@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {generateKeyPair,exportJWK,calculateJwkThumbprint,SignJWT} from 'jose';
+let api;try{api=await import('../src/device-proof.ts');}catch{api=null;}
+const target='https://connect.superlocalmemory.com/connector';const token='synthetic-device-token-'.repeat(3);
+async function setup(changes={}){const keys=await generateKeyPair('ES256');const jwk=await exportJWK(keys.publicKey);const jkt=await calculateJwkThumbprint(jwk);const claims={jti:crypto.randomUUID(),iat:Math.floor(Date.now()/1000),htm:'GET',htu:target,ath:api?await api.tokenHash(token):'synthetic',...changes};const proof=await new SignJWT(claims).setProtectedHeader({typ:'dpop+jwt',alg:'ES256',jwk}).sign(keys.privateKey);return {proof,jkt,claims};}
+test('device proof binds private-key possession, target, method and token',async()=>{assert.ok(api);const f=await setup();assert.equal((await api.verifyDeviceProof(f.proof,{jkt:f.jkt,method:'GET',url:target,token})).jti,f.claims.jti);});
+for(const [name,changes] of [['wrong method',{htm:'POST'}],['wrong target',{htu:'https://evil.example/connector'}],['stale proof',{iat:Math.floor(Date.now()/1000)-600}],['future proof',{iat:Math.floor(Date.now()/1000)+600}],['wrong token',{ath:'other'}],['invalid nonce',{jti:'x'.repeat(200)}]])test(name,async()=>{assert.ok(api);const f=await setup(changes);await assert.rejects(api.verifyDeviceProof(f.proof,{jkt:f.jkt,method:'GET',url:target,token}));});
+test('stolen device token with another key cannot impersonate installation',async()=>{assert.ok(api);const original=await setup();const attacker=await setup();await assert.rejects(api.verifyDeviceProof(attacker.proof,{jkt:original.jkt,method:'GET',url:target,token}));});
+test('tampered JWT and unsupported algorithm fail closed',async()=>{assert.ok(api);const f=await setup();await assert.rejects(api.verifyDeviceProof(f.proof.slice(0,-5)+'abcde',{jkt:f.jkt,method:'GET',url:target,token}));await assert.rejects(api.verifyDeviceProof('eyJhbGciOiJub25lIn0.e30.',{jkt:f.jkt,method:'GET',url:target,token}));});
