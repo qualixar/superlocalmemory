@@ -56,3 +56,20 @@ async def test_origin_never_uses_install_token_or_global_api_key():
     from dataclasses import replace
     async def app(*args):raise AssertionError("must not call app")
     with pytest.raises(ValueError):await CanonicalMcpOrigin(app)(frame(),replace(credential(),origin_key="global-api-key"))
+
+@pytest.mark.asyncio
+async def test_origin_reaches_real_pinned_sdk_transport_without_host_bypass():
+    from fastapi import FastAPI
+    from mcp.server.mcpserver import MCPServer
+    server=MCPServer('SLM transport verification')
+    @server.tool()
+    async def recall(query: str) -> dict:
+        return {'synthetic':query}
+    mcp_app=server.streamable_http_app(stateless_http=True,json_response=True,streamable_http_path='/',host='127.0.0.1')
+    app=FastAPI();app.mount('/mcp',mcp_app)
+    payload={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'synthetic','version':'1'}}}
+    packet=frame();packet['headers'].append(['accept','application/json']);packet['bodyBase64']=base64.b64encode(json.dumps(payload).encode()).decode()
+    async with mcp_app.router.lifespan_context(mcp_app):
+        response=await CanonicalMcpOrigin(app)(packet,credential())
+    assert response.status==200
+    assert json.loads(response.body)['result']['protocolVersion']=='2025-06-18'
