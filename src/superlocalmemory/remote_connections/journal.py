@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 from uuid import uuid4
 
-HOSTS = frozenset({"muse", "chatgpt", "claude_web", "claude_code_web", "composio"})
+HOSTS = frozenset({"muse", "chatgpt", "claude_web", "claude_code_web", "composio", "other_mcp"})
 _IDENTITY = re.compile(r"[A-Za-z0-9_.:-]{1,256}\Z")
 
 

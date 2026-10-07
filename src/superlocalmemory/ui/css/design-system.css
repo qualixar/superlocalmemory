@@ -785,3 +785,14 @@ button { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* Optional remote connection setup, within the existing dashboard theme. */
+.od-ai-journey { display: flex; flex-wrap: wrap; gap: 12px 32px; padding: 16px 16px 16px 32px; border: 1px solid var(--border); border-radius: 12px; }
+.od-ai-clients { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
+.od-ai-client { min-height: 48px; white-space: normal; }
+.od-ai-client[aria-pressed="true"] { border: 2px solid currentColor; background: var(--card-2); }
+#od-ai-connections input[readonly] { display: block; width: 100%; box-sizing: border-box; padding: 10px; margin: 8px 0; color: var(--fg-1); background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; }
+#od-ai-connections select { width: 100%; }
+
+.od-ai-journey [aria-current="step"] { font-weight: 700; color: var(--fg-1); }
+#od-ai-connections select[hidden] { display: none !important; }

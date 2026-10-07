@@ -257,3 +257,16 @@ def test_cancel_cannot_cross_profile_or_discover_foreign_connections(configured)
     assert client.post(path, headers=headers(), json={"profile_id": "other", "expected_version": 0}).status_code == 409
     result = client.post(path, headers=headers(), json={"profile_id": "default", "expected_version": 0})
     assert result.status_code == 404 and result.json()["detail"] == "not_found"
+
+
+def test_generic_mcp_client_still_requires_allowed_catalog_and_opt_in(configured):
+    client, provider, app = configured
+    data = payload(); data['host'] = 'other_mcp'
+    assert client.post('/api/v3/connections/initiate', headers=headers(), json=data).status_code == 403
+    app.state.remote_connections.hosts = ('muse', 'other_mcp')
+    data['remote_opt_in'] = False
+    assert client.post('/api/v3/connections/initiate', headers=headers(), json=data).status_code == 422
+    data['remote_opt_in'] = True
+    response = client.post('/api/v3/connections/initiate', headers=headers(), json=data)
+    assert response.status_code == 200 and response.json()['state'] == 'pending'
+    assert provider.calls == 1

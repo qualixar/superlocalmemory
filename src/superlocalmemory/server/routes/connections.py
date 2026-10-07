@@ -1,14 +1,22 @@
 """Existing-dashboard enrollment endpoints; off without a configured service."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import Literal
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from superlocalmemory.remote_connections.journal import JournalConflict
 from superlocalmemory.remote_connections.service import RemoteConnectionService
@@ -36,7 +44,7 @@ class Permissions(BaseModel):
 
 class ConnectionIntent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    host: Literal["muse", "chatgpt", "claude_web", "claude_code_web", "composio"]
+    host: Literal["muse", "chatgpt", "claude_web", "claude_code_web", "composio", "other_mcp"]
     profile_id: str
     remote_opt_in: StrictBool
     permissions: Permissions
@@ -59,10 +67,16 @@ def _context(request: Request, *, mutation: bool = False) -> tuple[str, str]:
     if request.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
         raise HTTPException(403, "same_origin_required")
     if mutation:
-        require_write_actor(request, getattr(request.app.state, "daemon_descriptor", None),
-                            actor_kind="remote-enrollment")
+        require_write_actor(
+            request,
+            getattr(request.app.state, "daemon_descriptor", None),
+            actor_kind="remote-enrollment",
+        )
     from superlocalmemory.server.profile_runtime import current_request_profile, get_profile_runtime
-    profile = current_request_profile() or get_profile_runtime(request.app.state).snapshot.profile_id
+
+    profile = (
+        current_request_profile() or get_profile_runtime(request.app.state).snapshot.profile_id
+    )
     principal = require_manage(request, profile=profile)
     return str(principal["user_id"]), profile
 
@@ -105,8 +119,13 @@ async def connection_status(request: Request):
     owner, profile = _context(request)
     service = _service(request)
     if service is None:
-        return {"available": False, "installation_id": "", "current_profile": profile,
-                "hosts": [], "connections": []}
+        return {
+            "available": False,
+            "installation_id": "",
+            "current_profile": profile,
+            "hosts": [],
+            "connections": [],
+        }
     try:
         runtime = getattr(request.app.state, "remote_connection_runtime", None)
         if runtime is not None:
@@ -158,8 +177,19 @@ async def connection_callback(request: Request):
     try:
         await runtime.callback(states[0], codes[0])
     except ValueError:
-        return HTMLResponse("<!doctype html><title>SuperLocalMemory</title><h1>Web connection could not be enabled</h1><p>Return to your SLM dashboard, refresh the connection status and try again.</p>", status_code=400, headers={"Cache-Control":"no-store"})
+        return HTMLResponse(
+            "<!doctype html><title>SuperLocalMemory</title>"
+            "<h1>Web connection could not be enabled</h1>"
+            "<p>Return to your SLM dashboard, refresh the connection status and try again.</p>",
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception:
         logger.error("remote_connection_callback_unavailable")
         raise HTTPException(503, "connection_service_unavailable") from None
-    return HTMLResponse("<!doctype html><title>SuperLocalMemory</title><h1>GitHub sign-in complete</h1><p>Return to your SLM dashboard. It will verify the device connection and show the URL for your AI client.</p>", headers={"Cache-Control":"no-store"})
+    return HTMLResponse(
+        "<!doctype html><title>SuperLocalMemory</title><h1>GitHub sign-in complete</h1>"
+        "<p>Return to your SLM dashboard. It will verify the device connection "
+        "and show the URL for your AI client.</p>",
+        headers={"Cache-Control": "no-store"},
+    )

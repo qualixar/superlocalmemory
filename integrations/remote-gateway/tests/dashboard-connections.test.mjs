@@ -116,3 +116,17 @@ test('ready Composio recipe includes correct OAuth metadata URL',async()=>{
  const f=await setup({available:true,current_profile:'profile-a',hosts:['composio'],connections:[{host:'composio',connection_id:'a'.repeat(32),state:'ready_for_client',verified:true,version:2,mcp_url:'https://mcp.superlocalmemory.com/mcp'}]});
  try{assert.match(f.card.textContent,/OAuth/);assert.equal(f.card.querySelector('input[aria-label="OAuth metadata URL"]')?.value,'https://auth.superlocalmemory.com/.well-known/oauth-authorization-server');}finally{f.dom.window.close();}
 });
+
+test('successful cancellation restores client choices and submit without manual refresh',async()=>{
+ const state={available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'pending',verified:false,version:3}]};const f=await setup(state);
+ try{const original=f.dom.window.slmFetch;f.dom.window.slmFetch=async(path,init)=>{if(path.endsWith('/cancel')){state.connections[0]={...state.connections[0],state:'cancelled',verified:false,cleanup_pending:false,version:4};return new Response(JSON.stringify(state.connections[0]));}return original(path,init);};click(f.card,'Cancel connection');await tick();await tick();assert.equal(f.card.querySelector('[type=submit]').disabled,false);assert.equal(f.card.querySelector('[data-client=muse]').disabled,false);}finally{f.dom.window.close();}
+});
+test('profile switch clears the old sign-in link and resets consent',async()=>{
+ const state={available:true,current_profile:'profile-a',hosts:['muse','composio'],connections:[]};const f=await setup(state,{state:'pending',connection_id:'a'.repeat(32),authorization_url:'https://auth.superlocalmemory.com/owner-login?connection_id='+'a'.repeat(32)});
+ try{await submit(f);assert.ok(f.card.querySelector('a'));state.current_profile='profile-b';f.dom.window.slmFetch=async()=>new Response(JSON.stringify({...state,installation_id:'synthetic-install'}));click(f.card,'Refresh status');await tick();await tick();assert.equal(f.card.querySelector('a'),null);assert.equal(f.card.querySelector('[data-remote-opt-in]').checked,false);assert.equal(f.card.querySelector('form').hidden,false);}finally{f.dom.window.close();}
+});
+
+test('transport verification highlights step three without claiming ready',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'pending',verified:false,version:3,transport_state:'connecting'}]});
+ try{assert.equal(f.card.querySelector('[aria-current=step]').textContent,'Verify connection');assert.match(f.card.textContent,/Verifying computer connection/);assert.equal(f.card.querySelector('input[readonly]'),null);}finally{f.dom.window.close();}
+});

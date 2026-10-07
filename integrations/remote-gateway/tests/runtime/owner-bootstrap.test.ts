@@ -25,3 +25,12 @@ test('cancelled connection id cannot be created by delayed provisioning',async()
  await expect((async()=>{await stub.addConnection(ownerId,installation,profile,client,{connectionId,installationId:installation,profileId:profile,host:'muse',permissions:{read:true,write:false,correction:false,session:false},credentialEnvelope:'encrypted',deviceDigest:'a'.repeat(64),deviceJkt:jkt,deviceExpiresAtMs:Date.now()+60000,generation:1,revokedAt:null,cleanupPending:false});})()).rejects.toThrow('connection_cancelled');
  expect(await stub.getConnection(ownerId,connectionId)).toBeNull();
 });
+
+test('generic MCP client keeps the same native ownership and permission boundaries',async()=>{
+ const {binding,jkt}=await fixture();binding.host='other_mcp';
+ const bootstrap=env.BOOTSTRAPS.getByName(crypto.randomUUID());await bootstrap.configure(binding);await bootstrap.approve('16027584');await bootstrap.confirm('16027584','native-client');
+ const owner=env.OWNERS.getByName(crypto.randomUUID());await owner.bind('16027584','install-a','default','native-client',jkt);
+ const row:OwnedConnection={connectionId:binding.connectionId,installationId:'install-a',profileId:'default',host:'other_mcp',permissions:binding.permissions,credentialEnvelope:'encrypted-synthetic',deviceDigest:'a'.repeat(64),deviceJkt:jkt,deviceExpiresAtMs:Date.now()+60000,generation:1,revokedAt:null,cleanupPending:false};
+ await owner.addConnection('16027584','install-a','default','native-client',row);expect(await owner.getConnection('16027584',row.connectionId)).toMatchObject({host:'other_mcp',permissions:binding.permissions});expect(await owner.list('999')).toEqual([]);
+ const invalid=env.BOOTSTRAPS.getByName(crypto.randomUUID());await rejected(()=>invalid.configure({...binding,host:'https://evil.example'}),'invalid_bootstrap');
+});

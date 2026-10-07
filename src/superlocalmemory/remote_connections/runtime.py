@@ -48,7 +48,7 @@ class NativeConnectionRuntime:
         self.service = ManagedConnectionService(
             journal,
             self.provider,
-            hosts=("muse", "chatgpt", "claude_web", "claude_code_web", "composio"),
+            hosts=("muse", "chatgpt", "claude_web", "claude_code_web", "composio", "other_mcp"),
             runtime=self,
         )
 
