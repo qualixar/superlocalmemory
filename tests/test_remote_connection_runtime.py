@@ -185,3 +185,34 @@ async def test_local_only_restore_never_opens_keyring(tmp_path,monkeypatch):
     monkeypatch.setattr(store,'by_connection',forbidden)
     await runtime.restore()
     assert not runtime._companions
+
+@pytest.mark.asyncio
+async def test_interrupted_callback_waits_for_mutating_thread_before_disconnect_ack(tmp_path,monkeypatch):
+    import asyncio,threading,time
+    from dataclasses import replace
+    runtime,row=enrolled_runtime(tmp_path)
+    entered=threading.Event();release=threading.Event();finished=threading.Event();original=runtime.keys.add
+    def delayed(*args,**kwargs):
+        entered.set()
+        assert release.wait(3)
+        try:return original(*args,**kwargs)
+        finally:finished.set()
+    monkeypatch.setattr(runtime.keys,'add',delayed)
+    class Provider:
+        async def exchange(self,value,code):return replace(value,access_token='synthetic')
+        async def provision(self,value):return {'device_token':'d'*64,'generation':1,'expires_at_ms':int(time.time()*1000)+60000}
+        async def revoke(self,value):return {'revoked':True}
+    runtime.provider=Provider()
+    callback=asyncio.create_task(runtime.callback(row.state,'code'))
+    assert await asyncio.to_thread(entered.wait,1)
+    callback.cancel()
+    current=runtime.journal.get(row.owner,row.profile,row.connection_id)
+    cancel=asyncio.create_task(runtime.service.cancel(row.owner,row.profile,row.connection_id,current.version))
+    try:
+        await asyncio.sleep(.05)
+        assert not cancel.done(), 'disconnect must wait for the mutation already in progress'
+    finally:release.set()
+    with pytest.raises(asyncio.CancelledError):await callback
+    await cancel
+    assert finished.is_set()
+    assert not any(key.active for key in runtime.keys.list())
