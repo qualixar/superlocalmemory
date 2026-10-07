@@ -79,3 +79,21 @@ test('unverified or noncanonical endpoint never exposes URL',async()=>{
  const f=await setup({available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'ready_for_client',verified:true,version:2,mcp_url:'https://evil.example/mcp'}]});
  try{assert.equal(f.card.querySelector('input[readonly]'),null);}finally{f.dom.window.close();}
 });
+
+test('Composio is a supported dashboard destination',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['composio'],connections:[]});
+ try{assert.equal(f.card.querySelector('select').value,'composio');assert.equal([...f.card.querySelectorAll('button')].find(x=>x.textContent==='Add AI connection').disabled,false);}finally{f.dom.window.close();}
+});
+test('sign-in starts from the user gesture and navigates only to verified receipt',async()=>{
+ const url='https://auth.superlocalmemory.com/owner-login?connection_id=synthetic-connection';const f=await setup(undefined,{state:'pending',connection_id:'synthetic-connection',authorization_url:url});const opened=[];const navigated=[];const popup={opener:f.dom.window,location:{replace:value=>navigated.push(value)},close(){}};
+ f.dom.window.open=(...args)=>{opened.push(args);return popup;};
+ try{await submit(f);assert.equal(opened[0][0],'about:blank');assert.equal(popup.opener,null);assert.deepEqual(navigated,[url]);}finally{f.dom.window.close();}
+});
+test('pending status polls until canonical verified readiness without another click',async()=>{
+ const status={available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'pending',verified:false,version:2}]};
+ const f=await setup(status);const scheduled=[];f.dom.window.setTimeout=fn=>{scheduled.push(fn);return 1;};
+ try{click(f.card,'Refresh status');await tick();await tick();assert.equal(scheduled.length,1);
+ status.connections[0]={...status.connections[0],state:'ready_for_client',verified:true,mcp_url:'https://mcp.superlocalmemory.com/mcp'};
+ scheduled.shift()();await tick();await tick();assert.match(f.card.textContent,/Ready for AI client/);assert.equal(scheduled.length,0);
+ }finally{f.dom.window.close();}
+});

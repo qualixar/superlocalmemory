@@ -47,3 +47,61 @@ async def test_two_connections_share_desktop_registration_and_key(tmp_path):
     for connection in ('a'*32,'b'*32):await provider.enroll(installation_id='installation',connection_id=connection,owner='owner',profile='profile',intent=intent)
     assert count==1
     assert payloads[0]['deviceJwk']==payloads[1]['deviceJwk']
+
+@pytest.mark.asyncio
+async def test_interrupted_connection_save_recovers_existing_desktop_client(tmp_path):
+    store=NativeEnrollmentStore(tmp_path,backend=Backend());count=0
+    original_save=store.save;failed=False
+    def interrupted(row):
+        nonlocal failed
+        if row.client_id and not failed:
+            failed=True
+            raise ValueError('synthetic-store-interruption')
+        return original_save(row)
+    store.save=interrupted
+    async def http(path,**kwargs):
+        nonlocal count
+        if path=='/oauth/register':count+=1;return {'client_id':'synthetic-client'}
+        return {'connection_id':'a'*32,'authorize_url':'https://auth.superlocalmemory.com/owner-login?connection_id='+'a'*32}
+    provider=CloudGatewayProvider(store,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback',http=http)
+    intent={'host':'muse','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':False,'correction':False,'session':False}}
+    with pytest.raises(ValueError):await provider.enroll(installation_id='installation',connection_id='a'*32,owner='owner',profile='profile',intent=intent)
+    await provider.enroll(installation_id='installation',connection_id='a'*32,owner='owner',profile='profile',intent=intent)
+    assert count==1
+
+@pytest.mark.asyncio
+async def test_slow_secure_store_does_not_block_unrelated_coroutine(tmp_path):
+    import asyncio,threading
+    entered=threading.Event();release=threading.Event()
+    class Slow(Backend):
+        def get_password(self,service,name):
+            entered.set();release.wait(2)
+            return super().get_password(service,name)
+    async def http(path,**kwargs):
+        if path=='/oauth/register':return {'client_id':'synthetic-client'}
+        return {'connection_id':'a'*32,'authorize_url':'https://auth.superlocalmemory.com/owner-login?connection_id='+'a'*32}
+    provider=CloudGatewayProvider(NativeEnrollmentStore(tmp_path,backend=Slow()),redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback',http=http)
+    intent={'host':'muse','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':False,'correction':False,'session':False}}
+    task=asyncio.create_task(provider.enroll(installation_id='installation',connection_id='a'*32,owner='owner',profile='profile',intent=intent))
+    try:
+        assert await asyncio.to_thread(entered.wait,1)
+        await asyncio.wait_for(asyncio.sleep(0),0.1)
+    finally:release.set()
+    await task
+
+@pytest.mark.asyncio
+async def test_expired_completed_record_refresh_persists_rotated_tokens(tmp_path):
+    from dataclasses import replace
+    from tests.test_remote_native_enrollment_store import record
+    backend=Backend();store=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:100)
+    row=replace(record(),expires_at_ms=101000,completed=True,client_id='client',access_token='old-access',refresh_token='old-refresh',access_expires_ms=1)
+    store.save(row)
+    later=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:102);requests=[]
+    async def http(path,**kwargs):
+        requests.append((path,kwargs))
+        return {'access_token':'new-access','refresh_token':'new-refresh','expires_in':3600,'scope':'slm:connect'}
+    provider=CloudGatewayProvider(later,redirect_uri=row.redirect_uri,http=http)
+    updated=await provider.exchange(later.by_connection(row.connection_id),'')
+    assert requests[0][1]['data']['grant_type']=='refresh_token'
+    assert later.by_connection(row.connection_id)==updated
+    assert updated.refresh_token=='new-refresh' and later.by_state(row.state) is None

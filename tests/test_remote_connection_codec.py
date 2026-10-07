@@ -56,3 +56,8 @@ def test_response_and_cancel_contract():
 def test_invalid_curated_header_configuration_fails_closed(options):
     assert decode_frame is not None
     with pytest.raises(FrameError):decode_frame(wire(request()),param_headers=options)
+
+@pytest.mark.parametrize('kind',[[],{},None,1])
+def test_non_string_kind_is_a_bounded_protocol_error(kind):
+    with pytest.raises(FrameError,match='INVALID_FRAME'):
+        decode_frame(wire(request(kind=kind)))
