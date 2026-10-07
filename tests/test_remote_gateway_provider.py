@@ -33,3 +33,17 @@ async def test_enrollment_retry_preserves_client_and_pkce(tmp_path):
     for _ in range(2):await provider.enroll(installation_id='installation',connection_id='a'*32,owner='owner',profile='profile',intent=intent)
     assert count==1
     assert payloads[0]==payloads[1]
+
+@pytest.mark.asyncio
+async def test_two_connections_share_desktop_registration_and_key(tmp_path):
+    count=0;payloads=[]
+    async def http(path,**kwargs):
+        nonlocal count
+        if path=='/oauth/register':count+=1;return {'client_id':'synthetic-client'}
+        value=kwargs['json'];payloads.append(value)
+        return {'connection_id':value['connectionId'],'authorize_url':'https://auth.superlocalmemory.com/owner-login?connection_id='+value['connectionId']}
+    provider=CloudGatewayProvider(NativeEnrollmentStore(tmp_path,backend=Backend()),redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback',http=http)
+    intent={'host':'muse','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':False,'correction':False,'session':False}}
+    for connection in ('a'*32,'b'*32):await provider.enroll(installation_id='installation',connection_id=connection,owner='owner',profile='profile',intent=intent)
+    assert count==1
+    assert payloads[0]['deviceJwk']==payloads[1]['deviceJwk']
