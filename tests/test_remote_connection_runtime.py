@@ -27,3 +27,15 @@ def test_confirmed_remote_cleanup_preserves_terminal_local_cancellation(tmp_path
     journal.clear_cleanup('owner','profile',row.connection_id)
     row=journal.get('owner','profile',row.connection_id)
     assert row.state=='cancelled' and not row.cleanup_pending
+
+def test_dashboard_runtime_installation_has_no_keyring_or_network_start(tmp_path,monkeypatch):
+    from fastapi import FastAPI
+    from types import SimpleNamespace
+    from superlocalmemory.remote_connections.runtime import install_runtime
+    import superlocalmemory.remote_connections.native_enrollment as native
+    def forbidden():raise AssertionError('keyring must stay closed before opt-in')
+    monkeypatch.setattr(native,'_native_backend',forbidden)
+    app=FastAPI();app.state.daemon_descriptor=SimpleNamespace(port=18767)
+    runtime=install_runtime(app,root=tmp_path)
+    assert app.state.remote_connections is runtime.service
+    assert not runtime._companions
