@@ -18,7 +18,7 @@ Both paths are intended to work concurrently. Enabling the remote path must pres
 
 - [Architecture and trust boundaries](architecture.md): components, data flow, authorization, local-core isolation and current implementation evidence.
 - [Dashboard onboarding](onboarding.md): the intended nontechnical user journey and connection states.
-- [Cloudflare pilot](cloudflare-pilot.md): operator setup, deployment sequence, rollback and usage checks.
+- [Cloudflare pilot](cloudflare-operations.md): operator setup, deployment sequence, rollback and usage checks.
 - [Acceptance and host certification](acceptance.md): synthetic, real-engine, native-host and regression gates.
 - [Offline visual preview](architecture-preview.html): desktop/mobile layouts with editable SVG source.
 - [Local engine architecture](../ARCHITECTURE.md): the existing memory pipeline, canonical store and projections.

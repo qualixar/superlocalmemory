@@ -31,4 +31,4 @@ Host account features and authentication requirements must be verified before a 
 
 Do not rewrite existing modes, profiles, providers, hooks, local MCP client wiring, mesh configuration or database paths. The companion and connection journal use separate remote state. Optional runtime failures must not become a local startup requirement.
 
-Hosted-service accounts and subscriptions cover remote connectivity only. The pilot requires an explicit operator-granted entitlement; no production caller-controlled bypass.
+GitHub sign-in covers optional web connections only. The local dashboard binds approval to the installation, current profile and selected permissions. Local SLM continues to work without a hosted account. Google sign-in is not required.

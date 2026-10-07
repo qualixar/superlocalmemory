@@ -146,7 +146,7 @@ SLM's remote-access architecture connects compatible web MCP clients to the same
 
 Remote access is opt-in. End users do not configure Cloudflare, DNS or tunnel commands. The free local core operates independently of hosted-service accounts and entitlements. The canonical database stays on your machine; remote tool arguments and results pass through the gateway and selected AI host. Your laptop must be online for remote calls.
 
-[Remote-access documentation](docs/remote-access/README.md) · [Architecture and boundaries](docs/remote-access/architecture.md) · [Dashboard onboarding](docs/remote-access/onboarding.md) · [Cloudflare operator guide](docs/remote-access/cloudflare-pilot.md) · [Acceptance procedures](docs/remote-access/acceptance.md).
+[Remote-access documentation](docs/remote-access/README.md) · [Architecture and boundaries](docs/remote-access/architecture.md) · [Dashboard onboarding](docs/remote-access/onboarding.md) · [Cloudflare operator guide](docs/remote-access/cloudflare-operations.md) · [Acceptance procedures](docs/remote-access/acceptance.md).
 
 ## Everything SLM does
 
