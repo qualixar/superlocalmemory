@@ -24,3 +24,16 @@ describe('public auth Worker boundaries',()=>{
   expect(response.status).toBeGreaterThanOrEqual(400);expect(await response.text()).not.toContain('synthetic-secret');await waitOnExecutionContext(ctx);
  });
 });
+
+it('anonymous admission denial prevents registration and bootstrap allocation',async()=>{
+ const settings={...configuration(),ANON_SETUP:{async limit(){return {success:false};}},ANON_GLOBAL:{async limit(){return {success:true};}},OAUTH_KV:new Proxy({}, {get(){throw new Error('storage must not be consulted');}}),BOOTSTRAPS:new Proxy({}, {get(){throw new Error('DO must not be allocated');}})} as AuthWorkerEnv;
+ for(const path of ['/oauth/register','/bootstrap']){
+  const ctx=createExecutionContext();const response=await authFetch(new Request(issuer+path,{method:'POST',headers:{'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.1'},body:'{}'}),settings,ctx);
+  expect(response.status).toBe(429);expect(response.headers.get('Retry-After')).toBe('60');await waitOnExecutionContext(ctx);
+ }
+});
+
+it('missing anonymous admission bindings fail closed',async()=>{
+ const settings={...configuration(),ANON_SETUP:undefined,ANON_GLOBAL:undefined} as unknown as AuthWorkerEnv;
+ const ctx=createExecutionContext();expect((await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),settings,ctx)).status).toBe(503);await waitOnExecutionContext(ctx);
+});

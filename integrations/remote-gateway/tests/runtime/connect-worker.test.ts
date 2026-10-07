@@ -12,3 +12,7 @@ test('public connector needs registered proof key and consumes jti durably',asyn
  const first=await connectFetch(request(),env as ConnectEnv,createExecutionContext());expect(first.status).toBe(503); // no configured relay; never fake connected
  expect((await connectFetch(request(),env as ConnectEnv,createExecutionContext())).status).toBe(401);
 });
+test('connector infrastructure failure is retryable rather than an authentication rejection',async()=>{
+ const broken={...env,DEVICES:{getByName(){throw new Error('synthetic storage outage');}}} as unknown as ConnectEnv;
+ const response=await connectFetch(new Request(endpoint,{headers:{Upgrade:'websocket',Authorization:'Bearer '+'a'.repeat(64),DPoP:'synthetic-proof'}}),broken,createExecutionContext());expect(response.status).toBe(503);expect(await response.json()).toMatchObject({error:'connector_unavailable'});
+});
