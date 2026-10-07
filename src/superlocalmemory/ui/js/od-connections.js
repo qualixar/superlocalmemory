@@ -3,7 +3,7 @@
 // this card never receives a connector key or changes transport configuration.
 (function () {
   'use strict';
-  var HOSTS = { muse: 'Musebot', chatgpt: 'ChatGPT Web', claude_web: 'Claude Web', claude_code_web: 'Claude Code Web' };
+  var HOSTS = { muse: 'Musebot', chatgpt: 'ChatGPT Web', claude_web: 'Claude Web', claude_code_web: 'Claude Code Web', composio: 'Composio' };
   function node(tag, text, cls) { var el = document.createElement(tag); if (text) el.textContent = text; if (cls) el.className = cls; return el; }
   function call(path, init) {
     var fetcher = typeof window.slmFetch === 'function' ? window.slmFetch : window.fetch;
@@ -39,6 +39,17 @@
     var submit = node('button', 'Continue', 'btn primary'); submit.type = 'submit'; form.appendChild(submit);
     var links = node('div'); body.appendChild(links);
     var metadata = null; var attempt = null; var busy = false; var storageKey = null;
+    var pollTimer = null; var loading = false; var disposed = false;
+    function schedulePoll(delay) {
+      if (pollTimer !== null) window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(function () {
+        pollTimer = null;
+        if (disposed || !card.isConnected) return;
+        if (busy || document.hidden) { schedulePoll(3000); return; }
+        load();
+      }, delay);
+    }
+    window.addEventListener('pagehide', function () { disposed = true; if (pollTimer !== null) window.clearTimeout(pollTimer); }, { once: true });
     function saveAttempt() {
       if (!storageKey || !attempt) throw new Error('intent persistence unavailable');
       // Only non-secret consent/request metadata. Never credentials or sign-in URLs.
@@ -55,6 +66,9 @@
       return { key: saved.key, payload: saved.payload, acknowledged: saved.acknowledged === true, connectionId: typeof saved.connectionId === 'string' ? saved.connectionId : null };
     }
     function load() {
+      if (loading || disposed) return Promise.resolve();
+      if (pollTimer !== null) { window.clearTimeout(pollTimer); pollTimer = null; }
+      loading = true;
       refresh.disabled = true;
       return call('/api/v3/connections/status').then(function (data) {
         metadata = data && typeof data === 'object' ? data : null;
@@ -80,11 +94,20 @@
             attempt.connectionId = connection.connection_id; saveAttempt();
           }
           var active = connection.state === 'connected' && connection.verified === true;
-          if ((active || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
+          var ready = connection.state === 'ready_for_client' && connection.verified === true && connection.mcp_url === 'https://mcp.superlocalmemory.com/mcp';
+          if ((active || ready || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
           var cancelled = connection.state === 'cancelled';
-          var description = active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : 'Not connected';
+          var description = ready ? 'Ready for AI client — GitHub connected' : active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : 'Not connected';
           list.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
-          if (connection.state === 'pending' && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
+          if (ready) {
+            var endpoint = node('input'); endpoint.type = 'text'; endpoint.readOnly = true; endpoint.value = connection.mcp_url; endpoint.setAttribute('aria-label', 'MCP server URL'); list.appendChild(endpoint);
+            var copy = node('button', 'Copy URL', 'btn ghost sm'); copy.type = 'button'; list.appendChild(copy);
+            copy.addEventListener('click', function () {
+              if (window.navigator.clipboard && window.navigator.clipboard.writeText) window.navigator.clipboard.writeText(connection.mcp_url).then(function () { copy.textContent = 'Copied'; }).catch(function () { endpoint.select(); });
+              else endpoint.select();
+            });
+          }
+          if ((connection.state === 'pending' || ready || active) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
             var cancel = node('button', 'Cancel connection', 'btn ghost sm'); cancel.type = 'button'; list.appendChild(cancel);
             var profile = metadata.current_profile;
             cancel.addEventListener('click', function () {
@@ -101,7 +124,8 @@
             });
           }
         });
-      }).catch(function () { metadata = null; add.disabled = true; status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { refresh.disabled = false; });
+        if (metadata && Array.isArray(metadata.connections) && metadata.connections.some(function (connection) { return connection && connection.state === 'pending'; })) schedulePoll(1500);
+      }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; add.disabled = true; status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { loading = false; refresh.disabled = false; });
     }
     add.addEventListener('click', function () { if (!add.disabled) form.hidden = false; });
     refresh.addEventListener('click', function () { if (!busy) load(); });
@@ -116,6 +140,8 @@
       }
       if (!attempt) attempt = { key: operationKey(), payload: payload };
       try { saveAttempt(); } catch (_) { status.textContent = 'Browser storage is unavailable. Connection was not requested.'; return; }
+      var signInWindow = null;
+      try { signInWindow = window.open('about:blank', '_blank'); if (signInWindow) signInWindow.opener = null; } catch (_) { signInWindow = null; }
       busy = true; submit.disabled = true; links.textContent = ''; status.textContent = 'Requesting your connection…';
       call('/api/v3/connections/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attempt.key }, body: payload }).then(function (result) {
         if (!result || result.state !== 'pending' || typeof result.connection_id !== 'string' || !result.connection_id || result.connection_id.length > 256) throw new Error('unconfirmed connection receipt');
@@ -123,8 +149,11 @@
         // A request acknowledgement is not proof of a live authorized connection.
         status.textContent = 'Connection requested. Waiting for sign-in and verification.';
         var url = result && safeSignIn(result.authorization_url, result.connection_id);
-        if (url) { var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); }
-      }).catch(function () { status.textContent = 'Connection request could not be confirmed. Retry the same request.'; }).finally(function () { busy = false; submit.disabled = false; });
+        if (url) {
+          if (signInWindow) { try { signInWindow.location.replace(url); } catch (_) { signInWindow.close(); } }
+          var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); } else if (signInWindow) signInWindow.close();
+        schedulePoll(1500);
+      }).catch(function () { if (signInWindow) signInWindow.close(); status.textContent = 'Connection request could not be confirmed. Retry the same request.'; }).finally(function () { busy = false; submit.disabled = false; });
     });
     load(); return card;
   };
