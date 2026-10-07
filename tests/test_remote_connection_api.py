@@ -69,6 +69,7 @@ def test_real_route_acks_pending_and_retry_does_not_repeat_provider(configured):
     status = client.get("/api/v3/connections/status").json()
     assert status["hosts"] == ["muse"] and status["installation_id"]
     assert status["connections"][0]["verified"] is False
+    assert status["connections"][0]["intent_key"] == "a" * 32
 
 
 def test_mutation_requires_explicit_install_credential(configured):

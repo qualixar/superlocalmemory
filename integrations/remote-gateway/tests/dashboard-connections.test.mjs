@@ -44,6 +44,18 @@ test('failed cancellation remains unconfirmed and can be retried',async()=>{
  assert.equal([...f.card.querySelectorAll('button')].find(x=>x.textContent==='Cancel connection').disabled,false);
  }finally{f.dom.window.close();}
 });
+test('uncertain initiation can be cancelled and retried with a fresh intent key',async()=>{
+ const status={available:true,current_profile:'profile-a',hosts:['muse'],connections:[]};
+ const f=await setup(status);try{
+ f.setFail(true);await submit(f);const first=f.calls.find(x=>x.init.method==='POST');
+ status.connections.push({host:'muse',state:'pending',connection_id:'a'.repeat(32),version:2,verified:false,intent_key:first.init.headers['Idempotency-Key']});
+ click(f.card,'Refresh status');await tick();await tick();
+ const original=f.dom.window.slmFetch;f.dom.window.slmFetch=async(path,init={})=>{if(path.endsWith('/cancel')){status.connections[0]={...status.connections[0],state:'cancelled',version:3,cleanup_pending:true};return new Response(JSON.stringify(status.connections[0]),{status:200});}return original(path,init);};
+ click(f.card,'Cancel connection');await tick();await tick();f.setFail(false);await submit(f);
+ const posts=f.calls.filter(x=>x.path==='/api/v3/connections/initiate'&&x.init.method==='POST');
+ assert.equal(posts.length,2);assert.notEqual(posts[0].init.headers['Idempotency-Key'],posts[1].init.headers['Idempotency-Key']);
+ }finally{f.dom.window.close();}
+});
 
 test('existing MCP pane mounts initiation card alongside current profile tools',async()=>{const f=await setup();try{f.dom.window.eval(readFileSync(new URL('../../../src/superlocalmemory/ui/js/od-mcp.js',import.meta.url),'utf8'));const pane=f.dom.window.document.createElement('div');f.dom.window.document.body.append(pane);f.dom.window.odRenderMcp(pane);await tick();await tick();assert.ok(pane.querySelector('#od-ai-connections'));assert.match(pane.textContent,/MCP & Integrations/);}finally{f.dom.window.close();}});
 test('MCP profile API failure retains independent initiation card',async()=>{const f=await setup();try{const original=f.dom.window.slmFetch;f.dom.window.slmFetch=(path,init)=>path==='/api/v3/mcp/profiles'?Promise.resolve(new Response('{}',{status:503})):original(path,init);f.dom.window.eval(readFileSync(new URL('../../../src/superlocalmemory/ui/js/od-mcp.js',import.meta.url),'utf8'));const pane=f.dom.window.document.createElement('div');f.dom.window.document.body.append(pane);f.dom.window.odRenderMcp(pane);await tick();await tick();assert.ok(pane.querySelector('#od-ai-connections'));}finally{f.dom.window.close();}});
