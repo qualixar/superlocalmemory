@@ -97,3 +97,22 @@ test('pending status polls until canonical verified readiness without another cl
  scheduled.shift()();await tick();await tick();assert.match(f.card.textContent,/Ready for AI client/);assert.equal(scheduled.length,0);
  }finally{f.dom.window.close();}
 });
+
+test('guided setup shows visible client choices and a single ordered journey',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['composio','chatgpt','muse','claude_web','other_mcp'],connections:[]});
+ try{for(const client of ['Composio','ChatGPT Web','Musebot','Claude Web','Other MCP client'])assert.ok(f.card.querySelector('[data-client="'+({Composio:'composio','ChatGPT Web':'chatgpt',Musebot:'muse','Claude Web':'claude_web','Other MCP client':'other_mcp'}[client])+'"]'));
+ assert.match(f.card.textContent,/Choose your AI/);assert.match(f.card.textContent,/Link this computer/);assert.match(f.card.textContent,/Verify connection/);assert.match(f.card.textContent,/Connect your AI/);assert.equal(f.card.querySelector('form').hidden,false);
+ }finally{f.dom.window.close();}
+});
+test('Muse selection explains its adapter and generic client selection remains bounded',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['muse','other_mcp'],connections:[]});
+ try{f.card.querySelector('[data-client=muse]').click();assert.match(f.card.textContent,/private adapter/i);f.card.querySelector('[data-client=other_mcp]').click();assert.equal(f.card.querySelector('select').value,'other_mcp');assert.match(f.card.textContent,/compatible.*MCP/i);}finally{f.dom.window.close();}
+});
+test('unchanged pending polls preserve the same cancel button and chosen host',async()=>{
+ const state={available:true,current_profile:'profile-a',hosts:['muse','composio'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'pending',verified:false,version:3,link_status:'sign_in_required'}]};const f=await setup(state);
+ try{const button=[...f.card.querySelectorAll('button')].find(x=>x.textContent==='Cancel connection');f.card.querySelector('select').value='composio';click(f.card,'Refresh status');await tick();await tick();assert.equal([...f.card.querySelectorAll('button')].find(x=>x.textContent==='Cancel connection'),button);assert.equal(f.card.querySelector('select').value,'composio');assert.match(f.card.textContent,/Waiting for GitHub sign-in/);}finally{f.dom.window.close();}
+});
+test('ready Composio recipe includes correct OAuth metadata URL',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['composio'],connections:[{host:'composio',connection_id:'a'.repeat(32),state:'ready_for_client',verified:true,version:2,mcp_url:'https://mcp.superlocalmemory.com/mcp'}]});
+ try{assert.match(f.card.textContent,/OAuth/);assert.equal(f.card.querySelector('input[aria-label="OAuth metadata URL"]')?.value,'https://auth.superlocalmemory.com/.well-known/oauth-authorization-server');}finally{f.dom.window.close();}
+});

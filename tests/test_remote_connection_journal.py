@@ -165,3 +165,8 @@ def test_cancel_before_dispatch_needs_no_remote_cleanup(journal):
     cancelled = journal.cancel("owner", "default", row.connection_id, 1)
     assert not cancelled.cleanup_pending
     assert journal.cancel("owner", "default", row.connection_id, 1) == cancelled
+
+def test_generic_compatible_mcp_client_uses_same_explicit_consent_boundary(journal):
+    payload=intent();payload['host']='other_mcp'
+    row=journal.begin('owner','default','a'*32,payload)
+    assert row.host=='other_mcp' and row.state=='pending'
