@@ -21,7 +21,7 @@ function html(body:string,headers:Headers,redirectUri?:string,status=200):Respon
  const nonce=crypto.randomUUID().replaceAll('-','');
  let destination='';
  if(redirectUri){try{const target=new URL(redirectUri);if(!target.username&&!target.password&&(target.protocol==='https:'||target.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(target.hostname)))destination=' '+target.origin;}catch{/* No additional destination for malformed metadata. */}}
- headers.set('Content-Type','text/html;charset=utf-8');headers.set('Cache-Control','no-store');headers.set('Referrer-Policy','no-referrer');
+ headers.set('Content-Type','text/html;charset=utf-8');headers.set('Cache-Control','no-store');headers.set('Referrer-Policy','strict-origin');
  // Chrome applies form-action to the redirect chain. Only the identity
  // provider and this SDK-validated client's return origin are allowed.
  headers.set('Content-Security-Policy',"default-src 'none'; style-src 'nonce-"+nonce+"'; form-action 'self' https://github.com"+destination+"; frame-ancestors 'none'; base-uri 'none'");
