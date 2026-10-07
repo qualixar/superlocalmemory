@@ -130,3 +130,8 @@ test('transport verification highlights step three without claiming ready',async
  const f=await setup({available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',connection_id:'a'.repeat(32),state:'pending',verified:false,version:3,transport_state:'connecting'}]});
  try{assert.equal(f.card.querySelector('[aria-current=step]').textContent,'Verify connection');assert.match(f.card.textContent,/Verifying computer connection/);assert.equal(f.card.querySelector('input[readonly]'),null);}finally{f.dom.window.close();}
 });
+
+test('cancelled attempts stay in collapsed history rather than appearing as duplicate active connections',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['composio'],connections:[{host:'composio',connection_id:'a'.repeat(32),state:'cancelled',verified:false,version:5,cleanup_pending:false}]});
+ try{const history=f.card.querySelector('details');assert.ok(history);assert.equal(history.open,false);assert.equal(history.querySelector('summary').textContent,'Past connections (1)');assert.match(history.textContent,/Composio: Cancelled/);}finally{f.dom.window.close();}
+});

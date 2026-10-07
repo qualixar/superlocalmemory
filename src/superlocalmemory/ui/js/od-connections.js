@@ -123,6 +123,8 @@
         var nextList = JSON.stringify([metadata.current_profile, metadata.connections || []]);
         if (nextList !== listSignature) {
         list.textContent = '';
+        var history = node('details'); var historyRows = node('div'); var historyCount = 0;
+        history.appendChild(node('summary', 'Past connections')); history.appendChild(historyRows);
         (metadata && Array.isArray(metadata.connections) ? metadata.connections : []).forEach(function (connection) {
           if (!connection || !Object.hasOwn(HOSTS, connection.host)) return;
           // Recover identity after a lost initiation response. This is a
@@ -134,22 +136,24 @@
           var ready = connection.state === 'ready_for_client' && connection.verified === true && connection.mcp_url === 'https://mcp.superlocalmemory.com/mcp';
           if ((active || ready || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; add.hidden = false; consent.checked = false; }
           var cancelled = connection.state === 'cancelled';
+          var row = node('div', '', 'od-ai-connection');
+          if (cancelled) { historyRows.appendChild(row); historyCount += 1; } else list.appendChild(row);
           var description = ready ? 'Ready for AI client — GitHub connected' : active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : connection.state === 'pending' ? connection.transport_state === 'authorization_required' ? 'Authorization required — cancel this connection and link again' : connection.transport_state ? 'Verifying computer connection' : 'Waiting for GitHub sign-in and connection verification' : 'Not connected';
-          list.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
+          row.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
           if (ready) {
-            list.appendChild(node('h4', 'Connect your AI — ' + HOSTS[connection.host]));
-            list.appendChild(node('p', connection.host === 'composio' ? 'In Composio, add a Custom MCP named SuperLocalMemory, paste the MCP server URL below, and choose OAuth. In Advanced settings, use the OAuth metadata URL below. Sign in with the same GitHub account and approve access to this profile.' : connection.host === 'muse' ? 'Use the Musebot private adapter with its secure OAuth connector. Give it the MCP server URL and OAuth metadata URL below; approve access using the same GitHub account. Never paste tokens into chat.' : 'Add a remote MCP connector in your compatible AI client using the MCP server URL below and OAuth. Sign in with the same GitHub account and approve this profile. Availability depends on your AI account.'));
-            var endpoint = node('input'); endpoint.type = 'text'; endpoint.readOnly = true; endpoint.value = connection.mcp_url; endpoint.setAttribute('aria-label', 'MCP server URL'); list.appendChild(endpoint);
+            row.appendChild(node('h4', 'Connect your AI — ' + HOSTS[connection.host]));
+            row.appendChild(node('p', connection.host === 'composio' ? 'In Composio, add a Custom MCP named SuperLocalMemory, paste the MCP server URL below, and choose OAuth. In Advanced settings, use the OAuth metadata URL below. Sign in with the same GitHub account and approve access to this profile.' : connection.host === 'muse' ? 'Use the Musebot private adapter with its secure OAuth connector. Give it the MCP server URL and OAuth metadata URL below; approve access using the same GitHub account. Never paste tokens into chat.' : 'Add a remote MCP connector in your compatible AI client using the MCP server URL below and OAuth. Sign in with the same GitHub account and approve this profile. Availability depends on your AI account.'));
+            var endpoint = node('input'); endpoint.type = 'text'; endpoint.readOnly = true; endpoint.value = connection.mcp_url; endpoint.setAttribute('aria-label', 'MCP server URL'); row.appendChild(endpoint);
             var oauthLabel = node('label', 'OAuth metadata URL'); var oauth = node('input'); oauth.type = 'text'; oauth.readOnly = true; oauth.value = 'https://auth.superlocalmemory.com/.well-known/oauth-authorization-server'; oauth.setAttribute('aria-label', 'OAuth metadata URL'); oauthLabel.appendChild(oauth);
-            var copy = node('button', 'Copy URL', 'btn ghost sm'); copy.type = 'button'; list.appendChild(copy);
-            list.appendChild(oauthLabel);
+            var copy = node('button', 'Copy URL', 'btn ghost sm'); copy.type = 'button'; row.appendChild(copy);
+            row.appendChild(oauthLabel);
             copy.addEventListener('click', function () {
               if (window.navigator.clipboard && window.navigator.clipboard.writeText) window.navigator.clipboard.writeText(connection.mcp_url).then(function () { copy.textContent = 'Copied'; }).catch(function () { endpoint.select(); });
               else endpoint.select();
             });
           }
           if ((connection.state === 'pending' || ready || active) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
-            var cancel = node('button', 'Cancel connection', 'btn ghost sm'); cancel.type = 'button'; list.appendChild(cancel);
+            var cancel = node('button', 'Cancel connection', 'btn ghost sm'); cancel.type = 'button'; row.appendChild(cancel);
             var profile = metadata.current_profile;
             cancel.addEventListener('click', function () {
               if (busy) return;
@@ -165,6 +169,7 @@
             });
           }
         });
+        if (historyCount) { history.firstChild.textContent = 'Past connections (' + historyCount + ')'; list.appendChild(history); }
         listSignature = nextList;
         }
         if (metadata && Array.isArray(metadata.connections) && metadata.connections.some(function (connection) { return connection && connection.state === 'pending'; })) schedulePoll(1500);
