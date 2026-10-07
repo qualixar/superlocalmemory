@@ -10,15 +10,26 @@ import type {AuthRequest} from '@cloudflare/workers-oauth-provider';
 import {calculateJwkThumbprint} from 'jose';
 import {authorizationServer,type AuthorizationEnv,type NativeAuthProps} from './authorization-server.ts';
 import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,validateAuthorizationRequest,memoryAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
-import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage} from './auth-flow.ts';
+import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage,renderAuthPage,renderAuthFailure} from './auth-flow.ts';
 import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
 export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;DCR_DIAGNOSTICS?:string;}
 interface ConsentContext {request:AuthRequest;bootstrapId?:string;ownerId?:string;}
 function response(status:number,error:string):Response{return Response.json({error},{status,headers:{'Cache-Control':'no-store'}});}
-function html(body:string,headers:Headers):Response{
- headers.set('Content-Type','text/html;charset=utf-8');headers.set('Cache-Control','no-store');headers.set('Content-Security-Policy',"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");headers.set('X-Content-Type-Options','nosniff');return new Response(body,{headers});
+function html(body:string,headers:Headers,redirectUri?:string,status=200):Response{
+ const nonce=crypto.randomUUID().replaceAll('-','');
+ let destination='';
+ if(redirectUri){try{const target=new URL(redirectUri);if(!target.username&&!target.password&&(target.protocol==='https:'||target.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(target.hostname)))destination=' '+target.origin;}catch{/* No additional destination for malformed metadata. */}}
+ headers.set('Content-Type','text/html;charset=utf-8');headers.set('Cache-Control','no-store');headers.set('Referrer-Policy','no-referrer');
+ // Chrome applies form-action to the redirect chain. Only the identity
+ // provider and this SDK-validated client's return origin are allowed.
+ headers.set('Content-Security-Policy',"default-src 'none'; style-src 'nonce-"+nonce+"'; form-action 'self' https://github.com"+destination+"; frame-ancestors 'none'; base-uri 'none'");
+ headers.set('X-Content-Type-Options','nosniff');
+ return new Response(body.replace('<style>','<style nonce="'+nonce+'">'),{status,headers});
+}
+function interactiveFailure(request:Request,status:number,error:string):Response {
+ return request.headers.get('Accept')?.includes('text/html')?html(renderAuthFailure(error),new Headers(),undefined,status):response(status,error);
 }
 function redirect(location:string,headers=new Headers()):Response {headers.set('Location',location);headers.set('Cache-Control','no-store');return new Response(null,{status:302,headers});}
 const boundedText=readAuthorizationBody;
@@ -31,18 +42,17 @@ async function beginConsent(request:AuthRequest,env:AuthWorkerEnv,context:Omit<C
  const api=authorizationServer.getOAuthApi(env);const consent=await api.beginConsent(request);
  await env.OAUTH_KV.put('slm-consent:'+consent.handle,JSON.stringify({request,...context}),{expirationTtl:900});
  const description=await api.describeConsent(request);
- let page=renderConsentPage(consent.handle,{...description,redirectHostname:description.redirectHost});
- if(context.bootstrapId){const row=await env.BOOTSTRAPS.getByName(context.bootstrapId).get();if(!row)return response(404,'connection_unavailable');page=page.replace('<form','<p>Local profile: '+escapeHtml(row.profileId)+'</p><form');}
- if(request.scope.includes('slm:write'))page=page.replace('<button name="decision"','<label><input type="checkbox" name="write" value="yes"> Allow saving memories</label><button name="decision"');
- if(request.scope.includes('slm:session'))page=page.replace('<button name="decision"','<label><input type="checkbox" name="session" value="yes"> Allow session tools</label><button name="decision"');
- return html(page,consent.headers);
+ let profileId:string|undefined;
+ if(context.bootstrapId){const row=await env.BOOTSTRAPS.getByName(context.bootstrapId).get();if(!row)return html(renderAuthFailure('connection_unavailable'),new Headers(),undefined,404);profileId=row.profileId;}
+ const page=renderConsentPage(consent.handle,{...description,redirectHostname:description.redirectHost,profileId});
+ return html(page,consent.headers,request.redirectUri);
 }
 async function consentContext(handle:string,env:AuthWorkerEnv):Promise<ConsentContext|null>{
  if(!handle||handle.length>512)return null;
  return env.OAUTH_KV.get<ConsentContext>('slm-consent:'+handle,'json');
 }
 async function handleConsent(request:Request,env:AuthWorkerEnv):Promise<Response>{
- const fields=await form(request);const handle=fields.get('handle')??'';const context=await consentContext(handle,env);if(!context)return response(400,'consent_unavailable');
+ const fields=await form(request);const handle=fields.get('handle')??'';const context=await consentContext(handle,env);if(!context)return interactiveFailure(request,400,'consent_unavailable');
  const api=authorizationServer.getOAuthApi(env);
  if(fields.get('decision')==='deny'){const denied=await api.denyConsent(request,handle);await env.OAUTH_KV.delete('slm-consent:'+handle);return redirect(denied.redirectTo,denied.headers);}
  if(fields.get('decision')!=='allow')return response(400,'invalid_decision');
@@ -69,14 +79,14 @@ async function githubCallback(request:Request,env:AuthWorkerEnv):Promise<Respons
  }
  if(resumed.request.resource!==MCP_RESOURCE)return response(400,'invalid_resource');
  const connections=(await env.OWNERS.getByName(ownerId).list(ownerId)).filter(c=>c.revokedAt===null);
- if(!connections.length)return html('<!doctype html><title>SuperLocalMemory</title><h1>No available SLM connections</h1><p>Enable a web connection in your local SuperLocalMemory dashboard, then reconnect this application.</p>',resumed.headers);
+ if(!connections.length)return html(renderAuthPage('Link your computer first','<h1>Link your computer first</h1><p>No active computer connection is available for this GitHub account. Open your local SLM dashboard, enable a web connection, then reconnect this application using the same GitHub account.</p>'),resumed.headers,resumed.request.redirectUri);
  const consent=await api.beginConsent(resumed.request);
  await env.OAUTH_KV.put('slm-consent:'+consent.handle,JSON.stringify({request:resumed.request,ownerId}),{expirationTtl:900});
  const options=connections.map(c=>'<option value="'+escapeHtml(c.connectionId)+'">'+escapeHtml(c.profileId)+' ('+escapeHtml(c.host)+')</option>').join('');
- return html('<!doctype html><meta charset="utf-8"><title>SuperLocalMemory</title><h1>Choose your SLM connection</h1><p>Permissions: '+resumed.request.scope.map(escapeHtml).join(', ')+'</p><form method="post" action="/select"><input type="hidden" name="handle" value="'+escapeHtml(consent.handle)+'"><label>Local profile <select name="connection_id">'+options+'</select></label><button name="decision" value="allow">Connect</button><button name="decision" value="deny">Cancel</button></form>',consent.headers);
+ return html(renderAuthPage('Choose your SLM connection','<h1>Choose your SLM connection</h1><p>GitHub sign-in is complete. Select the local profile this application may use.</p><form method="post" action="/select"><input type="hidden" name="handle" value="'+escapeHtml(consent.handle)+'"><label>Local profile <select name="connection_id">'+options+'</select></label><div class="actions"><button name="decision" value="allow">Connect</button><button name="decision" value="deny">Cancel</button></div></form><details><summary>Approved permissions</summary><p>'+resumed.request.scope.map(escapeHtml).join(', ')+'</p></details>'),consent.headers,resumed.request.redirectUri);
 }
 async function selectConnection(request:Request,env:AuthWorkerEnv):Promise<Response>{
- const fields=await form(request);const handle=fields.get('handle')??'';const saved=await consentContext(handle,env);if(!saved?.ownerId)return response(400,'consent_unavailable');
+ const fields=await form(request);const handle=fields.get('handle')??'';const saved=await consentContext(handle,env);if(!saved?.ownerId)return interactiveFailure(request,400,'consent_unavailable');
  const api=authorizationServer.getOAuthApi(env);
  if(fields.get('decision')==='deny'){const result=await api.denyConsent(request,handle);await env.OAUTH_KV.delete('slm-consent:'+handle);return redirect(result.redirectTo,result.headers);}
  if(fields.get('decision')!=='allow')return response(400,'invalid_decision');
@@ -112,8 +122,8 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
    return await beginConsent(parsed,env);
   }
   if(url.pathname==='/owner-login'&&request.method==='GET'){
-   const id=url.searchParams.get('connection_id')??'';if(!/^[a-f0-9]{32}$/.test(id))return response(404,'connection_unavailable');
-   const row=await env.BOOTSTRAPS.getByName(id).get();if(!row||!['pending','approved'].includes(row.status)||!validateAuthorizationRequest(row.authRequest))return response(404,'connection_unavailable');
+   const id=url.searchParams.get('connection_id')??'';if(!/^[a-f0-9]{32}$/.test(id))return interactiveFailure(request,404,'connection_unavailable');
+   const row=await env.BOOTSTRAPS.getByName(id).get();if(!row||!['pending','approved'].includes(row.status)||!validateAuthorizationRequest(row.authRequest))return interactiveFailure(request,404,'connection_unavailable');
    return await beginConsent(row.authRequest,env,{bootstrapId:id});
   }
   if(url.pathname==='/bootstrap/cancel'&&request.method==='POST'){
@@ -146,7 +156,7 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
   if(url.pathname==='/select'&&request.method==='POST')return await selectConnection(request,env);
   if(url.pathname==='/github/callback'&&request.method==='GET')return await githubCallback(request,env);
   return await issuerProtocol(request,env,ctx);
- }catch{return response(400,'authorization_unavailable');}
+ }catch{return ['/owner-login','/authorize','/consent','/select','/github/callback'].includes(url.pathname)?interactiveFailure(request,400,'authorization_unavailable'):response(400,'authorization_unavailable');}
 }
 export default class AuthWorker extends WorkerEntrypoint<AuthWorkerEnv>{
  fetch(request:Request):Promise<Response>{return authFetch(request,this.env,this.ctx);}

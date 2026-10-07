@@ -461,42 +461,42 @@
   // Main render
   // =========================================================================
 
-  window.odRenderMcp = function (pane) {
-    if (!pane) return;
+  window.odRenderMcp = function (pane, options) {
+    if (!pane) return Promise.resolve();
+    options = options || {};
     injectStyles();
-
-    // Show loading state immediately
-    pane.textContent = '';
-    var connections = typeof window.odCreateAiConnectionsCard === 'function' ? window.odCreateAiConnectionsCard() : null;
-    if (connections) pane.appendChild(connections);
-    pane.appendChild(buildLoading());
-
-    apiFetch('/api/v3/mcp/profiles')
+    // Connection controls are an interactive transaction, not a disposable
+    // profile-data snapshot. Keep the mounted node and focus across refreshes.
+    var root = pane.querySelector('#od-mcp-root');
+    var connections = pane.querySelector('#od-ai-connections');
+    if (!root) {
+      root = EL('div', { id: 'od-mcp-root' });
+      root.style.cssText = 'padding:26px;max-width:860px';
+      var pageHead = EL('div'); pageHead.className = 'page-head';
+      pageHead.appendChild(EL('h2', { text: 'MCP & Integrations' }));
+      root.appendChild(pageHead); root.appendChild(buildIntro());
+      if (!connections && typeof window.odCreateAiConnectionsCard === 'function') connections = window.odCreateAiConnectionsCard();
+      if (connections) root.appendChild(connections);
+      pane.textContent = ''; pane.appendChild(root);
+      var details = EL('div', { 'data-mcp-profile-details': '' });
+      details.appendChild(buildLoading()); root.appendChild(details);
+    } else if (!options.preserveConnectionScope && connections && typeof connections.odRefreshConnectionStatus === 'function') {
+      connections.odRefreshConnectionStatus();
+    }
+    var profileDetails = root.querySelector('[data-mcp-profile-details]');
+    var generation = (pane.odMcpGeneration || 0) + 1; pane.odMcpGeneration = generation;
+    return apiFetch('/api/v3/mcp/profiles')
       .then(function (data) {
-        pane.textContent = '';
-
-        // Root wrapper
-        var root = EL('div', { id: 'od-mcp-root' });
-        root.style.cssText = 'padding:26px;max-width:860px';
-
-        // Page heading
-        var pageHead = EL('div');
-        pageHead.className = 'page-head';
-        pageHead.appendChild(EL('h2', { text: 'MCP & Integrations' }));
-        root.appendChild(pageHead);
-
-        root.appendChild(buildIntro());
-        if (connections) root.appendChild(connections);
-        root.appendChild(buildCurrentCard(data));
-        root.appendChild(buildProfilesCard(data));
-        root.appendChild(buildHowToCard());
-
-        pane.appendChild(root);
+        if (pane.odMcpGeneration !== generation || !root.isConnected) return;
+        profileDetails.textContent = '';
+        profileDetails.appendChild(buildCurrentCard(data));
+        profileDetails.appendChild(buildProfilesCard(data));
+        profileDetails.appendChild(buildHowToCard());
       })
-      .catch(function (err) {
-        pane.textContent = '';
-        if (connections) pane.appendChild(connections);
-        pane.appendChild(buildError(
+      .catch(function () {
+        if (pane.odMcpGeneration !== generation || !root.isConnected) return;
+        profileDetails.textContent = '';
+        profileDetails.appendChild(buildError(
           'Could not load MCP profile data. Is the daemon running?',
           function () { window.odRenderMcp(pane); }
         ));

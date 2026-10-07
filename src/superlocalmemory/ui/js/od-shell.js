@@ -358,6 +358,14 @@
   function refreshOdPane(tabId, fnName, state, generation) {
     var oldPane = document.getElementById(tabId);
     if (!oldPane || typeof window[fnName] !== 'function') return Promise.resolve();
+    // This pane owns live OAuth form state. Refresh only its profile-data area;
+    // cloning and swapping it would discard selections, focus and sign-in links.
+    if (fnName === 'odRenderMcp') {
+      return Promise.resolve(window[fnName](oldPane, { preserveConnectionScope: true })).then(function () {
+        if (state.generation === generation) { state.mounted = true; state.loadedAt = Date.now(); }
+      });
+    }
+
 
     var snapshotId = tabId + '--stale-' + String(generation);
     var freshPane = oldPane.cloneNode(false);
@@ -497,7 +505,7 @@
           return true;
         }
         try {
-          pane.innerHTML = '';
+          if (fnName !== 'odRenderMcp') pane.innerHTML = '';
           window[fnName](pane);
           pane.dataset.slmOdRenderer = fnName;
           var mounted = getPaneLoadState(tabId);

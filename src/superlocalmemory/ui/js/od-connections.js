@@ -51,7 +51,9 @@
     var metadata = null; var attempt = null; var busy = false; var storageKey = null;
     var choicesSignature = null; var listSignature = null;
     var pollTimer = null; var loading = false; var disposed = false;
+    var refreshRevision = 0; var refreshRequested = false;
     function controls() {
+      consent.disabled = add.disabled || busy; write.disabled = add.disabled || busy;
       submit.disabled = add.disabled || busy;
       Array.from(clients.children).forEach(function (button) { button.disabled = add.disabled || busy; });
     }
@@ -84,8 +86,10 @@
       if (loading || disposed) return Promise.resolve();
       if (pollTimer !== null) { window.clearTimeout(pollTimer); pollTimer = null; }
       loading = true;
+      var observedRevision = refreshRevision;
       refresh.disabled = true;
       return call('/api/v3/connections/status').then(function (data) {
+        if (observedRevision !== refreshRevision) return;
         metadata = data && typeof data === 'object' ? data : null;
         var choices = metadata && Array.isArray(metadata.hosts) ? metadata.hosts.filter(function (name) { return Object.hasOwn(HOSTS, name); }) : [];
         var nextChoices = JSON.stringify(choices);
@@ -119,7 +123,7 @@
         else if (!add.disabled && step === 2) status.textContent = 'GitHub sign-in completed. Checking the connection from this computer…';
         else if (!add.disabled && step === 1) status.textContent = 'Waiting for GitHub sign-in. Finish the opened sign-in page, or retry the same request below.';
         Array.from(journey.children).forEach(function (item, index) { if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current'); });
-        controls();
+        controls(); links.hidden = add.disabled;
         var nextList = JSON.stringify([metadata.current_profile, metadata.connections || []]);
         if (nextList !== listSignature) {
         list.textContent = '';
@@ -173,7 +177,7 @@
         listSignature = nextList;
         }
         if (metadata && Array.isArray(metadata.connections) && metadata.connections.some(function (connection) { return connection && connection.state === 'pending'; })) schedulePoll(1500);
-      }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; add.disabled = true; controls(); status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { loading = false; refresh.disabled = false; });
+      }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; add.disabled = true; controls(); status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { loading = false; refresh.disabled = false; if (refreshRequested && !disposed) { refreshRequested = false; load(); } });
     }
     add.addEventListener('click', function () { if (!add.disabled) { form.hidden = false; add.hidden = true; } });
     refresh.addEventListener('click', function () { if (!busy) load(); });
@@ -203,6 +207,13 @@
         schedulePoll(1500);
       }).catch(function () { if (signInWindow) signInWindow.close(); status.textContent = 'Connection request could not be confirmed. Retry the same request.'; }).finally(function () { busy = false; controls(); });
     });
+    function refreshConnectionScope() {
+      refreshRevision += 1; add.disabled = true; links.hidden = true; controls();
+      if (loading) { refreshRequested = true; return Promise.resolve(); }
+      return load();
+    }
+    controls();
+    card.odRefreshConnectionStatus = refreshConnectionScope;
     load(); return card;
   };
 }());
