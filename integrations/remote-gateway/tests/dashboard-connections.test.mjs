@@ -51,7 +51,9 @@ test('uncertain initiation can be cancelled and retried with a fresh intent key'
  status.connections.push({host:'muse',state:'pending',connection_id:'a'.repeat(32),version:2,verified:false,intent_key:first.init.headers['Idempotency-Key']});
  click(f.card,'Refresh status');await tick();await tick();
  const original=f.dom.window.slmFetch;f.dom.window.slmFetch=async(path,init={})=>{if(path.endsWith('/cancel')){status.connections[0]={...status.connections[0],state:'cancelled',version:3,cleanup_pending:true};return new Response(JSON.stringify(status.connections[0]),{status:200});}return original(path,init);};
- click(f.card,'Cancel connection');await tick();await tick();f.setFail(false);await submit(f);
+ click(f.card,'Cancel connection');await tick();await tick();
+ f.card.remove();f.card=f.dom.window.odCreateAiConnectionsCard();f.dom.window.document.getElementById('pane').append(f.card);await tick();await tick();
+ f.setFail(false);await submit(f);
  const posts=f.calls.filter(x=>x.path==='/api/v3/connections/initiate'&&x.init.method==='POST');
  assert.equal(posts.length,2);assert.notEqual(posts[0].init.headers['Idempotency-Key'],posts[1].init.headers['Idempotency-Key']);
  }finally{f.dom.window.close();}

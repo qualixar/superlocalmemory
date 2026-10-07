@@ -10,14 +10,13 @@
     var options = Object.assign({ credentials: 'same-origin' }, init || {});
     return fetcher(path, options).then(function (response) { if (!response.ok) throw new Error('connection request unavailable'); return response.json(); });
   }
-  function safeSignIn(value) {
+  function safeSignIn(value, connectionId) {
     try {
       var url = new URL(value);
       if (url.protocol !== 'https:' || url.hostname !== 'auth.superlocalmemory.com' || url.port || url.username || url.password || url.hash) return null;
-      if (url.pathname !== '/authorize' && url.pathname !== '/owner/login') return null;
-      if (url.href.length > 4096) return null;
-      var forbidden = ['access_token', 'refresh_token', 'client_secret', 'token', 'secret', 'key'];
-      if (forbidden.some(function (name) { return url.searchParams.has(name); })) return null;
+      if (url.pathname !== '/owner-login' || url.href.length > 2048) return null;
+      var parameters = Array.from(url.searchParams.entries());
+      if (parameters.length !== 1 || parameters[0][0] !== 'connection_id' || parameters[0][1] !== connectionId) return null;
       return url.href;
     } catch (_) { return null; }
   }
@@ -75,9 +74,32 @@
         list.textContent = '';
         (metadata && Array.isArray(metadata.connections) ? metadata.connections : []).forEach(function (connection) {
           if (!connection || !Object.hasOwn(HOSTS, connection.host)) return;
+          // Recover identity after a lost initiation response. This is a
+          // non-secret idempotency key scoped by the authenticated local API.
+          if (attempt && connection.intent_key === attempt.key && /^[a-f0-9]{32}$/.test(connection.connection_id)) {
+            attempt.connectionId = connection.connection_id; saveAttempt();
+          }
           var active = connection.state === 'connected' && connection.verified === true;
-          if (active && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; }
-          list.appendChild(node('p', HOSTS[connection.host] + ': ' + (active ? 'Connected' : 'Not connected')));
+          if ((active || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
+          var cancelled = connection.state === 'cancelled';
+          var description = active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : 'Not connected';
+          list.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
+          if (connection.state === 'pending' && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
+            var cancel = node('button', 'Cancel connection', 'btn ghost sm'); cancel.type = 'button'; list.appendChild(cancel);
+            var profile = metadata.current_profile;
+            cancel.addEventListener('click', function () {
+              if (busy) return;
+              busy = true; cancel.disabled = true; status.textContent = 'Cancelling connection…';
+              call('/api/v3/connections/' + encodeURIComponent(connection.connection_id) + '/cancel', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_id: profile, expected_version: connection.version })
+              }).then(function (result) {
+                if (!result || result.connection_id !== connection.connection_id || result.state !== 'cancelled' || result.verified !== false || typeof result.cleanup_pending !== 'boolean') throw new Error('unconfirmed cancellation');
+                if (attempt && attempt.connectionId === connection.connection_id) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
+                return load();
+              }).catch(function () { status.textContent = 'Cancellation could not be confirmed. Refresh status and retry.'; }).finally(function () { busy = false; cancel.disabled = false; });
+            });
+          }
         });
       }).catch(function () { metadata = null; add.disabled = true; status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { refresh.disabled = false; });
     }
@@ -100,7 +122,7 @@
         attempt.acknowledged = true; attempt.connectionId = result.connection_id; saveAttempt();
         // A request acknowledgement is not proof of a live authorized connection.
         status.textContent = 'Connection requested. Waiting for sign-in and verification.';
-        var url = result && safeSignIn(result.authorization_url);
+        var url = result && safeSignIn(result.authorization_url, result.connection_id);
         if (url) { var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); }
       }).catch(function () { status.textContent = 'Connection request could not be confirmed. Retry the same request.'; }).finally(function () { busy = false; submit.disabled = false; });
     });

@@ -51,12 +51,21 @@ class RemoteConnectionService:
     def public(record: Enrollment) -> dict:
         return {"connection_id": record.connection_id, "host": record.host,
                 "state": record.state, "version": record.version, "verified": False,
-                "cleanup_pending": record.cleanup_pending}
+                "cleanup_pending": record.cleanup_pending, "intent_key": record.intent_key}
 
     def status(self, owner: str, profile: str) -> dict:
         return {"available": True, "installation_id": self.journal.installation_id,
                 "current_profile": profile, "hosts": list(self.hosts),
                 "connections": [self.public(row) for row in self.journal.list(owner, profile)]}
+
+    async def cancel(self, owner: str, profile: str, identifier: str, version: int) -> dict:
+        """Fence local dispatch; cleanup remains pending until gateway revocation.
+
+        A local cancellation cannot establish that an already dispatched remote
+        request was revoked. The durable cleanup flag must survive restart.
+        """
+        row = await asyncio.to_thread(self.journal.cancel, owner, profile, identifier, version)
+        return self.public(row)
 
     async def initiate(self, owner: str, profile: str, key: str, intent: dict) -> dict:
         if intent["host"] not in self.hosts:

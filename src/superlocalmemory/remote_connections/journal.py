@@ -37,6 +37,7 @@ class Enrollment:
     cleanup_pending: bool
     intent_json: str
     authorization_url: str | None = None
+    intent_key: str = ""
 
     @property
     def intent(self) -> dict:
@@ -135,7 +136,7 @@ class EnrollmentJournal:
     def _record(self, row: sqlite3.Row) -> Enrollment:
         return Enrollment(self.installation_id, row["connection_id"], json.loads(row["intent"])["host"],
                           row["state"], row["version"], bool(row["requested"]),
-                          bool(row["cleanup_pending"]), row["intent"], row["authorization_url"])
+                          bool(row["cleanup_pending"]), row["intent"], row["authorization_url"], row["intent_key"])
 
     @staticmethod
     def _owned(db: sqlite3.Connection, owner: str, profile: str, connection_id: str) -> sqlite3.Row:

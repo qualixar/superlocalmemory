@@ -1,6 +1,14 @@
 # SLM remote gateway — preparatory domain package
 
-Implemented: permission intersection, enrollment reducer, bounded relay codec, private hibernating Durable Object delivery, existing dashboard initiation UI, and outbound connector request/lifecycle components. This private package is not a deployed public gateway, a packaged companion, or a completed release. Merge and verify the completed 4.1.22 before final release; ongoing development does not require a separate M4 acceptance decision.
+Implemented: permission intersection, enrollment reducer, bounded relay codec, private hibernating Durable Object delivery, dashboard initiation/cancellation, a durable local enrollment journal and authenticated local API, and outbound connector request/lifecycle components. This private package is not a deployed public gateway, a packaged companion, or a completed release. Merge and verify the completed 4.1.22 before final release; ongoing development does not require a separate M4 acceptance decision.
+
+## Local enrollment integration checkpoint
+
+The existing daemon registers `/api/v3/connections/status`, `/initiate`, and `/{connection_id}/cancel`. Remote access remains unavailable without an explicitly configured service; optional router import failures preserve local startup. The journal stores enrollment metadata separately from memory databases with owner/profile isolation, durable idempotency, dispatch leases and cancellation fences. Mutations require explicit installation credentials and same-origin loopback requests.
+
+The dashboard accepts only a connection-bound HTTPS owner-login URL. It recovers an uncertain request through its non-secret intent key, permits authenticated versioned cancellation, and clears the cancelled browser intent so a fresh request works after reload. Pending receipts never establish connectivity. `cleanup_pending` remains true until authoritative gateway revocation; no cloud cleanup is fabricated.
+
+On 2026-10-07, verification passed 105 Python tests (56 enrollment/API/ACL probes plus 49 existing authentication/loopback regressions), 218 Node tests and 18 local workerd tests; TypeScript checks passed. Enrollment/API branch-aware coverage is 89%. Windows ACL probes are mocked. Five additional profile/MCP integration checks remain blocked by the isolated environment's broken OpenTelemetry entry-point metadata and missing MCPServer module. See [batch evidence](evidence/enrollment-dashboard-green.json). Historical counts below describe earlier checkpoints.
 
 ## Local core and optional remote service
 
@@ -8,7 +16,7 @@ Local SLM stays free through npm/PyPI with its complete local tools, mesh, confi
 
 ## Approved user journey
 
-SLM works locally with remote access off. The user optionally selects Connections → Add AI connection in the SLM UI. SLM will enroll the owned installation, provision its tunnel, manage its local connector and guide host consent. No end-user Cloudflare account, DNS, terminal command or infrastructure secret-paste step. Private-server mode B remains deferred.
+SLM works locally with remote access off. The user optionally selects MCP & Integrations → Add AI connection in the SLM UI. SLM will enroll the owned installation, provision its shared relay binding, manage its local connector and guide host consent. No end-user Cloudflare account, DNS, terminal command or infrastructure secret-paste step. Private-server mode B remains deferred.
 
 ## Module boundaries
 

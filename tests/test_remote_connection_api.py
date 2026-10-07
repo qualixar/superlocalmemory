@@ -204,6 +204,24 @@ def test_actual_daemon_registers_disabled_connection_routes():
     assert result.status_code == 200 and result.json()["available"] is False
 
 
+def test_optional_router_import_failure_preserves_local_daemon(monkeypatch, caplog):
+    import builtins
+    from superlocalmemory.server.unified_daemon import create_app
+    original_import = builtins.__import__
+
+    def import_without_addon(name, *args, **kwargs):
+        if name == "superlocalmemory.server.routes.connections":
+            raise ImportError("synthetic missing remote add-on")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_addon)
+    app = create_app()
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    assert "/api/v3/connections/status" not in paths
+    assert "/health" in paths
+    assert "remote_connections_router unavailable; local services remain enabled" in caplog.text
+
+
 def test_cancel_route_is_authenticated_versioned_and_idempotent(configured):
     client, provider, _ = configured
     identifier = client.post("/api/v3/connections/initiate", headers=headers(), json=payload()).json()["connection_id"]

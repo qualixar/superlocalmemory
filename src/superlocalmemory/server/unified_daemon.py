@@ -4339,6 +4339,13 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     from superlocalmemory.server.routes.config_api import router as config_api_router
     application.include_router(config_api_router)
 
+    # Optional hosted connections must never become a local startup requirement.
+    try:
+        from superlocalmemory.server.routes.connections import router as connections_router
+        application.include_router(connections_router)
+    except ImportError:
+        logger.warning("remote_connections_router unavailable; local services remain enabled")
+
     # Answer-check settings (4.1.18): on-device Laya, hosted Jev, or off.
     from superlocalmemory.server.routes.answer_check import router as answer_check_router
     application.include_router(answer_check_router)

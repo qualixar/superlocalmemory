@@ -6,7 +6,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from superlocalmemory.remote_connections.journal import JournalConflict
 from superlocalmemory.remote_connections.service import RemoteConnectionService
@@ -70,6 +70,32 @@ def _service(request: Request) -> RemoteConnectionService | None:
     if service is not None and not isinstance(service, RemoteConnectionService):
         raise HTTPException(503, "connection_service_unavailable")
     return service
+
+
+class CancellationIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    profile_id: str
+    expected_version: StrictInt = Field(ge=0)
+
+
+@router.post("/{connection_id}/cancel")
+async def cancel_connection(request: Request, connection_id: str, intent: CancellationIntent):
+    owner, profile = _context(request, mutation=True)
+    if intent.profile_id != profile:
+        raise HTTPException(409, "profile_changed")
+    service = _service(request)
+    if service is None:
+        raise HTTPException(503, "connection_service_unavailable")
+    try:
+        return await service.cancel(owner, profile, connection_id, intent.expected_version)
+    except JournalConflict as exc:
+        code = str(exc)
+        raise HTTPException(404 if code == "not_found" else 409, code) from None
+    except ValueError:
+        raise HTTPException(400, "invalid_enrollment_request") from None
+    except Exception:
+        logger.error("remote_connection_cancellation_unavailable")
+        raise HTTPException(503, "connection_service_unavailable") from None
 
 
 @router.get("/status")

@@ -20,6 +20,7 @@ Host account features and authentication requirements must be verified before a 
 | --- | --- | --- |
 | Off | Local-only use | No gateway enrollment or hosted entitlement checks |
 | Pending | Enrollment/login not complete | Resume the journaled operation; do not create duplicates |
+| Cancelled | Enrollment was stopped | Permit a fresh request; show remote cleanup pending until revocation is confirmed |
 | Connecting | Companion is establishing the route | No false connected indication |
 | Connected | Current remote access is verified | Display host/profile and granted permissions |
 | Reconnecting / offline | Laptop route is unavailable | Explain availability; leave local SLM usable |

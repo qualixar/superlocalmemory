@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-07",
+  "stage": "scoped enrollment/dashboard integration batch",
+  "python_tests": {
+    "passed": 105,
+    "failed": 0,
+    "enrollment_api_acl": 56,
+    "existing_auth_loopback": 49,
+    "coverage_branch_aware_percent": 89
+  },
+  "node_tests": {
+    "passed": 218,
+    "failed": 0,
+    "dashboard_subset": 22
+  },
+  "workerd_tests": {
+    "passed": 18,
+    "failed": 0,
+    "environment": "local synthetic Cloudflare runtime"
+  },
+  "typescript": "passed tsconfig.runtime-tests.json --noEmit",
+  "reviews": {
+    "python_security": "APPROVE consolidated batch; independent56Python/22dashboard",
+    "javascript": "APPROVE consolidated batch; independent22dashboard"
+  },
+  "implemented": [
+    "optional daemon router registration and import-failure containment",
+    "strict authenticated versioned local cancellation",
+    "exact connection-bound owner-login UI/API contract",
+    "owner/profile-scoped nonsecret intent-key uncertainty recovery",
+    "cancel/card-recreation/fresh-request regression"
+  ],
+  "red_checkpoints": [
+    "4857a9f2:sign-in18pass1fail",
+    "428c2818:cancelAPI23pass5fail",
+    "70f1f2bc:cancelUI19pass2fail",
+    "fd9ebdf0:recovery Python27pass1fail UI21pass1fail"
+  ],
+  "broader_profile_checks": {
+    "passed": 18,
+    "failed": 5,
+    "status": "unresolved isolated dependency environment; not compatibility acceptance",
+    "failure_causes": [
+      "4 canonical-runtime checks: OpenTelemetry context entry-point StopIteration through portalocker/redis imports",
+      "1 MCP-surface check: missing mcp.server.mcpserver module"
+    ],
+    "shared_fixtures": "second run loaded root conftest; no missing-fixture waiver"
+  },
+  "native_windows": "not verified; ACL probes mocked",
+  "remaining": [
+    "authoritative gateway cleanup",
+    "public OAuth and owner enrollment",
+    "protected credential loader",
+    "automatic companion packaging/lifecycle",
+    "real Cloudflare pilot",
+    "native Muse/Codex/Claude/Jev/Laya/mesh compatibility",
+    "M4 upstream reconciliation before final publication"
+  ],
+  "global_runtime": "no installed-runtime change in this batch",
+  "release_complete": false
+}
