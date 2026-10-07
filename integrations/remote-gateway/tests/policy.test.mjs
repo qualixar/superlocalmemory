@@ -5,7 +5,7 @@ const resource = 'https://slm-mcp.example.com/mcp';
 function fixture() {
   const actor = { ownerId: 'owner-a', authorizationId: 'grant-a', connectionId: 'connection-a', clientId: 'client-a', audience: resource, credentialKind: 'oauth', scopes: ['slm:read', 'slm:write', 'slm:session'] };
   const authorization = { ...actor, consentedTools: ['recall', 'remember', 'session_init'], consentedScopes: [...actor.scopes], consentedCorrection: false, consentedSharedRead: false, consentedGlobalRead: false, authorizationVersion: 1, revokedAt: null };
-  const connection = { connectionId: actor.connectionId, ownerId: actor.ownerId, installationId: 'installation-a', profileId: 'profile-a', exactAgentPath: '/mcp', upstreamUrl: 'https://slm-origin-a.example.com/mcp', originCredentialRef: 'secret-ref-a', allowedTools: [...authorization.consentedTools], allowCorrection: false, allowSharedRead: false, allowGlobalRead: false, policyVersion: 1, revokedAt: null };
+  const connection = { connectionId: actor.connectionId, ownerId: actor.ownerId, installationId: 'installation-a', profileId: 'profile-a', origin: {kind:'https',url:'https://slm-origin-a.example.com/mcp',credentialRef:'secret-ref-a',exactAgentPath:'/mcp'}, allowedTools: [...authorization.consentedTools], allowCorrection: false, allowSharedRead: false, allowGlobalRead: false, policyVersion: 1, revokedAt: null };
   const request = { era: 'legacy', rpcMethod: 'tools/call', toolName: 'recall', arguments: {}, originalBody: new Uint8Array() };
   return { actor, authorization, connection, request };
 }
@@ -60,3 +60,5 @@ test('correction also requires connection policy', () => { const f = fixture(); 
 test('grant snapshot is detached from input permissions', () => { const f = fixture(); const r = run(f); f.connection.allowedTools.length = 0; f.authorization.consentedTools.length = 0; assert.deepEqual(r.grant.connection.allowedTools, ['recall', 'remember', 'session_init']); assert.deepEqual(r.grant.authorization.consentedTools, ['recall', 'remember', 'session_init']); });
 test('missing tool cannot be called', () => { const f = fixture(); delete f.request.toolName; deny(f, 'TOOL_DENIED'); });
 test('prototype property is not a tool', () => { const f = fixture(); f.request.toolName = '__proto__'; f.authorization.consentedTools.push('__proto__'); f.connection.allowedTools.push('__proto__'); deny(f, 'TOOL_DENIED'); });
+
+test('effective origin transport is a frozen independent binding',()=>{const f=fixture();f.connection.origin={kind:'relay',installationId:f.connection.installationId,profileId:f.connection.profileId};const r=run(f);assert.equal(r.allowed,true);assert.ok(Object.isFrozen(r.grant.connection.origin));f.connection.origin.profileId='other';assert.equal(r.grant.connection.origin.profileId,'profile-a');});
