@@ -14,7 +14,7 @@ registered without being classified here.
 :class:`RemoteToolScopeASGI` enforces the policy on every MCP request that
 carries a remote principal (set by :mod:`server.remote_access`):
 
-* only ``initialize``, ``ping``, ``tools/list``, ``tools/call`` and client
+* only ``initialize``, ``server/discover``, ``ping``, ``tools/list``, ``tools/call`` and client
   notifications are accepted; every other MCP method is refused;
 * tool names are matched exactly - there are no aliases, so ``Remember`` or
   ``remember `` is simply an unknown, refused name;
@@ -37,6 +37,7 @@ logger = logging.getLogger("superlocalmemory.remote")
 audit_logger = logging.getLogger("superlocalmemory.remote.audit")
 
 MAX_BODY_BYTES = 1_048_576
+MAX_RESPONSE_BYTES = 4 * 1_048_576
 
 READ_TOOLS: frozenset[str] = frozenset({
     "fetch", "get_assertions", "get_attribution", "get_behavioral_patterns",
@@ -79,7 +80,7 @@ HOST_ONLY_TOOLS: frozenset[str] = frozenset({
 
 #: MCP methods a remote caller may send. Everything else is refused.
 ALLOWED_METHODS: frozenset[str] = frozenset({
-    "initialize", "ping", "tools/list", "tools/call",
+    "initialize", "server/discover", "ping", "tools/list", "tools/call",
     "notifications/initialized", "notifications/cancelled",
 })
 
@@ -247,6 +248,27 @@ def _redact_call_answer(body: bytes) -> bytes:
     return json.dumps(payload).encode()
 
 
+def _filter_discovery(body: bytes) -> bytes:
+    """Expose only the remote tools capability; never share scoped discovery."""
+    try:
+        payload = json.loads(body.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_discovery")
+        if "error" in payload:
+            return _redact_call_answer(body)
+        source = payload["result"]
+        versions = source["supportedVersions"]
+        if not isinstance(versions, list) or len(versions) > 32 or not all(isinstance(v, str) and len(v) <= 32 for v in versions):
+            raise ValueError("invalid_discovery")
+        result = {"cacheScope": "private", "ttlMs": 0, "resultType": "complete",
+                  "supportedVersions": versions, "capabilities": {"tools": {}},
+                  "instructions": "Scoped SuperLocalMemory access. Use tools/list for available tools."}
+        return json.dumps({"jsonrpc": "2.0", "id": payload.get("id"), "result": result}).encode()
+    except (UnicodeDecodeError, ValueError, TypeError, KeyError):
+        return json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+            "code": -32603, "message": "Discovery could not be checked."}}).encode()
+
+
 class _JsonAnswerFilter:
     """Buffers the single JSON answer and rewrites it with ``transform``. A
     streamed (non-JSON) answer is not forwarded at all (fail closed)."""
@@ -257,15 +279,26 @@ class _JsonAnswerFilter:
         self._transform = transform
         self._start: dict[str, Any] | None = None
         self._chunks: list[bytes] = []
+        self._size = 0
+        self._refused = False
 
     async def __call__(self, message: dict[str, Any]) -> None:
+        if self._refused:
+            return
         if message["type"] == "http.response.start":
             self._start = message
             return
         if message["type"] != "http.response.body":
             await self._send(message)
             return
-        self._chunks.append(message.get("body", b"") or b"")
+        chunk = message.get("body", b"") or b""
+        self._size += len(chunk)
+        if self._size > MAX_RESPONSE_BYTES:
+            self._refused = True
+            self._chunks.clear()
+            await _send_json(self._send, 502, {"error": "remote_answer_too_large"})
+            return
+        self._chunks.append(chunk)
         if message.get("more_body", False):
             return
         start = self._start or {"type": "http.response.start", "status": 500, "headers": []}
@@ -275,7 +308,8 @@ class _JsonAnswerFilter:
             return
         body = self._transform(b"".join(self._chunks))
         new_headers = [(k, v) for k, v in start.get("headers", [])
-                       if k.lower() != b"content-length"]
+                       if k.lower() not in {b"content-length", b"cache-control", b"etag", b"last-modified", b"age"}]
+        new_headers.append((b"cache-control", b"no-store"))
         new_headers.append((b"content-length", str(len(body)).encode()))
         await self._send(dict(start, headers=new_headers))
         await self._send({"type": "http.response.body", "body": body})
@@ -379,6 +413,8 @@ class RemoteToolScopeASGI:
         if message["method"] == "tools/list":
             downstream_send = _JsonAnswerFilter(
                 send, lambda raw: _filter_tools_list(raw, principal.scope))
+        elif message["method"] == "server/discover":
+            downstream_send = _JsonAnswerFilter(send, _filter_discovery)
         elif tool is not None:
             # Host details (paths, home, account, environment) never leave
             # this computer in a tool answer (server/remote_redaction).

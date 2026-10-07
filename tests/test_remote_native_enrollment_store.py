@@ -22,3 +22,26 @@ def test_pending_state_is_bound_to_stored_connection_and_cancelled_terminally(tm
     store.cancel(row.connection_id)
     assert store.by_state(row.state) is None
     with pytest.raises(ValueError,match='enrollment_cancelled'):store.save(row)
+
+def test_expired_completed_record_remains_available_only_for_authenticated_cleanup(tmp_path):
+    from dataclasses import replace
+    backend=Backend();store=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:100)
+    row=replace(record(),expires_at_ms=101000,completed=True)
+    store.save(row)
+    later=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:102)
+    assert later.by_connection(row.connection_id)==row
+    assert later.by_state(row.state) is None
+    later.cancel(row.connection_id)
+    assert later.by_connection(row.connection_id) is None
+
+def test_expired_pending_has_cleanup_only_lookup_without_callback_revival(tmp_path):
+    from dataclasses import replace
+    backend=Backend();store=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:100)
+    row=replace(record(),expires_at_ms=101000)
+    store.save(row)
+    later=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:102)
+    assert later.by_connection(row.connection_id) is None
+    assert later.by_state(row.state) is None
+    assert later.by_connection(row.connection_id,for_cleanup=True)==row
+    later.cancel(row.connection_id)
+    assert later.by_connection(row.connection_id,for_cleanup=True) is None

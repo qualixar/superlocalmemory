@@ -23,8 +23,14 @@ export async function currentAuthorization(options:TokenExchangeCallbackOptions<
  if(options.resource===OWNER_RESOURCE){
   if(props.kind!=='native'||!identifier(props.installationId)||!identifier(props.profileId)||typeof props.deviceJkt!=='string'||!options.requestedScope.every(s=>s==='slm:connect')||!options.requestedScope.includes('slm:connect'))denied();
   const available=await options.env.OWNERS.getByName(props.ownerId).authorizeNative(props.ownerId,props.installationId,props.profileId,options.clientId,props.deviceJkt);
-  const bootstrap=await options.env.BOOTSTRAPS.getByName(props.connectionId).get();
-  if(!available||!bootstrap||bootstrap.status!=='completed'||bootstrap.ownerId!==props.ownerId||bootstrap.authRequest.clientId!==options.clientId)denied();
+  if(!available)denied();
+  if(options.grantType==='authorization_code'){
+   const bootstrap=await options.env.BOOTSTRAPS.getByName(props.connectionId).get();
+   if(!bootstrap||bootstrap.status!=='completed'||bootstrap.ownerId!==props.ownerId||bootstrap.authRequest.clientId!==options.clientId)denied();
+  }else{
+   const connection=await options.env.OWNERS.getByName(props.ownerId).getConnection(props.ownerId,props.connectionId);
+   if(!connection||connection.revokedAt!==null||connection.installationId!==props.installationId||connection.profileId!==props.profileId||connection.deviceJkt!==props.deviceJkt)denied();
+  }
   return;
  }
  if(options.resource!==MCP_RESOURCE||!identifier(props.authorizationId)||props.kind==='native')denied();

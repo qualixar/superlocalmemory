@@ -1,0 +1,80 @@
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "observability": {
+    "enabled": false
+  },
+  "name": "slm-remote-auth",
+  "main": "src/worker-auth.ts",
+  "routes": [
+    {
+      "pattern": "auth.superlocalmemory.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "7d3aaaffad01461bb24237ba0fb7750d"
+    }
+  ],
+  "vars": {
+    "GITHUB_CLIENT_ID": "Ov23li9XJ38TF2PBBqp8"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REGISTRIES",
+        "class_name": "RegistryDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "RELAYS",
+        "class_name": "RelayDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "TOKEN_INDEX",
+        "class_name": "TokenIndexDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "OWNERS",
+        "class_name": "OwnerIndexDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "BOOTSTRAPS",
+        "class_name": "BootstrapDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "DEVICES",
+        "class_name": "DeviceIndexDO",
+        "script_name": "slm-remote-authority"
+      }
+    ]
+  },
+  "ratelimits": [
+    {
+      "name": "ANON_SETUP",
+      "namespace_id": "423001",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "ANON_GLOBAL",
+      "namespace_id": "423002",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    }
+  ]
+}

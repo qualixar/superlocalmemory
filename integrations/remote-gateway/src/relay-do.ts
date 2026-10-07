@@ -60,6 +60,19 @@ export class RelayDO extends DurableObject {
       for(const socket of this.ctx.getWebSockets("connector"))this.closeSocket(socket,403,"connection_revoked");
     });
   }
+  async forwardCurrent(request: Omit<Extract<RelayFrame,{kind:'request'}>,'generation'>, options: RelayCodecOptions = {}): Promise<Response> {
+    // Only the authenticated resource Worker calls this. Client metadata cannot
+    // choose a socket generation; forward() still checks current attachment.
+    return this.forward({...request,generation:Math.max(1,this.state.generation)},options);
+  }
+  async cancelCaller(identifier:string):Promise<void> {
+    for(const [wireId,pending] of this.pending){
+      if(pending.callerId!==identifier)continue;
+      const encoded=encodeRelayFrame({v:1,kind:'cancel',id:wireId,generation:pending.generation});
+      if(encoded.ok){try{pending.socket.send(encoded.text);}catch{}}
+      this.finish(wireId,failure(499,'request_cancelled'));
+    }
+  }
   async fetch(request: Request): Promise<Response> {
     if(new URL(request.url).pathname!=="/connector")return failure(404,"not_found");
     if(request.method!=="GET")return failure(405,"method_not_allowed");

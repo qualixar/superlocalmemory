@@ -5,3 +5,5 @@ export { TokenIndexDO } from '../../src/token-index-do.ts';
 export { BootstrapDO } from '../../src/bootstrap-do.ts';
 export { OwnerIndexDO } from '../../src/owner-index-do.ts';
 export default { fetch() { return new Response('runtime fixture only', {status:404}); } };
+
+export { DeviceIndexDO } from '../../src/device-index-do.ts';

@@ -1,0 +1,38 @@
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "observability": {
+    "enabled": false
+  },
+  "name": "slm-remote-connect",
+  "main": "src/worker-connect.ts",
+  "routes": [
+    {
+      "pattern": "connect.superlocalmemory.com",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAYS",
+        "class_name": "RelayDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "OWNERS",
+        "class_name": "OwnerIndexDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "DEVICES",
+        "class_name": "DeviceIndexDO",
+        "script_name": "slm-remote-authority"
+      }
+    ]
+  }
+}

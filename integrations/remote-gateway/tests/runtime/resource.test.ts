@@ -1,12 +1,13 @@
-import {env,createExecutionContext} from 'cloudflare:workers';
+import {env} from 'cloudflare:workers';
 import {expect,test} from 'vitest';
 import {createExecutionContext as context,waitOnExecutionContext} from 'cloudflare:test';
 import {resourceGateway} from '../../src/worker-resource.ts';
 import type {ResourceEnv} from '../../src/worker-resource.ts';
 import type {AuthorizationGrant,ConnectionGrant} from '../../src/contracts.ts';
+import {decodeRelayFrame,encodeRelayFrame} from '../../src/relay-protocol.ts';
 
 async function setup(){
- const id=crypto.randomUUID();const connection:ConnectionGrant={connectionId:id,ownerId:'owner-a',installationId:'installation-a',profileId:'profile-a',exactAgentPath:'/mcp',upstreamUrl:'http://127.0.0.1:8765/mcp',originCredentialRef:'keychain:installation-a',allowedTools:['recall','remember'],allowCorrection:false,allowSharedRead:false,allowGlobalRead:false,policyVersion:1,revokedAt:null};
+ const id=crypto.randomUUID();const connection:ConnectionGrant={connectionId:id,ownerId:'owner-a',installationId:'installation-a',profileId:'profile-a',origin:{kind:'relay',installationId:'installation-a',profileId:'profile-a'},allowedTools:['recall','remember'],allowCorrection:false,allowSharedRead:false,allowGlobalRead:false,policyVersion:1,revokedAt:null};
  const authorization:AuthorizationGrant={authorizationId:'authorization-a',audience:'https://mcp.superlocalmemory.com/mcp',ownerId:'owner-a',clientId:'client-a',connectionId:id,consentedTools:['recall','remember'],consentedScopes:['slm:read','slm:write'],consentedCorrection:false,consentedSharedRead:false,consentedGlobalRead:false,authorizationVersion:1,revokedAt:null};
  const registry=env.REGISTRIES.getByName(id);await registry.configure(connection);await registry.addAuthorization(authorization);await registry.setEntitlement('owner-a',Date.now()+60000,0);
  const auth={async validateToken(resource:string,token:string){if(!['synthetic-read','synthetic-write','synthetic-wrong-audience'].includes(token))return null;return {props:{ownerId:'owner-a',authorizationId:'authorization-a',connectionId:id},audience:token==='synthetic-wrong-audience'?'https://evil.example/mcp':resource,scope:token==='synthetic-read'?['slm:read']:['slm:read','slm:write'],expiresAt:Math.floor(Date.now()/1000)+60,userId:'owner-a',clientId:'client-a'};}};
@@ -24,3 +25,21 @@ test('authenticated admission cannot manufacture an online connector',async()=>{
 test('revocation denies valid OAuth token after durable acknowledgement',async()=>{const {fixtureEnv,registry}=await setup();await registry.revokeAuthorization('owner-a','authorization-a',1);expect((await call(fixtureEnv,'synthetic-write')).status).toBe(403);});
 test('host and Origin boundaries precede remote tool execution',async()=>{const {fixtureEnv}=await setup();expect((await call(fixtureEnv,'synthetic-write',undefined,{Origin:'https://evil.example'})).status).toBe(403);const response=await resourceGateway.fetch(new Request('https://evil.example/mcp',{method:'POST',headers:{Authorization:'Bearer synthetic-write','Content-Type':'application/json'},body:'{}'}),fixtureEnv,context());expect(response.status).toBe(403);});
 test('modern header mismatch returns the standard RPC error',async()=>{const {fixtureEnv}=await setup();const response=await call(fixtureEnv,'synthetic-write',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'recall',arguments:{query:'synthetic'},_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}},{'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':'remember'});expect(response.status).toBe(400);expect(await response.json()).toMatchObject({error:{code:-32020}});});
+
+test('authorized HTTP remember and recall cross registry and live relay socket',async()=>{
+ const {id,fixtureEnv}=await setup();const token='synthetic-device-token-'.repeat(3);
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token))),byte=>byte.toString(16).padStart(2,'0')).join('');
+ const relay=env.RELAYS.getByName(id);await relay.configureBinding({ownerId:'owner-a',connectionId:id,installationId:'installation-a',profileId:'profile-a',deviceDigest:digest,deviceExpiresAt:Date.now()+60000});
+ const upgrade=await relay.fetch(new Request('https://private.invalid/connector',{headers:{Upgrade:'websocket',Authorization:'Bearer '+token}}));
+ const socket=upgrade.webSocket!;const ready=new Promise<string>(resolve=>socket.addEventListener('message',event=>resolve(String(event.data)),{once:true}));socket.accept();await ready;
+ const memories:string[]=[];
+ socket.addEventListener('message',event=>{const decoded=decodeRelayFrame(String(event.data));if(!decoded.ok||decoded.frame.kind!=='request')return;const frame=decoded.frame;
+  const request=JSON.parse(atob(frame.bodyBase64));let result;
+  if(request.params.name==='remember'){memories.push(request.params.arguments.content);result={content:[{type:'text',text:'saved'}],structuredContent:{success:true}};}
+  else result={content:[{type:'text',text:memories.join('\n')}],structuredContent:{results:[...memories]}};
+  const response=encodeRelayFrame({v:1,kind:'response',id:frame.id,generation:frame.generation,status:200,headers:[['content-type','application/json']],bodyBase64:btoa(JSON.stringify({jsonrpc:'2.0',id:request.id,result}))});if(response.ok)socket.send(response.text);
+ });
+ try{const saved=await call(fixtureEnv,'synthetic-write',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'remember',arguments:{content:'synthetic scoped memory'}}});expect(saved.status).toBe(200);
+  const recalled=await call(fixtureEnv,'synthetic-read',{jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'recall',arguments:{query:'synthetic'}}});expect(recalled.status).toBe(200);expect(await recalled.json()).toMatchObject({result:{structuredContent:{results:['synthetic scoped memory']}}});expect(recalled.headers.get('cache-control')).toBe('no-store');
+ }finally{socket.close();}
+});

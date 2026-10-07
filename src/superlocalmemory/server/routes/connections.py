@@ -1,11 +1,13 @@
 """Existing-dashboard enrollment endpoints; off without a configured service."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from superlocalmemory.remote_connections.journal import JournalConflict
@@ -34,7 +36,7 @@ class Permissions(BaseModel):
 
 class ConnectionIntent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    host: Literal["muse", "chatgpt", "claude_web", "claude_code_web"]
+    host: Literal["muse", "chatgpt", "claude_web", "claude_code_web", "composio"]
     profile_id: str
     remote_opt_in: StrictBool
     permissions: Permissions
@@ -99,14 +101,17 @@ async def cancel_connection(request: Request, connection_id: str, intent: Cancel
 
 
 @router.get("/status")
-def connection_status(request: Request):
+async def connection_status(request: Request):
     owner, profile = _context(request)
     service = _service(request)
     if service is None:
         return {"available": False, "installation_id": "", "current_profile": profile,
                 "hosts": [], "connections": []}
     try:
-        return service.status(owner, profile)
+        runtime = getattr(request.app.state, "remote_connection_runtime", None)
+        if runtime is not None:
+            await runtime.resume(owner, profile)
+        return await asyncio.to_thread(service.status, owner, profile)
     except Exception:
         logger.error("remote_connection_status_unavailable")
         raise HTTPException(503, "connection_service_unavailable") from None
@@ -132,3 +137,29 @@ async def initiate_connection(request: Request, intent: ConnectionIntent):
     except Exception:
         logger.error("remote_connection_enrollment_unavailable")
         raise HTTPException(503, "connection_service_unavailable") from None
+
+
+@router.get("/callback")
+async def connection_callback(request: Request):
+    """OAuth return: the secret state delegates the already authorized local intent."""
+    query = request.query_params
+    states, codes = query.getlist("state"), query.getlist("code")
+    # Uvicorn constructs its access-log URL from this scope after response start.
+    # Never put OAuth codes or state values into that access log.
+    request.scope["query_string"] = b""
+    peer = request.client.host if request.client else ""
+    if not is_loopback(peer) or not is_loopback(request.url.hostname or ""):
+        raise HTTPException(403, "local_callback_required")
+    runtime = getattr(request.app.state, "remote_connection_runtime", None)
+    if runtime is None:
+        raise HTTPException(503, "connection_service_unavailable")
+    if len(states) != 1 or len(codes) != 1:
+        raise HTTPException(400, "invalid_callback")
+    try:
+        await runtime.callback(states[0], codes[0])
+    except ValueError:
+        return HTMLResponse("<!doctype html><title>SuperLocalMemory</title><h1>Web connection could not be enabled</h1><p>Return to your SLM dashboard, refresh the connection status and try again.</p>", status_code=400, headers={"Cache-Control":"no-store"})
+    except Exception:
+        logger.error("remote_connection_callback_unavailable")
+        raise HTTPException(503, "connection_service_unavailable") from None
+    return HTMLResponse("<!doctype html><title>SuperLocalMemory</title><h1>GitHub sign-in complete</h1><p>Return to your SLM dashboard. It will verify the device connection and show the URL for your AI client.</p>", headers={"Cache-Control":"no-store"})

@@ -194,14 +194,16 @@ def test_no_service_and_broken_service_do_not_enable_remote(configured):
     assert client.get("/api/v3/connections/status").status_code == 503
 
 
-def test_actual_daemon_registers_disabled_connection_routes():
+def test_actual_daemon_advertises_dormant_web_connection_feature():
     from superlocalmemory.server.unified_daemon import create_app
     app = create_app()
     client = TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 5000))
     # No lifespan start: this tests the real app/middleware registration without
     # launching background providers, mesh or memory engine workers.
     result = client.get("/api/v3/connections/status")
-    assert result.status_code == 200 and result.json()["available"] is False
+    assert result.status_code == 200 and result.json()["available"] is True
+    assert result.json()["connections"] == []
+    assert app.state.remote_connection_runtime._companions == {}
 
 
 def test_optional_router_import_failure_preserves_local_daemon(monkeypatch, caplog):

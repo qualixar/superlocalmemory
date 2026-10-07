@@ -35,7 +35,7 @@ export function authorizeRequest(actor: VerifiedActor, authorization: Authorizat
     return scope !== undefined && allowedScopes.includes(scope) && connection.allowedTools.includes(tool);
   });
   const grant: EffectiveGrant = {
-    connection: Object.freeze({ ...connection, allowedTools: Object.freeze([...connection.allowedTools]) }),
+    connection: Object.freeze({ ...connection, origin:Object.freeze({...connection.origin}), allowedTools: Object.freeze([...connection.allowedTools]) }),
     authorization: Object.freeze({ ...authorization, consentedTools: Object.freeze([...authorization.consentedTools]), consentedScopes: Object.freeze([...authorization.consentedScopes]),
       ...(authorization.providerGrantRef ? { providerGrantRef: Object.freeze({ ...authorization.providerGrantRef }) } : {}) }),
     allowedScopes: Object.freeze(allowedScopes), allowedTools: Object.freeze(allowedTools),

@@ -1,0 +1,39 @@
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "observability": {
+    "enabled": false
+  },
+  "name": "slm-remote-mcp",
+  "main": "src/worker-resource.ts",
+  "routes": [
+    {
+      "pattern": "mcp.superlocalmemory.com",
+      "custom_domain": true
+    }
+  ],
+  "services": [
+    {
+      "binding": "AUTH_SERVER",
+      "service": "slm-remote-auth"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REGISTRIES",
+        "class_name": "RegistryDO",
+        "script_name": "slm-remote-authority"
+      },
+      {
+        "name": "RELAYS",
+        "class_name": "RelayDO",
+        "script_name": "slm-remote-authority"
+      }
+    ]
+  }
+}

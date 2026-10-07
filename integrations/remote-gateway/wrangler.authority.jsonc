@@ -1,0 +1,54 @@
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "observability": {
+    "enabled": false
+  },
+  "name": "slm-remote-authority",
+  "main": "src/worker-authority.ts",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REGISTRIES",
+        "class_name": "RegistryDO"
+      },
+      {
+        "name": "RELAYS",
+        "class_name": "RelayDO"
+      },
+      {
+        "name": "TOKEN_INDEX",
+        "class_name": "TokenIndexDO"
+      },
+      {
+        "name": "OWNERS",
+        "class_name": "OwnerIndexDO"
+      },
+      {
+        "name": "BOOTSTRAPS",
+        "class_name": "BootstrapDO"
+      },
+      {
+        "name": "DEVICES",
+        "class_name": "DeviceIndexDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "slm-remote-v1",
+      "new_sqlite_classes": [
+        "RegistryDO",
+        "RelayDO",
+        "TokenIndexDO",
+        "OwnerIndexDO",
+        "BootstrapDO",
+        "DeviceIndexDO"
+      ]
+    }
+  ]
+}

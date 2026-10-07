@@ -1,4 +1,5 @@
 """Optional local enrollment orchestration; cloud identity remains separate."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +8,10 @@ from typing import Protocol
 from urllib.parse import parse_qsl, urlsplit
 
 from superlocalmemory.remote_connections.journal import (
-    HOSTS, EnrollmentJournal, Enrollment, JournalConflict,
+    HOSTS,
+    Enrollment,
+    EnrollmentJournal,
+    JournalConflict,
 )
 
 
@@ -18,8 +22,9 @@ class GatewayReceipt:
 
 
 class GatewayProvider(Protocol):
-    async def enroll(self, *, installation_id: str, connection_id: str,
-                     owner: str, profile: str, intent: dict) -> GatewayReceipt: ...
+    async def enroll(
+        self, *, installation_id: str, connection_id: str, owner: str, profile: str, intent: dict
+    ) -> GatewayReceipt: ...
 
 
 def validate_sign_in(url: str, connection_id: str) -> str:
@@ -27,9 +32,15 @@ def validate_sign_in(url: str, connection_id: str) -> str:
     if not isinstance(url, str) or len(url) > 2048:
         raise ValueError("invalid_authorization_url")
     parsed = urlsplit(url)
-    if (parsed.scheme != "https" or parsed.netloc != "auth.superlocalmemory.com"
-            or parsed.path != "/owner-login" or parsed.username or parsed.password or parsed.fragment
-            or parse_qsl(parsed.query, keep_blank_values=True) != [("connection_id", connection_id)]):
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "auth.superlocalmemory.com"
+        or parsed.path != "/owner-login"
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or parse_qsl(parsed.query, keep_blank_values=True) != [("connection_id", connection_id)]
+    ):
         raise ValueError("invalid_authorization_url")
     return url
 
@@ -42,21 +53,33 @@ class RemoteConnectionService:
     network uncertainty or process restart. No connected proof is minted here.
     """
 
-    def __init__(self, journal: EnrollmentJournal, provider: GatewayProvider, *, hosts: tuple[str, ...]):
+    def __init__(
+        self, journal: EnrollmentJournal, provider: GatewayProvider, *, hosts: tuple[str, ...]
+    ):
         if not hosts or len(set(hosts)) != len(hosts) or any(host not in HOSTS for host in hosts):
             raise ValueError("invalid_host_catalog")
         self.journal, self.provider, self.hosts = journal, provider, tuple(hosts)
 
     @staticmethod
     def public(record: Enrollment) -> dict:
-        return {"connection_id": record.connection_id, "host": record.host,
-                "state": record.state, "version": record.version, "verified": False,
-                "cleanup_pending": record.cleanup_pending, "intent_key": record.intent_key}
+        return {
+            "connection_id": record.connection_id,
+            "host": record.host,
+            "state": record.state,
+            "version": record.version,
+            "verified": False,
+            "cleanup_pending": record.cleanup_pending,
+            "intent_key": record.intent_key,
+        }
 
     def status(self, owner: str, profile: str) -> dict:
-        return {"available": True, "installation_id": self.journal.installation_id,
-                "current_profile": profile, "hosts": list(self.hosts),
-                "connections": [self.public(row) for row in self.journal.list(owner, profile)]}
+        return {
+            "available": True,
+            "installation_id": self.journal.installation_id,
+            "current_profile": profile,
+            "hosts": list(self.hosts),
+            "connections": [self.public(row) for row in self.journal.list(owner, profile)],
+        }
 
     async def cancel(self, owner: str, profile: str, identifier: str, version: int) -> dict:
         """Fence local dispatch; cleanup remains pending until gateway revocation.
@@ -75,15 +98,30 @@ class RemoteConnectionService:
             raise JournalConflict("intent_cancelled")
         lease = await asyncio.to_thread(self.journal.claim, owner, profile, row.connection_id)
         if lease is not None:
-            receipt = await asyncio.wait_for(self.provider.enroll(
-                installation_id=row.installation_id, connection_id=row.connection_id,
-                owner=owner, profile=profile, intent=row.intent), timeout=10)
+            receipt = await asyncio.wait_for(
+                self.provider.enroll(
+                    installation_id=row.installation_id,
+                    connection_id=row.connection_id,
+                    owner=owner,
+                    profile=profile,
+                    intent=row.intent,
+                ),
+                timeout=10,
+            )
             if not isinstance(receipt, GatewayReceipt):
                 raise ValueError("invalid_gateway_receipt")
             if receipt.authorization_url is not None:
                 validate_sign_in(receipt.authorization_url, row.connection_id)
-            accepted = await asyncio.to_thread(self.journal.acknowledge, owner, profile,
-                row.connection_id, lease.token, lease.version, receipt.reference, receipt.authorization_url)
+            accepted = await asyncio.to_thread(
+                self.journal.acknowledge,
+                owner,
+                profile,
+                row.connection_id,
+                lease.token,
+                lease.version,
+                receipt.reference,
+                receipt.authorization_url,
+            )
             if not accepted:
                 raise JournalConflict("stale_enrollment_receipt")
         # Reread durable truth after an async callback; never manufacture the

@@ -3317,9 +3317,21 @@ async def lifespan(application: FastAPI):
             application,
             state_path("memory.db"),
         )
+        remote_runtime = getattr(application.state, "remote_connection_runtime", None)
+        if remote_runtime is not None:
+            try:
+                remote_runtime.schedule_restore()
+            except Exception:
+                logger.warning("remote_connections_restore_unavailable")
         try:
             yield
         finally:
+            remote_runtime = getattr(application.state, "remote_connection_runtime", None)
+            if remote_runtime is not None:
+                try:
+                    await remote_runtime.stop()
+                except Exception:
+                    logger.warning("remote_connections_shutdown_unavailable")
             await _cancel_fact_entity_association_repair(application)
             await _cancel_source_quality_repair(application)
 
@@ -4343,7 +4355,9 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     try:
         from superlocalmemory.server.routes.connections import router as connections_router
         application.include_router(connections_router)
-    except ImportError:
+        from superlocalmemory.remote_connections.runtime import install_runtime
+        install_runtime(application)
+    except Exception:
         logger.warning("remote_connections_router unavailable; local services remain enabled")
 
     # Answer-check settings (4.1.18): on-device Laya, hosted Jev, or off.

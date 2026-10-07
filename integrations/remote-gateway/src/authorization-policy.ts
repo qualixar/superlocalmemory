@@ -16,10 +16,10 @@ export function selectedScopes(requested:readonly string[],ceiling:{read:boolean
 /** Fetch exactly GitHub's identity endpoint: never trust caller names or token payloads. */
 export async function verifyGithubIdentity(accessToken:string,fetcher:typeof fetch=fetch):Promise<string>{
  if(typeof accessToken!=='string'||!accessToken||accessToken.length>4096||/[\r\n]/.test(accessToken))throw new Error('identity_unavailable');
- const response=await fetcher('https://api.github.com/user',{headers:{Authorization:'Bearer '+accessToken,Accept:'application/vnd.github+json','User-Agent':'SuperLocalMemory-Remote-Pilot','X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(10000)});
+ const response=await fetcher('https://api.github.com/user',{headers:{Authorization:'Bearer '+accessToken,Accept:'application/vnd.github+json','User-Agent':'SuperLocalMemory','X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(10000)});
  if(!response.ok)throw new Error('identity_unavailable');
  const raw=await response.text();if(raw.length>65536)throw new Error('identity_unavailable');
  let value:unknown;try{value=JSON.parse(raw);}catch{throw new Error('identity_unavailable');}
- if(!value||typeof value!=='object'||!('id' in value)||value.id!==16027584)throw new Error('identity_denied');
- return '16027584';
+ if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='number'||!Number.isSafeInteger(value.id)||value.id<=0)throw new Error('identity_denied');
+ return String(value.id);
 }

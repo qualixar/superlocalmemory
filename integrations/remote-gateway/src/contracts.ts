@@ -33,14 +33,15 @@ export interface AuthorizationGrant {
   authorizationVersion: number;
   revokedAt: string | null;
 }
+export type OriginTransport =
+  | {kind:'relay';installationId:string;profileId:string}
+  | {kind:'https';url:string;credentialRef:string;exactAgentPath:string};
 export interface ConnectionGrant {
   connectionId: string;
   ownerId: string;
   installationId: string;
   profileId: string;
-  exactAgentPath: string;
-  upstreamUrl: string;
-  originCredentialRef: string;
+  origin: Readonly<OriginTransport>;
   allowedTools: readonly string[];
   allowCorrection: boolean;
   allowSharedRead: boolean;

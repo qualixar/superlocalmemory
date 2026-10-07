@@ -21,6 +21,8 @@ test('GitHub numeric account pilot identity is verified through /user',async()=>
  assert.equal(calls[0].options.redirect,'error');
 });
 test('wrong GitHub identity and malformed/failing replies denied',async()=>{
- for(const body of [{id:2},{id:'16027584'},{id:16027584.5}])await assert.rejects(verifyGithubIdentity('synthetic-token',async()=>Response.json(body)),/identity_denied/);
+ for(const body of [{id:0},{id:'16027584'},{id:16027584.5}])await assert.rejects(verifyGithubIdentity('synthetic-token',async()=>Response.json(body)),/identity_denied/);
  await assert.rejects(verifyGithubIdentity('synthetic-token',async()=>new Response('no',{status:401})),/identity_unavailable/);
 });
+
+test('end-user signup accepts any verified numeric GitHub account without founder allowlist',async()=>{assert.equal(await verifyGithubIdentity('synthetic-token',async()=>Response.json({id:42,login:'synthetic-end-user'})),'42');});
