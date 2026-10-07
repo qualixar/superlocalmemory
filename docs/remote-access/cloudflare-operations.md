@@ -38,6 +38,8 @@ http.host in {"auth.superlocalmemory.com" "mcp.superlocalmemory.com" "connect.su
 
 Disable **Browser Integrity Check** only for the matching hosts. Review and approve this security change before deploying the rule. Do not disable zone-wide protection or bypass all WAF rules. OAuth audience, PKCE, state/callback validation, per-connection permissions, device proof, revocation and setup admission remain mandatory.
 
+Browser Integrity Check and Bot Fight Mode are separate products. A hostname rule disabling the browser check does not bypass Free Bot Fight Mode. That whole-domain feature can challenge legitimate OAuth registration and MCP clients before a Worker sees the request. [Cloudflare documents that Free Bot Fight Mode cannot be skipped with WAF or Page Rules](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/#rules). When a security event names Bot Fight Mode, obtain explicit approval to disable that zone-wide feature, or deploy the machine API on separate Workers addresses or a suitable separate zone. Do not promise a three-host Bot Fight Mode exception on the Free feature.
+
 The auth Worker limits anonymous setup before allocating state. Per-address admission is evaluated before the shared limiter. Missing limiter bindings fail closed. [Cloudflare rate-limit counters](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) are approximate per-location controls, not a globally strict quota or spending cap. Monitor legitimate users sharing a network before changing thresholds.
 
 ## Client setup
