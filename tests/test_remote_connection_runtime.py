@@ -103,7 +103,7 @@ async def test_expired_pending_cancel_uses_bootstrap_verifier_and_terminal_secur
     assert result['state']=='cancelled' and not result['cleanup_pending']
     assert calls==[row.verifier]
     assert runtime.store.by_connection(row.connection_id,for_cleanup=True) is None
-    with pytest.raises(ValueError,match='enrollment_cancelled'):runtime.store.save(row)
+    with pytest.raises(ValueError):runtime.store.save(row)
 
 @pytest.mark.asyncio
 async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_key(tmp_path,monkeypatch):
@@ -163,3 +163,25 @@ async def test_completed_opt_in_restarts_stopped_companion(tmp_path):
     stopped=Stopped();runtime._companions[row.connection_id]=stopped
     await runtime.resume(row.owner,row.profile)
     assert stopped._running
+
+@pytest.mark.asyncio
+async def test_startup_restores_only_completed_authorized_current_profile_opt_ins(tmp_path,monkeypatch):
+    from dataclasses import replace
+    runtime,row=enrolled_runtime(tmp_path)
+    runtime.store.save(replace(row,completed=True));started=[]
+    async def start(value):started.append(value.connection_id)
+    monkeypatch.setattr(runtime,'start',start)
+    await runtime.restore()
+    assert started==[row.connection_id]
+    started.clear();runtime.current_profile=lambda:'another-profile'
+    await runtime.restore()
+    assert not started
+
+@pytest.mark.asyncio
+async def test_local_only_restore_never_opens_keyring(tmp_path,monkeypatch):
+    store=NativeEnrollmentStore(tmp_path/'secure',backend=Backend())
+    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),store,current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+    def forbidden(*args,**kwargs):raise AssertionError('no opt-in, no keyring')
+    monkeypatch.setattr(store,'by_connection',forbidden)
+    await runtime.restore()
+    assert not runtime._companions

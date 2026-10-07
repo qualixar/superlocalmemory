@@ -6,7 +6,7 @@ const source=readFileSync(new URL('../../../src/superlocalmemory/ui/js/od-connec
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function setup(status={available:true,current_profile:'profile-a',hosts:['muse','chatgpt'],connections:[]},reply={state:'pending',connection_id:'synthetic-connection'}){
  status=Object.assign({installation_id:'synthetic-install'},status);
- const dom=new JSDOM('<!doctype html><div id="pane"></div>',{url:'http://127.0.0.1:8765',runScripts:'outside-only'});const calls=[];let fail=false;
+ const dom=new JSDOM('<!doctype html><div id="pane"></div>',{url:'http://127.0.0.1:8765',runScripts:'outside-only',pretendToBeVisual:true});const calls=[];let fail=false;dom.window.open=()=>null;
  dom.window.slmFetch=async(path,init={})=>{calls.push({path,init});if(init.method==='POST'&&fail)throw new Error('synthetic transport error');return new Response(JSON.stringify(init.method==='POST'?reply:status),{status:200});};dom.window.eval(source);const card=dom.window.odCreateAiConnectionsCard();dom.window.document.getElementById('pane').append(card);await tick();await tick();return {dom,card,calls,setFail:v=>{fail=v;}};
 }
 function click(card,text){const btn=[...card.querySelectorAll('button')].find(x=>x.textContent===text);assert.ok(btn,'button '+text+' exists');btn.click();}
