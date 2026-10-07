@@ -66,6 +66,10 @@ LOCAL_LLMS: tuple[ModelEntry, ...] = (
     _e(id="qwen2.5:7b", role="llm", provider="ollama", label="Qwen 2.5 7B",
        size_gb=4.7, min_ram_gb=16, damaged=6, tested=102, recommended=True,
        advice="Fast and faithful; occasionally drops a number. Best with 16 GB."),
+    _e(id="qwen3:8b", role="llm", provider="ollama", label="Qwen 3 8B",
+       size_gb=5.2, min_ram_gb=16, damaged=0, tested=15,
+       advice="Faithful in a 15-sentence sample, but several times slower per memory "
+              "than Gemma 3 4B."),
     _e(id="llama3.2", role="llm", provider="ollama", label="Llama 3.2 3B",
        size_gb=2.0, min_ram_gb=4, damaged=36, tested=102,
        advice="Small, but in SLM's test it often invented dates and numbers that were "
@@ -84,11 +88,12 @@ LOCAL_EMBEDDERS: tuple[ModelEntry, ...] = (
 
 HOSTED_LLMS: tuple[ModelEntry, ...] = (
     _e(id="openai/gpt-6-luna", role="llm", provider="openrouter", label="GPT-6 Luna",
-       price="$0.10 / $0.50", recommended=True,
-       advice="Lowest cost per memory."),
+       price="$0.10 / $0.50", recommended=True, damaged=0, tested=102,
+       advice="Lowest cost per memory; no changed facts in SLM's extraction test."),
     _e(id="deepseek/deepseek-v4.1-flash", role="llm", provider="openrouter",
        label="DeepSeek V4.1 Flash", price="$0.04 / $1.20",
-       advice="Very low input cost."),
+       advice="Very low input cost, but in SLM's test it often added the conversation "
+              "date and side facts nobody stated."),
     _e(id="anthropic/claude-haiku-4.5", role="llm", provider="openrouter",
        label="Claude Haiku 4.5", price="$1 / $5",
        advice="Reliable structured output at a moderate price."),
@@ -122,9 +127,11 @@ def find(model_id: str) -> ModelEntry | None:
 
 
 def _rank(entry: ModelEntry) -> tuple[float, str]:
+    """Lower is better. (damaged + 1) / (tested + 2): a small sample with no
+    damage does not outrank a large one with almost none."""
     if entry.damaged is None or not entry.tested:
         return (1.0, entry.id)  # untested sorts after every tested model
-    return (entry.damaged / entry.tested, entry.id)
+    return ((entry.damaged + 1) / (entry.tested + 2), entry.id)
 
 
 def recommend_local_llms(ram_gb: float | None, installed: list[str]) -> list[Recommendation]:

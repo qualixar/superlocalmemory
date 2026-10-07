@@ -88,3 +88,8 @@ def test_catalog_is_plain_data() -> None:
     data = mc.catalog()
     assert json.loads(json.dumps(data)) == data
     assert data["defaults"]["local_llm"] == mc.DEFAULT_LOCAL_LLM
+
+
+def test_a_small_clean_sample_does_not_outrank_a_large_nearly_clean_one() -> None:
+    recs = mc.recommend_local_llms(24, ["qwen3:8b", "gemma3:4b", "qwen2.5:7b", "llama3.2"])
+    assert [r.model_id for r in recs[:4]] == ["gemma3:4b", "qwen3:8b", "qwen2.5:7b", "llama3.2"]
