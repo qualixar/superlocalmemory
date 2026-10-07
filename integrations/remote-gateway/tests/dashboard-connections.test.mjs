@@ -23,6 +23,28 @@ test('sign-in links reject foreign identity and ambiguous query parameters',asyn
 test('same uncertain request retry retains idempotency key',async()=>{const f=await setup();try{f.setFail(true);await submit(f);const form=f.card.querySelector('form');assert.ok(form);f.setFail(false);form.dispatchEvent(new f.dom.window.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();const posts=f.calls.filter(x=>x.init.method==='POST');assert.equal(posts.length,2);assert.equal(posts[0].init.headers['Idempotency-Key'],posts[1].init.headers['Idempotency-Key']);}finally{f.dom.window.close();}});
 test('unverified connected status is not trusted',async()=>{const f=await setup({available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',state:'connected',verified:false}]});try{assert.doesNotMatch(f.card.textContent,/Connected/);}finally{f.dom.window.close();}});
 
+test('pending connection can be cancelled with its observed profile and version',async()=>{
+ const status={available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',state:'pending',connection_id:'a'.repeat(32),version:3,verified:false}]};
+ const f=await setup(status);try{
+ const original=f.dom.window.slmFetch;
+ f.dom.window.slmFetch=async(path,init={})=>{if(path.endsWith('/cancel')){f.calls.push({path,init});status.connections[0]={...status.connections[0],state:'cancelled',version:4,cleanup_pending:true};return new Response(JSON.stringify(status.connections[0]),{status:200});}return original(path,init);};
+ click(f.card,'Cancel connection');await tick();await tick();
+ const request=f.calls.find(x=>x.path.endsWith('/cancel'));assert.ok(request);
+ assert.equal(request.path,'/api/v3/connections/'+'a'.repeat(32)+'/cancel');
+ assert.deepEqual(JSON.parse(request.init.body),{profile_id:'profile-a',expected_version:3});
+ assert.match(f.card.textContent,/cleanup pending/i);assert.doesNotMatch(f.card.textContent,/Connected/);
+ assert.equal([...f.card.querySelectorAll('button')].some(x=>x.textContent==='Cancel connection'),false);
+ }finally{f.dom.window.close();}
+});
+test('failed cancellation remains unconfirmed and can be retried',async()=>{
+ const f=await setup({available:true,current_profile:'profile-a',hosts:['muse'],connections:[{host:'muse',state:'pending',connection_id:'a'.repeat(32),version:3,verified:false}]});try{
+ const original=f.dom.window.slmFetch;f.dom.window.slmFetch=(path,init)=>path.endsWith('/cancel')?Promise.resolve(new Response('{}',{status:503})):original(path,init);
+ click(f.card,'Cancel connection');await tick();await tick();
+ assert.match(f.card.textContent,/Cancellation could not be confirmed/);
+ assert.equal([...f.card.querySelectorAll('button')].find(x=>x.textContent==='Cancel connection').disabled,false);
+ }finally{f.dom.window.close();}
+});
+
 test('existing MCP pane mounts initiation card alongside current profile tools',async()=>{const f=await setup();try{f.dom.window.eval(readFileSync(new URL('../../../src/superlocalmemory/ui/js/od-mcp.js',import.meta.url),'utf8'));const pane=f.dom.window.document.createElement('div');f.dom.window.document.body.append(pane);f.dom.window.odRenderMcp(pane);await tick();await tick();assert.ok(pane.querySelector('#od-ai-connections'));assert.match(pane.textContent,/MCP & Integrations/);}finally{f.dom.window.close();}});
 test('MCP profile API failure retains independent initiation card',async()=>{const f=await setup();try{const original=f.dom.window.slmFetch;f.dom.window.slmFetch=(path,init)=>path==='/api/v3/mcp/profiles'?Promise.resolve(new Response('{}',{status:503})):original(path,init);f.dom.window.eval(readFileSync(new URL('../../../src/superlocalmemory/ui/js/od-mcp.js',import.meta.url),'utf8'));const pane=f.dom.window.document.createElement('div');f.dom.window.document.body.append(pane);f.dom.window.odRenderMcp(pane);await tick();await tick();assert.ok(pane.querySelector('#od-ai-connections'));}finally{f.dom.window.close();}});
 
