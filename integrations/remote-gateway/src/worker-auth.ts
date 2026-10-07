@@ -1,4 +1,5 @@
 import {anonymousAdmission,type SetupAdmissionEnv} from './anonymous-admission.ts';
+import {registrationDiagnostic} from './dcr-diagnostics.ts';
 import {readAuthorizationBody} from './authorization-body.ts';
 import {ownerControlFetch} from './owner-control.ts';
 import type {ConnectEnv} from './worker-connect.ts';
@@ -13,7 +14,7 @@ import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage} 
 import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
-export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;}
+export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;DCR_DIAGNOSTICS?:string;}
 interface ConsentContext {request:AuthRequest;bootstrapId?:string;ownerId?:string;}
 function response(status:number,error:string):Response{return Response.json({error},{status,headers:{'Cache-Control':'no-store'}});}
 function html(body:string,headers:Headers):Response{
@@ -95,6 +96,16 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
  const url=new URL(request.url);if(url.origin!==AUTH_ISSUER)return response(403,'host_denied');
  const limited=await anonymousAdmission(request,env);if(limited)return limited;
  try{
+  if(url.pathname==='/oauth/register'&&request.method==='POST'&&env.DCR_DIAGNOSTICS==='1'){
+   let raw:string;try{raw=await readAuthorizationBody(request,{limit:1048576});}catch{return response(400,'invalid_request');}
+   let metadata:unknown;try{metadata=JSON.parse(raw);}catch{metadata=null;}
+   const copy=new Request(request.url,{method:request.method,headers:request.headers,body:raw});
+   const reply=await issuerProtocol(copy,env,ctx);let outcome:unknown;try{outcome=await reply.clone().json();}catch{outcome=null;}
+   const diagnostic=registrationDiagnostic(metadata,reply.status,outcome);
+   ctx.waitUntil(env.OAUTH_KV.put('slm-dcr-diagnostic:'+Date.now()+':'+crypto.randomUUID(),JSON.stringify(diagnostic),{expirationTtl:600}).catch(()=>{console.warn('dcr_diagnostic_unavailable');}));
+   return reply;
+  }
+
   if(url.pathname==='/authorize'&&request.method==='GET'){
    const parsed=await authorizationServer.getOAuthApi(env).parseAuthRequest(request);
    if(!validateAuthorizationRequest(parsed)||parsed.resource!==MCP_RESOURCE)return response(400,'invalid_authorization');

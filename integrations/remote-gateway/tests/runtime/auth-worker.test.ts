@@ -38,3 +38,10 @@ it('missing anonymous admission bindings fail closed',async()=>{
  const settings={...configuration(),ANON_SETUP:undefined,ANON_GLOBAL:undefined} as unknown as AuthWorkerEnv;
  const ctx=createExecutionContext();expect((await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),settings,ctx)).status).toBe(503);await waitOnExecutionContext(ctx);
 });
+it('temporary diagnostic mode preserves real confidential registration and saves only safe shapes',async()=>{
+ const ctx=createExecutionContext();const settings={...configuration(),DCR_DIAGNOSTICS:'1'};
+ const response=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'private-test-name',redirect_uris:['https://client.example/callback?state=private-test-state'],token_endpoint_auth_method:'client_secret_post',grant_types:['authorization_code','refresh_token'],response_types:['code']})}),settings,ctx);
+ expect(response.status).toBe(201);const body=await response.json() as {client_id:string;client_secret:string};expect(body.client_id).toBeTruthy();expect(body.client_secret).toBeTruthy();await waitOnExecutionContext(ctx);
+ const keys=await env.OAUTH_KV.list({prefix:'slm-dcr-diagnostic:'});expect(keys.keys.length).toBeGreaterThan(0);
+ const record=await env.OAUTH_KV.get(keys.keys[keys.keys.length-1].name);expect(record).not.toContain(body.client_secret);expect(record).not.toContain('private-test-name');expect(record).not.toContain('private-test-state');expect(JSON.parse(record!)).toMatchObject({status:201,method:'client_secret_post'});
+});
