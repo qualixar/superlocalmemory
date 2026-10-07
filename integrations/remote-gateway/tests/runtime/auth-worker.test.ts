@@ -45,3 +45,10 @@ it('temporary diagnostic mode preserves real confidential registration and saves
  const keys=await env.OAUTH_KV.list({prefix:'slm-dcr-diagnostic:'});expect(keys.keys.length).toBeGreaterThan(0);
  const record=await env.OAUTH_KV.get(keys.keys[keys.keys.length-1].name);expect(record).not.toContain(body.client_secret);expect(record).not.toContain('private-test-name');expect(record).not.toContain('private-test-state');expect(JSON.parse(record!)).toMatchObject({status:201,method:'client_secret_post'});
 });
+it('MCP consent excludes native scope when client asks for the whole advertised scope list',async()=>{
+ const ctx=createExecutionContext();const settings=configuration();
+ const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'scope-interoperability-fixture',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);
+ const client=await registered.json() as {client_id:string};
+ const uri=issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',resource:'https://mcp.superlocalmemory.com/mcp',scope:'slm:read slm:write slm:session slm:connect',state:'synthetic-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'});
+ const response=await authFetch(new Request(uri),settings,ctx);expect(response.status).toBe(200);const page=await response.text();expect(page).toContain('slm:read');expect(page).not.toContain('slm:connect');await waitOnExecutionContext(ctx);
+});
