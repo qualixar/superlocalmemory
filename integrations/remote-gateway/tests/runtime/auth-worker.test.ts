@@ -50,7 +50,7 @@ it('MCP consent excludes native scope when client asks for the whole advertised 
  const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'scope-interoperability-fixture',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);
  const client=await registered.json() as {client_id:string};
  const uri=issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',resource:'https://mcp.superlocalmemory.com/mcp',scope:'slm:read slm:write slm:session slm:connect',state:'synthetic-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'});
- const response=await authFetch(new Request(uri),settings,ctx);expect(response.status).toBe(200);const page=await response.text();expect(page).toContain('slm:read');expect(page).not.toContain('slm:connect');await waitOnExecutionContext(ctx);
+ const response=await authFetch(new Request(uri),settings,ctx);expect(response.status).toBe(200);const page=await response.text();expect(page).toContain('slm:read');expect(page).not.toContain('slm:connect');expect(page).toContain('Granted: slm:read<');expect(page).toContain('Only if selected above: slm:write, slm:session<');await waitOnExecutionContext(ctx);
 });
 
 it('omitting resource never reaches native owner enrollment',async()=>{
