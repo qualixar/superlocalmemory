@@ -3,10 +3,49 @@ import {validateIndexedToken,type IssuerEnv} from './issuer-protocol.ts';
 import {verifyDeviceProof} from './device-proof.ts';
 import {tokenDigest} from './issued-token-protocol.ts';
 import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
-import type {NativeAuthProps} from './authorization-server.ts';
+import {authorizationServer,type AuthorizationEnv,type NativeAuthProps} from './authorization-server.ts';
+import {readAuthorizationBody} from './authorization-body.ts';
 import type {ConnectEnv} from './worker-connect.ts';
 import type {OwnedConnection} from './owner-index-do.ts';
-export interface OwnerControlEnv extends IssuerEnv,ConnectEnv {DEVICE_WRAP_KEY:string;}
+export interface OwnerControlEnv extends IssuerEnv,ConnectEnv,AuthorizationEnv {DEVICE_WRAP_KEY:string;}
+/** Client names are third-party input: plain text only, bounded, no control characters. */
+function displayName(value:unknown):string {
+ const text=typeof value==='string'?value.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').replace(/\s+/g,' ').trim():'';
+ return (text||'Unnamed app').slice(0,80);
+}
+function displayHost(uris:readonly string[]|undefined):string|null {
+ try{return uris&&uris[0]?new URL(uris[0]).hostname.slice(0,253):null;}catch{return null;}
+}
+/** The owner's Connected apps list: names come from the client's own registration. */
+async function connectedApps(props:NativeAuthProps,env:OwnerControlEnv):Promise<Response>{
+ const apps=await env.REGISTRIES.getByName(props.connectionId).listAuthorizations(props.ownerId);
+ const api=authorizationServer.getOAuthApi(env);
+ const listed=await Promise.all(apps.map(async app=>{
+  const client=await api.lookupClient(app.clientId).catch(()=>null);
+  return {authorization_id:app.authorizationId,name:displayName(client?.clientName),client_host:displayHost(client?.redirectUris),
+   permissions:{read:app.consentedScopes.includes('slm:read'),save:app.consentedScopes.includes('slm:write'),session:app.consentedScopes.includes('slm:session')},
+   version:app.authorizationVersion,connected_at_ms:app.createdAt,last_used_at_ms:app.lastUsedAt};
+ }));
+ return result(200,{connection_id:props.connectionId,apps:listed});
+}
+async function removeApp(request:Request,props:NativeAuthProps,env:OwnerControlEnv):Promise<Response>{
+ let body:unknown;
+ try{body=JSON.parse(await readAuthorizationBody(request,{limit:1024}));}catch{return result(400,{error:'invalid_request'});}
+ const value=body as {authorization_id?:unknown;expected_version?:unknown};
+ if(!body||typeof body!=='object'||Object.keys(body).length!==2||typeof value.authorization_id!=='string'||!/^[A-Za-z0-9_.:-]{1,256}$/.test(value.authorization_id)||!Number.isSafeInteger(value.expected_version)||(value.expected_version as number)<1)return result(400,{error:'invalid_request'});
+ try{
+  const version=await env.REGISTRIES.getByName(props.connectionId).revokeAuthorization(props.ownerId,value.authorization_id,value.expected_version as number);
+  return result(200,{revoked:true,version});
+ }catch(error){
+  const code=error instanceof Error?error.message:'';
+  if(code==='not_found')return result(404,{error:'not_found'});
+  if(code==='version_conflict')return result(409,{error:'version_conflict'});
+  if(code==='owner_mismatch')return result(403,{error:'owner_mismatch'});
+  throw error;
+ }
+}
+/** The only owner operations; the auth Worker routes exactly these here. */
+export const OWNER_CONTROL_PATHS:readonly string[]=['/owner/connections','/owner/revoke','/owner/verify','/owner/apps','/owner/apps/revoke'];
 function result(status:number,value:unknown):Response{return Response.json(value,{status,headers:{'Cache-Control':'no-store'}});}
 function wrapKey(env:OwnerControlEnv):Uint8Array {if(!/^[a-f0-9]{64}$/.test(env.DEVICE_WRAP_KEY))throw new Error('credential_wrap_unavailable');return new Uint8Array(env.DEVICE_WRAP_KEY.match(/../g)!.map(x=>parseInt(x,16)));}
 interface Delivery {device_token:string;expires_at_ms:number;generation:number;}
@@ -37,7 +76,7 @@ async function provision(props:NativeAuthProps,clientId:string,env:OwnerControlE
  return delivery(row,env);
 }
 export async function ownerControlFetch(request:Request,env:OwnerControlEnv,_ctx:ExecutionContext):Promise<Response>{
- const url=new URL(request.url);if(url.origin!=='https://auth.superlocalmemory.com'||!['/owner/connections','/owner/revoke','/owner/verify'].includes(url.pathname))return result(404,{error:'not_found'});
+ const url=new URL(request.url);if(url.origin!=='https://auth.superlocalmemory.com'||!OWNER_CONTROL_PATHS.includes(url.pathname))return result(404,{error:'not_found'});
  if(request.method!=='POST')return result(405,{error:'method_not_allowed'});
  if(request.headers.get('Origin')!==null)return result(403,{error:'origin_denied'});
  const token=/^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization')??'')?.[1];const proof=request.headers.get('DPoP');if(!token||!proof)return result(401,{error:'owner_unauthorized'});
@@ -49,6 +88,11 @@ export async function ownerControlFetch(request:Request,env:OwnerControlEnv,_ctx
   const digest=await tokenDigest(token);const replay=env.DEVICES.getByName('control:'+digest);
   await replay.configure({ownerId:props.ownerId,connectionId:props.connectionId,installationId:props.installationId,profileId:props.profileId,deviceDigest:digest,deviceJkt:props.deviceJkt,expiresAtMs:principal.expiresAt*1000});
   if(!await replay.consume(digest,verified))return result(401,{error:'owner_unauthorized'});
+  if(url.pathname==='/owner/apps'||url.pathname==='/owner/apps/revoke'){
+   const row=await owner.getConnection(props.ownerId,props.connectionId);
+   if(!row||row.revokedAt!==null||row.installationId!==props.installationId||row.profileId!==props.profileId)return result(403,{error:'connection_unavailable'});
+   return url.pathname==='/owner/apps'?connectedApps(props,env):removeApp(request,props,env);
+  }
   if(url.pathname==='/owner/verify'){
    const row=await owner.getConnection(props.ownerId,props.connectionId);
    if(!row||row.revokedAt!==null||row.installationId!==props.installationId||row.profileId!==props.profileId)return result(403,{error:'connection_unavailable'});

@@ -9,6 +9,11 @@ interface RegistryState {
 /** Connect Free default; operators raise it per deployment with DAILY_TOOL_CALL_LIMIT. */
 export const DEFAULT_DAILY_TOOL_CALL_LIMIT=50;
 interface DailyUsage {day:string;count:number;}
+/** Registry-stamped app facts for the owner's Connected apps list (null = predates tracking). */
+interface AppMeta {createdAt:number|null;lastUsedAt:number|null;}
+export interface ConnectedApp {authorizationId:string;clientId:string;consentedScopes:string[];authorizationVersion:number;createdAt:number|null;lastUsedAt:number|null;}
+/** Last-use is coarse on purpose: at most one extra write per app per minute. */
+const LAST_USED_RESOLUTION_MS=60000;
 function dailyLimit(raw:unknown):number{const value=Number(raw);return Number.isSafeInteger(value)&&value>0?value:DEFAULT_DAILY_TOOL_CALL_LIMIT;}
 const tools=new Set(['recall','search','fetch','get_status','remember','session_init','close_session','report_feedback','report_outcome']);
 const scopes=new Set(['slm:read','slm:write','slm:session']);
@@ -41,6 +46,8 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
   private state:RegistryState={version:1,connection:null,authorizations:[],entitlement:{expiresAt:0,version:0}};
   /** Separate key: the strictly versioned registry-state schema is unchanged. */
   private usage:DailyUsage|null=null;
+  private meta:Record<string,AppMeta>|null=null;
+  private async appMeta():Promise<Record<string,AppMeta>>{this.meta??=(await this.ctx.storage.get<Record<string,AppMeta>>('authorization-meta'))??{};return this.meta;}
   constructor(ctx:DurableObjectState,env:Record<string,unknown>){
     super(ctx,env);
     this.ctx.blockConcurrencyWhile(async()=>{
@@ -74,7 +81,10 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
       const existing=this.state.authorizations.find(x=>x.authorizationId===a.authorizationId);
       if(existing)return JSON.stringify(existing)===JSON.stringify(a)?{value:undefined}:{error:'authorization_conflict'};
       if(this.state.authorizations.length>=256)return {error:'capacity_exhausted'};
-      await this.commit({...this.state,authorizations:[...this.state.authorizations,a]});return {value:undefined};
+      await this.commit({...this.state,authorizations:[...this.state.authorizations,a]});
+      const meta={...await this.appMeta(),[a.authorizationId]:{createdAt:Date.now(),lastUsedAt:null}};
+      await this.ctx.storage.put('authorization-meta',meta);this.meta=meta;
+      return {value:undefined};
     });
   }
   async setEntitlement(owner:string,expiresAt:number,expectedVersion:number):Promise<number>{
@@ -108,10 +118,19 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
       const stored=this.usage??await this.ctx.storage.get<DailyUsage>('usage-day')??null;
       const current=stored&&stored.day===day?stored:{day,count:0};
       if(current.count>=dailyLimit(this.env.DAILY_TOOL_CALL_LIMIT)){this.usage=current;return {allowed:false,code:'DAILY_LIMIT_REACHED',httpStatus:429};}
-      const next={day,count:current.count+1};
-      await this.ctx.storage.put('usage-day',next);this.usage=next;
+      const next={day,count:current.count+1};const now=Date.now();
+      const meta=await this.appMeta();const known=meta[actor.authorizationId];
+      if(known?.lastUsedAt!=null&&now-known.lastUsedAt<LAST_USED_RESOLUTION_MS){await this.ctx.storage.put('usage-day',next);}
+      else{const updated={...meta,[actor.authorizationId]:{createdAt:known?.createdAt??null,lastUsedAt:now}};await this.ctx.storage.put({'usage-day':next,'authorization-meta':updated});this.meta=updated;}
+      this.usage=next;
       return decision;
     });
+  }
+  /** Active grants for the owner's Connected apps list. No tokens or memory data. */
+  async listAuthorizations(owner:string):Promise<ConnectedApp[]>{
+    if(!this.state.connection||this.state.connection.ownerId!==owner)throw new Error('owner_mismatch');
+    const meta=await this.appMeta();
+    return this.state.authorizations.filter(a=>a.revokedAt===null).map(a=>({authorizationId:a.authorizationId,clientId:a.clientId,consentedScopes:[...a.consentedScopes],authorizationVersion:a.authorizationVersion,createdAt:meta[a.authorizationId]?.createdAt??null,lastUsedAt:meta[a.authorizationId]?.lastUsedAt??null}));
   }
   async revokeAuthorization(owner:string,identifier:string,expectedVersion:number):Promise<number>{
     return this.mutation<number>(async()=>{

@@ -49,3 +49,31 @@ describe('daily tool-call cap',()=>{
   for(let i=0;i<3;i++)expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
  });
 });
+
+// Connected apps: the owner sees which apps hold an active grant and when they last
+// used it. Times are stamped by the registry, never supplied by a caller.
+describe('connected apps list',()=>{
+ test('active grants are listed with a server-stamped connection time',async()=>{
+  const before=Date.now();const stub=await setup();
+  const apps=await stub.listAuthorizations('owner-a');
+  expect(apps).toHaveLength(1);
+  expect(apps[0]).toMatchObject({authorizationId:'authorization-a',clientId:'client-a',authorizationVersion:1,lastUsedAt:null});
+  expect([...apps[0].consentedScopes].sort()).toEqual([...grant.consentedScopes].sort());
+  expect(apps[0].createdAt).toBeGreaterThanOrEqual(before);
+ });
+ test('a tool call records last use and survives eviction',async()=>{
+  const stub=await setup();expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+  await evictDurableObject(stub);
+  const [app]=await stub.listAuthorizations('owner-a');
+  expect(typeof app.lastUsedAt).toBe('number');expect(typeof app.createdAt).toBe('number');
+ });
+ test('discovery alone does not count as use',async()=>{
+  const stub=await setup();await stub.admit(actor,grant.audience,{...request,rpcMethod:'tools/list',toolName:undefined,arguments:undefined});
+  expect((await stub.listAuthorizations('owner-a'))[0].lastUsedAt).toBeNull();
+ });
+ test('a revoked app leaves the list and another owner cannot read it',async()=>{
+  const stub=await setup();await stub.revokeAuthorization('owner-a','authorization-a',1);
+  expect(await stub.listAuthorizations('owner-a')).toEqual([]);
+  await expect((async()=>{await stub.listAuthorizations('other');})()).rejects.toThrow('owner_mismatch');
+ });
+});

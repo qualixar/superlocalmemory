@@ -1,7 +1,7 @@
 import {anonymousAdmission,type SetupAdmissionEnv} from './anonymous-admission.ts';
 import {registrationDiagnostic} from './dcr-diagnostics.ts';
 import {readAuthorizationBody} from './authorization-body.ts';
-import {ownerControlFetch} from './owner-control.ts';
+import {OWNER_CONTROL_PATHS,ownerControlFetch} from './owner-control.ts';
 import type {ConnectEnv} from './worker-connect.ts';
 import {issuerProtocol,validateIndexedToken} from './issuer-protocol.ts';
 import type {IssuedTokenEnv} from './issued-token-protocol.ts';
@@ -170,7 +170,7 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
    await env.BOOTSTRAPS.getByName(body.connectionId).configure({...body,authRequest:parsed});
    return Response.json({connection_id:body.connectionId,authorize_url:AUTH_ISSUER+'/owner-login?connection_id='+body.connectionId},{status:201,headers:{'Cache-Control':'no-store'}});
   }
-  if(['/owner/connections','/owner/revoke','/owner/verify'].includes(url.pathname))return await ownerControlFetch(request,env,ctx);
+  if(OWNER_CONTROL_PATHS.includes(url.pathname))return await ownerControlFetch(request,env,ctx);
   if(url.pathname==='/consent'&&request.method==='POST')return await handleConsent(request,env);
   if(url.pathname==='/select'&&request.method==='POST')return await selectConnection(request,env);
   if(url.pathname==='/github/callback'&&request.method==='GET')return await githubCallback(request,env);
