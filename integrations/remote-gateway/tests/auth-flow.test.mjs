@@ -17,3 +17,11 @@ test('consent rendering escapes client-controlled text',()=>{
  const html=renderConsentPage('handle',{clientName:'<script>bad</script>',redirectHostname:'client.example',redirectIsLoopback:false,scope:['slm:read']});
  assert(!html.includes('<script>'));assert(html.includes('&lt;script&gt;'));assert(html.includes('SuperLocalMemory'));
 });
+
+test('dashboard recovery receipt only routes to an authenticated loopback port, never grants access',async()=>{
+ const {dashboardReturnCookie,dashboardReturnUrl}=await import('../src/auth-flow.ts');const key='a'.repeat(64);
+ const cookie=await dashboardReturnCookie('http://127.0.0.1:18767/api/v3/connections/callback',key);assert.ok(cookie.includes('HttpOnly'));assert.ok(cookie.includes('Secure'));const request=new Request('https://auth.superlocalmemory.com/sign-in/error',{headers:{Cookie:cookie.split(';')[0]}});
+ assert.equal(await dashboardReturnUrl(request,key),'http://127.0.0.1:18767/#mcp-pane');assert.equal(await dashboardReturnUrl(request,'b'.repeat(64)),undefined);assert.equal(await dashboardReturnCookie('https://evil.example/callback',key),null);assert.equal(await dashboardReturnUrl(new Request(request.url,{headers:{Cookie:cookie.split(';')[0]+'tampered'}}),key),undefined);
+});
+
+test('provider failures do not falsely blame expired sign-in links',async()=>{const {renderAuthFailure}=await import('../src/auth-flow.ts');const page=renderAuthFailure('identity_exchange_unavailable');assert.match(page,/could not complete sign-in/);assert.doesNotMatch(page,/link expired or was already used/);});

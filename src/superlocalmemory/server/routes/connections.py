@@ -7,7 +7,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -114,6 +114,36 @@ async def cancel_connection(request: Request, connection_id: str, intent: Cancel
         raise HTTPException(503, "connection_service_unavailable") from None
 
 
+class RestartIntent(CancellationIntent):
+    remote_opt_in: StrictBool
+
+    @model_validator(mode="after")
+    def explicit_restart(self):
+        if self.remote_opt_in is not True:
+            raise ValueError("remote opt-in required")
+        return self
+
+
+@router.post("/{connection_id}/restart")
+async def restart_connection(request: Request, connection_id: str, intent: RestartIntent):
+    owner, profile = _context(request, mutation=True)
+    if intent.profile_id != profile:
+        raise HTTPException(409, "profile_changed")
+    service = _service(request)
+    if service is None or not hasattr(service, "restart"):
+        raise HTTPException(503, "connection_service_unavailable")
+    try:
+        return await service.restart(owner, profile, connection_id, intent.expected_version)
+    except JournalConflict as exc:
+        code = str(exc)
+        raise HTTPException(404 if code == "not_found" else 409, code) from None
+    except ValueError:
+        raise HTTPException(400, "invalid_enrollment_request") from None
+    except Exception:
+        logger.error("remote_connection_restart_unavailable")
+        raise HTTPException(503, "connection_service_unavailable") from None
+
+
 @router.get("/status")
 async def connection_status(request: Request):
     owner, profile = _context(request)
@@ -187,9 +217,5 @@ async def connection_callback(request: Request):
     except Exception:
         logger.error("remote_connection_callback_unavailable")
         raise HTTPException(503, "connection_service_unavailable") from None
-    return HTMLResponse(
-        "<!doctype html><title>SuperLocalMemory</title><h1>GitHub sign-in complete</h1>"
-        "<p>Return to your SLM dashboard. It will verify the device connection "
-        "and show the URL for your AI client.</p>",
-        headers={"Cache-Control": "no-store"},
-    )
+    # Do not leave the one-use OAuth code in a refreshable success-page URL.
+    return RedirectResponse("/#mcp-pane", status_code=303, headers={"Cache-Control": "no-store"})

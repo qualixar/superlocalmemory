@@ -216,3 +216,88 @@ async def test_interrupted_callback_waits_for_mutating_thread_before_disconnect_
     await cancel
     assert finished.is_set()
     assert not any(key.active for key in runtime.keys.list())
+
+
+def test_expired_enrollment_is_identified_without_exposing_credentials(tmp_path):
+    runtime, row = enrolled_runtime(tmp_path, expired=True)
+    status = runtime.service.status('owner', 'profile')
+    current = status['connections'][0]
+    assert current['sign_in_state'] == 'expired'
+    assert current['authorization_expires_at_ms'] == row.expires_at_ms
+    assert current['verified'] is False
+
+
+@pytest.mark.asyncio
+async def test_restart_revokes_old_request_and_concurrent_retries_share_new_intent(tmp_path):
+    import asyncio
+    from superlocalmemory.remote_connections.service import GatewayReceipt
+    runtime, row = enrolled_runtime(tmp_path, expired=True)
+    version = runtime.journal.get('owner', 'profile', row.connection_id).version
+    calls = []
+    async def cancel(owner, profile, identifier):
+        calls.append(('cancel', identifier))
+        return True
+    runtime.cancel = cancel
+    class Provider:
+        async def enroll(self, **kwargs):
+            calls.append(('enroll', kwargs['connection_id']))
+            return GatewayReceipt(kwargs['connection_id'])
+    runtime.service.provider = Provider()
+    a, b = await asyncio.gather(*[runtime.service.restart('owner', 'profile', row.connection_id, version) for _ in range(2)])
+    assert a['connection_id'] == b['connection_id'] != row.connection_id
+    assert len([x for x in calls if x[0] == 'enroll']) == 1
+    old = runtime.journal.get('owner', 'profile', row.connection_id)
+    assert old.state == 'cancelled' and not old.cleanup_pending
+    new = runtime.journal.get('owner', 'profile', a['connection_id'])
+    assert new.intent == old.intent
+
+
+@pytest.mark.asyncio
+async def test_restart_fails_closed_until_old_remote_cleanup_is_confirmed(tmp_path):
+    from superlocalmemory.remote_connections.journal import JournalConflict
+    runtime, row = enrolled_runtime(tmp_path, expired=True)
+    async def cancel(*args): return False
+    runtime.cancel = cancel
+    version = runtime.journal.get('owner', 'profile', row.connection_id).version
+    with pytest.raises(JournalConflict, match='cleanup_pending'):
+        await runtime.service.restart('owner', 'profile', row.connection_id, version)
+    assert len(runtime.journal.list('owner', 'profile')) == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_identity_is_canonical_across_accepted_versions_and_service_recreation(tmp_path):
+    from superlocalmemory.remote_connections.runtime import ManagedConnectionService
+    from superlocalmemory.remote_connections.service import GatewayReceipt
+    runtime, row = enrolled_runtime(tmp_path, expired=True)
+    version = runtime.journal.get('owner', 'profile', row.connection_id).version
+    async def cancel(*args): return True
+    runtime.cancel = cancel
+    class Provider:
+        async def enroll(self, **kwargs): return GatewayReceipt(kwargs['connection_id'])
+    provider = Provider();runtime.service.provider = provider
+    first = await runtime.service.restart('owner', 'profile', row.connection_id, version)
+    replacement = ManagedConnectionService(runtime.journal, provider, hosts=runtime.service.hosts, runtime=runtime)
+    second = await replacement.restart('owner', 'profile', row.connection_id, version + 1)
+    assert first['connection_id'] == second['connection_id']
+    assert len([x for x in runtime.journal.list('owner', 'profile') if x.state == 'pending']) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_cleanup_can_resume_with_current_cancelled_version(tmp_path):
+    from superlocalmemory.remote_connections.journal import JournalConflict
+    from superlocalmemory.remote_connections.service import GatewayReceipt
+    runtime, row = enrolled_runtime(tmp_path, expired=True)
+    async def cancel_no(*args): return False
+    runtime.cancel = cancel_no
+    version = runtime.journal.get('owner', 'profile', row.connection_id).version
+    with pytest.raises(JournalConflict, match='cleanup_pending'):
+        await runtime.service.restart('owner', 'profile', row.connection_id, version)
+    cancelled = runtime.journal.get('owner', 'profile', row.connection_id)
+    async def cancel_yes(*args): return True
+    runtime.cancel = cancel_yes
+    class Provider:
+        async def enroll(self, **kwargs): return GatewayReceipt(kwargs['connection_id'])
+    runtime.service.provider = Provider()
+    result = await runtime.service.restart('owner', 'profile', row.connection_id, cancelled.version)
+    assert result['state'] == 'pending'
+    assert len([x for x in runtime.journal.list('owner', 'profile') if x.state == 'pending']) == 1

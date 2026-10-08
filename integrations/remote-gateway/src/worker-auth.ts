@@ -10,7 +10,7 @@ import type {AuthRequest} from '@cloudflare/workers-oauth-provider';
 import {calculateJwkThumbprint} from 'jose';
 import {authorizationServer,type AuthorizationEnv,type NativeAuthProps} from './authorization-server.ts';
 import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,validateAuthorizationRequest,memoryAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
-import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage,renderAuthPage,renderAuthFailure} from './auth-flow.ts';
+import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage,renderAuthPage,renderAuthFailure,dashboardReturnCookie,dashboardReturnUrl} from './auth-flow.ts';
 import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
@@ -29,7 +29,7 @@ function html(body:string,headers:Headers,redirectUri?:string,status=200):Respon
  return new Response(body.replace('<style>','<style nonce="'+nonce+'">'),{status,headers});
 }
 function interactiveFailure(request:Request,status:number,error:string):Response {
- return request.headers.get('Accept')?.includes('text/html')?html(renderAuthFailure(error),new Headers(),undefined,status):response(status,error);
+ return request.headers.get('Accept')?.includes('text/html')?redirect(AUTH_ISSUER+'/sign-in/error?reason='+encodeURIComponent(error)):response(status,error);
 }
 function redirect(location:string,headers=new Headers()):Response {headers.set('Location',location);headers.set('Cache-Control','no-store');return new Response(null,{status:302,headers});}
 const boundedText=readAuthorizationBody;
@@ -60,17 +60,20 @@ async function handleConsent(request:Request,env:AuthWorkerEnv):Promise<Response
  const approved=await api.approveConsent(request,handle,{scope:scopes});await env.OAUTH_KV.delete('slm-consent:'+handle);
  const verifier=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
  const upstream=await api.beginUpstream(approved.request,{data:{verifier,bootstrapId:context.bootstrapId},headers:approved.headers});
+ if(context.request.resource===OWNER_RESOURCE){const receipt=await dashboardReturnCookie(context.request.redirectUri,env.DEVICE_WRAP_KEY);if(receipt)upstream.headers.append('Set-Cookie',receipt);}
  return redirect(githubAuthorizationUrl(env.GITHUB_CLIENT_ID,upstream.state,await tokenHash(verifier)),upstream.headers);
 }
 async function githubCallback(request:Request,env:AuthWorkerEnv):Promise<Response>{
- const api=authorizationServer.getOAuthApi(env);const resumed=await api.finishUpstream<{verifier:string;bootstrapId?:string}>(request);
+ const api=authorizationServer.getOAuthApi(env);
+ let resumed:Awaited<ReturnType<typeof api.finishUpstream<{verifier:string;bootstrapId?:string}>>>;
+ try{resumed=await api.finishUpstream<{verifier:string;bootstrapId?:string}>(request);}catch{return interactiveFailure(request,400,'sign_in_session_unavailable');}
  const code=new URL(request.url).searchParams.get('code')??'';
- const token=await exchangeGithubCode(env.GITHUB_CLIENT_ID,env.GITHUB_CLIENT_SECRET,code,resumed.data.verifier);
- const ownerId=await verifyGithubIdentity(token);
+ let token:string;try{token=await exchangeGithubCode(env.GITHUB_CLIENT_ID,env.GITHUB_CLIENT_SECRET,code,resumed.data.verifier);}catch{return interactiveFailure(request,502,'identity_exchange_unavailable');}
+ let ownerId:string;try{ownerId=await verifyGithubIdentity(token);}catch{return interactiveFailure(request,502,'identity_verification_unavailable');}
  if(resumed.request.resource===OWNER_RESOURCE){
   const connectionId=resumed.data.bootstrapId;if(!connectionId)return response(400,'connection_unavailable');
   const bootstrap=env.BOOTSTRAPS.getByName(connectionId);const row=await bootstrap.get();
-  if(!row||row.authRequest.clientId!==resumed.request.clientId||row.authRequest.codeChallenge!==resumed.request.codeChallenge||row.status==='cancelled')return response(400,'connection_unavailable');
+  if(!row||row.authRequest.clientId!==resumed.request.clientId||row.authRequest.codeChallenge!==resumed.request.codeChallenge||row.status==='cancelled')return interactiveFailure(request,400,'connection_unavailable');
   const deviceJkt=await calculateJwkThumbprint(row.deviceJwk,'sha256');
   await bootstrap.approve(ownerId);await env.OWNERS.getByName(ownerId).bind(ownerId,row.installationId,row.profileId,resumed.request.clientId,deviceJkt);await bootstrap.confirm(ownerId,resumed.request.clientId);
   const props:NativeAuthProps={kind:'native',ownerId,installationId:row.installationId,profileId:row.profileId,connectionId,deviceJkt};
@@ -106,6 +109,11 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
  const url=new URL(request.url);if(url.origin!==AUTH_ISSUER)return response(403,'host_denied');
  const limited=await anonymousAdmission(request,env);if(limited)return limited;
  try{
+  if(url.pathname==='/sign-in/error'&&request.method==='GET'){
+   const known=['consent_unavailable','authorization_unavailable','connection_unavailable','sign_in_session_unavailable','identity_exchange_unavailable','identity_verification_unavailable'];
+   const reason=url.searchParams.get('reason')??'';
+   return html(renderAuthFailure(known.includes(reason)?reason:'authorization_unavailable',await dashboardReturnUrl(request,env.DEVICE_WRAP_KEY)),new Headers(),undefined,400);
+  }
   if(url.pathname==='/oauth/register'&&request.method==='POST'&&env.DCR_DIAGNOSTICS==='1'){
    let raw:string;try{raw=await readAuthorizationBody(request,{limit:1048576});}catch{return response(400,'invalid_request');}
    let metadata:unknown;try{metadata=JSON.parse(raw);}catch{metadata=null;}

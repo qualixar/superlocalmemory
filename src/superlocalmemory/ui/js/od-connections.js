@@ -56,6 +56,7 @@
       consent.disabled = add.disabled || busy; write.disabled = add.disabled || busy;
       submit.disabled = add.disabled || busy;
       Array.from(clients.children).forEach(function (button) { button.disabled = add.disabled || busy; });
+      Array.from(list.querySelectorAll('[data-sign-in-action]')).forEach(function (action) { if (action.tagName === 'A') action.hidden = add.disabled || busy; else action.disabled = add.disabled || busy; });
     }
     function schedulePoll(delay) {
       if (pollTimer !== null) window.clearTimeout(pollTimer);
@@ -121,6 +122,7 @@
         var step = currentConnections.some(function (c) { return c && c.verified === true && (c.state === 'connected' || c.state === 'ready_for_client' && c.mcp_url === 'https://mcp.superlocalmemory.com/mcp'); }) ? 3 : currentConnections.some(function (c) { return c && c.state === 'pending' && c.transport_state && c.transport_state !== 'authorization_required'; }) ? 2 : currentConnections.some(function (c) { return c && c.state === 'pending'; }) ? 1 : 0;
         if (!add.disabled && step === 3) status.textContent = 'This computer is verified. Follow your AI connection instructions below.';
         else if (!add.disabled && step === 2) status.textContent = 'GitHub sign-in completed. Checking the connection from this computer…';
+        else if (!add.disabled && currentConnections.some(function (c) { return c && c.sign_in_state === 'expired'; })) status.textContent = 'A sign-in link expired. Use Restart sign-in to continue with the same permissions.';
         else if (!add.disabled && step === 1) status.textContent = 'Waiting for GitHub sign-in. Finish the opened sign-in page, or retry the same request below.';
         Array.from(journey.children).forEach(function (item, index) { if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current'); });
         controls(); links.hidden = add.disabled;
@@ -140,9 +142,10 @@
           var ready = connection.state === 'ready_for_client' && connection.verified === true && connection.mcp_url === 'https://mcp.superlocalmemory.com/mcp';
           if ((active || ready || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; add.hidden = false; consent.checked = false; }
           var cancelled = connection.state === 'cancelled';
+          var rowProfile = metadata.current_profile;
           var row = node('div', '', 'od-ai-connection');
-          if (cancelled) { historyRows.appendChild(row); historyCount += 1; } else list.appendChild(row);
-          var description = ready ? 'Ready for AI client — GitHub connected' : active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : connection.state === 'pending' ? connection.transport_state === 'authorization_required' ? 'Authorization required — cancel this connection and link again' : connection.transport_state ? 'Verifying computer connection' : 'Waiting for GitHub sign-in and connection verification' : 'Not connected';
+          if (cancelled && !connection.cleanup_pending) { historyRows.appendChild(row); historyCount += 1; } else list.appendChild(row);
+          var description = connection.sign_in_state === 'expired' ? 'Sign-in expired — restart to get a fresh link' : ready ? 'Ready for AI client — GitHub connected' : active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : connection.state === 'pending' ? connection.transport_state === 'authorization_required' ? 'Authorization required — cancel this connection and link again' : connection.transport_state ? 'Verifying computer connection' : 'Waiting for GitHub sign-in and connection verification' : 'Not connected';
           row.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
           if (ready) {
             row.appendChild(node('h4', 'Connect your AI — ' + HOSTS[connection.host]));
@@ -154,6 +157,34 @@
             copy.addEventListener('click', function () {
               if (window.navigator.clipboard && window.navigator.clipboard.writeText) window.navigator.clipboard.writeText(connection.mcp_url).then(function () { copy.textContent = 'Copied'; }).catch(function () { endpoint.select(); });
               else endpoint.select();
+            });
+          }
+          if (connection.state === 'pending' && connection.sign_in_state === 'required' && /^[a-f0-9]{32}$/.test(connection.connection_id)) {
+            var continuation = safeSignIn('https://auth.superlocalmemory.com/owner-login?connection_id=' + connection.connection_id, connection.connection_id);
+            var resume = node('a', 'Continue sign-in', 'btn primary'); resume.href = continuation; resume.target = '_blank'; resume.rel = 'noopener noreferrer'; resume.setAttribute('data-sign-in-action', ''); resume.addEventListener('click', function (event) { if (busy || add.disabled || !metadata || metadata.current_profile !== rowProfile) event.preventDefault(); }); row.appendChild(resume);
+            var transient = links.querySelector('a');
+            if (transient && transient.href === continuation) links.textContent = '';
+          }
+          if ((connection.state === 'pending' && connection.verified !== true || connection.state === 'cancelled' && connection.cleanup_pending) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version)) {
+            var restart = node('button', 'Restart sign-in', 'btn primary'); restart.type = 'button'; restart.setAttribute('data-sign-in-action', ''); row.appendChild(restart);
+            restart.addEventListener('click', function () {
+              if (busy || add.disabled || !metadata || metadata.current_profile !== rowProfile) return;
+              var profile = rowProfile; var popup = null;
+              try { popup = window.open('about:blank', '_blank'); if (popup) popup.opener = null; } catch (_) {}
+              busy = true; controls(); restart.disabled = true; status.textContent = 'Restarting sign-in with the same approved permissions…'; links.textContent = '';
+              call('/api/v3/connections/' + connection.connection_id + '/restart', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_id: profile, expected_version: connection.version, remote_opt_in: true })
+              }).then(function (result) {
+                if (!result || result.state !== 'pending' || !/^[a-f0-9]{32}$/.test(result.connection_id)) throw new Error('unconfirmed restart');
+                var url = safeSignIn(result.authorization_url, result.connection_id);
+                if (!url) throw new Error('unconfirmed restart sign-in');
+                if (attempt && attempt.connectionId === connection.connection_id) { window.sessionStorage.removeItem(storageKey); attempt = null; }
+                if (popup) popup.location.replace(url);
+                var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); links.hidden = false;
+                status.textContent = 'Fresh sign-in link ready. Complete GitHub sign-in in the opened page.';
+                schedulePoll(1500);
+              }).catch(function () { if (popup) popup.close(); status.textContent = 'Restart could not be confirmed. Retry Restart sign-in; your approved permissions are unchanged.'; }).finally(function () { busy = false; controls(); });
             });
           }
           if ((connection.state === 'pending' || ready || active) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
@@ -174,7 +205,7 @@
           }
         });
         if (historyCount) { history.firstChild.textContent = 'Past connections (' + historyCount + ')'; list.appendChild(history); }
-        listSignature = nextList;
+        listSignature = nextList; controls();
         }
         if (metadata && Array.isArray(metadata.connections) && metadata.connections.some(function (connection) { return connection && connection.state === 'pending'; })) schedulePoll(1500);
       }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; add.disabled = true; controls(); status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { loading = false; refresh.disabled = false; if (refreshRequested && !disposed) { refreshRequested = false; load(); } });

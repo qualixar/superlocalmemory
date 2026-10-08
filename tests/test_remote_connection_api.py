@@ -270,3 +270,29 @@ def test_generic_mcp_client_still_requires_allowed_catalog_and_opt_in(configured
     response = client.post('/api/v3/connections/initiate', headers=headers(), json=data)
     assert response.status_code == 200 and response.json()['state'] == 'pending'
     assert provider.calls == 1
+
+
+def test_restart_requires_explicit_opt_in_local_token_and_current_profile(configured):
+    client, provider, app = configured
+    calls = []
+    async def restart(owner, profile, identifier, version):
+        calls.append((owner, profile, identifier, version))
+        return {'state': 'pending', 'connection_id': 'b' * 32}
+    app.state.remote_connections.restart = restart
+    path = '/api/v3/connections/' + 'a' * 32 + '/restart'
+    data = {'profile_id': 'default', 'expected_version': 3, 'remote_opt_in': True}
+    assert client.post(path, json=data).status_code == 403
+    assert client.post(path, headers=headers(), json={**data, 'remote_opt_in': False}).status_code == 422
+    assert client.post(path, headers=headers(), json={**data, 'profile_id': 'other'}).status_code == 409
+    assert client.post(path, headers=headers(), json=data).status_code == 200
+    assert len(calls) == 1
+
+
+def test_successful_callback_redirects_to_dashboard_without_replayable_query(configured):
+    client, _, app = configured
+    async def callback(state, code): return 'a' * 32
+    app.state.remote_connection_runtime = SimpleNamespace(callback=callback)
+    response = client.get('/api/v3/connections/callback?state=synthetic&code=synthetic', follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/#mcp-pane'
+    assert 'synthetic' not in response.headers['location']

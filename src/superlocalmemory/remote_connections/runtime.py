@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
 from dataclasses import replace
 from typing import Callable
 
@@ -317,6 +320,7 @@ class ManagedConnectionService(RemoteConnectionService):
     def __init__(self, *args, runtime: NativeConnectionRuntime, **kwargs):
         super().__init__(*args, **kwargs)
         self.runtime = runtime
+        self._restart_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     def status(self, owner: str, profile: str) -> dict:
         result = super().status(owner, profile)
@@ -331,7 +335,47 @@ class ManagedConnectionService(RemoteConnectionService):
                 )
             elif connection["state"] == "pending" and identifier in self.runtime._states:
                 connection["transport_state"] = self.runtime._states[identifier]
+            if connection["state"] == "pending":
+                row = self.runtime.store.by_connection(identifier, for_cleanup=True)
+                if row and not row.completed:
+                    connection["authorization_expires_at_ms"] = row.expires_at_ms
+                    connection["sign_in_state"] = (
+                        "expired" if row.expires_at_ms <= time.time() * 1000 else "required"
+                    )
         return result
+
+    async def restart(self, owner: str, profile: str, identifier: str, version: int) -> dict:
+        """Revoke first, then retry the same consent with a durable idempotent key."""
+        lock = self._restart_locks.setdefault((owner, profile), asyncio.Lock())
+        async with lock:
+            if self.runtime.current_profile() != profile or not self.runtime.can_manage(
+                owner, profile
+            ):
+                raise JournalConflict("profile_changed")
+            row = await asyncio.to_thread(self.journal.get, owner, profile, identifier)
+            if identifier in self.runtime._verified:
+                raise JournalConflict("connection_already_verified")
+            if row.state == "pending" and row.version != version:
+                raise JournalConflict("version_conflict")
+            if row.state == "cancelled" and row.version not in {version, version + 1, version + 2}:
+                raise JournalConflict("version_conflict")
+            if row.state not in {"pending", "cancelled"}:
+                raise JournalConflict("connection_not_pending")
+            if row.state == "pending" or row.cleanup_pending:
+                result = await self.cancel(owner, profile, identifier, row.version)
+                if result["cleanup_pending"]:
+                    raise JournalConflict("cleanup_pending")
+            if self.runtime.current_profile() != profile or not self.runtime.can_manage(
+                owner, profile
+            ):
+                raise JournalConflict("profile_changed")
+            # Derive the same new intent after lost HTTP replies/process restarts.
+            # This key conveys no authority; local owner/profile checks still apply.
+            material = json.dumps(
+                ["restart-v1", row.installation_id, owner, profile, identifier]
+            )
+            key = hashlib.sha256(material.encode()).hexdigest()[:32]
+            return await self.initiate(owner, profile, key, row.intent)
 
     async def cancel(self, owner: str, profile: str, identifier: str, version: int) -> dict:
         await super().cancel(owner, profile, identifier, version)

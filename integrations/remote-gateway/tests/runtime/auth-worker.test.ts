@@ -60,5 +60,10 @@ it('consent page permits the real GitHub redirect and uses nonce-bound SLM styli
 });
 it('expired or consumed browser consent shows recovery instructions instead of raw JSON',async()=>{
  const ctx=createExecutionContext();const response=await authFetch(new Request(issuer+'/consent',{method:'POST',headers:{Origin:issuer,Accept:'text/html','Content-Type':'application/x-www-form-urlencoded'},body:'handle=synthetic&decision=allow'}),configuration(),ctx);
- expect(response.status).toBe(400);expect(response.headers.get('Content-Type')).toContain('text/html');const page=await response.text();expect(page).toContain('Return to your SLM dashboard');expect(page).toContain('consent_unavailable');await waitOnExecutionContext(ctx);
+ expect(response.status).toBe(302);const location=new URL(response.headers.get('Location')!);expect(location.pathname).toBe('/sign-in/error');expect(location.searchParams.get('reason')).toBe('consent_unavailable');const recovery=await authFetch(new Request(location),configuration(),ctx);expect(recovery.headers.get('Content-Type')).toContain('text/html');const page=await recovery.text();expect(page).toContain('Return to your SLM dashboard');expect(page).toContain('Restart sign-in');await waitOnExecutionContext(ctx);
+});
+
+
+it('refreshable recovery URL contains no callback code or state',async()=>{
+ const ctx=createExecutionContext();const result=await authFetch(new Request(issuer+'/github/callback?code=synthetic-secret-code&state=synthetic-secret-state',{headers:{Accept:'text/html'}}),configuration(),ctx);expect(result.status).toBe(302);const location=result.headers.get('Location')!;expect(location).not.toContain('synthetic-secret');expect(new URL(location).pathname).toBe('/sign-in/error');const page=await authFetch(new Request(location),configuration(),ctx);expect(await page.text()).toContain('Restart sign-in');await waitOnExecutionContext(ctx);
 });

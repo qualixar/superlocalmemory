@@ -1,3 +1,4 @@
+import {SignJWT,jwtVerify} from 'jose';
 import {AUTH_ISSUER} from './authorization-policy.ts';
 export const GITHUB_CALLBACK=AUTH_ISSUER+'/github/callback';
 export function githubAuthorizationUrl(clientId:string,state:string,challenge:string):string {
@@ -28,6 +29,28 @@ export function renderConsentPage(handle:string,description:{clientName:string;r
  const options=(description.scope.includes('slm:write')?'<label><input type="checkbox" name="write" value="yes"> Allow saving memories</label>':'')+(description.scope.includes('slm:session')?'<label><input type="checkbox" name="session" value="yes"> Allow session tools</label>':'');
  return renderAuthPage(native?'Link this computer':'Connect your AI','<h1>'+(native?'Link this computer':'Connect your AI')+'</h1><p>Sign in with GitHub to '+(native?'connect your local SLM profile. Your database stays on this computer.':'choose your SLM connection and approve access for this application.')+'</p><div class="identity"><dl><dt>Application</dt><dd>'+escapeHtml(description.clientName)+'</dd>'+(description.profileId?'<dt>Local profile</dt><dd>'+escapeHtml(description.profileId)+'</dd>':'')+'<dt>Returns to</dt><dd>'+escapeHtml(description.redirectHostname)+(description.redirectIsLoopback?' (this computer)':'')+'</dd></dl></div><p class="note">'+(description.clientDomain?'Client domain: '+escapeHtml(description.clientDomain):'The application name is supplied by the client.')+'</p><h2>What you are approving</h2><ul class="permissions">'+permissions+'</ul><p class="note">'+(native?'Only continue if you started this connection in your SLM dashboard. AI memory access requires its own approval.':'Approved memory results will be shared with this application. Saving and session tools remain off unless you select them below.')+'</p><form method="post" action="/consent"><input type="hidden" name="handle" value="'+escapeHtml(handle)+'"><div class="options">'+options+'</div><div class="actions"><button name="decision" value="allow">Sign in with GitHub</button><button name="decision" value="deny">Cancel</button></div></form><details><summary>Technical permissions</summary><p>'+description.scope.map(escapeHtml).join(', ')+'</p></details>');
 }
-export function renderAuthFailure(error:string):string {
- return renderAuthPage('Sign-in needs another attempt','<h1>Sign-in needs another attempt</h1><p>This connection request has expired, was already used, or could not be verified. Return to your dashboard to check the connection status and start a fresh sign-in request.</p><div class="identity"><strong>Return to your SLM dashboard</strong><p>Close this page. If the connection is still pending, cancel that request, then select <strong>Link this computer with GitHub</strong> to start again.</p></div><p>If GitHub asks you to log in, complete login on github.com. Do not enter your GitHub password on this page.</p><details><summary>Support information</summary><p>Code: <code>'+escapeHtml(error)+'</code></p></details>');
+export function renderAuthFailure(error:string,dashboard?:string):string {
+ const message=['consent_unavailable','connection_unavailable','sign_in_session_unavailable'].includes(error)?'This sign-in session is no longer valid. Refreshing it cannot restart authorization.':'We could not complete sign-in. Return to SLM to retry; if this continues, share the support code below.';
+ return renderAuthPage('Continue sign-in from SLM','<h1>Continue sign-in from SLM</h1><p>'+message+'</p><div class="identity"><strong>Return to your SLM dashboard</strong><p>Select <strong>Restart sign-in</strong> on your connection. SLM will replace the old attempt using the same approved permissions.</p></div>'+(dashboard&&/^http:\/\/127\.0\.0\.1:\d{1,5}\/#mcp-pane$/.test(dashboard)?'<p><a class="button primary" href="'+escapeHtml(dashboard)+'">Return to SLM</a></p>':'')+'<p>If GitHub asks you to log in, complete login on github.com. Do not enter your GitHub password on this page.</p><details><summary>Support information</summary><p>Code: <code>'+escapeHtml(error)+'</code></p></details>');
+}
+
+// A routing receipt only: never accepted as an OAuth token or access proof.
+const RETURN_COOKIE='__Host-slm-dashboard-return';
+async function returnKey(secret:string):Promise<Uint8Array|null>{
+ if(!/^[a-f0-9]{64}$/.test(secret))return null;
+ return new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('slm-dashboard-return-v1:'+secret)));
+}
+export async function dashboardReturnCookie(uri:string,secret:string):Promise<string|null>{
+ const key=await returnKey(secret);if(!key)return null;
+ let target:URL;try{target=new URL(uri);}catch{return null;}
+ const port=Number(target.port||80);
+ if(target.protocol!=='http:'||target.hostname!=='127.0.0.1'||target.pathname!=='/api/v3/connections/callback'||target.username||target.password||target.search||target.hash||!Number.isInteger(port)||port<1||port>65535)return null;
+ const token=await new SignJWT({port}).setProtectedHeader({alg:'HS256',typ:'slm-ui-return'}).setIssuer(AUTH_ISSUER).setAudience('slm-dashboard-return').setIssuedAt().setExpirationTime('1h').sign(key);
+ return RETURN_COOKIE+'='+token+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600';
+}
+export async function dashboardReturnUrl(request:Request,secret:string):Promise<string|undefined>{
+ const key=await returnKey(secret);if(!key)return undefined;
+ const token=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(RETURN_COOKIE+'='))?.slice(RETURN_COOKIE.length+1);
+ if(!token||token.length>2048)return undefined;
+ try{const {payload,protectedHeader}=await jwtVerify(token,key,{issuer:AUTH_ISSUER,audience:'slm-dashboard-return',algorithms:['HS256']});const port=payload.port;if(protectedHeader.typ!=='slm-ui-return'||typeof port!=='number'||!Number.isInteger(port)||port<1||port>65535)return undefined;return 'http://127.0.0.1:'+port+'/#mcp-pane';}catch{return undefined;}
 }
