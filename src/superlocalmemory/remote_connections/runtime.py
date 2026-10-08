@@ -25,6 +25,37 @@ from superlocalmemory.server.remote_keys import RemoteKeyStore
 MCP_URL = "https://mcp.superlocalmemory.com/mcp"
 
 
+def _connected_app(value: object) -> bool:
+    """Gateway rows are re-checked before the dashboard sees them."""
+    if not isinstance(value, dict) or set(value) != {
+        "authorization_id",
+        "name",
+        "client_host",
+        "permissions",
+        "version",
+        "connected_at_ms",
+        "last_used_at_ms",
+    }:
+        return False
+    permissions = value["permissions"]
+    return (
+        isinstance(value["authorization_id"], str)
+        and 0 < len(value["authorization_id"]) <= 256
+        and isinstance(value["name"], str)
+        and 0 < len(value["name"]) <= 80
+        and (value["client_host"] is None or isinstance(value["client_host"], str))
+        and isinstance(permissions, dict)
+        and set(permissions) == {"read", "save", "session"}
+        and all(type(flag) is bool for flag in permissions.values())
+        and type(value["version"]) is int
+        and value["version"] >= 1
+        and all(
+            value[key] is None or type(value[key]) is int
+            for key in ("connected_at_ms", "last_used_at_ms")
+        )
+    )
+
+
 class NativeConnectionRuntime:
     def __init__(
         self,
@@ -232,6 +263,42 @@ class NativeConnectionRuntime:
         await asyncio.sleep(delay)
         if self._epochs.get(row.connection_id, 0) == epoch:
             await self.verify(row, epoch, attempt)
+
+    async def _owned_link(self, owner: str, profile: str, connection_id: str):
+        """The completed laptop link for a connection this owner/profile holds, with a
+        fresh owner token. Anything else is reported as not_found (no existence leak)."""
+        try:
+            record = await asyncio.to_thread(self.journal.get, owner, profile, connection_id)
+        except (JournalConflict, ValueError):
+            raise ValueError("not_found") from None
+        if record.state != "pending":
+            raise ValueError("not_found")
+        row = await asyncio.to_thread(self.store.by_connection, connection_id)
+        if row is None or not row.completed:
+            raise ValueError("not_found")
+        return await self.provider.exchange(row, "")
+
+    async def list_apps(self, owner: str, profile: str, connection_id: str) -> dict:
+        latest = await self._owned_link(owner, profile, connection_id)
+        value = await self.provider.list_apps(latest)
+        apps = value.get("apps") if isinstance(value, dict) else None
+        rows = apps if isinstance(apps, list) else []
+        listed = [app for app in rows if _connected_app(app)]
+        return {"connection_id": connection_id, "apps": listed}
+
+    async def revoke_app(
+        self,
+        owner: str,
+        profile: str,
+        connection_id: str,
+        authorization_id: str,
+        expected_version: int,
+    ) -> dict:
+        latest = await self._owned_link(owner, profile, connection_id)
+        value = await self.provider.revoke_app(latest, authorization_id, expected_version)
+        if not isinstance(value, dict) or value.get("revoked") is not True:
+            raise ValueError("apps_unavailable")
+        return {"revoked": True}
 
     async def resume(self, owner: str, profile: str) -> None:
         for record in await asyncio.to_thread(self.journal.list, owner, profile):

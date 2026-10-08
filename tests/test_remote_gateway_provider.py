@@ -105,3 +105,34 @@ async def test_expired_completed_record_refresh_persists_rotated_tokens(tmp_path
     assert requests[0][1]['data']['grant_type']=='refresh_token'
     assert later.by_connection(row.connection_id)==updated
     assert updated.refresh_token=='new-refresh' and later.by_state(row.state) is None
+
+
+def _proof_target(proof):
+    import base64,json
+    payload=proof.split('.')[1];payload+='='*(-len(payload)%4)
+    return json.loads(base64.urlsafe_b64decode(payload))['htu']
+
+@pytest.mark.asyncio
+async def test_connected_apps_calls_use_owner_token_and_endpoint_bound_proof(tmp_path):
+    from dataclasses import replace
+    from tests.test_remote_native_enrollment_store import record
+    requests=[]
+    async def http(path,**kwargs):
+        requests.append((path,kwargs))
+        return {'apps':[]} if path=='/owner/apps' else {'revoked':True,'version':2}
+    provider=CloudGatewayProvider(NativeEnrollmentStore(tmp_path,backend=Backend()),redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback',http=http)
+    row=replace(record(),access_token='owner-token',completed=True)
+    assert await provider.list_apps(row)=={'apps':[]}
+    assert await provider.revoke_app(row,'app-1',1)=={'revoked':True,'version':2}
+    (list_path,list_kwargs),(revoke_path,revoke_kwargs)=requests
+    assert list_path=='/owner/apps' and revoke_path=='/owner/apps/revoke'
+    assert list_kwargs['headers']['Authorization']=='Bearer owner-token'
+    assert _proof_target(list_kwargs['headers']['DPoP']).endswith('/owner/apps')
+    assert _proof_target(revoke_kwargs['headers']['DPoP']).endswith('/owner/apps/revoke')
+    assert revoke_kwargs['json']=={'authorization_id':'app-1','expected_version':1}
+
+def test_only_app_removal_reports_conflict_and_missing_distinctly():
+    assert CloudGatewayProvider._removal_error('/owner/apps/revoke',409)=='version_conflict'
+    assert CloudGatewayProvider._removal_error('/owner/apps/revoke',404)=='not_found'
+    assert CloudGatewayProvider._removal_error('/owner/apps/revoke',503) is None
+    assert CloudGatewayProvider._removal_error('/owner/revoke',409) is None

@@ -144,6 +144,61 @@ async def restart_connection(request: Request, connection_id: str, intent: Resta
         raise HTTPException(503, "connection_service_unavailable") from None
 
 
+def _apps_runtime(request: Request):
+    runtime = getattr(request.app.state, "remote_connection_runtime", None)
+    if runtime is None or not hasattr(runtime, "list_apps"):
+        raise HTTPException(503, "connection_service_unavailable")
+    return runtime
+
+
+def _apps_error(code: str) -> HTTPException:
+    # Fixed codes only; provider or gateway text never reaches the dashboard.
+    if code == "not_found":
+        return HTTPException(404, "not_found")
+    if code == "version_conflict":
+        return HTTPException(409, "version_conflict")
+    return HTTPException(503, "apps_unavailable")
+
+
+@router.get("/{connection_id}/apps")
+async def connected_apps(request: Request, connection_id: str):
+    """Apps that currently hold access to this computer's memory (Connected apps)."""
+    owner, profile = _context(request)
+    runtime = _apps_runtime(request)
+    try:
+        return await runtime.list_apps(owner, profile, connection_id)
+    except ValueError as exc:
+        raise _apps_error(str(exc)) from None
+    except Exception:
+        logger.error("remote_connected_apps_unavailable")
+        raise HTTPException(503, "apps_unavailable") from None
+
+
+class AppRemovalIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    profile_id: str
+    expected_version: StrictInt = Field(ge=1)
+
+
+@router.post("/{connection_id}/apps/{authorization_id}/revoke")
+async def remove_connected_app(
+    request: Request, connection_id: str, authorization_id: str, intent: AppRemovalIntent
+):
+    owner, profile = _context(request, mutation=True)
+    if intent.profile_id != profile:
+        raise HTTPException(409, "profile_changed")
+    runtime = _apps_runtime(request)
+    try:
+        return await runtime.revoke_app(
+            owner, profile, connection_id, authorization_id, intent.expected_version
+        )
+    except ValueError as exc:
+        raise _apps_error(str(exc)) from None
+    except Exception:
+        logger.error("remote_connected_app_removal_unavailable")
+        raise HTTPException(503, "apps_unavailable") from None
+
+
 @router.get("/status")
 async def connection_status(request: Request):
     owner, profile = _context(request)

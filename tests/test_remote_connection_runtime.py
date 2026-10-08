@@ -352,3 +352,44 @@ async def test_verification_retries_are_bounded(tmp_path):
     await asyncio.sleep(1.0)
     assert runtime._states[row.connection_id]=='verification_unavailable'
     assert len(calls)==1+5
+
+
+def _apps_runtime(tmp_path, gateway_apps):
+    from types import SimpleNamespace
+    journal=EnrollmentJournal(tmp_path/'journal')
+    payload={'host':'composio','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':True,'correction':False,'session':False}}
+    pending=journal.begin('owner','profile','a'*32,payload)
+    runtime=NativeConnectionRuntime(None,journal,NativeEnrollmentStore(tmp_path/'secure',backend=Backend()),current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+    row=SimpleNamespace(connection_id=pending.connection_id,completed=True,access_token='old')
+    runtime.store=SimpleNamespace(by_connection=lambda identifier,for_cleanup=False:row if identifier==pending.connection_id else None)
+    calls=[]
+    class Provider:
+        async def exchange(self,latest,code):calls.append('refresh');return SimpleNamespace(**{**vars(latest),'access_token':'fresh'})
+        async def list_apps(self,latest):calls.append(('list',latest.access_token));return gateway_apps
+        async def revoke_app(self,latest,authorization_id,expected_version):calls.append(('revoke',latest.access_token,authorization_id,expected_version));return {'revoked':True,'version':expected_version+1}
+    runtime.provider=Provider()
+    return runtime,pending.connection_id,calls
+
+GOOD_APP={'authorization_id':'app-1','name':'Composio','client_host':'backend.composio.dev','permissions':{'read':True,'save':True,'session':False},'version':1,'connected_at_ms':1,'last_used_at_ms':None}
+
+@pytest.mark.asyncio
+async def test_connected_apps_refreshes_the_owner_token_and_keeps_only_well_formed_rows(tmp_path):
+    hostile=[GOOD_APP,{'authorization_id':'x','name':7},'junk',{**GOOD_APP,'authorization_id':'app-2','permissions':{'read':'yes'}}]
+    runtime,connection,calls=_apps_runtime(tmp_path,{'connection_id':'ignored','apps':hostile})
+    listed=await runtime.list_apps('owner','profile',connection)
+    assert calls==['refresh',('list','fresh')]
+    assert listed=={'connection_id':connection,'apps':[GOOD_APP]}
+
+@pytest.mark.asyncio
+async def test_connected_apps_are_only_visible_to_the_owning_profile(tmp_path):
+    runtime,connection,calls=_apps_runtime(tmp_path,{'apps':[GOOD_APP]})
+    for owner,profile in [('intruder','profile'),('owner','work')]:
+        with pytest.raises(ValueError,match='not_found'):await runtime.list_apps(owner,profile,connection)
+        with pytest.raises(ValueError,match='not_found'):await runtime.revoke_app(owner,profile,connection,'app-1',1)
+    assert calls==[]
+
+@pytest.mark.asyncio
+async def test_removing_an_app_uses_a_fresh_owner_token(tmp_path):
+    runtime,connection,calls=_apps_runtime(tmp_path,{'apps':[]})
+    assert await runtime.revoke_app('owner','profile',connection,'app-1',1)=={'revoked':True}
+    assert calls==['refresh',('revoke','fresh','app-1',1)]

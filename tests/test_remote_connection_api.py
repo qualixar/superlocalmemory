@@ -296,3 +296,56 @@ def test_successful_callback_redirects_to_dashboard_without_replayable_query(con
     assert response.status_code == 303
     assert response.headers['location'] == '/#mcp-pane'
     assert 'synthetic' not in response.headers['location']
+
+
+class AppsRuntime:
+    """Synthetic runtime for the Connected apps routes; no cloud calls."""
+    def __init__(self, error=None):
+        self.error, self.removed = error, []
+    async def resume(self, owner, profile):
+        return None
+    async def list_apps(self, owner, profile, connection_id):
+        if self.error:
+            raise ValueError(self.error)
+        return {"connection_id": connection_id, "apps": [{"authorization_id": "app-1", "name": "Composio", "client_host": "backend.composio.dev", "permissions": {"read": True, "save": True, "session": False}, "version": 1, "connected_at_ms": 1, "last_used_at_ms": None}]}
+    async def revoke_app(self, owner, profile, connection_id, authorization_id, expected_version):
+        if self.error:
+            raise ValueError(self.error)
+        self.removed.append((owner, profile, connection_id, authorization_id, expected_version))
+        return {"revoked": True}
+
+
+def test_connected_apps_list_is_served_to_the_local_dashboard(configured):
+    client, _, app = configured
+    app.state.remote_connection_runtime = AppsRuntime()
+    response = client.get("/api/v3/connections/" + "c" * 32 + "/apps")
+    assert response.status_code == 200
+    assert response.json()["apps"][0]["name"] == "Composio"
+
+
+def test_removing_an_app_needs_the_install_credential_and_current_profile(configured):
+    client, _, app = configured
+    runtime = AppsRuntime(); app.state.remote_connection_runtime = runtime
+    url = "/api/v3/connections/" + "c" * 32 + "/apps/app-1/revoke"
+    assert client.post(url, json={"profile_id": "default", "expected_version": 1}).status_code == 403
+    assert client.post(url, headers=headers(), json={"profile_id": "work", "expected_version": 1}).status_code == 409
+    assert client.post(url, headers=headers(), json={"profile_id": "default", "expected_version": 1, "x": 1}).status_code == 422
+    ok = client.post(url, headers=headers(), json={"profile_id": "default", "expected_version": 1})
+    assert ok.status_code == 200 and ok.json() == {"revoked": True}
+    assert runtime.removed == [(runtime.removed[0][0], "default", "c" * 32, "app-1", 1)]
+
+
+@pytest.mark.parametrize("code,status", [("not_found", 404), ("version_conflict", 409), ("SECRET gateway text", 503)])
+def test_connected_apps_errors_are_mapped_and_sanitized(configured, code, status):
+    client, _, app = configured
+    app.state.remote_connection_runtime = AppsRuntime(code)
+    listed = client.get("/api/v3/connections/" + "c" * 32 + "/apps")
+    removed = client.post("/api/v3/connections/" + "c" * 32 + "/apps/app-1/revoke", headers=headers(), json={"profile_id": "default", "expected_version": 1})
+    assert listed.status_code == status and removed.status_code == status
+    assert "SECRET" not in listed.text and "SECRET" not in removed.text
+
+
+def test_connected_apps_without_runtime_is_unavailable(configured):
+    client, _, app = configured
+    app.state.remote_connection_runtime = None
+    assert client.get("/api/v3/connections/" + "c" * 32 + "/apps").status_code == 503

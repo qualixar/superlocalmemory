@@ -23,6 +23,10 @@ AUTH = "https://auth.superlocalmemory.com"
 OWNER_RESOURCE = AUTH + "/owner"
 
 
+class _GatewayAnswer(Exception):
+    """A non-success gateway status, mapped to a fixed code before leaving _request."""
+
+
 class CloudGatewayProvider:
     def __init__(
         self,
@@ -46,6 +50,8 @@ class CloudGatewayProvider:
             "/owner/connections",
             "/owner/revoke",
             "/owner/verify",
+            "/owner/apps",
+            "/owner/apps/revoke",
             "/bootstrap/cancel",
         }:
             raise ValueError("invalid_gateway_endpoint")
@@ -55,7 +61,8 @@ class CloudGatewayProvider:
             ) as client:
                 async with client.stream("POST", AUTH + path, **kwargs) as response:
                     if not response.is_success:
-                        raise ValueError("unavailable")
+                        distinct = CloudGatewayProvider._removal_error(path, response.status_code)
+                        raise _GatewayAnswer(distinct or "unavailable")
                     chunks, length = [], 0
                     async for chunk in response.aiter_bytes():
                         length += len(chunk)
@@ -66,6 +73,10 @@ class CloudGatewayProvider:
                     if not isinstance(value, dict):
                         raise ValueError("invalid")
                     return value
+        except _GatewayAnswer as answer:
+            if answer.args[0] in {"not_found", "version_conflict"}:
+                raise ValueError(answer.args[0]) from None
+            raise ValueError("remote_gateway_unavailable") from None
         except Exception:
             raise ValueError("remote_gateway_unavailable") from None
 
@@ -272,6 +283,33 @@ class CloudGatewayProvider:
         )
         return await self._http(
             "/owner/verify", headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof}
+        )
+
+    @staticmethod
+    def _removal_error(path: str, status: int) -> str | None:
+        """Only app removal distinguishes a stale list and an already-removed app."""
+        if path != "/owner/apps/revoke":
+            return None
+        return {404: "not_found", 409: "version_conflict"}.get(status)
+
+    async def list_apps(self, row: PendingEnrollment) -> dict:
+        proof = DeviceSigner(row.private_key).proof(
+            "POST", AUTH + "/owner/apps", token=row.access_token
+        )
+        return await self._http(
+            "/owner/apps", headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof}
+        )
+
+    async def revoke_app(
+        self, row: PendingEnrollment, authorization_id: str, expected_version: int
+    ) -> dict:
+        proof = DeviceSigner(row.private_key).proof(
+            "POST", AUTH + "/owner/apps/revoke", token=row.access_token
+        )
+        return await self._http(
+            "/owner/apps/revoke",
+            headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof},
+            json={"authorization_id": authorization_id, "expected_version": expected_version},
         )
 
     async def cancel_bootstrap(self, row: PendingEnrollment) -> dict:
