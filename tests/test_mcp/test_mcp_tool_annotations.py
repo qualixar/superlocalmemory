@@ -245,3 +245,13 @@ def test_read_only_count_at_least_13(tools: dict[str, object]) -> None:
         f"Only {count} tools have readOnlyHint=True; expected ≥ 12. "
         "Check that recent refactors didn't strip annotations."
     )
+
+
+def test_remember_is_declared_additive_not_destructive(tools: dict[str, object]) -> None:
+    """remember only adds a memory. Without hints the MCP default is
+    destructiveHint=true, so hosted clients (and the Claude Connectors Directory
+    review) would treat saving a memory like deleting data."""
+    ann = getattr(tools["remember"], "annotations", None)
+    assert _ann_flag(ann, "readOnlyHint", "read_only_hint") is False
+    assert _ann_flag(ann, "destructiveHint", "destructive_hint") is False
+    assert _ann_flag(ann, "openWorldHint", "open_world_hint") is False

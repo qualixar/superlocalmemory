@@ -107,7 +107,13 @@ def _emit_event(event_type: str, payload: dict | None = None,
 def register_core_tools(server, get_engine: Callable) -> None:
     """Register the 13 core MCP tools on *server*."""
 
-    @server.tool()
+    # Adds a memory; never deletes or overwrites one. Declared explicitly because
+    # the MCP default for an unannotated tool is destructiveHint=true.
+    @server.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+        )
+    )
     @admits(OperationKind.REMEMBER)
     async def remember(
         content: str, tags: str = "", project: str = "",
