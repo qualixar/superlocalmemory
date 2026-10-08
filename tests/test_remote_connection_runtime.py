@@ -301,3 +301,54 @@ async def test_failed_cleanup_can_resume_with_current_cancelled_version(tmp_path
     result = await runtime.service.restart('owner', 'profile', row.connection_id, cancelled.version)
     assert result['state'] == 'pending'
     assert len([x for x in runtime.journal.list('owner', 'profile') if x.state == 'pending']) == 1
+
+
+def _verify_runtime(tmp_path, outcomes):
+    """Runtime whose provider verify() yields the given outcomes in order (Exception = failure)."""
+    import asyncio
+    from types import SimpleNamespace
+    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),NativeEnrollmentStore(tmp_path/'secure',backend=Backend()),current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+    row=SimpleNamespace(connection_id='c'*32)
+    runtime.store=SimpleNamespace(by_connection=lambda identifier:row)
+    async def current(_row):return None
+    runtime._current=current
+    calls=[]
+    class Provider:
+        async def exchange(self,latest,code):return latest
+        async def verify(self,latest):
+            calls.append(1);outcome=outcomes[min(len(calls),len(outcomes))-1]
+            if isinstance(outcome,Exception):raise outcome
+            return outcome
+    runtime.provider=Provider()
+    runtime._verify_retry_base_s=0.01
+    runtime._epochs[row.connection_id]=1;runtime._states[row.connection_id]='transport_ready'
+    return runtime,row,calls,asyncio
+
+@pytest.mark.asyncio
+async def test_transient_verification_failure_recovers_without_a_reconnect(tmp_path):
+    ok={'verified':True,'connection_id':'c'*32}
+    runtime,row,calls,asyncio=_verify_runtime(tmp_path,[TimeoutError(),ok])
+    await runtime.verify(row,1)
+    assert runtime._states[row.connection_id]=='verification_unavailable'
+    for _ in range(200):
+        if runtime._states[row.connection_id]=='ready_for_client':break
+        await asyncio.sleep(0.01)
+    assert runtime._states[row.connection_id]=='ready_for_client' and len(calls)==2
+    await runtime.shutdown() if hasattr(runtime,'shutdown') else None
+
+@pytest.mark.asyncio
+async def test_verification_retry_never_applies_to_a_changed_connection(tmp_path):
+    ok={'verified':True,'connection_id':'c'*32}
+    runtime,row,calls,asyncio=_verify_runtime(tmp_path,[TimeoutError(),ok])
+    await runtime.verify(row,1)
+    runtime._epochs[row.connection_id]=2;runtime._states[row.connection_id]='reconnecting'
+    await asyncio.sleep(0.2)
+    assert runtime._states[row.connection_id]=='reconnecting' and row.connection_id not in runtime._verified and len(calls)==1
+
+@pytest.mark.asyncio
+async def test_verification_retries_are_bounded(tmp_path):
+    runtime,row,calls,asyncio=_verify_runtime(tmp_path,[TimeoutError()])
+    await runtime.verify(row,1)
+    await asyncio.sleep(1.0)
+    assert runtime._states[row.connection_id]=='verification_unavailable'
+    assert len(calls)==1+5

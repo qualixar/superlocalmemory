@@ -48,6 +48,10 @@ class NativeConnectionRuntime:
         self._epochs: dict[str, int] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._verification_tasks: dict[str, asyncio.Task] = {}
+        #: A transient verify failure (cold engine, network blip) is retried while the
+        #: same transport stays up, so the dashboard does not stay wrongly unavailable.
+        self._verify_retry_limit = 5
+        self._verify_retry_base_s = 5.0
         self.service = ManagedConnectionService(
             journal,
             self.provider,
@@ -187,7 +191,9 @@ class NativeConnectionRuntime:
         self._companions[row.connection_id] = companion
         await companion.start()
 
-    async def verify(self, row: PendingEnrollment, epoch: int | None = None) -> None:
+    async def verify(
+        self, row: PendingEnrollment, epoch: int | None = None, attempt: int = 0
+    ) -> None:
         captured = self._epochs.get(row.connection_id, 0) if epoch is None else epoch
         try:
             await self._current(row)
@@ -199,7 +205,10 @@ class NativeConnectionRuntime:
             await self._current(latest)
             if (
                 self._epochs.get(row.connection_id, 0) == captured
-                and self._states.get(row.connection_id) == "transport_ready"
+                # The epoch moves on every transport change, so an unchanged epoch
+                # means the same socket is still up even after a failed attempt.
+                and self._states.get(row.connection_id)
+                in {"transport_ready", "verification_unavailable"}
                 and result.get("verified") is True
                 and result.get("connection_id") == row.connection_id
             ):
@@ -211,6 +220,18 @@ class NativeConnectionRuntime:
             if self._epochs.get(row.connection_id, 0) == captured:
                 self._verified.discard(row.connection_id)
                 self._states[row.connection_id] = "verification_unavailable"
+                if attempt < self._verify_retry_limit:
+                    delay = self._verify_retry_base_s * 2**attempt
+                    self._verification_tasks[row.connection_id] = asyncio.create_task(
+                        self._verify_later(row, captured, attempt + 1, delay)
+                    )
+
+    async def _verify_later(
+        self, row: PendingEnrollment, epoch: int, attempt: int, delay: float
+    ) -> None:
+        await asyncio.sleep(delay)
+        if self._epochs.get(row.connection_id, 0) == epoch:
+            await self.verify(row, epoch, attempt)
 
     async def resume(self, owner: str, profile: str) -> None:
         for record in await asyncio.to_thread(self.journal.list, owner, profile):
