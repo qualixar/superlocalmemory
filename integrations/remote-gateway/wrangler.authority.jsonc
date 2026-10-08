@@ -10,6 +10,9 @@
   },
   "name": "slm-remote-authority",
   "main": "src/worker-authority.ts",
+  // Daily tool-call cap per connection (RegistryDO). Code default 50 = Connect Free;
+  // 500 while the 4.1.23 beta measures real usage. Change here, no code change.
+  "vars": { "DAILY_TOOL_CALL_LIMIT": "500" },
   "durable_objects": {
     "bindings": [
       {

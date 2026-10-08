@@ -1,6 +1,6 @@
 import {env} from 'cloudflare:workers';
 import {evictDurableObject} from 'cloudflare:test';
-import {expect,test} from 'vitest';
+import {describe,expect,test} from 'vitest';
 import type {AuthorizationGrant,ConnectionGrant,VerifiedActor,RequestEnvelope} from '../../src/contracts.ts';
 
 const connection:ConnectionGrant={connectionId:'connection-a',ownerId:'owner-a',installationId:'installation-a',profileId:'profile-a',origin:{kind:'relay',installationId:'installation-a',profileId:'profile-a'},allowedTools:['recall','remember','get_status'],allowCorrection:false,allowSharedRead:false,allowGlobalRead:false,policyVersion:1,revokedAt:null};
@@ -22,3 +22,30 @@ test('token scopes and profile arguments are rechecked at admission',async()=>{c
 test('concurrent immutable grants never admit a widened payload',async()=>{const stub=await setup();const results=await Promise.allSettled([stub.addAuthorization(grant),stub.addAuthorization({...grant,consentedCorrection:true})]);expect(results[0].status).toBe('fulfilled');expect(results[1].status).toBe('rejected');});
 test('registry has no public administrative HTTP route',async()=>{const stub=await setup();expect((await stub.fetch(new Request('https://private.invalid/admin'))).status).toBe(404);});
 test('malformed control-plane data is rejected before durable mutation',async()=>{const stub=env.REGISTRIES.getByName(crypto.randomUUID());await rejected(async()=>await stub.configure({...connection,policyVersion:0}),'invalid_connection');await rejected(async()=>await stub.configure({...connection,allowedTools:['admin']}),'invalid_connection');await stub.configure(connection);await rejected(async()=>await stub.addAuthorization({...grant,consentedScopes:['invalid'] as never}),'invalid_authorization');});
+
+// Connect Free: the daily cap counts real tool calls exactly (Durable Object, not an
+// approximate edge counter). Test binding DAILY_TOOL_CALL_LIMIT=3.
+describe('daily tool-call cap',()=>{
+ test('tool calls beyond the daily limit are refused with a stable code',async()=>{
+  const stub=await setup();
+  for(let i=0;i<3;i++)expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+  expect(await stub.admit(actor,grant.audience,request)).toEqual({allowed:false,code:'DAILY_LIMIT_REACHED',httpStatus:429});
+ });
+ test('discovery and handshake messages never consume the quota',async()=>{
+  const stub=await setup();
+  for(const rpcMethod of ['initialize','notifications/initialized','tools/list','tools/list','ping'])expect((await stub.admit(actor,grant.audience,{...request,rpcMethod,toolName:undefined,arguments:undefined})).allowed).toBe(true);
+  for(let i=0;i<3;i++)expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+ });
+ test('the count survives eviction',async()=>{
+  const stub=await setup();
+  for(let i=0;i<2;i++)expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+  await evictDurableObject(stub);
+  expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+  expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(false);
+ });
+ test('refused requests do not consume the quota',async()=>{
+  const stub=await setup();
+  for(let i=0;i<5;i++)expect((await stub.admit({...actor,ownerId:'foreign'},grant.audience,request)).allowed).toBe(false);
+  for(let i=0;i<3;i++)expect((await stub.admit(actor,grant.audience,request)).allowed).toBe(true);
+ });
+});

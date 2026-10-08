@@ -6,6 +6,10 @@ interface RegistryState {
   version:1; connection:ConnectionGrant|null; authorizations:AuthorizationGrant[];
   entitlement:{expiresAt:number;version:number};
 }
+/** Connect Free default; operators raise it per deployment with DAILY_TOOL_CALL_LIMIT. */
+export const DEFAULT_DAILY_TOOL_CALL_LIMIT=50;
+interface DailyUsage {day:string;count:number;}
+function dailyLimit(raw:unknown):number{const value=Number(raw);return Number.isSafeInteger(value)&&value>0?value:DEFAULT_DAILY_TOOL_CALL_LIMIT;}
 const tools=new Set(['recall','search','fetch','get_status','remember','session_init','close_session','report_feedback','report_outcome']);
 const scopes=new Set(['slm:read','slm:write','slm:session']);
 const id=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,256}$/.test(value);
@@ -35,6 +39,8 @@ function validActor(a:VerifiedActor):boolean {
  */
 export class RegistryDO extends DurableObject<Record<string,unknown>> {
   private state:RegistryState={version:1,connection:null,authorizations:[],entitlement:{expiresAt:0,version:0}};
+  /** Separate key: the strictly versioned registry-state schema is unchanged. */
+  private usage:DailyUsage|null=null;
   constructor(ctx:DurableObjectState,env:Record<string,unknown>){
     super(ctx,env);
     this.ctx.blockConcurrencyWhile(async()=>{
@@ -94,7 +100,18 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
     const state=this.state;
     if(state.entitlement.expiresAt<=Date.now())return {allowed:false,code:'ENTITLEMENT_REQUIRED',httpStatus:403};
     const authorization=state.authorizations.find(a=>a.authorizationId===actor.authorizationId)??null;
-    return authorizeRequest(actor,authorization,state.connection,resource,request);
+    const decision=authorizeRequest(actor,authorization,state.connection,resource,request);
+    // Only real work counts: a client's initialize/tools/list handshake is free.
+    if(!decision.allowed||request.rpcMethod!=='tools/call')return decision;
+    return this.ctx.blockConcurrencyWhile(async():Promise<PolicyResult>=>{
+      const day=new Date().toISOString().slice(0,10);
+      const stored=this.usage??await this.ctx.storage.get<DailyUsage>('usage-day')??null;
+      const current=stored&&stored.day===day?stored:{day,count:0};
+      if(current.count>=dailyLimit(this.env.DAILY_TOOL_CALL_LIMIT)){this.usage=current;return {allowed:false,code:'DAILY_LIMIT_REACHED',httpStatus:429};}
+      const next={day,count:current.count+1};
+      await this.ctx.storage.put('usage-day',next);this.usage=next;
+      return decision;
+    });
   }
   async revokeAuthorization(owner:string,identifier:string,expectedVersion:number):Promise<number>{
     return this.mutation<number>(async()=>{

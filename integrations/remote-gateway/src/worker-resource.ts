@@ -4,6 +4,7 @@ import {RegistryDO} from './registry-do.ts';
 import {RelayDO} from './relay-do.ts';
 import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
 import {publicRelayCode} from './relay-errors.ts';
+import {secondsUntilUtcMidnight} from './usage-limit.ts';
 import {GatewayInputError,filterMcpResponse,parseMcpRequest} from './mcp-http.ts';
 
 export {RegistryDO,RelayDO};
@@ -35,7 +36,12 @@ async function handle(request:Request,env:ResourceEnv,context:OAuthResourceConte
     const parsed=await parseMcpRequest(request);
     const registry=env.REGISTRIES.getByName(principal.connectionId);
     const admission=await registry.admit(principal,RESOURCE,parsed.envelope);
-    if(!admission.allowed)return failure(admission.httpStatus,admission.code);
+    if(!admission.allowed){
+      const refused=failure(admission.httpStatus,admission.code);
+      // Tells the client when the daily tool-call quota resets.
+      if(admission.code==='DAILY_LIMIT_REACHED')refused.headers.set('Retry-After',String(secondsUntilUtcMidnight(Date.now())));
+      return refused;
+    }
     if(admission.grant.connection.origin.kind!=='relay')return failure(503,'origin_transport_unavailable');
     const relay=env.RELAYS.getByName(admission.grant.connection.connectionId);
     const identifier=crypto.randomUUID();
