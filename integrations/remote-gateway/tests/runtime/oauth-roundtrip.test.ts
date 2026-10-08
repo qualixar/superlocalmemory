@@ -8,7 +8,7 @@ import {tokenHash} from '../../src/device-proof.ts';
 const issuer='https://auth.superlocalmemory.com';
 function cookies(response:Response){return response.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');}
 function handle(page:string){const result=/name="handle" value="([^"]+)"/.exec(page);if(!result)throw new Error('missing handle');return result[1];}
-test('real local OAuth consent, mocked GitHub identity, connection selection and PKCE token exchange',async()=>{
+async function roundTrip(omitResource:boolean){
  const configuration={...env,GITHUB_CLIENT_ID:'synthetic-client',GITHUB_CLIENT_SECRET:'synthetic-secret'} as AuthWorkerEnv;
  const connectionId=crypto.randomUUID().replaceAll('-','');const installationId='installation-'+connectionId;const ownerId='16027584';const profileId='synthetic';const jkt='a'.repeat(43);
  const owner=env.OWNERS.getByName(ownerId);await owner.bind(ownerId,installationId,profileId,'native-'+connectionId,jkt);
@@ -17,7 +17,7 @@ test('real local OAuth consent, mocked GitHub identity, connection selection and
  async function call(path:string,init?:RequestInit){const ctx=createExecutionContext();const response=await authFetch(new Request(path.startsWith('https:')?path:issuer+path,init),configuration,ctx);await waitOnExecutionContext(ctx);return response;}
  const registration=await call('/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'Synthetic MCP client',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});
  expect(registration.status).toBe(201);const client=await registration.json() as {client_id:string};const verifier='v'.repeat(43);
- const parameters=new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',scope:'slm:read slm:write slm:session slm:connect',resource:'https://mcp.superlocalmemory.com/mcp',state:'synthetic-client-state',code_challenge:await tokenHash(verifier),code_challenge_method:'S256'});
+ const parameters=new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',scope:'slm:read slm:write slm:session slm:connect',...(omitResource?{}:{resource:'https://mcp.superlocalmemory.com/mcp'}),state:'synthetic-client-state',code_challenge:await tokenHash(verifier),code_challenge_method:'S256'});
  const consent=await call('/authorize?'+parameters);expect(consent.status).toBe(200);const consentHandle=handle(await consent.text());
  const signIn=await call('/consent',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:issuer,Cookie:cookies(consent)},body:new URLSearchParams({handle:consentHandle,decision:'allow'})});
  expect(signIn.status).toBe(302);const upstream=new URL(signIn.headers.get('Location')!);
@@ -27,7 +27,7 @@ test('real local OAuth consent, mocked GitHub identity, connection selection and
   expect(selection.status).toBe(200);const selectionHandle=handle(await selection.text());
   const completed=await call('/select',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:issuer,Cookie:cookies(selection)},body:new URLSearchParams({handle:selectionHandle,connection_id:connectionId,decision:'allow'})});
   expect(completed.status).toBe(302);const returned=new URL(completed.headers.get('Location')!);expect(returned.searchParams.get('state')).toBe('synthetic-client-state');
-  const tokenResponse=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:returned.searchParams.get('code')!,redirect_uri:'https://client.example/callback',code_verifier:verifier,resource:'https://mcp.superlocalmemory.com/mcp'})});
+  const tokenResponse=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:returned.searchParams.get('code')!,redirect_uri:'https://client.example/callback',code_verifier:verifier,...(omitResource?{}:{resource:'https://mcp.superlocalmemory.com/mcp'})})});
   expect(tokenResponse.status).toBe(200);const issued=await tokenResponse.json() as {access_token:string;scope:string};
   expect(issued.scope).toBe('slm:read');expect(await validateIndexedToken(issuer+'/owner',issued.access_token,configuration)).toBeNull();const validated=await authorizationServer.validateToken('https://mcp.superlocalmemory.com/mcp',issued.access_token,configuration);expect(validated?.userId).toBe(ownerId);expect(validated?.scope).toEqual(['slm:read']);
   expect(await indexedToken(issued.access_token,configuration)).toMatchObject({ownerId,connectionId,tokenKind:'access',revoked:false});
@@ -35,7 +35,11 @@ test('real local OAuth consent, mocked GitHub identity, connection selection and
   const revoked=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:client.client_id,token:issued.access_token})});expect(revoked.status).toBe(200);
   expect(await validateIndexedToken('https://mcp.superlocalmemory.com/mcp',issued.access_token,configuration)).toBeNull();
  }finally{vi.unstubAllGlobals();}
-});
+}
+test('real local OAuth consent, mocked GitHub identity, connection selection and PKCE token exchange',async()=>{await roundTrip(false);});
+// Hosted connector flows (Meta Muse) cannot send RFC 8707 resource. The maintained provider's
+// defaultResource binds such a request to the MCP audience; the token stays audience-bound.
+test('memory client that omits resource is bound to the MCP audience end to end',async()=>{await roundTrip(true);});
 
 // This browser regression uses a real authorization code but only a mocked identity provider.
 async function browserSelect(callback:string){

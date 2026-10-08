@@ -53,6 +53,12 @@ it('MCP consent excludes native scope when client asks for the whole advertised 
  const response=await authFetch(new Request(uri),settings,ctx);expect(response.status).toBe(200);const page=await response.text();expect(page).toContain('slm:read');expect(page).not.toContain('slm:connect');await waitOnExecutionContext(ctx);
 });
 
+it('omitting resource never reaches native owner enrollment',async()=>{
+ const ctx=createExecutionContext();const settings=configuration();
+ const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'owner-probe',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);const client=await registered.json() as {client_id:string};
+ const response=await authFetch(new Request(issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',scope:'slm:connect',state:'synthetic-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'})),settings,ctx);
+ expect(response.status).toBeGreaterThanOrEqual(400);expect(await response.text()).not.toContain('Sign in with GitHub');await waitOnExecutionContext(ctx);
+});
 it('consent page permits the real GitHub redirect and uses nonce-bound SLM styling',async()=>{
  const ctx=createExecutionContext();const settings=configuration();const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'fixture',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);const client=await registered.json() as {client_id:string};
  const response=await authFetch(new Request(issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',resource:'https://mcp.superlocalmemory.com/mcp',scope:'slm:read',state:'synthetic-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'})),settings,ctx);

@@ -42,6 +42,9 @@ export async function currentAuthorization(options:TokenExchangeCallbackOptions<
  * in the auth Worker; this library owns DCR, PKCE, code/token handling and metadata. */
 export const authorizationServer=new OAuthAuthorizationServer<AuthorizationEnv>({
  issuer:AUTH_ISSUER,resources:[MCP_RESOURCE,OWNER_RESOURCE],
+ // Hosted connector flows that cannot send RFC 8707 resource get the MCP audience.
+ // Native enrollment still requires the explicit owner resource and slm:connect.
+ defaultResource:MCP_RESOURCE,
  authorizeEndpoint:AUTH_ISSUER+'/authorize',tokenEndpoint:AUTH_ISSUER+'/oauth/token',
  clientRegistrationEndpoint:AUTH_ISSUER+'/oauth/register',
  scopesSupported:['slm:read','slm:write','slm:session','slm:connect'],
