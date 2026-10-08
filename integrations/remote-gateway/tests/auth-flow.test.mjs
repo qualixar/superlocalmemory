@@ -7,7 +7,7 @@ test('GitHub authorization URL binds exact callback, S256 and library state',()=
 });
 test('GitHub code exchange uses exact endpoint and denies redirect',async()=>{
  let call;const result=await exchangeGithubCode('client','synthetic-secret','synthetic-code','a'.repeat(43),async(url,options)=>{call={url,options};return Response.json({access_token:'synthetic-token',token_type:'bearer'});});
- assert.equal(result,'synthetic-token');assert.equal(call.url,'https://github.com/login/oauth/access_token');assert.equal(call.options.redirect,'error');
+ assert.equal(result,'synthetic-token');assert.equal(call.url,'https://github.com/login/oauth/access_token');assert.equal(call.options.redirect,'manual');
  assert.equal(call.options.body.get('redirect_uri'),'https://auth.superlocalmemory.com/github/callback');
 });
 test('provider errors are bounded categories',async()=>{
@@ -30,3 +30,6 @@ test('known GitHub exchange failures map to fixed safe categories without server
  await assert.rejects(exchangeGithubCode('client','synthetic','code','a'.repeat(43),async()=>Response.json({error:'incorrect_client_credentials',error_description:'SYNTHETIC_SECRET'})),/^Error: identity_client_configuration$/);
  await assert.rejects(exchangeGithubCode('client','synthetic','code','a'.repeat(43),async()=>Response.json({error:'bad_verification_code',error_description:'SYNTHETIC_SECRET'})),/^Error: identity_code_rejected$/);
 });
+
+
+test('GitHub redirect is rejected even if its body resembles a token response',async()=>{await assert.rejects(exchangeGithubCode('client','synthetic','code','a'.repeat(43),async()=>new Response(JSON.stringify({access_token:'synthetic-token'}),{status:302,headers:{Location:'https://evil.example/'}})),/identity_exchange_failed/);});

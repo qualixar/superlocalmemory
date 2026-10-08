@@ -18,7 +18,7 @@ test('GitHub numeric account pilot identity is verified through /user',async()=>
  const calls=[];const fetcher=async(url,options)=>{calls.push({url,options});return Response.json({id:16027584,login:'varun369'});};
  assert.equal(await verifyGithubIdentity('synthetic-token',fetcher), '16027584');
  assert.equal(calls[0].url,'https://api.github.com/user');
- assert.equal(calls[0].options.redirect,'error');
+ assert.equal(calls[0].options.redirect,'manual');
 });
 test('wrong GitHub identity and malformed/failing replies denied',async()=>{
  for(const body of [{id:0},{id:'16027584'},{id:16027584.5}])await assert.rejects(verifyGithubIdentity('synthetic-token',async()=>Response.json(body)),/identity_denied/);

@@ -10,7 +10,8 @@ export async function exchangeGithubCode(clientId:string,clientSecret:string,cod
  if(!clientId||!clientSecret)throw new Error('identity_client_configuration');
  if(!code||code.length>4096||!/^[-A-Za-z0-9_.~]{43,128}$/.test(verifier))throw new Error('identity_exchange_failed');
  let response:Response;
- try{response=await fetcher('https://github.com/login/oauth/access_token',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded','User-Agent':'SuperLocalMemory'},body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,code,redirect_uri:GITHUB_CALLBACK,code_verifier:verifier}),redirect:'error',signal:AbortSignal.timeout(10000)});}catch{throw new Error('identity_exchange_failed');}
+ try{response=await fetcher('https://github.com/login/oauth/access_token',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded','User-Agent':'SuperLocalMemory'},body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,code,redirect_uri:GITHUB_CALLBACK,code_verifier:verifier}),redirect:'manual',signal:AbortSignal.timeout(10000)});}catch{throw new Error('identity_exchange_failed');}
+ if(response.status>=300&&response.status<400)throw new Error('identity_exchange_failed');
  const raw=await response.text();if(raw.length>16384)throw new Error('identity_exchange_failed');
  let value:unknown;try{value=JSON.parse(raw);}catch{throw new Error('identity_exchange_failed');}
  if(value&&typeof value==='object'&&'error' in value){if(value.error==='incorrect_client_credentials'||value.error==='redirect_uri_mismatch')throw new Error('identity_client_configuration');if(value.error==='bad_verification_code')throw new Error('identity_code_rejected');if(value.error==='unverified_user_email')throw new Error('identity_email_unverified');}
