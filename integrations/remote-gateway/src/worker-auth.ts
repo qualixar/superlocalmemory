@@ -68,7 +68,7 @@ async function githubCallback(request:Request,env:AuthWorkerEnv):Promise<Respons
  let resumed:Awaited<ReturnType<typeof api.finishUpstream<{verifier:string;bootstrapId?:string}>>>;
  try{resumed=await api.finishUpstream<{verifier:string;bootstrapId?:string}>(request);}catch{return interactiveFailure(request,400,'sign_in_session_unavailable');}
  const code=new URL(request.url).searchParams.get('code')??'';
- let token:string;try{token=await exchangeGithubCode(env.GITHUB_CLIENT_ID,env.GITHUB_CLIENT_SECRET,code,resumed.data.verifier);}catch{return interactiveFailure(request,502,'identity_exchange_unavailable');}
+ let token:string;try{token=await exchangeGithubCode(env.GITHUB_CLIENT_ID,env.GITHUB_CLIENT_SECRET,code,resumed.data.verifier);}catch(error){const category=error instanceof Error?error.message:'';const known=['identity_client_configuration','identity_code_rejected','identity_email_unverified','identity_provider_http_400','identity_provider_http_401','identity_provider_http_403','identity_provider_http_429','identity_provider_http_500','identity_provider_http_502','identity_provider_http_503'];return interactiveFailure(request,502,known.includes(category)?category:'identity_exchange_unavailable');}
  let ownerId:string;try{ownerId=await verifyGithubIdentity(token);}catch{return interactiveFailure(request,502,'identity_verification_unavailable');}
  if(resumed.request.resource===OWNER_RESOURCE){
   const connectionId=resumed.data.bootstrapId;if(!connectionId)return response(400,'connection_unavailable');
@@ -110,7 +110,7 @@ export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionC
  const limited=await anonymousAdmission(request,env);if(limited)return limited;
  try{
   if(url.pathname==='/sign-in/error'&&request.method==='GET'){
-   const known=['consent_unavailable','authorization_unavailable','connection_unavailable','sign_in_session_unavailable','identity_exchange_unavailable','identity_verification_unavailable'];
+   const known=['consent_unavailable','authorization_unavailable','connection_unavailable','sign_in_session_unavailable','identity_exchange_unavailable','identity_verification_unavailable','identity_client_configuration','identity_code_rejected','identity_email_unverified','identity_provider_http_400','identity_provider_http_401','identity_provider_http_403','identity_provider_http_429','identity_provider_http_500','identity_provider_http_502','identity_provider_http_503'];
    const reason=url.searchParams.get('reason')??'';
    return html(renderAuthFailure(known.includes(reason)?reason:'authorization_unavailable',await dashboardReturnUrl(request,env.DEVICE_WRAP_KEY)),new Headers(),undefined,400);
   }

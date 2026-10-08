@@ -25,3 +25,8 @@ test('dashboard recovery receipt only routes to an authenticated loopback port, 
 });
 
 test('provider failures do not falsely blame expired sign-in links',async()=>{const {renderAuthFailure}=await import('../src/auth-flow.ts');const page=renderAuthFailure('identity_exchange_unavailable');assert.match(page,/could not complete sign-in/);assert.doesNotMatch(page,/link expired or was already used/);});
+
+test('known GitHub exchange failures map to fixed safe categories without server descriptions',async()=>{
+ await assert.rejects(exchangeGithubCode('client','synthetic','code','a'.repeat(43),async()=>Response.json({error:'incorrect_client_credentials',error_description:'SYNTHETIC_SECRET'})),/^Error: identity_client_configuration$/);
+ await assert.rejects(exchangeGithubCode('client','synthetic','code','a'.repeat(43),async()=>Response.json({error:'bad_verification_code',error_description:'SYNTHETIC_SECRET'})),/^Error: identity_code_rejected$/);
+});
