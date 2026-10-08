@@ -63,6 +63,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Most community member IDs returned with a recall (drill-down handle, not a dump).
+_COMMUNITY_MEMBER_ID_LIMIT = 20
+
 
 # How long the parallel channel phase may run before a channel is abandoned.
 #
@@ -770,14 +773,19 @@ class RetrievalEngine:
 
             row = summ_by_cid[best_cid]
             try:
-                members = json.loads(row.get("fact_ids_json") or "[]")
+                members = [str(fid) for fid in json.loads(row.get("fact_ids_json") or "[]")]
             except (ValueError, TypeError):
                 members = []
+            # Drill-down handle, bounded: a large community once shipped ~4,900 IDs
+            # (94 KB) with a 5-result recall. Matched members come first.
+            matched = [fid for fid in top_ids if fact_to_cid.get(fid) == best_cid]
+            handle = list(dict.fromkeys(matched + members))[:_COMMUNITY_MEMBER_ID_LIMIT]
             return {
                 "community_id": best_cid,
                 "summary": row.get("summary", ""),
                 "keywords": row.get("keywords", ""),
-                "member_fact_ids": members,
+                "member_fact_ids": handle,
+                "member_count": len(members),
                 "coverage": round(coverage, 3),
                 "matched_results": count,
             }

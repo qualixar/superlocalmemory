@@ -101,3 +101,22 @@ class TestSerializerPassthrough:
         resp = types.SimpleNamespace(results=[])
         md = recall_response_metadata(resp)
         assert md["thematic_context"] is None
+
+
+class TestCommunityContextIsBounded:
+    """A large community must not ship every member ID with each recall.
+    Observed: ~4,900 IDs = 94 KB of a 106 KB, 5-result response to a hosted client."""
+
+    def test_member_ids_are_capped_with_true_count_and_matches_first(self) -> None:
+        import json as _json
+        members = [f"m{i}" for i in range(100)]
+        db = MagicMock()
+        db.execute.return_value = [{"community_id": 7, "summary": "Big topic.", "keywords": "k",
+                                    "fact_ids_json": _json.dumps(members), "fact_count": 100}]
+        eng = _engine(db)
+        ctx = eng._community_context([_result("m50"), _result("m51"), _result("zz")], "default")
+        assert ctx is not None
+        assert ctx["member_count"] == 100
+        assert len(ctx["member_fact_ids"]) == 20
+        assert ctx["member_fact_ids"][:2] == ["m50", "m51"]  # drill-down to what was matched first
+        assert len(set(ctx["member_fact_ids"])) == 20
