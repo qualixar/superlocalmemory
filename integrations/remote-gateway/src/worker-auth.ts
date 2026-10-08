@@ -28,6 +28,14 @@ function html(body:string,headers:Headers,redirectUri?:string,status=200):Respon
  headers.set('X-Content-Type-Options','nosniff');
  return new Response(body.replace('<style>','<style nonce="'+nonce+'">'),{status,headers});
 }
+function clientHandoff(location:string,headers:Headers):Response {
+ const target=new URL(location);
+ if(target.username||target.password||!(target.protocol==='https:'||target.protocol==='http:'&&target.hostname==='127.0.0.1'))throw new Error('invalid_client_return');
+ // End the POST with a document before navigating to the SDK-validated client
+ // callback. Its downstream redirects are no longer a form-action chain.
+ const page=renderAuthPage('Returning to your AI','<h1>Returning to your AI</h1><p>Your connection has been approved. You will return to your application automatically.</p><p><a class="button primary" href="'+escapeHtml(location)+'">Continue to your AI</a></p>').replace('</head>','<meta http-equiv="refresh" content="0;url='+escapeHtml(location)+'"></head>');
+ return html(page,headers,target.origin);
+}
 function interactiveFailure(request:Request,status:number,error:string):Response {
  return request.headers.get('Accept')?.includes('text/html')?redirect(AUTH_ISSUER+'/sign-in/error?reason='+encodeURIComponent(error)):response(status,error);
 }
@@ -103,7 +111,7 @@ async function selectConnection(request:Request,env:AuthWorkerEnv):Promise<Respo
  const tools=['recall','search','fetch','get_status',...(scopes.includes('slm:write')?['remember']:[]),...(scopes.includes('slm:session')?['session_init','close_session','report_feedback','report_outcome']:[])];
  await env.REGISTRIES.getByName(connectionId).addAuthorization({authorizationId,ownerId:saved.ownerId,connectionId,clientId:approved.request.clientId,audience:MCP_RESOURCE,consentedTools:tools,consentedScopes:scopes as Scope[],consentedCorrection:false,consentedSharedRead:false,consentedGlobalRead:false,authorizationVersion:1,revokedAt:null});
  const completed=await api.completeAuthorization({request:approved.request,userId:saved.ownerId,metadata:{connectionId},scope:scopes,props,revokeExistingGrants:false});
- return redirect(completed.redirectTo,approved.headers);
+ return request.headers.get('Accept')?.includes('text/html')?clientHandoff(completed.redirectTo,approved.headers):redirect(completed.redirectTo,approved.headers);
 }
 export async function authFetch(request:Request,env:AuthWorkerEnv,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);if(url.origin!==AUTH_ISSUER)return response(403,'host_denied');

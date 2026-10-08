@@ -36,3 +36,15 @@ test('real local OAuth consent, mocked GitHub identity, connection selection and
   expect(await validateIndexedToken('https://mcp.superlocalmemory.com/mcp',issued.access_token,configuration)).toBeNull();
  }finally{vi.unstubAllGlobals();}
 });
+
+// This browser regression uses a real authorization code but only a mocked identity provider.
+test('browser client handoff ends the POST before an external callback redirect chain',async()=>{
+ const settings={...env,GITHUB_CLIENT_ID:'synthetic-client',GITHUB_CLIENT_SECRET:'synthetic-secret'} as AuthWorkerEnv;
+ const ctx=createExecutionContext();const api=authorizationServer.getOAuthApi(settings);
+ const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'browser-fixture',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);const client=await registered.json() as {client_id:string};
+ const request=await api.parseAuthRequest(new Request(issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',resource:'https://mcp.superlocalmemory.com/mcp',scope:'slm:read',state:'browser-fixture-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'})));
+ const ownerId='16027584';const connectionId=crypto.randomUUID().replaceAll('-','');const installation='i-'+connectionId;const native='n-'+connectionId;const jkt='a'.repeat(43);const owner=env.OWNERS.getByName(ownerId);await owner.bind(ownerId,installation,'profile',native,jkt);await owner.addConnection(ownerId,installation,'profile',native,{connectionId,installationId:installation,profileId:'profile',host:'composio',permissions:{read:true,write:false,correction:false,session:false},credentialEnvelope:'encrypted',deviceDigest:'a'.repeat(64),deviceJkt:jkt,deviceExpiresAtMs:Date.now()+60000,generation:1,revokedAt:null,cleanupPending:false});await env.REGISTRIES.getByName(connectionId).configure({connectionId,ownerId,installationId:installation,profileId:'profile',origin:{kind:'relay',installationId:installation,profileId:'profile'},allowedTools:['recall','search','fetch','get_status'],allowCorrection:false,allowSharedRead:false,allowGlobalRead:false,policyVersion:1,revokedAt:null});
+ const consent=await api.beginConsent(request);await env.OAUTH_KV.put('slm-consent:'+consent.handle,JSON.stringify({request,ownerId}));
+ const response=await authFetch(new Request(issuer+'/select',{method:'POST',headers:{Origin:issuer,Accept:'text/html','Content-Type':'application/x-www-form-urlencoded',Cookie:consent.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ')},body:new URLSearchParams({handle:consent.handle,connection_id:connectionId,decision:'allow'})}),settings,ctx);
+ expect(response.status).toBe(200);expect(response.headers.get('Content-Type')).toContain('text/html');const page=await response.text();expect(page).toContain('http-equiv="refresh"');expect(page).toContain('https://client.example/callback?');expect(page).toContain('Continue to your AI');await waitOnExecutionContext(ctx);
+});
