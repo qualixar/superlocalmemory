@@ -9,6 +9,11 @@ export type RelayFrame =
 export type DecodeResult = { ok: true; frame: RelayFrame } | { ok: false; code: string };
 export type EncodeResult = { ok: true; text: string } | { ok: false; code: string };
 export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+/** Longest a relayed call may wait for the laptop. A correct answer from a busy
+ * local database is not a failure; the laptop companion uses the same budget. */
+export const RELAY_DEADLINE_MS = 25000;
+/** Laptop clocks may lag the relay's; tolerated on the laptop side only. */
+export const CLOCK_SKEW_TOLERANCE_MS = 5000;
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const requestHeaders = new Set(["content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name"]);

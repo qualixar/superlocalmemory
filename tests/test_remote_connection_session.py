@@ -103,3 +103,44 @@ async def test_concurrency_cap_rejects_ninth_request_without_origin():
     for n in range(9):await session.receive(compact(frame(f"request-{n}")))
     assert sent[0]["status"]==429
     await session.stop()
+
+
+async def _ready_session(sent, exchange):
+    async def send(text):sent.append(decode_frame(text))
+    session=RelaySession(credential(),exchange=exchange,send=send,close=lambda _:None)
+    await session.receive(compact({"v":1,"kind":"ready","generation":1}))
+    return session
+
+async def _ok(*args):
+    return OriginResponse(200,(("content-type","application/json"),),b'{"ok":true}')
+
+@pytest.mark.asyncio
+async def test_correct_but_slow_origin_gets_the_relay_budget_not_five_seconds():
+    # A real database during maintenance can take more than 5 s; that is not a failure.
+    sent=[];session=await _ready_session(sent,_ok)
+    await session.receive(compact(frame(deadlineAt=int(time.time()*1000)+20000)));await session.wait_idle()
+    assert [x["status"] for x in sent]==[200]
+    await session.stop()
+
+@pytest.mark.asyncio
+async def test_laptop_clock_behind_the_relay_is_tolerated_and_wait_is_capped(monkeypatch):
+    # deadlineAt comes from Cloudflare's clock. A laptop 3 s behind sees 28 s remaining.
+    import superlocalmemory.remote_connections.session as module
+    waits=[];original=module.asyncio.wait_for
+    async def recording(awaitable,timeout):
+        waits.append(timeout);return await original(awaitable,timeout)
+    monkeypatch.setattr(module.asyncio,"wait_for",recording)
+    sent=[];session=await _ready_session(sent,_ok)
+    await session.receive(compact(frame(deadlineAt=int(time.time()*1000)+28000)));await session.wait_idle()
+    assert [x["status"] for x in sent]==[200]
+    assert waits and max(waits)<=25.0
+    await session.stop()
+
+@pytest.mark.asyncio
+async def test_deadline_beyond_budget_and_clock_tolerance_is_rejected():
+    sent=[];calls=[]
+    async def exchange(*args):calls.append(args);return await _ok()
+    session=await _ready_session(sent,exchange)
+    await session.receive(compact(frame(deadlineAt=int(time.time()*1000)+40000)));await session.wait_idle()
+    assert [x["status"] for x in sent]==[400] and calls==[]
+    await session.stop()

@@ -1,4 +1,4 @@
-import { decodeRelayFrame, encodeRelayFrame, MAX_RESPONSE_BYTES, MAX_FRAME_BYTES, type RelayFrame, type RelayCodecOptions } from './relay-protocol.ts';
+import { decodeRelayFrame, encodeRelayFrame, MAX_RESPONSE_BYTES, MAX_FRAME_BYTES, RELAY_DEADLINE_MS, CLOCK_SKEW_TOLERANCE_MS, type RelayFrame, type RelayCodecOptions } from './relay-protocol.ts';
 
 interface ConnectorOptions {
   origin: string;
@@ -100,9 +100,10 @@ export class LocalRelaySession {
       if(operation){clearTimeout(operation.timer);operation.controller.abort();this.operations.delete(frame.id);}
       return;
     }
-    const duration=frame.deadlineAt-Date.now();
-    if(duration<=0){this.reply(frame,504,'relay_timeout');return;}
-    if(duration>5000){this.reply(frame,400,'invalid_deadline');return;}
+    const remaining=frame.deadlineAt-Date.now();
+    if(remaining<=0){this.reply(frame,504,'relay_timeout');return;}
+    if(remaining>RELAY_DEADLINE_MS+CLOCK_SKEW_TOLERANCE_MS){this.reply(frame,400,'invalid_deadline');return;}
+    const duration=Math.min(remaining,RELAY_DEADLINE_MS);
     if(this.operations.has(frame.id)){this.fail();return;}
     if(this.operations.size>=8){this.reply(frame,429,'connector_busy');return;}
     const controller=new AbortController();

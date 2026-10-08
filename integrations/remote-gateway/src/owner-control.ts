@@ -2,6 +2,7 @@ import {CompactEncrypt,compactDecrypt} from 'jose';
 import {validateIndexedToken,type IssuerEnv} from './issuer-protocol.ts';
 import {verifyDeviceProof} from './device-proof.ts';
 import {tokenDigest} from './issued-token-protocol.ts';
+import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
 import type {NativeAuthProps} from './authorization-server.ts';
 import type {ConnectEnv} from './worker-connect.ts';
 import type {OwnedConnection} from './owner-index-do.ts';
@@ -56,7 +57,7 @@ export async function ownerControlFetch(request:Request,env:OwnerControlEnv,_ctx
     {jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'get_status',arguments:{}}}
    ]){
     const bytes=new TextEncoder().encode(JSON.stringify(message));
-    const reply=await env.RELAYS.getByName(props.connectionId).forwardCurrent({v:1,kind:'request',id:crypto.randomUUID(),deadlineAt:Date.now()+5000,headers:[['content-type','application/json'],['accept','application/json'],['mcp-protocol-version','2025-06-18']],bodyBase64:btoa(String.fromCharCode(...bytes))});
+    const reply=await env.RELAYS.getByName(props.connectionId).forwardCurrent({v:1,kind:'request',id:crypto.randomUUID(),deadlineAt:Date.now()+RELAY_DEADLINE_MS,headers:[['content-type','application/json'],['accept','application/json'],['mcp-protocol-version','2025-06-18']],bodyBase64:btoa(String.fromCharCode(...bytes))});
     if(!reply.ok)return result(503,{error:'verification_unavailable'});
     const body=await reply.json() as {jsonrpc?:unknown;id?:unknown;error?:unknown;result?:{isError?:unknown}};
     if(body.jsonrpc!=='2.0'||body.id!==message.id||body.error!==undefined||!body.result||body.result.isError===true)return result(503,{error:'verification_unavailable'});

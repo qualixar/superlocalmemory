@@ -42,3 +42,12 @@ for (const [label,header,options] of [
 ]) test(label,()=>assert.deepEqual(decodeRelayFrame(JSON.stringify({...request(),headers:[header]}),options),{ok:false,code:'INVALID_FRAME'}));
 test('parameter case-duplicates rejected',()=>{const f={...request(),headers:[['Mcp-Param-query','x'],['mcp-param-query','y']]};assert.deepEqual(decodeRelayFrame(JSON.stringify(f),{requestParamHeaders:['Mcp-Param-query']}),{ok:false,code:'INVALID_FRAME'});});
 test('schema param never permitted on response',()=>{const f={v:1,kind:'response',id:'r',generation:1,status:200,headers:[['Mcp-Param-query','x']],bodyBase64:''};assert.deepEqual(decodeRelayFrame(JSON.stringify(f),{requestParamHeaders:['Mcp-Param-query']}),{ok:false,code:'INVALID_FRAME'});});
+
+test('gateway relay budget and the laptop companion budget never drift apart', async () => {
+  const { RELAY_DEADLINE_MS } = await import('../src/relay-protocol.ts');
+  const { readFile } = await import('node:fs/promises');
+  const python = await readFile(new URL('../../../src/superlocalmemory/remote_connections/session.py', import.meta.url), 'utf8');
+  const laptop = Number(/^RELAY_DEADLINE_MS = (\d+)$/m.exec(python)?.[1]);
+  assert.equal(RELAY_DEADLINE_MS, 25000);
+  assert.equal(laptop, RELAY_DEADLINE_MS);
+});

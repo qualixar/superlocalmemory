@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { decodeRelayFrame, encodeRelayFrame, type RelayFrame, type RelayCodecOptions } from "./relay-protocol.ts";
+import { decodeRelayFrame, encodeRelayFrame, RELAY_DEADLINE_MS, type RelayFrame, type RelayCodecOptions } from "./relay-protocol.ts";
 export interface RelayBinding {
   ownerId: string; connectionId: string; installationId: string; profileId: string;
   deviceDigest: string; deviceExpiresAt: number;
@@ -106,7 +106,7 @@ export class RelayDO extends DurableObject {
 
     const remaining=frame.deadlineAt-Date.now();
     if(remaining<=0)return failure(504,"relay_timeout");
-    if(remaining>5000)return failure(400,"invalid_deadline");
+    if(remaining>RELAY_DEADLINE_MS)return failure(400,"invalid_deadline");
     const socket=this.currentSocket();
     if(!socket)return failure(503,"connector_offline");
     if(frame.generation!==this.state.generation)return failure(409,"stale_generation");

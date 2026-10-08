@@ -18,6 +18,13 @@ from superlocalmemory.remote_connections.codec import (
 )
 from superlocalmemory.remote_connections.credentials import ConnectorCredential
 
+#: Longest a relayed call may wait for this laptop. Matches the gateway's budget;
+#: a correct answer from a busy database is not a failure.
+RELAY_DEADLINE_MS = 25000
+#: deadlineAt is stamped by the relay's clock. Tolerate a laptop clock this far
+#: behind it, but never wait longer than RELAY_DEADLINE_MS.
+CLOCK_SKEW_TOLERANCE_MS = 5000
+
 
 @dataclass(frozen=True)
 class OriginResponse:
@@ -120,9 +127,10 @@ class RelaySession:
         if duration <= 0:
             await self._reply(frame, 504, "relay_timeout")
             return
-        if duration > 5000:
+        if duration > RELAY_DEADLINE_MS + CLOCK_SKEW_TOLERANCE_MS:
             await self._reply(frame, 400, "invalid_deadline")
             return
+        duration = min(duration, RELAY_DEADLINE_MS)
         if frame["id"] in self._operations:
             await self._fail()
             return

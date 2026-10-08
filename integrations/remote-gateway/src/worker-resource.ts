@@ -2,6 +2,7 @@ import {OAuthResourceServer,type OAuthResourceContext,type OAuthResourceTokenVal
 import type {AuthProps,Scope,VerifiedActor} from './contracts.ts';
 import {RegistryDO} from './registry-do.ts';
 import {RelayDO} from './relay-do.ts';
+import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
 import {GatewayInputError,filterMcpResponse,parseMcpRequest} from './mcp-http.ts';
 
 export {RegistryDO,RelayDO};
@@ -42,7 +43,7 @@ async function handle(request:Request,env:ResourceEnv,context:OAuthResourceConte
     let response:Response;
     try {
       if(request.signal.aborted)return failure(499,'request_cancelled');
-      response=await relay.forwardCurrent({v:1,kind:'request',id:identifier,deadlineAt:Date.now()+5000,
+      response=await relay.forwardCurrent({v:1,kind:'request',id:identifier,deadlineAt:Date.now()+RELAY_DEADLINE_MS,
         headers:parsed.headers,bodyBase64:base64(parsed.envelope.originalBody)},
         {requestParamHeaders:parsed.parameterHeaderNames});
     }finally{request.signal.removeEventListener('abort',abort);}
