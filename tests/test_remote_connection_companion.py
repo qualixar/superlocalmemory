@@ -100,3 +100,35 @@ async def test_handshake_auth_denial_does_not_retry_forever(harness):
 def test_invalid_lifecycle_configuration_rejected(harness):
     states,calls,socket,load,exchange,dial=harness
     with pytest.raises(ValueError):Companion(enabled=True,load_credential=load,exchange=exchange,dial=dial,on_state=states.append,retry_ms=0)
+
+@pytest.mark.asyncio
+async def test_connection_end_reason_is_logged_without_secrets(harness,caplog):
+    # A relay 503 is only diagnosable if the laptop records why its socket ended.
+    states,calls,socket,load,exchange,dial=harness
+    caplog.set_level("INFO",logger="superlocalmemory.remote_connections.companion")
+    companion=Companion(enabled=True,load_credential=load,exchange=exchange,dial=dial,on_state=states.append,retry_ms=5)
+    await companion.start();await wait_until(lambda:"transport_ready" in states)
+    socket.queue.put_nowait(b"binary is forbidden")
+    await wait_until(lambda:len(calls)>=2)
+    await companion.stop()
+    text="\n".join(record.getMessage() for record in caplog.records)
+    assert "remote_companion_state state=transport_ready" in text
+    assert "remote_companion_connection_ended reason=connected_then_lost" in text
+    assert "slmr_" not in text and "a"*32 not in text
+
+@pytest.mark.asyncio
+async def test_connection_failure_logs_error_class_only(harness,caplog):
+    states,calls,socket,load,exchange,_=harness
+    caplog.set_level("INFO",logger="superlocalmemory.remote_connections.companion")
+    attempts=[]
+    @asynccontextmanager
+    async def failing(endpoint,token):
+        attempts.append(1)
+        raise RuntimeError("SECRET dial detail")
+        yield
+    companion=Companion(enabled=True,load_credential=load,exchange=exchange,dial=failing,on_state=states.append,retry_ms=5)
+    await companion.start();await wait_until(lambda:len(attempts)>=2)
+    await companion.stop()
+    text="\n".join(record.getMessage() for record in caplog.records)
+    assert "remote_companion_connection_failed error=RuntimeError" in text
+    assert "SECRET" not in text

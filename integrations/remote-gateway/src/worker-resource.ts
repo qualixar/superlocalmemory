@@ -3,6 +3,7 @@ import type {AuthProps,Scope,VerifiedActor} from './contracts.ts';
 import {RegistryDO} from './registry-do.ts';
 import {RelayDO} from './relay-do.ts';
 import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
+import {publicRelayCode} from './relay-errors.ts';
 import {GatewayInputError,filterMcpResponse,parseMcpRequest} from './mcp-http.ts';
 
 export {RegistryDO,RelayDO};
@@ -51,7 +52,7 @@ async function handle(request:Request,env:ResourceEnv,context:OAuthResourceConte
       // Relay failure packets contain bounded non-secret codes; never expose
       // arbitrary origin errors or HTML to the public client.
       let code='origin_unavailable';
-      try{const body:unknown=await response.json();if(body&&typeof body==='object'&&'error' in body&&typeof body.error==='string'&&['connector_unavailable','connector_offline','connection_revoked','relay_timeout','relay_busy','origin_timeout','request_cancelled'].includes(body.error))code=body.error;}catch{}
+      try{code=publicRelayCode(await response.json());}catch{}
       return failure(response.status,code);
     }
     const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store'});

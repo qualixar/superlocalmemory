@@ -74,6 +74,8 @@ class Companion:
         self._running = False
 
     def _publish(self, state: str) -> None:
+        # Fixed state names only; never credentials or provider text.
+        logger.info("remote_companion_state state=%s", state)
         try:
             self._observer(state)
         except Exception:
@@ -123,6 +125,7 @@ class Companion:
                 self._publish("connecting")
                 try:
                     reason = await self._connection(credential, epoch)
+                    logger.info("remote_companion_connection_ended reason=%s", reason)
                     if reason == "authorization_required":
                         self._publish(reason)
                         return
@@ -131,6 +134,10 @@ class Companion:
                     raise
                 except Exception as error:
                     from websockets.exceptions import InvalidStatus
+
+                    logger.info(
+                        "remote_companion_connection_failed error=%s", type(error).__name__
+                    )
 
                     if isinstance(error, InvalidStatus) and error.response.status_code in {
                         401,
