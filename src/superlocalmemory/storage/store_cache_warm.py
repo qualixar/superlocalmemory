@@ -16,18 +16,31 @@ first minute after a start.
 
 WHAT THIS DOES
 --------------
-One background thread reads ``memory.db`` and its WAL front to back and drops
-the bytes. Nothing is written or changed, so no answer can change. The read
-releases the interpreter lock while it waits on the disk. A store larger than
-a quarter of this computer's memory is not read: the cache could not keep it,
-and it would push out what other programs need. Unknown memory size: nothing
-is read.
+One background thread starts a short-lived child process that reads
+``memory.db`` and its WAL front to back and drops the bytes. Nothing is written
+or changed, so no answer can change. A store larger than a quarter of this
+computer's memory is not read: the cache could not keep it, and it would push
+out what other programs need. Unknown memory size: nothing is read.
+
+WHY A CHILD PROCESS
+-------------------
+SQLite's locks on ``memory.db`` are POSIX advisory locks, and those belong to
+the process, not to a file descriptor: closing any descriptor of the file drops
+every lock the process holds on it. Reading the store in the service process
+therefore released the lock each WAL connection keeps on it. The next hook or
+MCP server that closed its last connection then found no other user, ran a
+checkpoint and deleted ``-wal`` and ``-shm`` under the service, which kept
+writing to the deleted files and later checkpointed stale pages over the
+store ("database disk image is malformed"). A child process has its own
+locks, so its open and close leave the service's locks alone.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Iterable
@@ -40,11 +53,15 @@ logger = logging.getLogger(__name__)
 
 CHUNK = 8 << 20
 MAX_FRACTION_OF_RAM = 0.25
+CHILD_TIMEOUT_S = 120.0
 
 
 def warm(paths: Iterable[str | Path], *, max_bytes: int) -> int:
     """Read each existing file in full, in order, while the total stays within
-    ``max_bytes``. Returns the bytes read. Never raises."""
+    ``max_bytes``. Returns the bytes read. Never raises.
+
+    Opens and closes the files, so never call it in a process that has the
+    store open through SQLite; ``warm_in_child`` runs it in its own process."""
     total = 0
     buf = bytearray(CHUNK)
     for path in paths:
@@ -60,6 +77,18 @@ def warm(paths: Iterable[str | Path], *, max_bytes: int) -> int:
     return total
 
 
+def warm_in_child(paths: Iterable[str | Path], *, max_bytes: int) -> int:
+    """Run ``warm`` in a child process, so this process's SQLite locks on the
+    files stay in place. Returns the bytes read, 0 on any failure. Never raises."""
+    cmd = [sys.executable, "-m", __name__, str(max_bytes), *map(str, paths)]
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=CHILD_TIMEOUT_S, check=False)
+        return int(done.stdout.strip()) if done.returncode == 0 else 0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
 def warm_engine_store(engine: Any) -> int:
     """Read the engine's store and WAL, capped by this computer's memory."""
     db_path = getattr(getattr(engine, "_db", None), "db_path", None)
@@ -67,8 +96,8 @@ def warm_engine_store(engine: Any) -> int:
     if db_path is None or ram_gb <= 0:
         return 0
     started = time.monotonic()
-    read = warm([db_path, f"{db_path}-wal"],
-                max_bytes=int(ram_gb * (1 << 30) * MAX_FRACTION_OF_RAM))
+    read = warm_in_child([db_path, f"{db_path}-wal"],
+                         max_bytes=int(ram_gb * (1 << 30) * MAX_FRACTION_OF_RAM))
     logger.info("store read into the file cache: %d MB in %.0f ms",
                 read >> 20, (time.monotonic() - started) * 1000.0)
     return read
@@ -87,4 +116,12 @@ def start(engine: Any) -> threading.Thread:
     return thread
 
 
-__all__ = ["CHUNK", "MAX_FRACTION_OF_RAM", "start", "warm", "warm_engine_store"]
+__all__ = [
+    "CHILD_TIMEOUT_S", "CHUNK", "MAX_FRACTION_OF_RAM", "start", "warm",
+    "warm_engine_store", "warm_in_child",
+]
+
+
+if __name__ == "__main__":
+    # Child side of ``warm_in_child``: argv is max_bytes, then the paths.
+    print(warm(sys.argv[2:], max_bytes=int(sys.argv[1])))
