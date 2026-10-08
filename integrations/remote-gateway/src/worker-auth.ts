@@ -16,11 +16,12 @@ import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
 export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;DCR_DIAGNOSTICS?:string;}
 interface ConsentContext {request:AuthRequest;bootstrapId?:string;ownerId?:string;}
+const LOOPBACK_HOSTS=['127.0.0.1','localhost','[::1]'];
 function response(status:number,error:string):Response{return Response.json({error},{status,headers:{'Cache-Control':'no-store'}});}
 function html(body:string,headers:Headers,redirectUri?:string,status=200):Response{
  const nonce=crypto.randomUUID().replaceAll('-','');
  let destination='';
- if(redirectUri){try{const target=new URL(redirectUri);if(!target.username&&!target.password&&(target.protocol==='https:'||target.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(target.hostname)))destination=' '+target.origin;}catch{/* No additional destination for malformed metadata. */}}
+ if(redirectUri){try{const target=new URL(redirectUri);if(!target.username&&!target.password&&(target.protocol==='https:'||target.protocol==='http:'&&LOOPBACK_HOSTS.includes(target.hostname)))destination=' '+target.origin;}catch{/* No additional destination for malformed metadata. */}}
  headers.set('Content-Type','text/html;charset=utf-8');headers.set('Cache-Control','no-store');headers.set('Referrer-Policy','strict-origin');
  // Chrome applies form-action to the redirect chain. Only the identity
  // provider and this SDK-validated client's return origin are allowed.
@@ -29,8 +30,10 @@ function html(body:string,headers:Headers,redirectUri?:string,status=200):Respon
  return new Response(body.replace('<style>','<style nonce="'+nonce+'">'),{status,headers});
 }
 function clientHandoff(location:string,headers:Headers):Response {
+ // The code is already issued when this runs, so an ineligible target falls back
+ // to the SDK's plain redirect instead of throwing and orphaning the grant.
  const target=new URL(location);
- if(target.username||target.password||!(target.protocol==='https:'||target.protocol==='http:'&&target.hostname==='127.0.0.1'))throw new Error('invalid_client_return');
+ if(target.username||target.password||!(target.protocol==='https:'||target.protocol==='http:'&&LOOPBACK_HOSTS.includes(target.hostname)))return redirect(location,headers);
  // End the POST with a document before navigating to the SDK-validated client
  // callback. Its downstream redirects are no longer a form-action chain.
  const page=renderAuthPage('Returning to your AI','<h1>Returning to your AI</h1><p>Your connection has been approved. You will return to your application automatically.</p><p><a class="button primary" href="'+escapeHtml(location)+'">Continue to your AI</a></p>').replace('</head>','<meta http-equiv="refresh" content="0;url='+escapeHtml(location)+'"></head>');
