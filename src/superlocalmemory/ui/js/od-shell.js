@@ -82,6 +82,9 @@
     ]},
     { g: 'Integrations', items: [
       { k: 'mcp-pane',       t: 'MCP & Tools', i: 'plug',     crumb: 'Integrations' },
+      // 4.1.23: the internet-connection flow (ChatGPT, Claude on the web, Composio,
+      // Muse, group bots) left MCP & Tools, which is for local agents. Optional.
+      { k: 'apps-pane',      t: 'Connected apps', i: 'link',  crumb: 'Integrations', tag: 'Optional' },
       { k: 'mesh-pane',      t: 'Mesh Peers',  i: 'mesh',     crumb: 'Integrations' },
       // 4.0.8: was a tab inside Governance. Every other Governance tab governs
       // SLM's OWN data — lifecycle, access, trust, compliance, ingestion.
@@ -358,9 +361,10 @@
   function refreshOdPane(tabId, fnName, state, generation) {
     var oldPane = document.getElementById(tabId);
     if (!oldPane || typeof window[fnName] !== 'function') return Promise.resolve();
-    // This pane owns live OAuth form state. Refresh only its profile-data area;
-    // cloning and swapping it would discard selections, focus and sign-in links.
-    if (fnName === 'odRenderMcp') {
+    // These panes own live OAuth form state (MCP: profile data; Connected apps:
+    // the sign-in flow). Refresh in place; cloning and swapping them would
+    // discard selections, focus and sign-in links.
+    if (fnName === 'odRenderMcp' || fnName === 'odRenderApps') {
       return Promise.resolve(window[fnName](oldPane, { preserveConnectionScope: true })).then(function () {
         if (state.generation === generation) { state.mounted = true; state.loadedAt = Date.now(); }
       });
@@ -505,7 +509,7 @@
           return true;
         }
         try {
-          if (fnName !== 'odRenderMcp') pane.innerHTML = '';
+          if (fnName !== 'odRenderMcp' && fnName !== 'odRenderApps') pane.innerHTML = '';
           window[fnName](pane);
           pane.dataset.slmOdRenderer = fnName;
           var mounted = getPaneLoadState(tabId);
@@ -586,11 +590,49 @@
       case 'mcp-pane':
         od('odRenderMcp');
         return true;
+      case 'apps-pane':
+        od('odRenderApps');
+        return true;
       case 'backup-pane':
         od('odRenderBackup');
         return true;
     }
     return false;
+  }
+
+  // Lets one pane link to another (MCP & Tools -> Connected apps) with the same
+  // activation path the sidebar uses.
+  window.slmNavigate = function (paneId) {
+    if (NAV_MAP[paneId]) activateTab(paneId);
+  };
+
+  // The sign-in callback (server side) redirects to /#mcp-pane. A fresh page
+  // load of exactly that address, with no query string, means "back from
+  // sign-in": land on Connected apps, where the connection lives now. A reload
+  // or back/forward on MCP & Tools is not that, so it is left alone.
+  function isFreshNavigation() {
+    try {
+      var entries = window.performance && window.performance.getEntriesByType
+        ? window.performance.getEntriesByType('navigation') : [];
+      return !entries || !entries.length || entries[0].type === 'navigate';
+    } catch (e) { return false; }
+  }
+  window.slmIsSignInReturn = function (hash, search) {
+    return hash === 'mcp-pane' && !search && isFreshNavigation();
+  };
+  // Only a connection that is not cancelled can be the one the user just
+  // signed in for; otherwise stay on (or go back to) MCP & Tools.
+  function confirmSignInReturn() {
+    var fetcher = typeof window.slmFetch === 'function' ? window.slmFetch : window.fetch;
+    if (typeof fetcher !== 'function') return;
+    Promise.resolve().then(function () { return fetcher('/api/v3/connections/status', { credentials: 'same-origin' }); })
+      .then(function (response) { return response && response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.connections)) return;
+        var live = data.connections.some(function (c) { return c && c.state && c.state !== 'cancelled'; });
+        if (!live) { window.__slmAppsReturn = false; activateTab('mcp-pane'); }
+      })
+      .catch(function () { /* stay on Connected apps; it reports its own errors */ });
   }
 
   // Mutating actions and profile switches can invalidate cached panes without
@@ -842,11 +884,17 @@
   document.addEventListener('DOMContentLoaded', function () {
     // Determine initial active pane from URL hash (if valid tab pane)
     var active = 'dashboard-pane';
+    var returnedFromSignIn = false;
     var hash = window.location.hash.replace('#', '');
     if (hash) {
       var el = document.getElementById(hash);
       if (el && el.classList && el.classList.contains('tab-pane')) {
         active = hash;
+        if (window.slmIsSignInReturn(hash, window.location.search)) {
+          active = 'apps-pane';
+          returnedFromSignIn = true;
+          window.__slmAppsReturn = true;   // the pane treats a ready connection as new
+        }
       } else {
         // Stale section anchor from a previous session — strip it so
         // we always land on Dashboard, not a blank screen.
@@ -855,6 +903,7 @@
     }
 
     window.slmShell({ active: active });
+    if (returnedFromSignIn) confirmSignInReturn();
 
     // The URL now names the pane, and on load the browser scrolls to that
     // fragment: the pane's first line ended up under the sticky top bar.

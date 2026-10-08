@@ -61,7 +61,13 @@ const HASHED = ['od-brain.js', 'od-graph.js', 'fact-detail.js', 'od-memories.js'
                 'od-ops-health.js',
                 // 4.1.21: the live event stream subscribes to memory.captured;
                 // a stale copy would keep listening for an event nobody emits.
-                'events.js', 'od-connections.js', 'od-mcp.js'];
+                'events.js', 'od-connections.js', 'od-mcp.js',
+                // 4.1.23: the Connected apps pane. The sidebar entry, the pane and the
+                // internet-connection flow all moved; a stale copy of any of these
+                // would keep showing the flow inside MCP & Tools.
+                'od-apps-ui.js', 'od-apps-list.js', 'od-apps.js'];
+//: Stylesheets stamped the same way (static/css/<name>?v=<sha256[:8]>).
+const HASHED_CSS = ['od-apps.css'];
 
 describe('cache-bust params match file content', function () {
   const html = readFileSync(join(UI, 'index.html'), 'utf8');
@@ -82,6 +88,24 @@ describe('cache-bust params match file content', function () {
         'Returning users will be served the OLD file and will see none of your ' +
         'changes — which reads as "the fix does not work". Re-stamp it (see the ' +
         'snippet at the top of this test file).');
+    });
+  }
+});
+
+describe('stylesheet cache-bust params match file content', function () {
+  const html = readFileSync(join(UI, 'index.html'), 'utf8');
+
+  for (const name of HASHED_CSS) {
+    it(`${name} is stamped with its own content hash`, function () {
+      const bytes = readFileSync(join(UI, 'css', name));
+      const expected = createHash('sha256').update(bytes).digest('hex').slice(0, 8);
+      const m = html.match(
+        new RegExp(`static/css/${name.replace('.', '\\.')}\\?v=([0-9a-f]+)`),
+      );
+      assert.ok(m, `index.html does not reference static/css/${name} with a ?v= param`);
+      assert.equal(m[1], expected,
+        `${name} was edited without re-stamping its cache-bust param ` +
+        `(index.html says ?v=${m[1]}, content hash is ?v=${expected}).`);
     });
   }
 });

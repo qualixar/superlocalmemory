@@ -168,6 +168,26 @@
   }
 
   // =========================================================================
+  // Build: pointer to the Connected apps pane (internet apps live there)
+  // =========================================================================
+
+  function buildAppsPointer() {
+    var wrap = EL('div', { className: 'apps-pointer', 'data-apps-pointer': '' });
+    var text = EL('div', { className: 'apps-pointer-text' });
+    text.appendChild(EL('strong', { text: 'Want ChatGPT, Claude on the web, Muse or bots to use your memory?' }));
+    text.appendChild(EL('span', { text: 'That is optional and set up separately, under Connected apps.' }));
+    var link = EL('a', { href: '#apps-pane', className: 'btn secondary sm', text: 'Open Connected apps' });
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (typeof window.slmNavigate === 'function') window.slmNavigate('apps-pane');
+      else window.location.hash = '#apps-pane';
+    });
+    wrap.appendChild(text);
+    wrap.appendChild(link);
+    return wrap;
+  }
+
+  // =========================================================================
   // Build: current profile card
   // =========================================================================
 
@@ -465,23 +485,21 @@
     if (!pane) return Promise.resolve();
     options = options || {};
     injectStyles();
-    // Connection controls are an interactive transaction, not a disposable
-    // profile-data snapshot. Keep the mounted node and focus across refreshes.
+    // The pane keeps its mounted root across refreshes (and the shell does not
+    // clear it), so only the profile-data area below is ever re-rendered.
+    // The internet-connection flow ("Connect your AI") moved to its own pane,
+    // Connected apps (od-apps.js); this pane is for local agents only.
     var root = pane.querySelector('#od-mcp-root');
-    var connections = pane.querySelector('#od-ai-connections');
     if (!root) {
       root = EL('div', { id: 'od-mcp-root' });
       root.style.cssText = 'padding:26px;max-width:860px';
       var pageHead = EL('div'); pageHead.className = 'page-head';
       pageHead.appendChild(EL('h2', { text: 'MCP & Integrations' }));
       root.appendChild(pageHead); root.appendChild(buildIntro());
-      if (!connections && typeof window.odCreateAiConnectionsCard === 'function') connections = window.odCreateAiConnectionsCard();
-      if (connections) root.appendChild(connections);
+      root.appendChild(buildAppsPointer());
       pane.textContent = ''; pane.appendChild(root);
       var details = EL('div', { 'data-mcp-profile-details': '' });
       details.appendChild(buildLoading()); root.appendChild(details);
-    } else if (!options.preserveConnectionScope && connections && typeof connections.odRefreshConnectionStatus === 'function') {
-      connections.odRefreshConnectionStatus();
     }
     var profileDetails = root.querySelector('[data-mcp-profile-details]');
     var generation = (pane.odMcpGeneration || 0) + 1; pane.odMcpGeneration = generation;

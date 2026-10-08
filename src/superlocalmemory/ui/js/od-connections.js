@@ -1,10 +1,50 @@
 // Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar — AGPL-3.0
+// Connected apps: the internet-connection controller.
+//
 // Existing dashboard initiation. Local API/installation auth owns enrollment;
 // this card never receives a connector key or changes transport configuration.
+//
+// window.odCreateAiConnectionsCard() returns #od-ai-connections, a stack of
+// four sections that share ONE state machine:
+//   1. "This computer"   link state, status pill, per-connection actions
+//   2. "Your connected apps"   window.odCreateConnectedAppsList() (od-apps-list.js)
+//   3. "Add an app"      app cards + the guided four-step panel
+//   4. "Technical details"   server URLs and the past-connections history
+//
+// The behaviours below were moved, not rewritten, from the former single card:
+// the intent is persisted before any request, an idempotency key makes a lost
+// response recoverable, controls stay blocked until the status call returns,
+// refreshes are queued behind an in-flight load, a profile refresh fences the
+// older answer, cancelling restores the controls, and cancelled history stays
+// collapsed. Requires od-apps-ui.js (window.odAppsUi).
 (function () {
   'use strict';
-  var HOSTS = { muse: 'Musebot', chatgpt: 'ChatGPT Web', claude_web: 'Claude Web', claude_code_web: 'Claude Code Web', composio: 'Composio', other_mcp: 'Other MCP client' };
-  function node(tag, text, cls) { var el = document.createElement(tag); if (text) el.textContent = text; if (cls) el.className = cls; return el; }
+  var MCP_URL = 'https://mcp.superlocalmemory.com/mcp';
+  var OAUTH_URL = 'https://auth.superlocalmemory.com/.well-known/oauth-authorization-server';
+  var CONNECTION_ID = /^[a-f0-9]{32}$/;
+  var HOSTS = { muse: 'Muse', chatgpt: 'ChatGPT', claude_web: 'Claude (web)', claude_code_web: 'Claude Code (web)', composio: 'Composio', other_mcp: 'Other app (MCP)' };
+  // Order and wording of the "Add an app" cards.
+  var APP_CARDS = [
+    { host: 'chatgpt', desc: 'Let ChatGPT use your memory in your conversations.' },
+    { host: 'claude_web', desc: 'Let Claude on claude.ai draw on what you have saved.' },
+    { host: 'claude_code_web', desc: 'Give Claude Code on the web access to your memory.' },
+    { host: 'composio', desc: 'Connect your memory to Composio agents and automations.' },
+    { host: 'muse', desc: 'Use your memory with Muse and your group bots.' },
+    { host: 'other_mcp', desc: 'Any app that supports remote MCP connections with sign-in.' }
+  ];
+  var HELP = {
+    muse: 'Muse uses a private adapter and its secure OAuth connector. Link this computer first, then set up the adapter in Muse.',
+    composio: 'Link this computer first. Then add SuperLocalMemory as a Custom MCP in Composio using OAuth.',
+    other_mcp: 'Works with any app that supports remote MCP connections and OAuth. Link this computer first, then open that app’s connector settings.',
+    default: 'Your account must support custom remote MCP connections with OAuth. Link this computer first, then use the app’s connector settings.'
+  };
+  function nameFor(host) { return host === 'other_mcp' ? 'your app' : HOSTS[host]; }
+  function instructionSteps(host) {
+    if (host === 'composio') return ['In Composio, add a Custom MCP and name it SuperLocalMemory.', 'Paste the server URL below and choose OAuth as the sign-in method.', 'In Advanced settings, paste the OAuth metadata URL shown below.', 'Sign in with the same GitHub account and approve access to this memory profile.'];
+    if (host === 'muse') return ['Open the Muse private adapter and add its secure OAuth connector.', 'Give it the server URL and the OAuth metadata URL shown below.', 'Approve access with the same GitHub account. Never paste tokens into chat.'];
+    return ['In ' + nameFor(host) + ', add a remote MCP connector (some apps call it a custom connector).', 'Paste the server URL below and choose OAuth.', 'Sign in with the same GitHub account and approve this memory profile.', 'Availability depends on your account or plan with that app.'];
+  }
+
   function call(path, init) {
     var fetcher = typeof window.slmFetch === 'function' ? window.slmFetch : window.fetch;
     var options = Object.assign({ credentials: 'same-origin' }, init || {});
@@ -21,43 +61,181 @@
     } catch (_) { return null; }
   }
   function operationKey() { var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes); return Array.from(bytes, function (x) { return x.toString(16).padStart(2, '0'); }).join(''); }
+
   window.odCreateAiConnectionsCard = function () {
-    var card = node('section', '', 'card'); card.id = 'od-ai-connections'; card.style.marginBottom = '16px';
-    var head = node('div', '', 'card-head'); head.appendChild(node('h3', 'Connect your AI')); card.appendChild(head);
-    var body = node('div', '', 'card-pad'); card.appendChild(body);
-    body.appendChild(node('p', 'Use this computer’s memories in your AI. You choose whether it can save new memories.'));
-    body.appendChild(node('p', 'Remote access starts off. Your database stays on this computer, which must be online.', 'od-mcp-intro'));
-    var status = node('p', 'Checking connection availability…'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); body.appendChild(status);
-    var journey = node('ol', '', 'od-ai-journey');
-    ['Choose your AI', 'Link this computer', 'Verify connection', 'Connect your AI'].forEach(function (step) { journey.appendChild(node('li', step)); }); body.appendChild(journey);
-    var list = node('div'); body.appendChild(list);
-    var add = node('button', 'Add AI connection', 'btn ghost sm'); add.hidden = true; add.type = 'button'; add.disabled = true; body.appendChild(add);
-    var refresh = node('button', 'Refresh status', 'btn ghost sm'); refresh.type = 'button'; refresh.style.marginLeft = '8px'; body.appendChild(refresh);
-    var form = node('form'); form.hidden = false; form.style.marginTop = '12px'; body.appendChild(form);
-    form.appendChild(node('h4', 'Choose your AI'));
-    var label = node('label', 'Choose your AI'); label.htmlFor = 'od-connection-host'; label.hidden = true; form.appendChild(label);
-    var host = node('select'); host.hidden = true; host.id = 'od-connection-host'; host.style.display = 'block'; host.style.marginBottom = '12px'; host.style.cssText += ';padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card-2);color:var(--fg-1);min-width:200px;max-width:100%'; form.appendChild(host);
-    var clients = node('div', '', 'od-ai-clients'); clients.setAttribute('role', 'group'); clients.setAttribute('aria-label', 'AI services'); form.insertBefore(clients, host);
-    var help = node('p', '', 'od-mcp-intro'); form.appendChild(help);
-    function selectedClient() {
-      Array.from(clients.children).forEach(function (button) { button.setAttribute('aria-pressed', String(button.getAttribute('data-client') === host.value)); });
-      help.textContent = host.value === 'muse' ? 'Musebot uses a private adapter and its secure OAuth connector. Link this computer first; then configure the adapter in Musebot.' : host.value === 'composio' ? 'Link this computer first. Then add SuperLocalMemory as a Custom MCP in Composio using OAuth.' : host.value === 'other_mcp' ? 'Use a compatible web client that supports remote MCP and OAuth. Link this computer first, then use its MCP connection settings.' : 'Your AI account must support custom remote MCP connections with OAuth. Link this computer first, then use its connector settings.';
+    var ui = window.odAppsUi; var h = ui.h;
+    var card = h('div', { id: 'od-ai-connections', className: 'apps-stack' });
+
+    // ---- 1. This computer ---------------------------------------------------
+    var computerTitleId = ui.nextId('apps-computer-title');
+    var pill = h('span', { className: 'apps-pill is-off', 'data-computer-status': '' });
+    var pillText = h('span', { text: 'Off' }); pill.appendChild(pillText);
+    var linkedValue = h('dd', { className: 'apps-fact-value', text: 'Not linked yet' });
+    var profileValue = h('dd', { className: 'apps-fact-value', text: '—' });
+    var status = h('p', { className: 'apps-status', role: 'status', 'aria-live': 'polite', text: 'Checking whether internet access is available…' });
+    var list = h('ul', { className: 'apps-conn-rows', 'aria-label': 'Connections on this computer' });
+    var refresh = h('button', { type: 'button', className: 'btn ghost sm' }, [ui.icon('refresh', 15), h('span', { text: 'Refresh status' })]);
+    var computerPanel = h('div', { className: 'apps-panel apps-computer' }, [
+      h('div', { className: 'apps-computer-head' }, [
+        h('div', { className: 'apps-avatar is-device', 'aria-hidden': 'true' }, [ui.icon('monitor', 20)]),
+        h('div', { className: 'apps-computer-title' }, [
+          h('strong', { text: 'SuperLocalMemory' }),
+          h('span', { className: 'apps-host', text: 'Running on this computer' })
+        ]),
+        pill
+      ]),
+      h('dl', { className: 'apps-facts' }, [
+        h('div', { className: 'apps-fact' }, [h('dt', { text: 'GitHub sign-in' }), linkedValue]),
+        h('div', { className: 'apps-fact' }, [h('dt', { text: 'Memory profile' }), profileValue])
+      ]),
+      status,
+      list,
+      h('div', { className: 'apps-computer-foot' }, [refresh])
+    ]);
+    var computer = h('section', { className: 'apps-section', 'aria-labelledby': computerTitleId }, [
+      h('div', { className: 'apps-section-head' }, [h('div', { className: 'apps-section-headtext' }, [
+        h('h3', { id: computerTitleId, className: 'apps-section-title', text: 'This computer' }),
+        h('p', { className: 'apps-section-sub', text: 'The link between your memory and the apps you add. Nothing leaves this computer until you approve an app.' })
+      ])]),
+      computerPanel
+    ]);
+    card.appendChild(computer);
+
+    // ---- 2. Your connected apps --------------------------------------------
+    var appsList = typeof window.odCreateConnectedAppsList === 'function' ? window.odCreateConnectedAppsList() : null;
+    if (appsList) card.appendChild(appsList);
+
+    // ---- 3. Add an app ------------------------------------------------------
+    var grid = h('ul', { className: 'apps-grid' });
+    var setupButtons = [];
+    var cardItems = {};
+    APP_CARDS.forEach(function (entry) {
+      var label = HOSTS[entry.host];
+      var button = h('button', { type: 'button', className: 'btn secondary sm', 'data-client': entry.host, 'aria-label': 'Set up ' + label }, [h('span', { text: 'Set up' })]);
+      button.disabled = true;
+      button.addEventListener('click', function () { openFlow(entry.host); });
+      var item = h('li', { className: 'apps-app-card' }, [
+        h('div', { className: 'apps-avatar', 'aria-hidden': 'true', text: ui.monogram(label) }),
+        h('div', { className: 'apps-app-text' }, [h('h4', { className: 'apps-app-name', text: label }), h('p', { className: 'apps-app-desc', text: entry.desc })]),
+        button
+      ]);
+      cardItems[entry.host] = item; setupButtons.push(button); grid.appendChild(item);
+    });
+
+    var flowTitle = h('h4', { id: 'apps-flow-title', className: 'apps-flow-title', tabindex: '-1', text: 'Set up an app' });
+    var closeFlow = h('button', { type: 'button', className: 'btn ghost sm', 'aria-label': 'Close setup' }, [ui.icon('close', 16), h('span', { text: 'Close' })]);
+    var journey = h('ol', { className: 'apps-steps', 'aria-label': 'Setup steps' });
+    ['Choose app', 'Link this computer', 'Check connection', 'Add to your app'].forEach(function (step, index) {
+      journey.appendChild(h('li', { className: 'apps-step' }, [h('span', { className: 'apps-step-num', 'aria-hidden': 'true', text: String(index + 1) }), h('span', { className: 'apps-step-label', text: step })]));
+    });
+    var help = h('p', { className: 'apps-flow-help' });
+    var form = h('form', { className: 'apps-form', novalidate: true, 'aria-labelledby': 'apps-flow-title' });
+    var consent = h('input', { type: 'checkbox', 'data-remote-opt-in': '' });
+    var write = h('input', { type: 'checkbox', 'data-permission': 'write' });
+    var session = h('input', { type: 'checkbox', 'data-permission': 'session' });
+    function check(input, title, hint) {
+      return h('label', { className: 'apps-check' }, [input, h('span', { className: 'apps-check-text' }, [h('span', { className: 'apps-check-title', text: title }), h('span', { className: 'apps-check-hint', text: hint })])]);
     }
-    host.addEventListener('change', selectedClient);
-    var consentLabel = node('label'); var consent = node('input'); consent.type = 'checkbox'; consent.setAttribute('data-remote-opt-in', ''); consentLabel.append(consent, document.createTextNode(' Enable remote access for this connection.')); form.appendChild(consentLabel);
-    var writeLabel = node('label'); writeLabel.style.display = 'block'; writeLabel.style.margin = '8px 0'; var write = node('input'); write.type = 'checkbox'; write.setAttribute('data-permission', 'write'); writeLabel.append(write, document.createTextNode(' Allow this AI to save new memories.')); form.appendChild(writeLabel);
-    var submit = node('button', 'Link this computer with GitHub', 'btn primary'); submit.type = 'submit'; form.appendChild(submit);
-    var links = node('div'); body.appendChild(links);
+    var perms = h('fieldset', { className: 'apps-perms' }, [
+      h('legend', { className: 'apps-perms-legend', text: 'What this app can do' }),
+      check(consent, 'Turn on internet access for this app', 'It stays off until you approve it here. Reading your memories is always included.'),
+      check(write, 'Allow saving memories (recommended)', 'Lets the app remember new things for you. Leave it off to keep the app read-only.'),
+      check(session, 'Allow session tools', 'Lets the app open and close memory sessions so it can keep track of a conversation.')
+    ]);
+    var submit = h('button', { type: 'submit', className: 'btn primary', text: 'Link this computer with GitHub' });
+    submit.disabled = true;
+    form.append(perms, h('div', { className: 'apps-form-actions' }, [submit]));
+    var links = h('div', { className: 'apps-links' });
+    var instructions = h('div', { className: 'apps-instructions-stack' });
+    var flow = h('div', { className: 'apps-panel apps-flow', hidden: true, role: 'region', 'aria-labelledby': 'apps-flow-title' }, [
+      h('div', { className: 'apps-flow-head' }, [flowTitle, closeFlow]),
+      journey, help, form, links, instructions
+    ]);
+    var addTitle = h('h3', { id: 'apps-add-title', className: 'apps-section-title', tabindex: '-1', text: 'Add an app' });
+    var add = h('section', { id: 'apps-add', className: 'apps-section', 'aria-labelledby': 'apps-add-title' }, [
+      h('div', { className: 'apps-section-head' }, [h('div', { className: 'apps-section-headtext' }, [
+        addTitle,
+        h('p', { className: 'apps-section-sub', text: 'Choose an app to connect. You approve each one before it can see anything.' })
+      ])]),
+      grid, flow
+    ]);
+    card.appendChild(add);
+
+    // ---- 4. Technical details ----------------------------------------------
+    function urlField(label, value) {
+      var input = h('input', { type: 'text', readonly: true, className: 'apps-input', 'aria-label': label, value: value });
+      input.value = value;
+      return h('div', { className: 'apps-url-field' }, [
+        h('span', { className: 'apps-url-label', text: label }),
+        h('div', { className: 'apps-url-row' }, [input, ui.copyButton('Copy', function () { return value; }, input)])
+      ]);
+    }
+    var historyMount = h('div', { className: 'apps-history' });
+    var details = h('details', { className: 'apps-tech' }, [
+      h('summary', { className: 'apps-tech-summary' }, [
+        ui.icon('chevron', 16),
+        h('span', { className: 'apps-tech-title', text: 'Technical details' }),
+        h('span', { className: 'apps-tech-sub', text: 'For developers' })
+      ]),
+      h('div', { className: 'apps-tech-body' }, [
+        h('p', { className: 'apps-section-sub', text: 'Most apps only ask for the server URL. Some also ask for the OAuth metadata URL.' }),
+        urlField('MCP server URL', MCP_URL),
+        urlField('OAuth metadata URL', OAUTH_URL),
+        historyMount
+      ])
+    ]);
+    card.appendChild(details);
+
+    // ---- state machine (moved from the former card) -------------------------
     var metadata = null; var attempt = null; var busy = false; var storageKey = null;
+    var unavailable = true;            // blocks every control until profile metadata arrives
+    var selectedHost = '';
     var choicesSignature = null; var listSignature = null;
     var pollTimer = null; var loading = false; var disposed = false;
     var refreshRevision = 0; var refreshRequested = false;
+    var flowOpen = false; var flowDismissed = false; var knownReady = null; var pendingStep = 0;
+    if (window.__slmAppsReturn) { knownReady = {}; window.__slmAppsReturn = false; }
+
     function controls() {
-      consent.disabled = add.disabled || busy; write.disabled = add.disabled || busy;
-      submit.disabled = add.disabled || busy;
-      Array.from(clients.children).forEach(function (button) { button.disabled = add.disabled || busy; });
-      Array.from(list.querySelectorAll('[data-sign-in-action]')).forEach(function (action) { if (action.tagName === 'A') action.hidden = add.disabled || busy; else action.disabled = add.disabled || busy; });
+      var blocked = unavailable || busy;
+      consent.disabled = blocked; write.disabled = blocked; session.disabled = blocked; submit.disabled = blocked;
+      setupButtons.forEach(function (button) { button.disabled = blocked; });
+      Array.from(list.querySelectorAll('[data-sign-in-action]')).forEach(function (action) { if (action.tagName === 'A') action.hidden = blocked; else action.disabled = blocked; });
     }
+    function setPill(kind, label) {
+      pill.className = 'apps-pill is-' + kind; pillText.textContent = label;
+    }
+    function selectedClient() {
+      var name = selectedHost && HOSTS[selectedHost];
+      flowTitle.textContent = name ? 'Set up ' + name : 'Set up an app';
+      help.textContent = form.hidden ? 'This computer is linked. Finish in your app with the steps below.' : name ? (HELP[selectedHost] || HELP.default) : 'Choose an app above to begin.';
+      Object.keys(cardItems).forEach(function (host) { cardItems[host].classList.toggle('is-selected', host === selectedHost && flowOpen); });
+    }
+    // The stepper follows THIS setup, not every connection on the computer:
+    // a sign-in under way sets it (1 link, 2 check); a finished one shows the
+    // last step; a fresh form for a chosen app sits on "Link this computer".
+    function updateSteps() {
+      var current = pendingStep ? pendingStep : form.hidden ? 3 : selectedHost ? 1 : 0;
+      Array.from(journey.children).forEach(function (item, index) {
+        if (index === current) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');
+        item.classList.toggle('is-done', index < current); item.classList.toggle('is-current', index === current);
+      });
+    }
+    function syncFlow() { flow.hidden = !flowOpen; instructions.hidden = !form.hidden; selectedClient(); updateSteps(); }
+    function openFlow(name) {
+      if (unavailable || busy || !Object.hasOwn(HOSTS, name)) return;
+      selectedHost = name; flowOpen = true; flowDismissed = false; form.hidden = false;
+      syncFlow();
+      // Move keyboard focus first without jumping, then bring the panel into view.
+      flowTitle.focus({ preventScroll: true });
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (typeof flow.scrollIntoView === 'function') flow.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }
+    closeFlow.addEventListener('click', function () {
+      flowOpen = false; flowDismissed = true; syncFlow();
+      var target = selectedHost && cardItems[selectedHost] && cardItems[selectedHost].querySelector('button');
+      if (target && !target.disabled) target.focus(); else addTitle.focus();
+    });
     function schedulePoll(delay) {
       if (pollTimer !== null) window.clearTimeout(pollTimer);
       pollTimer = window.setTimeout(function () {
@@ -80,8 +258,36 @@
       var saved = JSON.parse(raw);
       if (!saved || !/^[a-f0-9]{32}$/.test(saved.key) || typeof saved.payload !== 'string') throw new Error('invalid pending intent');
       var payload = JSON.parse(saved.payload);
-      if (!payload || payload.profile_id !== metadata.current_profile || !Object.hasOwn(HOSTS, payload.host) || payload.remote_opt_in !== true || !payload.permissions || payload.permissions.read !== true || typeof payload.permissions.write !== 'boolean' || payload.permissions.correction !== false || payload.permissions.session !== false) throw new Error('invalid pending intent');
+      if (!payload || payload.profile_id !== metadata.current_profile || !Object.hasOwn(HOSTS, payload.host) || payload.remote_opt_in !== true || !payload.permissions || payload.permissions.read !== true || typeof payload.permissions.write !== 'boolean' || payload.permissions.correction !== false || typeof payload.permissions.session !== 'boolean') throw new Error('invalid pending intent');
       return { key: saved.key, payload: saved.payload, acknowledged: saved.acknowledged === true, connectionId: typeof saved.connectionId === 'string' ? saved.connectionId : null };
+    }
+    function isLive(connection) {
+      return !!connection && connection.verified === true && CONNECTION_ID.test(connection.connection_id) && (connection.state === 'connected' || connection.state === 'ready_for_client' && connection.mcp_url === MCP_URL);
+    }
+    function describe(connection, ready, active, cancelled) {
+      return connection.sign_in_state === 'expired' ? 'Sign-in expired. Restart it to get a fresh link.' : ready ? 'On. Apps you approve can reach your memory while this computer is online.' : active ? 'On' : cancelled ? (connection.cleanup_pending ? 'Cancelled. Cleaning up on the connection service…' : 'Cancelled') : connection.state === 'pending' ? connection.transport_state === 'authorization_required' ? 'Needs a new sign-in. Cancel this setup and link again.' : connection.transport_state ? 'Checking the connection from this computer' : 'Waiting for GitHub sign-in' : 'Not connected';
+    }
+    function buildInstructions(connection) {
+      var steps = h('ol', { className: 'apps-instructions-steps' }, instructionSteps(connection.host).map(function (line) { return h('li', { text: line }); }));
+      var box = h('div', { className: 'apps-instructions' }, [
+        h('h4', { className: 'apps-instructions-title', text: 'Add SuperLocalMemory to ' + (connection.host === 'other_mcp' ? 'your app' : HOSTS[connection.host]) }),
+        steps
+      ]);
+      var endpoint = h('input', { type: 'text', readonly: true, className: 'apps-input', 'aria-label': 'MCP server URL' });
+      endpoint.value = connection.mcp_url;
+      box.appendChild(h('div', { className: 'apps-url-field' }, [
+        h('span', { className: 'apps-url-label', text: 'MCP server URL' }),
+        h('div', { className: 'apps-url-row' }, [endpoint, ui.copyButton('Copy', function () { return connection.mcp_url; }, endpoint)])
+      ]));
+      if (connection.host === 'composio' || connection.host === 'muse') {
+        var oauth = h('input', { type: 'text', readonly: true, className: 'apps-input', 'aria-label': 'OAuth metadata URL' });
+        oauth.value = OAUTH_URL;
+        box.appendChild(h('div', { className: 'apps-url-field' }, [
+          h('span', { className: 'apps-url-label', text: 'OAuth metadata URL' }),
+          h('div', { className: 'apps-url-row' }, [oauth, ui.copyButton('Copy', function () { return OAUTH_URL; }, oauth)])
+        ]));
+      }
+      return box;
     }
     function load() {
       if (loading || disposed) return Promise.resolve();
@@ -95,80 +301,95 @@
         var choices = metadata && Array.isArray(metadata.hosts) ? metadata.hosts.filter(function (name) { return Object.hasOwn(HOSTS, name); }) : [];
         var nextChoices = JSON.stringify(choices);
         if (nextChoices !== choicesSignature) {
-          var selected = host.value; host.textContent = ''; clients.textContent = '';
-          choices.forEach(function (name) {
-            var option = node('option', HOSTS[name]); option.value = name; host.appendChild(option);
-            var button = node('button', HOSTS[name], 'btn ghost od-ai-client'); button.type = 'button'; button.setAttribute('data-client', name);
-            button.addEventListener('click', function () { host.value = name; selectedClient(); }); clients.appendChild(button);
-          });
-          if (choices.indexOf(selected) >= 0) host.value = selected;
+          if (choices.indexOf(selectedHost) < 0) selectedHost = '';
+          Object.keys(cardItems).forEach(function (name) { cardItems[name].hidden = choices.indexOf(name) < 0; });
           choicesSignature = nextChoices; selectedClient();
         }
-        add.disabled = !(metadata && metadata.available === true && typeof metadata.current_profile === 'string' && metadata.current_profile && metadata.current_profile.length <= 256 && typeof metadata.installation_id === 'string' && metadata.installation_id && metadata.installation_id.length <= 256 && choices.length);
-        if (!add.disabled) {
+        unavailable = !(metadata && metadata.available === true && typeof metadata.current_profile === 'string' && metadata.current_profile && metadata.current_profile.length <= 256 && typeof metadata.installation_id === 'string' && metadata.installation_id && metadata.installation_id.length <= 256 && choices.length);
+        if (!unavailable) {
           var nextStorageKey = 'slm-ai-intent-v1:' + encodeURIComponent(metadata.installation_id) + ':' + encodeURIComponent(metadata.current_profile);
           if (storageKey !== nextStorageKey) {
-            storageKey = nextStorageKey; links.textContent = ''; form.hidden = false; add.hidden = true; attempt = restoreAttempt(); consent.checked = false; write.checked = false; listSignature = null;
-          if (attempt) {
-            var restored = JSON.parse(attempt.payload);
-            if (choices.indexOf(restored.host) < 0) throw new Error('pending host unavailable');
-            host.value = restored.host; write.checked = restored.permissions.write; consent.checked = false;
-          }
-          selectedClient();
+            storageKey = nextStorageKey; links.textContent = ''; form.hidden = false; attempt = restoreAttempt(); consent.checked = false; write.checked = false; session.checked = false; listSignature = null;
+            if (attempt) {
+              var restored = JSON.parse(attempt.payload);
+              if (choices.indexOf(restored.host) < 0) throw new Error('pending host unavailable');
+              selectedHost = restored.host; write.checked = restored.permissions.write; session.checked = restored.permissions.session; consent.checked = false;
+              flowOpen = true; flowDismissed = false;
+            }
+            selectedClient();
           }
         }
-        status.textContent = add.disabled ? 'AI connections are currently unavailable.' : attempt ? 'A pending request was restored. Review it and confirm remote access to retry.' : 'No remote access is enabled until you approve a connection.';
         var currentConnections = metadata && Array.isArray(metadata.connections) ? metadata.connections : [];
-        var step = currentConnections.some(function (c) { return c && c.verified === true && (c.state === 'connected' || c.state === 'ready_for_client' && c.mcp_url === 'https://mcp.superlocalmemory.com/mcp'); }) ? 3 : currentConnections.some(function (c) { return c && c.state === 'pending' && c.transport_state && c.transport_state !== 'authorization_required'; }) ? 2 : currentConnections.some(function (c) { return c && c.state === 'pending'; }) ? 1 : 0;
-        if (!add.disabled && step === 3) status.textContent = 'This computer is verified. Follow your AI connection instructions below.';
-        else if (!add.disabled && step === 2) status.textContent = 'GitHub sign-in completed. Checking the connection from this computer…';
-        else if (!add.disabled && currentConnections.some(function (c) { return c && c.sign_in_state === 'expired'; })) status.textContent = 'A sign-in link expired. Use Restart sign-in to continue with the same permissions.';
-        else if (!add.disabled && step === 1) status.textContent = 'Waiting for GitHub sign-in. Finish the opened sign-in page, or retry the same request below.';
-        Array.from(journey.children).forEach(function (item, index) { if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current'); });
-        controls(); links.hidden = add.disabled;
-        var nextList = JSON.stringify([metadata.current_profile, metadata.connections || []]);
+        var live = currentConnections.filter(isLive);
+        var pendingConnections = currentConnections.filter(function (c) { return c && c.state === 'pending'; });
+        var needsAttention = currentConnections.some(function (c) { return c && (c.sign_in_state === 'expired' || c.state === 'pending' && c.transport_state === 'authorization_required' || c.state === 'cancelled' && c.cleanup_pending); });
+        var step = live.length ? 3 : currentConnections.some(function (c) { return c && c.state === 'pending' && c.transport_state && c.transport_state !== 'authorization_required'; }) ? 2 : pendingConnections.length ? 1 : 0;
+        status.textContent = unavailable ? 'Connected apps are not available on this computer right now.' : attempt ? 'A pending request was restored. Review it and confirm internet access to retry.' : 'Internet access is off. It only turns on when you approve an app.';
+        if (!unavailable && step === 3) status.textContent = 'Web access is on. Apps you approve can reach your memory while this computer is online.';
+        else if (!unavailable && step === 2) status.textContent = 'GitHub sign-in is done. Checking the connection from this computer…';
+        else if (!unavailable && currentConnections.some(function (c) { return c && c.sign_in_state === 'expired'; })) status.textContent = 'A sign-in link expired. Use Restart sign-in to continue with the same permissions.';
+        else if (!unavailable && step === 1) status.textContent = 'Waiting for GitHub sign-in. Finish the page that opened, or retry the same request below.';
+        if (unavailable) setPill(metadata ? 'off' : 'warn', metadata ? 'Off' : 'Needs attention');
+        else if (live.length) setPill('ok', 'Ready');
+        else if (needsAttention) setPill('warn', 'Needs attention');
+        else if (pendingConnections.length) setPill('work', 'Connecting');
+        else setPill('off', 'Off');
+        var linked = live.length > 0 || step === 2;
+        linkedValue.textContent = linked ? 'Linked' : 'Not linked yet'; linkedValue.className = 'apps-fact-value' + (linked ? ' is-ok' : '');
+        profileValue.textContent = metadata && typeof metadata.current_profile === 'string' && metadata.current_profile ? metadata.current_profile : '—';
+        pendingStep = pendingConnections.length ? (step === 2 || currentConnections.some(function (c) { return c && c.state === 'pending' && c.transport_state && c.transport_state !== 'authorization_required'; }) ? 2 : 1) : 0;
+        updateSteps();
+        controls(); links.hidden = unavailable;
+        var nextList = JSON.stringify([metadata && metadata.current_profile, metadata && metadata.connections || []]);
         if (nextList !== listSignature) {
-        list.textContent = '';
-        var history = node('details'); var historyRows = node('div'); var historyCount = 0;
-        history.appendChild(node('summary', 'Past connections')); history.appendChild(historyRows);
+        list.textContent = ''; instructions.textContent = '';
+        var historyDetails = h('details', { className: 'apps-history-details' }); var historyRows = h('ul', { className: 'apps-conn-rows' }); var historyCount = 0;
+        var historySummary = h('summary', { text: 'Past connections' });
+        historyDetails.appendChild(historySummary); historyDetails.appendChild(historyRows);
+        var readyNow = {};
         (metadata && Array.isArray(metadata.connections) ? metadata.connections : []).forEach(function (connection) {
           if (!connection || !Object.hasOwn(HOSTS, connection.host)) return;
           // Recover identity after a lost initiation response. This is a
           // non-secret idempotency key scoped by the authenticated local API.
-          if (attempt && connection.intent_key === attempt.key && /^[a-f0-9]{32}$/.test(connection.connection_id)) {
+          if (attempt && connection.intent_key === attempt.key && CONNECTION_ID.test(connection.connection_id)) {
             attempt.connectionId = connection.connection_id; saveAttempt();
           }
           var active = connection.state === 'connected' && connection.verified === true;
-          var ready = connection.state === 'ready_for_client' && connection.verified === true && connection.mcp_url === 'https://mcp.superlocalmemory.com/mcp';
-          if ((active || ready || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; add.hidden = false; consent.checked = false; }
+          var ready = connection.state === 'ready_for_client' && connection.verified === true && connection.mcp_url === MCP_URL;
+          if ((active || ready || connection.state === 'cancelled') && attempt && connection.connection_id === attempt.connectionId) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
           var cancelled = connection.state === 'cancelled';
           var rowProfile = metadata.current_profile;
-          var row = node('div', '', 'od-ai-connection');
+          var actions = h('div', { className: 'apps-row-actions' });
+          var row = h('li', { className: 'apps-conn-row' }, [
+            h('div', { className: 'apps-avatar', 'aria-hidden': 'true', text: ui.monogram('Web access') }),
+            h('div', { className: 'apps-row-main' }, [
+              // One link serves every approved app, so it is named for what it is, not for the
+              // app chosen at setup; history keeps that origin for context.
+              h('div', { className: 'apps-row-title' }, [h('span', { className: 'apps-name', text: cancelled ? 'Web access · set up for ' + HOSTS[connection.host] : 'Web access' })]),
+              h('p', { className: 'apps-row-desc', text: describe(connection, ready, active, cancelled) })
+            ]),
+            actions
+          ]);
           if (cancelled && !connection.cleanup_pending) { historyRows.appendChild(row); historyCount += 1; } else list.appendChild(row);
-          var description = connection.sign_in_state === 'expired' ? 'Sign-in expired — restart to get a fresh link' : ready ? 'Ready for AI client — GitHub connected' : active ? 'Connected' : cancelled ? (connection.cleanup_pending ? 'Cancelled — remote cleanup pending' : 'Cancelled') : connection.state === 'pending' ? connection.transport_state === 'authorization_required' ? 'Authorization required — cancel this connection and link again' : connection.transport_state ? 'Verifying computer connection' : 'Waiting for GitHub sign-in and connection verification' : 'Not connected';
-          row.appendChild(node('p', HOSTS[connection.host] + ': ' + description));
           if (ready) {
-            row.appendChild(node('h4', 'Connect your AI — ' + HOSTS[connection.host]));
-            row.appendChild(node('p', connection.host === 'composio' ? 'In Composio, add a Custom MCP named SuperLocalMemory, paste the MCP server URL below, and choose OAuth. In Advanced settings, use the OAuth metadata URL below. Sign in with the same GitHub account and approve access to this profile.' : connection.host === 'muse' ? 'Use the Musebot private adapter with its secure OAuth connector. Give it the MCP server URL and OAuth metadata URL below; approve access using the same GitHub account. Never paste tokens into chat.' : 'Add a remote MCP connector in your compatible AI client using the MCP server URL below and OAuth. Sign in with the same GitHub account and approve this profile. Availability depends on your AI account.'));
-            var endpoint = node('input'); endpoint.type = 'text'; endpoint.readOnly = true; endpoint.value = connection.mcp_url; endpoint.setAttribute('aria-label', 'MCP server URL'); row.appendChild(endpoint);
-            var oauthLabel = node('label', 'OAuth metadata URL'); var oauth = node('input'); oauth.type = 'text'; oauth.readOnly = true; oauth.value = 'https://auth.superlocalmemory.com/.well-known/oauth-authorization-server'; oauth.setAttribute('aria-label', 'OAuth metadata URL'); oauthLabel.appendChild(oauth);
-            var copy = node('button', 'Copy URL', 'btn ghost sm'); copy.type = 'button'; row.appendChild(copy);
-            row.appendChild(oauthLabel);
-            copy.addEventListener('click', function () {
-              if (window.navigator.clipboard && window.navigator.clipboard.writeText) window.navigator.clipboard.writeText(connection.mcp_url).then(function () { copy.textContent = 'Copied'; }).catch(function () { endpoint.select(); });
-              else endpoint.select();
-            });
+            readyNow[connection.connection_id] = true;
+            instructions.appendChild(buildInstructions(connection));
+            var show = h('button', { type: 'button', className: 'btn secondary sm', text: 'How to add an app' });
+            show.addEventListener('click', function () { flowOpen = true; flowDismissed = false; selectedHost = connection.host; form.hidden = true; syncFlow(); flowTitle.focus({ preventScroll: true }); if (typeof flow.scrollIntoView === 'function') flow.scrollIntoView({ block: 'start' }); });
+            actions.appendChild(show);
           }
-          if (connection.state === 'pending' && connection.sign_in_state === 'required' && /^[a-f0-9]{32}$/.test(connection.connection_id)) {
+          if (connection.state === 'pending' && connection.sign_in_state === 'required' && CONNECTION_ID.test(connection.connection_id)) {
             var continuation = safeSignIn('https://auth.superlocalmemory.com/owner-login?connection_id=' + connection.connection_id, connection.connection_id);
-            var resume = node('a', 'Continue sign-in', 'btn primary'); resume.href = continuation; resume.target = '_blank'; resume.rel = 'noopener noreferrer'; resume.setAttribute('data-sign-in-action', ''); resume.addEventListener('click', function (event) { if (busy || add.disabled || !metadata || metadata.current_profile !== rowProfile) event.preventDefault(); }); row.appendChild(resume);
+            var resume = h('a', { className: 'btn primary sm', text: 'Continue sign-in', 'data-sign-in-action': '', target: '_blank', rel: 'noopener noreferrer' });
+            if (continuation) resume.href = continuation;
+            resume.addEventListener('click', function (event) { if (busy || unavailable || !metadata || metadata.current_profile !== rowProfile) event.preventDefault(); }); actions.appendChild(resume);
             var transient = links.querySelector('a');
             if (transient && transient.href === continuation) links.textContent = '';
           }
-          if ((connection.state === 'pending' && connection.verified !== true || connection.state === 'cancelled' && connection.cleanup_pending) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version)) {
-            var restart = node('button', 'Restart sign-in', 'btn primary'); restart.type = 'button'; restart.setAttribute('data-sign-in-action', ''); row.appendChild(restart);
+          if ((connection.state === 'pending' && connection.verified !== true || connection.state === 'cancelled' && connection.cleanup_pending) && CONNECTION_ID.test(connection.connection_id) && Number.isSafeInteger(connection.version)) {
+            var restart = h('button', { type: 'button', className: 'btn secondary sm', text: 'Restart sign-in', 'data-sign-in-action': '' }); actions.appendChild(restart);
             restart.addEventListener('click', function () {
-              if (busy || add.disabled || !metadata || metadata.current_profile !== rowProfile) return;
+              if (busy || unavailable || !metadata || metadata.current_profile !== rowProfile) return;
               var profile = rowProfile; var popup = null;
               try { popup = window.open('about:blank', '_blank'); if (popup) popup.opener = null; } catch (_) {}
               busy = true; controls(); restart.disabled = true; status.textContent = 'Restarting sign-in with the same approved permissions…'; links.textContent = '';
@@ -176,47 +397,71 @@
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ profile_id: profile, expected_version: connection.version, remote_opt_in: true })
               }).then(function (result) {
-                if (!result || result.state !== 'pending' || !/^[a-f0-9]{32}$/.test(result.connection_id)) throw new Error('unconfirmed restart');
+                if (!result || result.state !== 'pending' || !CONNECTION_ID.test(result.connection_id)) throw new Error('unconfirmed restart');
                 var url = safeSignIn(result.authorization_url, result.connection_id);
                 if (!url) throw new Error('unconfirmed restart sign-in');
                 if (attempt && attempt.connectionId === connection.connection_id) { window.sessionStorage.removeItem(storageKey); attempt = null; }
                 if (popup) popup.location.replace(url);
-                var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); links.hidden = false;
-                status.textContent = 'Fresh sign-in link ready. Complete GitHub sign-in in the opened page.';
+                var link = h('a', { className: 'btn secondary sm', text: 'Continue sign-in', target: '_blank', rel: 'noopener noreferrer' }); link.href = url; links.appendChild(link); links.hidden = false;
+                status.textContent = 'Fresh sign-in link ready. Complete GitHub sign-in in the page that opened.';
                 schedulePoll(1500);
               }).catch(function () { if (popup) popup.close(); status.textContent = 'Restart could not be confirmed. Retry Restart sign-in; your approved permissions are unchanged.'; }).finally(function () { busy = false; controls(); });
             });
           }
-          if ((connection.state === 'pending' || ready || active) && /^[a-f0-9]{32}$/.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
-            var cancel = node('button', 'Cancel connection', 'btn ghost sm'); cancel.type = 'button'; row.appendChild(cancel);
+          if ((connection.state === 'pending' || ready || active) && CONNECTION_ID.test(connection.connection_id) && Number.isSafeInteger(connection.version) && connection.version >= 0) {
+            var cancel = h('button', { type: 'button', className: 'btn ghost sm', text: connection.state === 'pending' ? 'Cancel setup' : 'Turn off', 'aria-label': connection.state === 'pending' ? 'Cancel setup for ' + HOSTS[connection.host] : 'Turn off web access for this computer' }); actions.appendChild(cancel);
             var profile = metadata.current_profile;
-            cancel.addEventListener('click', function () {
+            var runCancel = function () {
               if (busy) return;
-              busy = true; cancel.disabled = true; status.textContent = 'Cancelling connection…';
+              busy = true; cancel.disabled = true; status.textContent = connection.state === 'pending' ? 'Cancelling setup…' : 'Turning off web access…';
               call('/api/v3/connections/' + encodeURIComponent(connection.connection_id) + '/cancel', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ profile_id: profile, expected_version: connection.version })
               }).then(function (result) {
                 if (!result || result.connection_id !== connection.connection_id || result.state !== 'cancelled' || result.verified !== false || typeof result.cleanup_pending !== 'boolean') throw new Error('unconfirmed cancellation');
-                if (attempt && attempt.connectionId === connection.connection_id) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; add.hidden = false; consent.checked = false; }
+                if (attempt && attempt.connectionId === connection.connection_id) { window.sessionStorage.removeItem(storageKey); attempt = null; links.textContent = ''; form.hidden = true; consent.checked = false; }
                 return load();
               }).catch(function () { status.textContent = 'Cancellation could not be confirmed. Refresh status and retry.'; }).finally(function () { busy = false; cancel.disabled = false; controls(); });
+            };
+            cancel.addEventListener('click', function () {
+              if (busy) return;
+              if (connection.state === 'pending') { runCancel(); return; }
+              // Turning off cuts every connected app at once: always confirm.
+              ui.confirmDialog({
+                title: 'Turn off web access?',
+                body: 'Every connected app will lose access to your memory right away. Your memory on this computer is not affected. You can turn web access on again any time.',
+                confirmLabel: 'Turn off web access', cancelLabel: 'Keep it on', returnFocus: cancel,
+                fallbackFocus: function () { return status; },
+                onConfirm: function (controller) { controller.close(); runCancel(); }
+              });
             });
           }
         });
-        if (historyCount) { history.firstChild.textContent = 'Past connections (' + historyCount + ')'; list.appendChild(history); }
+        historyMount.textContent = '';
+        if (historyCount) { historySummary.textContent = 'Past connections (' + historyCount + ')'; historyMount.appendChild(historyDetails); }
+        list.hidden = !list.children.length;
+        // Open the guided panel for sign-in that is under way, and for a
+        // connection that just became ready; leave it closed for old state.
+        var justReady = false;
+        if (knownReady === null) knownReady = readyNow;
+        else Object.keys(readyNow).forEach(function (id) { if (!knownReady[id]) { knownReady[id] = true; justReady = true; } });
+        if (!flowDismissed && (pendingConnections.length || justReady)) flowOpen = true;
+        if (form.hidden && !instructions.childNodes.length && !pendingConnections.length) flowOpen = false;
+        if (selectedHost === '' && flowOpen) { var first = currentConnections.filter(function (c) { return c && Object.hasOwn(HOSTS, c.host) && c.state !== 'cancelled'; })[0]; if (first) selectedHost = first.host; }
+        syncFlow();
         listSignature = nextList; controls();
         }
+        if (appsList) appsList.odSetConnections(unavailable ? [] : live.map(function (c) { return c.connection_id; }), unavailable ? '' : metadata.current_profile);
         if (metadata && Array.isArray(metadata.connections) && metadata.connections.some(function (connection) { return connection && connection.state === 'pending'; })) schedulePoll(1500);
-      }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; add.disabled = true; controls(); status.textContent = 'Could not check AI connections. Refresh to retry.'; }).finally(function () { loading = false; refresh.disabled = false; if (refreshRequested && !disposed) { refreshRequested = false; load(); } });
+      }).catch(function () { if (attempt && attempt.acknowledged) schedulePoll(10000); metadata = null; unavailable = true; controls(); setPill('warn', 'Needs attention'); status.textContent = 'Could not check your connections. Use Refresh status to try again.'; if (appsList) appsList.odSetUnavailable(); }).finally(function () { loading = false; refresh.disabled = false; if (refreshRequested && !disposed) { refreshRequested = false; load(); } });
     }
-    add.addEventListener('click', function () { if (!add.disabled) { form.hidden = false; add.hidden = true; } });
     refresh.addEventListener('click', function () { if (!busy) load(); });
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || add.disabled || !metadata) return;
-      if (!consent.checked) { status.textContent = 'Please enable remote access to continue.'; return; }
-      var payload = JSON.stringify({ host: host.value, profile_id: metadata.current_profile, remote_opt_in: true, permissions: { read: true, write: write.checked, correction: false, session: false } });
+      if (busy || unavailable || !metadata) return;
+      if (!selectedHost) { status.textContent = 'Choose an app to set up first.'; return; }
+      if (!consent.checked) { status.textContent = 'Please turn on internet access to continue.'; consent.focus(); return; }
+      var payload = JSON.stringify({ host: selectedHost, profile_id: metadata.current_profile, remote_opt_in: true, permissions: { read: true, write: write.checked, correction: false, session: session.checked } });
       if (attempt && attempt.payload !== payload) {
         if (!attempt.acknowledged) { status.textContent = 'Retry the pending request before changing its settings.'; return; }
         attempt = null;
@@ -229,20 +474,23 @@
       call('/api/v3/connections/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attempt.key }, body: payload }).then(function (result) {
         if (!result || result.state !== 'pending' || typeof result.connection_id !== 'string' || !result.connection_id || result.connection_id.length > 256) throw new Error('unconfirmed connection receipt');
         attempt.acknowledged = true; attempt.connectionId = result.connection_id; saveAttempt();
+        flowOpen = true; flowDismissed = false; syncFlow();
         // A request acknowledgement is not proof of a live authorized connection.
         status.textContent = 'Connection requested. Waiting for sign-in and verification.';
         var url = result && safeSignIn(result.authorization_url, result.connection_id);
         if (url) {
           if (signInWindow) { try { signInWindow.location.replace(url); } catch (_) { signInWindow.close(); } }
-          var link = node('a', 'Continue sign-in', 'btn ghost'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); } else if (signInWindow) signInWindow.close();
+          var link = h('a', { className: 'btn secondary sm', text: 'Continue sign-in', target: '_blank', rel: 'noopener noreferrer' }); link.href = url; links.appendChild(link); } else if (signInWindow) signInWindow.close();
         schedulePoll(1500);
       }).catch(function () { if (signInWindow) signInWindow.close(); status.textContent = 'Connection request could not be confirmed. Retry the same request.'; }).finally(function () { busy = false; controls(); });
     });
     function refreshConnectionScope() {
-      refreshRevision += 1; add.disabled = true; links.hidden = true; controls();
+      refreshRevision += 1; unavailable = true; links.hidden = true; controls();
+      if (appsList) appsList.odFence();
       if (loading) { refreshRequested = true; return Promise.resolve(); }
       return load();
     }
+    selectedClient();
     controls();
     card.odRefreshConnectionStatus = refreshConnectionScope;
     load(); return card;

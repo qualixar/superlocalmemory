@@ -273,4 +273,4 @@ async def connection_callback(request: Request):
         logger.error("remote_connection_callback_unavailable")
         raise HTTPException(503, "connection_service_unavailable") from None
     # Do not leave the one-use OAuth code in a refreshable success-page URL.
-    return RedirectResponse("/#mcp-pane", status_code=303, headers={"Cache-Control": "no-store"})
+    return RedirectResponse("/#apps-pane", status_code=303, headers={"Cache-Control": "no-store"})

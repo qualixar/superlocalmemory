@@ -27,6 +27,8 @@
     <link rel="stylesheet" href="static/css/design-system.css">
     <!-- OD-Bootstrap bridge: tab-pane visibility, mobile sidebar, responsive shims -->
     <link rel="stylesheet" href="static/css/od-bridge.css">
+    <!-- Connected apps pane + MCP & Tools pointer card (4.1.23) -->
+    <link rel="stylesheet" href="static/css/od-apps.css?v=5375edd7">
 </head>
 <body>
 
@@ -1468,6 +1470,7 @@
                 </div>
             </div>
             <div class="tab-pane fade" id="mcp-pane"></div>
+            <div class="tab-pane fade" id="apps-pane"></div>
             <div class="tab-pane fade" id="backup-pane"></div>
         </div>
       </main><!-- /.content -->
@@ -1589,7 +1592,7 @@
     <script src="static/js/ng-skills.js?v=3411"></script>
     <script src="static/js/ng-mesh.js?v=345"></script>
     <!-- OD Shell v1.0 — replaces ng-shell.js; CSP-safe single-page tab switching -->
-    <script src="static/js/od-shell.js?v=a8703ffc"></script>
+    <script src="static/js/od-shell.js?v=838b8074"></script>
     <!-- Optimize tab (v3.6.0) — runtime config for cache + compress + proxy -->
     <script src="static/js/optimize.js?v=360"></script>
     <!-- B2 (v3.7.9): CSP-safe event delegation — replaces inline on*= handlers -->
@@ -1621,8 +1624,11 @@
     <script src="static/js/od-backup-encryption.js?v=4119"></script>
     <script src="static/js/od-backup.js?v=4120"></script>
     <!-- MCP & Integrations pane (v3.8.0): shows exposed MCP tool profile + counts -->
-    <script src="static/js/od-connections.js?v=73421243"></script>
-    <script src="static/js/od-mcp.js?v=2b9975e3"></script>
+    <script src="static/js/od-apps-ui.js?v=6c8d8c6f"></script>
+    <script src="static/js/od-apps-list.js?v=01e7c3fc"></script>
+    <script src="static/js/od-connections.js?v=e293a5ce"></script>
+    <script src="static/js/od-apps.js?v=193e8c41"></script>
+    <script src="static/js/od-mcp.js?v=cbce06f3"></script>
 
     <!-- Aggressive compression warning modal (v3.6.0 M-03) -->
     <div class="modal fade" id="optimizeAggressiveModal" tabindex="-1" aria-labelledby="optimizeAggressiveModalLabel" aria-hidden="true">

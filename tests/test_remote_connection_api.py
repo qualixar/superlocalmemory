@@ -294,7 +294,7 @@ def test_successful_callback_redirects_to_dashboard_without_replayable_query(con
     app.state.remote_connection_runtime = SimpleNamespace(callback=callback)
     response = client.get('/api/v3/connections/callback?state=synthetic&code=synthetic', follow_redirects=False)
     assert response.status_code == 303
-    assert response.headers['location'] == '/#mcp-pane'
+    assert response.headers['location'] == '/#apps-pane'
     assert 'synthetic' not in response.headers['location']
 
 
