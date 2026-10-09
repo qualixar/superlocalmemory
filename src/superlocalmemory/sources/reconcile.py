@@ -25,6 +25,7 @@ from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import ingest, locks, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
+from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
 from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
@@ -338,7 +339,10 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     if runtime is None:
         stats.waiting = True
         return stats
-    root = Path(source["root_path"])
+    try:
+        root = check_root(source["root_path"])  # the rules for a new folder hold on every scan
+    except RootRefused as exc:
+        return _offline(store, source, stats, exc.code)
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:
         walked = walk_tree(root, rules)

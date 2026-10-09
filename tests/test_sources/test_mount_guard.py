@@ -62,3 +62,19 @@ def test_a_different_device_at_the_path_is_offline(env):
     assert stats.offline is True and "other.md" not in env.files(sid)
     assert env.files(sid)["a.md"]["state"] == "indexed" and env.runtime.archived == []
     assert json.loads(source_row(env, sid)["last_scan_stats_json"])["root_dev"] == os.stat(env.root).st_dev + 1
+
+
+def test_a_folder_that_became_unsafe_is_offline_and_nothing_is_saved(env):
+    env.write("a.md", "note a")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    (env.root / ".ssh").mkdir()
+    env.write("b.md", "note b")
+    stats = env.scan(sid)
+    assert stats.offline is True and stats.offline_reason == "holds_credentials"
+    assert env.runtime.contents() == ["note a"] and "b.md" not in env.files(sid)
+    row = source_row(env, sid)
+    assert row["state"] == "offline" and json.loads(row["last_scan_stats_json"])["offline_reason"] == "holds_credentials"
+    (env.root / ".ssh").rmdir()
+    env.scan(sid)
+    assert source_row(env, sid)["state"] == "active" and env.files(sid)["b.md"]["state"] == "indexed"
