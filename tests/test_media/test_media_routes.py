@@ -172,3 +172,16 @@ def test_no_words_means_an_empty_preview(monkeypatch):
     c, calls, hooks, _ = _governed(monkeypatch)
     c.post("/api/v3/media/remember", json={"base64": BODY["base64"]})
     assert hooks.calls[0][1]["content_preview"] == ""
+
+
+def test_gc_route_defaults_to_a_dry_run_and_is_local_only(monkeypatch):
+    from superlocalmemory.media.gc import GcReport
+
+    seen = []
+    monkeypatch.setattr(routes, "run_gc", lambda profile, dry_run: seen.append((profile, dry_run)) or GcReport(dry_run))
+    c, _ = make(monkeypatch)
+    r = c.post("/api/v3/media/gc", json={})
+    assert r.status_code == 200 and r.json()["dry_run"] is True and seen == [("default", True)]
+    assert c.post("/api/v3/media/gc", json={"dry_run": False}).json()["dry_run"] is False
+    assert make(monkeypatch, client=REMOTE)[0].post("/api/v3/media/gc", json={}).status_code == 403
+    assert make(monkeypatch, actor="")[0].post("/api/v3/media/gc", json={"dry_run": False}).status_code == 403
