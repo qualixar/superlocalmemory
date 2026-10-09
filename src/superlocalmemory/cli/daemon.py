@@ -257,7 +257,27 @@ def _health_fallback(port: int) -> bool:
     health = _fetch_health(port)
     if health is None or not health_is_same_account(health):
         return False
+    recorded = read_descriptor()
+    if recorded is not None and descriptor_matches_health(recorded, health):
+        return True  # health proves the recorded instance; nothing to wait for
     return _wait_for_republished_record()
+
+
+def _record_port_hint() -> int:
+    """Port for a damaged record: the plain mirror if sane, else the default."""
+    try:
+        text = descriptor_path().with_name("daemon.port").read_text(encoding="utf-8")
+        port = int(text.strip())
+        if 1 <= port <= 65535:
+            return port
+    except (OSError, ValueError):
+        pass
+    return _get_port()
+
+
+def _owner_without_record() -> bool:
+    """The record is gone but a daemon holds the lock: wait for its repair."""
+    return instance_lock_is_held() and _wait_for_republished_record()
 
 
 def is_daemon_running() -> bool:
@@ -282,7 +302,9 @@ def is_daemon_running() -> bool:
     # A malformed or foreign descriptor never falls through to legacy PID/port
     # adoption in the same namespace; only the health fallback may rescue it.
     if local_descriptor_path.exists():
-        return _health_fallback(_get_port())
+        return _health_fallback(_record_port_hint())
+    if _owner_without_record():
+        return True
 
     legacy = _verified_legacy_health()
     return legacy is not None
@@ -312,7 +334,10 @@ def owned_daemon_process_alive() -> bool:
             return True
         port = descriptor.port
     elif descriptor_path().exists():
-        port = _get_port()
+        port = _record_port_hint()
+    elif _owner_without_record():
+        repaired = read_descriptor()
+        return repaired is not None and _descriptor_process_is_alive(repaired)
     else:
         return _verified_legacy_health() is not None
     if not _health_fallback(port):
@@ -888,12 +913,18 @@ def _data_folder_is_owned() -> bool:
     return descriptor is not None and _descriptor_process_is_alive(descriptor)
 
 
-def _wait_while_owned() -> bool:
-    """Never spawn into an owned folder: wait the start budget for owned health."""
+def _wait_while_owned() -> bool | None:
+    """Never spawn into an owned folder: wait the start budget for owned health.
+
+    True: the daemon answered. False: the budget ran out while it still owned
+    the folder. None: ownership ended first, so the caller may start one.
+    """
     deadline = time.monotonic() + _startup.start_wait_budget()
     while not is_daemon_running():
-        if time.monotonic() >= deadline or not _data_folder_is_owned():
-            return is_daemon_running()
+        if not _data_folder_is_owned():
+            return None
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.25)
     return True
 
@@ -928,7 +959,9 @@ def ensure_daemon(*, port: int | None = None) -> bool:
         )
         return False
     if _data_folder_is_owned():
-        return _wait_while_owned()
+        waited = _wait_while_owned()
+        if waited is not None:
+            return waited
     if _startup.this_process_is_spawning():
         # 4.1.22: another thread of THIS process holds the start lock and is
         # spawning. Never spawn twice; wait the bounded start budget only.
@@ -970,7 +1003,9 @@ def ensure_daemon(*, port: int | None = None) -> bool:
         if is_daemon_running():
             return True
         if _data_folder_is_owned():
-            return _wait_while_owned()
+            waited = _wait_while_owned()
+            if waited is not None:
+                return waited
 
         # v3.6.9 (#36): TCP-level check catches a systemd-started daemon that
         # has bound the port but hasn't written a PID file yet (e.g. different

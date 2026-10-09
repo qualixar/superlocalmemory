@@ -49,6 +49,7 @@ class RecordGuardian:
         self._thread: threading.Thread | None = None
         self._state = "stopped"
         self._detail = ""
+        self._lock_loss_logged = False
 
     def _drift_reason(self, ours: DaemonDescriptor) -> str | None:
         """Why the record is wrong, or None when it already names this process."""
@@ -58,6 +59,8 @@ class RecordGuardian:
             return "unreadable" if exists else "missing"
         if not hmac.compare_digest(recorded.instance_id, ours.instance_id):
             return f"names another instance (pid {recorded.pid})"
+        if recorded.state != ours.state or recorded.port != ours.port:
+            return f"state or port differs ({recorded.state}, {recorded.port})"
         base = descriptor_path(self._data_root)
         for name, expected in (("daemon.pid", ours.pid), ("daemon.port", ours.port)):
             try:
@@ -69,9 +72,18 @@ class RecordGuardian:
         return None
 
     def check_once(self) -> str:
-        """One pass: ``ok``, ``republished``, ``not_owner`` or ``no_descriptor``."""
+        """One pass: ``ok``, ``republished``, ``not_owner``, ``lock_lost`` or
+        ``no_descriptor``."""
         if not self._lock.held:
             return "not_owner"
+        if not self._lock.still_owns_file():
+            if not self._lock_loss_logged:
+                self._lock_loss_logged = True
+                logger.error(
+                    "the data-folder lock file was removed or replaced; this "
+                    "daemon no longer writes the record",
+                )
+            return "lock_lost"
         ours = self._provider()
         if ours is None:
             return "no_descriptor"
@@ -79,7 +91,8 @@ class RecordGuardian:
         if reason is None:
             return "ok"
         logger.warning("daemon record was wrong (%s); republishing it", reason)
-        publish_if_owner(ours, self._lock)
+        # Publish what is current now, never a state read before the check.
+        publish_if_owner(self._provider() or ours, self._lock)
         return "republished"
 
     def _run(self) -> None:

@@ -256,3 +256,155 @@ def test_owned_process_alive_follows_the_same_fallback(root, health_server):
     writer = _republish_later(live)
     assert daemon_mod.owned_daemon_process_alive() is True
     writer.join(timeout=5)
+
+
+# -- hardening -----------------------------------------------------------------
+
+def test_health_that_proves_the_record_needs_no_wait(root, health_server):
+    from superlocalmemory.cli import daemon as daemon_mod
+
+    live, payload = _serve_same_account(health_server)
+    # the process is invisible to this client (dead pid here), health still
+    # names exactly the recorded instance
+    dead = replace(live, pid=_dead_pid())
+    payload.update(dead.public_health_fields())
+    write_descriptor(dead)
+    started = time.monotonic()
+    assert daemon_mod._health_fallback(dead.port) is True
+    assert time.monotonic() - started < 1.0
+
+
+def test_missing_record_with_held_lock_waits_for_republish(root, health_server):
+    from superlocalmemory.cli import daemon as daemon_mod
+    from superlocalmemory.infra.instance_lock import instance_lock_path
+
+    live, _ = _serve_same_account(health_server)
+
+    held = InstanceLock(instance_lock_path())
+    assert held.try_acquire()
+    try:
+        writer = _republish_later(live)
+        assert daemon_mod.owned_daemon_process_alive() is True
+        descriptor_path().unlink()
+        writer = _republish_later(live)
+        assert daemon_mod.is_daemon_running() is True
+        writer.join(timeout=5)
+    finally:
+        held.release()
+
+
+def test_lock_file_replaced_means_lock_lost(root, lock, caplog):
+    ours = _ours()
+    assert lock.try_acquire() and lock.still_owns_file()
+    publish_if_owner(ours, lock)
+    lock.path.unlink()
+    assert lock.still_owns_file() is False
+    descriptor_path().unlink()
+    guardian = _guardian(ours, lock)
+    with caplog.at_level(logging.ERROR):
+        assert guardian.check_once() == "lock_lost"
+        assert guardian.check_once() == "lock_lost"
+    assert not descriptor_path().exists()
+    assert publish_if_owner(ours, lock) is False
+    assert len([r for r in caplog.records if r.levelno == logging.ERROR]) == 1
+
+
+def test_state_drift_is_repaired_with_the_current_descriptor(root, lock):
+    starting = replace(_ours(), state="starting")
+    ready = replace(starting, state="ready")
+    assert lock.try_acquire()
+    publish_if_owner(starting, lock)
+    from superlocalmemory.daemon.record_guardian import RecordGuardian
+
+    guardian = RecordGuardian(descriptor_provider=lambda: ready, lock=lock)
+    assert guardian.check_once() == "republished"
+    assert read_descriptor().state == "ready"
+    calls = iter([starting, ready])
+    stale = RecordGuardian(
+        descriptor_provider=lambda: next(calls, ready), lock=lock,
+    )
+    descriptor_path().unlink()
+    assert stale.check_once() == "republished"
+    assert read_descriptor().state == "ready"
+
+
+def test_mirror_failure_does_not_fail_the_publish(root, lock, caplog):
+    from unittest.mock import patch
+
+    assert lock.try_acquire()
+    with patch(
+        "superlocalmemory.infra.daemon_identity.write_mirror_atomic",
+        side_effect=OSError("held open"),
+    ), caplog.at_level(logging.WARNING):
+        assert publish_if_owner(_ours(), lock) is True
+    assert read_descriptor() is not None
+    assert any("mirror" in r.getMessage() for r in caplog.records)
+
+
+def test_restart_record_temp_never_survives_a_failure(root):
+    from unittest.mock import patch
+
+    from superlocalmemory.cli.commands import _write_restart_record
+
+    logs = descriptor_path().parent / "logs"
+    with patch("os.replace", side_effect=OSError("nope")):
+        _write_restart_record(1.0, [])
+    assert not list(logs.glob("*.tmp"))
+
+
+def test_malformed_record_uses_the_port_mirror(root, health_server):
+    from superlocalmemory.cli import daemon as daemon_mod
+
+    live, _ = _serve_same_account(health_server)
+    descriptor_path().parent.mkdir(parents=True, exist_ok=True)
+    descriptor_path().write_text("{not json")
+    descriptor_path().with_name("daemon.port").write_text(str(live.port))
+    writer = _republish_later(live)
+    assert daemon_mod.is_daemon_running() is True
+    writer.join(timeout=5)
+
+
+def test_ensure_daemon_starts_when_ownership_ends_during_the_wait(
+    root, monkeypatch,
+):
+    from superlocalmemory.cli import daemon as daemon_mod
+    from superlocalmemory.infra.instance_lock import instance_lock_path
+
+    held = InstanceLock(instance_lock_path())
+    assert held.try_acquire()
+    monkeypatch.setenv("SLM_DAEMON_START_WAIT_S", "5")
+    monkeypatch.setattr(daemon_mod, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(daemon_mod, "_has_tcp_listener", lambda port: False)
+    started = []
+    monkeypatch.setattr(
+        daemon_mod, "_start_daemon_subprocess",
+        lambda port=None: started.append(port) or True,
+    )
+    releaser = threading.Timer(0.6, held.release)
+    releaser.start()
+    try:
+        assert daemon_mod.ensure_daemon() is True
+    finally:
+        releaser.join()
+        held.release()
+    assert started
+
+
+def test_start_server_failure_after_publish_still_cleans_up(root, monkeypatch):
+    from unittest.mock import patch
+
+    from superlocalmemory.infra.instance_lock import get_instance_lock
+    from superlocalmemory.server import unified_daemon
+
+    monkeypatch.setattr(unified_daemon, "install_thread_dump_signal", lambda: None)
+    monkeypatch.setattr(unified_daemon, "_cleanup_process_descriptor", lambda d: None)
+    monkeypatch.setattr(
+        unified_daemon, "_serve_owned",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        unified_daemon.start_server(port=0)
+    assert unified_daemon._RECORD_GUARDIAN is None
+    assert not get_instance_lock().held
+    assert not [t for t in threading.enumerate()
+                if t.name == "slm-record-guardian" and t.is_alive()]

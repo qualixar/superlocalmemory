@@ -72,6 +72,21 @@ class InstanceLock:
                 pass
         return True
 
+    def still_owns_file(self) -> bool:
+        """True while the locked file is still the file at the lock path.
+
+        If someone removes or replaces the file, a second process could lock
+        the new one and also believe it owns the folder; the holder must stop
+        writing the record when that happens.
+        """
+        if self._fd is None:
+            return False
+        try:
+            held, named = os.fstat(self._fd), os.stat(self._path)
+        except OSError:
+            return False
+        return (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+
     def _lock_fd(self, fd: int) -> bool:
         try:
             if sys.platform == "win32":

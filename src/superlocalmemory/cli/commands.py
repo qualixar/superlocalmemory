@@ -915,8 +915,14 @@ def _write_restart_record(started_at: float, steps: list[dict]) -> None:
             "steps": steps,
         }
         tmp = logs / f".restart-last.{os.getpid()}.tmp"
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp, logs / "restart-last.json")
+        tmp.unlink(missing_ok=True)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload))
+            os.replace(tmp, logs / "restart-last.json")
+        finally:
+            tmp.unlink(missing_ok=True)
     except Exception:  # noqa: BLE001 - a record must never fail the restart
         pass
 

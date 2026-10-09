@@ -358,14 +358,20 @@ def publish_if_owner(descriptor: DaemonDescriptor, lock: "InstanceLock") -> bool
     does not hold the lock never writes it, however it came to believe it
     should; that is what keeps a losing starter from overwriting the winner.
     """
-    if not lock.held:
+    still_owns = getattr(lock, "still_owns_file", None)
+    if not lock.held or (still_owns is not None and not still_owns()):
         logger.warning("not the instance-lock owner; record untouched")
         return False
     root = _canonical_path(descriptor.data_root)
     write_descriptor(descriptor, data_root=root)
     base = root / "daemon.json"
-    write_mirror_atomic(base.with_name("daemon.pid"), str(descriptor.pid))
-    write_mirror_atomic(base.with_name("daemon.port"), str(descriptor.port))
+    # Mirrors are a courtesy; a reader holding one open (Windows) must not
+    # fail a daemon start. The guardian repairs a missing mirror.
+    for name, value in (("daemon.pid", descriptor.pid), ("daemon.port", descriptor.port)):
+        try:
+            write_mirror_atomic(base.with_name(name), str(value))
+        except OSError as exc:
+            logger.warning("could not write the %s mirror: %s", name, exc)
     return True
 
 

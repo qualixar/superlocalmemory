@@ -6986,6 +6986,23 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
 
     _publish_process_descriptor(port, SLM_VERSION, "starting")
     _start_record_guardian()
+    try:
+        _serve_owned(port, bind_host, listener, instance_lock)
+    finally:
+        # Whatever happens after the record is published (including a failure
+        # before the server runs), stop the guardian, clear the record and
+        # let go of the data folder. Each step is safe to repeat.
+        listener.close()
+        _stop_record_guardian()
+        _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+        instance_lock.release()
+
+
+def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
+    """Run the daemon once this process owns the data folder and the port."""
+    global _start_time
+    import uvicorn
+
     _start_time = time.monotonic()
 
     try:
