@@ -219,7 +219,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
         if row:
             tmp.unlink(missing_ok=True)
             return _repeat(store, row) or _retry(store, row, payload)
-        count, used = store.count_and_bytes(profile_id)
+        _, used = store.count_and_bytes(profile_id)
         if used + store.document_bytes(profile_id) + size > QUOTA_BYTES:
             raise _refuse("The library is full (2 GB limit). Remove some items first.")
         return _create(store, root, tmp, sha, size, doc_id, profile_id, _title(inp), payload)
