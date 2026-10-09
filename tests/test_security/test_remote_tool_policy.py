@@ -281,3 +281,10 @@ def test_image_tools_are_host_only_and_denied_for_read_and_write_keys(tool) -> N
 
 def test_remote_image_rights_stay_off_in_this_build() -> None:
     assert policy.REMOTE_MEDIA_TOOLS_ENABLED is False
+
+
+def test_mesh_wait_is_host_only_while_remote_mesh_is_off() -> None:
+    assert policy.REMOTE_MESH_TOOLS_ENABLED is False
+    assert "mesh_wait" in policy.HOST_ONLY_TOOLS
+    assert not policy.tool_allowed("read", "mesh_wait")
+    assert not policy.tool_allowed("write", "mesh_wait")

@@ -20,8 +20,8 @@ WIKI_PAGE = REPO_ROOT / "wiki-content" / "MCP-Tools.md"
 # "whole" is deliberately absent from `_PROFILE_DEFINITIONS` (raw server, all
 # tools). Pinned by tests/test_mcp/test_mcp_exposure_contract.py
 # (`test_registration_exposure_is_exact_and_duplicate_free`, exposure
-# "whole", expected_count 105).
-_WHOLE_TOOLS_COUNT = 105
+# "whole", expected_count 106).
+_WHOLE_TOOLS_COUNT = 106
 
 
 def _real_count(name: str) -> int:

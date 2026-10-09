@@ -88,7 +88,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 
 > The MCP config ships only `SLM_AGENT_ID=claude_code` — no `SLM_MCP_PROFILE` —
 > so it falls back to the same no-profile default every install gets: the
-> 56-tool `full` surface. That is the 18 core tools below **plus** mesh
+> 57-tool `full` surface. That is the 18 core tools below **plus** mesh
 > coordination (8: `mesh_summary`, `mesh_peers`, `mesh_send`, `mesh_inbox`,
 > `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`), portable-evidence
 > tools (5: `get_brain_evidence_status`, `record_agent_experience`,
@@ -105,7 +105,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 > which trades mesh and administration tools for 6 code-graph tools
 > (`build_code_graph`, `get_blast_radius`, `query_graph`,
 > `semantic_search_code`, `get_review_context`, `detect_changes`). Use
-> `power` (68 tools) for governance and audit tools. The tool set is read when the
+> `power` (69 tools) for governance and audit tools. The tool set is read when the
 > MCP server starts; `switch_profile` changes the active memory profile, not the
 > tool set. See slm-profile.
 

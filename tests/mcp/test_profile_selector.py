@@ -116,7 +116,7 @@ def test_profile_code_exact():
 # ---------------------------------------------------------------------------
 
 _EXPECTED_FULL_MESH = frozenset({
-    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
+    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
 })
 
@@ -155,7 +155,7 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 56, f"full must be 56 names, got {len(full)}"
+    assert len(full) == 57, f"full must be 57 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
@@ -182,7 +182,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 68, f"power must be 68 names, got {len(power)}"
+    assert len(power) == 69, f"power must be 69 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 
@@ -197,7 +197,7 @@ def test_profile_mesh_exact():
     assert mesh == _EXPECTED_FULL_MESH, (
         f"mesh diff — extra: {mesh - _EXPECTED_FULL_MESH}, missing: {_EXPECTED_FULL_MESH - mesh}"
     )
-    assert len(mesh) == 8, f"mesh must be 8 names, got {len(mesh)}"
+    assert len(mesh) == 9, f"mesh must be 9 names, got {len(mesh)}"
     non_mesh = {n for n in mesh if not n.startswith("mesh_")}
     assert not non_mesh, f"All mesh names must start with 'mesh_'; offenders: {non_mesh}"
 
