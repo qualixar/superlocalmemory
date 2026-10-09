@@ -199,7 +199,7 @@ def _move(p: _Pass, e: Entry, sha: str) -> bool:
 
 
 def _process(p: _Pass, e: Entry, sha: str) -> None:
-    row = p.rows.get(e.relpath)
+    row = p.store.get_file(p.sid, e.relpath)  # fresh: an earlier file of this pass may have changed it
     if row and row["sha256"] == sha and row["state"] in ("indexed", "cloud_placeholder", "quarantined"):
         keep = "quarantined" if row["state"] == "quarantined" else "indexed"
         p.store.put_file(p.sid, e.relpath, state=keep, **_stat_fields(e))
