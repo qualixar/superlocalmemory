@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from superlocalmemory.runtimes.features import (
-    disable_media, enable_media, media_enabled, media_feature_status, read_features,
+    apply_requested, disable_media, enable_media, media_enabled, media_feature_status, read_features,
     register_media_stop_hook,
 )
 from superlocalmemory.runtimes.managed_env import (
@@ -17,6 +17,6 @@ from superlocalmemory.runtimes.media_env import MEDIA_ENV, media_env
 
 __all__ = [
     "EnvSpec", "EnvStatus", "HuggingFaceSource", "LocalDirSource", "MEDIA_ENV", "ManagedEnv",
-    "ModelSource", "disable_media", "enable_media", "media_enabled", "media_env",
+    "ModelSource", "apply_requested", "disable_media", "enable_media", "media_enabled", "media_env",
     "media_feature_status", "read_features", "register_media_stop_hook",
 ]
