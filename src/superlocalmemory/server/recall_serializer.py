@@ -157,6 +157,22 @@ def apply_source_content_discipline(
     return new_r
 
 
+def media_object(source: dict) -> dict | None:
+    """The ``media`` block for a result whose memory came from a picture or a page."""
+    kind = {"media": "image", "document": "page"}.get(source.get("type"))
+    if kind is None:
+        return None
+    media_id = source.get("media_id")
+    return {
+        "media_id": media_id,
+        "kind": kind,
+        "thumbnail_uri": f"slm://media/{media_id}/thumb" if media_id else None,
+        "page": source.get("page"),
+        "document_id": source.get("document_id"),
+        "citation": source.get("citation") or "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # THE shared chokepoint: RecallResponse -> transport dicts (all surfaces)
 # ---------------------------------------------------------------------------
@@ -175,6 +191,7 @@ def serialize_recall_response(
     include_source: bool = False,
     include_marker: bool = False,
     display_min_confidence: float | None = None,
+    source_map: dict[str, dict] | None = None,
 ) -> tuple[list[dict], bool]:
     """Convert a RecallResponse into budgeted, source-disciplined dicts.
 
@@ -191,6 +208,9 @@ def serialize_recall_response(
         full:           Bypass clamping/stubs (additive escape hatch).
         include_source: Return full source_content (else ≤280-char preview).
         include_marker: Emit each result's HMAC usage marker. See below.
+        source_map:     memory_id -> ``_slm_source`` for the pictures and pages
+            among the results (``retrieval.media_channel.memory_sources``).
+            Those results get a ``media`` block; ``None`` changes nothing.
         display_min_confidence: The confidence below which a model-suggested
             kind is shown as its legacy/untyped fallback instead of a
             suggestion (``storage.memory_kinds.kind_fields``). ``None`` (the
@@ -281,6 +301,9 @@ def serialize_recall_response(
         # Only when asked, and only when the engine actually produced one —
         # an empty key would be indistinguishable from a marker that failed
         # to compute, and the hook validates before trusting anything anyway.
+        block = media_object(source_map[fact.memory_id]) if source_map and fact.memory_id in source_map else None
+        if block is not None:
+            entry["media"] = block
         if include_marker:
             marker = getattr(r, "marker", "") or ""
             if marker:
