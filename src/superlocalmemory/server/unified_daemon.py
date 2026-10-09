@@ -3842,6 +3842,13 @@ def create_app() -> FastAPI:
     except ImportError:
         pass
 
+    # -- Image routes (local only) --
+    try:
+        from superlocalmemory.server.routes.media import router as media_router
+        application.include_router(media_router)
+    except ImportError:
+        pass
+
     # -- Brain route (LLD-04 v2: /api/v3/brain + deprecated shims) --
     try:
         from superlocalmemory.server.middleware.security_headers import (

@@ -35,7 +35,8 @@ _DDL = (
     """CREATE TABLE IF NOT EXISTS media_items (
       media_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('image','page')),
-      sha256 TEXT NOT NULL, phash TEXT, mime TEXT NOT NULL, bytes INTEGER NOT NULL,
+      source_sha256 TEXT NOT NULL, stored_sha256 TEXT, phash TEXT, mime TEXT NOT NULL,
+      bytes INTEGER NOT NULL, remote_ok INTEGER NOT NULL DEFAULT 0,
       width INTEGER, height INTEGER, original_relpath TEXT,
       exif_json TEXT NOT NULL DEFAULT '{}',
       captured_at TEXT, anchor_memory_id TEXT,
@@ -44,7 +45,7 @@ _DDL = (
       state TEXT NOT NULL DEFAULT 'active'
         CHECK (state IN ('active','tombstoned','quarantined','media_missing')),
       thumb_webp BLOB, created_at TEXT NOT NULL, tombstoned_at TEXT)""",
-    "CREATE INDEX IF NOT EXISTS ix_media_profile_sha ON media_items(profile_id, sha256)",
+    "CREATE INDEX IF NOT EXISTS ix_media_profile_sha ON media_items(profile_id, source_sha256)",
     "CREATE INDEX IF NOT EXISTS ix_media_anchor ON media_items(anchor_memory_id)",
     "CREATE INDEX IF NOT EXISTS ix_media_doc ON media_items(document_id, page_no)",
     """CREATE TABLE IF NOT EXISTS media_vector_rows (

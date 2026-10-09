@@ -29,6 +29,7 @@ _SITES: dict[tuple[str, str], str] = {
     ("server/unified_daemon.py", "ObserveBuffer.enqueue"): "prepared",
     ("server/unified_daemon.py", "_register_daemon_routes.remember"): "prepared",
     ("server/routes/ingest.py", "ingest"): "prepared",
+    ("memory_core/submit.py", "submit_memory"): "prepared",
     ("server/routes/data_io.py", "import_memories"): "prepared",
     ("daemon/materializer.py", "legacy_item"): "prepared",
     ("core/engine_ingestion.py", "canonical_store"): "prepared",
