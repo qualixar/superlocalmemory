@@ -96,3 +96,53 @@ def test_abstention_tau_ignores_test_labels(tiny_home):
     flipped = [dict(q, answerable=not q["answerable"]) for q in qs["test"]]
     tau2 = report.tune_tau(qs["dev"], scores)
     assert tau1 == tau2 and flipped
+
+
+def _fake_python(tmp_path):
+    """An executable that runs worker.py with hash-based fake embedders."""
+    import stat
+    import sys
+
+    harness = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = tmp_path / "fakepy"
+    script.write_text(f"""#!{sys.executable}
+import sys, zlib
+sys.path.insert(0, {harness!r})
+import numpy as np
+import embedders, worker
+
+def vec(text):
+    v = np.zeros(64, np.float32)
+    for w in text.lower().split():
+        v[zlib.crc32(w.encode()) % 64] += 1.0
+    return v / max(np.linalg.norm(v), 1e-9)
+
+class Fake:
+    def __init__(self): self.name = "fake"
+    def load(self): pass
+    def embed_queries(self, t): return np.stack([vec(x) for x in t])
+    embed_docs = embed_queries
+    def embed_images(self, p): return np.stack([vec(x) for x in p])
+
+embedders.REGISTRY = {{k: Fake for k in ("nomic", "eg2_text", "eg2_full")}}
+sys.exit(worker.main())
+""")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+def test_model_systems_plumbing_with_fake_embedders(tiny_home, tmp_path):
+    import shutil
+
+    home = tmp_path / "h"
+    shutil.copytree(tiny_home, home)
+    fake = _fake_python(tmp_path)
+    rc = run_eval.main(["--home", str(home), "--systems", "s1,s2,s3",
+                        "--python-slm", fake, "--python-eg2", fake])
+    assert rc == 0
+    status = json.loads((home / "runs" / "status.json").read_text())
+    assert all(status[s]["ran"] for s in ("s1", "s2", "s3")), status
+    assert report.main(["--home", str(home), "--out", str(tmp_path / "o")]) == 0
+    res = json.loads((tmp_path / "o" / "RESULTS.json").read_text())
+    assert res["one_model"]["verdict"] == "SAMPLE TOO SMALL TO DECIDE"
+    assert "s1 -> s2" in res["paired"]

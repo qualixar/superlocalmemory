@@ -35,7 +35,7 @@ IMAGE_ONLY_PAGES: list[list[str]] = [
 
 def _clean(line: str) -> str:
     line = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", line)
-    return re.sub(r"[*`_]{1,3}", "", line).strip()
+    return re.sub(r"[*`]{1,3}", "", line).strip()
 
 
 def _flowables(md: str):
