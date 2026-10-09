@@ -314,12 +314,20 @@ def _known_device(source: dict) -> int | None:
     return found if isinstance(found, int) else None
 
 
-def _device_problem(root: Path, stats: ScanStats) -> str:
-    """"disk_changed" when another disk is now at the folder's path (the disk is noted on the first scan)."""
+def _device_problem(root: Path, stats: ScanStats, store: SourceStore, sid: str, walked: WalkResult) -> str:
+    """"disk_changed" when another disk is now at the folder's path (the disk is noted on the first scan).
+
+    The same files on a new device number (a remount) are the same folder: the number is re-recorded.
+    """
     current = os.stat(root).st_dev
-    if stats.root_dev is None:
+    if stats.root_dev is None or stats.root_dev == current:
         stats.root_dev = current
-    return "disk_changed" if stats.root_dev != current else ""
+        return ""
+    known = {r["relpath"] for r in store.files(sid, ("indexed",))}
+    if known and not any(e.relpath in known for e in walked.entries):
+        return "disk_changed"
+    stats.root_dev = current
+    return ""
 
 
 def _offline(store: SourceStore, source: dict, stats: ScanStats, reason: str) -> ScanStats:
@@ -346,7 +354,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:
         walked = walk_tree(root, rules)
-        device = _device_problem(root, stats)
+        device = _device_problem(root, stats, store, source["source_id"], walked)
     except OSError:
         return _offline(store, source, stats, "unreachable")
     if device or (not walked.entries and not walked.capped and store.files(source["source_id"], ("indexed",))):

@@ -52,6 +52,7 @@ def test_a_different_device_at_the_path_is_offline(env):
     env.write("a.md", "note a")
     sid = env.add_and_confirm()
     env.scan(sid)
+    (env.root / "a.md").unlink()
     env.write("other.md", "a different disk")
     media = env.store()
     with media._write() as conn:
