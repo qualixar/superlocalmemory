@@ -73,13 +73,14 @@ def provenance(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {"type": "folder", "source_id": source_id, "relpath": relpath, "version": version}
 
 
-def _key(source_id: str, relpath: str, version: str, part: int) -> str:
+def _key(source_id: str, relpath: str, version: str, generation: int, part: int) -> str:
+    """Per source, path, version and generation: a file that comes back after a delete is a new save."""
     path = hashlib.sha256(relpath.encode()).hexdigest()[:12]
-    return f"src:{source_id[:12]}:{path}:{version}:{part}"
+    return f"src:{source_id[:12]}:{path}:{version}:g{generation}:{part}"
 
 
 def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data: bytes,
-                version: str) -> Ingested:
+                version: str, generation: int = 0) -> Ingested:
     """Save a text or markdown file as memories (credentials stripped as derived text)."""
     parts = split_text(relpath, data.decode("utf-8", errors="replace"))
     if not parts:
@@ -90,7 +91,7 @@ def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data
             segments=((part, ContentOrigin.DERIVED_TEXT),), profile_id=source["profile_id"],
             source_type="folder", trusted_actor_id=host.actor_id(),
             trusted_metadata={"_slm_source": provenance(source["source_id"], relpath, version)},
-            idempotency_key=_key(source["source_id"], relpath, version, number))
+            idempotency_key=_key(source["source_id"], relpath, version, generation, number))
         saved = submit_memory(runtime, request, config=host.config())
         out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version})
     return out
@@ -100,14 +101,15 @@ def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {**provenance(source_id, relpath, version), "origin": "folder"}
 
 
-def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str) -> Ingested:
+def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str,
+               generation: int = 0) -> Ingested:
     from superlocalmemory.documents import submit_document
     from superlocalmemory.media.ingest import MediaInput
 
     receipt = submit_document(
         MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), config=host.config(),
-        idempotency_key=_key(source["source_id"], relpath, version, 0),
+        idempotency_key=_key(source["source_id"], relpath, version, generation, 0),
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "refused":
         return Ingested(skip_reason=receipt.reason[:120] or "refused")
@@ -115,13 +117,13 @@ def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version
 
 
 def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, path: Path,
-                 version: str) -> Ingested:
+                 version: str, generation: int = 0) -> Ingested:
     from superlocalmemory.media.ingest import MediaInput, remember_media
 
     receipt = remember_media(
         MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), runtime=runtime, config=host.config(),
-        idempotency_key=_key(source["source_id"], relpath, version, 0),
+        idempotency_key=_key(source["source_id"], relpath, version, generation, 0),
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "warming":
         return Ingested(retry=True)

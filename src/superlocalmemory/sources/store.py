@@ -22,6 +22,19 @@ def entries_of(row: dict[str, Any]) -> list[dict[str, Any]]:
     return [e for e in found if isinstance(e, dict)]
 
 
+def generation_of(row: dict[str, Any] | None) -> int:
+    """How many times this path was tombstoned. Kept as a ``{"gen": n}`` marker among the entries."""
+    return max((int(e["gen"]) for e in entries_of(row or {}) if "gen" in e), default=0)
+
+
+def with_generation(entries: list[dict[str, Any]], gen: int) -> list[dict[str, Any]]:
+    return [e for e in entries if "gen" not in e] + [{"gen": gen}]
+
+
+def memory_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [e for e in entries if "gen" not in e]
+
+
 class SourceStore:
     def __init__(self, media: Any) -> None:
         self._m = media

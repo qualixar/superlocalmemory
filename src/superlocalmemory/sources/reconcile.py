@@ -24,7 +24,7 @@ from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import ingest, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
-from superlocalmemory.sources.store import SourceStore, entries_of
+from superlocalmemory.sources.store import SourceStore, entries_of, generation_of, memory_entries
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
 logger = logging.getLogger(__name__)
@@ -138,12 +138,13 @@ def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: 
 
 def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
     version, kind, path = sha[:12], kind_of(e.relpath), p.root / e.relpath
+    gen = generation_of(row)
     if kind == "text":
-        out = ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version)
+        out = ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, gen)
     elif kind == "pdf":
-        out = ingest.ingest_pdf(p.host, p.source, e.relpath, path, version)
+        out = ingest.ingest_pdf(p.host, p.source, e.relpath, path, version, gen)
     else:
-        out = ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version)
+        out = ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version, gen)
     if out.retry:
         p.stats.deferred += 1
         return
@@ -152,15 +153,20 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
                          entries=_supersede(p, row), **_stat_fields(e))
         return
     old = _supersede(p, row)
+    if row and generation_of(row):
+        out.entries.append({"gen": generation_of(row)})
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
-                     entries=old + out.entries, document_id=out.document_id, media_id=out.media_id,
+                     entries=[x for x in old if "gen" not in x] + out.entries, document_id=out.document_id, media_id=out.media_id,
                      **_stat_fields(e))
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
     p.stats.new += 0 if row and row["state"] != "tombstoned" else 1
 
 
 def _move(p: _Pass, e: Entry, sha: str) -> bool:
-    """Re-point a vanished file's row to this path when the bytes are the same."""
+    """Re-point a vanished file's row to this path when the bytes are the same.
+
+    The row is the truth: ``_slm_source.relpath`` inside the saved memories keeps the old path.
+    """
     olds = p.vanished.get(sha)
     if not olds:
         return False
@@ -180,7 +186,7 @@ def _process(p: _Pass, e: Entry, sha: str) -> None:
         return
     if row is None and _move(p, e, sha):
         return
-    if e.relpath.lower().endswith(".canvas"):
+    if e.relpath.lower().endswith(".canvas"):  # canvas files are recorded, not read
         p.store.put_file(p.sid, e.relpath, sha256=sha, state="skipped", reason="canvas_not_supported",
                          **_stat_fields(e))
         return
@@ -218,7 +224,7 @@ def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
     for rel, row in list(p.rows.items()):
         if rel in seen or row["state"] == "tombstoned" or walked.under_unreadable(rel):
             continue
-        if entries_of(row) or row.get("document_id"):
+        if memory_entries(entries_of(row)) or row.get("document_id"):
             p.stats.errors += retire.hide_file(p.host, p.store, p.runtime, p.source, row, tombstone=True)
             p.stats.tombstoned += 1
         else:
@@ -232,6 +238,7 @@ def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
 
 
 def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | None) -> None:
+    p.stats.errors += retire.retry_hides(p.host, p.store, p.runtime, p.source)
     p.rows = {r["relpath"]: r for r in p.store.files(p.sid)}
     candidates: list[Entry] = []
     for e in walked.entries:

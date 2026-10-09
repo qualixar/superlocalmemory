@@ -12,7 +12,8 @@ from typing import Any
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of
-from superlocalmemory.sources.store import SourceStore, entries_of
+from superlocalmemory.sources.store import (
+    SourceStore, entries_of, generation_of, memory_entries, with_generation)
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +24,44 @@ def _facts(runtime: Any, entries: list[dict[str, Any]]) -> list[str]:
     return sorted({*facts, *facts_of(runtime, unknown)})
 
 
+# Local hiding goes through ``archive_fact`` (recall already skips archived facts), the same as
+# removing a document. The ``hide_sources`` visibility flag is for remote callers only.
 def hide_entries(host: SourceHost, runtime: Any, source: dict, entries: list[dict[str, Any]],
                  relpath: str) -> int:
-    """Archive the live entries (recall stops showing them) and mark them replaced. Returns failures."""
-    live = [e for e in entries if not e.get("sup")]
+    """Archive the live entries (recall stops showing them) and mark them replaced. Returns failures.
+
+    An entry whose facts could not all be archived gets no ``sup`` time and is flagged ``old``,
+    so ``retry_hides`` tries it again on a later pass.
+    """
+    live = [e for e in memory_entries(entries) if not e.get("sup")]
     failures = 0
-    for fact in _facts(runtime, live):
-        try:
-            runtime.archive_fact(source["profile_id"], fact,
-                                 idempotency_key=f"src:{source['source_id'][:12]}:{fact}")
-        except Exception as exc:  # noqa: BLE001 - hide what can be hidden; the rest stays visible, not lost
-            failures += 1
-            logger.warning("a folder memory could not be hidden (%s)", type(exc).__name__)
-    now = utc_stamp()
     for entry in live:
-        entry["sup"] = now
+        ok = True
+        for fact in _facts(runtime, [entry]):
+            try:
+                runtime.archive_fact(source["profile_id"], fact,
+                                     idempotency_key=f"src:{source['source_id'][:12]}:{fact}")
+            except Exception as exc:  # noqa: BLE001 - stays visible, flagged, and retried
+                ok = False
+                failures += 1
+                logger.warning("a folder memory could not be hidden (%s)", type(exc).__name__)
+        if ok:
+            entry["sup"] = utc_stamp()
+            entry.pop("old", None)
+        else:
+            entry["old"] = True
+    return failures
+
+
+def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:
+    """Hide again the replaced or deleted memories that could not be hidden earlier."""
+    failures = 0
+    for row in store.files(source["source_id"]):
+        entries = entries_of(row)
+        stale = [e for e in entries if e.get("old") and not e.get("sup")]
+        if stale:
+            failures += hide_entries(host, runtime, source, stale, row["relpath"])
+            store.put_file(source["source_id"], row["relpath"], entries=entries)
     return failures
 
 
@@ -61,7 +85,8 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     hide_document(store, runtime, source, row)
     fields: dict[str, Any] = {"entries": entries}
     if tombstone:
-        fields.update(state="tombstoned", tombstoned_at=utc_stamp())
+        fields.update(state="tombstoned", tombstoned_at=utc_stamp(),
+                      entries=with_generation(entries, generation_of(row) + 1))
     store.put_file(source["source_id"], row["relpath"], **fields)
     return failures
 
@@ -110,7 +135,7 @@ def purge_due(host: SourceHost, store: SourceStore, runtime: Any, source: dict) 
                 purged += 1
             continue
         entries = entries_of(row)
-        due = [e for e in entries if e.get("sup") and e["sup"] <= cutoff]
+        due = [e for e in memory_entries(entries) if e.get("sup") and e["sup"] <= cutoff]
         if due and _erase(host, runtime, source, due, f"src:{source['source_id'][:12]}"):
             keep = [e for e in entries if e not in due]
             store.put_file(source["source_id"], row["relpath"], entries=keep)

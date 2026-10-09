@@ -273,3 +273,71 @@ def test_scan_yields_to_recalls(env, monkeypatch):
     sid = env.add_and_confirm()
     env.scan(sid)
     assert len(calls) >= 2
+
+
+def test_file_that_comes_back_after_delete_is_saved_again_as_visible_memories(env):
+    path = env.write("a.md", "same words")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    path.unlink()
+    env.scan(sid)
+    assert env.runtime.archived == ["f1"]
+    env.write("a.md", "same words")
+    env.scan(sid)
+    assert len(env.runtime.saved) == 2
+    first, second = env.runtime.saved
+    assert first["key"] != second["key"] and ":g0:" in first["key"] and ":g1:" in second["key"]
+    assert env.runtime.archived == ["f1"]  # the old memory stays archived, the new one is visible
+    row = env.files(sid)["a.md"]
+    live = [e for e in json.loads(row["memory_ids_json"]) if e.get("m") and not e.get("sup")]
+    assert [e["m"] for e in live] == [second["mid"]] and row["state"] == "indexed"
+
+
+def test_generation_keeps_counting_across_deletes(env):
+    for n in range(3):
+        path = env.write("a.md", "same words")
+        sid = env.add_and_confirm() if n == 0 else sid
+        env.scan(sid)
+        path.unlink()
+        env.scan(sid)
+    assert [":g%d:" % n in r["key"] for n, r in enumerate(env.runtime.saved)] == [True] * 3
+
+
+def test_a_failed_archive_is_retried_on_the_next_pass(env):
+    path = env.write("a.md", "version one")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    working = env.runtime.archive_fact
+
+    def failing(*a, **k):
+        raise RuntimeError("writer busy")
+
+    env.runtime.archive_fact = failing
+    path.write_text("version two")
+    os.utime(path, ns=(2_000_000_000_000_000_000,) * 2)
+    stats = env.scan(sid)
+    assert stats.errors == 1 and env.runtime.archived == []
+    entries = json.loads(env.files(sid)["a.md"]["memory_ids_json"])
+    old = [e for e in entries if e.get("m") == "m1"][0]
+    assert not old.get("sup") and old.get("old") is True
+    env.runtime.archive_fact = working
+    env.scan(sid)
+    assert env.runtime.archived == ["f1"]
+    entries = json.loads(env.files(sid)["a.md"]["memory_ids_json"])
+    assert [e for e in entries if e.get("m") == "m1"][0].get("sup")
+    env.scan(sid)
+    assert env.runtime.archived == ["f1"]  # hidden once, not again
+
+
+def test_a_failed_archive_of_a_deleted_file_is_retried(env):
+    path = env.write("a.md", "bye")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    working = env.runtime.archive_fact
+    env.runtime.archive_fact = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("busy"))
+    path.unlink()
+    env.scan(sid)
+    assert env.runtime.archived == [] and env.files(sid)["a.md"]["state"] == "tombstoned"
+    env.runtime.archive_fact = working
+    env.scan(sid)
+    assert env.runtime.archived == ["f1"]
