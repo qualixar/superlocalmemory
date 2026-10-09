@@ -118,6 +118,9 @@ class SourceStore:
                                     "memory_ids_json", "document_id", "media_id")}
         keep.update(fields)
         self.put_file(source_id, new, **keep)
+        with self._m._write() as conn:
+            conn.execute("UPDATE OR REPLACE source_links SET from_relpath = ?"
+                         " WHERE source_id = ? AND from_relpath = ?", (new, source_id, old))
 
     def release_shared(self, source_id: str, sha256: str | None, except_relpath: str) -> int:
         """Queue the other copies of these bytes that borrowed the owner's save to be saved afresh."""
@@ -141,6 +144,20 @@ class SourceStore:
     def delete_file(self, source_id: str, relpath: str) -> None:
         with self._m._write() as conn:
             conn.execute("DELETE FROM source_files WHERE source_id = ? AND relpath = ?", (source_id, relpath))
+            conn.execute("DELETE FROM source_links WHERE source_id = ? AND from_relpath = ?",
+                         (source_id, relpath))
+
+    def replace_links(self, source_id: str, relpath: str, found: Sequence[Any]) -> None:
+        """The links of one file, replaced as a whole (``found`` items have target, kind and label)."""
+        with self._m._write() as conn:
+            conn.execute("DELETE FROM source_links WHERE source_id = ? AND from_relpath = ?",
+                         (source_id, relpath))
+            conn.executemany(
+                "INSERT OR IGNORE INTO source_links(source_id, from_relpath, target, link_kind, label)"
+                " VALUES (?, ?, ?, ?, ?)", [(source_id, relpath, l.target, l.kind, l.label) for l in found])
+
+    def delete_links(self, source_id: str, relpath: str) -> None:
+        self.replace_links(source_id, relpath, [])
 
     def delete_source_rows(self, source_id: str) -> None:
         with self._m._write() as conn:
