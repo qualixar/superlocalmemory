@@ -224,14 +224,25 @@ def test_foreign_account_health_fails_without_waiting(root, health_server):
     assert time.monotonic() - started < 1.0
 
 
-def test_dead_record_without_any_health_fails_immediately(root):
+def test_dead_record_without_any_health_fails_immediately(root, monkeypatch):
     from superlocalmemory.cli import daemon as daemon_mod
 
+    # A refused connection is not instant everywhere (Windows retries the
+    # connect for about two seconds), so the probe itself is stubbed: what is
+    # under test is that no health means no wait for a republished record.
+    probed: list[int] = []
+    monkeypatch.setattr(daemon_mod, "_fetch_health", lambda port: probed.append(port))
+
+    def _no_wait(*_args, **_kwargs):
+        raise AssertionError("waited for a republish with no health at all")
+
+    monkeypatch.setattr(daemon_mod, "_wait_for_republished_record", _no_wait)
     write_descriptor(build_descriptor(
         port=1, version="t", pid=_dead_pid(), state="ready"))
     started = time.monotonic()
     assert daemon_mod.is_daemon_running() is False
     assert time.monotonic() - started < 1.0
+    assert probed == [1]
 
 
 def test_malformed_record_with_health_waits_for_republish(
