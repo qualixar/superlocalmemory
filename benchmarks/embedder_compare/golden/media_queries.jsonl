@@ -50,3 +50,9 @@
 {"id": "med:unanswerable:08", "text": "Page describing the refund policy for annual subscriptions", "stratum": "unanswerable", "answerable": false, "relevant": [], "provisional": true}
 {"id": "med:unanswerable:09", "text": "Page with the nuclear reactor cooling procedure", "stratum": "unanswerable", "answerable": false, "relevant": [], "provisional": true}
 {"id": "med:unanswerable:10", "text": "Ferry timetable for the summer season starting in June", "stratum": "unanswerable", "answerable": false, "relevant": [], "provisional": true}
+{"id": "med:image:25", "text": "photo of a red bicycle leaning on a blue wall", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_bicycle"], "provisional": true}
+{"id": "med:image:26", "text": "small boat with white sails floating on dark blue water", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_sailboat"], "provisional": true}
+{"id": "med:image:27", "text": "snowman wearing a red hat and orange nose next to pine trees", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_snowman"], "provisional": true}
+{"id": "med:image:28", "text": "orange traffic cone standing on grey asphalt", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_cone"], "provisional": true}
+{"id": "med:image:29", "text": "yellow cottage with a red roof beside a leafy tree on a lawn", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_house"], "provisional": true}
+{"id": "med:image:30", "text": "striped parasol planted in sand next to turquoise water", "stratum": "image", "answerable": true, "relevant": ["img:syn_vis_umbrella"], "provisional": true}

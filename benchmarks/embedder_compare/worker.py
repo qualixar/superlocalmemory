@@ -2,6 +2,8 @@
 
 stdin: JSON {"out_dir": str, "threads": int, "stages": [{"embedder": name,
 "queries": [...], "docs": [...], "images": [...]}]}
+Exactly one stage (one model loadout) per process: load time and peak RSS are
+then attributable to that loadout.
 stdout: JSON timings. Vectors are written to <out_dir>/<stage>_<kind>.npy.
 """
 from __future__ import annotations
@@ -38,6 +40,7 @@ def run_stage(emb, stage: dict, idx: int, out_dir: Path) -> dict:
     for kind, fn, batch in jobs:
         items = stage.get(kind) or []
         if items:
+            fn(items[:1])  # warm-up: first call pays one-off setup costs, not timed
             vecs, timing = _timed(fn, items, batch)
             np.save(out_dir / f"{idx}_{kind}.npy", vecs)
             info[kind] = timing
@@ -52,6 +55,8 @@ def main() -> int:
 
     out_dir = Path(job["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
+    if len(job["stages"]) != 1:
+        raise SystemExit("one model loadout per worker process: expected exactly one stage")
     stages = []
     for idx, stage in enumerate(job["stages"]):
         emb = REGISTRY[stage["embedder"]]()

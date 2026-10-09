@@ -5,13 +5,42 @@ queries are written from this table, never from model output.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+import synth_visual
+
 SIZE = (1280, 720)
-FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
+FONT_FILES = ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf")
+FONT_SEARCH = (
+    "/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu", "/usr/share/fonts/TTF",
+    "/usr/local/share/fonts", "/opt/homebrew/share/fonts", "/usr/local/Cellar/font-dejavu",
+    "/opt/homebrew/Caskroom/font-dejavu", "/Library/Fonts", "~/Library/Fonts", "~/.fonts",
+    "~/.local/share/fonts",
+)
+_font_dir_cache: Path | None = None
+
+
+def font_dir() -> Path:
+    """Directory holding the DejaVu fonts: $SLM_BENCH_FONT_DIR first, then common paths."""
+    global _font_dir_cache
+    if _font_dir_cache is not None:
+        return _font_dir_cache
+    override = os.environ.get("SLM_BENCH_FONT_DIR")
+    candidates = [Path(override).expanduser()] if override else []
+    candidates += [Path(p).expanduser() for p in FONT_SEARCH]
+    for base in candidates:
+        if base.is_dir():
+            for hit in [base, *sorted(p for p in base.rglob("*") if p.is_dir())]:
+                if all((hit / f).exists() for f in FONT_FILES):
+                    _font_dir_cache = hit
+                    return hit
+    raise FileNotFoundError(
+        "DejaVu fonts (" + ", ".join(FONT_FILES) + ") not found. Install them (apt: fonts-dejavu-core; "
+        "brew: font-dejavu) or set SLM_BENCH_FONT_DIR to the folder that holds them.")
 
 # name -> (kind, payload). Names become doc ids "img:syn_<name>".
 CONTENT: dict[str, tuple[str, dict]] = {
@@ -58,6 +87,12 @@ CONTENT: dict[str, tuple[str, dict]] = {
         "def fibonacci(n):", "    a, b = 0, 1", "    for _ in range(n):", "        a, b = b, a + b", "    return a"]}),
     "code_sql": ("code", {"lines": [
         "SELECT name, total", "FROM orders", "WHERE total > 500", "ORDER BY total DESC;"]}),
+    "vis_bicycle": ("visual", {"name": "bicycle"}),
+    "vis_sailboat": ("visual", {"name": "sailboat"}),
+    "vis_snowman": ("visual", {"name": "snowman"}),
+    "vis_cone": ("visual", {"name": "cone"}),
+    "vis_house": ("visual", {"name": "house"}),
+    "vis_umbrella": ("visual", {"name": "umbrella"}),
     "table_shifts": ("table", {"title": "Shift Schedule", "rows": [
         ("Name", "Day", "Shift"), ("Asha", "Mon", "Early"), ("Jonas", "Tue", "Late"), ("Lena", "Wed", "Night")]}),
 }
@@ -65,7 +100,7 @@ CONTENT: dict[str, tuple[str, dict]] = {
 
 def _font(size: int, bold: bool = False, mono: bool = False) -> ImageFont.FreeTypeFont:
     name = ("DejaVuSansMono" if mono else "DejaVuSans") + ("-Bold" if bold else "") + ".ttf"
-    return ImageFont.truetype(str(FONT_DIR / name), size)
+    return ImageFont.truetype(str(font_dir() / name), size)
 
 
 def _canvas(bg=(255, 255, 255)) -> tuple[Image.Image, ImageDraw.ImageDraw]:
@@ -223,7 +258,7 @@ def _table(p: dict) -> Image.Image:
 
 _RENDER = {"slide": _slide, "bars": _bars, "line": _line, "pie": _pie, "dialog": _dialog,
            "boxes": _boxes, "tree": _tree, "scene": _scene, "receipt": _receipt,
-           "code": _code, "table": _table}
+           "code": _code, "table": _table, "visual": lambda p: synth_visual.render(p["name"])}
 
 
 def generate(out_dir: Path) -> list[str]:

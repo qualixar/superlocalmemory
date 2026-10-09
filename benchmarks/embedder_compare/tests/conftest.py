@@ -27,5 +27,6 @@ def tiny_home(tmp_path_factory) -> Path:
     selection = bd.select_locomo(data, TINY_QUOTAS, n_convs=2)
     sel_path = home / "selection.json"
     sel_path.write_text(json.dumps(selection))
-    bd.build(FIXTURE, sel_path, home / "dataset", media=False)
+    bd.build(FIXTURE, sel_path, home / "dataset", media=False,
+             frozen_path=home / "frozen.sha256", refreeze=True)
     return home

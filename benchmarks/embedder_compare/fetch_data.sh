@@ -18,7 +18,11 @@ if [ ! -d "$dest/.git" ]; then
 fi
 git -C "$dest" fetch --quiet origin "$LOCOMO_COMMIT" 2>/dev/null || true
 git -C "$dest" checkout --quiet "$LOCOMO_COMMIT"
-actual="$(sha256sum "$dest/data/locomo10.json" | cut -d' ' -f1)"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$dest/data/locomo10.json" | cut -d' ' -f1)"
+else
+  actual="$(shasum -a 256 "$dest/data/locomo10.json" | cut -d' ' -f1)"
+fi
 if [ "$actual" != "$LOCOMO_SHA256" ]; then
   echo "LoCoMo checksum mismatch: expected $LOCOMO_SHA256, got $actual" >&2
   exit 1

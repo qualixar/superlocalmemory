@@ -80,10 +80,57 @@ def test_synth_images_deterministic(tmp_path):
 
     a = synth_images.generate(tmp_path / "a")
     b = synth_images.generate(tmp_path / "b")
-    assert len(a) == 24 and len(set(a)) == 24
+    assert len(a) == 30 and len(set(a)) == 30
     for name in a:
         pa, pb = tmp_path / "a" / f"{name}.png", tmp_path / "b" / f"{name}.png"
         assert hashlib.sha256(pa.read_bytes()).hexdigest() == hashlib.sha256(pb.read_bytes()).hexdigest()
         assert imagehash.phash(Image.open(pa)) == imagehash.phash(Image.open(pb))
         w, h = Image.open(pa).size
         assert (w, h) == synth_images.SIZE
+
+
+def test_visual_images_have_queries_and_no_text_content():
+    names = [n for n in synth_images.CONTENT if n.startswith("vis_")]
+    assert len(names) == 6
+    assert all(synth_images.CONTENT[n][0] == "visual" for n in names)
+    golden = Path(__file__).parents[1] / "golden" / "media_queries.jsonl"
+    rel = {d for line in golden.read_text().splitlines() for d in json.loads(line)["relevant"]}
+    assert {f"img:syn_{n}" for n in names} <= rel
+
+
+def test_font_dir_override_and_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(synth_images, "_font_dir_cache", None)
+    monkeypatch.setattr(synth_images, "FONT_SEARCH", ())
+    monkeypatch.setenv("SLM_BENCH_FONT_DIR", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="SLM_BENCH_FONT_DIR"):
+        synth_images.font_dir()
+    for f in synth_images.FONT_FILES:
+        (tmp_path / f).write_bytes(b"")
+    assert synth_images.font_dir() == tmp_path
+    monkeypatch.setattr(synth_images, "_font_dir_cache", None)
+
+
+def test_build_refuses_changed_test_set_without_refreeze(tmp_path):
+    data = json.loads(FIXTURE.read_text())
+    quotas = {"text_single_hop": 3, "text_multi_hop": 2, "entity": 2, "temporal": 2, "unanswerable": 2}
+    sel = tmp_path / "sel.json"
+    sel.write_text(json.dumps(bd.select_locomo(data, quotas, n_convs=2)))
+    frozen, ds = tmp_path / "frozen.sha256", tmp_path / "ds"
+    with pytest.raises(ValueError, match="refreeze"):
+        bd.build(FIXTURE, sel, ds, media=False, frozen_path=frozen)
+    assert not ds.exists()
+    bd.build(FIXTURE, sel, ds, media=False, frozen_path=frozen, refreeze=True)
+    first = frozen.read_text()
+    bd.build(FIXTURE, sel, ds, media=False, frozen_path=frozen)  # same hash: fine
+    frozen.write_text("0" * 64 + "\n")
+    before = (ds / "manifest.lock").read_text()
+    with pytest.raises(ValueError, match="frozen"):
+        bd.build(FIXTURE, sel, ds, media=False, frozen_path=frozen)
+    assert (ds / "manifest.lock").read_text() == before and first != frozen.read_text()
+
+
+def test_synth_pdfs_generate(tmp_path):
+    import synth_pdfs
+
+    names = synth_pdfs.generate(tmp_path, Path(__file__).resolve().parents[3])
+    assert names and all((tmp_path / f"{n}.pdf").stat().st_size > 0 for n in names)

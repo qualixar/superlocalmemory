@@ -203,15 +203,59 @@ def manifest_hash(test_jsonl: Path, test_qrels: Path) -> str:
     return h.hexdigest()
 
 
+def dataset_hash(ds: Path) -> str:
+    """Hash of everything a run depends on: corpus, both query splits, both qrels."""
+    h = hashlib.sha256()
+    for rel in ("corpus.jsonl", "queries/dev.jsonl", "queries/test.jsonl",
+                "qrels/dev.json", "qrels/test.json"):
+        h.update((Path(ds) / rel).read_bytes())
+        h.update(b"\n--\n")
+    return h.hexdigest()
+
+
+def check_frozen(digest: str, frozen_path: Path | None, refreeze: bool) -> None:
+    """Refuse to change the committed test-manifest hash unless refreeze is set."""
+    if frozen_path is None:
+        return
+    frozen_path = Path(frozen_path)
+    current = frozen_path.read_text().strip() if frozen_path.exists() else None
+    if current == digest:
+        return
+    if not refreeze:
+        raise ValueError(
+            f"test queries/qrels hash {digest[:12]} differs from the frozen "
+            f"{(current or 'missing')[:12]} in {frozen_path}; rerun with --refreeze to accept")
+    frozen_path.write_text(digest + "\n")
+
+
 def build(locomo_path: Path, selection_path: Path, out_dir: Path, media: bool = True,
-          media_queries_path: Path | None = None) -> dict:
+          media_queries_path: Path | None = None, frozen_path: Path | None = None,
+          refreeze: bool = False) -> dict:
+    """Build into a scratch dir, check the frozen test hash, then replace out_dir."""
+    out_dir = Path(out_dir)
+    scratch = out_dir.with_name(out_dir.name + ".building")
+    if scratch.exists():
+        shutil.rmtree(scratch)
+    summary = _build_into(locomo_path, selection_path, scratch, media, media_queries_path)
+    digest = manifest_hash(scratch / "queries" / "test.jsonl", scratch / "qrels" / "test.json")
+    try:
+        check_frozen(digest, frozen_path, refreeze)
+    except ValueError:
+        shutil.rmtree(scratch)
+        raise
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    scratch.rename(out_dir)
+    return summary
+
+
+def _build_into(locomo_path: Path, selection_path: Path, out_dir: Path, media: bool,
+                media_queries_path: Path | None) -> dict:
     """Write corpus, split queries/qrels and manifest.lock; return per-stratum counts."""
     data = json.loads(Path(locomo_path).read_text())
     selection = json.loads(Path(selection_path).read_text())
     samples = {s["sample_id"]: s for s in data if s["sample_id"] in {r["sample_id"] for r in selection}}
     out_dir = Path(out_dir)
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
     (out_dir / "queries").mkdir(parents=True)
     (out_dir / "qrels").mkdir()
     corpus = _locomo_corpus(samples)
@@ -247,12 +291,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--write-selection", action="store_true",
                     help="(re)generate the id-only selection from the downloaded LoCoMo file")
     ap.add_argument("--no-media", action="store_true")
+    ap.add_argument("--refreeze", action="store_true",
+                    help="accept a changed test set and rewrite golden/test_manifest.sha256")
     args = ap.parse_args(argv)
     locomo = args.home / "locomo" / "data" / "locomo10.json"
     if args.write_selection:
         sel = select_locomo(json.loads(locomo.read_text()), DEFAULT_QUOTAS)
         args.selection.write_text(json.dumps(sel, indent=0) + "\n")
-    summary = build(locomo, args.selection, args.home / "dataset", media=not args.no_media)
+    try:
+        summary = build(locomo, args.selection, args.home / "dataset", media=not args.no_media,
+                        frozen_path=HERE / "golden" / "test_manifest.sha256", refreeze=args.refreeze)
+    except ValueError as exc:
+        print(f"refusing to build: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(summary, indent=1))
     return 0
 

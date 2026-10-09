@@ -39,7 +39,9 @@ def per_query(qrels: dict, run: dict, metric: str) -> dict[str, float]:
     for qid, rel in qrels.items():
         if not rel:
             continue
-        out[qid] = _one(rel, ranked_docs(run.get(qid, {})), name, k)
+        if qid not in run:
+            raise ValueError(f"run has no ranking for query {qid}")
+        out[qid] = _one(rel, ranked_docs(run[qid]), name, k)
     return out
 
 
@@ -60,6 +62,8 @@ def paired_delta_ci(a: Sequence[float], b: Sequence[float], n_boot: int = N_BOOT
                     seed: int = SEED) -> tuple[float, float, float]:
     """Bootstrap CI of mean(b - a) over paired per-query values."""
     diff = np.asarray(b, dtype=float) - np.asarray(a, dtype=float)
+    if diff.size == 0:
+        return (float("nan"),) * 3
     if not diff.any():
         return (0.0, 0.0, 0.0)
     return bootstrap_ci(diff, n_boot=n_boot, seed=seed)
@@ -114,23 +118,40 @@ def abstention_report(scores: Sequence[float], unanswerable: Sequence[bool],
     }
 
 
-def one_model_rule(s1: Sequence[float], s2: Sequence[float], margin: float = 0.03,
-                   min_n: int = 30, n_boot: int = N_BOOT) -> dict:
-    """One-model default rule on per-query text recall@5 (S1 two-space, S2 one-model).
+VERDICT_LABEL = "criterion 1 of 4 (text non-inferiority)"
 
-    Pass when the 95% CI lower bound of mean(S2 - S1) is >= -margin. Also reports
-    the literal form: S2's own lower CI bound >= S1's point estimate - margin.
+
+def _verdict(n: int, min_n: int, s1_mean: float, bm25: float | None,
+             delta: float, lo: float, margin: float) -> str:
+    if n < min_n:
+        return "SAMPLE TOO SMALL TO DECIDE"
+    if s1_mean == 0 or (bm25 is not None and s1_mean < bm25):
+        return "INVALID"
+    if lo >= -margin:
+        return "PASS"
+    return "NOT SHOWN NON-INFERIOR" if delta >= -margin else "FAIL"
+
+
+def one_model_rule(s1: Sequence[float], s2: Sequence[float], margin: float = 0.03,
+                   min_n: int = 30, n_boot: int = N_BOOT,
+                   bm25_point: float | None = None) -> dict:
+    """Text non-inferiority of the one-model system S2 against shipped S1.
+
+    Outcomes: PASS (CI lower bound of mean(S2 - S1) >= -margin); NOT SHOWN
+    NON-INFERIOR (point delta >= -margin but lower bound below it); FAIL (point
+    delta < -margin); SAMPLE TOO SMALL TO DECIDE; INVALID (S1 recall@5 is 0 or
+    below the bm25 point, so the run itself is suspect). The literal form
+    (S2's own lower CI bound >= S1 point - margin) is reported alongside.
     """
     delta, lo, hi = paired_delta_ci(s1, s2, n_boot=n_boot)
     s1_mean = float(np.mean(s1)) if len(s1) else float("nan")
     _, s2_lo, _ = bootstrap_ci(s2, n_boot=n_boot)
-    passed = lo >= -margin
-    verdict = "PASS" if passed else "FAIL"
-    if len(s1) < min_n:
-        verdict = "SAMPLE TOO SMALL TO DECIDE"
     return {
-        "verdict": verdict, "n": len(s1), "margin": margin,
-        "delta": delta, "delta_ci": [lo, hi], "ci_rule_pass": passed,
+        "criterion": VERDICT_LABEL,
+        "verdict": _verdict(len(s1), min_n, s1_mean, bm25_point, delta, lo, margin),
+        "n": len(s1), "margin": margin,
+        "delta": delta, "delta_ci": [lo, hi], "ci_width": hi - lo,
+        "ci_rule_pass": lo >= -margin,
         "literal_form_pass": s2_lo >= s1_mean - margin,
-        "s1_point": s1_mean, "s2_ci_low": s2_lo,
+        "s1_point": s1_mean, "s2_ci_low": s2_lo, "bm25_point": bm25_point,
     }

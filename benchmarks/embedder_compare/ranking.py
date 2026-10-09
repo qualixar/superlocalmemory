@@ -16,13 +16,26 @@ def rank_topk(scores: np.ndarray, doc_ids: list[str], k: int = K_TOP) -> list[tu
     return [(doc_ids[order[i]], float(s[i])) for i in top]
 
 
-def rrf_fuse(rankings: list[list[str]], k: int = 60, top: int = K_TOP) -> list[tuple[str, float]]:
-    """Reciprocal-rank fusion of ranked doc-id lists (rank is 1-based)."""
+MEDIA_WEIGHTS = (0.0, 0.1, 0.25, 0.5, 0.75, 1.0)
+
+
+def rrf_fuse(rankings: list[list[str]], k: int = 60, top: int = K_TOP,
+             weights: list[float] | None = None) -> list[tuple[str, float]]:
+    """Weighted reciprocal-rank fusion of ranked doc-id lists (rank is 1-based).
+
+    Ties in fused score go to the doc whose best-weighted contribution comes
+    from the earlier channel (channel 0 is the priority channel), then doc id.
+    """
+    weights = weights or [1.0] * len(rankings)
     acc: dict[str, float] = {}
-    for ranking in rankings:
+    first: dict[str, int] = {}
+    for ch, (ranking, w) in enumerate(zip(rankings, weights)):
+        if w == 0:
+            continue
         for pos, doc in enumerate(ranking, start=1):
-            acc[doc] = acc.get(doc, 0.0) + 1.0 / (k + pos)
-    ordered = sorted(acc.items(), key=lambda kv: (-kv[1], kv[0]))
+            acc[doc] = acc.get(doc, 0.0) + w / (k + pos)
+            first.setdefault(doc, ch)
+    ordered = sorted(acc.items(), key=lambda kv: (-kv[1], first[kv[0]], kv[0]))
     return ordered[:top]
 
 

@@ -108,3 +108,52 @@ def test_rrf_fusion_ordering():
     ids = [d for d, _ in fused]
     assert ids == ["b", "c", "a", "d"]
     assert fused[0][1] == pytest.approx(1 / 62 + 1 / 61)
+
+
+def test_one_model_rule_outcomes():
+    n = 40
+    s1 = [1.0 if i % 2 else 0.0 for i in range(n)]
+    out = stats.one_model_rule(s1, [1.0 if i % 2 else 0.0 if i % 4 else 1.0 for i in range(n)], n_boot=500)
+    assert out["verdict"] in ("PASS", "NOT SHOWN NON-INFERIOR")
+    assert out["criterion"].startswith("criterion 1 of 4")
+    assert out["ci_width"] >= 0
+    # point delta within margin but CI wide: not shown
+    s2 = list(s1)
+    s2[0], s2[1] = 1.0, 0.0
+    s2[3] = 0.0
+    wide = stats.one_model_rule(s1, s2, n_boot=500)
+    assert wide["verdict"] == "NOT SHOWN NON-INFERIOR" and wide["delta"] >= -0.03
+    assert stats.one_model_rule(s1, [0.0] * n, n_boot=500)["verdict"] == "FAIL"
+    assert stats.one_model_rule([0.0] * n, [0.0] * n, n_boot=500)["verdict"] == "INVALID"
+    assert stats.one_model_rule(s1, s1, n_boot=500, bm25_point=0.9)["verdict"] == "INVALID"
+    assert stats.one_model_rule(s1[:5], s1[:5], n_boot=500)["verdict"] == "SAMPLE TOO SMALL TO DECIDE"
+
+
+def test_empty_paired_delta_is_nan_and_missing_query_raises():
+    assert all(math.isnan(x) for x in stats.paired_delta_ci([], []))
+    with pytest.raises(ValueError, match="q9"):
+        stats.per_query({"q9": {"a": 1}}, {}, "recall@5")
+
+
+def test_weighted_rrf_and_tie_break():
+    fused = ranking.rrf_fuse([["a", "b"], ["b", "a"]], weights=[1.0, 0.0])
+    assert [d for d, _ in fused] == ["a", "b"]
+    tied = ranking.rrf_fuse([["a"], ["b"]], weights=[1.0, 1.0])
+    assert [d for d, _ in tied] == ["a", "b"]  # equal score: text (first) channel first
+
+
+def test_fusion_weight_tuned_on_dev_only_and_abstain_channel():
+    import fusion
+
+    junk = [(f"j{i}", 0.5 - i / 100) for i in range(6)]
+    text = [[("t1", 0.9)] + junk + [("m1", 0.2)], [("t2", 0.8)] + junk + [("m2", 0.1)]]
+    media = [[("m1", 0.7)], [("m2", 0.6)]]
+    dev_qrels = {"q0": {"m1": 1}, "q1": {"m2": 1}}
+    w, table = fusion.tune_weight(text, media, {"m1", "m2"}, ["q0", "q1"], dev_qrels)
+    assert w > 0 and table[0.0] == 0.0 and table[1.0] == 1.0
+    w0, _ = fusion.tune_weight(text, media, {"m1", "m2"}, ["q0", "q1"], {"q0": {"t1": 1}, "q1": {"t2": 1}})
+    assert w0 == 0.0  # ties go to the text channel
+    fused, abst = fusion.fuse_all(text, media, {"m1", "m2"}, 1.0)
+    assert fused[0][0][0] == "m1" and abst[0] == 0.7  # media doc: media-channel cosine
+    fused0, abst0 = fusion.fuse_all(text, media, {"m1", "m2"}, 0.0)
+    assert fused0[0][0][0] == "t1" and abst0[0] == 0.9

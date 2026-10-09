@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 
 LONG_EDGE = 1280
@@ -45,6 +46,7 @@ class Ocr:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._engine = None
         self.errors: list[str] = []
+        self.last_ms = 0.0  # OCR time of the last image_text call (cached value if cached)
 
     def _read(self, path: Path) -> str:
         if self._engine is None:
@@ -58,29 +60,35 @@ class Ocr:
         """OCR text of an image file; failures are logged and recorded, never silent."""
         cache = self.cache_dir / f"{file_sha256(path)}.json"
         if cache.exists():
-            return json.loads(cache.read_text())["text"]
+            cached = json.loads(cache.read_text())
+            self.last_ms = cached.get("ocr_ms", 0.0)
+            return cached["text"]
+        t0 = time.perf_counter()
         try:
             text = self._read(path)
+            self.last_ms = (time.perf_counter() - t0) * 1000
         except Exception as exc:  # unreadable image: log loudly, keep going
             msg = f"OCR failed for {path}: {exc!r}"
             self.errors.append(msg)
             print(msg, file=sys.stderr)
+            self.last_ms = 0.0
             return ""
-        cache.write_text(json.dumps({"text": text}))
+        cache.write_text(json.dumps({"text": text, "ocr_ms": self.last_ms}))
         return text
 
 
 def attach_text(corpus: list[dict], dataset_dir: Path, ocr: Ocr) -> list[dict]:
-    """Fill item['text'] for image and pdf_page items (text layer first, then OCR)."""
+    """Fill item['text'] and item['ocr_ms'] for image and pdf_page items (text layer first, then OCR)."""
     for item in corpus:
         if item["kind"] == "text":
             continue
         png = dataset_dir / item["path"]
-        text = ""
+        text, ocr.last_ms = "", 0.0
         if item["kind"] == "pdf_page":
             meta = item["meta"]
             text = pdf_text_layer(dataset_dir / meta["pdf"], meta["page"] - 1)
         if len(text.strip()) < MIN_TEXT_LAYER:
             text = ocr.image_text(png)
         item["text"] = " ".join(text.split())
+        item["ocr_ms"] = ocr.last_ms
     return corpus

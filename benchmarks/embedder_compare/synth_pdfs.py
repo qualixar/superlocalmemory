@@ -9,7 +9,7 @@ from xml.sax.saxutils import escape
 
 from PIL import Image, ImageDraw
 
-from synth_images import FONT_DIR, _font
+from synth_images import _font, font_dir
 
 # pdf name -> (source doc relative to repo root, max source characters)
 SOURCES: dict[str, tuple[str, int]] = {
@@ -72,7 +72,7 @@ def _register_fonts() -> None:
 
     for name, file in (("DejaVu", "DejaVuSans.ttf"), ("DejaVu-Bold", "DejaVuSans-Bold.ttf"),
                        ("DejaVuMono", "DejaVuSansMono.ttf")):
-        pdfmetrics.registerFont(TTFont(name, str(FONT_DIR / file)))
+        pdfmetrics.registerFont(TTFont(name, str(font_dir() / file)))
 
 
 def _text_pdf(path: Path, md: str, title: str) -> None:

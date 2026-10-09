@@ -1,9 +1,11 @@
 """Embed the shared corpus with each system and write ranx-format runs.
 
-Systems: bm25 (model-free smoke), s1 (nomic text; media via OCR text),
-s2 (EmbeddingGemma 2 one-model: text-only loadout for text, full model for
-images and pages), s3 (nomic text plus EmbeddingGemma 2 media channel, fused
-with reciprocal-rank fusion k=60).
+Systems: bm25 (model-free smoke), s1 (nomic as SLM ships it, no task prefixes;
+media via OCR text), s1p (nomic with task prefixes, reference only), s2
+(EmbeddingGemma 2 one-model: text-only loadout for text, full model for images
+and pages), s3 (nomic text plus EmbeddingGemma 2 media channel, weighted
+reciprocal-rank fusion, k=60, media weight tuned on dev). Every model loadout
+runs in its own process.
 """
 from __future__ import annotations
 
@@ -18,13 +20,14 @@ from pathlib import Path
 
 import numpy as np
 
+import fusion
 import ocr
 import ranking
 import rss
-from build_dataset import bench_home
+from build_dataset import bench_home, dataset_hash
 
 HERE = Path(__file__).resolve().parent
-ALL_SYSTEMS = ("bm25", "s1", "s2", "s3")
+ALL_SYSTEMS = ("bm25", "s1", "s2", "s3")  # s1p (prefixed nomic) is opt-in, reference only
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -70,7 +73,8 @@ def summarise(timings: dict, peak_mb: float, queries_key: str = "queries") -> di
 
 
 def run_dicts(qids: list[str], tops: list[list[tuple[str, float]]]) -> tuple[dict, dict]:
-    run = {q: {d: s for d, s in top} for q, top in zip(qids, tops)}
+    """ranx run (strictly decreasing rank-based scores) and raw top-1 abstention scores."""
+    run = {q: {d: float(len(top) - i) for i, (d, _) in enumerate(top)} for q, top in zip(qids, tops)}
     abstain = {q: (top[0][1] if top else 0.0) for q, top in zip(qids, tops)}
     return run, abstain
 
@@ -82,28 +86,14 @@ def cosine_tops(qv: np.ndarray, dv: np.ndarray, doc_ids: list[str]) -> list[list
     return [ranking.rank_topk(row, doc_ids) for row in sims]
 
 
-def fuse_tops(nomic_tops: list, eg2_q: np.ndarray, eg2_media: np.ndarray,
-              media_ids: list[str]) -> tuple[list, list]:
-    """S3: RRF of the nomic ranking (all docs) and the media-channel ranking.
-
-    The abstention score of a query is the largest raw cosine its fused top-1
-    document had in either channel (RRF scores themselves carry no confidence).
-    """
-    tops_text = nomic_tops
-    tops_media = cosine_tops(eg2_q, eg2_media, media_ids)
-    fused, abst = [], []
-    for t, m in zip(tops_text, tops_media):
-        scores: dict[str, list[float]] = {}
-        for d, s in t + m:
-            scores.setdefault(d, []).append(s)
-        f = ranking.rrf_fuse([[d for d, _ in t], [d for d, _ in m]])
-        fused.append(f)
-        abst.append(max(scores[f[0][0]]) if f else 0.0)
-    return fused, abst
-
-
 def doc_text(item: dict) -> str:
     return item.get("text", "")
+
+
+def ocr_summary(corpus: list[dict]) -> dict:
+    """OCR time per media item (text-layer PDF pages count as 0 ms)."""
+    ms = [d.get("ocr_ms", 0.0) for d in corpus if d["kind"] != "text"]
+    return {"n": len(ms), "p50_ms": pctl(ms, 50), "p95_ms": pctl(ms, 95), "total_s": sum(ms) / 1000}
 
 
 def system_bm25(corpus, queries) -> tuple[list, dict]:
@@ -113,16 +103,17 @@ def system_bm25(corpus, queries) -> tuple[list, dict]:
     tops = ranking.bm25_rank(ids, texts, [q["text"] for q in queries])
     each = (time.perf_counter() - t0) * 1000 / max(len(queries), 1)
     return tops, {"load_s": 0.0, "query": {"n": len(queries), "p50_ms": each, "p95_ms": each},
-                  "doc": {"n": len(ids)}, "image": {"n": 0}, "items_per_min": None}
+                  "doc": {"n": len(ids)}, "image": {"n": 0}, "items_per_min": None,
+                  "ocr": ocr_summary(corpus)}
 
 
-def system_nomic(corpus, queries, python: str):
-    job = {"stages": [{"embedder": "nomic", "queries": [q["text"] for q in queries],
+def system_nomic(corpus, queries, python: str, embedder: str = "nomic"):
+    job = {"stages": [{"embedder": embedder, "queries": [q["text"] for q in queries],
                        "docs": [doc_text(d) for d in corpus]}]}
     timings, peak, out = spawn(job, python)
     tops = cosine_tops(np.load(out / "0_queries.npy"), np.load(out / "0_docs.npy"),
                        [d["doc_id"] for d in corpus])
-    return tops, summarise(timings, peak)
+    return tops, {**summarise(timings, peak), "ocr": ocr_summary(corpus)}
 
 
 def _media(corpus: list[dict], home_ds: Path) -> tuple[list[dict], list[str]]:
@@ -130,30 +121,55 @@ def _media(corpus: list[dict], home_ds: Path) -> tuple[list[dict], list[str]]:
     return media, [str(home_ds / d["path"]) for d in media]
 
 
-def system_s2(corpus, queries, python: str, ds: Path):
-    text_docs = [d for d in corpus if d["kind"] == "text"]
-    media, paths = _media(corpus, ds)
-    job = {"stages": [
-        {"embedder": "eg2_text", "queries": [q["text"] for q in queries],
-         "docs": [doc_text(d) for d in text_docs]},
-        {"embedder": "eg2_full", "images": paths}]}
-    timings, peak, out = spawn(job, python)
-    parts = [np.load(out / f) for f in ("0_docs.npy", "1_images.npy") if (out / f).exists()]
-    dv = np.concatenate(parts)
-    ids = [d["doc_id"] for d in text_docs + media]
-    return cosine_tops(np.load(out / "0_queries.npy"), dv, ids), summarise(timings, peak)
+_EG2_FULL_CACHE: dict[str, tuple] = {}
 
 
-def system_s3(corpus, queries, python_slm: str, python_eg2: str, ds: Path):
-    nomic_tops, nomic_sum = system_nomic(corpus, queries, python_slm)
-    media, paths = _media(corpus, ds)
+def eg2_full_media(queries: list[dict], paths: list[str], python: str):
+    """One eg2_full process: query vectors and image vectors. Cached for S2 and S3."""
+    key = json.dumps([[q["text"] for q in queries], paths, python])
+    if key in _EG2_FULL_CACHE:
+        return (*_EG2_FULL_CACHE[key], True)
     job = {"stages": [{"embedder": "eg2_full", "queries": [q["text"] for q in queries],
                        "images": paths}]}
-    timings, peak, out = spawn(job, python_eg2)
+    timings, peak, out = spawn(job, python)
+    img = out / "0_images.npy"
+    result = (np.load(out / "0_queries.npy"), np.load(img) if img.exists() else None,
+              summarise(timings, peak))
+    _EG2_FULL_CACHE[key] = result
+    return (*result, False)
+
+
+def system_s2(corpus, queries, python: str, ds: Path):
+    """One-model system: text-only loadout in one process, full model in another."""
+    text_docs = [d for d in corpus if d["kind"] == "text"]
+    media, paths = _media(corpus, ds)
+    job = {"stages": [{"embedder": "eg2_text", "queries": [q["text"] for q in queries],
+                       "docs": [doc_text(d) for d in text_docs]}]}
+    timings, peak, out = spawn(job, python)
+    text_sum = summarise(timings, peak)
+    dv = np.load(out / "0_docs.npy")
+    ids = [d["doc_id"] for d in text_docs]
+    procs = {"eg2_text loadout": text_sum}
+    if paths:
+        _, img, full_sum, _ = eg2_full_media(queries, paths, python)
+        dv, ids = np.concatenate([dv, img]), ids + [d["doc_id"] for d in media]
+        procs["eg2_full loadout"] = full_sum
+    return cosine_tops(np.load(out / "0_queries.npy"), dv, ids), {"processes": procs}
+
+
+def system_s3(corpus, queries, python_slm: str, python_eg2: str, ds: Path, dev_qrels: dict):
+    """Nomic text channel plus eg2_full media channel, weighted RRF tuned on dev."""
+    nomic_tops, nomic_sum = system_nomic(corpus, queries, python_slm)
+    media, paths = _media(corpus, ds)
+    qv, img, eg_sum, reused = eg2_full_media(queries, paths, python_eg2)
     ids = [d["doc_id"] for d in media]
-    media_vecs = np.load(out / "0_images.npy") if ids else np.zeros((0, 1), np.float32)
-    fused, abst = fuse_tops(nomic_tops, np.load(out / "0_queries.npy"), media_vecs, ids)
-    summary = {"nomic_process": nomic_sum, "eg2_media_process": summarise(timings, peak)}
+    media_tops = cosine_tops(qv, img, ids) if ids else [[] for _ in queries]
+    qids = [q["id"] for q in queries]
+    weight, table = fusion.tune_weight(nomic_tops, media_tops, set(ids), qids, dev_qrels)
+    fused, abst = fusion.fuse_all(nomic_tops, media_tops, set(ids), weight)
+    summary = {"processes": {"nomic loadout": nomic_sum, "eg2_full loadout (media channel)": eg_sum},
+               "fusion": {"media_weight": weight, "dev_recall_by_weight": {str(k): v for k, v in table.items()}},
+               "eg2_full_reused_from_s2": reused}
     return fused, abst, summary
 
 
@@ -167,10 +183,10 @@ def write_system(runs: Path, name: str, qids: list[str], tops, timings: dict,
     (runs / f"{name}.timings.json").write_text(json.dumps(timings, indent=1))
 
 
-def _set_status(runs: Path, name: str, ran: bool, reason: str = "") -> None:
+def _set_status(runs: Path, name: str, ran: bool, reason: str, dataset: str) -> None:
     path = runs / "status.json"
     status = json.loads(path.read_text()) if path.exists() else {}
-    status[name] = {"ran": ran, "reason": reason}
+    status[name] = {"ran": ran, "reason": reason, "dataset": dataset}
     path.write_text(json.dumps(status, indent=1, sort_keys=True))
 
 
@@ -182,21 +198,23 @@ def _need(python: str | None, label: str) -> str:
     return python
 
 
-def run_system(name: str, corpus, queries, args, ds: Path):
+def run_system(name: str, corpus, queries, args, ds: Path, dev_qrels: dict):
     """Return (tops, abstain|None, timings) for one system; raise RuntimeError if it cannot run."""
     if name == "bm25":
-        with rss.RssSampler(os.getpid()) as s:
+        with rss.RssSampler(os.getpid()) as sampler:
             tops, timings = system_bm25(corpus, queries)
-        return tops, None, {**timings, "peak_rss_mb": s.peak_mb}
-    if name == "s1":
-        tops, timings = system_nomic(corpus, queries, _need(args.python_slm, "slm"))
+        return tops, None, {**timings, "peak_rss_mb": sampler.peak_mb}
+    if name in ("s1", "s1p"):
+        embedder = "nomic" if name == "s1" else "nomic_prefixed"
+        tops, timings = system_nomic(corpus, queries, _need(args.python_slm, "slm"), embedder)
         return tops, None, timings
     if name == "s2":
         tops, timings = system_s2(corpus, queries, _need(args.python_eg2, "eg2"), ds)
         return tops, None, timings
-    tops, abst, timings = system_s3(corpus, queries, _need(args.python_slm, "slm"),
-                                    _need(args.python_eg2, "eg2"), ds)
-    return tops, abst, timings
+    if name == "s3":
+        return system_s3(corpus, queries, _need(args.python_slm, "slm"),
+                         _need(args.python_eg2, "eg2"), ds, dev_qrels)
+    raise RuntimeError(f"unknown system {name!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -209,18 +227,20 @@ def main(argv: list[str] | None = None) -> int:
     ds, runs = args.home / "dataset", args.home / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     corpus, queries = load_dataset(ds)
+    dev_qrels = json.loads((ds / "qrels" / "dev.json").read_text())
+    digest = dataset_hash(ds)
     ocr_engine = ocr.Ocr(args.home / "cache" / "ocr")
     ocr.attach_text(corpus, ds, ocr_engine)
     qids = [q["id"] for q in queries]
     for name in args.systems.split(","):
         try:
-            tops, abst, timings = run_system(name, corpus, queries, args, ds)
+            tops, abst, timings = run_system(name, corpus, queries, args, ds, dev_qrels)
         except RuntimeError as exc:
             print(f"{name}: not run ({exc})", file=sys.stderr)
-            _set_status(runs, name, False, str(exc))
+            _set_status(runs, name, False, str(exc), digest)
             continue
         write_system(runs, name, qids, tops, timings, abst)
-        _set_status(runs, name, True)
+        _set_status(runs, name, True, "", digest)
         print(f"{name}: done")
     (runs / "ocr_errors.json").write_text(json.dumps(ocr_engine.errors))
     return 0
