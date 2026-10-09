@@ -102,5 +102,18 @@ def purge_context_cache(data_root: Path, profile_id: str) -> int:
     return sum(purge_profile_from_cache_db(c, profile_id) for c in candidates if c.exists())
 
 
+def move_media(data_root: Path, profile_id: str, target: str = "default") -> int:
+    """Images and documents of the deleted profile go to target; nothing is made if absent."""
+    from superlocalmemory.media import open_media_store
+
+    store = open_media_store(data_root=data_root)
+    if store is None:
+        return 0
+    try:
+        return store.move_profile_rows(profile_id, target)
+    finally:
+        store.close()
+
+
 __all__ = ["LEARNING_DECISIONS", "SidecarFoldError", "check_learning", "move_pending",
-           "purge_context_cache", "purge_learned_state"]
+           "move_media", "purge_context_cache", "purge_learned_state"]

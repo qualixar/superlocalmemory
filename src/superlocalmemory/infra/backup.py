@@ -76,6 +76,7 @@ MANAGED_DATABASES: tuple[str, ...] = (
     "code_graph.db",    # Code knowledge graph: symbols, references
     "pending.db",       # Pending operations queue
     "audit.db",         # Legacy audit (pre-v3.4)
+    "media.db",         # Images and documents: items, pages, media vectors, jobs
 )
 
 
