@@ -240,3 +240,6 @@ scratchpad/
 # stale on the next commit, and a plan published with any item open reads as
 # self-documented non-compliance (F-11). Public record of shipped work = CHANGELOG.md.
 docs/audits/
+
+# ==== UPGRADE FIXTURES (stores are rebuilt on demand; manifests live in tests/upgrade/manifests/) ====
+tests/upgrade/fixtures/
