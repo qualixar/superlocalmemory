@@ -71,6 +71,8 @@
       { k: 'memories-pane',  t: 'Memories',           i: 'memories', crumb: 'Memory' },
       { k: 'entities-pane',  t: 'Entity Explorer',    i: 'entity',   crumb: 'Memory' },
       { k: 'agents-pane',    t: 'Multi-Agent Memory', i: 'mesh',     crumb: 'Memory' },
+      // 4.1.25: images and PDFs. Off until the person turns them on.
+      { k: 'media-pane',     t: 'Documents & Images', i: 'pkg',      crumb: 'Memory', tag: 'new' },
     ]},
     { g: 'Intelligence', items: [
       { k: 'skills-pane',    t: 'Skill Evolution',  i: 'skill',    crumb: 'Intelligence' },
@@ -586,6 +588,9 @@
         return true;
       case 'agents-pane':
         od('odRenderAgents');
+        return true;
+      case 'media-pane':
+        od('odRenderMedia');
         return true;
       case 'mcp-pane':
         od('odRenderMcp');
