@@ -4,8 +4,8 @@
 
 """Image routes (local only): save an image, and fetch its thumbnail.
 
-``POST /api/v3/media/remember`` takes a file path on this machine or base64
-data. It is not part of any remote tool list. The thumbnail route answers only
+``POST /api/v3/media/remember`` takes a file path on this machine, base64
+data or an https download link. It is not part of any remote tool list. The thumbnail route answers only
 for the profile the picture belongs to.
 """
 
@@ -32,6 +32,7 @@ _CODES = {"stored": 200, "duplicate": 200, "warming": 202, "refused": 422}
 class MediaRememberRequest(BaseModel):
     path: str | None = None
     base64: str | None = Field(default=None, max_length=12_000_000)
+    download_url: str | None = Field(default=None, max_length=2_048)
     content: str = Field(default="", max_length=24_000)
     tags: str = ""
     profile_id: str = ""
@@ -40,8 +41,8 @@ class MediaRememberRequest(BaseModel):
 
     @model_validator(mode="after")
     def _one_source(self) -> "MediaRememberRequest":
-        if bool(self.path) == bool(self.base64):
-            raise ValueError("give exactly one of path or base64")
+        if sum(bool(v) for v in (self.path, self.base64, self.download_url)) != 1:
+            raise ValueError("give exactly one of path, base64 or download_url")
         return self
 
 
@@ -80,7 +81,8 @@ async def remember(req: MediaRememberRequest, request: Request):
     runtime = getattr(request.app.state, "canonical_remember_runtime", None)
     if runtime is None:
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")
-    inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64)
+    inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64,
+                     download_url=req.download_url or None, remote=False)
     receipt = await asyncio.to_thread(
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)

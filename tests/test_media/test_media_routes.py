@@ -108,6 +108,24 @@ def test_a_body_with_neither_path_nor_data_is_422(monkeypatch):
     assert c.post("/api/v3/media/remember", json={"content": "x"}).status_code == 422
 
 
+def test_a_download_link_is_passed_on_as_a_local_caller(monkeypatch):
+    c, calls = make(monkeypatch)
+    r = c.post("/api/v3/media/remember", json={"download_url": "https://img.example.com/a.png", "content": "x"})
+    assert r.status_code == 200
+    inp, _ = calls[0]
+    assert inp.download_url == "https://img.example.com/a.png" and inp.remote is False
+    assert inp.base64 is None and inp.path is None
+
+
+def test_exactly_one_source_is_required(monkeypatch):
+    c, calls = make(monkeypatch)
+    url = "https://img.example.com/a.png"
+    for body in ({"download_url": url, "base64": BODY["base64"]}, {"download_url": url, "path": "/tmp/a.png"},
+                 {"path": "/tmp/a.png", "base64": BODY["base64"]}):
+        assert c.post("/api/v3/media/remember", json=body).status_code == 422
+    assert calls == []
+
+
 def test_thumbnail_is_served_only_to_the_owning_profile(monkeypatch, tmp_path):
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
     s = open_media_store(create=True, data_root=tmp_path)
