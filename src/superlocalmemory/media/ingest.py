@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import tempfile
 import time
 import uuid
@@ -124,10 +125,13 @@ def _read_input(inp: MediaInput) -> bytes:
         path = Path(inp.path)
         if not path.is_file():
             raise _refuse("That image file could not be found.")
-        if path.stat().st_size > MAX_FILE_BYTES:
-            raise _refuse("That image is too large (25 MB limit).")
         with open(path, "rb") as fh:
-            return fh.read(MAX_FILE_BYTES + 1)
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise _refuse("That image file could not be found.")
+            data = fh.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise _refuse("That image is too large (25 MB limit).")
+        return data
     except OSError:
         raise _refuse("That image file could not be read.") from None
 

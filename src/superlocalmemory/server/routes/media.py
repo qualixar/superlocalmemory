@@ -71,6 +71,11 @@ async def remember(req: MediaRememberRequest, request: Request):
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id)
     require_permission(request, Permission.WRITE, profile=profile)
+    from superlocalmemory.memory_core import prepare_user_text
+    from superlocalmemory.server.write_governance import enforce_remember_governance
+
+    words = prepare_user_text(engine._config, req.content).text if req.content.strip() else ""
+    enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview=words)
     runtime = getattr(request.app.state, "canonical_remember_runtime", None)
     if runtime is None:
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")

@@ -290,3 +290,32 @@ def test_a_missing_ocr_engine_is_not_cached(env):
     env.client.ocr = ("none", "")
     save(env)
     assert env.cache.puts == []
+
+
+def test_a_file_that_grows_after_the_size_check_is_still_refused(env, monkeypatch, tmp_path):
+    big = tmp_path / "grows.png"
+    big.write_bytes(png())
+    monkeypatch.setattr(ingest, "MAX_FILE_BYTES", 10)
+    real = Path.stat
+
+    def small(self, *a, **k):
+        r = real(self, *a, **k)
+        return os.stat_result((r.st_mode, r.st_ino, r.st_dev, r.st_nlink, r.st_uid, r.st_gid, 5,
+                               int(r.st_atime), int(r.st_mtime), int(r.st_ctime))) if self == big else r
+
+    monkeypatch.setattr(Path, "stat", small)
+    r = save(env, inp=MediaInput(path=big))
+    assert r.status == "refused" and "too large" in r.reason and env.client.calls == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX fifos")
+def test_a_fifo_is_refused_without_blocking(env, tmp_path, monkeypatch):
+    fifo = tmp_path / "pipe.png"
+    os.mkfifo(fifo)
+    monkeypatch.setattr(Path, "is_file", lambda self: True)  # as if swapped in after the check
+    fd = os.open(fifo, os.O_RDWR)  # keeps open() from blocking if the code under test does reach it
+    try:
+        r = save(env, inp=MediaInput(path=fifo))
+    finally:
+        os.close(fd)
+    assert r.status == "refused" and env.client.calls == []

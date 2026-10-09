@@ -84,6 +84,7 @@ def _memory_id(runtime: Any, payload: Mapping[str, Any], fact_ids: tuple[str, ..
     """The memory the facts belong to: from the receipt, else looked up from the first fact."""
     if payload.get("memory_id"):
         return str(payload["memory_id"])
+    # Private on purpose: the writer's receipt carries no memory_id, so the fact row is the only link.
     db = getattr(runtime, "_db", None)
     if db is None or not fact_ids:
         return None

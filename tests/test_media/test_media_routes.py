@@ -17,6 +17,25 @@ LOCAL, REMOTE = ("127.0.0.1", 50000), ("10.1.2.3", 50000)
 BODY = {"base64": base64.b64encode(b"\x89PNG\r\n\x1a\nxx").decode(), "content": "hello", "tags": "a,b"}
 
 
+class Hooks:
+    def __init__(self, exc=None):
+        self.calls, self.exc = [], exc
+
+    def run_pre(self, name, payload):
+        self.calls.append((name, payload))
+        if self.exc:
+            raise self.exc
+
+
+class Registry:
+    def __init__(self, allowed=True):
+        self.allowed, self.calls = allowed, []
+
+    def evaluate(self, kind, ctx, mode):
+        self.calls.append((kind, ctx, mode))
+        return SimpleNamespace(allowed=self.allowed, reason="no")
+
+
 class Db:
     def execute(self, sql, params=()):
         return [{"one": 1}] if params and params[0] in ("default", "p2") else []
@@ -31,7 +50,7 @@ def make(monkeypatch, *, actor="authenticated:test", client=LOCAL, runtime=True)
 
     monkeypatch.setattr(routes, "remember_media", fake)
     app = FastAPI()
-    app.state.engine = SimpleNamespace(_profile_id="default", _config=SimpleNamespace(pii_redaction=False), _db=Db())
+    app.state.engine = SimpleNamespace(_profile_id="default", _config=SimpleNamespace(pii_redaction=False), _db=Db(), _hooks=Hooks())
     if runtime:
         app.state.canonical_remember_runtime = object()
 
@@ -112,3 +131,44 @@ def test_thumbnail_without_a_media_database_is_404(monkeypatch, tmp_path):
     c, _ = make(monkeypatch)
     assert c.get("/api/v3/media/" + "a" * 32 + "/thumb").status_code == 404
     assert not (tmp_path / "empty" / "media.db").exists()
+
+
+def _governed(monkeypatch, *, hook_exc=None, allowed=True, pii=False):
+    from superlocalmemory.server import write_governance
+
+    reg = Registry(allowed)
+    monkeypatch.setattr(write_governance, "_registry", reg)
+    c, calls = make(monkeypatch)
+    engine = c.app.state.engine
+    engine._hooks = Hooks(hook_exc)
+    engine._config = SimpleNamespace(pii_redaction=pii)
+    return c, calls, engine._hooks, reg
+
+
+def test_a_refusing_trust_hook_stops_the_save(monkeypatch):
+    c, calls, hooks, _ = _governed(monkeypatch, hook_exc=PermissionError("blocked"))
+    assert c.post("/api/v3/media/remember", json=BODY).status_code == 403
+    assert calls == [] and len(hooks.calls) == 1
+
+
+def test_a_denying_policy_stops_the_save(monkeypatch):
+    c, calls, hooks, reg = _governed(monkeypatch, allowed=False)
+    assert c.post("/api/v3/media/remember", json=BODY).status_code == 403
+    assert calls == [] and len(reg.calls) == 1
+
+
+def test_allowed_save_runs_both_checks_with_the_redacted_words_only(monkeypatch):
+    c, calls, hooks, reg = _governed(monkeypatch, pii=True)
+    r = c.post("/api/v3/media/remember", json={**BODY, "content": "mail bob@example.com " + "x" * 200})
+    assert r.status_code == 200 and len(calls) == 1
+    name, payload = hooks.calls[0]
+    assert name == "store" and payload["agent_id"] == "authenticated:test" and payload["profile_id"] == "default"
+    assert payload["content_preview"].startswith("mail [PII:EMAIL]") and len(payload["content_preview"]) <= 100
+    kind, ctx, mode = reg.calls[0]
+    assert kind.name == "REMEMBER" and ctx.principal_id == "authenticated:test" and mode == "local"
+
+
+def test_no_words_means_an_empty_preview(monkeypatch):
+    c, calls, hooks, _ = _governed(monkeypatch)
+    c.post("/api/v3/media/remember", json={"base64": BODY["base64"]})
+    assert hooks.calls[0][1]["content_preview"] == ""

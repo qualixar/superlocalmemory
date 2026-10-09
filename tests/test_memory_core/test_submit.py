@@ -98,3 +98,9 @@ def test_writer_errors_propagate_and_empty_content_is_refused():
         submit_memory(Runtime(exc=RuntimeError("boom")), req(), config=cfg())
     with pytest.raises(ValueError):
         submit_memory(Runtime(), req(segments=()), config=cfg())
+
+
+def test_a_runtime_without_a_db_gives_no_memory_id_and_no_error():
+    rt = Runtime(payload={"status": "queryable", "operation_id": "o", "fact_ids": ["f1"]})
+    assert not hasattr(rt, "_db")
+    assert submit_memory(rt, req(), config=cfg()).memory_id is None
