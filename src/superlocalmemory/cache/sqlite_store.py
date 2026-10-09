@@ -34,6 +34,14 @@ _DDL = (
     "CREATE TABLE IF NOT EXISTS cache_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     "INSERT OR IGNORE INTO cache_meta (key, value) VALUES ('schema_version', '1')",
 )
+_initial_meta: dict[str, str] = {}
+
+
+def set_initial_meta(key: str, value: str) -> None:
+    """Record a cache_meta entry that every newly created cache file starts with."""
+    _initial_meta[key] = value
+
+
 _WHERE = "content_sha256=? AND deriver_id=? AND deriver_version=? AND model_id=? AND params_hash=?"
 
 
@@ -85,6 +93,10 @@ class SqliteDeriveCache:
             conn.execute("PRAGMA synchronous=NORMAL")
             for statement in _DDL:
                 conn.execute(statement)
+            if new:
+                for key, value in _initial_meta.items():
+                    conn.execute("INSERT OR IGNORE INTO cache_meta (key, value) VALUES (?, ?)",
+                                 (key, value))
             conn.commit()
         except sqlite3.DatabaseError:
             conn.close()
