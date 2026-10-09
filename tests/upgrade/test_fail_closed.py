@@ -251,3 +251,94 @@ def test_run_checks_refuses_a_down_interpreter_that_is_not_4_1_20(monkeypatch, t
     monkeypatch.setattr(env, "package_version", lambda py, package="superlocalmemory": versions[str(py)])
     with pytest.raises(RuntimeError, match="expected superlocalmemory 4.1.20"):
         uc.run_checks(tmp_path, Path("/x/bin/python"), Path("/y/bin/python"), tmp_path, Path("/z/bin/python"))
+
+
+# --- snapshot classification, reasons, virtual tables -------------------------
+
+def sig(*rows):
+    return sorted(rows)
+
+
+T = ("table", "t", "CREATE TABLE t (x)")
+IDX = ("index", "idx_t", "CREATE INDEX idx_t ON t(x)")
+TRG = ("trigger", "trg_t", "CREATE TRIGGER trg_t AFTER INSERT ON t BEGIN SELECT 1; END")
+CORE = {"memories": 5, "atomic_facts": 9}
+
+
+def test_unchanged_schema_is_not_applicable():
+    r = v.snapshotless_verdict({"memory.db": sig(T, IDX)}, {"memory.db": sig(T, IDX)}, CORE, CORE)
+    assert r["status"] == "n/a" and r["passed"] is None and r["errors"] == []
+
+
+def test_additive_only_diff_is_n_a_additive_with_evidence():
+    after = sig(T, IDX, ("table", "new", "CREATE TABLE new (y)"), ("index", "idx_new", "CREATE INDEX idx_new ON new(y)"),
+                ("trigger", "trg_t", TRG[2] + " "))
+    r = v.snapshotless_verdict({"memory.db": sig(T, IDX, TRG)}, {"memory.db": after}, CORE, CORE)
+    assert r["status"] == "n/a-additive" and r["passed"] is None and r["errors"] == []
+    assert r["diff"]["memory.db"]["added"] == ["idx_new", "new"]
+    assert r["diff"]["memory.db"]["changed"] == ["trg_t"]
+
+
+def test_changed_or_removed_table_fails():
+    for after in (sig(("table", "t", "CREATE TABLE t (x, y)")), sig()):
+        r = v.snapshotless_verdict({"memory.db": sig(T)}, {"memory.db": after}, CORE, CORE)
+        assert r["passed"] is False and r["status"] == "fail" and r["errors"]
+
+
+def test_user_data_count_change_fails_even_when_additive():
+    after = sig(T, ("table", "new", "CREATE TABLE new (y)"))
+    r = v.snapshotless_verdict({"memory.db": sig(T)}, {"memory.db": after}, CORE, {**CORE, "memories": 4})
+    assert r["passed"] is False and any("memories" in e for e in r["errors"])
+
+
+def test_check_ok_accepts_n_a_additive_only_with_null_passed():
+    assert v.check_ok({"passed": None, "status": "n/a-additive"}) is True
+    assert v.check_ok({"passed": False, "status": "n/a-additive"}) is False
+
+
+def test_failing_snapshot_always_has_a_reason():
+    assert v.snapshot_reasons([], 0)
+    assert v.snapshot_reasons([{"ok": False}], 0)
+    assert v.snapshot_reasons([{"ok": False, "reasons": ["columns differ"]}], 0) == ["columns differ"]
+    assert v.snapshot_reasons([{"ok": True}], 1)
+    assert v.snapshot_reasons([{"ok": True}], 0) == []
+
+
+def test_restore_problems_name_the_failed_condition_and_allow_extra_empty_tables():
+    want = {"t": ["a"]}
+    good = dict(want_cols=want, got_cols={**want, "memory_events": ["id"]}, want_counts={"t": 2},
+                got_counts={"t": 2, "memory_events": 0}, want_schema=None, got_schema=None, contents_ok=True)
+    assert v.restore_problems(**good) == [] and v.restore_ok(**good) is True
+    bad = v.restore_problems(**{**good, "got_counts": {"t": 2, "memory_events": 3}})
+    assert bad and "memory_events" in bad[0]
+    assert v.restore_problems(**{**good, "contents_ok": False})
+    assert v.restore_problems(**{**good, "got_cols": {"t": ["a", "b"]}})
+
+
+def test_virtual_table_does_not_crash_the_reader(tmp_path):
+    db = tmp_path / "v.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE plain (a, b)")
+    # a module sqlite cannot load here: the row exists in sqlite_master but any read of it fails
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute("INSERT INTO sqlite_master (type,name,tbl_name,rootpage,sql) VALUES "
+                 "('table','vec_x','vec_x',0,'CREATE VIRTUAL TABLE vec_x USING vec0(e float[3])')")
+    conn.commit()
+    conn.close()
+    cols = env.table_columns(db)
+    assert cols["plain"] == ["a", "b"] and "vec_x" in cols and cols["vec_x"]
+    assert env.table_counts(db)["vec_x"] == -1
+
+
+def test_unreadable_table_becomes_an_error_entry(tmp_path, monkeypatch):
+    db = tmp_path / "u.db"
+    make_db(db, ["CREATE TABLE ok (a)", "CREATE TABLE bad (b)"])
+    real = env._pragma_columns
+
+    def flaky(conn, name):
+        if name == "bad":
+            raise sqlite3.OperationalError("no such module: vec0")
+        return real(conn, name)
+    monkeypatch.setattr(env, "_pragma_columns", flaky)
+    cols = env.table_columns(db)
+    assert cols["ok"] == ["a"] and cols["bad"][0].startswith("<unreadable")

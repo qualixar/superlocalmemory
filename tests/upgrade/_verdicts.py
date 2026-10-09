@@ -118,15 +118,52 @@ def downgrade_ok(d: dict, recall_vs_baseline: dict | None, ceiling: int) -> bool
         and not d.get("errors"))
 
 
+def restore_problems(want_cols: dict, got_cols: dict, want_counts: dict, got_counts: dict,
+                     want_schema: int | None, got_schema: int | None, contents_ok: bool) -> list[str]:
+    """Why a restored database differs from the fixture's (empty list: it equals it).
+
+    A table the fixture lacks is tolerated only when the restored copy has it empty
+    (an older version creates such tables on start); every other difference is a reason.
+    """
+    out: list[str] = []
+    if want_schema != got_schema:
+        out.append(f"schema version {got_schema} != fixture {want_schema}")
+    extra = set(got_cols) - set(want_cols)
+    nonempty = sorted(t for t in extra if got_counts.get(t) != 0)
+    if nonempty:
+        out.append(f"restored copy has extra tables that are not known to be empty: {nonempty}")
+    if sorted(set(want_cols) - set(got_cols)):
+        out.append(f"restored copy lacks tables: {sorted(set(want_cols) - set(got_cols))}")
+    out += [f"columns of {t} differ" for t in sorted(want_cols) if t in got_cols and want_cols[t] != got_cols[t]]
+    out += [f"row count of {t}: {got_counts.get(t)} != fixture {want_counts[t]}"
+            for t in sorted(want_counts) if got_counts.get(t) != want_counts[t]]
+    if not contents_ok:
+        out.append("stored contents differ from the fixture's")
+    return out
+
+
 def restore_ok(want_cols: dict, got_cols: dict, want_counts: dict, got_counts: dict,
                want_schema: int | None, got_schema: int | None, contents_ok: bool) -> bool:
     """A restored database equals the fixture's: schema version, tables, columns, rows, contents."""
-    return bool(want_schema == got_schema and want_cols == got_cols
-                and want_counts == got_counts and contents_ok)
+    return not restore_problems(want_cols, got_cols, want_counts, got_counts, want_schema, got_schema, contents_ok)
+
+
+def snapshot_reasons(restores: list[dict], restore_points_rc: int | None) -> list[str]:
+    """Every reason the snapshot check fails; empty only when it passes."""
+    out: list[str] = []
+    if not restores:
+        out.append("no snapshot was restored")
+    for r in restores:
+        if r.get("ok") is not True:
+            out += list(r.get("reasons") or ([r["error"]] if r.get("error") else [])) or [
+                f"restore of {r.get('snapshot', '?')} did not verify"]
+    if restore_points_rc != 0:
+        out.append(f"slm db restore-points exited {restore_points_rc}")
+    return out
 
 
 def snapshot_passed(restores: list[dict], restore_points_rc: int | None) -> bool:
-    return bool(restores and all(r.get("ok") is True for r in restores) and restore_points_rc == 0)
+    return not snapshot_reasons(restores, restore_points_rc)
 
 
 #: memory.db tables that hold what users stored; their row counts must survive an upgrade.
@@ -147,6 +184,10 @@ def mapping_diff(before: dict, after: dict) -> dict:
             "changed": sorted(k for k in set(before) & set(after) if before[k] != after[k])}
 
 
+def _by_name(signature: list[tuple]) -> dict[str, tuple]:
+    return {r[1]: (r[0], r[2]) for r in signature}
+
+
 def schema_unchanged(before: Path, after: Path) -> bool:
     """Both databases have exactly the schema they had (only then is 'no snapshot' expected)."""
     from _slm_env import schema_signature
@@ -155,9 +196,34 @@ def schema_unchanged(before: Path, after: Path) -> bool:
                for n in ("memory.db", "learning.db"))
 
 
+def snapshotless_verdict(before: dict[str, list[tuple]], after: dict[str, list[tuple]],
+                         counts_before: dict, counts_after: dict) -> dict:
+    """Judge a start that took no pre-migration copy, from the schema signatures it left.
+
+    unchanged -> n/a; only additions (and re-created indexes/triggers) with user data
+    intact -> n/a-additive; an existing table changed or removed, or user-data rows
+    changed -> fail. ``diff`` is kept as evidence in every case.
+    """
+    diff, errors = {}, []
+    for db in sorted(before):
+        b, a = _by_name(before[db]), _by_name(after.get(db, []))
+        diff[db] = mapping_diff(b, a)
+        errors += [f"{db}: table {n} {'removed' if n not in a else 'changed'} without a snapshot"
+                   for n in diff[db]["removed"] + diff[db]["changed"] if b[n][0] == "table"]
+    lost = sorted(t for t in CORE_MEMORY_TABLES if t in counts_before and counts_after.get(t) != counts_before[t])
+    errors += [f"user-data table {t}: {counts_before[t]} -> {counts_after.get(t)} rows without a snapshot" for t in lost]
+    changed = any(any(d.values()) for d in diff.values())
+    if errors:
+        return {"status": "fail", "passed": False, "errors": errors, "diff": diff}
+    if not changed:
+        return {"status": "n/a", "passed": None, "errors": [], "diff": diff}
+    return {"status": "n/a-additive", "passed": None, "errors": [], "diff": diff}
+
+
 def check_ok(check: dict) -> bool:
     """Passed, or explicitly not applicable; anything else (including no verdict) is a failure."""
-    return check.get("passed") is True or (check.get("passed") is None and check.get("status") == "n/a")
+    return check.get("passed") is True or (
+        check.get("passed") is None and check.get("status") in {"n/a", "n/a-additive"})
 
 
 def failing(checks: dict) -> list[str]:

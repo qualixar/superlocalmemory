@@ -324,15 +324,31 @@ def schema_version(learning_db: Path) -> int | None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _pragma_columns(conn: sqlite3.Connection, name: str) -> list[str]:
+    return [r[1] for r in conn.execute(f'PRAGMA table_info("{name}")')]
+
+
 def table_columns(db: Path) -> dict[str, list[str]]:
-    """Every user table in ``db`` mapped to its column names, in order."""
+    """Every user table in ``db`` mapped to its column names, in order.
+
+    A virtual table (its module may not be loadable here) is described by its
+    declaration instead of being probed; a table that cannot be read gets an
+    ``<unreadable: ...>`` entry, so the comparison fails instead of the check crashing.
+    """
     if not db.exists():
         return {}
     conn, tmp = _open_copy(db)
     try:
         out = {}
-        for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
-            out[name] = [r[1] for r in conn.execute(f'PRAGMA table_info("{name}")')]
+        rows = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
+        for name, sql in rows:
+            if (sql or "").lstrip().upper().startswith("CREATE VIRTUAL"):
+                out[name] = [f"<virtual> {' '.join(sql.split())}"]
+                continue
+            try:
+                out[name] = _pragma_columns(conn, name)
+            except sqlite3.DatabaseError as exc:
+                out[name] = [f"<unreadable: {exc}>"]
         return out
     finally:
         conn.close()

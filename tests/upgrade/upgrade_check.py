@@ -30,7 +30,7 @@ import _slm_env as env  # noqa: E402
 import corpus  # noqa: E402
 from _verdicts import (  # noqa: E402,F401
     DOWNGRADE_SCHEMA, core_counts_unchanged, TARGET_SCHEMA, check_ok, downgrade_ok, expected_hits, failing, overlap,
-    mapping_diff, recall_check, recall_verdict, restore_ok, schema_unchanged, snapshot_passed, upgrade_ok)
+    mapping_diff, recall_check, recall_verdict, restore_problems, snapshot_passed, snapshot_reasons, snapshotless_verdict, upgrade_ok)
 
 SNAP_DIR = "pre-migration-snapshots"
 EXPECTED_OLD = "4.1.24"
@@ -191,17 +191,27 @@ def restore_one(new_py: Path, root: Path, snap: Path, fixture: Path, work: Path)
     want_db, got_db = fixture / "data" / kind, probe / kind
     want_cols, got_cols = env.table_columns(want_db), env.table_columns(got_db)
     contents_ok = kind != "memory.db" or env.contents_by_ref(got_db) == env.contents_by_ref(want_db)
-    ok = restore_ok(want_cols, got_cols, env.table_counts(want_db), env.table_counts(got_db),
-                    env.schema_version(want_db), env.schema_version(got_db), contents_ok)
-    return {**out, "ok": ok, "contents_identical": contents_ok,
+    problems = restore_problems(want_cols, got_cols, env.table_counts(want_db), env.table_counts(got_db),
+                                env.schema_version(want_db), env.schema_version(got_db), contents_ok)
+    return {**out, "ok": not problems, "reasons": problems, "contents_identical": contents_ok,
             "bytes_identical": env.sha256_file(got_db) == env.sha256_file(want_db),
             "extra_tables": sorted(set(got_cols) - set(want_cols)), "missing_tables": sorted(set(want_cols) - set(got_cols)),
             "schema_versions": {"fixture": env.schema_version(want_db), "restored": env.schema_version(got_db)}}
 
 
-def _sig_diff(before: Path, after: Path) -> dict:
-    return mapping_diff({r[1]: r[2] for r in env.schema_signature(before)},
-                        {r[1]: r[2] for r in env.schema_signature(after)})
+def _no_snapshot_detail(detail: dict, fixture: Path, data: Path, names: tuple = ("memory.db", "learning.db")) -> dict:
+    """Judge a start that left no pre-migration copy (see ``snapshotless_verdict``)."""
+    verdict = snapshotless_verdict({n: env.schema_signature(fixture / "data" / n) for n in names},
+                                   {n: env.schema_signature(data / n) for n in names},
+                                   env.table_counts(fixture / "data" / "memory.db"), env.table_counts(data / "memory.db"))
+    detail.update(status=verdict["status"], passed=verdict["passed"], schema_changes=verdict["diff"])
+    detail["errors"] += verdict["errors"]
+    if verdict["status"] == "n/a":
+        detail["not_applicable"] = "neither database changed schema, so the start takes no copy"
+    elif verdict["status"] == "n/a-additive":
+        detail["not_applicable"] = ("only new objects were added (tables, indexes, triggers); no existing table "
+                                    "changed and no user-data row count moved, so no copy was needed")
+    return detail
 
 
 def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, work: Path) -> dict:
@@ -212,22 +222,17 @@ def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, wor
                     "fixture_schema_version": env.schema_version(fixture / "data" / "learning.db")}
     rc, _, _, _ = instance(new_py.parent, root).run("db", "restore-points", "--json", timeout=60)
     detail["restore_points_rc"] = rc
-    detail["schema_changes"] = {n: _sig_diff(fixture / "data" / n, data / n) for n in ("memory.db", "learning.db")}
-    detail["schema_changed_without_snapshot"] = sorted(
-        n for n, diff in detail["schema_changes"].items()
-        if any(diff.values()) and not any(s.name.startswith(n.split(".")[0] + "-") for s in snaps))
-    if not snaps and schema_unchanged(fixture / "data", data):
-        detail.update(passed=None, status="n/a",
-                      not_applicable="neither database changed schema, so the start takes no copy")
-        return detail
     if not snaps:
-        detail["errors"].append("no *-pre-migration.db was created although the schema changed")
-        return detail
+        return _no_snapshot_detail(detail, fixture, data)
     detail["restores"] = [restore_one(new_py, root, s, fixture, work) for s in snaps]
-    detail["errors"] += [r["error"] for r in detail["restores"] if r.get("error")]
+    detail["errors"] += snapshot_reasons(detail["restores"], rc)
     detail["passed"] = snapshot_passed(detail["restores"], rc)
-    if rc != 0:
-        detail["errors"].append(f"slm db restore-points exited {rc}")
+    bare = tuple(n for n in ("memory.db", "learning.db") if not any(s.name.startswith(n.split(".")[0] + "-") for s in snaps))
+    if bare:  # a database without its own copy must not have changed in a way that needed one
+        extra = _no_snapshot_detail({"errors": []}, fixture, data, bare)
+        detail["schema_changes"] = extra["schema_changes"]
+        detail["errors"] += extra["errors"]
+        detail["passed"] = bool(detail["passed"] and not extra["errors"])
     return detail
 
 
