@@ -1196,7 +1196,14 @@ class ObserveBuffer:
         self._engine = engine
 
     def enqueue(self, content: str, *, trusted_actor_id: str = "") -> dict:
+        # The hash is only a duplicate-window and idempotency key; the text
+        # that is previewed, evented and stored is the prepared one.
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        from superlocalmemory.memory_core import prepare_user_text
+
+        content = prepare_user_text(
+            getattr(self._engine, "_config", None), content,
+        ).text
         with self._lock:
             if content_hash in self._seen:
                 return {"captured": False, "reason": "duplicate within debounce window"}
@@ -1230,7 +1237,6 @@ class ObserveBuffer:
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
             from superlocalmemory.hooks.auto_capture import AutoCapture
-
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
                 _emit_event(
@@ -5171,7 +5177,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
                 meta[METADATA_KEY] = declared_kind.value
 
+            from superlocalmemory.memory_core import (
+                pii_redaction_enabled,
+                prepare_key,
+                prepare_metadata,
+                prepare_user_text,
+            )
+
+            prepared = prepare_user_text(engine._config, req.content)
+            redact = pii_redaction_enabled(engine._config)
+            meta, _ = prepare_metadata(meta, pii_redaction=redact)
             store_config = getattr(engine._config, "store", None)
+            # Length limits judge what the caller sent, as before.
             validate_deterministic_admission(
                 req.content,
                 max_verbatim_chars=getattr(
@@ -5193,7 +5210,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "operation": "store",
                 "agent_id": trusted_actor_id,
                 "profile_id": write_profile,
-                "content_preview": req.content[:100],
+                "content_preview": prepared.text[:100],
             })
 
             # V4 Phase 4: OperationPolicyRegistry evaluation.
@@ -5270,10 +5287,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     )
 
             admission = RememberRequest(
-                content=req.content,
+                content=prepared.text,
                 profile_id=write_profile,
                 source_type="http",
-                idempotency_key=req.idempotency_key or uuid.uuid4().hex,
+                idempotency_key=(
+                    prepare_key(req.idempotency_key, pii_redaction=redact)
+                    if req.idempotency_key else uuid.uuid4().hex
+                ),
                 metadata=meta,
                 scope=scope,
                 shared_with=tuple(shared_with or ()),
@@ -5528,6 +5548,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 ) from exc
             if isinstance(exc, (AdmissionAuthorizationError, PermissionError)):
                 raise HTTPException(403, detail="remember admission is not authorized") from exc
+            # Known limit: a retry of a key saved before redaction was turned on
+            # conflicts here (422) and is not treated as a duplicate, unlike
+            # /ingest and /import. The journal compares the request as sent.
             if isinstance(
                 exc,
                 (AdmissionPayloadError, IdempotencyConflict),

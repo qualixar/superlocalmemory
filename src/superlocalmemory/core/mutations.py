@@ -677,7 +677,11 @@ def update_fact_authorized(
     """
     if not content or not content.strip():
         return {"ok": False, "error": "content cannot be empty"}
-    content = content.strip()
+    from superlocalmemory.memory_core import prepare_user_text
+
+    # The new text is prepared like any save, so the stored successor and every
+    # event preview built from it hold no personal data when redaction is on.
+    content = prepare_user_text(getattr(engine, "_config", None), content.strip()).text
     profile_id, context = _context(
         engine,
         "update",
