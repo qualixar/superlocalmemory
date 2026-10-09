@@ -11,6 +11,7 @@ from pathlib import Path
 
 from superlocalmemory.runtimes import managed_env as _env
 from superlocalmemory.runtimes.managed_env import EnvSpec, HuggingFaceSource, ManagedEnv
+from superlocalmemory.runtimes.media_canary import media_canary
 
 #: Top-level packages. The installed set is the hashed lock for the platform
 #: (runtimes/locks/), generated from these by scripts/lock_media_env.py.
@@ -48,6 +49,7 @@ MEDIA_ENV = EnvSpec(
     model_source=HuggingFaceSource(MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION, MEDIA_DOWNLOAD_BYTES),
     min_free_disk_bytes=_min_free_disk(),
     min_ram_bytes_warn=MEDIA_RAM_WARN_BYTES,
+    canary=media_canary,
     expected_download_bytes=MEDIA_DOWNLOAD_BYTES,
 )
 
