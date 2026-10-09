@@ -1,4 +1,4 @@
-"""Per-request peer seam: remote callers get their own peer and a web origin."""
+"""A mesh call made for a connected web app is refused, never run as the local session."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from superlocalmemory.mcp import tools_mesh
+from superlocalmemory.mesh.broker import MeshBroker  # noqa: F401
 from superlocalmemory.mcp.remote_caller import RemotePeer, current_remote_peer, remote_peer
 
 
@@ -25,7 +26,7 @@ class _Collector:
 def tools(monkeypatch):
     calls: list[tuple[str, str, dict | None]] = []
 
-    def request(method, path, body=None):
+    def request(method, path, body=None, **kw):
         calls.append((method, path, body))
         if path == "/register":
             return {"peer_id": "web-peer-id" if body.get("session_id") == "ref-1" else "other-web", "pending_messages": 0}
@@ -60,26 +61,41 @@ def test_local_send_uses_process_peer_and_same_body(tools) -> None:
     assert not any(p == "/register" for _, p, _ in calls)
 
 
-def test_remote_send_registers_a_distinct_web_peer(tools) -> None:
+ALL_TOOL_ARGS = {
+    "mesh_summary": ("x",), "mesh_peers": (), "mesh_send": ("p", "hi"),
+    "mesh_inbox": (), "mesh_wait": (1,), "mesh_state": ("k", "v", "set"),
+    "mesh_lock": ("/tmp/f", "acquire"), "mesh_events": (), "mesh_status": (),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ALL_TOOL_ARGS))
+def test_every_tool_refuses_a_web_caller_without_calling_the_daemon(tools, name) -> None:
     fns, calls = tools
     with remote_peer(RemotePeer("ref-1", "notes", "My Notes")):
-        asyncio.run(fns["mesh_send"]("other", "hi", refs=["fact:abcdef"], reply_to=9))
-    reg = [b for _, p, b in calls if p == "/register"][0]
-    assert reg["session_id"] == "ref-1" and reg["agent_type"] == "notes"
-    send = [b for _, p, b in calls if p == "/send"][0]
-    assert send["from_peer"] == "web-peer-id"
-    assert send["refs"] == ["fact:abcdef"] and send["reply_to"] == 9
-    assert "origin" not in send and "kind" not in send and "app" not in send
+        out = asyncio.run(fns[name](*ALL_TOOL_ARGS[name]))
+    assert out == {"ok": False,
+                   "error": "mesh messages for connected web apps are not available yet"}
+    assert calls == []
 
 
-def test_two_remote_peers_get_two_identities(tools) -> None:
-    fns, calls = tools
+def test_web_caller_never_stores_a_message(monkeypatch) -> None:
+    """Even with the daemon wired to a real broker, a web caller stores nothing."""
+    from superlocalmemory.mesh.broker import MeshBroker
+    stored = []
+    real = MeshBroker.send_message
+
+    def spy(self, *a, **k):
+        stored.append(a)
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(MeshBroker, "send_message", spy)
+    http: list = []
+    monkeypatch.setattr(tools_mesh, "_mesh_request", lambda *a, **k: http.append(a))
+    c = _Collector()
+    tools_mesh.register_mesh_tools(c, lambda: None)
     with remote_peer(RemotePeer("ref-1", "notes", "N")):
-        asyncio.run(fns["mesh_send"]("x", "a"))
-    with remote_peer(RemotePeer("ref-2", "mail", "M")):
-        asyncio.run(fns["mesh_send"]("x", "b"))
-    froms = [b["from_peer"] for _, p, b in calls if p == "/send"]
-    assert froms == ["web-peer-id", "other-web"]
+        asyncio.run(c.tools["mesh_send"]("x", "hi"))
+    assert http == [] and stored == []
 
 
 def test_inbox_adds_preface_and_keeps_keys(tools) -> None:
@@ -98,6 +114,13 @@ def test_wait_tool(tools) -> None:
     wait_calls = [p for m, p, _ in calls if "/wait" in p]
     assert wait_calls and "timeout_s=5" in wait_calls[0] and "/inbox/local-peer/wait" in wait_calls[0]
     assert ("POST", "/inbox/local-peer/read", {"message_ids": [3]}) in calls
+
+
+def test_wait_tool_maps_busy_daemon(tools, monkeypatch) -> None:
+    fns, _ = tools
+    monkeypatch.setattr(tools_mesh, "_mesh_request", lambda *a, **k: {"busy": True})
+    out = asyncio.run(fns["mesh_wait"]())
+    assert out == {"ok": False, "error": "too many waits, retry shortly"}
 
 
 def test_wait_tool_clamps_and_survives_daemon_down(tools, monkeypatch) -> None:

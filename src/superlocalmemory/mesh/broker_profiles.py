@@ -38,25 +38,40 @@ class SendRateLimiter:
         self._lock = threading.Lock()
         self._sent: dict[tuple[str, str], deque[float]] = {}
 
-    def _trim(self, key: tuple[str, str], now: float) -> deque[float]:
-        q = self._sent.setdefault(key, deque())
+    def _trim(self, key: tuple[str, str], now: float) -> deque[float] | None:
+        q = self._sent.get(key)
+        if q is None:
+            return None
         while q and now - q[0] >= self._window:
             q.popleft()
+        if not q:
+            del self._sent[key]
+            return None
         return q
 
-    def retry_after(self, profile_id: str, sender: str) -> int | None:
-        """Seconds until the sender may send again, or None when it may now."""
-        now = time.monotonic()
-        with self._lock:
-            q = self._trim((profile_id, sender), now)
-            if len(q) < self._limit:
-                return None
-            return max(1, int(self._window - (now - q[0])) + 1)
+    def try_acquire(self, profile_id: str, sender: str) -> int | None:
+        """Take one slot, or return the seconds until the sender may send again.
 
-    def record(self, profile_id: str, sender: str) -> None:
-        now = time.monotonic()
+        The check and the record happen under one lock, so concurrent sends
+        cannot both pass the last slot.
+        """
+        key, now = (profile_id, sender), time.monotonic()
         with self._lock:
-            self._trim((profile_id, sender), now).append(now)
+            q = self._trim(key, now)
+            if q is not None and len(q) >= self._limit:
+                return max(1, int(self._window - (now - q[0])) + 1)
+            self._sent.setdefault(key, deque()).append(now)
+            return None
+
+    def refund(self, profile_id: str, sender: str) -> None:
+        """Give back the newest slot (the send did not happen)."""
+        key = (profile_id, sender)
+        with self._lock:
+            q = self._sent.get(key)
+            if q:
+                q.pop()
+                if not q:
+                    del self._sent[key]
 
 
 def upsert_profile(conn: sqlite3.Connection, peer_id: str, *, kind: str,
@@ -120,9 +135,16 @@ def retire(conn: sqlite3.Connection, peer_id: str, profile_id: str) -> dict:
         return {"ok": False, "error": "peer not found"}
     _ensure_profile(conn, peer_id)
     now = _now()
+    session = conn.execute(
+        "SELECT session_id FROM mesh_peers WHERE peer_id=? AND profile_id=?",
+        (peer_id, profile_id),
+    ).fetchone()
+    # The retirement is kept against the connection's own reference, so the
+    # same reference cannot simply register again as a new peer.
     conn.execute(
-        "UPDATE mesh_peer_profiles SET retired_at=?, updated_at=? WHERE peer_id=?",
-        (now, now, peer_id),
+        "UPDATE mesh_peer_profiles SET retired_at=?, updated_at=?, "
+        "authorization_ref=COALESCE(authorization_ref, ?) WHERE peer_id=?",
+        (now, now, session["session_id"] if session else None, peer_id),
     )
     ids = [r[0] for r in conn.execute(
         "SELECT id FROM mesh_messages WHERE profile_id=? AND COALESCE(read, 0)=0 "
@@ -138,6 +160,14 @@ def retire(conn: sqlite3.Connection, peer_id: str, profile_id: str) -> dict:
     conn.execute("DELETE FROM mesh_peers WHERE peer_id=? AND profile_id=?",
                  (peer_id, profile_id))
     return {"ok": True, "dropped": len(ids)}
+
+
+def is_retired_ref(conn: sqlite3.Connection, ref: str) -> bool:
+    """Has the owner retired the peer that registered under this reference?"""
+    return conn.execute(
+        "SELECT 1 FROM mesh_peer_profiles WHERE authorization_ref=? "
+        "AND retired_at IS NOT NULL LIMIT 1", (ref,),
+    ).fetchone() is not None
 
 
 def sender_block(conn: sqlite3.Connection, peer_id: str) -> str | None:
@@ -169,14 +199,19 @@ def resolve_hop(conn: sqlite3.Connection, reply_to: int | None,
     return hop
 
 
-def prepare_envelope(conn: sqlite3.Connection, *, kind: str, from_peer: str,
-                     refs: Sequence[str], reply_to: int | None,
-                     profile_id: str) -> tuple[dict | None, dict | None]:
-    """Gate a send and compute its envelope fields: ``(error, fields)``."""
-    if kind == "web":
-        blocked = sender_block(conn, from_peer)
-        if blocked:
-            return {"ok": False, "error": blocked}, None
+def gate_send(conn: sqlite3.Connection, *, kind: str, from_peer: str,
+              refs: Sequence[str], reply_to: int | None,
+              profile_id: str) -> tuple[dict | None, dict | None]:
+    """Gate a send and compute its envelope fields: ``(error, fields)``.
+
+    Mute and retire apply to every sender, local or web. ``fields`` is None
+    when the message needs no envelope row (a plain local send).
+    """
+    blocked = sender_block(conn, from_peer)
+    if blocked:
+        return {"ok": False, "error": blocked}, None
+    if kind != "web" and not refs and reply_to is None:
+        return None, None
     try:
         clean_refs = validate_refs(refs)
         hop = resolve_hop(conn, reply_to, profile_id) if kind == "web" else 0

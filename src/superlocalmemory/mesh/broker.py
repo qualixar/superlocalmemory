@@ -45,7 +45,7 @@ MAX_MESSAGE_SIZE = 4096  # 4KB cap — mesh messages are notifications, not data
 MESSAGE_TTL_HOURS = 48   # Offline messages expire after 48h
 LOCK_TTL_HOURS = 8       # M-02: file locks auto-expire so a crashed session can't deadlock a path
 _NEVER_EXPIRES = "9999-12-31T23:59:59Z"  # legacy sentinel default; treated as stale/free
-MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+MAX_QUEUED_PER_TARGET = broker_inbox.MAX_QUEUED_PER_TARGET  # unread cap per broadcast/project target
 
 _T = TypeVar("_T")
 # Retry budget for a transient writer collision. 250ms was too thin under
@@ -212,6 +212,8 @@ class MeshBroker(OwnerControlsMixin):
                       project_path: str = "", agent_type: str = "unknown",
                       profile_id: str = "default") -> dict:
         def _register(conn: sqlite3.Connection) -> dict:
+            if broker_profiles.is_retired_ref(conn, session_id):
+                return {"ok": False, "error": "peer is retired"}
             now = datetime.now(timezone.utc).isoformat()
             effective_host = host or self._host
             # Idempotent within the tenant: update if same session_id exists
@@ -329,145 +331,136 @@ class MeshBroker(OwnerControlsMixin):
                      origin: Origin | None = None,
                      refs: Sequence[str] = (),
                      reply_to: int | None = None) -> dict:
-        # Guard: 4KB message size cap
         if len(content) > MAX_MESSAGE_SIZE:
-            return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
-                    "Mesh messages are notifications — reference a file path instead."}
+            return self._too_large(content)
+        remote = self._forward_if_remote(from_peer, to_peer, content, msg_type, profile_id)
+        if remote is not None:
+            return remote
+        kind = origin.kind if origin else "local"
+        content, refused = self._screen_content(kind, profile_id, from_peer, content)
+        if refused is not None:
+            return refused
+        envelope = (kind, origin.app if origin else "", refs, reply_to)
+        result = self._write_with_retry(
+            lambda conn: self._store_message(
+                conn, from_peer, to_peer, content, msg_type, project_path,
+                profile_id, operation_id, envelope),
+        )
+        self._after_send(result, kind, profile_id, from_peer)
+        return result
 
-        # Remote delivery is an external side effect, so do it outside the
-        # retry envelope. Local writes below are retried as a whole short
-        # transaction when another daemon-owned operation has SQLite's writer.
-        # Hold the lock only for the membership check, not for the HTTP call.
-        # A remote peer only counts if it belongs to this tenant (profile).
+    @staticmethod
+    def _too_large(content: str) -> dict:
+        return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
+                "Mesh messages are notifications — reference a file path instead."}
+
+    def _forward_if_remote(self, from_peer: str, to_peer: str, content: str,
+                           msg_type: str, profile_id: str) -> dict | None:
+        """Deliver to a peer on another broker; None when the target is local.
+
+        Remote delivery is an external side effect, so it stays outside the
+        retry envelope. The lock covers only the membership check. A remote
+        peer only counts if it belongs to this tenant (profile).
+        """
         with self._remote_peers_lock:
             remote_info = self._remote_peers.get(to_peer)
             is_remote = (
                 remote_info is not None
                 and remote_info.get("profile_id", "default") == profile_id
             )
-        if is_remote and self._sync_client:
-            return self._sync_client.send_to_remote(to_peer, {
-                "from_peer": from_peer,
-                "to": to_peer,
-                "content": content,
-                "type": msg_type,
-                "profile_id": profile_id,
-            })
+        if not (is_remote and self._sync_client):
+            return None
+        return self._sync_client.send_to_remote(to_peer, {
+            "from_peer": from_peer, "to": to_peer, "content": content,
+            "type": msg_type, "profile_id": profile_id,
+        })
 
-        kind = origin.kind if origin else "local"
-        app = origin.app if origin else ""
-        if kind == "web":
-            # A web app's text is screened before it is stored; local text
-            # stays verbatim (see the 4.1.19 note below).
-            retry = self._send_limiter.retry_after(profile_id, from_peer)
-            if retry is not None:
-                return {"ok": False, "error": "send rate limit", "retry_after_s": retry}
-            from superlocalmemory.core.security_primitives import redact_secrets
-            content = redact_secrets(content, aggression="high")
+    def _screen_content(self, kind: str, profile_id: str, from_peer: str,
+                        content: str) -> tuple[str, dict | None]:
+        """Web text is rate-limited and secret-redacted before it is stored.
 
-        def _send(conn: sqlite3.Connection) -> dict:
-            # Derive locals fresh on EVERY call. A nonlocal mutation of to_peer
-            # persisted across _write_with_retry attempts: a 'project:' address
-            # rewritten to 'project' on the first try then misrouted to the
-            # direct-peer branch on retry ("recipient peer not found").
-            _to_peer = to_peer
-            _project_path = project_path
-            now = datetime.now(timezone.utc).isoformat()
-            expires_at = self._compute_expires(now)
+        Local text stays verbatim (see the 4.1.19 note in ``_store_message``).
+        """
+        if kind != "web":
+            return content, None
+        retry = self._send_limiter.try_acquire(profile_id, from_peer)
+        if retry is not None:
+            return content, {"ok": False, "error": "send rate limit", "retry_after_s": retry}
+        from superlocalmemory.core.security_primitives import redact_secrets
+        content = redact_secrets(content, aggression="high")
+        if len(content) > MAX_MESSAGE_SIZE:
+            self._send_limiter.refund(profile_id, from_peer)
+            return content, self._too_large(content)
+        return content, None
 
-            # Idempotency: return original result for a repeated operation_id.
-            if operation_id:
-                op = conn.execute(
-                    "SELECT message_id FROM mesh_sent_ops WHERE operation_id=?", (operation_id,)
-                ).fetchone()
-                if op:
-                    return {"ok": True, "id": op["message_id"],
-                            "idempotent": True, "operation_id": operation_id}
-
-            # Identity binding: cross-profile impersonation guard.
-            cross_profile_err = check_cross_profile_sender(conn, from_peer, profile_id)
-            if cross_profile_err is not None:
-                return cross_profile_err
-
-            fields = None
-            if kind == "web" or refs or reply_to is not None:
-                err, fields = broker_profiles.prepare_envelope(
-                    conn, kind=kind, from_peer=from_peer, refs=refs,
-                    reply_to=reply_to, profile_id=profile_id,
-                )
-                if err is not None:
-                    return err
-
-            # Determine target type
-            if _to_peer == "broadcast":
-                target_type = "broadcast"
-            elif _to_peer.startswith("project:"):
-                target_type = "project"
-                _project_path = _to_peer[len("project:"):]
-                _to_peer = "project"
-            else:
-                target_type = "peer"
-                # Verify recipient exists WITHIN this tenant for direct messages.
-                # A peer_id in another profile is not a valid recipient here.
-                if not conn.execute(
-                    "SELECT 1 FROM mesh_peers WHERE peer_id=? AND profile_id=?",
-                    (_to_peer, profile_id),
-                ).fetchone():
-                    return {"ok": False, "error": "recipient peer not found"}
-
-            # Enforce per-target queue cap (per tenant)
-            if target_type in ("broadcast", "project"):
-                count = conn.execute(
-                    "SELECT COUNT(*) FROM mesh_messages "
-                    "WHERE profile_id=? AND target_type=? AND project_path=? AND read=0",
-                    (profile_id, target_type, _project_path),
-                ).fetchone()[0]
-                if count >= MAX_QUEUED_PER_TARGET:
-                    # Delete oldest to make room
-                    conn.execute(
-                        "DELETE FROM mesh_messages WHERE id IN ("
-                        "  SELECT id FROM mesh_messages "
-                        "  WHERE profile_id=? AND target_type=? AND project_path=? AND read=0 "
-                        "  ORDER BY created_at ASC LIMIT ?)",
-                        (profile_id, target_type, _project_path,
-                         count - MAX_QUEUED_PER_TARGET + 1),
-                    )
-
-            # Option A (4.1.19 meshredact): local storage keeps the message
-            # exactly as sent or received. Credentials stay in SLM the same
-            # way any other memory does; the network boundary is screened at
-            # egress by mesh/remote_sync.py, which is the only place a mesh
-            # payload can leave this machine.
-            _content = content
-            cursor = conn.execute(
-                "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, "
-                "created_at, expires_at, target_type, project_path, profile_id) "
-                "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-                (from_peer, _to_peer, msg_type, _content, now, expires_at,
-                 target_type, _project_path, profile_id),
-            )
-            msg_id = cursor.lastrowid
-            if fields is not None:
-                broker_profiles.insert_envelope(
-                    conn, msg_id, kind=kind, app=app, fields=fields,
-                )
-
-            if operation_id:
-                conn.execute("INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)", (operation_id, msg_id, now))
-
-            self._log_event(conn, "message_sent", from_peer or "system", {
-                "to": _to_peer, "target_type": target_type, "project": _project_path,
-            }, profile_id=profile_id)
-            conn.commit()
-            return {"ok": True, "id": msg_id, "target_type": target_type,
-                    "expires_at": expires_at}
-
-        result = self._write_with_retry(_send)
+    def _after_send(self, result: dict, kind: str, profile_id: str,
+                    from_peer: str) -> None:
         if result.get("ok") and not result.get("idempotent"):
-            if kind == "web":
-                self._send_limiter.record(profile_id, from_peer)
             self._waiter.notify()
-        return result
+        elif kind == "web":
+            self._send_limiter.refund(profile_id, from_peer)
+
+    @staticmethod
+    def _replay(conn: sqlite3.Connection, operation_id: str | None) -> dict | None:
+        """The original result for a repeated operation_id, if there is one."""
+        if not operation_id:
+            return None
+        op = conn.execute(
+            "SELECT message_id FROM mesh_sent_ops WHERE operation_id=?", (operation_id,)
+        ).fetchone()
+        if not op:
+            return None
+        return {"ok": True, "id": op["message_id"],
+                "idempotent": True, "operation_id": operation_id}
+
+    def _store_message(self, conn: sqlite3.Connection, from_peer: str,
+                       to_peer: str, content: str, msg_type: str,
+                       project_path: str, profile_id: str,
+                       operation_id: str | None, envelope: tuple) -> dict:
+        kind, app, refs, reply_to = envelope
+        now = datetime.now(timezone.utc).isoformat()
+        expires_at = self._compute_expires(now)
+        replay = self._replay(conn, operation_id)
+        if replay is not None:
+            return replay
+        # Identity binding: cross-profile impersonation guard.
+        cross_profile_err = check_cross_profile_sender(conn, from_peer, profile_id)
+        if cross_profile_err is not None:
+            return cross_profile_err
+        err, fields = broker_profiles.gate_send(
+            conn, kind=kind, from_peer=from_peer, refs=refs,
+            reply_to=reply_to, profile_id=profile_id,
+        )
+        if err is not None:
+            return err
+        target = broker_inbox.resolve_target(conn, to_peer, project_path, profile_id)
+        if target.get("ok") is False:
+            return target
+        target_type, _to_peer, _project_path = (
+            target["target_type"], target["to_peer"], target["project_path"])
+        # Option A (4.1.19 meshredact): local storage keeps the message
+        # exactly as sent or received. Credentials stay in SLM the same
+        # way any other memory does; the network boundary is screened at
+        # egress by mesh/remote_sync.py, which is the only place a mesh
+        # payload can leave this machine.
+        cursor = conn.execute(
+            "INSERT INTO mesh_messages (from_peer, to_peer, msg_type, content, read, "
+            "created_at, expires_at, target_type, project_path, profile_id) "
+            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+            (from_peer, _to_peer, msg_type, content, now, expires_at,
+             target_type, _project_path, profile_id),
+        )
+        msg_id = cursor.lastrowid
+        if fields is not None:
+            broker_profiles.insert_envelope(conn, msg_id, kind=kind, app=app, fields=fields)
+        if operation_id:
+            conn.execute("INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)", (operation_id, msg_id, now))
+        self._log_event(conn, "message_sent", from_peer or "system", {
+            "to": _to_peer, "target_type": target_type, "project": _project_path,
+        }, profile_id=profile_id)
+        conn.commit()
+        return {"ok": True, "id": msg_id, "target_type": target_type,
+                "expires_at": expires_at}
 
     def get_inbox(self, peer_id: str, project_path: str = "",
                   profile_id: str = "default", *,

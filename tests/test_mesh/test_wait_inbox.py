@@ -88,3 +88,22 @@ def test_ninth_concurrent_wait_refused(broker, monkeypatch) -> None:
         t.join()
     # slots are released afterwards
     broker.wait_inbox(b, timeout_s=0.5)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -1, 0, None, "x"])
+def test_non_finite_or_bad_timeouts_use_the_minimum(broker, monkeypatch, bad) -> None:
+    b = make_peer(broker, "b")
+    monkeypatch.setattr(broker_inbox, "WAIT_MIN_S", 0.2)
+    monkeypatch.setattr(broker_inbox, "WAIT_MAX_S", 0.5)
+    t0 = time.monotonic()
+    msgs, timed_out = broker.wait_inbox(b, timeout_s=bad)
+    assert timed_out is True and time.monotonic() - t0 < 1.0
+
+
+def test_large_timeout_is_capped(broker, monkeypatch) -> None:
+    b = make_peer(broker, "b")
+    monkeypatch.setattr(broker_inbox, "WAIT_MIN_S", 0.2)
+    monkeypatch.setattr(broker_inbox, "WAIT_MAX_S", 0.4)
+    t0 = time.monotonic()
+    broker.wait_inbox(b, timeout_s=99)
+    assert time.monotonic() - t0 < 1.0

@@ -10,6 +10,7 @@ keeps ownership of connections, retries and tenancy.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import threading
 import time
@@ -70,6 +71,46 @@ def query_inbox(conn: sqlite3.Connection, peer_id: str, project_path: str,
     return all_msgs[:100]
 
 
+MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+
+
+def resolve_target(conn: sqlite3.Connection, to_peer: str, project_path: str,
+                   profile_id: str) -> dict:
+    """Work out where a send goes and make room in a shared queue.
+
+    Returns ``{"target_type", "to_peer", "project_path"}`` or an error result.
+    Derived fresh on every call: a retry must see the caller's original address.
+    """
+    if to_peer == "broadcast":
+        target_type = "broadcast"
+    elif to_peer.startswith("project:"):
+        target_type = "project"
+        project_path = to_peer[len("project:"):]
+        to_peer = "project"
+    else:
+        # A direct recipient must exist WITHIN this tenant.
+        if not conn.execute(
+            "SELECT 1 FROM mesh_peers WHERE peer_id=? AND profile_id=?",
+            (to_peer, profile_id),
+        ).fetchone():
+            return {"ok": False, "error": "recipient peer not found"}
+        return {"target_type": "peer", "to_peer": to_peer, "project_path": project_path}
+    count = conn.execute(
+        "SELECT COUNT(*) FROM mesh_messages "
+        "WHERE profile_id=? AND target_type=? AND project_path=? AND read=0",
+        (profile_id, target_type, project_path),
+    ).fetchone()[0]
+    if count >= MAX_QUEUED_PER_TARGET:
+        conn.execute(
+            "DELETE FROM mesh_messages WHERE id IN ("
+            "  SELECT id FROM mesh_messages "
+            "  WHERE profile_id=? AND target_type=? AND project_path=? AND read=0 "
+            "  ORDER BY created_at ASC LIMIT ?)",
+            (profile_id, target_type, project_path, count - MAX_QUEUED_PER_TARGET + 1),
+        )
+    return {"target_type": target_type, "to_peer": to_peer, "project_path": project_path}
+
+
 def attach_envelopes(conn: sqlite3.Connection, msgs: list[dict],
                      *, remote_view: bool) -> list[dict]:
     """Add an ``envelope`` to each message; in a remote view also datamark ``content``."""
@@ -88,7 +129,7 @@ def attach_envelopes(conn: sqlite3.Connection, msgs: list[dict],
     for msg in msgs:
         env = envelope_for(msg, by_id.get(msg["id"]), remote_view=remote_view)
         msg["envelope"] = env
-        if remote_view:
+        if env["trust"] == "untrusted-peer":
             msg["content"] = env["content"]
     return msgs
 
@@ -168,7 +209,13 @@ class InboxWaiter:
     def wait(self, fetch: Callable[[], list[dict]],
              timeout_s: float) -> tuple[list[dict], bool]:
         """Return ``(messages, timed_out)``; ``timeout_s`` is clamped to the bounds."""
-        timeout = min(max(float(timeout_s), WAIT_MIN_S), WAIT_MAX_S)
+        try:
+            wanted = float(timeout_s)
+        except (TypeError, ValueError):
+            wanted = WAIT_MIN_S
+        if not math.isfinite(wanted):
+            wanted = WAIT_MIN_S
+        timeout = min(max(wanted, WAIT_MIN_S), WAIT_MAX_S)
         self._acquire_slot()
         try:
             deadline = time.monotonic() + timeout

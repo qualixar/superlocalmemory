@@ -49,6 +49,10 @@ def remote_caller(key_id: str) -> Iterator[None]:
 class RemotePeer:
     """A web app calling through a remote connection, as the mesh sees it.
 
+    Nothing sets this in the shipped daemon yet. The mesh tools refuse a caller
+    for whom it is set (they cannot serve a web app over the daemon's HTTP
+    interface); a later change will serve it in process.
+
     ``peer_ref`` is a stable, opaque reference for the app (never a secret);
     ``app`` is its short name and ``display_name`` what the owner sees.
     """

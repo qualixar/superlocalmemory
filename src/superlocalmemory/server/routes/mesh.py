@@ -14,11 +14,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-
-from superlocalmemory.mcp.remote_caller import current_remote_peer
-from superlocalmemory.mesh.envelope import Origin
 
 router = APIRouter(prefix="/mesh", tags=["mesh"])
 
@@ -166,22 +163,6 @@ def _reject_secret_state(key: str, value: str) -> None:
         )
 
 
-def _sender_and_origin(broker, claimed_peer: str, profile: str) -> tuple[str, Origin | None]:
-    """Who is sending, and as what.
-
-    The origin comes only from the in-process per-request marker, never from
-    the request body. A web app always sends as the peer registered for it,
-    whatever ``from_peer`` the body claims.
-    """
-    remote = current_remote_peer()
-    if remote is None:
-        return claimed_peer, None
-    peer_id = broker.peer_id_for_session(remote.peer_ref, profile)
-    if peer_id is None:
-        raise HTTPException(409, detail="register this peer before sending")
-    return peer_id, Origin("web", remote.app)
-
-
 def _send_error_status(error: str) -> int:
     """HTTP status for a refused send."""
     for needle, status in (("too large", 413), ("muted", 403), ("retired", 403),
@@ -198,18 +179,12 @@ def register(req: RegisterRequest, request: Request):
     broker = _get_broker(request)
     if not req.session_id:
         raise HTTPException(400, detail="session_id required")
-    profile = _active_profile()
     result = broker.register_peer(
         req.session_id, req.summary, req.host, req.port,
-        req.project_path, req.agent_type, profile_id=profile,
+        req.project_path, req.agent_type, profile_id=_active_profile(),
     )
-    remote = current_remote_peer()
-    if remote is not None and result.get("peer_id"):
-        # Only an in-process web caller is a web peer; a request body never says so.
-        broker.upsert_peer_profile(
-            result["peer_id"], kind="web", app_name=remote.app,
-            display_name=remote.display_name, authorization_ref=remote.peer_ref,
-        )
+    if result.get("ok") is False:
+        raise HTTPException(409, detail=result.get("error", "registration refused"))
     return result
 
 
@@ -382,97 +357,85 @@ def summary(req: SummaryRequest, request: Request):
     return result
 
 
+def _strict_peer_key(broker, from_peer: str) -> str:
+    """The per-peer key a strict-identity send must verify against (fails closed)."""
+    if not from_peer:
+        raise HTTPException(401, detail="strict identity: from_peer required")
+    import sqlite3 as _sqlite3
+    try:
+        _conn = _sqlite3.connect(broker._db_path, timeout=3)
+        _conn.row_factory = _sqlite3.Row
+        _row = _conn.execute(
+            "SELECT peer_key FROM mesh_peers WHERE peer_id=? LIMIT 1",
+            (from_peer,),
+        ).fetchone()
+        _conn.close()
+    except _sqlite3.Error:
+        raise HTTPException(503, detail="strict identity: peer key lookup failed")
+    if not _row or not _row["peer_key"]:
+        raise HTTPException(
+            401,
+            detail="strict identity: from_peer is not a registered peer with a per-peer key",
+        )
+    return str(_row["peer_key"])
+
+
+def _admit_remote_send(client_host: str) -> None:
+    """Admission gate parity (closes the P1 bypass for inbound remote send)."""
+    try:
+        from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
+        from superlocalmemory.core.actor_context import Transport
+        from superlocalmemory.core.operation_request import OperationKind
+    except ImportError:
+        return
+    try:
+        admit(OperationKind.MESH_SEND, resolve_actor(Transport.HTTP, client_host=client_host))
+    except AdmissionDenied as exc:
+        raise HTTPException(403, detail=str(exc))
+
+
+def _verify_remote_send(request: Request, broker, req: SendRequest,
+                        to_target: str) -> None:
+    """3a-1 + 3a-2: signature verification and admission gate for non-loopback."""
+    client_host = request.client.host if request.client else "127.0.0.1"
+    from superlocalmemory.server.loopback import is_loopback as _is_loopback_host
+    if _is_loopback_host(client_host):
+        return
+    from superlocalmemory.mesh.broker_security import (
+        check_mesh_message_signature,
+        is_strict_identity,
+    )
+    strict = is_strict_identity(getattr(request.app.state, "config", None))
+    # SEC-4 (hardened): COMPAT verifies with the fleet secret (or accepts
+    # unsigned legacy); STRICT needs the sender's own per-peer key and has NO
+    # fleet-secret fallback, so every failure closes.
+    verify_secret = getattr(broker, "_shared_secret", None)
+    if strict:
+        verify_secret = _strict_peer_key(broker, req.from_peer)
+    sig_err = check_mesh_message_signature(
+        verify_secret, req.from_peer, to_target, req.content,
+        request.headers.get("x-mesh-sig"), request.headers.get("x-mesh-nonce"),
+        request.headers.get("x-mesh-ts"), is_loopback=False, strict=strict,
+    )
+    if sig_err is not None:
+        raise HTTPException(401, detail=sig_err.get("error", "signature error"))
+    _admit_remote_send(client_host)
+
+
 @router.post("/send")
 def send(req: SendRequest, request: Request):
     broker = _get_broker(request)
     to_target = req.to_peer or req.to  # v3.4.6: accept both field names
     if not to_target:
         raise HTTPException(400, detail="'to' or 'to_peer' required")
-    profile = _active_profile()
-
-    # 3a-1 + 3a-2: Apply signature verification and admission gate for non-loopback.
-    client_host = request.client.host if request.client else "127.0.0.1"
-    from superlocalmemory.server.loopback import is_loopback as _is_loopback_host
-    _is_lb = _is_loopback_host(client_host)
-
-    if not _is_lb:
-        from superlocalmemory.mesh.broker_security import (
-            check_mesh_message_signature,
-            is_strict_identity,
-        )
-        config = getattr(request.app.state, "config", None)
-        strict = is_strict_identity(config)
-        fleet_secret = getattr(broker, "_shared_secret", None)
-
-        # SEC-4 (hardened): identity resolution per mode.
-        #  - COMPAT (default): fleet secret verifies (or unsigned legacy accepted).
-        #  - STRICT: the sender MUST be a registered peer with its own per-peer key.
-        #    There is NO fleet-secret fallback in strict mode — unregistered
-        #    from_peer, a NULL peer_key, or a DB error all FAIL CLOSED. (The old
-        #    fleet fallback was an impersonation escape hatch: any fleet-secret
-        #    holder could claim an unregistered/legacy from_peer.)
-        verify_secret = fleet_secret
-        if strict:
-            if not req.from_peer:
-                raise HTTPException(401, detail="strict identity: from_peer required")
-            import sqlite3 as _sqlite3
-            try:
-                _conn = _sqlite3.connect(broker._db_path, timeout=3)
-                _conn.row_factory = _sqlite3.Row
-                _row = _conn.execute(
-                    "SELECT peer_key FROM mesh_peers WHERE peer_id=? LIMIT 1",
-                    (req.from_peer,),
-                ).fetchone()
-                _conn.close()
-            except _sqlite3.Error:
-                raise HTTPException(503, detail="strict identity: peer key lookup failed")
-            if not _row or not _row["peer_key"]:
-                raise HTTPException(
-                    401,
-                    detail="strict identity: from_peer is not a registered peer with a per-peer key",
-                )
-            verify_secret = str(_row["peer_key"])
-
-        sig_err = check_mesh_message_signature(
-            verify_secret,
-            req.from_peer,
-            to_target,
-            req.content,
-            request.headers.get("x-mesh-sig"),
-            request.headers.get("x-mesh-nonce"),
-            request.headers.get("x-mesh-ts"),
-            is_loopback=False,
-            strict=strict,
-        )
-        if sig_err is not None:
-            raise HTTPException(401, detail=sig_err.get("error", "signature error"))
-
-        # Admission gate parity (closes the P1 bypass for inbound remote send).
-        try:
-            from superlocalmemory.core.admission import (
-                AdmissionDenied,
-                admit,
-                resolve_actor,
-            )
-            from superlocalmemory.core.actor_context import Transport
-            from superlocalmemory.core.operation_request import OperationKind
-        except ImportError:
-            AdmissionDenied = None  # type: ignore[assignment,misc]
-
-        if AdmissionDenied is not None:
-            try:
-                actor = resolve_actor(Transport.HTTP, client_host=client_host)
-                admit(OperationKind.MESH_SEND, actor)
-            except AdmissionDenied as exc:
-                raise HTTPException(403, detail=str(exc))
-
-    from_peer, origin = _sender_and_origin(broker, req.from_peer, profile)
+    _verify_remote_send(request, broker, req, to_target)
     # This sync FastAPI route already runs in the worker thread pool, so the
     # broker's SQLite retries and optional remote HTTP delivery cannot block
-    # the daemon event loop.
+    # the daemon event loop. The origin of a send is never read from the
+    # request: every send arriving here is a local one.
     result = broker.send_message(
-        from_peer, to_target, req.content, req.type, "", profile,
-        origin=origin, refs=req.refs, reply_to=req.reply_to,
+        req.from_peer, to_target, req.content, req.type, "", _active_profile(),
+        refs=req.refs, reply_to=req.reply_to,
     )
     if not result.get("ok"):
         raise HTTPException(_send_error_status(result.get("error", "")),
@@ -485,20 +448,18 @@ def inbox(peer_id: str, request: Request, project_path: str = ""):
     broker = _get_broker(request)
     return {"messages": broker.get_inbox(
         peer_id, project_path, profile_id=_active_profile(),
-        remote_view=current_remote_peer() is not None,
     )}
 
 
 @router.get("/inbox/{peer_id}/wait")
-def inbox_wait(peer_id: str, request: Request, timeout_s: float = 20,
-               project_path: str = ""):
+def inbox_wait(peer_id: str, request: Request,
+               timeout_s: float = Query(20, ge=1, le=20), project_path: str = ""):
     """Wait (bounded) for unread mail. Sync route: the wait holds a worker thread."""
     broker = _get_broker(request)
     try:
         messages, timed_out = broker.wait_inbox(
             peer_id, timeout_s=timeout_s, project_path=project_path,
             profile_id=_active_profile(),
-            remote_view=current_remote_peer() is not None,
         )
     except RuntimeError:
         raise HTTPException(429, detail="too many waits")
