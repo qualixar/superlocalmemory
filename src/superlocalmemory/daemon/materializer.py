@@ -249,11 +249,18 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     idempotency_key = str(
         metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
     )
-    from superlocalmemory.memory_core import prepare_user_text
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        prepare_metadata,
+        prepare_user_text,
+    )
 
     # pending.db rows were written raw by the old fallback path.
     config = getattr(engine, "_config", None)
     prepared = prepare_user_text(config, item["content"])
+    metadata, _ = prepare_metadata(
+        metadata, pii_redaction=pii_redaction_enabled(config),
+    )
     command = build_engine_ingestion_command(engine)
     request = IngestionRequest(
         content=prepared.text,

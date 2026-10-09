@@ -395,3 +395,70 @@ def test_remember_redacts_tags_and_key_on_disk(
         })
         assert resp.status_code == 200, resp.text
     _assert_raw_absent(tmp_path)
+
+
+def test_engine_path_metadata_redacted_on_disk(
+    engine_with_mock_deps, monkeypatch, tmp_path,
+) -> None:
+    from superlocalmemory.core.engine_ingestion import (
+        canonical_store,
+        local_trusted_actor_id,
+    )
+
+    monkeypatch.setenv("SLM_PII_REDACTION", "1")
+    canonical_store(
+        engine_with_mock_deps, "The platform review was scheduled for Thursday afternoon.",
+        source_type="python-api",
+        trusted_actor_id=local_trusted_actor_id("python-api"),
+        metadata={"from": EMAIL}, require_complete=True,
+    )
+    blob = _disk_bytes(tmp_path)
+    assert EMAIL.encode() not in blob and b"[PII:EMAIL]" in blob
+
+
+def test_engine_path_metadata_unchanged_when_off(
+    engine_with_mock_deps, monkeypatch, tmp_path,
+) -> None:
+    from superlocalmemory.core.engine_ingestion import (
+        canonical_store,
+        local_trusted_actor_id,
+    )
+
+    monkeypatch.delenv("SLM_PII_REDACTION", raising=False)
+    canonical_store(
+        engine_with_mock_deps, "The platform review was scheduled for Thursday afternoon.",
+        source_type="python-api",
+        trusted_actor_id=local_trusted_actor_id("python-api"),
+        metadata={"from": EMAIL}, require_complete=True,
+    )
+    blob = _disk_bytes(tmp_path)
+    assert EMAIL.encode() in blob and b"[PII:EMAIL]" not in blob
+
+
+def test_legacy_backfill_metadata_redacted(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    from superlocalmemory.daemon import materializer
+
+    monkeypatch.setenv("SLM_PII_REDACTION", "1")
+    seen: list = []
+
+    class _Cmd:
+        def submit(self, request):
+            seen.append(request)
+            raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(
+        "superlocalmemory.core.engine_ingestion.build_engine_ingestion_command",
+        lambda engine, **kw: _Cmd(),
+    )
+    engine = MagicMock()
+    engine._profile_id = "default"
+    engine._config.pii_redaction = False
+    item = {
+        "id": 2, "content": "A note about the review.", "profile_id": "default",
+        "tags": f"owner {EMAIL}", "metadata": {"from": EMAIL},
+    }
+    with pytest.raises(RuntimeError):
+        materializer.legacy_item(engine, item, actor_id="t")
+    assert EMAIL not in repr(seen[0].metadata) and "[PII:EMAIL]" in repr(seen[0].metadata)

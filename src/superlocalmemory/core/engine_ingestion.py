@@ -363,9 +363,16 @@ def canonical_store(
     # Opt-in PII redaction (config.pii_redaction or SLM_PII_REDACTION) runs in
     # the shared save step, before the content is extracted, embedded or
     # persisted; with it off the text is stored byte-identical.
-    from superlocalmemory.memory_core import prepare_user_text
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        prepare_metadata,
+        prepare_user_text,
+    )
 
     content = prepare_user_text(engine._config, content).text
+    metadata, _ = prepare_metadata(
+        dict(metadata or {}), pii_redaction=pii_redaction_enabled(engine._config),
+    )
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
@@ -374,7 +381,7 @@ def canonical_store(
             profile_id=profile_id or engine._profile_id,
             source_type=source_type,
             idempotency_key=idempotency_key or uuid.uuid4().hex,
-            metadata=dict(metadata or {}),
+            metadata=metadata,
             scope=scope,
             shared_with=tuple(shared_with or ()),
             trusted_actor_id=trusted_actor_id,
