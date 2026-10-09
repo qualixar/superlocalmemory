@@ -17,6 +17,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from superlocalmemory.mcp.remote_caller import current_remote_peer
+from superlocalmemory.mesh.envelope import Origin
+
 router = APIRouter(prefix="/mesh", tags=["mesh"])
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -54,6 +57,8 @@ class SendRequest(BaseModel):
     to_peer: str = ""  # v3.4.6: accept both 'to' and 'to_peer' for compatibility
     content: str
     type: str = "text"
+    refs: list[str] = []
+    reply_to: int | None = None
 
 
 class ReadRequest(BaseModel):
@@ -161,6 +166,31 @@ def _reject_secret_state(key: str, value: str) -> None:
         )
 
 
+def _sender_and_origin(broker, claimed_peer: str, profile: str) -> tuple[str, Origin | None]:
+    """Who is sending, and as what.
+
+    The origin comes only from the in-process per-request marker, never from
+    the request body. A web app always sends as the peer registered for it,
+    whatever ``from_peer`` the body claims.
+    """
+    remote = current_remote_peer()
+    if remote is None:
+        return claimed_peer, None
+    peer_id = broker.peer_id_for_session(remote.peer_ref, profile)
+    if peer_id is None:
+        raise HTTPException(409, detail="register this peer before sending")
+    return peer_id, Origin("web", remote.app)
+
+
+def _send_error_status(error: str) -> int:
+    """HTTP status for a refused send."""
+    for needle, status in (("too large", 413), ("muted", 403), ("retired", 403),
+                           ("rate limit", 429), ("hop limit", 422), ("ref", 422)):
+        if needle in error:
+            return status
+    return 404
+
+
 # -- Routes --
 
 @router.post("/register")
@@ -168,10 +198,19 @@ def register(req: RegisterRequest, request: Request):
     broker = _get_broker(request)
     if not req.session_id:
         raise HTTPException(400, detail="session_id required")
-    return broker.register_peer(
+    profile = _active_profile()
+    result = broker.register_peer(
         req.session_id, req.summary, req.host, req.port,
-        req.project_path, req.agent_type, profile_id=_active_profile(),
+        req.project_path, req.agent_type, profile_id=profile,
     )
+    remote = current_remote_peer()
+    if remote is not None and result.get("peer_id"):
+        # Only an in-process web caller is a web peer; a request body never says so.
+        broker.upsert_peer_profile(
+            result["peer_id"], kind="web", app_name=remote.app,
+            display_name=remote.display_name, authorization_ref=remote.peer_ref,
+        )
+    return result
 
 
 @router.post("/deregister")
@@ -427,23 +466,43 @@ def send(req: SendRequest, request: Request):
             except AdmissionDenied as exc:
                 raise HTTPException(403, detail=str(exc))
 
+    from_peer, origin = _sender_and_origin(broker, req.from_peer, profile)
     # This sync FastAPI route already runs in the worker thread pool, so the
     # broker's SQLite retries and optional remote HTTP delivery cannot block
     # the daemon event loop.
     result = broker.send_message(
-        req.from_peer, to_target, req.content, req.type, "", profile,
+        from_peer, to_target, req.content, req.type, "", profile,
+        origin=origin, refs=req.refs, reply_to=req.reply_to,
     )
     if not result.get("ok"):
-        status = 413 if "too large" in result.get("error", "") else 404
-        raise HTTPException(status, detail=result.get("error", ""))
+        raise HTTPException(_send_error_status(result.get("error", "")),
+                            detail=result.get("error", ""))
     return result
 
 
 @router.get("/inbox/{peer_id}")
 def inbox(peer_id: str, request: Request, project_path: str = ""):
     broker = _get_broker(request)
-    return {"messages": broker.get_inbox(peer_id, project_path,
-                                         profile_id=_active_profile())}
+    return {"messages": broker.get_inbox(
+        peer_id, project_path, profile_id=_active_profile(),
+        remote_view=current_remote_peer() is not None,
+    )}
+
+
+@router.get("/inbox/{peer_id}/wait")
+def inbox_wait(peer_id: str, request: Request, timeout_s: float = 20,
+               project_path: str = ""):
+    """Wait (bounded) for unread mail. Sync route: the wait holds a worker thread."""
+    broker = _get_broker(request)
+    try:
+        messages, timed_out = broker.wait_inbox(
+            peer_id, timeout_s=timeout_s, project_path=project_path,
+            profile_id=_active_profile(),
+            remote_view=current_remote_peer() is not None,
+        )
+    except RuntimeError:
+        raise HTTPException(429, detail="too many waits")
+    return {"messages": messages, "timed_out": timed_out}
 
 
 @router.post("/inbox/{peer_id}/read")

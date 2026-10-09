@@ -62,6 +62,10 @@ WRITE_ONLY_TOOLS: frozenset[str] = frozenset({
 
 WRITE_TOOLS: frozenset[str] = READ_TOOLS | WRITE_ONLY_TOOLS
 
+# Mesh tools stay denied to remote callers until a verified per-app identity
+# exists; flipping this alone does not expose them.
+REMOTE_MESH_TOOLS_ENABLED = False
+
 HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "apply_refactor", "audit_trail", "backup_status", "build_code_graph", "build_graph",
     "code_entity_history", "code_memory_search", "code_stale_check", "compact_memories",
@@ -71,7 +75,7 @@ HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "get_review_context", "link_memory_to_code", "list_communities",
     "list_failed_operations", "list_flows", "list_graph_stats", "mesh_events",
     "mesh_inbox", "mesh_lock", "mesh_peers", "mesh_send", "mesh_state", "mesh_status",
-    "mesh_summary", "observe_bounded_loop_evidence",
+    "mesh_summary", "mesh_wait", "observe_bounded_loop_evidence",
     "observe_bounded_loop_execution_learning", "quantize", "query_graph",
     "reap_processes", "refactor_preview", "resolve_operation", "run_maintenance",
     "semantic_search_code", "set_mode", "set_retention_policy", "slm_loop_run",

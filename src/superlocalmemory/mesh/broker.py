@@ -19,6 +19,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger("superlocalmemory.mesh")
@@ -27,6 +28,10 @@ import os as _os
 from .broker_security import (  # noqa: E501
     apply_security_schema, check_cross_profile_sender, ensure_db_healthy, get_or_create_peer_key, reject_secret_state, seed_fencing_counter, _set_nonce_db_path, validate_lock_fence_query,  # noqa: E501
 )
+
+from . import broker_inbox, broker_profiles
+from .broker_owner import OwnerControlsMixin
+from .envelope import Origin
 
 # Remote sync support (optional, try/except to avoid import issues)
 try:
@@ -51,7 +56,7 @@ _WRITE_RETRY_BASE_SECONDS = 0.025
 _WRITE_BUSY_TIMEOUT_MS = 2000
 
 
-class MeshBroker:
+class MeshBroker(OwnerControlsMixin):
     """Lightweight mesh broker — peer lifecycle, messaging, state, locks, events."""
 
     def __init__(self, db_path: str | Path):
@@ -71,6 +76,8 @@ class MeshBroker:
         self._degraded: bool = False
         self._fencing_lock = threading.Lock()
         self._fencing_counter: int = 0  # seeded below after schema is applied
+        self._waiter = broker_inbox.InboxWaiter()
+        self._send_limiter = broker_profiles.SendRateLimiter()
         if self._is_remote and not self._shared_secret:
             raise RuntimeError(
                 "SLM_MESH_SHARED_SECRET is required when SLM_MESH_HOST is not localhost"
@@ -318,7 +325,10 @@ class MeshBroker:
     def send_message(self, from_peer: str, to_peer: str, content: str,
                      msg_type: str = "text", project_path: str = "",
                      profile_id: str = "default",
-                     operation_id: str | None = None) -> dict:
+                     operation_id: str | None = None,
+                     origin: Origin | None = None,
+                     refs: Sequence[str] = (),
+                     reply_to: int | None = None) -> dict:
         # Guard: 4KB message size cap
         if len(content) > MAX_MESSAGE_SIZE:
             return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
@@ -344,6 +354,17 @@ class MeshBroker:
                 "profile_id": profile_id,
             })
 
+        kind = origin.kind if origin else "local"
+        app = origin.app if origin else ""
+        if kind == "web":
+            # A web app's text is screened before it is stored; local text
+            # stays verbatim (see the 4.1.19 note below).
+            retry = self._send_limiter.retry_after(profile_id, from_peer)
+            if retry is not None:
+                return {"ok": False, "error": "send rate limit", "retry_after_s": retry}
+            from superlocalmemory.core.security_primitives import redact_secrets
+            content = redact_secrets(content, aggression="high")
+
         def _send(conn: sqlite3.Connection) -> dict:
             # Derive locals fresh on EVERY call. A nonlocal mutation of to_peer
             # persisted across _write_with_retry attempts: a 'project:' address
@@ -367,6 +388,15 @@ class MeshBroker:
             cross_profile_err = check_cross_profile_sender(conn, from_peer, profile_id)
             if cross_profile_err is not None:
                 return cross_profile_err
+
+            fields = None
+            if kind == "web" or refs or reply_to is not None:
+                err, fields = broker_profiles.prepare_envelope(
+                    conn, kind=kind, from_peer=from_peer, refs=refs,
+                    reply_to=reply_to, profile_id=profile_id,
+                )
+                if err is not None:
+                    return err
 
             # Determine target type
             if _to_peer == "broadcast":
@@ -417,6 +447,10 @@ class MeshBroker:
                  target_type, _project_path, profile_id),
             )
             msg_id = cursor.lastrowid
+            if fields is not None:
+                broker_profiles.insert_envelope(
+                    conn, msg_id, kind=kind, app=app, fields=fields,
+                )
 
             if operation_id:
                 conn.execute("INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)", (operation_id, msg_id, now))
@@ -428,103 +462,35 @@ class MeshBroker:
             return {"ok": True, "id": msg_id, "target_type": target_type,
                     "expires_at": expires_at}
 
-        return self._write_with_retry(_send)
+        result = self._write_with_retry(_send)
+        if result.get("ok") and not result.get("idempotent"):
+            if kind == "web":
+                self._send_limiter.record(profile_id, from_peer)
+            self._waiter.notify()
+        return result
 
     def get_inbox(self, peer_id: str, project_path: str = "",
-                  profile_id: str = "default") -> list[dict]:
+                  profile_id: str = "default", *,
+                  remote_view: bool = False) -> list[dict]:
         """Get all messages for this peer: direct + broadcast + project.
 
         Scoped to the peer's tenant (profile_id): a peer never sees another
-        tenant's direct, broadcast, or project traffic.
+        tenant's direct, broadcast, or project traffic. Each message carries
+        an ``envelope``; in a remote view its text is datamarked.
         """
         conn = self._conn()
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            # Direct messages to this peer
-            # v3.6.12 (mesh-3): only UNREAD direct messages — was returning read
-            # ones too, so every poll re-listed already-read messages until the
-            # 24h cleanup (broadcast/project already filter unread via mesh_reads).
-            direct = conn.execute(
-                "SELECT id, from_peer, to_peer, msg_type, content, read, created_at, "
-                "target_type, project_path FROM mesh_messages "
-                "WHERE profile_id=? AND to_peer=? AND target_type='peer' "
-                "AND COALESCE(read, 0) = 0 "
-                "AND (expires_at IS NULL OR expires_at > ?) "
-                "ORDER BY created_at DESC LIMIT 100",
-                (profile_id, peer_id, now),
-            ).fetchall()
-
-            # Broadcast messages not from this peer and not yet read by this peer
-            broadcast = conn.execute(
-                "SELECT m.id, m.from_peer, m.to_peer, m.msg_type, m.content, "
-                "CASE WHEN r.peer_id IS NOT NULL THEN 1 ELSE 0 END AS read, "
-                "m.created_at, m.target_type, m.project_path "
-                "FROM mesh_messages m "
-                "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
-                "WHERE m.profile_id=? AND m.target_type='broadcast' AND m.from_peer != ? "
-                "AND r.peer_id IS NULL "
-                "AND (m.expires_at IS NULL OR m.expires_at > ?) "
-                "ORDER BY m.created_at DESC LIMIT 50",
-                (peer_id, profile_id, peer_id, now),
-            ).fetchall()
-
-            # Project messages for my project, not from me, not yet read
-            project_msgs = []
-            if project_path:
-                project_msgs = conn.execute(
-                    "SELECT m.id, m.from_peer, m.to_peer, m.msg_type, m.content, "
-                    "CASE WHEN r.peer_id IS NOT NULL THEN 1 ELSE 0 END AS read, "
-                    "m.created_at, m.target_type, m.project_path "
-                    "FROM mesh_messages m "
-                    "LEFT JOIN mesh_reads r ON m.id = r.message_id AND r.peer_id = ? "
-                    "WHERE m.profile_id=? AND m.target_type='project' "
-                    "AND m.project_path=? AND m.from_peer != ? "
-                    "AND r.peer_id IS NULL "
-                    "AND (m.expires_at IS NULL OR m.expires_at > ?) "
-                    "ORDER BY m.created_at DESC LIMIT 50",
-                    (peer_id, profile_id, project_path, peer_id, now),
-                ).fetchall()
-
-            all_msgs = [dict(r) for r in direct] + [dict(r) for r in broadcast] + [dict(r) for r in project_msgs]
-            # Sort by created_at descending
-            all_msgs.sort(key=lambda m: m.get("created_at", ""), reverse=True)
-            return all_msgs[:100]
+            msgs = broker_inbox.query_inbox(conn, peer_id, project_path, profile_id)
+            return broker_inbox.attach_envelopes(conn, msgs, remote_view=remote_view)
         finally:
             conn.close()
 
     def mark_read(self, peer_id: str, message_ids: list[int],
                   profile_id: str = "default") -> dict:
-        def _mark_read(conn: sqlite3.Connection) -> dict:
-            if not message_ids:
-                return {"ok": True, "marked": 0}
-            now = datetime.now(timezone.utc).isoformat()
-            ph = ",".join("?" * len(message_ids))
-            # One batched read of target types (tenant-scoped), then batched
-            # writes — was 2N round-trips per N messages.
-            rows = conn.execute(
-                f"SELECT id, target_type FROM mesh_messages "
-                f"WHERE id IN ({ph}) AND profile_id=?",
-                (*message_ids, profile_id),
-            ).fetchall()
-            direct_ids = [r["id"] for r in rows if r["target_type"] == "peer"]
-            shared_ids = [r["id"] for r in rows if r["target_type"] != "peer"]
-            if direct_ids:
-                dph = ",".join("?" * len(direct_ids))
-                conn.execute(
-                    f"UPDATE mesh_messages SET read=1 "
-                    f"WHERE id IN ({dph}) AND to_peer=? AND profile_id=?",
-                    (*direct_ids, peer_id, profile_id),
-                )
-            if shared_ids:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO mesh_reads (message_id, peer_id, read_at) "
-                    "VALUES (?, ?, ?)",
-                    [(mid, peer_id, now) for mid in shared_ids],
-                )
-            conn.commit()
-            return {"ok": True, "marked": len(message_ids)}
-
-        return self._write_with_retry(_mark_read)
+        return self._write_with_retry(
+            lambda conn: broker_inbox.mark_messages_read(
+                conn, peer_id, message_ids, profile_id),
+        )
 
     # -- State --
 
@@ -806,6 +772,11 @@ class MeshBroker:
             # v3.4.6: Clean up orphaned mesh_reads entries
             conn.execute(
                 "DELETE FROM mesh_reads WHERE message_id NOT IN "
+                "(SELECT id FROM mesh_messages)",
+            )
+            # Envelope rows go with their message, whichever rule removed it.
+            conn.execute(
+                "DELETE FROM mesh_message_envelopes WHERE message_id NOT IN "
                 "(SELECT id FROM mesh_messages)",
             )
             # Delete expired locks (the 9999-… sentinel sorts after any real now)

@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 _current_remote_key_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "slm_remote_key_id", default=None,
@@ -44,4 +45,40 @@ def remote_caller(key_id: str) -> Iterator[None]:
         _current_remote_key_id.reset(token)
 
 
-__all__ = ["current_remote_key_id", "remote_caller"]
+@dataclass(frozen=True)
+class RemotePeer:
+    """A web app calling through a remote connection, as the mesh sees it.
+
+    ``peer_ref`` is a stable, opaque reference for the app (never a secret);
+    ``app`` is its short name and ``display_name`` what the owner sees.
+    """
+
+    peer_ref: str
+    app: str
+    display_name: str
+
+
+_current_remote_peer: contextvars.ContextVar[RemotePeer | None] = contextvars.ContextVar(
+    "slm_remote_peer", default=None,
+)
+
+
+def current_remote_peer() -> RemotePeer | None:
+    """The web app behind this request, or ``None`` for a caller on this computer."""
+    return _current_remote_peer.get()
+
+
+@contextmanager
+def remote_peer(peer: RemotePeer | None) -> Iterator[None]:
+    """Run everything inside as the given web app (``None`` clears it)."""
+    token = _current_remote_peer.set(peer)
+    try:
+        yield
+    finally:
+        _current_remote_peer.reset(token)
+
+
+__all__ = [
+    "RemotePeer", "current_remote_key_id", "current_remote_peer",
+    "remote_caller", "remote_peer",
+]
