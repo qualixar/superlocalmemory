@@ -366,7 +366,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
         root = check_root(source["root_path"])  # the rules for a new folder hold on every scan
     except RootRefused as exc:
         return _offline(store, source, stats, exc.code)
-    if str(root) != source["root_path"]:  # the path now leads somewhere else than the folder confirmed
+    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):  # the path now leads somewhere else than the folder confirmed
         return _offline(store, source, stats, "root_moved")
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:

@@ -76,3 +76,20 @@ def test_a_removal_stops_the_scan_before_it_hashes_anything(env, monkeypatch):
     t.join(10)
     r.join(10)
     assert hashed == [] and env.runtime.saved == []
+
+
+def test_root_paths_are_compared_the_way_the_platform_does(env, monkeypatch):
+    """On a case-insensitive platform the same folder spelled differently is not a moved root."""
+    import superlocalmemory.sources.reconcile as rc
+
+    env.write("a.md", "note a")
+    sid = env.add_and_confirm()
+    real = rc.check_root(str(env.root))
+    media = env.store()
+    with media._write() as conn:
+        conn.execute("UPDATE sources SET root_path = ? WHERE source_id = ?", (str(real).upper(), sid))
+    media.close()
+    monkeypatch.setattr(rc, "check_root", lambda path: real)
+    monkeypatch.setattr(rc.os.path, "normcase", lambda s: str(s).lower())
+    stats = env.scan(sid)
+    assert not stats.offline
