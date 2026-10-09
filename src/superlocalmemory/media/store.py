@@ -114,9 +114,13 @@ class MediaStore(JobsMixin):
         conn = sqlite3.connect(str(self.path), timeout=5, check_same_thread=False,
                                isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        _load_vec(conn)
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA foreign_keys=ON")
+            _load_vec(conn)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def _init_schema(self) -> None:
