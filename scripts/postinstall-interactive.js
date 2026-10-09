@@ -33,9 +33,11 @@
  *   --reconfigure          Allow overwrite of existing config.toml.
  *   --home=<path>          Override $HOME (test hook).
  *   --reply-file=<json>    JSON file providing custom-knob answers.
+ *   --media                Record a request to turn on images and documents.
  *
  * Environment variables (test/CI hooks):
  *   CI=true                        Force non-TTY path.
+ *   SLM_ENABLE_MEDIA=1             Same as --media (records a request; never downloads).
  *   SLM_INSTALL_FREE_RAM_MB=<int>  Override free-RAM probe (benchmark).
  *   SLM_INSTALL_COLD_START_MS=<n>  Override Python cold-start probe.
  *   SLM_INSTALL_DISK_FREE_GB=<n>   Override disk-free probe.
@@ -144,6 +146,7 @@ function parseArgs(argv) {
     home: null,
     replyFile: null,
     homeOutsideHome: false, // H-10: opt-in flag for --home outside $HOME
+    media: false, // --media: record a request to turn on images and documents
     // v3.8.0: deployment mode — "personal" | "enterprise" (default: personal)
     deployment: null,
   };
@@ -151,6 +154,7 @@ function parseArgs(argv) {
     if (a === '--dry-run') args.dryRun = true;
     else if (a === '--reconfigure') args.reconfigure = true;
     else if (a === '--home-outside-home') args.homeOutsideHome = true; // H-10
+    else if (a === '--media') args.media = true;
     else if (a.startsWith('--profile=')) args.profile = a.slice('--profile='.length);
     else if (a.startsWith('--home=')) args.home = a.slice('--home='.length);
     else if (a.startsWith('--reply-file=')) args.replyFile = a.slice('--reply-file='.length);
@@ -187,6 +191,9 @@ const {
   promptIdeMultiselect,
   executeIdeConnections,
 } = require('./postinstall/ide-multiselect.js');
+
+// 4.1.25 — what's-new banner + the (never-downloading) media request
+const { printWhatsNew, handleMediaChoice } = require('./postinstall/media-request.js');
 
 // ------------------------------------------------------------------------
 // TTY detection
@@ -526,22 +533,6 @@ async function runInteractiveFlow(rl, recommendedProfile) {
 // First-run checklist
 // ------------------------------------------------------------------------
 
-// UX-G2 — one-screen "what's new in v3.4.21" banner for upgraders so
-// existing users see the headline before the first-run checklist. Kept
-// under 60 LOC per Stage-8 G2 scope.
-function printLivingBrainDelta() {
-  console.log('');
-  console.log('Current setup guarantees:');
-  console.log('  + session_init mandate hook — Claude calls ToolSearch→session_init first, every session');
-  console.log('  + External IDE integrations are installed only after explicit consent in `slm setup`');
-  console.log('  + M017 migration — ccq_consolidated_blocks gets scope column (no more silent CCQ scope drop)');
-  console.log('  + GC-safe test flags baked into pyproject.toml + Makefile (no more macOS ARM SIGSEGV)');
-  console.log('What\'s unchanged:');
-  console.log('  * Your memory.db — zero deletes, zero rewrites');
-  console.log('  * Your profile settings');
-  console.log('  * All CLI commands you already use');
-}
-
 function printFirstRunChecklist(config) {
   console.log('');
   console.log('SuperLocalMemory is configured.');
@@ -608,6 +599,8 @@ async function main() {
   if (cfgExists && !args.reconfigure) {
     console.log('SLM: existing config.toml detected at ' + cfgPath);
     console.log('SLM: skipping installer. Use --reconfigure to change settings.');
+    printWhatsNew();
+    await handleMediaChoice({ args, env: process.env, slmDir, interactive: false });
     return 0;
   }
 
@@ -710,6 +703,8 @@ async function main() {
   if (args.dryRun) {
     console.log('SLM dry-run: would write profile=' + config.profile +
       ' to ' + cfgPath);
+    printWhatsNew();
+    await handleMediaChoice({ args, env: process.env, slmDir, interactive: false });
     printFirstRunChecklist(config);
     return 0;
   }
@@ -764,8 +759,9 @@ async function main() {
   // v3.8.0: Execute IDE connections after config write so state is consistent.
   if (config._pendingIdes) executeIdeConnections(config._pendingIdes, slmDir);
 
-  // UX-G2: show the one-screen delta banner so upgraders see what shipped.
-  printLivingBrainDelta();
+  // Show what shipped, then the (default-No) question about images and documents.
+  printWhatsNew();
+  await handleMediaChoice({ args, env: process.env, slmDir, interactive: !nonInteractive });
 
   printFirstRunChecklist(config);
   return 0;
@@ -800,7 +796,7 @@ module.exports = {
   LLM_MODEL_CHOICES,
   PROFILES,
   CUSTOM_KNOB_ENUMS, // UX-M3
-  printLivingBrainDelta, // UX-G2 (exposed for the test harness only)
+  printWhatsNew, // exposed for the test harness
   // v3.8.0 — deployment
   DEPLOYMENT_PRESETS,
   DEFAULT_DEPLOYMENT_MODE,

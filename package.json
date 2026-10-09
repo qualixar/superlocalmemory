@@ -75,6 +75,7 @@
     "scripts/postinstall.js",
     "scripts/postinstall-interactive.js",
     "scripts/postinstall/validation.js",
+    "scripts/postinstall/media-request.js",
     "scripts/preuninstall.js",
     ".claude-plugin/",
     "plugin/",

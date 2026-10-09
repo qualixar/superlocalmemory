@@ -1,0 +1,110 @@
+/**
+ * What's-new banner and the "turn on images and documents" request.
+ *
+ * The installer never downloads anything. It only records a request in
+ * <data root>/features.json; the SLM daemon acts on it the next time it
+ * starts. Nothing is written unless the person asked (a flag, the
+ * SLM_ENABLE_MEDIA=1 environment variable, or a "yes" at a terminal).
+ *
+ * Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+ * Licensed under AGPL-3.0-or-later.
+ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+
+const FEATURES_FILE = 'features.json';
+
+function printWhatsNew(log = console.log) {
+  log('');
+  log("What's new in 4.1.25:");
+  log('  + Images & documents: off until you turn them on (about 1.5 GB of models). Run: slm media enable');
+  log('  + Bots on the web can message each other through the mesh (remote access is still off).');
+  log('  + See what is on and what you can turn on: slm features');
+}
+
+function mediaRequested(args, env) {
+  return Boolean((args && args.media) || (env && env.SLM_ENABLE_MEDIA === '1'));
+}
+
+/**
+ * Merge {"media": {"requested": true, ...}} into features.json (mode 0600).
+ * Never throws; returns { ok, note }.
+ */
+function recordMediaRequest(slmDir, now = new Date()) {
+  const file = path.join(slmDir, FEATURES_FILE);
+  try {
+    let data = { schema: 1 };
+    if (fs.existsSync(file)) {
+      try {
+        data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (_e) {
+        return { ok: false, note: 'features.json could not be read; left untouched. Run: slm media enable' };
+      }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return { ok: false, note: 'features.json has an unexpected shape; left untouched. Run: slm media enable' };
+      }
+    }
+    const media = data.media && typeof data.media === 'object' ? data.media : {};
+    if (media.enabled) return { ok: true, note: 'images and documents are already on' };
+    data.media = Object.assign({}, media, {
+      requested: true,
+      requested_at: now.toISOString(),
+      choice_source: 'npm',
+    });
+    fs.mkdirSync(slmDir, { recursive: true });
+    const tmp = file + '.tmp';
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try {
+      fs.writeSync(fd, JSON.stringify(data), 0, 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, file);
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(file, 0o600); } catch (_e) { /* best-effort */ }
+    }
+    return { ok: true, note: 'recorded' };
+  } catch (e) {
+    return { ok: false, note: 'could not record the request (' + e.message + '). Run: slm media enable' };
+  }
+}
+
+function askYesNo(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(/^\s*y(es)?\s*$/i.test(answer || ''));
+    });
+  });
+}
+
+/**
+ * Decide and (unless dry-run) record. `interactive` allows the question,
+ * which defaults to No. Returns true when a request was recorded.
+ */
+async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesNo, log = console.log }) {
+  let wanted = mediaRequested(args, env);
+  if (!wanted && interactive) {
+    log('');
+    wanted = await ask('Turn on images and documents later? It downloads about 1.5 GB when SLM next starts. [y/N] ');
+  }
+  if (!wanted) return false;
+  if (args && args.dryRun) {
+    log('SLM dry-run: would record a request to turn on images and documents.');
+    return false;
+  }
+  const result = recordMediaRequest(slmDir);
+  if (result.ok) {
+    log('SLM: images and documents will start setting up the next time SLM starts (' + result.note + ').');
+  } else {
+    log('SLM: ' + result.note);
+  }
+  return result.ok;
+}
+
+module.exports = { printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };
