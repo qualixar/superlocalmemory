@@ -113,7 +113,10 @@ def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "refused":
         return Ingested(skip_reason=receipt.reason[:120] or "refused")
-    return Ingested(document_id=receipt.document_id, shared=receipt.status == "duplicate")
+    if receipt.status == "duplicate":  # someone else's document: borrowed, never owned
+        entries = [{"shared_doc": receipt.document_id}] if receipt.document_id else []
+        return Ingested(entries=entries, shared=True)
+    return Ingested(document_id=receipt.document_id)
 
 
 def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, path: Path,
@@ -129,9 +132,11 @@ def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, pat
         return Ingested(retry=True)
     if receipt.status == "refused":
         return Ingested(skip_reason=receipt.reason[:120] or "refused")
+    if receipt.status == "duplicate":  # someone else's picture: borrowed, never owned
+        entries = [{"shared_m": receipt.memory_id}] if receipt.memory_id else []
+        return Ingested(entries=entries, shared=True)
     entry = {"m": receipt.memory_id, "f": [], "v": version} if receipt.memory_id else None
-    return Ingested(entries=[entry] if entry else [], media_id=receipt.media_id,
-                    shared=receipt.status == "duplicate")
+    return Ingested(entries=[entry] if entry else [], media_id=receipt.media_id)
 
 
 def facts_of(runtime: Any, memory_ids: list[str]) -> list[str]:

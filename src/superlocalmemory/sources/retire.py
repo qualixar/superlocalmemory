@@ -77,12 +77,19 @@ def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str,
         logger.warning("a folder document could not be hidden (%s)", type(exc).__name__)
 
 
+def release_copies(store: SourceStore, source: dict, row: dict[str, Any]) -> None:
+    """The owner of a picture or document is going: identical copies in the folder take over next pass."""
+    if row.get("reason") != "shared" and (row.get("document_id") or row.get("media_id")):
+        store.release_shared(source["source_id"], row.get("sha256"), row["relpath"])
+
+
 def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, row: dict[str, Any],
               *, tombstone: bool) -> int:
     """Hide everything a file row owns. With ``tombstone`` the row stays, marked deleted."""
     entries = entries_of(row)
     failures = hide_entries(host, runtime, source, entries, row["relpath"])
     hide_document(store, runtime, source, row)
+    release_copies(store, source, row)
     fields: dict[str, Any] = {"entries": entries}
     if tombstone:
         fields.update(state="tombstoned", tombstoned_at=utc_stamp(),

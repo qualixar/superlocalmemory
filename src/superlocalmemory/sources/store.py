@@ -32,7 +32,8 @@ def with_generation(entries: list[dict[str, Any]], gen: int) -> list[dict[str, A
 
 
 def memory_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [e for e in entries if "gen" not in e]
+    """The memories this file owns. ``shared_m`` / ``shared_doc`` entries point at things it does not own."""
+    return [e for e in entries if "m" in e]
 
 
 class SourceStore:
@@ -125,6 +126,16 @@ class SourceStore:
                                     "memory_ids_json", "document_id", "media_id")}
         keep.update(fields)
         self.put_file(source_id, new, **keep)
+
+    def release_shared(self, source_id: str, sha256: str | None, except_relpath: str) -> int:
+        """Queue the other copies of these bytes that borrowed the owner's save to be saved afresh."""
+        if not sha256:
+            return 0
+        with self._m._write() as conn:
+            return conn.execute(
+                "UPDATE source_files SET state = 'pending' WHERE source_id = ? AND sha256 = ?"
+                " AND reason = 'shared' AND relpath != ? AND state IN ('indexed', 'pending')",
+                (source_id, sha256, except_relpath)).rowcount
 
     def delete_file(self, source_id: str, relpath: str) -> None:
         with self._m._write() as conn:

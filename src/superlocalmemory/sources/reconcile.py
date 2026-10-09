@@ -125,6 +125,7 @@ def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
     entries = entries_of(row)
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
     retire.hide_document(p.store, p.runtime, p.source, row)
+    retire.release_copies(p.store, p.source, row)
     return entries
 
 
@@ -156,7 +157,7 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
     if row and generation_of(row):
         out.entries.append({"gen": generation_of(row)})
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
-                     entries=[x for x in old if "gen" not in x] + out.entries, document_id=out.document_id, media_id=out.media_id,
+                     entries=memory_entries(old) + out.entries, document_id=out.document_id, media_id=out.media_id,
                      **_stat_fields(e))
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
     p.stats.new += 0 if row and row["state"] != "tombstoned" else 1
