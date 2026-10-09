@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,33 +65,41 @@ def stat_entry(root: Path, relpath: str) -> Entry | None:
     return Entry(relpath, st.st_size, st.st_mtime_ns, f"{st.st_dev}:{st.st_ino}", is_placeholder(st))
 
 
+def _link_skip(root: Path, path: str, result: WalkResult, *, is_dir: bool) -> None:
+    if not is_inside(root, path):
+        result.skip("symlink_escape")
+    else:
+        result.skip("symlink_dir" if is_dir else "symlink_file")
+
+
 def _classify(root: Path, dirpath: str, item: os.DirEntry, rules: IgnoreRules,
               result: WalkResult) -> tuple[str, Entry | None]:
-    """``("dir", None)``, ``("file", Entry)`` or ``("skip", None)`` for one directory item."""
+    """``("dir", None)``, ``("file", Entry)`` or ``("skip", None)`` for one directory item.
+
+    Files are looked at with ``lstat`` so a link swapped in after the listing is never followed;
+    directories are not stat-ed again.
+    """
     rel = f"{dirpath}/{item.name}" if dirpath else item.name
     try:
-        symlink = item.is_symlink()
-        if symlink and not is_inside(root, item.path):
-            result.skip("symlink_escape")
+        if item.is_symlink():
+            _link_skip(root, item.path, result, is_dir=item.is_dir())
             return "skip", None
         is_dir = item.is_dir(follow_symlinks=False)
-        if symlink:
-            result.skip("symlink_dir" if item.is_dir() else "symlink_file")
-            return "skip", None
-        st = item.stat()
-        if not st.st_ino:  # Windows listings carry no file id; ask the file itself
-            st = os.stat(item.path)
+        st = None if is_dir else os.lstat(item.path)
     except OSError:
         result.skip("unreadable")
         return "skip", None
-    if not is_dir and not item.is_file():
+    if st is not None and stat.S_ISLNK(st.st_mode):
+        _link_skip(root, item.path, result, is_dir=False)
+        return "skip", None
+    if st is not None and not stat.S_ISREG(st.st_mode):
         result.skip("not_a_file")
         return "skip", None
-    reason = rules.skip_reason(rel, is_dir=is_dir, size=st.st_size)
+    reason = rules.skip_reason(rel, is_dir=is_dir, size=0 if st is None else st.st_size)
     if reason:
         result.skip(reason)
         return "skip", None
-    if is_dir:
+    if st is None:
         return "dir", None
     return "file", Entry(rel, st.st_size, st.st_mtime_ns, f"{st.st_dev}:{st.st_ino}", is_placeholder(st))
 
