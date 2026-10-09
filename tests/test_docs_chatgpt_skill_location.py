@@ -9,13 +9,13 @@ SETUP = ROOT / "docs" / "web-agents" / "setup-prompt.md"
 
 
 def _chatgpt_section() -> str:
-    match = re.search(r"## ChatGPT \(web, paid plan\)\n(.*?)(?=\n## )", HOSTS.read_text(), re.S)
+    match = re.search(r"## ChatGPT \(web, paid plan\)\n(.*?)(?=\n## )", HOSTS.read_text(encoding="utf-8"), re.S)
     assert match, "ChatGPT section missing from hosts.md"
     return match.group(1)
 
 
 def _chatgpt_row() -> str:
-    rows = [r for r in SETUP.read_text().splitlines() if r.startswith("| ChatGPT |")]
+    rows = [r for r in SETUP.read_text(encoding="utf-8").splitlines() if r.startswith("| ChatGPT |")]
     assert rows, "ChatGPT row missing from setup-prompt.md"
     return rows[0]
 
