@@ -19,7 +19,7 @@ a skill itself, it tells you where to paste it instead.
 | App | Where the skill ends up |
 |---|---|
 | Muse, Grok Bot | The bot saves it as a skill or standing rule from the chat |
-| ChatGPT | ChatGPT cannot change its own instructions. Paste the [full block](instructions.md#full-block) into a project's instructions, or the short block into custom instructions |
+| ChatGPT | ChatGPT cannot change its own instructions. Paste the [full block](instructions.md#full-block) into a project's instructions, or the short block into custom instructions. If it says it saved the skill elsewhere, for example to Composio, paste it yourself; ChatGPT does not read that copy |
 | ChatGPT dots | Paste the full block into the dot's instructions when you create it |
 | Composio agents, other MCP clients | The agent's system prompt or instructions field |
 | Apps that accept Agent Skills | Upload the [`superlocalmemory-web`](superlocalmemory-web/SKILL.md) folder instead |
