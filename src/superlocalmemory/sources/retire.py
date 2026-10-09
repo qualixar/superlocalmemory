@@ -12,8 +12,7 @@ from typing import Any
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of
-from superlocalmemory.sources.store import (
-    SourceStore, entries_of, generation_of, memory_entries, with_generation)
+from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +91,7 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     release_copies(store, source, row)
     fields: dict[str, Any] = {"entries": entries}
     if tombstone:
-        fields.update(state="tombstoned", tombstoned_at=utc_stamp(),
-                      entries=with_generation(entries, generation_of(row) + 1))
+        fields.update(state="tombstoned", tombstoned_at=utc_stamp())
     store.put_file(source["source_id"], row["relpath"], **fields)
     return failures
 

@@ -286,21 +286,11 @@ def test_file_that_comes_back_after_delete_is_saved_again_as_visible_memories(en
     env.scan(sid)
     assert len(env.runtime.saved) == 2
     first, second = env.runtime.saved
-    assert first["key"] != second["key"] and ":g0:" in first["key"] and ":g1:" in second["key"]
+    assert first["key"] != second["key"]
     assert env.runtime.archived == ["f1"]  # the old memory stays archived, the new one is visible
     row = env.files(sid)["a.md"]
     live = [e for e in json.loads(row["memory_ids_json"]) if e.get("m") and not e.get("sup")]
     assert [e["m"] for e in live] == [second["mid"]] and row["state"] == "indexed"
-
-
-def test_generation_keeps_counting_across_deletes(env):
-    for n in range(3):
-        path = env.write("a.md", "same words")
-        sid = env.add_and_confirm() if n == 0 else sid
-        env.scan(sid)
-        path.unlink()
-        env.scan(sid)
-    assert [":g%d:" % n in r["key"] for n, r in enumerate(env.runtime.saved)] == [True] * 3
 
 
 def test_a_failed_archive_is_retried_on_the_next_pass(env):

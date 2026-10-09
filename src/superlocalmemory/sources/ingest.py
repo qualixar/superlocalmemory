@@ -73,14 +73,14 @@ def provenance(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {"type": "folder", "source_id": source_id, "relpath": relpath, "version": version}
 
 
-def _key(source_id: str, relpath: str, version: str, generation: int, part: int) -> str:
-    """Per source, path, version and generation: a file that comes back after a delete is a new save."""
+def _key(source_id: str, relpath: str, n: int, part: int) -> str:
+    """Per source, path and save number ``n``: every save of a path is its own save, never a repeat."""
     path = hashlib.sha256(relpath.encode()).hexdigest()[:12]
-    return f"src:{source_id[:12]}:{path}:{version}:g{generation}:{part}"
+    return f"src:{source_id[:12]}:{path}:{n}:{part}"
 
 
 def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data: bytes,
-                version: str, generation: int = 0) -> Ingested:
+                version: str, n: int) -> Ingested:
     """Save a text or markdown file as memories (credentials stripped as derived text)."""
     parts = split_text(relpath, data.decode("utf-8", errors="replace"))
     if not parts:
@@ -91,7 +91,7 @@ def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data
             segments=((part, ContentOrigin.DERIVED_TEXT),), profile_id=source["profile_id"],
             source_type="folder", trusted_actor_id=host.actor_id(),
             trusted_metadata={"_slm_source": provenance(source["source_id"], relpath, version)},
-            idempotency_key=_key(source["source_id"], relpath, version, generation, number))
+            idempotency_key=_key(source["source_id"], relpath, n, number))
         saved = submit_memory(runtime, request, config=host.config())
         out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version})
     return out
@@ -101,15 +101,14 @@ def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {**provenance(source_id, relpath, version), "origin": "folder"}
 
 
-def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str,
-               generation: int = 0) -> Ingested:
+def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str, n: int) -> Ingested:
     from superlocalmemory.documents import submit_document
     from superlocalmemory.media.ingest import MediaInput
 
     receipt = submit_document(
         MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), config=host.config(),
-        idempotency_key=_key(source["source_id"], relpath, version, generation, 0),
+        idempotency_key=_key(source["source_id"], relpath, n, 0),
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "refused":
         return Ingested(skip_reason=receipt.reason[:120] or "refused")
@@ -120,13 +119,13 @@ def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version
 
 
 def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, path: Path,
-                 version: str, generation: int = 0) -> Ingested:
+                 version: str, n: int) -> Ingested:
     from superlocalmemory.media.ingest import MediaInput, remember_media
 
     receipt = remember_media(
         MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), runtime=runtime, config=host.config(),
-        idempotency_key=_key(source["source_id"], relpath, version, generation, 0),
+        idempotency_key=_key(source["source_id"], relpath, n, 0),
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "warming":
         return Ingested(retry=True)
@@ -156,5 +155,19 @@ def facts_of(runtime: Any, memory_ids: list[str]) -> list[str]:
     return found
 
 
-__all__ = ["Ingested", "SCREEN_BYTES", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
+def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
+    """True when a returned save points at memories whose facts are archived (hidden from recall)."""
+    db = getattr(runtime, "_db", None)
+    if db is None or not memory_ids:
+        return False
+    try:
+        row = db.execute("SELECT 1 FROM atomic_facts WHERE lifecycle = 'archived' AND memory_id IN ("
+                         + ",".join("?" * len(memory_ids)) + ") LIMIT 1", tuple(memory_ids)).fetchone()
+    except Exception as exc:  # noqa: BLE001 - not knowing is treated as "not archived"
+        logger.warning("could not look up folder memories (%s)", type(exc).__name__)
+        return False
+    return row is not None
+
+
+__all__ = ["Ingested", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
            "provenance", "screen", "split_markdown", "split_text"]

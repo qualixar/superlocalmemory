@@ -24,7 +24,7 @@ from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import ingest, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
-from superlocalmemory.sources.store import SourceStore, entries_of, generation_of, memory_entries
+from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
 logger = logging.getLogger(__name__)
@@ -137,15 +137,27 @@ def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: 
     p.stats.quarantined += 1
 
 
-def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
+def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested:
+    """One save of the file; each call takes the next save number of its path."""
     version, kind, path = sha[:12], kind_of(e.relpath), p.root / e.relpath
-    gen = generation_of(row)
+    n = p.store.next_save_n(p.sid, e.relpath)
     if kind == "text":
-        out = ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, gen)
-    elif kind == "pdf":
-        out = ingest.ingest_pdf(p.host, p.source, e.relpath, path, version, gen)
-    else:
-        out = ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version, gen)
+        return ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, n)
+    if kind == "pdf":
+        return ingest.ingest_pdf(p.host, p.source, e.relpath, path, version, n)
+    return ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version, n)
+
+
+def _hidden_copy(p: _Pass, out: ingest.Ingested) -> bool:
+    """A repeat that points at memories already archived would leave the file invisible."""
+    ids = [x.get("m") or x.get("shared_m") for x in out.entries]
+    return out.shared and ingest.any_archived(p.runtime, [i for i in ids if i])
+
+
+def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
+    out = _ingest(p, e, sha, data)
+    if not out.retry and not out.skip_reason and _hidden_copy(p, out):
+        out = _ingest(p, e, sha, data)  # once more, under a new save number
     if out.retry:
         p.stats.deferred += 1
         return
@@ -154,11 +166,9 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
                          entries=_supersede(p, row), **_stat_fields(e))
         return
     old = _supersede(p, row)
-    if row and generation_of(row):
-        out.entries.append({"gen": generation_of(row)})
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
-                     entries=memory_entries(old) + out.entries, document_id=out.document_id, media_id=out.media_id,
-                     **_stat_fields(e))
+                     entries=memory_entries(old) + out.entries, document_id=out.document_id,
+                     media_id=out.media_id, **_stat_fields(e))
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
     p.stats.new += 0 if row and row["state"] != "tombstoned" else 1
 

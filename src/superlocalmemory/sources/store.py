@@ -22,15 +22,6 @@ def entries_of(row: dict[str, Any]) -> list[dict[str, Any]]:
     return [e for e in found if isinstance(e, dict)]
 
 
-def generation_of(row: dict[str, Any] | None) -> int:
-    """How many times this path was tombstoned. Kept as a ``{"gen": n}`` marker among the entries."""
-    return max((int(e["gen"]) for e in entries_of(row or {}) if "gen" in e), default=0)
-
-
-def with_generation(entries: list[dict[str, Any]], gen: int) -> list[dict[str, Any]]:
-    return [e for e in entries if "gen" not in e] + [{"gen": gen}]
-
-
 def memory_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The memories this file owns. ``shared_m`` / ``shared_doc`` entries point at things it does not own."""
     return [e for e in entries if "m" in e]
@@ -137,13 +128,22 @@ class SourceStore:
                 " AND reason = 'shared' AND relpath != ? AND state IN ('indexed', 'pending')",
                 (source_id, sha256, except_relpath)).rowcount
 
+    def next_save_n(self, source_id: str, relpath: str) -> int:
+        """How many times this path has been saved, counting this one. Never reset, not even by a purge."""
+        with self._m._write() as conn:
+            conn.execute(
+                "INSERT INTO source_save_counters(source_id, relpath, n) VALUES (?, ?, 1)"
+                " ON CONFLICT(source_id, relpath) DO UPDATE SET n = n + 1", (source_id, relpath))
+            return conn.execute("SELECT n FROM source_save_counters WHERE source_id = ? AND relpath = ?",
+                                (source_id, relpath)).fetchone()[0]
+
     def delete_file(self, source_id: str, relpath: str) -> None:
         with self._m._write() as conn:
             conn.execute("DELETE FROM source_files WHERE source_id = ? AND relpath = ?", (source_id, relpath))
 
     def delete_source_rows(self, source_id: str) -> None:
         with self._m._write() as conn:
-            for table in ("source_files", "source_links"):
+            for table in ("source_files", "source_links", "source_save_counters"):
                 conn.execute(f"DELETE FROM {table} WHERE source_id = ?", (source_id,))
             conn.execute("UPDATE sources SET state = 'removed' WHERE source_id = ?", (source_id,))
 

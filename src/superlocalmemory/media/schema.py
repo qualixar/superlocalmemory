@@ -89,6 +89,8 @@ _DDL = (
         'cloud_placeholder','tombstoned','error')),
       reason TEXT, memory_ids_json TEXT NOT NULL DEFAULT '[]', document_id TEXT, media_id TEXT,
       tombstoned_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (source_id, relpath))""",
+    """CREATE TABLE IF NOT EXISTS source_save_counters (
+      source_id TEXT NOT NULL, relpath TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (source_id, relpath))""",
     "CREATE INDEX IF NOT EXISTS ix_source_files_sha ON source_files(source_id, sha256)",
     "CREATE INDEX IF NOT EXISTS ix_source_files_state ON source_files(source_id, state)",
     """CREATE TABLE IF NOT EXISTS source_links (
