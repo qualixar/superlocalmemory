@@ -24,6 +24,7 @@ import secrets as _secrets
 import stat
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -276,6 +277,35 @@ _HIGH_AGGRESSION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _VALID_AGGRESSION = frozenset({"normal", "high"})
+
+
+@dataclass(frozen=True)
+class SecretHit:
+    """One credential-shaped span: ``text[start:end]`` is the match."""
+
+    kind: str
+    start: int
+    end: int
+
+
+def detect_secrets(text: str) -> list[SecretHit]:
+    """The credential shapes found in ``text``, in order, without overlaps.
+
+    Detection only. It uses the named key shapes (the same ones ``redact_secrets``
+    replaces) and never an entropy test, so a sha256 hex string or any other long
+    random-looking word is not a hit.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    found: list[SecretHit] = []
+    for pattern, kind in _SECRET_PATTERNS:
+        found.extend(SecretHit(kind, m.start(), m.end()) for m in pattern.finditer(text))
+    found.sort(key=lambda h: (h.start, -(h.end - h.start)))
+    hits: list[SecretHit] = []
+    for hit in found:
+        if not hits or hit.start >= hits[-1].end:
+            hits.append(hit)
+    return hits
 
 
 def _shannon_entropy(s: str) -> float:
@@ -697,6 +727,8 @@ __all__ = (
     "safe_resolve_identifier",
     "verify_sha256",
     "redact_secrets",
+    "SecretHit",
+    "detect_secrets",
     "ensure_install_token",
     "verify_install_token",
     "run_subprocess_safe",
