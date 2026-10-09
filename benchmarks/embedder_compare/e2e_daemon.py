@@ -233,6 +233,7 @@ class Client:
     def __init__(self, port: int, headers: dict[str, str] | None = None, timeout: float = 120.0):
         self.port, self._headers, self.timeout = port, dict(headers or {}), timeout
         self._conn: http.client.HTTPConnection | None = None
+        self.retry_after: float | None = None  # Retry-After of the last response, seconds
 
     def __repr__(self) -> str:
         return f"Client(port={self.port})"
@@ -248,6 +249,7 @@ class Client:
             self._conn.request(method, path, payload, headers)
             resp = self._conn.getresponse()
             raw = resp.read()
+            self.retry_after = _seconds(resp.getheader("Retry-After"))
         except (OSError, http.client.HTTPException):
             self._conn = None
             raise
@@ -257,6 +259,13 @@ class Client:
         except ValueError:
             data = {}
         return resp.status, data if isinstance(data, dict) else {}, ms
+
+
+def _seconds(value: str | None) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except ValueError:
+        return None
 
 
 def free_port(start: int = 8821) -> int:
@@ -298,26 +307,47 @@ def read_auth(data: Path) -> dict[str, str]:
 
 # ------------------------------------------------------------------ run stages
 
+MAX_BACKOFF_S = 65.0
+
+
+def remember_one(client: Client, item: dict, throttle: dict) -> tuple[int, dict, float]:
+    """POST /remember, honouring the daemon's write rate limit (429 + Retry-After)."""
+    for _ in range(30):
+        status, body, ms = client.call("POST", "/remember", {"content": item["text"]})
+        if status != 429:
+            return status, body, ms
+        wait = min(60.0 if client.retry_after is None else client.retry_after, MAX_BACKOFF_S)
+        throttle["n_429"] += 1
+        throttle["backoff_s"] += wait
+        time.sleep(wait)
+    return status, body, ms
+
+
 def ingest(client: Client, items: list[dict], log_every: int = 250) -> dict:
-    """POST every corpus item once; returns latencies, id pairs and error info."""
+    """POST every corpus item once; returns latencies, id pairs and error info.
+
+    Latency covers accepted calls only; time spent waiting out a 429 is reported
+    separately as throttling.
+    """
     pairs, latencies, errors = [], [], []
+    throttle = {"n_429": 0, "backoff_s": 0.0}
     for i, item in enumerate(items, 1):
         try:
-            status, body, ms = client.call("POST", "/remember", {"content": item["text"]})
+            status, body, ms = remember_one(client, item, throttle)
         except (OSError, http.client.HTTPException) as exc:
             errors.append({"doc_id": item["doc_id"], "error": type(exc).__name__})
             continue
-        latencies.append(ms)
         if status != 200:
             errors.append({"doc_id": item["doc_id"], "status": status})
         else:
+            latencies.append(ms)
             pairs.append((item["doc_id"], list(body.get("fact_ids") or [])))
         if i % log_every == 0:
             print(f"ingested {i}/{len(items)}", file=sys.stderr, flush=True)
     stats_ = {"p50_ms": percentile(latencies, 50), "p95_ms": percentile(latencies, 95),
               "max_ms": max(latencies, default=None)}
     return {"ok": len(pairs), "attempted": len(items), "errors": errors[:20], "n_errors": len(errors),
-            "latency": stats_, "pairs": pairs,
+            "latency": stats_, "pairs": pairs, "throttle": throttle,
             "without_fact_id": sum(1 for _, f in pairs if not f)}
 
 
@@ -419,7 +449,9 @@ def render_md(r: dict) -> str:
            "", "## Ingest (POST /remember, concurrency 1)", "",
            f"- stored {ing['ok']} of {ing['attempted']} turns, {ing['n_errors']} errors, "
            f"{ing['without_fact_id']} without a fact id",
-           f"- remember latency: {_lat(ing['latency'])}, max {_fmt(ing['latency']['max_ms'], 1)} ms",
+           f"- remember latency (accepted calls): {_lat(ing['latency'])}, max {_fmt(ing['latency']['max_ms'], 1)} ms",
+           f"- write rate limit: {ing['throttle']['n_429']} HTTP 429 responses, "
+           f"{_fmt(ing['throttle']['backoff_s'], 0)} s spent waiting out Retry-After",
            f"- idle after ingest: {r['idle']['idle']} (waited {_fmt(r['idle']['wait_s'], 1)} s, "
            f"projection `{json.dumps(r['idle']['projection'])}`)",
            "", "## Recall (GET /recall?limit=10, default answer check)", "",

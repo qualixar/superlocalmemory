@@ -73,6 +73,15 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_POST(self):
+        if not getattr(self.server, "throttled", True):
+            self.server.throttled = True
+            raw = b"{}"
+            self.send_response(429)
+            self.send_header("Retry-After", "0")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         n = int(self.headers["Content-Length"])
         content = json.loads(self.rfile.read(n))["content"]
         self.server.stored.append(content)
@@ -86,13 +95,14 @@ class _Handler(BaseHTTPRequestHandler):
 def test_ingest_and_recall_against_a_fake_daemon():
     srv = HTTPServer(("127.0.0.1", 0), _Handler)
     srv.stored = []
+    srv.throttled = False  # first POST answers 429 once
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         client = e2e.Client(srv.server_port, {"X-SLM-Daemon-Capability": "secret"})
         assert "secret" not in repr(client)
         items = [{"doc_id": "t:1", "text": "alpha"}, {"doc_id": "t:2", "text": "beta"}]
         ing = e2e.ingest(client, items)
-        assert ing["ok"] == 2 and ing["n_errors"] == 0 and ing["latency"]["p50_ms"] > 0
+        assert ing["ok"] == 2 and ing["n_errors"] == 0 and ing["throttle"]["n_429"] == 1 and ing["latency"]["p50_ms"] > 0
         recs = e2e.recall_all(client, [{"id": "loc:q", "text": "what"}], e2e.build_fact_map(ing["pairs"]), {})
         assert recs["loc:q"]["ranked"] == ["t:1"]
         assert e2e.tally_fields(list(recs.values()))["channel_status.bm25"] == {"ok": 1}
