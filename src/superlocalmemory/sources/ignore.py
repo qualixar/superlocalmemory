@@ -197,4 +197,9 @@ class IgnoreRules:
         return "temp_file" if _TEMP_NAME.match(name) else None
 
 
-__all__ = ["DEFAULT_TYPES", "GitIgnore", "IgnoreRules", "MAX_FILES", "kind_of"]
+def size_cap(kind: str) -> int:
+    """The largest file, in bytes, that a source will take for this kind (text, pdf, image)."""
+    return _SIZE_CAPS[kind]
+
+
+__all__ = ["DEFAULT_TYPES", "GitIgnore", "IgnoreRules", "MAX_FILES", "kind_of", "size_cap"]

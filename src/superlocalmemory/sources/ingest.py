@@ -18,13 +18,13 @@ from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.memory_core import ContentOrigin
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.sources.host import SourceHost
+from superlocalmemory.sources.ignore import size_cap
 from superlocalmemory.sources.safe_read import open_regular
 
 logger = logging.getLogger(__name__)
 
 SCREEN_BYTES = 256 * 1024
 SECTION_LIMIT = 24_000
-MAX_LOAD_BYTES = 128 * 1024 * 1024
 _HEADING = re.compile(r"^#{1,2} \S")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _MARKDOWN = (".md", ".markdown")
@@ -104,12 +104,17 @@ def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {"origin": "folder", "source_id": source_id, "relpath": relpath, "version": version}
 
 
-def load_verified(path: Path, file_id: str | None, sha: str) -> bytes:
-    """The file's bytes, read without following a link; OSError when they are not the bytes that were hashed."""
+def load_verified(path: Path, file_id: str | None, sha: str, kind: str) -> bytes | None:
+    """The file's bytes, read without following a link; None when they are no longer the bytes that were hashed.
+
+    The read stops one byte past the kind's size cap, so a file that grew cannot fill memory.
+    OSError is raised for a link, a pipe or another file.
+    """
+    cap = size_cap(kind)
     with open_regular(path, file_id) as fh:
-        data = fh.read(MAX_LOAD_BYTES + 1)
-    if len(data) > MAX_LOAD_BYTES or hashlib.sha256(data).hexdigest() != sha:
-        raise OSError("the file changed while it was being read")
+        data = fh.read(cap + 1)
+    if len(data) > cap or hashlib.sha256(data).hexdigest() != sha:
+        return None
     return data
 
 

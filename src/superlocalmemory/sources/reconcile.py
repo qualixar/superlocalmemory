@@ -153,7 +153,9 @@ def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested
     """One save of the file; each call takes the next save number of its path."""
     version, kind = sha[:12], kind_of(e.relpath)
     if kind != "text":  # pictures and PDFs are handed over as bytes, never re-opened by path
-        data = ingest.load_verified(p.root / e.relpath, e.file_id, sha)
+        data = ingest.load_verified(p.root / e.relpath, e.file_id, sha, kind)
+        if data is None:  # edited since the hash: look again next pass
+            return ingest.Ingested(retry=True)
     n = p.store.next_save_n(p.sid, e.relpath)
     if kind == "text":
         return ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, n)

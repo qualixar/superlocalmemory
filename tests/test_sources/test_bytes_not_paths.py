@@ -57,3 +57,48 @@ def test_a_pdf_is_handed_over_as_bytes_and_a_swapped_link_is_refused(env, tmp_pa
     sid = env.add_and_confirm()
     stats = env.scan(sid)
     assert seen == [] and stats.errors == 1
+
+
+def _rewrite_after_hashing(monkeypatch, path, data):
+    import superlocalmemory.sources.reconcile as rc
+
+    real = rc._hash_all
+
+    def rewritten(p, entries):
+        out = real(p, entries)
+        path.write_bytes(data)  # same file, new bytes, after the hash
+        return out
+
+    monkeypatch.setattr(rc, "_hash_all", rewritten)
+
+
+def test_a_picture_edited_after_the_hash_is_deferred_not_an_error(pics, monkeypatch):
+    env = pics
+    path = env.write("p.png", png("a"))
+    env.write("keep.canvas", "{}")
+    _rewrite_after_hashing(monkeypatch, path, png("edited"))
+    sid = env.add_and_confirm()
+    stats = env.scan(sid)
+    assert stats.errors == 0 and stats.deferred == 1
+    assert "p.png" not in env.files(sid) or env.files(sid)["p.png"]["state"] != "error"
+
+
+def test_a_pdf_edited_after_the_hash_is_deferred_not_an_error(env, monkeypatch):
+    def fake(inp, **kw):
+        raise AssertionError("must not be reached for an edited file")
+
+    monkeypatch.setattr("superlocalmemory.documents.submit_document", fake)
+    path = env.write("a.pdf", b"%PDF-1.4\n" + b"0" * 50)
+    _rewrite_after_hashing(monkeypatch, path, b"%PDF-1.4\n" + b"1" * 60)
+    sid = env.add_and_confirm()
+    stats = env.scan(sid)
+    assert stats.errors == 0 and stats.deferred == 1
+
+
+def test_the_read_is_bounded_by_the_kind_cap(tmp_path, monkeypatch):
+    from superlocalmemory.sources import ingest
+
+    big = tmp_path / "a.png"
+    big.write_bytes(b"x" * 100)
+    monkeypatch.setattr(ingest, "size_cap", lambda kind: 10)
+    assert ingest.load_verified(big, None, "0" * 64, "image") is None
