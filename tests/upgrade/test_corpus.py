@@ -96,3 +96,16 @@ def test_manifest_validation_accepts_good_and_rejects_bad():
 @pytest.mark.parametrize("n", [0, 39])
 def test_memory_ids_are_sequential_refs(n):
     assert corpus.MEMORIES[n].id == f"QX-{1001 + n}"
+
+
+def test_committed_manifests_are_well_formed_and_hold_no_secrets():
+    import json
+
+    files = sorted((Path(__file__).resolve().parent / "manifests").glob("*.json"))
+    assert files
+    for f in files:
+        m = json.loads(f.read_text())
+        assert bf.validate_manifest(m) == [], f.name
+        assert m["version"] == f.stem
+        assert not m.get("errors")
+        assert "/home/" not in f.read_text() and "-key" not in f.read_text()

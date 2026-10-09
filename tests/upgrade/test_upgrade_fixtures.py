@@ -8,6 +8,8 @@ Environment:
                     (default: ``tests/upgrade/fixtures``)
   SLM_UPG_OLD_PY    python of a venv with superlocalmemory 4.1.24 installed
   SLM_UPG_NEW_PY    python of a venv running this checkout (default: this interpreter)
+  SLM_UPG_DOWN_PY   python of a venv with superlocalmemory 4.1.20 (optional; adds a second downgrade)
+  SLM_UPG_VERSIONS  comma-separated fixture versions to run (default: all found)
   SLM_UPG_OUT       directory to write one verdict JSON per version (optional)
 
 Run with: ``pytest tests/upgrade -m slow``.
@@ -24,11 +26,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _slm_env as env  # noqa: E402
 import upgrade_check as uc  # noqa: E402
 
 FIXTURES = Path(os.environ.get("SLM_UPG_FIXTURES", Path(__file__).resolve().parent / "fixtures"))
-VERSIONS = sorted(p.parent.name for p in FIXTURES.glob("*/manifest.json") if (p.parent / "data" / "memory.db").exists())
+_ONLY = {v.strip() for v in os.environ.get("SLM_UPG_VERSIONS", "").split(",") if v.strip()}
+VERSIONS = sorted(p.parent.name for p in FIXTURES.glob("*/manifest.json")
+                  if (p.parent / "data" / "memory.db").exists() and (not _ONLY or p.parent.name in _ONLY))
 
 pytestmark = pytest.mark.slow
 
@@ -41,11 +44,12 @@ def test_fixture_upgrades_and_downgrades(version, tmp_path):
     if not old_py:
         pytest.skip("SLM_UPG_OLD_PY (python with superlocalmemory 4.1.24) is not set")
     new_py = Path(os.environ.get("SLM_UPG_NEW_PY", sys.executable))
-    work = env.make_work_dir()
-    verdict = uc.run_checks(FIXTURES / version, Path(old_py), new_py, work)
+    down_py = os.environ.get("SLM_UPG_DOWN_PY")
+    verdict = uc.run_checks(FIXTURES / version, Path(old_py), new_py, tmp_path,
+                            Path(down_py) if down_py else None)
     out = os.environ.get("SLM_UPG_OUT")
     if out:
         Path(out).mkdir(parents=True, exist_ok=True)
         (Path(out) / f"verdict-{version}.json").write_text(json.dumps(verdict, indent=2, sort_keys=True))
-    failed = {name: c.get("errors") for name, c in verdict["checks"].items() if not c.get("passed")}
+    failed = {name: verdict["checks"][name].get("errors") for name in verdict["failing"]}
     assert not failed, failed

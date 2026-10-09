@@ -23,7 +23,9 @@ Synthetic data only: every person, project and number in `corpus.py` is invented
 |------|---------|
 | `corpus.py` | 40 invented memories, 12 queries, expected ids |
 | `build_fixture.py` | builds a store with one released version (own venv, own CLI) |
-| `upgrade_check.py` | runs the four checks, writes a JSON verdict |
+| `upgrade_check.py` | runs the checks, writes a JSON verdict |
+| `_verdicts.py` | the pass/fail rules (all fail closed) |
+| `_slm_env.py` | runs one version against a scratch HOME, with the daemon guards |
 | `test_corpus.py` | fast tests (default run) |
 | `test_upgrade_fixtures.py` | end-to-end, marked `slow` |
 
@@ -36,6 +38,22 @@ python tests/upgrade/upgrade_check.py --fixture /scratch/fixtures/4.1.20 \
 SLM_UPG_FIXTURES=/scratch/fixtures SLM_UPG_OLD_PY=/scratch/venvs/4.1.24/bin/python pytest tests/upgrade -m slow
 ```
 
-Stores are not committed: a venv with the full dependency set is several GB and
-the stores are cheap to rebuild.  Every step works on copies in a scratch directory
+Stores are not committed (`tests/upgrade/fixtures/` is ignored): a venv with the
+full dependency set is several GB and the stores are cheap to rebuild.  The build
+record of each fixture is kept in `tests/upgrade/manifests/<version>.json`.  Every step works on copies in a scratch directory
 with its own `HOME`, so a real `~/.superlocalmemory` is never touched.
+
+## Rules every check follows
+
+- A check passes only on positive evidence.  A recorded error, a missing field, an
+  unparsable answer or a recall with nothing to compare is a failure.  A check that
+  does not apply reports `status: "n/a"` with `passed: null`.
+- The reference interpreter (`SLM_UPG_OLD_PY`) must report superlocalmemory 4.1.24;
+  the optional `SLM_UPG_DOWN_PY` must report 4.1.20 and adds a second downgrade.
+  4.1.24 and 4.1.20 share the schema ceiling 53, so both open a store left at 51.
+- Daemons run on a random port in 8840-8899 and never on 8765/8767.  Versions before
+  4.0 are stopped by the pid in the scratch `daemon.pid` only (after checking that the
+  process belongs to the scratch HOME), never with `slm serve stop`, which stops every
+  SLM daemon on the machine; building such a fixture is refused while 8765 or 8767 is
+  listening.
+- `SLM_UPG_VERSIONS=4.1.20,4.1.21` limits a slow run to those fixtures.

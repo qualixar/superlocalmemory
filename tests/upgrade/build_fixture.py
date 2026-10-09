@@ -117,6 +117,14 @@ def wait_settled(data_dir: Path, want: int = len(corpus.MEMORIES), limit: int = 
     return last
 
 
+def fixture_problems(settled: int, errors: list[str]) -> list[str]:
+    """Reasons a built store cannot be used: any error, or fewer memories than the corpus."""
+    problems = list(errors)
+    if settled < len(corpus.MEMORIES):
+        problems.append(f"short fixture: {settled} of {len(corpus.MEMORIES)} corpus memories were stored")
+    return problems
+
+
 def build(version: str, out: Path, venv: Path, py: str) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     make_venv(venv, py)
@@ -124,17 +132,18 @@ def build(version: str, out: Path, venv: Path, py: str) -> dict:
     home = out / "home"
     data = home / env.DATA_SUBDIR
     data.mkdir(parents=True, exist_ok=True)
-    inst = env.Instance(bin_dir=venv / "bin", data_dir=data, home=home)
-    up, start_s, note = inst.serve_start()
-    errors = [] if up else [f"daemon did not start: {note}"]
-    status = ""
-    if up:
-        errors += write_corpus(inst)
-        settled = wait_settled(data)
-        _, status, probe_err = inst.recall_ids(corpus.QUERIES[0].text)
-        errors += [probe_err] if probe_err else []
-    inst.serve_stop()
-    return _finish(version, venv, data, status, settled if up else 0, errors, install_s, start_s)
+    inst = env.Instance(bin_dir=venv / "bin", data_dir=data, home=home, version=version)
+    errors, status, settled, start_s = [], "", 0, 0.0
+    with inst.session() as (up, start_s, note):
+        if up:
+            errors += write_corpus(inst)
+            settled = wait_settled(data)
+            _, status, probe_err = inst.recall_ids(corpus.QUERIES[0].text)
+            errors += [probe_err] if probe_err else []
+        else:
+            errors.append(f"daemon did not start: {note}")
+    errors = fixture_problems(settled, errors)
+    return _finish(version, venv, data, status, settled, errors, install_s, start_s)
 
 
 def _finish(version, venv, data, status, settled, errors, install_s, start_s) -> dict:
