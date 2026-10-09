@@ -3348,6 +3348,11 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("memory kind runner not started: %s", type(exc).__name__)
 
+        # A request the installer recorded for images and documents is acted on
+        # here, so the install runs in the daemon (never in npm). Never raises.
+        from superlocalmemory.runtimes import apply_requested
+        apply_requested(source="npm")
+
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
         # them only once it cycles, and its reap used to sit behind the
@@ -4465,6 +4470,10 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Memory kinds (4.1.19): status, settings, review, classification runs.
     from superlocalmemory.server.routes import memory_kinds as _memory_kinds_routes
     _memory_kinds_routes.register(application)
+
+    # Images and documents: the feature switch (GET/POST /api/v3/features).
+    from superlocalmemory.server.routes import features as _features_routes
+    _features_routes.register(application)
 
     # Task #47: dashboard-editable rate limits (GET/PUT /api/v3/ratelimit)
     from superlocalmemory.server.routes.ratelimit import router as ratelimit_router
