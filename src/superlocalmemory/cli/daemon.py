@@ -27,7 +27,6 @@ import os
 import socket
 import sys
 import time
-from dataclasses import replace
 
 from superlocalmemory.cli import daemon_startup as _startup
 from superlocalmemory.infra.daemon_identity import (
@@ -35,14 +34,14 @@ from superlocalmemory.infra.daemon_identity import (
     descriptor_matches_health,
     descriptor_path,
     health_is_other_account,
-    process_create_time_for,
+    health_is_same_account,
     read_descriptor,
-    write_descriptor,
 )
 from superlocalmemory.infra.data_root import (
     assert_no_durable_root_conflict,
     state_path,
 )
+from superlocalmemory.infra.instance_lock import instance_lock_is_held
 from superlocalmemory.infra.process_identity import (
     compare_start_tokens,
     process_start_token_for,
@@ -227,27 +226,63 @@ def wait_for_owned_daemon_shutdown(
     return False
 
 
+def _wait_for_republished_record(
+    timeout_s: float = 6.0, poll_s: float = 0.25,
+) -> bool:
+    """Wait for the owning daemon to publish a record that names a live process.
+
+    Only the daemon writes the record; a client that finds it stale or damaged
+    while health still answers waits for the daemon's guardian to repair it.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        descriptor = read_descriptor()
+        if descriptor is not None and _descriptor_process_is_alive(descriptor):
+            if descriptor.state == "starting":
+                return True
+            health = _fetch_health(descriptor.port)
+            if health is not None and descriptor_matches_health(descriptor, health):
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_s)
+
+
+def _health_fallback(port: int) -> bool:
+    """The record is stale or damaged: trust only a same-account daemon's repair.
+
+    A daemon of another account or data folder never passes, and nothing here
+    reads or returns a capability (health carries none).
+    """
+    health = _fetch_health(port)
+    if health is None or not health_is_same_account(health):
+        return False
+    return _wait_for_republished_record()
+
+
 def is_daemon_running() -> bool:
     """Return True only for a daemon owned by this canonical data namespace.
 
     A PID or an HTTP 200 proves liveness, not ownership. V3.7 requires the
     private local descriptor and the health endpoint to agree on namespace,
     process instance, capability fingerprint, owner, PID, protocol, and port.
+    A stale or damaged record next to a healthy same-account daemon is waited
+    out (the daemon repairs it) rather than reported as "not running".
     """
     local_descriptor_path = descriptor_path()
     descriptor = read_descriptor()
     if descriptor is not None:
         if not _descriptor_process_is_alive(descriptor):
-            return False
+            return _health_fallback(descriptor.port)
         if descriptor.state == "starting":
             return True
         health = _fetch_health(descriptor.port)
         return health is not None and descriptor_matches_health(descriptor, health)
 
-    # A malformed or foreign descriptor must fail closed; never fall through
-    # to legacy PID/port adoption in the same namespace.
+    # A malformed or foreign descriptor never falls through to legacy PID/port
+    # adoption in the same namespace; only the health fallback may rescue it.
     if local_descriptor_path.exists():
-        return False
+        return _health_fallback(_get_port())
 
     legacy = _verified_legacy_health()
     return legacy is not None
@@ -267,13 +302,23 @@ def owned_daemon_process_alive() -> bool:
     daemon is not skipped as "already stopped" while it keeps running and
     holding the port — which then made Step 3 refuse to start a second
     daemon on the still-occupied port and fail the whole restart.
+
+    A stale or damaged record beside a healthy same-account daemon takes the
+    same health fallback as ``is_daemon_running``.
     """
     descriptor = read_descriptor()
     if descriptor is not None:
-        return _descriptor_process_is_alive(descriptor)
-    if descriptor_path().exists():
+        if _descriptor_process_is_alive(descriptor):
+            return True
+        port = descriptor.port
+    elif descriptor_path().exists():
+        port = _get_port()
+    else:
+        return _verified_legacy_health() is not None
+    if not _health_fallback(port):
         return False
-    return _verified_legacy_health() is not None
+    repaired = read_descriptor()
+    return repaired is not None and _descriptor_process_is_alive(repaired)
 
 
 def _fetch_health(port: int, timeout: float = 2.0) -> dict | None:
@@ -814,28 +859,9 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     with open(log_file, "a", encoding="utf-8") as lf:
         proc = subprocess.Popen(cmd, stdout=lf, stderr=lf, **kwargs)
 
-    # Publish the exact child identity immediately so concurrent callers know
-    # this namespace is warming up. If the child won the race and already
-    # published the same instance as ready, never overwrite it with starting.
-    child_descriptor = replace(
-        bootstrap_descriptor,
-        pid=proc.pid,
-        process_create_time=process_create_time_for(proc.pid),
-        process_start_token=process_start_token_for(proc.pid),
-    )
-    current = read_descriptor()
-    if not (
-        current is not None
-        and current.instance_id == child_descriptor.instance_id
-        and current.pid == child_descriptor.pid
-        and current.state == "ready"
-    ):
-        write_descriptor(child_descriptor)
-
-    # One-release compatibility mirrors; never sufficient for ownership.
-    _pid_file_path().write_text(str(proc.pid), encoding="utf-8")
-    _port_file_path().write_text(str(_target_port), encoding="utf-8")
-
+    # The child writes the record itself once it owns the data folder. The
+    # parent never does: a child that loses a start race must not overwrite
+    # the record of the daemon that won it.
     return _wait_for_daemon(timeout=60)
 
 
@@ -852,6 +878,24 @@ def _wait_bounded_for_lock_holder() -> bool:
     """
     _startup.wait_for_starting_daemon()
     return is_daemon_running()
+
+
+def _data_folder_is_owned() -> bool:
+    """A daemon owns this data folder: it holds the lock or the record names it."""
+    if instance_lock_is_held():
+        return True
+    descriptor = read_descriptor()
+    return descriptor is not None and _descriptor_process_is_alive(descriptor)
+
+
+def _wait_while_owned() -> bool:
+    """Never spawn into an owned folder: wait the start budget for owned health."""
+    deadline = time.monotonic() + _startup.start_wait_budget()
+    while not is_daemon_running():
+        if time.monotonic() >= deadline or not _data_folder_is_owned():
+            return is_daemon_running()
+        time.sleep(0.25)
+    return True
 
 
 def ensure_daemon(*, port: int | None = None) -> bool:
@@ -883,6 +927,8 @@ def ensure_daemon(*, port: int | None = None) -> bool:
             "pytest isolation blocked daemon spawn; use an owned daemon fixture",
         )
         return False
+    if _data_folder_is_owned():
+        return _wait_while_owned()
     if _startup.this_process_is_spawning():
         # 4.1.22: another thread of THIS process holds the start lock and is
         # spawning. Never spawn twice; wait the bounded start budget only.
@@ -923,6 +969,8 @@ def ensure_daemon(*, port: int | None = None) -> bool:
         # Re-check after acquiring lock (another process may have started it)
         if is_daemon_running():
             return True
+        if _data_folder_is_owned():
+            return _wait_while_owned()
 
         # v3.6.9 (#36): TCP-level check catches a systemd-started daemon that
         # has bound the port but hasn't written a PID file yet (e.g. different
@@ -1000,10 +1048,8 @@ def ensure_daemon(*, port: int | None = None) -> bool:
                 lock_fd.close()
             except Exception:
                 pass
-            try:
-                _lock_file_path().unlink(missing_ok=True)
-            except Exception:
-                pass
+            # The lock file is never unlinked: removing a locked file lets a
+            # third starter lock a fresh inode while this one is still held.
 
 
 def _wait_for_daemon(timeout: int = 60) -> bool:

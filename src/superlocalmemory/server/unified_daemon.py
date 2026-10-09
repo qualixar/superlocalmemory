@@ -58,9 +58,12 @@ from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
 from superlocalmemory.infra.daemon_identity import (
     DaemonDescriptor,
     build_descriptor,
-    clear_descriptor,
-    descriptor_path,
-    write_descriptor,
+    clear_descriptor_if_owner,
+    publish_if_owner,
+)
+from superlocalmemory.infra.instance_lock import (
+    acquire_with_backoff,
+    get_instance_lock,
 )
 from superlocalmemory.infra.data_root import (
     assert_no_durable_root_conflict,
@@ -638,29 +641,44 @@ def _process_descriptor(port: int, version: str, state: str) -> DaemonDescriptor
 def _publish_process_descriptor(
     port: int, version: str, state: str,
 ) -> DaemonDescriptor:
-    """Atomically publish identity plus one-release PID/port mirrors."""
+    """Publish identity plus PID/port mirrors, only as the instance-lock owner."""
     descriptor = _process_descriptor(port, version, state)
-    write_descriptor(descriptor)
-    pid_file = descriptor_path().with_name("daemon.pid")
-    port_file = descriptor_path().with_name("daemon.port")
-    pid_file.write_text(str(descriptor.pid), encoding="utf-8")
-    port_file.write_text(str(descriptor.port), encoding="utf-8")
+    publish_if_owner(descriptor, get_instance_lock())
     return descriptor
 
 
+_RECORD_GUARDIAN: "RecordGuardian | None" = None
+
+
+def _start_record_guardian() -> None:
+    """Keep the record true while this process owns the data folder."""
+    global _RECORD_GUARDIAN
+    from superlocalmemory.daemon.record_guardian import RecordGuardian
+
+    _stop_record_guardian()
+    _RECORD_GUARDIAN = RecordGuardian(
+        descriptor_provider=lambda: _ACTIVE_DAEMON_DESCRIPTOR,
+        lock=get_instance_lock(),
+    )
+    _RECORD_GUARDIAN.start()
+
+
+def _stop_record_guardian() -> None:
+    global _RECORD_GUARDIAN
+    guardian, _RECORD_GUARDIAN = _RECORD_GUARDIAN, None
+    if guardian is not None:
+        guardian.stop()
+
+
 def _cleanup_process_descriptor(descriptor: DaemonDescriptor | None) -> None:
-    """Remove lifecycle state only when this process still owns the instance."""
-    if descriptor is None or not clear_descriptor(descriptor.instance_id):
-        return
-    for path, expected in (
-        (descriptor_path().with_name("daemon.pid"), str(descriptor.pid)),
-        (descriptor_path().with_name("daemon.port"), str(descriptor.port)),
-    ):
-        try:
-            if path.read_text(encoding="utf-8").strip() == expected:
-                path.unlink()
-        except OSError:
-            pass
+    """Remove lifecycle state only when this process still owns the instance.
+
+    The guardian stops first so it cannot republish a record this call clears.
+    Safe to call twice (lifespan shutdown, then the start_server finally).
+    """
+    _stop_record_guardian()
+    if descriptor is not None:
+        clear_descriptor_if_owner(descriptor.instance_id, get_instance_lock())
 
 
 # ---------------------------------------------------------------------------
@@ -2379,6 +2397,8 @@ async def lifespan(application: FastAPI):
             # serving (DaemonAlreadyServing), OR the bounded retry loop exhausted
             # (CanonicalRememberUnavailable).  Belt-and-suspenders: a lost writer
             # race must NEVER be a traceback for a non-technical user.
+            # With the instance lock this is reached only against a daemon of an
+            # older release (no lock) running on another port.
             logger.info(
                 "another SLM daemon holds the writer; this instance exits cleanly"
             )
@@ -6877,11 +6897,30 @@ def install_thread_dump_signal() -> "os.PathLike | str | None":
         return None
 
 
+def _instance_lock_wait_s() -> float:
+    """Seconds start_server may wait for a previous daemon to release the folder."""
+    try:
+        return max(0.0, float(os.environ.get("SLM_INSTANCE_LOCK_WAIT_S", "") or 20.0))
+    except ValueError:
+        return 20.0
+
+
 def start_server(port: int = _DEFAULT_PORT) -> None:
     """Start the unified daemon. Blocks until stopped."""
     global _start_time
     install_thread_dump_signal()
     assert_no_durable_root_conflict()
+    # The lock decides who the daemon is: nothing below (socket, logs, record)
+    # runs in a process that does not own this data folder. A restart overlaps
+    # with the old daemon letting go, so wait a bounded time before giving up;
+    # returning (not raising) keeps the exit code 0 so no service manager loops.
+    instance_lock = get_instance_lock()
+    if not acquire_with_backoff(instance_lock, _instance_lock_wait_s()):
+        logger.error(
+            "SLM daemon will not start: another SLM daemon owns this data "
+            "folder (%s)", instance_lock.path,
+        )
+        return
     import socket
 
     import uvicorn
@@ -6926,6 +6965,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         listener.listen(socket.SOMAXCONN)
     except OSError as exc:
         listener.close()
+        instance_lock.release()
         logger.error(
             "SLM daemon will not start: %s:%d is already unavailable (%s)",
             bind_host, port, exc,
@@ -6945,6 +6985,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     from superlocalmemory.server.routes.helpers import SLM_VERSION
 
     _publish_process_descriptor(port, SLM_VERSION, "starting")
+    _start_record_guardian()
     _start_time = time.monotonic()
 
     try:
@@ -7007,6 +7048,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         finally:
             listener.close()
             _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+            instance_lock.release()
         return
 
     # Remote access on: one application, two listeners, one lifespan (owned by
@@ -7027,6 +7069,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         listener.close()
         remote_sock.close()
         _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+        instance_lock.release()
 
 
 # ---------------------------------------------------------------------------

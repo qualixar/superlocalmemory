@@ -22,10 +22,13 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.infra.process_identity import process_start_token_for
+
+if TYPE_CHECKING:  # typing only: infra must not depend on the lock module at runtime
+    from superlocalmemory.infra.instance_lock import InstanceLock
 
 DAEMON_DESCRIPTOR_SCHEMA = 1
 DAEMON_PROTOCOL = 1
@@ -332,3 +335,61 @@ def clear_descriptor(
         return True
     except OSError:
         return False
+
+
+def write_mirror_atomic(path: Path, text: str) -> None:
+    """Write a plain-text mirror (pid or port) atomically with mode 0600."""
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def publish_if_owner(descriptor: DaemonDescriptor, lock: "InstanceLock") -> bool:
+    """Publish the daemon record, but only as the holder of the instance lock.
+
+    The record names the one process that owns the data folder. A process that
+    does not hold the lock never writes it, however it came to believe it
+    should; that is what keeps a losing starter from overwriting the winner.
+    """
+    if not lock.held:
+        logger.warning("not the instance-lock owner; record untouched")
+        return False
+    root = _canonical_path(descriptor.data_root)
+    write_descriptor(descriptor, data_root=root)
+    base = root / "daemon.json"
+    write_mirror_atomic(base.with_name("daemon.pid"), str(descriptor.pid))
+    write_mirror_atomic(base.with_name("daemon.port"), str(descriptor.port))
+    return True
+
+
+def clear_descriptor_if_owner(
+    instance_id: str,
+    lock: "InstanceLock",
+    *,
+    data_root: str | Path | None = None,
+) -> bool:
+    """Remove the record and its mirrors, only as owner of that instance."""
+    if not lock.held:
+        return False
+    descriptor = read_descriptor(data_root=data_root)
+    if descriptor is None or not clear_descriptor(instance_id, data_root=data_root):
+        return False
+    base = descriptor_path(data_root)
+    for name, expected in (
+        ("daemon.pid", str(descriptor.pid)),
+        ("daemon.port", str(descriptor.port)),
+    ):
+        path = base.with_name(name)
+        try:
+            if path.read_text(encoding="utf-8").strip() == expected:
+                path.unlink()
+        except OSError:
+            pass
+    return True
