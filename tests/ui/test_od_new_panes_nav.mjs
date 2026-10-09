@@ -1,5 +1,5 @@
 /**
- * Sidebar entries and activation for the Documents & Images pane.
+ * Sidebar entries and activation for the Documents & Images and Bot messages panes.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,6 +32,7 @@ function shell(paneIds) {
 
 const ENTRIES = [
     { pane: 'media-pane', label: 'Documents & Images', crumb: 'Memory', render: 'odRenderMedia' },
+    { pane: 'botmsg-pane', label: 'Bot messages', crumb: 'Integrations', render: 'odRenderBotMessages' },
 ];
 
 describe('new panes in the sidebar', () => {

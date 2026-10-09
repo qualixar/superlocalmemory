@@ -88,6 +88,8 @@
       // Muse, group bots) left MCP & Tools, which is for local agents. Optional.
       { k: 'apps-pane',      t: 'Connected apps', i: 'link',  crumb: 'Integrations', tag: 'Optional' },
       { k: 'mesh-pane',      t: 'Mesh Peers',  i: 'mesh',     crumb: 'Integrations' },
+      // 4.1.25: what bots sent through the mesh, with owner controls per peer.
+      { k: 'botmsg-pane',    t: 'Bot messages', i: 'send',    crumb: 'Integrations', tag: 'new' },
       // 4.0.8: was a tab inside Governance. Every other Governance tab governs
       // SLM's OWN data — lifecycle, access, trust, compliance, ingestion.
       // Bounded Loops governs none of it: it is a separate product SLM
@@ -591,6 +593,9 @@
         return true;
       case 'media-pane':
         od('odRenderMedia');
+        return true;
+      case 'botmsg-pane':
+        od('odRenderBotMessages');
         return true;
       case 'mcp-pane':
         od('odRenderMcp');
