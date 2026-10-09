@@ -29,8 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _slm_env as env  # noqa: E402
 import corpus  # noqa: E402
 from _verdicts import (  # noqa: E402,F401
-    DOWNGRADE_SCHEMA, TARGET_SCHEMA, check_ok, downgrade_ok, expected_hits, failing, overlap,
-    recall_check, recall_verdict, restore_ok, schema_unchanged, snapshot_passed, upgrade_ok)
+    DOWNGRADE_SCHEMA, core_counts_unchanged, TARGET_SCHEMA, check_ok, downgrade_ok, expected_hits, failing, overlap,
+    mapping_diff, recall_check, recall_verdict, restore_ok, schema_unchanged, snapshot_passed, upgrade_ok)
 
 SNAP_DIR = "pre-migration-snapshots"
 EXPECTED_OLD = "4.1.24"
@@ -134,10 +134,14 @@ def check_upgrade(new_bin: Path, root: Path, fixture: Path) -> tuple[dict, list[
     version = env.schema_version(inst.data_dir / "learning.db")
     errors += migration_errors(log_text_since(inst, offset))
     errors += ["migrations did not finish within the time limit"] if timed_out else []
+    counts_after = env.base_table_counts(inst.data_dir / "memory.db")
     detail = {"daemon_up": up, "start_seconds": round(start_s, 1), "readiness": ready, "timed_out": timed_out,
               "schema_version": version, "corpus_before": len(before), "corpus_after": len(after),
               "contents_unchanged": before == after, "errors": errors,
-              "memory_counts_unchanged": env.base_table_counts(inst.data_dir / "memory.db") == counts_before,
+              "memory_counts_unchanged": core_counts_unchanged(counts_before, counts_after),
+              "derived_count_changes": {k: [counts_before.get(k), counts_after.get(k)]
+                                    for k in set(counts_before) | set(counts_after)
+                                    if counts_before.get(k) != counts_after.get(k)},
               "seconds": round(time.monotonic() - started, 1)}
     detail["passed"] = upgrade_ok(detail)
     return detail, results, status, query_errors
@@ -195,6 +199,11 @@ def restore_one(new_py: Path, root: Path, snap: Path, fixture: Path, work: Path)
             "schema_versions": {"fixture": env.schema_version(want_db), "restored": env.schema_version(got_db)}}
 
 
+def _sig_diff(before: Path, after: Path) -> dict:
+    return mapping_diff({r[1]: r[2] for r in env.schema_signature(before)},
+                        {r[1]: r[2] for r in env.schema_signature(after)})
+
+
 def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, work: Path) -> dict:
     """The upgrade left a snapshot, and restoring it gives back the pre-upgrade database."""
     data = root / "home" / env.DATA_SUBDIR
@@ -203,6 +212,10 @@ def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, wor
                     "fixture_schema_version": env.schema_version(fixture / "data" / "learning.db")}
     rc, _, _, _ = instance(new_py.parent, root).run("db", "restore-points", "--json", timeout=60)
     detail["restore_points_rc"] = rc
+    detail["schema_changes"] = {n: _sig_diff(fixture / "data" / n, data / n) for n in ("memory.db", "learning.db")}
+    detail["schema_changed_without_snapshot"] = sorted(
+        n for n, diff in detail["schema_changes"].items()
+        if any(diff.values()) and not any(s.name.startswith(n.split(".")[0] + "-") for s in snaps))
     if not snaps and schema_unchanged(fixture / "data", data):
         detail.update(passed=None, status="n/a",
                       not_applicable="neither database changed schema, so the start takes no copy")
@@ -226,6 +239,7 @@ def check_downgrade(new_bin: Path, old_bin: Path, root: Path) -> tuple[dict, lis
     if rc != 0:
         detail["errors"].append(f"prepare-downgrade rc={rc}: {(err or out)[-400:]}")
     mem = root / "home" / env.DATA_SUBDIR / "memory.db"
+    detail["schema_after_prepare"] = env.schema_version(mem.parent / "learning.db")
     before, offset, results = len(env.contents_by_ref(mem)), log_size(old_i), []
     with old_i.session() as (up, start_s, note):
         if up:
@@ -243,11 +257,12 @@ def check_downgrade(new_bin: Path, old_bin: Path, root: Path) -> tuple[dict, lis
     return detail, results
 
 
-def downgrade_to(new_py: Path, old_py: Path, root: Path, runs: list, version: str) -> dict:
+def downgrade_to(new_py: Path, old_py: Path, root: Path, runs: list, version: str, ceiling: int) -> dict:
     """One downgrade, judged against the reference baseline."""
     detail, results = check_downgrade(new_py.parent, old_py.parent, root)
     vr = recall_verdict(runs[0], runs[1], results) if len(runs) == 2 and results else None
-    detail.update(downgraded_to=version, recall_vs_baseline=vr, passed=downgrade_ok(detail, vr))
+    detail.update(downgraded_to=version, ceiling=ceiling, recall_vs_baseline=vr,
+                  passed=downgrade_ok(detail, vr, ceiling))
     return detail
 
 
@@ -270,8 +285,8 @@ def run_checks(fixture: Path, old_py: Path, new_py: Path, work: Path, down_py: P
     if down_py:
         alt_root = work / "upgraded-alt"
         shutil.copytree(new_root, alt_root)
-        checks[f"downgrade_to_{EXPECTED_DOWN}"] = downgrade_to(new_py, down_py, alt_root, base["runs"], EXPECTED_DOWN)
-    checks["downgrade"] = downgrade_to(new_py, old_py, new_root, base["runs"], EXPECTED_OLD)
+        checks[f"downgrade_to_{EXPECTED_DOWN}"] = downgrade_to(new_py, down_py, alt_root, base["runs"], EXPECTED_DOWN, 53)
+    checks["downgrade"] = downgrade_to(new_py, old_py, new_root, base["runs"], EXPECTED_OLD, 54)
     return {"fixture_version": manifest["version"], "fixture_embedding_mode": manifest["embedding_mode"],
             "checks": checks, "failing": failing(checks), "total_seconds": round(time.monotonic() - started, 1)}
 

@@ -110,26 +110,46 @@ def test_upgrade_missing_evidence_fails():
 # --- downgrade ----------------------------------------------------------------
 
 def good_down():
-    return {"prepare_rc": 0, "daemon_up": True, "schema_version": 51, "queries_answered": 12,
-            "corpus_before": 40, "corpus_after": 40, "errors": []}
+    return {"prepare_rc": 0, "daemon_up": True, "schema_after_prepare": 51, "schema_version": 51,
+            "queries_answered": 12, "corpus_before": 40, "corpus_after": 40, "errors": []}
 
 
 def test_downgrade_ok_baseline():
-    assert v.downgrade_ok(good_down(), {"verdict": "identical"}) is True
+    assert v.downgrade_ok(good_down(), {"verdict": "identical"}, 54) is True
 
 
 @pytest.mark.parametrize("change", [
-    {"prepare_rc": 1}, {"daemon_up": False}, {"schema_version": 54}, {"schema_version": None},
+    {"prepare_rc": 1}, {"daemon_up": False}, {"schema_after_prepare": 54}, {"schema_after_prepare": None},
+    {"schema_version": 50}, {"schema_version": 55}, {"schema_version": None},
     {"queries_answered": 11}, {"corpus_after": 39}, {"errors": ["SchemaVersionError"]},
 ])
 def test_downgrade_fails_closed(change):
-    assert v.downgrade_ok({**good_down(), **change}, {"verdict": "identical"}) is False
+    assert v.downgrade_ok({**good_down(), **change}, {"verdict": "identical"}, 54) is False
+
+
+def test_older_version_may_remigrate_up_to_its_own_ceiling_only():
+    d = {**good_down(), "schema_version": 53}
+    assert v.downgrade_ok(d, {"verdict": "identical"}, 53) is True
+    assert v.downgrade_ok({**d, "schema_version": 54}, {"verdict": "identical"}, 53) is False
 
 
 def test_downgrade_needs_a_recall_verdict_that_is_not_worse():
-    assert v.downgrade_ok(good_down(), None) is False
-    assert v.downgrade_ok(good_down(), {"verdict": "worse"}) is False
-    assert v.downgrade_ok(good_down(), {"verdict": "within_noise"}) is True
+    assert v.downgrade_ok(good_down(), None, 54) is False
+    assert v.downgrade_ok(good_down(), {"verdict": "worse"}, 54) is False
+    assert v.downgrade_ok(good_down(), {"verdict": "within_noise"}, 54) is True
+
+
+def test_core_counts_ignore_derived_tables_but_not_user_data():
+    before = {"memories": 40, "atomic_facts": 40, "projection_outbox": 40}
+    assert v.core_counts_unchanged(before, {"memories": 40, "atomic_facts": 40, "projection_outbox": 0, "new": 1})
+    assert not v.core_counts_unchanged(before, {"memories": 39, "atomic_facts": 40})
+    assert not v.core_counts_unchanged(before, {"atomic_facts": 40})
+    assert not v.core_counts_unchanged({"projection_outbox": 1}, {"projection_outbox": 1})  # no core table at all
+
+
+def test_mapping_diff_reports_added_removed_changed():
+    d = v.mapping_diff({"a": 1, "b": 2}, {"b": 3, "c": 4})
+    assert d == {"added": ["c"], "removed": ["a"], "changed": ["b"]}
 
 
 # --- restore ------------------------------------------------------------------

@@ -97,11 +97,21 @@ def upgrade_ok(d: dict) -> bool:
         and not d.get("errors"))
 
 
-def downgrade_ok(d: dict, recall_vs_baseline: dict | None) -> bool:
-    """prepare-downgrade worked, the older version opened the store at the floor schema and answered."""
+def schema_in_range(version: object, ceiling: int) -> bool:
+    """After the older version ran, the store is at the floor or was re-migrated up to that version's ceiling."""
+    return isinstance(version, int) and DOWNGRADE_SCHEMA <= version <= ceiling
+
+
+def downgrade_ok(d: dict, recall_vs_baseline: dict | None, ceiling: int) -> bool:
+    """prepare-downgrade left the floor schema, the older version opened the store and answered.
+
+    ``ceiling`` is the newest schema the older version supports; it may re-apply its own
+    additive migrations when it opens a store left at the floor, but never go past it.
+    """
     return bool(
         d.get("prepare_rc") == 0 and d.get("daemon_up") is True
-        and d.get("schema_version") == DOWNGRADE_SCHEMA
+        and d.get("schema_after_prepare") == DOWNGRADE_SCHEMA
+        and schema_in_range(d.get("schema_version"), ceiling)
         and d.get("queries_answered") == len(corpus.QUERIES)
         and d.get("corpus_before") == d.get("corpus_after") == len(corpus.MEMORIES)
         and recall_vs_baseline is not None and recall_vs_baseline.get("verdict") in {"identical", "within_noise"}
@@ -117,6 +127,24 @@ def restore_ok(want_cols: dict, got_cols: dict, want_counts: dict, got_counts: d
 
 def snapshot_passed(restores: list[dict], restore_points_rc: int | None) -> bool:
     return bool(restores and all(r.get("ok") is True for r in restores) and restore_points_rc == 0)
+
+
+#: memory.db tables that hold what users stored; their row counts must survive an upgrade.
+#: Other tables (indexes, outboxes, change logs, caches) are rebuilt or drained by migrations.
+CORE_MEMORY_TABLES = ("memories", "atomic_facts", "profiles", "write_commits",
+                      "ingestion_operations", "fact_temporal_validity")
+
+
+def core_counts_unchanged(before: dict, after: dict) -> bool:
+    """Every core table the old store had still has the same number of rows."""
+    return all(after.get(t) == before[t] for t in CORE_MEMORY_TABLES if t in before) and any(
+        t in before for t in CORE_MEMORY_TABLES)
+
+
+def mapping_diff(before: dict, after: dict) -> dict:
+    """Keys added, removed or changed between two mappings (for the verdict's evidence)."""
+    return {"added": sorted(set(after) - set(before)), "removed": sorted(set(before) - set(after)),
+            "changed": sorted(k for k in set(before) & set(after) if before[k] != after[k])}
 
 
 def schema_unchanged(before: Path, after: Path) -> bool:

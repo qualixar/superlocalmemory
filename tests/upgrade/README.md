@@ -50,7 +50,8 @@ with its own `HOME`, so a real `~/.superlocalmemory` is never touched.
   does not apply reports `status: "n/a"` with `passed: null`.
 - The reference interpreter (`SLM_UPG_OLD_PY`) must report superlocalmemory 4.1.24;
   the optional `SLM_UPG_DOWN_PY` must report 4.1.20 and adds a second downgrade.
-  4.1.24 and 4.1.20 share the schema ceiling 53, so both open a store left at 51.
+  4.1.24's schema ceiling (54) equals this branch's; 4.1.20's is 53, so it is the one
+  real below-ceiling downgrade (a store left at 51 must open there).
 - Daemons run on a random port in 8840-8899 and never on 8765/8767.  Versions before
   4.0 are stopped by the pid in the scratch `daemon.pid` only (after checking that the
   process belongs to the scratch HOME), never with `slm serve stop`, which stops every
