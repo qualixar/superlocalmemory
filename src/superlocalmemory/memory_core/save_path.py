@@ -57,6 +57,23 @@ def pii_redaction_enabled(config: object | None) -> bool:
     return os.environ.get("SLM_PII_REDACTION", "").strip().lower() in _ENV_ON
 
 
+def effective_pii_redaction(config: object | None) -> bool:
+    """Like ``pii_redaction_enabled``, plus the deployment policy.
+
+    The daemon upgrades its engine config from the deployment file at start-up;
+    a process that loads a plain config (an MCP server, a CLI) has to ask the
+    deployment file itself. Unreadable policy counts as not set.
+    """
+    if pii_redaction_enabled(config):
+        return True
+    try:
+        from superlocalmemory.core.config import load_deployment_config
+
+        return bool(load_deployment_config().pii_redaction)
+    except Exception:  # noqa: BLE001 - an unreadable policy never blocks a read
+        return False
+
+
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

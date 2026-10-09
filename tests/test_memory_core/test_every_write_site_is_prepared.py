@@ -19,7 +19,7 @@ from pathlib import Path
 _SRC = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory"
 _CLASSES = {"IngestionRequest", "RememberRequest"}
 _REBUILD = {"from_payload", "from_dict"}
-_PREPARERS = {"prepare_for_save", "prepare_user_text"}
+_PREPARERS = {"prepare_for_save", "prepare_user_text", "_prepared_prebuilt"}
 
 _REPLAY = "exempt: replay of an already admitted request"
 _STORED = "exempt: repair of text that is already stored"
@@ -88,77 +88,101 @@ def _type_use_ids(tree: ast.AST) -> set[int]:
     return ids
 
 
-def scan_source(source: str) -> list[Finding]:
-    tree = ast.parse(source)
-    names = _aliases(tree)
-    type_ids = _type_use_ids(tree)
-    findings: list[Finding] = []
+def _is_class_ref(node: ast.AST, names: set[str]) -> bool:
+    return (
+        (isinstance(node, ast.Name) and node.id in names)
+        or (isinstance(node, ast.Attribute) and node.attr in _CLASSES)
+    )
 
-    def is_class(node: ast.AST) -> bool:
-        return (
-            (isinstance(node, ast.Name) and node.id in names)
-            or (isinstance(node, ast.Attribute) and node.attr in _CLASSES)
-        )
 
-    def visit(node: ast.AST, stack: list[str], func: ast.AST | None) -> None:
+def _is_replace_with_content(call: ast.Call) -> bool:
+    fn = call.func
+    named_replace = (isinstance(fn, ast.Name) and fn.id == "replace") or (
+        isinstance(fn, ast.Attribute) and fn.attr == "replace"
+        and isinstance(fn.value, ast.Name) and fn.value.id == "dataclasses"
+    )
+    return named_replace and any(kw.arg == "content" for kw in call.keywords)
+
+
+def _classify_call(call: ast.Call, names: set[str]) -> str | None:
+    fn = call.func
+    if _is_class_ref(fn, names):
+        return "construct"
+    if isinstance(fn, ast.Attribute) and fn.attr in _REBUILD and _is_class_ref(fn.value, names):
+        return "rebuild"
+    return "replace" if _is_replace_with_content(call) else None
+
+
+class _Scanner:
+    def __init__(self, tree: ast.AST) -> None:
+        self.names = _aliases(tree)
+        self.type_ids = _type_use_ids(tree)
+        self.findings: list[Finding] = []
+
+    def visit(self, node: ast.AST, stack: list[str], func: ast.AST | None) -> None:
+        qual = ".".join(stack) or "<module>"
         for child in ast.iter_child_nodes(node):
             sub, inner = stack, func
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 sub = stack + [child.name]
-                if not isinstance(child, ast.ClassDef):
-                    inner = child
-            qual = ".".join(stack) or "<module>"
-            if isinstance(child, ast.Call):
-                fn = child.func
-                if is_class(fn):
-                    findings.append(Finding("construct", qual, child.lineno, child, func))
-                elif (
-                    isinstance(fn, ast.Attribute) and fn.attr in _REBUILD
-                    and is_class(fn.value)
-                ):
-                    findings.append(Finding("rebuild", qual, child.lineno, child, func))
-                elif (
-                    (isinstance(fn, ast.Name) and fn.id == "replace")
-                    or (isinstance(fn, ast.Attribute) and fn.attr == "replace"
-                        and isinstance(fn.value, ast.Name) and fn.value.id == "dataclasses")
-                ) and any(kw.arg == "content" for kw in child.keywords):
-                    findings.append(Finding("replace", qual, child.lineno, child, func))
-            elif (
-                isinstance(child, (ast.Name, ast.Attribute))
-                and isinstance(getattr(child, "ctx", None), ast.Load)
-                and is_class(child)
-                and id(child) not in type_ids
-            ):
-                findings.append(Finding("reference", qual, child.lineno, None, func))
-            visit(child, sub, inner)
+                inner = func if isinstance(child, ast.ClassDef) else child
+            self._note(child, qual, func)
+            self.visit(child, sub, inner)
 
-    visit(tree, [], None)
-    # A construct's func node is also seen as a reference; drop those.
-    call_lines = {f.line for f in findings if f.kind == "construct"}
-    rebuild_lines = {f.line for f in findings if f.kind == "rebuild"}
+    def _note(self, child: ast.AST, qual: str, func: ast.AST | None) -> None:
+        if isinstance(child, ast.Call):
+            kind = _classify_call(child, self.names)
+            if kind:
+                self.findings.append(Finding(kind, qual, child.lineno, child, func))
+        elif (
+            isinstance(child, (ast.Name, ast.Attribute))
+            and isinstance(getattr(child, "ctx", None), ast.Load)
+            and _is_class_ref(child, self.names)
+            and id(child) not in self.type_ids
+        ):
+            self.findings.append(Finding("reference", qual, child.lineno, None, func))
+
+
+def scan_source(source: str) -> list[Finding]:
+    tree = ast.parse(source)
+    scanner = _Scanner(tree)
+    scanner.visit(tree, [], None)
+    # A call's func node is also seen as a reference; drop those.
+    call_lines = {f.line for f in scanner.findings if f.kind in {"construct", "rebuild"}}
     return [
-        f for f in findings
-        if f.kind != "reference" or f.line not in call_lines | rebuild_lines
+        f for f in scanner.findings
+        if f.kind != "reference" or f.line not in call_lines
     ]
 
 
-def _assigned_from_prepared(func: ast.AST | None, name: str) -> bool:
+def _last_assigned_value(func: ast.AST | None, name: str, before: int) -> ast.AST | None:
+    """The value of the last assignment to ``name`` above line ``before``."""
+    best: ast.Assign | None = None
     for node in ast.walk(func) if func is not None else []:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == name for t in node.targets
-        ):
-            return _is_prepared_value(node.value)
-    return False
+        if not isinstance(node, ast.Assign) or node.lineno >= before:
+            continue
+        targets = [
+            t for target in node.targets
+            for t in (target.elts if isinstance(target, ast.Tuple) else [target])
+        ]
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            if best is None or node.lineno > best.lineno:
+                best = node
+    return best.value if best is not None else None
 
 
-def _is_prepared_value(value: ast.AST) -> bool:
+def _from_preparer(value: ast.AST | None, func: ast.AST | None, before: int) -> bool:
+    """True when ``value`` is, or is taken off, a prepare-step result."""
+    if isinstance(value, ast.Call):
+        fn = value.func
+        return (isinstance(fn, ast.Name) and fn.id in _PREPARERS) or (
+            isinstance(fn, ast.Attribute) and fn.attr in _PREPARERS
+        )
     if isinstance(value, ast.Attribute) and value.attr == "text":
-        return True
-    return (
-        isinstance(value, ast.Call)
-        and ((isinstance(value.func, ast.Name) and value.func.id in _PREPARERS)
-             or (isinstance(value.func, ast.Attribute) and value.func.attr in _PREPARERS))
-    )
+        return _from_preparer(value.value, func, before)
+    if isinstance(value, ast.Name):
+        return _from_preparer(_last_assigned_value(func, value.id, before), func, before)
+    return False
 
 
 def content_is_prepared(finding: Finding) -> bool:
@@ -166,12 +190,10 @@ def content_is_prepared(finding: Finding) -> bool:
     if call is None:
         return False
     for kw in call.keywords:
-        if kw.arg != "content":
-            continue
-        if isinstance(kw.value, ast.Attribute) and kw.value.attr == "text":
-            return True
-        if isinstance(kw.value, ast.Name):
-            return _assigned_from_prepared(finding.func, kw.value.id)
+        if kw.arg == "content":
+            return isinstance(kw.value, (ast.Attribute, ast.Name)) and _from_preparer(
+                kw.value, finding.func, call.lineno,
+            )
     return False
 
 
@@ -272,3 +294,34 @@ def test_guard_requires_content_to_come_from_the_prepare_step() -> None:
     assert violations("m.py", via_name, _SITE) == []
     assert violations("m.py", via_assign, _SITE) == []
     assert violations("m.py", substring_only, _SITE)
+
+
+def test_guard_rejects_text_taken_off_a_non_preparer() -> None:
+    src = (
+        "from x import IngestionRequest\n"
+        "def go(msg):\n    return IngestionRequest(content=msg.text)\n"
+    )
+    assert violations("m.py", src, _SITE)
+
+
+def test_guard_rejects_a_raw_reassignment_after_the_prepare_step() -> None:
+    src = (
+        "from x import IngestionRequest\n"
+        "def go(t, raw):\n"
+        "    t = prepare_for_save(t).text\n"
+        "    t = raw\n"
+        "    return IngestionRequest(content=t)\n"
+    )
+    assert violations("m.py", src, _SITE)
+
+
+def test_guard_accepts_the_last_assignment_being_a_preparer() -> None:
+    src = (
+        "from x import IngestionRequest\n"
+        "def go(t, raw):\n"
+        "    t = raw\n"
+        "    p = prepare_user_text(c, t)\n"
+        "    t = p.text\n"
+        "    return IngestionRequest(content=t)\n"
+    )
+    assert violations("m.py", src, _SITE) == []

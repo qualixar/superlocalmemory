@@ -121,6 +121,11 @@ def _prebuilt_fact_payload(fact: AtomicFact) -> dict:
     return payload
 
 
+_TEXT_DERIVED_VECTORS = (
+    "embedding", "fisher_mean", "fisher_variance", "langevin_position",
+)
+
+
 def _prepared_prebuilt(engine: MemoryEngine, fact: AtomicFact) -> tuple["PreparedContent", dict]:
     """The request text and payload of a prebuilt fact, personal data removed.
 
@@ -144,8 +149,9 @@ def _prepared_prebuilt(engine: MemoryEngine, fact: AtomicFact) -> tuple["Prepare
             )
             scrubbed += n_names
     if scrubbed:
-        # Anything derived from the old text must be recomputed.
-        payload["embedding"] = None
+        # Everything derived from the old text must be recomputed.
+        for name in _TEXT_DERIVED_VECTORS:
+            payload[name] = None
     return prepared, payload
 
 
@@ -368,6 +374,7 @@ def canonical_store(
     # persisted; with it off the text is stored byte-identical.
     from superlocalmemory.memory_core import (
         pii_redaction_enabled,
+        prepare_key,
         prepare_metadata,
         prepare_user_text,
     )
@@ -382,6 +389,12 @@ def canonical_store(
         pii_redaction=pii_redaction_enabled(engine._config),
     )
     metadata.update(trusted_metadata or {})
+    if idempotency_key:
+        idempotency_key = prepare_key(
+            idempotency_key, pii_redaction=pii_redaction_enabled(engine._config),
+        )
+    # Known limit: a retry of a key saved before redaction was turned on raises
+    # IdempotencyConflict to the caller; it is not tolerated as a duplicate here.
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)

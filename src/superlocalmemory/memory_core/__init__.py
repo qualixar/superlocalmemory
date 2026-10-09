@@ -5,6 +5,7 @@
 
 from superlocalmemory.memory_core.duplicates import find_redacted_duplicate
 from superlocalmemory.memory_core.save_path import (
+    effective_pii_redaction,
     ContentOrigin,
     PreparedContent,
     pii_redaction_enabled,
@@ -16,6 +17,7 @@ from superlocalmemory.memory_core.save_path import (
 )
 
 __all__ = [
+    "effective_pii_redaction",
     "find_redacted_duplicate",
     "ContentOrigin",
     "PreparedContent",

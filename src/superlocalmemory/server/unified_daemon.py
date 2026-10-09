@@ -5548,6 +5548,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 ) from exc
             if isinstance(exc, (AdmissionAuthorizationError, PermissionError)):
                 raise HTTPException(403, detail="remember admission is not authorized") from exc
+            # Known limit: a retry of a key saved before redaction was turned on
+            # conflicts here (422) and is not treated as a duplicate, unlike
+            # /ingest and /import. The journal compares the request as sent.
             if isinstance(
                 exc,
                 (AdmissionPayloadError, IdempotencyConflict),

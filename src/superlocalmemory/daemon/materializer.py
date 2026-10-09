@@ -253,6 +253,7 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     from superlocalmemory.core.metadata_guard import strip_reserved_metadata
     from superlocalmemory.memory_core import (
         pii_redaction_enabled,
+        prepare_key,
         prepare_metadata,
     )
 
@@ -267,7 +268,9 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
         content=prepared.text,
         profile_id=expected_profile_id,
         source_type=source_type,
-        idempotency_key=idempotency_key,
+        idempotency_key=prepare_key(
+            idempotency_key, pii_redaction=pii_redaction_enabled(config),
+        ),
         metadata=metadata,
         scope=scope,
         shared_with=shared_with,
