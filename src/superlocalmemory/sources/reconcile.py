@@ -253,7 +253,7 @@ def _gone(p: _Pass) -> bool:
 
 def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
     stats.paused = True
-    store.set_state(source["source_id"], "paused", stats=stats.summary())
+    store.set_state(source["source_id"], "paused", stats=stats.summary(), scanned=True)
     return stats
 
 

@@ -118,7 +118,10 @@ class SourceScanService:
 
     def _queue_due(self, store: SourceStore) -> None:
         cutoff = utc_stamp(-self._interval_s)
+        remote = self._host.remote_on()  # one check per pass
         for source in store.list_sources(states=("active", "offline", "paused")):
+            if remote and source["state"] == "paused":
+                continue
             last = source["last_scan_at"] or ""
             if last <= cutoff:
                 store.queue_scan(source["profile_id"], source["source_id"])
@@ -149,7 +152,7 @@ class SourceScanService:
             self._stop.wait(self._poll_s)
             return False
         media.finish_job(job["job_id"], self._owner, "cancelled" if stats.removed else "done")
-        return True
+        return not stats.paused  # a paused source is not work: let the loop sleep
 
 
 __all__ = ["RESCAN_INTERVAL_S", "SERVICE_NAME", "SourceScanService"]
