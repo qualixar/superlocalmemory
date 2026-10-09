@@ -34,7 +34,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MemoryHealth", "measure", "describe"]
+__all__ = [
+    "MemoryHealth", "RefileReport", "measure", "describe", "classify",
+    "refile_hidden",
+]
 
 
 @dataclass(frozen=True)
@@ -138,11 +141,7 @@ def measure(db_path: str | Path) -> MemoryHealth:
             # The contradiction M043 repairs: hidden, yet scored to keep.
             inconsistent = _count(
                 conn,
-                "SELECT COUNT(*) FROM fact_retention r "
-                "JOIN atomic_facts af ON af.fact_id = r.fact_id "
-                "WHERE r.lifecycle_zone IN ('archive', 'forgotten') "
-                "  AND r.retention_score > 0.8 "
-                f"  AND {_prefixed(live_clause, 'af')}",
+                "SELECT COUNT(*) " + _inconsistent_from(live_clause),
             )
         else:
             unavailable.append("fact_retention")
@@ -223,8 +222,8 @@ def describe(health: MemoryHealth) -> list[str]:
     if health.inconsistently_hidden:
         lines.append(
             f"{health.inconsistently_hidden:,} memories are hidden even though "
-            f"they are marked worth keeping. The next forgetting pass files each "
-            f"one again from its own score; `slm decay --execute` runs it now."
+            f"they are marked worth keeping. `slm doctor --refile-hidden` "
+            f"files exactly those again; nothing else moves."
         )
 
     if health.hidden_by_forgetting:
@@ -235,6 +234,77 @@ def describe(health: MemoryHealth) -> list[str]:
         )
 
     return lines
+
+
+def classify(health: MemoryHealth) -> tuple[str, str]:
+    """Doctor status and the one command that fixes it: ``(status, fix)``.
+
+    A store-wide decay pass moves every memory whose score changed, thousands
+    on a large store, so it is never offered for an answer-ability finding.
+    """
+    if health.healthy:
+        return "PASS", ""
+    if health.reachability < 0.9:
+        return "FAIL", "slm restart"
+    if health.inconsistently_hidden:
+        return "WARN", "slm doctor --refile-hidden"
+    return "WARN", "slm db reembed --missing-only"
+
+
+@dataclass(frozen=True)
+class RefileReport:
+    """Memories flagged as wrongly hidden, and how many were moved."""
+
+    fact_ids: tuple[str, ...] = ()
+    #: First 80 characters of each flagged memory, in the same order.
+    previews: tuple[str, ...] = ()
+    moved: int = 0
+
+
+def _inconsistent_from(live_clause: str) -> str:
+    """FROM/WHERE shared by the count and the re-file, so they cannot differ."""
+    return (
+        "FROM fact_retention r "
+        "JOIN atomic_facts af ON af.fact_id = r.fact_id "
+        "WHERE r.lifecycle_zone IN ('archive', 'forgotten') "
+        "  AND r.retention_score > 0.8 "
+        f"  AND {_prefixed(live_clause, 'af')}"
+    )
+
+
+def refile_hidden(db_path: str | Path, *, dry_run: bool = True) -> RefileReport:
+    """Re-file exactly the memories ``measure`` counts as inconsistently hidden.
+
+    Each goes to the zone its score implies (above 0.8 is ``active``) through
+    the canonical lifecycle writer, which keeps the ``atomic_facts`` mirror in
+    step. No other row is touched. No snapshot is taken: the change is one
+    reversible zone per memory and the ids are logged.
+    """
+    from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
+
+    conn = sqlite3.connect(str(Path(db_path)), timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        has_q = _has_column(conn, "atomic_facts", "quarantined")
+        live = "COALESCE(quarantined, 0) = 0" if has_q else "1=1"
+        rows = conn.execute(
+            "SELECT af.fact_id AS fact_id, af.content AS content "
+            + _inconsistent_from(live) + " ORDER BY af.fact_id"
+        ).fetchall()
+        ids = tuple(r["fact_id"] for r in rows)
+        previews = tuple((r["content"] or "")[:80] for r in rows)
+        if dry_run or not ids:
+            return RefileReport(ids, previews, 0)
+        moved = set_fact_lifecycle_zone(conn, ids, "active")
+        conn.commit()
+        logger.info("memory health: re-filed %d hidden memories: %s",
+                    moved, ", ".join(ids))
+        return RefileReport(ids, previews, moved)
+    except sqlite3.Error:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
