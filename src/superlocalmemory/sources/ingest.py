@@ -98,7 +98,8 @@ def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data
 
 
 def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
-    return {**provenance(source_id, relpath, version), "origin": "folder"}
+    """Added beside a picture's or page's own ``type``, which stays ``media`` or ``document``."""
+    return {"origin": "folder", "source_id": source_id, "relpath": relpath, "version": version}
 
 
 def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str, n: int) -> Ingested:

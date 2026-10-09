@@ -23,7 +23,7 @@ def test_pdf_is_submitted_as_a_folder_document(env, monkeypatch):
     env.scan(sid)
     [(inp, kw)] = calls
     assert inp.path == env.root.resolve() / "papers/a.pdf" and kw["actor_id"] == "test-actor"
-    assert kw["folder"] == {"type": "folder", "source_id": sid, "relpath": "papers/a.pdf",
+    assert kw["folder"] == {"source_id": sid, "relpath": "papers/a.pdf",
                             "version": kw["folder"]["version"], "origin": "folder"}
     row = env.files(sid)["papers/a.pdf"]
     assert row["state"] == "indexed" and row["document_id"] == "d1" and row["reason"] is None

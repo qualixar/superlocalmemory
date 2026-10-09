@@ -105,3 +105,36 @@ def test_purging_a_deleted_picture_erases_its_row_and_file(pics):
     env.scan(sid)
     assert media_rows(env) == {} and not [p for p in (env.data / "media").rglob("*.png")]
     assert "p.png" not in env.files(sid)
+
+
+def test_folder_picture_keeps_its_media_type_and_names_its_folder(pics):
+    import json as _json
+    from types import SimpleNamespace
+
+    from superlocalmemory.retrieval import visibility as vis
+    from superlocalmemory.retrieval.visibility import VisibilityContext
+    from superlocalmemory.server.recall_serializer import media_object
+    from tests.test_sources.test_visibility_sources import Db
+
+    env = pics
+    env.write("pics/p.png", png("a"))
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    meta = env.runtime.saved[0]["metadata"]["_slm_source"]
+    assert meta["type"] == "media" and meta["origin"] == "folder"
+    assert meta["source_id"] == sid and meta["relpath"] == "pics/p.png" and meta["version"]
+    assert media_object(meta)["kind"] == "image"
+    db = Db({"m": _json.dumps({"_slm_source": meta})}, {"f": "m"})
+    for flag in ("hide_sources", "hide_media"):
+        with vis.use(VisibilityContext(**{flag: True})):
+            assert vis.drop_hidden_results([SimpleNamespace(fact_id="f")], db, "p") == []
+
+
+def test_folder_tag_adds_to_the_media_provenance_and_never_replaces_the_type():
+    from superlocalmemory.server.recall_serializer import media_object
+    from superlocalmemory.sources.ingest import folder_tag
+
+    tag = folder_tag("sid", "a/b.pdf", "v1")
+    assert "type" not in tag and tag["origin"] == "folder" and tag["relpath"] == "a/b.pdf"
+    page = {"type": "document", "document_id": "d", "page": 2, **tag}
+    assert media_object(page)["kind"] == "page"
