@@ -184,3 +184,22 @@ def test_without_hide_media_the_same_recall_still_returns_them(tmp_path, monkeyp
         store.close()
     assert {"t1", "img", "page"} <= {r.fact.fact_id for r in resp.results}
     assert client.calls
+
+
+def test_a_failing_lookup_with_hide_media_returns_nothing(tmp_path, monkeypatch):
+    eng, store, _, _ = _media_engine(tmp_path, monkeypatch)
+    seen = Seen(eng)
+    real = eng._db.execute.side_effect
+
+    def boom(sql, params=()):
+        if "FROM memories" in sql or "FROM atomic_facts" in sql:
+            raise RuntimeError("disk")
+        return real(sql, params)
+
+    eng._db.execute.side_effect = boom
+    try:
+        with visibility.use(visibility.VisibilityContext(hide_media=True)):
+            resp = eng.recall("red bicycle", "default", Mode.A, limit=10)
+    finally:
+        store.close()
+    assert resp.results == [] and not seen.built

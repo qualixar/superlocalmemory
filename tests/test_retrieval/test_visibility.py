@@ -113,8 +113,32 @@ def test_hide_media_on_results_looks_up_each_fact_once(media_db):
     assert len(media_db.queries) == 2  # fact -> memory, then memory -> source
 
 
-def test_hide_media_costs_nothing_when_media_is_off(media_db, tmp_path):
-    (tmp_path / "media.db").unlink()
+def test_hiding_does_not_depend_on_the_feature_switch(media_db, tmp_path, monkeypatch):
+    (tmp_path / "media.db").unlink()  # no media.db
+    monkeypatch.setattr("superlocalmemory.runtimes.features.media_enabled", lambda root=None: False)
     with visibility.use(visibility.VisibilityContext(hide_media=True)):
-        out = visibility.drop_hidden_results([_fr("f_img")], media_db, "default")
-    assert [f.fact_id for f in out] == ["f_img"]  # no media exists, nothing to hide
+        out = visibility.drop_hidden_results(
+            [_fr("f_img"), _fr("f_page"), _fr("f_note")], media_db, "default")
+        facts = visibility.drop_hidden_facts(
+            {"f_img": _fact("f_img", "m_img"), "f_note": _fact("f_note", "m_note")}, media_db)
+    assert [f.fact_id for f in out] == ["f_note"]
+    assert list(facts) == ["f_note"]
+
+
+def test_unparseable_metadata_counts_as_hidden_but_plain_json_is_visible(media_db):
+    media_db.conn.execute("UPDATE memories SET metadata_json = '{not json' WHERE memory_id = 'm_note'")
+    with visibility.use(visibility.VisibilityContext(hide_media=True)):
+        out = visibility.drop_hidden_results([_fr("f_note"), _fr("f_plain")], media_db, "default")
+    assert [f.fact_id for f in out] == ["f_plain"]
+
+
+class _BrokenDb:
+    def execute(self, *a, **k):
+        raise RuntimeError("disk")
+
+
+def test_a_failed_lookup_hides_everything(caplog):
+    with visibility.use(visibility.VisibilityContext(hide_media=True)):
+        assert visibility.drop_hidden_results([_fr("a")], _BrokenDb(), "default") == []
+        assert visibility.drop_hidden_facts({"a": _fact("a")}, _BrokenDb()) == {}
+    assert "RuntimeError" in caplog.text
