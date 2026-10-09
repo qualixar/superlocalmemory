@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import stat
 import sys
@@ -105,7 +106,7 @@ def test_item_crud_and_sha_lookup(store):
     assert store.count_and_bytes("default") == (1, 10)
 
 
-@pytest.mark.parametrize("key", ["GPSLatitude", "gpsinfo", "GPS"])
+@pytest.mark.parametrize("key", ["GPSLatitude", "gpsinfo", "GPS", 34853, "34853"])
 def test_gps_in_exif_is_refused(store, key):
     with pytest.raises(ValueError):
         store.insert_item(**item(exif_json={"Make": "x", key: "1"}))
@@ -148,9 +149,11 @@ def test_jobs_lifecycle(store):
     job = store.claim_job("w1", lease_s=60)
     assert job["job_id"] == jid and job["state"] == "running"
     assert store.claim_job("w2", lease_s=60) is None
-    store.progress_job(jid, 2)
+    assert store.progress_job(jid, "w1", 2)
     assert store.get_job(jid)["done"] == 2
-    store.finish_job(jid, "done")
+    assert store.renew_lease(jid, "w1", 30)
+    assert not store.renew_lease(jid, "w2", 30)
+    assert store.finish_job(jid, "w1", "done")
     assert store.get_job(jid)["state"] == "done"
     assert store.list_jobs("default", states=["done"])[0]["job_id"] == jid
     assert store.list_jobs("default", states=["queued"]) == []
@@ -165,7 +168,8 @@ def test_expired_lease_is_reclaimed(store):
 
 def test_purge_jobs_drops_old_finished_jobs_only(store):
     old = store.enqueue_job("default", "gc")
-    store.finish_job(old, "done")
+    store.claim_job("w")
+    store.finish_job(old, "w", "done")
     live = store.enqueue_job("default", "gc")
     with store._write() as conn:
         conn.execute("UPDATE jobs SET updated_at='2000-01-01T00:00:00.000000Z' WHERE job_id=?", (old,))
@@ -249,3 +253,88 @@ def test_profile_delete_sidecar_moves_media_and_makes_nothing_when_absent(root):
         assert s.get_item(mid)["profile_id"] == "default"
     finally:
         s.close()
+
+
+def test_exif_keeps_only_known_plain_keys(store):
+    mid = store.insert_item(**item(exif_json={"Make": "x", "MakerNote": "blob", "Model": {"a": 1}}))
+    kept = json.loads(store.get_item(mid)["exif_json"])
+    assert kept == {"Make": "x"}
+
+
+def test_space_id_must_fully_match(store):
+    from superlocalmemory.media.store import vec_table
+
+    with pytest.raises(ValueError):
+        vec_table("a" * 32 + "\n")
+
+
+def test_old_owner_cannot_finish_a_reclaimed_job(store):
+    jid = store.enqueue_job("default", "gc")
+    store.claim_job("w1", lease_s=-5)
+    assert store.claim_job("w2", lease_s=60)["lease_owner"] == "w2"
+    assert store.finish_job(jid, "w1", "done") is False
+    assert store.progress_job(jid, "w1", 5) is False
+    job = store.get_job(jid)
+    assert job["state"] == "running" and job["lease_owner"] == "w2" and job["done"] == 0
+    assert store.finish_job(jid, "w2", "done") is True
+
+
+def test_move_resolves_source_root_collisions(store):
+    with store._write() as c:
+        for pid, sid in (("p1", "s1"), ("default", "s2")):
+            c.execute("INSERT INTO sources VALUES (?,?,'folder','/same','x','[]','active',0,1,'t',NULL,'{}')",
+                      (sid, pid))
+    store.move_profile_rows("p1", "default")
+    with store._write() as c:
+        rows = dict(c.execute("SELECT source_id, state FROM sources").fetchall())
+    assert rows == {"s1": "removed", "s2": "active"}
+
+
+def test_move_skips_orphan_vector_rows(store):
+    mid = _fill(store, "p1", "1" * 64)
+    sid = store.active_space()["space_id"]
+    with store._write() as c:
+        c.execute(f"DELETE FROM media_vec_{sid}")
+    store.move_profile_rows("p1", "default")
+    with store._write() as c:
+        assert c.execute("SELECT COUNT(*) FROM media_vector_rows").fetchone()[0] == 0
+    assert store.get_item(mid)["profile_id"] == "default"
+
+
+def test_sidecar_preflight_refuses_a_read_only_media_db_before_anything(root):
+    from superlocalmemory.storage import profile_fold_sidecars as sidecars
+
+    open_media_store(create=True, data_root=root).close()
+    conn = sqlite3.connect(media_db_path(root))
+    conn.execute("UPDATE media_schema SET value='99' WHERE key='version'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(sidecars.SidecarFoldError):
+        sidecars.check_media(root)
+    with pytest.raises(sidecars.SidecarFoldError):
+        sidecars.move_media(root, "a", "default")
+
+
+def test_sidecar_preflight_refuses_an_unopenable_media_db(root, monkeypatch):
+    from superlocalmemory import media
+    from superlocalmemory.storage import profile_fold_sidecars as sidecars
+
+    open_media_store(create=True, data_root=root).close()
+
+    def boom(**_):
+        raise ImportError("sqlite_vec")
+
+    monkeypatch.setattr(media, "open_media_store", boom)
+    with pytest.raises(sidecars.SidecarFoldError):
+        sidecars.check_media(root)
+    with pytest.raises(sidecars.SidecarFoldError):
+        sidecars.move_media(root, "a", "default")
+
+
+def test_sidecar_preflight_passes_when_absent_or_fine(root):
+    from superlocalmemory.storage import profile_fold_sidecars as sidecars
+
+    root.mkdir()
+    sidecars.check_media(root)
+    open_media_store(create=True, data_root=root).close()
+    sidecars.check_media(root)

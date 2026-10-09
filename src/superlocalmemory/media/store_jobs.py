@@ -51,22 +51,32 @@ class JobsMixin:
             )
         return self.get_job(row[0])
 
-    def progress_job(self, job_id: str, done: int, total: int | None = None) -> None:
+    def progress_job(self, job_id: str, owner: str, done: int, total: int | None = None) -> bool:
+        """Record progress; False (and nothing written) when this owner no longer holds the job."""
+        sets, args = ["done = ?", "updated_at = ?"], [int(done), utc_stamp()]
+        if total is not None:
+            sets.append("total = ?")
+            args.append(int(total))
         with self._write() as conn:
-            if total is None:
-                conn.execute("UPDATE jobs SET done = ?, updated_at = ? WHERE job_id = ?",
-                             (int(done), utc_stamp(), job_id))
-            else:
-                conn.execute("UPDATE jobs SET done = ?, total = ?, updated_at = ? WHERE job_id = ?",
-                             (int(done), int(total), utc_stamp(), job_id))
+            return conn.execute(
+                f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ? AND lease_owner = ? AND state = 'running'",
+                (*args, job_id, owner)).rowcount == 1
 
-    def finish_job(self, job_id: str, state: str, error: str | None = None) -> None:
+    def renew_lease(self, job_id: str, owner: str, lease_s: float = 60) -> bool:
+        with self._write() as conn:
+            return conn.execute(
+                "UPDATE jobs SET lease_until = ?, updated_at = ? WHERE job_id = ? AND lease_owner = ?"
+                " AND state = 'running'", (utc_stamp(lease_s), utc_stamp(), job_id, owner)).rowcount == 1
+
+    def finish_job(self, job_id: str, owner: str, state: str, error: str | None = None) -> bool:
+        """Finish a job this owner holds; False when the lease was lost to someone else."""
         if state not in _FINAL:
             raise ValueError(f"not a final job state: {state}")
         with self._write() as conn:
-            conn.execute(
+            return conn.execute(
                 "UPDATE jobs SET state = ?, error = ?, lease_owner = NULL, lease_until = NULL,"
-                " updated_at = ? WHERE job_id = ?", (state, error, utc_stamp(), job_id))
+                " updated_at = ? WHERE job_id = ? AND lease_owner = ? AND state = 'running'",
+                (state, error, utc_stamp(), job_id, owner)).rowcount == 1
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         row = self._read().execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()

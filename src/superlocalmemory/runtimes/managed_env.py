@@ -21,6 +21,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -196,12 +197,25 @@ class ManagedEnv:
         with self._mutex:
             record = {**self._read(), **changes, "updated_at": _now()}
             self.root.mkdir(parents=True, exist_ok=True)
-            tmp = self.root / f"{STATE_FILE}.tmp-{os.getpid()}"
-            tmp.write_text(json.dumps(record), encoding="utf-8")
-            os.replace(tmp, self.root / STATE_FILE)
+            # mkstemp: a unique, owner-only (0600) file in the same folder, so the replace is atomic.
+            fd, tmp = tempfile.mkstemp(prefix=f"{STATE_FILE}.", suffix=".tmp", dir=str(self.root))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps(record))
+                os.replace(tmp, self.root / STATE_FILE)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
 
     def _mark(self, step: str, value: str) -> None:
         self._update(markers={**self._read().get("markers", {}), step: value})
+
+    def _clear_markers(self, *steps: str) -> None:
+        kept = {k: v for k, v in self._read().get("markers", {}).items() if k not in steps}
+        self._update(markers=kept)
 
     def _marker(self, step: str) -> str:
         return str(self._read().get("markers", {}).get(step, ""))
@@ -257,7 +271,10 @@ class ManagedEnv:
     # -- running things -------------------------------------------------------
     def _run(self, cmd: list[str], *, timeout_s: float, env: dict[str, str] | None = None):
         runner = self._runner or self._cancelable_run
-        return runner(cmd, timeout_s=timeout_s, env=env, classify=classify_error)
+        # Nothing from the caller's shell may steer pip or Python inside the environment.
+        clean = {k: v for k, v in (env if env is not None else os.environ).items()
+                 if not k.startswith(("PIP_", "PYTHON"))}
+        return runner(cmd, timeout_s=timeout_s, env=clean, classify=classify_error)
 
     def _cancelable_run(self, cmd, *, timeout_s, env, classify):
         cancel = self._cancel
@@ -307,6 +324,7 @@ class ManagedEnv:
             return self.status()
         self._cancel = cancel
         try:
+            self._drop_stale_venv()
             return self._install_locked(on_progress or (lambda f, s: None), cancel)
         except Exception:  # noqa: BLE001 - install never raises
             logger.exception("environment install failed unexpectedly")
@@ -314,6 +332,14 @@ class ManagedEnv:
         finally:
             self._cancel = None
             lock.release()
+
+    def _drop_stale_venv(self) -> None:
+        """A venv built by a different base Python is rebuilt, and its packages are reinstalled."""
+        rec = self._read()
+        recorded = (rec.get("base_python"), rec.get("base_version"))
+        if recorded[0] and recorded != _base_python():
+            shutil.rmtree(self.root / "venv", ignore_errors=True)
+            self._clear_markers("venv", "pip")
 
     def _progress_now(self) -> float:
         return float(self._read().get("progress", 0.0))
@@ -341,6 +367,8 @@ class ManagedEnv:
             kind = run_step(say)
             if kind:
                 return self._fail(kind, top[0])
+        if stopped():
+            return self._fail("cancelled", top[0])
         path, version = _base_python()
         self._update(state=READY, progress=1.0, step="Ready", error_kind="", base_python=path, base_version=version)
         report(1.0, "Ready")
@@ -356,6 +384,7 @@ class ManagedEnv:
             return ""
         say(0.05, "Creating the environment")
         shutil.rmtree(self.root / "venv", ignore_errors=True)
+        self._clear_markers("venv", "pip")
         ok, kind, detail = self._create_venv()
         if not ok:
             logger.warning("venv creation failed: %s", detail)
@@ -372,8 +401,8 @@ class ManagedEnv:
         if self._marker("pip") == digest:
             return ""
         say(0.15, "Installing the packages")
-        cmd = [str(self.python()), "-m", "pip", "install", "--disable-pip-version-check", "--require-hashes",
-               "--no-deps", *_lock_index_args(text), "-r", str(lock)]
+        cmd = [str(self.python()), "-m", "pip", "install", "--disable-pip-version-check", "--isolated",
+               "--only-binary=:all:", "--require-hashes", "--no-deps", *_lock_index_args(text), "-r", str(lock)]
         ok, kind, detail = self._run(cmd, timeout_s=_PIP_TIMEOUT_S, env={**os.environ, "TOKENIZERS_PARALLELISM": "false"})
         if not ok:
             logger.warning("package install failed (%s): %s", kind, detail)
@@ -410,15 +439,21 @@ class ManagedEnv:
         return "" if healthy else "canary"
 
     # -- removal --------------------------------------------------------------
-    def remove(self, *, keep_weights: bool) -> None:
-        shutil.rmtree(self.root / "venv", ignore_errors=True)
-        markers = self._read().get("markers", {}) if keep_weights else {}
-        if not keep_weights:
-            shutil.rmtree(self.weights_dir(), ignore_errors=True)
-        self.root.mkdir(parents=True, exist_ok=True)
-        markers = {k: v for k, v in markers.items() if k == "weights"}
-        self._update(state=NOT_INSTALLED, progress=0.0, step="", error_kind="", markers=markers,
-                     base_python="", base_version="")
+    def remove(self, *, keep_weights: bool) -> EnvStatus:
+        """Delete the environment (and the weights unless kept). Refused while an install runs."""
+        lock = InstanceLock(self.root / "install.lock")
+        if not lock.try_acquire():
+            return EnvStatus(INSTALLING, self._progress_now(), "Setup is still running. Cancel it first.")
+        try:
+            shutil.rmtree(self.root / "venv", ignore_errors=True)
+            keep = {"weights": self._marker("weights")} if keep_weights and self._marker("weights") else {}
+            if not keep_weights:
+                shutil.rmtree(self.weights_dir(), ignore_errors=True)
+            self._update(state=NOT_INSTALLED, progress=0.0, step="", error_kind="", markers=keep,
+                         base_python="", base_version="")
+        finally:
+            lock.release()
+        return self.status()
 
 
 __all__ = ["EnvSpec", "EnvStatus", "HuggingFaceSource", "LocalDirSource", "ManagedEnv", "ModelSource",

@@ -133,3 +133,58 @@ def test_doctor_line_is_read_only_and_says_off(root, capsys):
     assert "Images & documents" in out and '"off"' in out
     assert not features.features_path(root).exists()
     assert not (root / "media.db").exists() and not (root / "runtimes").exists()
+
+
+def test_enable_rolls_back_when_the_store_cannot_be_made(root, monkeypatch):
+    import sqlite3
+
+    from superlocalmemory import media
+
+    def boom(**_):
+        raise sqlite3.OperationalError("nope")
+
+    monkeypatch.setattr(media, "open_media_store", boom)
+    out = features.enable_media(source="cli", env=FakeEnv(), data_root=root)
+    assert out["enabled"] is False and out.get("error")
+    assert features.media_enabled(root) is False
+    assert json.loads(features.features_path(root).read_text())["media"]["enabled"] is False
+
+
+def test_disable_cancels_a_running_install_and_remove_waits_for_it(root):
+    from superlocalmemory.runtimes.managed_env import EnvSpec, ManagedEnv
+
+    started = threading.Event()
+
+    class Src:
+        model_id, revision = "m", "r"
+
+        def fetch(self, python, dest, *, progress, cancel=None):
+            started.set()
+            cancel.wait(10)
+            return (False, "cancelled", "") if cancel.is_set() else (True, "", "")
+
+    def runner(cmd, *, timeout_s, env, classify):
+        if "venv" in cmd:
+            py = Path(cmd[-1]) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            py.parent.mkdir(parents=True, exist_ok=True)
+            py.write_text("")
+        return True, "", ""
+
+    from pathlib import Path
+
+    from superlocalmemory.runtimes import managed_env as me
+
+    lock_dir = root / "locks"
+    lock_dir.mkdir()
+    (lock_dir / me.lock_name()).write_text("foo==1 --hash=sha256:" + "a" * 64 + "\n")
+    old = me.LOCKS_DIR
+    me.LOCKS_DIR = lock_dir
+    try:
+        env = ManagedEnv(EnvSpec("t", ("foo==1",), Src(), 1, 1), root=root / "env", runner=runner)
+        features.enable_media(source="cli", env=env, data_root=root)
+        assert started.wait(10)
+        assert env.remove(keep_weights=False).state == "installing"
+        features.disable_media(remove_files=True, env=env, data_root=root)
+        assert env.status().state == "not_installed"
+    finally:
+        me.LOCKS_DIR = old

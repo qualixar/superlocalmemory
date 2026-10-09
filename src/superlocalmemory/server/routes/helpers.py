@@ -409,6 +409,7 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
 
     root = Path(DB_PATH).parent
     sidecars.check_learning(root / "learning.db")
+    sidecars.check_media(root)
     _refuse_unfoldable(name, move_to)
     # Receipt evidence lives in learning.db, not recall's memory.db.
     from superlocalmemory.storage.agent_experience import purge_profile_receipts

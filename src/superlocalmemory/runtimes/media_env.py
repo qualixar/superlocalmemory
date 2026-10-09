@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from superlocalmemory.runtimes import managed_env as _env
@@ -51,6 +52,15 @@ MEDIA_ENV = EnvSpec(
 )
 
 
+_SHARED: dict[Path, ManagedEnv] = {}
+_SHARED_LOCK = threading.Lock()
+
+
 def media_env(root: Path | None = None) -> ManagedEnv:
-    """The media environment under ``<data_root>/runtimes/media`` (or ``root``)."""
-    return ManagedEnv(MEDIA_ENV, root=root)
+    """The one media environment per folder (``<data_root>/runtimes/media`` unless ``root`` is given).
+
+    Shared so every caller in the process uses the same state-file mutex.
+    """
+    fresh = ManagedEnv(MEDIA_ENV, root=root)
+    with _SHARED_LOCK:
+        return _SHARED.setdefault(fresh.root, fresh)

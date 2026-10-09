@@ -45,7 +45,7 @@ class MediaStoreReadOnly(RuntimeError):
 
 
 def vec_table(space_id: str) -> str:
-    if not _SPACE_ID.match(space_id):
+    if not _SPACE_ID.fullmatch(space_id):
         raise ValueError("invalid space id")
     return f"media_vec_{space_id}"
 
@@ -60,10 +60,26 @@ def _load_vec(conn: sqlite3.Connection) -> None:
         conn.enable_load_extension(False)
 
 
+#: The only camera/capture fields kept. Anything else (maker notes, embedded
+#: blobs, location sub-records) is dropped before it reaches the database.
+EXIF_ALLOWED = frozenset({
+    "DateTime", "DateTimeOriginal", "DateTimeDigitized", "Make", "Model", "Orientation", "LensModel",
+    "Software", "ExposureTime", "FNumber", "ISOSpeedRatings", "FocalLength", "Flash", "WhiteBalance",
+    "ColorSpace", "XResolution", "YResolution", "ResolutionUnit", "PixelXDimension", "PixelYDimension",
+    "ImageWidth", "ImageLength",
+})
+_GPS_TAG_ID = "34853"
+
+
+def _is_location_key(key: Any) -> bool:
+    text = str(key).strip().upper()
+    return text.startswith("GPS") or text == _GPS_TAG_ID
+
+
 def _reject_location(value: Any) -> None:
     if isinstance(value, dict):
         for key, inner in value.items():
-            if str(key).upper().startswith("GPS"):
+            if _is_location_key(key):
                 raise ValueError("location data is never stored")
             _reject_location(inner)
     elif isinstance(value, list):
@@ -74,7 +90,11 @@ def _reject_location(value: Any) -> None:
 def _exif_text(raw: Any) -> str:
     data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
     _reject_location(data)
-    return json.dumps(data, sort_keys=True)
+    if not isinstance(data, dict):
+        raise ValueError("exif must be an object")
+    kept = {str(k): v for k, v in data.items()
+            if str(k) in EXIF_ALLOWED and isinstance(v, (str, int, float, bool))}
+    return json.dumps(kept, sort_keys=True)
 
 
 class MediaStore(JobsMixin):
@@ -284,19 +304,36 @@ class MediaStore(JobsMixin):
             return 0
         total = 0
         with self._write() as conn:
-            for space_id, rowid, media_id, _ in self._vector_rows(conn, from_profile):
-                table = vec_table(space_id)
-                emb = conn.execute(f"SELECT embedding FROM {table} WHERE rowid = ?", (rowid,)).fetchone()
-                conn.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
-                cur = conn.execute(f"INSERT INTO {table}(profile_id, embedding) VALUES (?, ?)",
-                                   (to_profile, emb[0]))
-                conn.execute("UPDATE media_vector_rows SET vec_rowid = ?, profile_id = ? "
-                             "WHERE space_id = ? AND vec_rowid = ?", (cur.lastrowid, to_profile, space_id, rowid))
-                total += 1
+            total += self._retire_clashing_sources(conn, from_profile, to_profile)
+            total += self._move_vectors(conn, from_profile, to_profile)
             for table in ("media_items", "documents", "jobs", "sources"):
                 total += conn.execute(f"UPDATE {table} SET profile_id = ? WHERE profile_id = ?",
                                       (to_profile, from_profile)).rowcount
         return total
+
+    @staticmethod
+    def _retire_clashing_sources(conn: sqlite3.Connection, from_profile: str, to_profile: str) -> int:
+        """A folder both profiles watch stays with the target; the mover's copy is marked removed."""
+        return conn.execute(
+            "UPDATE sources SET state = 'removed' WHERE profile_id = ? AND state != 'removed' AND root_path IN "
+            "(SELECT root_path FROM sources WHERE profile_id = ? AND state != 'removed')",
+            (from_profile, to_profile)).rowcount
+
+    def _move_vectors(self, conn: sqlite3.Connection, from_profile: str, to_profile: str) -> int:
+        moved = 0
+        for space_id, rowid, _, _ in self._vector_rows(conn, from_profile):
+            table = vec_table(space_id)
+            emb = conn.execute(f"SELECT embedding FROM {table} WHERE rowid = ?", (rowid,)).fetchone()
+            if emb is None:  # a map row whose vector is gone: drop the mapping, move nothing
+                conn.execute("DELETE FROM media_vector_rows WHERE space_id = ? AND vec_rowid = ?",
+                             (space_id, rowid))
+                continue
+            conn.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
+            cur = conn.execute(f"INSERT INTO {table}(profile_id, embedding) VALUES (?, ?)", (to_profile, emb[0]))
+            conn.execute("UPDATE media_vector_rows SET vec_rowid = ?, profile_id = ? "
+                         "WHERE space_id = ? AND vec_rowid = ?", (cur.lastrowid, to_profile, space_id, rowid))
+            moved += 1
+        return moved
 
     @staticmethod
     def _vector_rows(conn: sqlite3.Connection, profile_id: str) -> list[sqlite3.Row]:

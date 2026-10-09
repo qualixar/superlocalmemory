@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import sys
+import tempfile
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -32,6 +34,9 @@ INSTALL_THREAD_NAME = "media-env-install"
 _stop_hook: Callable[[], None] | None = None
 _install_thread: threading.Thread | None = None
 _lock = threading.Lock()
+_cancel = threading.Event()
+#: How long turning the feature off waits for a cancelled install to stop.
+_STOP_WAIT_S = 15.0
 
 
 def _root(data_root: str | Path | None) -> Path:
@@ -72,11 +77,17 @@ def media_enabled(data_root: str | Path | None = None) -> bool:
 def _write_features(data_root: str | Path | None, data: dict[str, Any]) -> None:
     path = features_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(data, fh)
-    os.replace(tmp, path)
+    fd, tmp_name = tempfile.mkstemp(prefix=f"{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     if sys.platform != "win32":
         os.chmod(path, 0o600)
 
@@ -113,7 +124,9 @@ def _start_install(managed: ManagedEnv) -> None:
             return
         if managed.status().state in ("ready", "installing"):
             return
-        _install_thread = threading.Thread(target=managed.install, name=INSTALL_THREAD_NAME, daemon=True)
+        _cancel.clear()
+        _install_thread = threading.Thread(target=lambda: managed.install(cancel=_cancel),
+                                           name=INSTALL_THREAD_NAME, daemon=True)
         _install_thread.start()
 
 
@@ -132,14 +145,32 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
         store = open_media_store(create=True, data_root=_root(data_root))
         if store is not None:
             store.close()
-    except OSError as exc:
+    except (OSError, sqlite3.Error, ImportError) as exc:
         logger.warning("could not turn on images and documents: %s", exc)
+        _roll_back_enable(data_root)
         return {**media_feature_status(data_root, env=env), "enabled": False,
                 "error": "Couldn't save the setting. Check that the data folder is writable."}
     managed = _env(env, data_root)
     if start_install:
         _start_install(managed)
     return media_feature_status(data_root, env=managed)
+
+
+def _roll_back_enable(data_root: str | Path | None) -> None:
+    try:
+        data = read_features(data_root)
+        data["media"]["enabled"] = False
+        _write_features(data_root, data)
+    except OSError:
+        pass
+
+
+def _stop_install() -> None:
+    """Ask a running install to stop and give it a moment to do so."""
+    _cancel.set()
+    thread = _install_thread
+    if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(_STOP_WAIT_S)
 
 
 def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
@@ -156,6 +187,7 @@ def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
             _stop_hook()
         except Exception:  # noqa: BLE001 - turning off must not fail on a worker that is already gone
             logger.exception("media stop hook failed")
+    _stop_install()
     managed = _env(env, data_root)
     if remove_files:
         managed.remove(keep_weights=False)

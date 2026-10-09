@@ -102,18 +102,43 @@ def purge_context_cache(data_root: Path, profile_id: str) -> int:
     return sum(purge_profile_from_cache_db(c, profile_id) for c in candidates if c.exists())
 
 
+_MEDIA_REFUSAL = ("the images and documents database can't be updated safely right now; "
+                  "the profile was not deleted")
+
+
+def _open_media(data_root: Path):
+    """The media store, or None when there is none; SidecarFoldError when it can't be used."""
+    try:
+        from superlocalmemory.media import open_media_store
+
+        store = open_media_store(data_root=data_root)
+    except (sqlite3.Error, ImportError, OSError) as exc:
+        raise SidecarFoldError(_MEDIA_REFUSAL) from exc
+    if store is not None and store.read_only:
+        store.close()
+        raise SidecarFoldError(_MEDIA_REFUSAL + " (it was written by a newer version)")
+    return store
+
+
+def check_media(data_root: Path) -> None:
+    """Raise before anything is deleted when media.db exists but can't take the move."""
+    store = _open_media(Path(data_root))
+    if store is not None:
+        store.close()
+
+
 def move_media(data_root: Path, profile_id: str, target: str = "default") -> int:
     """Images and documents of the deleted profile go to target; nothing is made if absent."""
-    from superlocalmemory.media import open_media_store
-
-    store = open_media_store(data_root=data_root)
+    store = _open_media(Path(data_root))
     if store is None:
         return 0
     try:
         return store.move_profile_rows(profile_id, target)
+    except (sqlite3.Error, ImportError, OSError) as exc:
+        raise SidecarFoldError(_MEDIA_REFUSAL) from exc
     finally:
         store.close()
 
 
 __all__ = ["LEARNING_DECISIONS", "SidecarFoldError", "check_learning", "move_pending",
-           "move_media", "purge_context_cache", "purge_learned_state"]
+           "check_media", "move_media", "purge_context_cache", "purge_learned_state"]

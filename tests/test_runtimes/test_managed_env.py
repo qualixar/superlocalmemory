@@ -237,3 +237,113 @@ def test_lock_script_builds_commands_and_names():
 def test_lock_header_index_lines_are_read_with_or_without_comment():
     text = "# --index-url https://a\n--extra-index-url https://b\nfoo==1 --hash=sha256:00\n"
     assert me._lock_index_args(text) == ["--index-url", "https://a", "--extra-index-url", "https://b"]
+
+
+def test_pip_is_strict_and_environment_is_clean(tmp_path, src, lock, monkeypatch):
+    monkeypatch.setenv("PIP_INDEX_URL", "https://evil.invalid")
+    monkeypatch.setenv("PYTHONPATH", "/x")
+    envs = []
+
+    class R(Runner):
+        def __call__(self, cmd, *, timeout_s, env, classify):
+            envs.append(env)
+            return super().__call__(cmd, timeout_s=timeout_s, env=env, classify=classify)
+
+    runner = R()
+    make(tmp_path, src, runner).install()
+    pip = [c for c in runner.calls if "pip" in c][0]
+    assert "--only-binary=:all:" in pip and "--isolated" in pip
+    for env in envs:
+        assert env is not None
+        assert not any(k.startswith(("PIP_", "PYTHON")) for k in env)
+
+
+def test_recreated_venv_drops_the_pip_marker(tmp_path, src, lock):
+    runner = Runner()
+    env = make(tmp_path, src, runner)
+    env.install()
+    import shutil
+
+    shutil.rmtree(tmp_path / "env" / "venv")
+    env.install()
+    assert runner.count("venv") == 2 and sum(1 for c in runner.calls if "pip" in c) == 2
+
+
+def test_changed_base_python_drops_venv_and_markers_on_install(tmp_path, src, lock, monkeypatch):
+    runner = Runner()
+    env = make(tmp_path, src, runner)
+    env.install()
+    monkeypatch.setattr(me, "_base_python", lambda: ("/elsewhere/python3", "3.13.0"))
+    assert env.install().state == "ready"
+    assert runner.count("venv") == 2 and sum(1 for c in runner.calls if "pip" in c) == 2
+
+
+class SlowSource:
+    model_id, revision = "m", "r"
+
+    def __init__(self):
+        self.started = threading.Event()
+
+    def fetch(self, python, dest, *, progress, cancel=None):
+        self.started.set()
+        cancel.wait(10)
+        return (False, "cancelled", "") if cancel.is_set() else (True, "", "")
+
+
+def test_remove_is_refused_while_an_install_runs_and_cancel_stops_it(tmp_path, src, lock):
+    source = SlowSource()
+    env = make(tmp_path, src, source=source)
+    cancel, result = threading.Event(), []
+    t = threading.Thread(target=lambda: result.append(env.install(cancel=cancel)))
+    t.start()
+    assert source.started.wait(10)
+    refused = env.remove(keep_weights=False)
+    assert refused.state == "installing"
+    assert (tmp_path / "env" / "venv").exists()
+    cancel.set()
+    t.join(10)
+    assert result[0].state == "failed" and result[0].error_kind == "cancelled"
+    assert env.remove(keep_weights=False).state == "not_installed"
+
+
+def test_cancel_before_ready_wins(tmp_path, src, lock):
+    cancel = threading.Event()
+    env = make(tmp_path, src, canary=lambda p: cancel.set() or True)
+    st = env.install(cancel=cancel)
+    assert st.state == "failed" and st.error_kind == "cancelled"
+
+
+def test_local_source_honours_cancel_between_files(tmp_path, src):
+    for i in range(3):
+        (src / f"f{i}").write_bytes(b"x")
+    cancel = threading.Event()
+    cancel.set()
+    ok, kind, _ = LocalDirSource(src).fetch(Path("py"), tmp_path / "dest", progress=lambda f, s: None,
+                                            cancel=cancel)
+    assert not ok and kind == "cancelled" and not (tmp_path / "dest").exists()
+
+
+def test_concurrent_state_writes_do_not_collide(tmp_path, src):
+    env = make(tmp_path, src)
+    errors = []
+
+    def spin(n):
+        try:
+            for i in range(40):
+                env._update(progress=i / 40, step=f"s{n}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    ts = [threading.Thread(target=spin, args=(n,)) for n in range(6)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errors and env._read()["state"] if env._read().get("state") else not errors
+    if os.name != "nt":
+        assert (tmp_path / "env" / "state.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_media_env_is_shared_per_root(tmp_path):
+    from superlocalmemory.runtimes.media_env import media_env
+
+    assert media_env(tmp_path / "a") is media_env(tmp_path / "a")
+    assert media_env(tmp_path / "a") is not media_env(tmp_path / "b")

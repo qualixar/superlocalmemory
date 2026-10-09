@@ -52,13 +52,21 @@ class LocalDirSource:
 
     def fetch(self, python: Path, dest: Path, *, progress: ProgressFn,
               cancel: threading.Event | None = None) -> FetchResult:
+        staging = dest.with_name(dest.name + ".partial")
         try:
-            staging = dest.with_name(dest.name + ".partial")
             shutil.rmtree(staging, ignore_errors=True)
-            shutil.copytree(self.path, staging)
+            staging.mkdir(parents=True)
+            for file in sorted(p for p in self.path.rglob("*") if p.is_file()):
+                if cancel is not None and cancel.is_set():
+                    shutil.rmtree(staging, ignore_errors=True)
+                    return False, "cancelled", "stopped by the person"
+                target = staging / file.relative_to(self.path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file, target)
             shutil.rmtree(dest, ignore_errors=True)
             staging.replace(dest)
         except OSError as exc:
+            shutil.rmtree(staging, ignore_errors=True)
             return False, "disk" if getattr(exc, "errno", None) == 28 else "other", str(exc)
         progress(1.0, "Copying the model files")
         return True, "", ""
