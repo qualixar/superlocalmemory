@@ -77,7 +77,7 @@ def reset_engine():
 
 # Register tools and resources -------------------------------------------------
 #
-# Essential-only default: 48 base tools + 8 mesh tools = 56 registered
+# Essential-only default: 48 base tools + 9 mesh tools = 57 registered
 # when mesh is enabled. Set ``SLM_MCP_ALL_TOOLS=1`` to expose the full
 # toolset. Rationale: IDEs cap at 50-100 tools total (Cursor,
 # Antigravity, Windsurf) and a maximal SLM registration crowds out
@@ -152,7 +152,7 @@ if not _mesh_tools_enabled:
 
 if _mesh_tools_enabled:
     _ESSENTIAL_TOOLS.update({
-        "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
+        "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
         "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
     })
 

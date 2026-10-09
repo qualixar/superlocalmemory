@@ -3845,6 +3845,11 @@ def create_app() -> FastAPI:
         application.include_router(mesh_router)
     except ImportError:
         pass
+    try:
+        from superlocalmemory.server.routes.mesh_owner import router as mesh_owner_router
+        application.include_router(mesh_owner_router)
+    except ImportError:
+        pass
 
     # -- Entity routes (Phase D) --
     try:
