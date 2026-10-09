@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as HTTPServer
 
 import e2e_daemon as e2e
 
@@ -62,6 +62,8 @@ def test_scrub_cmdline_drops_long_arguments():
 
 
 class _Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, *a):  # silence
         pass
 
@@ -73,6 +75,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_POST(self):
+        n = int(self.headers["Content-Length"])
+        body = self.rfile.read(n)
         if not getattr(self.server, "throttled", True):
             self.server.throttled = True
             raw = b"{}"
@@ -82,8 +86,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
-        n = int(self.headers["Content-Length"])
-        content = json.loads(self.rfile.read(n))["content"]
+        content = json.loads(body)["content"]
         self.server.stored.append(content)
         self._send({"fact_ids": [f"f{len(self.server.stored)}"]})
 
@@ -96,6 +99,7 @@ def test_ingest_and_recall_against_a_fake_daemon():
     srv = HTTPServer(("127.0.0.1", 0), _Handler)
     srv.stored = []
     srv.throttled = False  # first POST answers 429 once
+    srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         client = e2e.Client(srv.server_port, {"X-SLM-Daemon-Capability": "secret"})
@@ -119,3 +123,19 @@ def test_process_sampler_sees_own_process():
     time.sleep(0.15)
     procs = s.stop()
     assert procs and procs[0]["peak_mb"] > 0 and s.peak_total_mb > 0
+
+
+def test_client_reconnects_after_server_closed_a_kept_alive_connection():
+    import socket
+
+    srv = HTTPServer(("127.0.0.1", 0), _Handler)
+    srv.stored, srv.throttled = ["x"], True
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        client = e2e.Client(srv.server_port)
+        assert client.call("GET", "/recall")[0] == 200
+        client._conn.sock.shutdown(socket.SHUT_RDWR)  # what an idle-timeout close looks like
+        assert client.call("GET", "/recall")[0] == 200
+    finally:
+        srv.shutdown()

@@ -238,21 +238,28 @@ class Client:
     def __repr__(self) -> str:
         return f"Client(port={self.port})"
 
+    def _send(self, method: str, path: str, payload: bytes | None, headers: dict):
+        if self._conn is None:
+            self._conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=self.timeout)
+        self._conn.request(method, path, payload, headers)
+        resp = self._conn.getresponse()
+        raw = resp.read()
+        self.retry_after = _seconds(resp.getheader("Retry-After"))
+        return resp, raw
+
     def call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict, float]:
         """(status, parsed JSON or {}, latency ms). Raises OSError on connection failure."""
         payload = json.dumps(body).encode() if body is not None else None
         headers = {**self._headers, **({"Content-Type": "application/json"} if payload else {})}
-        t0 = time.perf_counter()
-        try:
-            if self._conn is None:
-                self._conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=self.timeout)
-            self._conn.request(method, path, payload, headers)
-            resp = self._conn.getresponse()
-            raw = resp.read()
-            self.retry_after = _seconds(resp.getheader("Retry-After"))
-        except (OSError, http.client.HTTPException):
-            self._conn = None
-            raise
+        for attempt in (1, 2):
+            t0 = time.perf_counter()
+            try:
+                resp, raw = self._send(method, path, payload, headers)
+                break
+            except (OSError, http.client.HTTPException):
+                self._conn = None
+                if attempt == 2:  # a kept-alive connection the server closed: retry once, fresh
+                    raise
         ms = (time.perf_counter() - t0) * 1000
         try:
             data = json.loads(raw) if raw else {}
