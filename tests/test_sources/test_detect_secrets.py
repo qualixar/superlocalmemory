@@ -55,3 +55,38 @@ def test_vendor_token_shapes():
         text = f"token here {token} end"
         hits = detect_secrets(text)
         assert [(h.kind, text[h.start:h.end]) for h in hits] == [(kind, token)]
+
+
+def test_kebab_case_slugs_are_not_keys():
+    text = ("see [[risk-assessment-for-quarterly-review]] and task-management-system-overview, "
+            "also disk-usage-report-for-the-whole-cluster")
+    assert detect_secrets(text) == []
+
+
+def test_a_real_sk_key_is_still_found_after_the_anchor():
+    for text in ("key sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2", "(sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2)",
+                 "OPENAI_API_KEY=sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2"):
+        assert detect_secrets(text), text
+
+
+def test_other_aws_key_id_prefixes_are_found():
+    for prefix in ("AKIA", "ASIA", "AGPA", "AIDA", "AROA", "ANPA", "ANVA", "AIPA"):
+        key = prefix + "IOSFODNN7EXAMPLE"
+        assert [h.kind for h in detect_secrets(f"id {key} end")] == ["AWS"], prefix
+
+
+def test_an_aws_secret_access_key_label_is_found():
+    secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    for text in (f"aws_secret_access_key = {secret}", f"AWS_SECRET_ACCESS_KEY={secret}",
+                 f"aws_secret_access_key: {secret}"):
+        assert [h.kind for h in detect_secrets(text)] == ["AWS_SECRET"], text
+
+
+def test_a_url_with_a_password_is_found():
+    for url in ("postgres://admin:Sup3rS3cret!@db.internal:5432/app", "https://user:hunter2@example.com/x",
+                "redis://:p4ss@cache:6379/0"):
+        assert [h.kind for h in detect_secrets(f"DATABASE_URL={url}")] == ["URL_PASSWORD"], url
+
+
+def test_urls_without_a_password_are_not_credentials():
+    assert detect_secrets("see https://example.com:8080/path and ssh://git@github.com/org/repo") == []

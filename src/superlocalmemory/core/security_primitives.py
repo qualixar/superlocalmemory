@@ -231,14 +231,21 @@ def verify_sha256(data: bytes, expected_hex: str) -> None:
 
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
-    (re.compile(r"sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
+    (re.compile(r"(?<![A-Za-z0-9-])sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
+    (re.compile(r"(?<![A-Za-z0-9-])sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
     (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "GITHUB"),
     (re.compile(r"AKIA[A-Z0-9]{16}"), "AWS"),
     (re.compile(r"xoxb-[A-Za-z0-9\-]{10,}"), "SLACK"),
     (re.compile(r"ey[A-Za-z0-9_\-]{10,}\.ey[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}"),
      "JWT"),
     (re.compile(r"-----BEGIN [A-Z ]+-----"), "PRIVATE_KEY"),
+)
+
+#: Shapes ``detect_secrets`` adds to the replaced ones above; ``redact_secrets`` does not use them.
+_DETECT_ONLY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"), "AWS"),
+    (re.compile(r"(?i)\baws_secret_access_key\s*[=:]\s*\S{40}"), "AWS_SECRET"),
+    (credential_shapes._URL_PASSWORD, "URL_PASSWORD"),
 )
 
 # LLD-00 §5 high-aggression patterns (P0.3). Stricter than the defaults:
@@ -298,7 +305,7 @@ def detect_secrets(text: str) -> list[SecretHit]:
     if not isinstance(text, str) or not text:
         return []
     found: list[SecretHit] = []
-    for pattern, kind in (*_SECRET_PATTERNS, *credential_shapes.TOKEN_SHAPES):
+    for pattern, kind in (*_SECRET_PATTERNS, *credential_shapes.TOKEN_SHAPES, *_DETECT_ONLY_PATTERNS):
         found.extend(SecretHit(kind, m.start(), m.end()) for m in pattern.finditer(text))
     found.sort(key=lambda h: (h.start, -(h.end - h.start)))
     hits: list[SecretHit] = []
