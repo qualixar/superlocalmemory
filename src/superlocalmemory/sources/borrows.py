@@ -6,32 +6,9 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from superlocalmemory.sources.store import SourceStore, entries_of
-
-logger = logging.getLogger(__name__)
-
-_BATCH = 400
-
-
-def _living_memories(runtime: Any, ids: list[str]) -> set[str] | None:
-    """Memories with at least one fact that is not archived; None when the writer cannot be asked."""
-    db = getattr(runtime, "_db", None)
-    if db is None:
-        return None
-    alive: set[str] = set()
-    try:
-        for i in range(0, len(ids), _BATCH):
-            part = ids[i:i + _BATCH]
-            rows = db.execute("SELECT DISTINCT memory_id FROM atomic_facts WHERE lifecycle != 'archived'"
-                              " AND memory_id IN (" + ",".join("?" * len(part)) + ")", tuple(part))
-            alive.update(r[0] for r in rows)
-    except Exception as exc:  # noqa: BLE001 - not knowing leaves the row as it is
-        logger.warning("could not check borrowed folder memories (%s)", type(exc).__name__)
-        return None
-    return alive
 
 
 def _dead_documents(store: SourceStore, ids: list[str]) -> set[str]:
@@ -50,10 +27,9 @@ def reset_dead_borrows(store: SourceStore, runtime: Any, source_id: str) -> int:
         return 0
     memories = sorted({e["shared_m"] for r in shared for e in entries_of(r) if e.get("shared_m")})
     docs = sorted({e["shared_doc"] for r in shared for e in entries_of(r) if e.get("shared_doc")})
-    alive = _living_memories(runtime, memories) if memories else set()
     dead = _dead_documents(store, docs)
-    if alive is not None:
-        dead |= set(memories) - alive
+    if memories:  # a picture borrow is dead only when its media item is no longer active
+        dead |= set(memories) - store._m.active_anchor_ids(memories)
     count = 0
     for row in shared:
         borrowed = {e.get("shared_m") or e.get("shared_doc") for e in entries_of(row)}
