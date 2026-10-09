@@ -88,7 +88,10 @@ async def remember(req: MediaRememberRequest, request: Request):
     receipt = await asyncio.to_thread(
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
-    return JSONResponse(dataclasses.asdict(receipt), status_code=_CODES.get(receipt.status, 200))
+    body = dataclasses.asdict(receipt)
+    if receipt.status == "refused":
+        body["detail"] = receipt.reason  # the 422 reader (daemon_request) shows this, not a generic line
+    return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
 
 
 class MediaGcRequest(BaseModel):

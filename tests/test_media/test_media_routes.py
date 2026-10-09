@@ -245,3 +245,14 @@ def test_an_unknown_thumbnail_format_is_422(monkeypatch, tmp_path):
     mine, _ = _one_thumb(tmp_path, monkeypatch)
     c, _ = make(monkeypatch)
     assert c.get(f"/api/v3/media/{mine}/thumb?format=xml").status_code == 422
+
+
+def test_a_refused_receipt_carries_its_reason_as_detail(monkeypatch):
+    reason = "That file is not a picture this build can read."
+    c, _ = make(monkeypatch)
+    monkeypatch.setattr(routes, "remember_media", lambda inp, **kw: MediaReceipt("refused", reason=reason))
+    r = c.post("/api/v3/media/remember", json=BODY)
+    assert r.status_code == 422
+    assert r.json()["detail"] == reason and r.json()["reason"] == reason and r.json()["status"] == "refused"
+    monkeypatch.setattr(routes, "remember_media", lambda inp, **kw: MediaReceipt("stored", media_id="a" * 32))
+    assert "detail" not in c.post("/api/v3/media/remember", json=BODY).json()

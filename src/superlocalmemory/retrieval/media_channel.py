@@ -163,6 +163,40 @@ def for_engine(db: Any) -> MediaChannel:
     return MediaChannel(store, embedder, db if root is not None else None)
 
 
+_PAGE_STORES: dict[Path, Any] = {}
+_PAGE_STORES_LOCK = threading.Lock()
+
+
+def _page_store(root: Path) -> Any:
+    with _PAGE_STORES_LOCK:
+        if _PAGE_STORES.get(root) is None:
+            from superlocalmemory.media import open_media_store
+
+            _PAGE_STORES[root] = open_media_store(data_root=root)
+        return _PAGE_STORES[root]
+
+
+def _with_page_media_ids(root: Path, found: dict[str, dict]) -> dict[str, dict]:
+    """Give each page source that names a document and a page (no media id yet) its page's
+    media id, from one query on media.db. A page with no row keeps no media id."""
+    todo = {mid: s for mid, s in found.items()
+            if s.get("type") == "document" and not s.get("media_id")
+            and s.get("document_id") and isinstance(s.get("page"), int)}
+    if not todo:
+        return found
+    try:
+        store = _page_store(root)
+        ids = store.page_media_ids([(s["document_id"], s["page"]) for s in todo.values()]) if store else {}
+    except Exception as exc:  # noqa: BLE001 - presentation only
+        logger.debug("page thumbnails unavailable (%s)", type(exc).__name__)
+        return found
+    for mid, s in todo.items():
+        media_id = ids.get((s["document_id"], s["page"]))
+        if media_id:
+            found[mid] = {**s, "media_id": media_id}
+    return found
+
+
 def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
     """``{memory_id: _slm_source}`` for the images and pages among these memories.
 
@@ -187,7 +221,7 @@ def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
             source = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
             if isinstance(source, dict) and source.get("type") in MEDIA_SOURCE_TYPES:
                 out[row["memory_id"]] = source
-        return out
+        return _with_page_media_ids(root, out)
     except Exception as exc:  # noqa: BLE001 - presentation only
         logger.debug("media sources unavailable (%s)", type(exc).__name__)
         return {}

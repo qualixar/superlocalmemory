@@ -158,3 +158,15 @@ def test_the_media_resources_serve_the_thumbnail_and_refuse_remote(srv, monkeypa
     assert len(spy.calls) == n
     with pytest.raises(Exception):
         run(srv.read_resource("slm://media/not-an-id/thumb"))
+
+
+def test_remember_media_shows_the_specific_reason_the_route_gave(srv, monkeypatch):
+    import io
+    import urllib.error
+
+    reason = "That file is not a picture this build can read."
+    body = json.dumps({"status": "refused", "reason": reason, "detail": reason}).encode()
+    http_err = urllib.error.HTTPError("http://x", 422, "Unprocessable", {}, io.BytesIO(body))
+    monkeypatch.setattr(daemon, "daemon_request", Spy(exc=daemon._unprocessable(http_err)))
+    res = call(srv, "remember_media", {"base64": "QUJD"})
+    assert res["status"] == "refused" and res["error"] == reason

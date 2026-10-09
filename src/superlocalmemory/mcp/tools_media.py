@@ -97,6 +97,61 @@ def thumb_via_daemon(media_id: str, profile_id: str = "") -> tuple[bytes | None,
     return raw, ""
 
 
+MAX_RECALL_IMAGES = 3
+
+
+def _recall_media_ids(payload: dict[str, Any]) -> list[str]:
+    """The first few distinct picture ids among a recall's results, in result order."""
+    found: list[str] = []
+    for row in payload.get("results") or []:
+        block = row.get("media") if isinstance(row, dict) else None
+        media_id = block.get("media_id") if isinstance(block, dict) else None
+        if isinstance(media_id, str) and _ID.fullmatch(media_id) and media_id not in found:
+            found.append(media_id)
+    return found[:MAX_RECALL_IMAGES]
+
+
+def _recall_thumbs(ids: list[str], profile_id: str) -> list[bytes]:
+    thumbs: list[bytes] = []
+    for media_id in ids:
+        try:
+            raw, _ = thumb_via_daemon(media_id, profile_id)
+        except Exception as exc:  # noqa: BLE001 - a missing picture never fails a recall
+            logger.debug("recall thumbnail skipped (%s)", type(exc).__name__)
+            continue
+        if raw:
+            thumbs.append(raw)
+    return thumbs
+
+
+async def with_recall_images(payload: dict[str, Any], profile_id: str = "") -> Any:
+    """What the recall tool returns: ``payload`` itself, untouched, unless a local caller's
+    results include pictures and at least one thumbnail could be read. Then the same text the
+    framework would have made from ``payload``, followed by up to three image blocks. The
+    payload (and so ``structuredContent``) never carries a thumbnail."""
+    try:
+        if current_remote_key_id() is not None:
+            return payload
+        ids = _recall_media_ids(payload)
+        if not ids:
+            return payload
+        thumbs = await asyncio.to_thread(_recall_thumbs, ids, (profile_id or "").strip())
+        if not thumbs:
+            return payload
+        # The framework's own conversion (compact JSON included), so the first block is
+        # exactly what a plain dict return would have produced.
+        from mcp.server.mcpserver.utilities import func_metadata
+
+        return CallToolResult(content=[
+            *func_metadata._convert_to_content(payload),
+            *[ImageContent(type="image", data=base64.b64encode(raw).decode("ascii"),
+                           mime_type="image/webp") for raw in thumbs],
+        ])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("recall images skipped (%s)", type(exc).__name__)
+        return payload
+
+
 async def _remember(args: dict[str, Any]) -> dict[str, Any]:
     if current_remote_key_id() is not None:
         return _fail("not_for_remote", NOT_FOR_REMOTE)

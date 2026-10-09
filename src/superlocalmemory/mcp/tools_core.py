@@ -725,7 +725,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 _recall_via_daemon_pool,
             )
             if result.get("ok"):
-                return {
+                from superlocalmemory.mcp.tools_media import with_recall_images
+                return await with_recall_images({
                     "success": True,
                     "results": result.get("results", []),
                     "count": result.get("result_count", 0),
@@ -745,7 +746,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     # report_outcome), who chose the order, abandoned channels,
                     # temporal frame — and any field added there later.
                     **forward_recall_metadata(result),
-                }
+                }, profile_id)
             # 4.1.14 audit: structured daemon answers (unknown_profile)
             # pass through with code and retryability intact — collapsing
             # them to a bare error string repeats the DAEMON_UNAVAILABLE
