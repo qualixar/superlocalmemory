@@ -230,13 +230,19 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
 def submit_document(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "", store: Any = None,
+    folder: dict[str, Any] | None = None,
 ) -> DocumentReceipt:
-    """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes."""
+    """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes.
+
+    ``folder`` (set only by folder sources) is added to every memory's provenance.
+    """
     opened, store_ref = False, store
     try:
         store_ref, opened = _resolve(store)
         words = prepare_user_text(config, content).text if content.strip() else ""
         payload = {"user_words": words, "tags": tags, "session_date": session_date, "actor_id": actor_id}
+        if folder:
+            payload["folder"] = dict(folder)
         receipt = _submit(store_ref, inp, Path(store_ref.path).parent, profile_id, payload, idempotency_key)
     except _Stop as stop:
         return stop.receipt

@@ -309,7 +309,8 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     request = SaveRequest(
         segments=_segments(args["content"], ocr.text), profile_id=profile_id, source_type="media",
         trusted_actor_id=args["actor_id"], tags=args["tags"], session_date=args["session_date"],
-        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool"}},
+        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool",
+                                          **(args.get("folder") or {})}},
         idempotency_key=args["idempotency_key"])
     try:
         saved = submit_memory(args["runtime"], request, config=job.config)
@@ -322,7 +323,8 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         stored_sha256=info["stored_sha"], phash=info.get("phash"), mime=info["mime"],
         bytes=info["stored_size"], width=info.get("width"), height=info.get("height"),
         original_relpath=relpath, exif_json=info.get("exif") or {}, captured_at=_captured_at(info.get("exif") or {}),
-        anchor_memory_id=saved.memory_id, origin="tool", thumb_webp=info["thumb"],
+        anchor_memory_id=saved.memory_id,
+        origin="folder" if args.get("folder") else "tool", thumb_webp=info["thumb"],
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
@@ -338,7 +340,7 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
 def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
-    client: Any = None, store: Any = None, cache: Any = None,
+    client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
 ) -> MediaReceipt:
     """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
     opened = False
@@ -357,7 +359,7 @@ def remember_media(
             raise _refuse("The image library is full (2 GB limit). Remove some images first.")
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
-            session_date=session_date, idempotency_key=idempotency_key))
+            session_date=session_date, idempotency_key=idempotency_key, folder=folder))
     except _Stop as stop:
         return stop.receipt
     finally:

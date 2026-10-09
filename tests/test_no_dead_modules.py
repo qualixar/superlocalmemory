@@ -79,8 +79,6 @@ _TESTS = _REPO / "tests"
 #: TODO(4.0.7): triage the seeded entries — teach the scan about dynamic
 #: invocation (subprocess "-m", route registries), then wire or delete the rest.
 _KNOWN_DEAD: dict[str, str] = {
-    "sources/ignore.py": "folder sources, first commit: the scanner that uses it follows",
-    "sources/roots.py": "folder sources, first commit: the scanner that uses it follows",
     "code_graph/git_hooks.py": "seeded 4.0.6 — triage: wire or delete",
     "code_graph/incremental.py": "seeded 4.0.6 — triage",
     "code_graph/watcher.py": "seeded 4.0.6 — triage",
@@ -115,7 +113,6 @@ _KNOWN_DEAD: dict[str, str] = {
 #: its real job is blocking the NEXT one. Every entry states why it is here.
 #: TODO(4.0.7): wire or delete all four.
 _KNOWN_DEAD_PACKAGES: dict[str, str] = {
-    "sources": "folder sources, first commit: the scanner and routes follow",
     "attribution": "seeded 4.0.6 — triage: provenance signer/watermark, no caller",
     # code_graph/bridge: REMOVED in 4.0.7 — wired into core/maintenance.py as a
     # background pass. This guard is what forced the entry out: the ratchet test

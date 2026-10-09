@@ -1,0 +1,295 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+# Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
+
+"""One scan pass over one source: the folder is the truth, memory follows it.
+
+Order: refuse while remote access is set up, find what is in the folder, look again at changed
+files once (a single wait for the whole pass), then save new and changed files, re-point moved
+ones, hide deleted ones and erase what is past its grace period. Nothing in the folder is
+ever written, moved or deleted. An unreachable folder tombstones nothing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
+from superlocalmemory.media.store_jobs import utc_stamp
+from superlocalmemory.sources import ingest, retire
+from superlocalmemory.sources.host import SourceHost
+from superlocalmemory.sources.ignore import IgnoreRules, kind_of
+from superlocalmemory.sources.store import SourceStore, entries_of
+from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
+
+logger = logging.getLogger(__name__)
+
+_QUIET_STATES = ("indexed", "quarantined", "skipped")
+_REMOTE_CHECK_EVERY = 25
+_PAUSE_REASON = "remote_access_on"
+
+
+@dataclass
+class ScanStats:
+    new: int = 0
+    changed: int = 0
+    moved: int = 0
+    unchanged: int = 0
+    tombstoned: int = 0
+    purged: int = 0
+    quarantined: int = 0
+    placeholders: int = 0
+    deferred: int = 0
+    errors: int = 0
+    skipped: dict[str, int] = field(default_factory=dict)
+    capped: bool = False
+    offline: bool = False
+    paused: bool = False
+    waiting: bool = False
+
+    def summary(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["paused_reason"] = _PAUSE_REASON if self.paused else None
+        return out
+
+
+@dataclass
+class _Pass:
+    host: SourceHost
+    store: SourceStore
+    source: dict[str, Any]
+    runtime: Any
+    root: Path
+    stats: ScanStats
+    rows: dict[str, dict[str, Any]]
+    vanished: dict[str, list[str]] = field(default_factory=dict)
+
+    @property
+    def sid(self) -> str:
+        return self.source["source_id"]
+
+
+def _digest(path: Path, limit: int | None = None) -> tuple[str, bytes | None]:
+    """sha256 of a file, read in chunks; the bytes too when ``limit`` allows keeping them."""
+    h, kept = hashlib.sha256(), bytearray()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+            if limit is not None and len(kept) <= limit:
+                kept += chunk
+    return h.hexdigest(), (bytes(kept) if limit is not None and len(kept) <= limit else None)
+
+
+def _unchanged(row: dict[str, Any] | None, e: Entry) -> bool:
+    return bool(row and row["state"] in _QUIET_STATES
+                and (row["size"], row["mtime_ns"], row["file_id"]) == e.signature())
+
+
+def _stat_fields(e: Entry) -> dict[str, Any]:
+    return {"size": e.size, "mtime_ns": e.mtime_ns, "file_id": e.file_id}
+
+
+def _stable(p: _Pass, candidates: list[Entry]) -> list[Entry]:
+    """The candidates whose size and mtime did not move during one shared wait."""
+    if not candidates:
+        return []
+    p.host.sleep(p.host.stability_s)
+    steady = []
+    for e in candidates:
+        again = stat_entry(p.root, e.relpath)
+        if again is not None and again.signature() == e.signature() and not again.placeholder:
+            steady.append(e)
+        else:
+            p.stats.deferred += 1
+    return steady
+
+
+def _placeholder(p: _Pass, e: Entry, row: dict[str, Any] | None) -> None:
+    """A cloud-only file is never read and never tombstones what it already gave."""
+    p.stats.placeholders += 1
+    if row and row["state"] == "cloud_placeholder":
+        return
+    fields = {} if row else _stat_fields(e)
+    p.store.put_file(p.sid, e.relpath, state="cloud_placeholder", reason="cloud_only", **fields)
+
+
+def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Hide the old version of a file; returns its entries (marked replaced) to keep for the purge."""
+    if row is None:
+        return []
+    entries = entries_of(row)
+    p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
+    retire.hide_document(p.store, p.runtime, p.source, row)
+    return entries
+
+
+def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: list) -> None:
+    kinds = ",".join(sorted({h.kind for h in hits}))
+    entries = _supersede(p, row)
+    p.store.put_file(p.sid, e.relpath, sha256=sha, state="quarantined", reason=f"credential:{kinds}",
+                     entries=entries, document_id=None, media_id=None, **_stat_fields(e))
+    p.stats.quarantined += 1
+
+
+def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
+    version, kind, path = sha[:12], kind_of(e.relpath), p.root / e.relpath
+    if kind == "text":
+        out = ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version)
+    elif kind == "pdf":
+        out = ingest.ingest_pdf(p.host, p.source, e.relpath, path, version)
+    else:
+        out = ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version)
+    if out.retry:
+        p.stats.deferred += 1
+        return
+    if out.skip_reason:
+        p.store.put_file(p.sid, e.relpath, sha256=sha, state="skipped", reason=out.skip_reason,
+                         entries=_supersede(p, row), **_stat_fields(e))
+        return
+    old = _supersede(p, row)
+    p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
+                     entries=old + out.entries, document_id=out.document_id, media_id=out.media_id,
+                     **_stat_fields(e))
+    p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
+    p.stats.new += 0 if row and row["state"] != "tombstoned" else 1
+
+
+def _move(p: _Pass, e: Entry, sha: str) -> bool:
+    """Re-point a vanished file's row to this path when the bytes are the same."""
+    olds = p.vanished.get(sha)
+    if not olds:
+        return False
+    old = olds.pop(0)
+    p.store.repoint(p.sid, old, e.relpath, state="indexed", **_stat_fields(e))
+    p.rows.pop(old, None)
+    p.stats.moved += 1
+    return True
+
+
+def _process(p: _Pass, e: Entry, sha: str) -> None:
+    row = p.rows.get(e.relpath)
+    if row and row["sha256"] == sha and row["state"] in ("indexed", "cloud_placeholder", "quarantined"):
+        keep = "quarantined" if row["state"] == "quarantined" else "indexed"
+        p.store.put_file(p.sid, e.relpath, state=keep, **_stat_fields(e))
+        p.stats.unchanged += 1
+        return
+    if row is None and _move(p, e, sha):
+        return
+    if e.relpath.lower().endswith(".canvas"):
+        p.store.put_file(p.sid, e.relpath, sha256=sha, state="skipped", reason="canvas_not_supported",
+                         **_stat_fields(e))
+        return
+    data = None
+    if kind_of(e.relpath) == "text":
+        again, data = _digest(p.root / e.relpath, ingest.SCREEN_BYTES * 20)
+        if again != sha or data is None:
+            p.stats.deferred += 1
+            return
+        hits = [] if (row and row.get("reason") == "released") else ingest.screen(data)
+        if hits:
+            _quarantine(p, e, row, sha, hits)
+            return
+    _save(p, e, row, sha, data)
+
+
+def _hash_all(p: _Pass, entries: list[Entry]) -> list[tuple[Entry, str]]:
+    out = []
+    for e in entries:
+        try:
+            out.append((e, _digest(p.root / e.relpath)[0]))
+        except OSError:
+            p.stats.errors += 1
+    return out
+
+
+def _index_vanished(p: _Pass, seen: set[str], walked: WalkResult) -> None:
+    for rel, row in p.rows.items():
+        if rel in seen or row["state"] != "indexed" or not row["sha256"] or walked.under_unreadable(rel):
+            continue
+        p.vanished.setdefault(row["sha256"], []).append(rel)
+
+
+def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
+    for rel, row in list(p.rows.items()):
+        if rel in seen or row["state"] == "tombstoned" or walked.under_unreadable(rel):
+            continue
+        if entries_of(row) or row.get("document_id"):
+            p.stats.errors += retire.hide_file(p.host, p.store, p.runtime, p.source, row, tombstone=True)
+            p.stats.tombstoned += 1
+        else:
+            p.store.delete_file(p.sid, rel)
+
+
+def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
+    stats.paused = True
+    store.set_state(source["source_id"], "paused", stats=stats.summary())
+    return stats
+
+
+def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | None) -> None:
+    p.rows = {r["relpath"]: r for r in p.store.files(p.sid)}
+    candidates: list[Entry] = []
+    for e in walked.entries:
+        row = p.rows.get(e.relpath)
+        if e.placeholder:
+            _placeholder(p, e, row)
+        elif _unchanged(row, e):
+            p.stats.unchanged += 1
+        else:
+            candidates.append(e)
+    seen = {e.relpath for e in walked.entries}
+    _index_vanished(p, seen, walked)
+    hashed = _hash_all(p, _stable(p, candidates))
+    for i, (e, sha) in enumerate(hashed):
+        if i % _REMOTE_CHECK_EVERY == _REMOTE_CHECK_EVERY - 1 and p.host.remote_on():
+            p.stats.paused = True
+            return
+        yield_to_recalls()
+        try:
+            _process(p, e, sha)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the pass
+            logger.warning("a folder file could not be saved (%s)", type(exc).__name__)
+            p.stats.errors += 1
+            p.store.put_file(p.sid, e.relpath, state="error", reason=type(exc).__name__[:60],
+                             sha256=sha, **_stat_fields(e))
+        if progress:
+            progress(i + 1, len(hashed))
+    if not walked.capped:
+        _tombstone_missing(p, seen, walked)
+    p.stats.purged = retire.purge_due(p.host, p.store, p.runtime, p.source)
+
+
+def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
+                progress: Callable[[int, int], None] | None = None) -> ScanStats:
+    """Reconcile one source with its folder; returns what happened."""
+    stats = ScanStats()
+    if host.remote_on():
+        return _pause(store, source, stats)
+    runtime = host.runtime()
+    if runtime is None:
+        stats.waiting = True
+        return stats
+    root = Path(source["root_path"])
+    rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
+    try:
+        walked = walk_tree(root, rules)
+    except OSError:
+        stats.offline = True
+        store.set_state(source["source_id"], "offline", stats=stats.summary(), scanned=True)
+        return stats
+    stats.skipped, stats.capped = walked.skipped, walked.capped
+    p = _Pass(host, store, source, runtime, root, stats, {})
+    with background_work():
+        _work(p, walked, progress)
+    if stats.paused:
+        return _pause(store, source, stats)
+    store.set_state(source["source_id"], "active", stats=stats.summary(), scanned=True)
+    return stats
+
+
+__all__ = ["ScanStats", "scan_source"]

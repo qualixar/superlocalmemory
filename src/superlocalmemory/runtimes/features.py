@@ -52,7 +52,8 @@ def features_path(data_root: str | Path | None = None) -> Path:
 
 
 def _defaults() -> dict[str, Any]:
-    return {"schema": 1, "media": {"enabled": False, "enabled_at": None, "choice_source": None}}
+    off = {"enabled": False, "enabled_at": None, "choice_source": None}
+    return {"schema": 1, "media": dict(off), "sources": dict(off)}
 
 
 def read_features(data_root: str | Path | None = None) -> dict[str, Any]:
@@ -61,8 +62,10 @@ def read_features(data_root: str | Path | None = None) -> dict[str, Any]:
     data = _defaults()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict) and isinstance(raw.get("media"), dict):
-            data["media"].update(raw["media"])
+        if isinstance(raw, dict):
+            for key in ("media", "sources"):
+                if isinstance(raw.get(key), dict):
+                    data[key].update(raw[key])
     except FileNotFoundError:
         pass
     except (OSError, ValueError):
@@ -72,6 +75,11 @@ def read_features(data_root: str | Path | None = None) -> dict[str, Any]:
 
 def media_enabled(data_root: str | Path | None = None) -> bool:
     return bool(read_features(data_root)["media"].get("enabled"))
+
+
+def sources_enabled(data_root: str | Path | None = None) -> bool:
+    """Folder sources have their own switch, off until a folder is confirmed."""
+    return bool(read_features(data_root)["sources"].get("enabled"))
 
 
 def _write_features(data_root: str | Path | None, data: dict[str, Any]) -> None:
@@ -192,3 +200,38 @@ def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
     if remove_files:
         managed.remove(keep_weights=False)
     return media_feature_status(data_root, env=managed)
+
+
+def enable_sources(*, source: str, data_root: str | Path | None = None) -> bool:
+    """Turn folder sources on and create media.db (where the folder tables live).
+
+    Called only when a person confirms a folder; returns False when it could not be saved.
+    """
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {SOURCES}")
+    from superlocalmemory.media import open_media_store
+
+    try:
+        data = read_features(data_root)
+        data["sources"] = {"enabled": True, "enabled_at": datetime.now(timezone.utc).isoformat(),
+                           "choice_source": source}
+        _write_features(data_root, data)
+        store = open_media_store(create=True, data_root=_root(data_root))
+        if store is not None:
+            store.close()
+    except (OSError, sqlite3.Error, ImportError) as exc:
+        logger.warning("could not turn on folder sources: %s", exc)
+        return False
+    return True
+
+
+def disable_sources(*, data_root: str | Path | None = None) -> None:
+    """Turn folder sources off. Nothing already saved is removed."""
+    if not features_path(data_root).exists():
+        return
+    data = read_features(data_root)
+    data["sources"]["enabled"] = False
+    try:
+        _write_features(data_root, data)
+    except OSError as exc:
+        logger.warning("could not save the switch: %s", exc)

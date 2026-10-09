@@ -46,3 +46,12 @@ def test_hits_are_ordered_and_do_not_overlap():
     hits = detect_secrets(text)
     assert [h.start for h in hits] == sorted(h.start for h in hits)
     assert all(a.end <= b.start for a, b in zip(hits, hits[1:]))
+
+
+def test_vendor_token_shapes():
+    stripe = "sk_" + "live_" + "a1b2c3d4e5f6" * 2
+    npm = "npm_" + "Ab1Cd2Ef3G" * 4
+    for kind, token in (("STRIPE", stripe), ("NPM", npm)):
+        text = f"token here {token} end"
+        hits = detect_secrets(text)
+        assert [(h.kind, text[h.start:h.end]) for h in hits] == [(kind, token)]
