@@ -40,7 +40,7 @@ def test_pdf_edited_back_to_earlier_content_is_saved_again(env, monkeypatch):
     keys = []
 
     def submit(inp, **kw):
-        data = inp.path.read_bytes()
+        data = inp.data
         keys.append(kw["idempotency_key"])
         if data in docs:
             return SimpleNamespace(status="duplicate", document_id=docs[data], job_id=None, reason="")
@@ -72,7 +72,7 @@ def test_picture_edited_back_to_earlier_content_is_saved_again(env, monkeypatch)
     made = []
 
     def remember(inp, **kw):
-        data = inp.path.read_bytes()
+        data = inp.data
         made.append(kw["idempotency_key"])
         if data in known and not known[data].startswith("again:"):
             old = known[data]  # the library still knows these bytes and hands back the old, archived save

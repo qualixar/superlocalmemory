@@ -54,6 +54,8 @@ class MediaInput:
     path: Path | None = None
     base64: str | None = None
     file_name: str = ""
+    #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
+    data: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,10 @@ def _cold_wait_s() -> float:
 # -- reading the input ---------------------------------------------------------
 
 def _read_input(inp: MediaInput) -> bytes:
+    if inp.data is not None:
+        if len(inp.data) > MAX_FILE_BYTES:
+            raise _refuse("That image is too large (25 MB limit).")
+        return inp.data
     if inp.base64 is not None:
         if len(inp.base64) * 3 // 4 > MAX_BASE64_BYTES + 3:
             raise _refuse("That image is too large (8 MB limit for pasted images).")

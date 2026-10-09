@@ -15,7 +15,7 @@ def bump(path, s=1):
 def test_copy_touched_in_same_pass_as_owner_change_takes_over(env, monkeypatch):
     docs, made = {}, []
     def submit(inp, **kw):
-        data = inp.path.read_bytes()
+        data = inp.data
         if data in docs:
             return SimpleNamespace(status="duplicate", document_id=docs[data], job_id=None, reason="")
         made.append(1); docs[data] = f"d{len(made)}"

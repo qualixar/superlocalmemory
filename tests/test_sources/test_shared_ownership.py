@@ -85,7 +85,7 @@ def test_identical_pdf_copies_the_second_becomes_the_owner_when_the_first_goes(e
     saved = []
 
     def submit(inp, **kw):
-        sha = inp.path.read_bytes()
+        sha = inp.data
         if sha in docs:
             return SimpleNamespace(status="duplicate", document_id=docs[sha], job_id=None, reason="")
         docs[sha] = f"d{len(saved) + 1}"
@@ -128,7 +128,7 @@ def test_a_changed_owner_hands_ownership_to_its_identical_copy(env, monkeypatch)
     made = []
 
     def submit(inp, **kw):
-        data = inp.path.read_bytes()
+        data = inp.data
         if data in docs:
             return SimpleNamespace(status="duplicate", document_id=docs[data], job_id=None, reason="")
         made.append(1)

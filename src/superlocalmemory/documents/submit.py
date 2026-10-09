@@ -133,13 +133,25 @@ def _stage_path(inp: MediaInput, out: Any) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+def _stage_data(inp: MediaInput, out: Any) -> tuple[str, int]:
+    data = inp.data or b""
+    if len(data) > _max_bytes():
+        raise _refuse("That document is too large.")
+    _check_head(data[:8])
+    out.write(data)
+    return hashlib.sha256(data).hexdigest(), len(data)
+
+
 def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
-    if (inp.base64 is None) == (inp.path is None):
+    if inp.data is None and (inp.base64 is None) == (inp.path is None):
         raise _refuse("Give a document file or document data.")
     tmp, out = _new_tmp(files.tmp_dir(root))
     try:
         with out:
-            sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
+            if inp.data is not None:
+                sha, size = _stage_data(inp, out)
+            else:
+                sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
         return tmp, sha, size
     except BaseException:
         tmp.unlink(missing_ok=True)

@@ -18,11 +18,13 @@ from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.memory_core import ContentOrigin
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.sources.host import SourceHost
+from superlocalmemory.sources.safe_read import open_regular
 
 logger = logging.getLogger(__name__)
 
 SCREEN_BYTES = 256 * 1024
 SECTION_LIMIT = 24_000
+MAX_LOAD_BYTES = 128 * 1024 * 1024
 _HEADING = re.compile(r"^#{1,2} \S")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _MARKDOWN = (".md", ".markdown")
@@ -102,12 +104,21 @@ def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
     return {"origin": "folder", "source_id": source_id, "relpath": relpath, "version": version}
 
 
-def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version: str, n: int) -> Ingested:
+def load_verified(path: Path, file_id: str | None, sha: str) -> bytes:
+    """The file's bytes, read without following a link; OSError when they are not the bytes that were hashed."""
+    with open_regular(path, file_id) as fh:
+        data = fh.read(MAX_LOAD_BYTES + 1)
+    if len(data) > MAX_LOAD_BYTES or hashlib.sha256(data).hexdigest() != sha:
+        raise OSError("the file changed while it was being read")
+    return data
+
+
+def ingest_pdf(host: SourceHost, source: dict, relpath: str, data: bytes, version: str, n: int) -> Ingested:
     from superlocalmemory.documents import submit_document
     from superlocalmemory.media.ingest import MediaInput
 
     receipt = submit_document(
-        MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
+        MediaInput(data=data, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), config=host.config(),
         idempotency_key=_key(source["source_id"], relpath, n, 0),
         folder=folder_tag(source["source_id"], relpath, version))
@@ -119,12 +130,12 @@ def ingest_pdf(host: SourceHost, source: dict, relpath: str, path: Path, version
     return Ingested(document_id=receipt.document_id)
 
 
-def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, path: Path,
+def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, data: bytes,
                  version: str, n: int) -> Ingested:
     from superlocalmemory.media.ingest import MediaInput, remember_media
 
     receipt = remember_media(
-        MediaInput(path=path, file_name=Path(relpath).name), profile_id=source["profile_id"],
+        MediaInput(data=data, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), runtime=runtime, config=host.config(),
         idempotency_key=_key(source["source_id"], relpath, n, 0),
         folder=folder_tag(source["source_id"], relpath, version))
@@ -171,4 +182,4 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
 
 
 __all__ = ["Ingested", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
-           "provenance", "screen", "split_markdown", "split_text"]
+           "load_verified", "provenance", "screen", "split_markdown", "split_text"]

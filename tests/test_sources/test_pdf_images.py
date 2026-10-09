@@ -22,7 +22,7 @@ def test_pdf_is_submitted_as_a_folder_document(env, monkeypatch):
     sid = env.add_and_confirm()
     env.scan(sid)
     [(inp, kw)] = calls
-    assert inp.path == env.root.resolve() / "papers/a.pdf" and kw["actor_id"] == "test-actor"
+    assert inp.path is None and inp.data == PDF and inp.file_name == "a.pdf" and kw["actor_id"] == "test-actor"
     assert kw["folder"] == {"source_id": sid, "relpath": "papers/a.pdf",
                             "version": kw["folder"]["version"], "origin": "folder"}
     row = env.files(sid)["papers/a.pdf"]

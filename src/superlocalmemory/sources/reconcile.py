@@ -149,13 +149,15 @@ def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: 
 
 def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested:
     """One save of the file; each call takes the next save number of its path."""
-    version, kind, path = sha[:12], kind_of(e.relpath), p.root / e.relpath
+    version, kind = sha[:12], kind_of(e.relpath)
+    if kind != "text":  # pictures and PDFs are handed over as bytes, never re-opened by path
+        data = ingest.load_verified(p.root / e.relpath, e.file_id, sha)
     n = p.store.next_save_n(p.sid, e.relpath)
     if kind == "text":
         return ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, n)
     if kind == "pdf":
-        return ingest.ingest_pdf(p.host, p.source, e.relpath, path, version, n)
-    return ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, path, version, n)
+        return ingest.ingest_pdf(p.host, p.source, e.relpath, data, version, n)
+    return ingest.ingest_image(p.host, p.runtime, p.source, e.relpath, data, version, n)
 
 
 def _hidden_copy(p: _Pass, out: ingest.Ingested) -> bool:
