@@ -35,7 +35,7 @@ def store(root):
 
 
 def item(profile="default", sha="a" * 64, **kw):
-    base = dict(profile_id=profile, kind="image", sha256=sha, mime="image/png",
+    base = dict(profile_id=profile, kind="image", source_sha256=sha, mime="image/png",
                 bytes=10, origin="tool")
     base.update(kw)
     return base
@@ -93,7 +93,7 @@ def test_newer_schema_opens_read_only(root, caplog):
 def test_item_crud_and_sha_lookup(store):
     mid = store.insert_item(**item(width=3, height=4))
     got = store.get_item(mid)
-    assert got["sha256"] == "a" * 64 and got["state"] == "active" and got["width"] == 3
+    assert got["source_sha256"] == "a" * 64 and got["state"] == "active" and got["width"] == 3
     assert store.find_by_sha("default", "a" * 64)["media_id"] == mid
     assert store.find_by_sha("other", "a" * 64) is None
     store.insert_item(**item(sha="b" * 64, kind="page"))
@@ -338,3 +338,22 @@ def test_sidecar_preflight_passes_when_absent_or_fine(root):
     sidecars.check_media(root)
     open_media_store(create=True, data_root=root).close()
     sidecars.check_media(root)
+
+
+def test_two_hashes_remote_flag_and_preassigned_id(store):
+    mid = "c" * 32
+    got_id = store.insert_item(**item(media_id=mid, stored_sha256="b" * 64))
+    assert got_id == mid
+    row = store.get_item(mid)
+    assert row["stored_sha256"] == "b" * 64 and row["remote_ok"] == 0
+    store.insert_item(**item(sha="d" * 64, remote_ok=1))
+    assert [r["remote_ok"] for r in store.list_items("default")] == [0, 1]
+
+
+def test_phash_candidates_are_per_profile_and_active_only(store):
+    a = store.insert_item(**item(sha="1" * 64, phash="f" * 16))
+    store.insert_item(**item(sha="2" * 64, phash=None))
+    store.insert_item(**item(profile="other", sha="3" * 64, phash="0" * 16))
+    gone = store.insert_item(**item(sha="4" * 64, phash="e" * 16))
+    store.set_state(gone, "tombstoned")
+    assert store.phash_candidates("default") == [(a, "f" * 16)]
