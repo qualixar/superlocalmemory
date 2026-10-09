@@ -303,6 +303,21 @@ class MediaWorkerClient(MediaEmbedderPort):
             out += self._request("embed_image", paths=[str(p) for p in paths[i:i + MAX_PATHS]])["vectors"]
         return out
 
+    def _image_request(self, cmd: str, wait_cold: bool, **fields: Any) -> dict:
+        if not wait_cold and not self.is_warm():
+            self.warm_up()
+            raise MediaWorkerWarming("The image model is starting. Try again in a moment.")
+        reply = self._request(cmd, **fields)
+        return {k: v for k, v in reply.items() if k not in ("ok", "id")}
+
+    def prepare_image(self, path: Path | str, out_dir: Path | str, *, wait_cold: bool = True) -> dict:
+        """Strip metadata, make a thumbnail and a perceptual hash; results are files in ``out_dir``."""
+        return self._image_request("prepare_image", wait_cold, path=str(path), out_dir=str(out_dir))
+
+    def ocr_image(self, path: Path | str, *, wait_cold: bool = True) -> dict:
+        """The text in an image: ``{"engine": ..., "text": ...}`` (engine ``none`` when none is installed)."""
+        return self._image_request("ocr_image", wait_cold, path=str(path))
+
     def embed_query(self, text: str, *, wait_s: float = 0.3) -> list[float] | None:
         """For recall: a vector only if the worker is already warm and free; otherwise None."""
         if not self.is_warm():

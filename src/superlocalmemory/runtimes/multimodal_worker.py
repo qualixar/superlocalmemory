@@ -18,6 +18,11 @@ Every request may carry an ``"id"``; the reply echoes it.
                     -> {"ok": true, "vectors": [[...], ...]}
   {"cmd": "embed_image", "paths": [str, ...<=16]}
                     -> {"ok": true, "vectors": [[...], ...]}
+  {"cmd": "prepare_image", "path": "...", "out_dir": "..."}
+                    -> {"ok": true, "mime", "width", "height", "exif", "phash",
+                        "stored_path", "stored_ext", "thumb_path"}
+  {"cmd": "ocr_image", "path": "..."}
+                    -> {"ok": true, "engine": "apple_vision|rapidocr|none|fake", "text": "..."}
   {"cmd": "quit"}
 
 Fake mode (``SLM_MEDIA_WORKER_FAKE=1`` or a model id ``fake:<dim>``) answers with
@@ -31,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
 import math
 import os
@@ -193,6 +199,46 @@ def _cmd_embed_image(req: dict) -> dict:
     return {"vectors": _encode_images(paths)}
 
 
+def _image_ops():
+    """``media_image_ops.py`` next to this file, loaded by path (-I leaves our directory off sys.path)."""
+    if "ops" not in _STATE:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media_image_ops.py")
+        spec = importlib.util.spec_from_file_location("media_image_ops", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _STATE["ops"] = module
+    return _STATE["ops"]
+
+
+def _cmd_prepare_image(req: dict) -> dict:
+    path, out_dir = req.get("path"), req.get("out_dir")
+    if not isinstance(path, str) or not isinstance(out_dir, str):
+        raise _Invalid("invalid paths")
+    _check_paths([path])
+    if not os.path.isdir(out_dir):
+        raise _Invalid("out_dir is not a directory")
+    try:
+        return _image_ops().prepare_image(path, out_dir)
+    except ImportError:
+        raise _Invalid("pillow unavailable") from None
+    except ValueError as exc:  # the module's own messages: no paths, no contents
+        raise _Invalid(f"ValueError: {exc}") from None
+
+
+def _cmd_ocr_image(req: dict) -> dict:
+    path = req.get("path")
+    if not isinstance(path, str):
+        raise _Invalid("invalid paths")
+    _check_paths([path])
+    if _STATE["fake"]:
+        try:
+            with open(path + ".ocr.txt", encoding="utf-8") as fh:
+                return {"engine": "fake", "text": fh.read(MAX_TEXT_CHARS * 8)}
+        except OSError:
+            return {"engine": "fake", "text": ""}
+    return _image_ops().ocr_image(path)
+
+
 def _cmd_sleep(req: dict) -> dict:
     if not _STATE["fake"]:
         raise _Invalid("unknown command")
@@ -201,7 +247,8 @@ def _cmd_sleep(req: dict) -> dict:
 
 
 _COMMANDS = {"ping": _cmd_ping, "load": _cmd_load, "embed_text": _cmd_embed_text,
-             "embed_image": _cmd_embed_image, "sleep": _cmd_sleep}
+             "embed_image": _cmd_embed_image, "prepare_image": _cmd_prepare_image,
+             "ocr_image": _cmd_ocr_image, "sleep": _cmd_sleep}
 
 
 def handle(req: dict) -> dict:

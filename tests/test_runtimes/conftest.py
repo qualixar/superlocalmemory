@@ -43,3 +43,25 @@ def client_factory(stub_env):
     yield make
     for c in made:
         c.stop()
+
+
+@pytest.fixture(scope="session")
+def image_python(tmp_path_factory):
+    """An interpreter with Pillow and ImageHash, for the real image tests.
+
+    ``SLM_TEST_IMAGE_PYTHON`` names a ready one; otherwise a throw-away venv is built once.
+    """
+    import subprocess
+
+    ready = os.environ.get("SLM_TEST_IMAGE_PYTHON")
+    if ready:
+        return Path(ready)
+    root = tmp_path_factory.mktemp("imgvenv")
+    try:
+        subprocess.run([sys.executable, "-m", "venv", str(root / "v")], check=True, capture_output=True, timeout=300)
+        py = root / "v" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        subprocess.run([str(py), "-m", "pip", "install", "-q", "pillow==12.3.0", "ImageHash==4.3.2"],
+                       check=True, capture_output=True, timeout=900)
+    except (subprocess.SubprocessError, OSError) as exc:
+        pytest.skip(f"could not build an image test environment (no network?): {type(exc).__name__}")
+    return py
