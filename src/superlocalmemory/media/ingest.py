@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.media import files
+from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
@@ -42,7 +43,7 @@ MAX_OCR_CHARS = 8_000
 PREVIEW_CHARS = 200
 NEAR_DUPLICATE_BITS = 4
 MAX_THUMB_BYTES = 262_144
-MARKER = "[Text in image]\n"
+MARKER = TEXT_MARKER
 _MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 _EXT = re.compile(r"[a-z0-9]{1,8}")
 _EXIF_DATE = re.compile(r"(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})")
@@ -285,7 +286,7 @@ def _segments(content: str, ocr_text: str) -> tuple[tuple[str, ContentOrigin], .
         lead = "\n\n" if parts else ""
         parts.append((f"{lead}{MARKER}{ocr_text}", ContentOrigin.DERIVED_TEXT))
     if not parts:
-        parts.append(("[Image without text]", ContentOrigin.DERIVED_TEXT))
+        parts.append((NO_TEXT, ContentOrigin.DERIVED_TEXT))
     return tuple(parts)
 
 

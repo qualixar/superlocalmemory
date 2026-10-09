@@ -262,6 +262,33 @@ class MediaStore(JobsMixin, EraseMixin):
             conn.execute("INSERT INTO media_vector_rows(space_id, vec_rowid, media_id, profile_id)"
                          " VALUES (?, ?, ?, ?)", (space_id, cur.lastrowid, media_id, profile_id))
 
+    def vector_count(self, profile_id: str) -> int:
+        """How many vectors this profile has (0 means searching by picture has nothing to find)."""
+        row = self._read().execute(
+            "SELECT COUNT(*) FROM media_vector_rows WHERE profile_id = ?", (profile_id,)).fetchone()
+        return int(row[0])
+
+    def memory_ids_of(self, media_ids: Sequence[str]) -> dict[str, list[str]]:
+        """The memories that stand for each active item: its anchor, or a page's own memories."""
+        ids = list(dict.fromkeys(media_ids))
+        if not ids:
+            return {}
+        conn = self._read()
+        rows = conn.execute(
+            "SELECT m.media_id, m.anchor_memory_id, p.memory_ids_json FROM media_items m"
+            " LEFT JOIN doc_pages p ON p.document_id = m.document_id AND p.page_no = m.page_no"
+            f" WHERE m.state = 'active' AND m.media_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        out: dict[str, list[str]] = {}
+        for media_id, anchor, pages in rows:
+            found = [anchor] if anchor else []
+            try:
+                found += [str(x) for x in json.loads(pages or "[]")]
+            except ValueError:
+                pass
+            if found:
+                out[media_id] = found
+        return out
+
     def knn(self, vector: Sequence[float], profile_id: str, k: int,
             space_id: str | None = None) -> list[tuple[str, float]]:
         """Nearest items of one profile, closest first: [(media_id, cosine distance)]."""

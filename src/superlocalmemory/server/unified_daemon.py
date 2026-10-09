@@ -882,6 +882,7 @@ class EngineRecallAdapter:
             if memory_ids else {}
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
         from superlocalmemory.server.recall_serializer import (
             recall_response_metadata,
@@ -892,6 +893,7 @@ class EngineRecallAdapter:
             response,
             limit=limit,
             memory_map={k: _sanitize_json_text(v) for k, v in memory_map.items()},
+            source_map=memory_sources(self._engine._db, memory_ids),
             per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
             total_max=getattr(_rc, "recall_total_max_chars", 12000),
             # Option B: markers only on session-bearing recalls. A marker can
