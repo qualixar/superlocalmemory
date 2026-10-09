@@ -141,3 +141,19 @@ def test_four_threads_can_put_and_get(path):
     [t.join() for t in threads]
     assert not errors, errors
     assert all(cache.get(make_key(t * 1000 + n)) for t in range(4) for n in range(200))
+
+
+def test_invalidate_content_drops_every_entry_of_one_file(tmp_path):
+    from superlocalmemory.cache.keys import CacheKey
+    from superlocalmemory.cache.sqlite_store import SqliteDeriveCache
+
+    cache = SqliteDeriveCache(tmp_path / "c.db")
+    a, b = "a" * 64, "b" * 64
+    cache.put(CacheKey(a, "ocr.auto", "1"), b"x", kind="text")
+    cache.put(CacheKey(a, "pdf.text", "1"), b"y", kind="text")
+    cache.put(CacheKey(b, "ocr.auto", "1"), b"z", kind="text")
+    assert cache.invalidate_content(a) == 2
+    assert cache.get(CacheKey(a, "ocr.auto", "1")) is None
+    assert cache.get(CacheKey(b, "ocr.auto", "1")) == b"z"
+    assert SqliteDeriveCache(tmp_path / "none.db").invalidate_content(a) == 0
+    assert not (tmp_path / "none.db").exists()

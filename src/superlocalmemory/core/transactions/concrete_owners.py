@@ -553,12 +553,20 @@ def build_transaction_service(engine: Any) -> MemoryTransactionService:
     return MemoryTransactionService(_admission_owners(engine))
 
 
+def _media_owner(db: Any, data_root: Any = None) -> Any:
+    # Imported here: the image store is optional and nothing above it is needed to save text.
+    from superlocalmemory.media.erasure import MediaErasureOwner
+
+    return MediaErasureOwner(db, data_root=data_root)
+
+
 def build_erasure_service(engine: Any) -> ErasureService:
     audit_logger = _audit_chain_logger()
-    return ErasureService(_admission_owners(engine), audit_logger=audit_logger)
+    owners = {**_admission_owners(engine), "media": _media_owner(engine._db)}
+    return ErasureService(owners, audit_logger=audit_logger)
 
 
-def build_erasure_service_for_db(db: Any, engine: Any = None) -> ErasureService:
+def build_erasure_service_for_db(db: Any, engine: Any = None, data_root: Any = None) -> ErasureService:
     """Build an ErasureService given a db wrapper and an optional engine.
 
     Used by GDPR erasure paths that have a db handle but may not have an
@@ -575,6 +583,7 @@ def build_erasure_service_for_db(db: Any, engine: Any = None) -> ErasureService:
             vector_store=getattr(engine, "_vector_store", None),
             ann_index=getattr(engine, "_ann_index", None),
         ),
+        "media": _media_owner(db, data_root),
     }
     return ErasureService(owners, audit_logger=audit_logger)
 
