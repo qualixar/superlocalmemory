@@ -3,6 +3,7 @@
 
 """The one place text is prepared before any durable write."""
 
+from superlocalmemory.memory_core.duplicates import find_redacted_duplicate
 from superlocalmemory.memory_core.save_path import (
     ContentOrigin,
     PreparedContent,
@@ -15,6 +16,7 @@ from superlocalmemory.memory_core.save_path import (
 )
 
 __all__ = [
+    "find_redacted_duplicate",
     "ContentOrigin",
     "PreparedContent",
     "pii_redaction_enabled",

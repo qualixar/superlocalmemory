@@ -319,6 +319,7 @@ def canonical_store(
     require_complete: bool = True,
     return_receipt: bool = False,
     profile_id: str | None = None,
+    trusted_metadata: dict | None = None,
 ) -> list[str] | IngestionOperation:
     """Submit canonical evidence, optionally waiting for enrichment completion.
 
@@ -327,6 +328,8 @@ def canonical_store(
     durable receipt without invoking any LLM, embedding, or graph work.  The
     daemon materializer owns that expensive, retryable enrichment.  Explicit
     complete callers retain the historical synchronous contract.
+
+    ``trusted_metadata`` carries server-set reserved keys (never caller input).
 
     ``profile_id`` follows the ``engine.recall`` convention: ``None``/``""``
     targets the engine's active profile; an explicit value routes this one
@@ -370,9 +373,15 @@ def canonical_store(
     )
 
     content = prepare_user_text(engine._config, content).text
+    # A caller's metadata never sets a reserved ``_slm_*`` key; the ones the
+    # server itself sets arrive in ``trusted_metadata``, after redaction.
+    from superlocalmemory.core.metadata_guard import strip_reserved_metadata
+
     metadata, _ = prepare_metadata(
-        dict(metadata or {}), pii_redaction=pii_redaction_enabled(engine._config),
+        strip_reserved_metadata(metadata),
+        pii_redaction=pii_redaction_enabled(engine._config),
     )
+    metadata.update(trusted_metadata or {})
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)

@@ -89,8 +89,11 @@ async def ingest(req: IngestRequest, request: Request):
         from superlocalmemory.server.rbac_enforce import require_permission
 
         require_permission(request, Permission.WRITE, profile=engine._profile_id)
+        from superlocalmemory.core.ingestion_command import IdempotencyConflict
+        from superlocalmemory.core.metadata_guard import strip_reserved_metadata
         from superlocalmemory.memory_core import (
             pii_redaction_enabled,
+            find_redacted_duplicate,
             prepare_key,
             prepare_metadata,
             prepare_user_text,
@@ -98,17 +101,27 @@ async def ingest(req: IngestRequest, request: Request):
 
         prepared = prepare_user_text(engine._config, req.content)
         redact = pii_redaction_enabled(engine._config)
-        metadata, _ = prepare_metadata(dict(req.metadata), pii_redaction=redact)
+        metadata, _ = prepare_metadata(
+            strip_reserved_metadata(req.metadata), pii_redaction=redact,
+        )
         dedup_key = prepare_key(req.dedup_key, pii_redaction=redact)
         command = build_engine_ingestion_command(engine)
-        receipt, created = command.submit_with_status(IngestionRequest(
+        request_obj = IngestionRequest(
             content=prepared.text,
             profile_id=engine._profile_id,
             source_type=req.source_type,
             idempotency_key=dedup_key,
             metadata=metadata,
             trusted_actor_id=actor_id,
-        ))
+        )
+        try:
+            receipt, created = command.submit_with_status(request_obj)
+        except IdempotencyConflict:
+            # Saved before redaction was turned on: same text once prepared.
+            receipt = find_redacted_duplicate(engine._db, request_obj, redact)
+            if receipt is None:
+                raise
+            created = False
         completed = command.materialize(receipt.operation_id)
         if completed.state is not IngestionState.COMPLETE:
             raise RuntimeError(

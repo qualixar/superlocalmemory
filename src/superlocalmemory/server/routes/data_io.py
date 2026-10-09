@@ -240,15 +240,13 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
             IngestionState,
         )
 
-        from superlocalmemory.core.ingestion_command import (
-            IdempotencyConflict,
-            IngestionOperationRepository,
-        )
+        from superlocalmemory.core.ingestion_command import IdempotencyConflict
+        from superlocalmemory.core.metadata_guard import strip_reserved_metadata
         from superlocalmemory.memory_core import (
+            find_redacted_duplicate,
             pii_redaction_enabled,
             prepare_metadata,
             prepare_user_text,
-            same_after_redaction,
         )
 
         redact = pii_redaction_enabled(engine._config)
@@ -288,7 +286,9 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                     if _field in memory:
                         metadata[_field] = memory[_field]
                 prepared = prepare_user_text(engine._config, memory_content)
-                metadata, _ = prepare_metadata(metadata, pii_redaction=redact)
+                metadata, _ = prepare_metadata(
+                    strip_reserved_metadata(metadata), pii_redaction=redact,
+                )
                 request_obj = IngestionRequest(
                     content=prepared.text,
                     profile_id=engine._profile_id,
@@ -308,12 +308,9 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 except IdempotencyConflict:
                     # Saved raw before redaction was on: the same text once
                     # prepared is already present, not a failure.
-                    existing = IngestionOperationRepository(
-                        engine._db,
-                    ).find_for_request(request_obj)
-                    if existing is None or not same_after_redaction(
-                        existing.raw_content, prepared.text, redact,
-                    ):
+                    if find_redacted_duplicate(
+                        engine._db, request_obj, redact,
+                    ) is None:
                         raise
                     skipped += 1
                     continue

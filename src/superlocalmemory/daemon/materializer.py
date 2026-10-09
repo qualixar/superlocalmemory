@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from superlocalmemory.memory_core import prepare_user_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -179,7 +181,9 @@ def ingestion_pass(
                     "operation_id": result.operation_id,
                     "fact_ids": list(result.fact_ids),
                     "path": "canonical_materializer",
-                    "content_preview": result.raw_content[:120],
+                    "content_preview": prepare_user_text(
+                        getattr(engine, "_config", None), result.raw_content,
+                    ).text[:120],
                 },
                 source_agent="materializer",
             )
@@ -197,23 +201,20 @@ def ingestion_pass(
 def _submit_tolerating_raw_duplicate(command, engine, request):
     """Submit; an operation saved raw before redaction was on, whose text is the
     same once prepared, is already present: return its id instead of failing."""
-    from superlocalmemory.core.ingestion_command import (
-        IdempotencyConflict,
-        IngestionOperationRepository,
-    )
+    from superlocalmemory.core.ingestion_command import IdempotencyConflict
     from superlocalmemory.memory_core import (
+        find_redacted_duplicate,
         pii_redaction_enabled,
-        same_after_redaction,
     )
 
     try:
         return command.submit(request)
     except IdempotencyConflict:
-        existing = IngestionOperationRepository(engine._db).find_for_request(request)
-        if existing is not None and same_after_redaction(
-            existing.raw_content, request.content,
+        existing = find_redacted_duplicate(
+            engine._db, request,
             pii_redaction_enabled(getattr(engine, "_config", None)),
-        ):
+        )
+        if existing is not None:
             return existing.operation_id
         raise
 
@@ -249,17 +250,17 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     idempotency_key = str(
         metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
     )
+    from superlocalmemory.core.metadata_guard import strip_reserved_metadata
     from superlocalmemory.memory_core import (
         pii_redaction_enabled,
         prepare_metadata,
-        prepare_user_text,
     )
 
     # pending.db rows were written raw by the old fallback path.
     config = getattr(engine, "_config", None)
     prepared = prepare_user_text(config, item["content"])
     metadata, _ = prepare_metadata(
-        metadata, pii_redaction=pii_redaction_enabled(config),
+        strip_reserved_metadata(metadata), pii_redaction=pii_redaction_enabled(config),
     )
     command = build_engine_ingestion_command(engine)
     request = IngestionRequest(
@@ -420,7 +421,10 @@ class PendingMaterializer:
                     "pending_id": item["id"],
                     "operation_id": operation_id,
                     "path": "legacy_pending_backfill",
-                    "content_preview": item["content"][:120],
+                    "content_preview": prepare_user_text(
+                        getattr(self.engine_supplier(), "_config", None),
+                        item["content"],
+                    ).text[:120],
                 },
                 source_agent="materializer",
             )
