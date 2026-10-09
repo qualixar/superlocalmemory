@@ -15,6 +15,7 @@ source_modules =
     superlocalmemory.daemon
     superlocalmemory.cache
     superlocalmemory.media
+    superlocalmemory.documents
     superlocalmemory.runtimes
     superlocalmemory.memory_core
 forbidden_modules =
@@ -59,10 +60,11 @@ forbidden_modules =
 allow_indirect_imports = True
 
 [importlinter:contract:media-runtimes-no-upward]
-name = The media and runtimes packages never import the server, CLI or MCP layers
+name = The media, documents and runtimes packages never import the server, CLI or MCP layers
 type = forbidden
 source_modules =
     superlocalmemory.media
+    superlocalmemory.documents
     superlocalmemory.runtimes
 forbidden_modules =
     superlocalmemory.server

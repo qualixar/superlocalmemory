@@ -3356,6 +3356,13 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("memory kind runner not started: %s", type(exc).__name__)
 
+        # Saved PDFs are read page by page in the background; idle while images and documents are off.
+        try:
+            from superlocalmemory.documents import start_document_jobs
+            start_document_jobs(application, _SERVICES)
+        except Exception as exc:  # pragma: no cover — optional feature
+            logger.warning("document job service not started: %s", type(exc).__name__)
+
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
         # them only once it cycles, and its reap used to sit behind the
@@ -3648,6 +3655,11 @@ async def lifespan(application: FastAPI):
         kind_runner_stopped = stop_backfill(application)
     except Exception:  # pragma: no cover — defensive
         kind_runner_stopped = True
+    try:
+        from superlocalmemory.documents import stop_document_jobs
+        kind_runner_stopped = stop_document_jobs(_SERVICES) and kind_runner_stopped
+    except Exception:  # pragma: no cover — defensive
+        pass
     materializer_stopped = _stop_pending_materializer() and kind_runner_stopped
     canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None

@@ -37,15 +37,27 @@ def _actor_context(request: Request, engine, actor_id: str, profile: str) -> Act
         session_token_hash=hashlib.sha256(token.encode()).hexdigest()[:16] if token else "")
 
 
+def _enforce(request: Request, engine, kind: OperationKind, hook_payload: dict, *, actor_id: str,
+             profile: str, what: str) -> None:
+    try:
+        engine._hooks.run_pre("store" if kind is OperationKind.REMEMBER else "delete", hook_payload)
+    except Exception as exc:  # noqa: BLE001 - any refusal from the hook stops the action
+        logger.info("%s refused by the trust hook (%s)", what, type(exc).__name__)
+        raise HTTPException(403, detail=f"This {what} was refused by the workspace trust policy.") from None
+    decision = _registry.evaluate(kind, _actor_context(request, engine, actor_id, profile), _policy_mode(request))
+    if not decision.allowed:
+        raise HTTPException(403, detail=f"This {what} is not allowed by the workspace policy.")
+
+
 def enforce_remember_governance(request: Request, engine, *, actor_id: str, profile: str, preview: str) -> None:
     """Run the trust pre-hook and the REMEMBER policy; 403 when either refuses. Stores nothing."""
-    try:
-        engine._hooks.run_pre("store", {"operation": "store", "agent_id": actor_id,
-                                        "profile_id": profile, "content_preview": preview[:100]})
-    except Exception as exc:  # noqa: BLE001 - any refusal from the hook stops the save
-        logger.info("save refused by the trust hook (%s)", type(exc).__name__)
-        raise HTTPException(403, detail="This save was refused by the workspace trust policy.") from None
-    decision = _registry.evaluate(OperationKind.REMEMBER, _actor_context(request, engine, actor_id, profile),
-                                  _policy_mode(request))
-    if not decision.allowed:
-        raise HTTPException(403, detail="This save is not allowed by the workspace policy.")
+    _enforce(request, engine, OperationKind.REMEMBER,
+             {"operation": "store", "agent_id": actor_id, "profile_id": profile, "content_preview": preview[:100]},
+             actor_id=actor_id, profile=profile, what="save")
+
+
+def enforce_forget_governance(request: Request, engine, *, actor_id: str, profile: str, target: str) -> None:
+    """Run the trust pre-hook and the FORGET policy for taking ``target`` out of view; 403 when refused."""
+    _enforce(request, engine, OperationKind.FORGET,
+             {"operation": "delete", "agent_id": actor_id, "profile_id": profile, "fact_id": target},
+             actor_id=actor_id, profile=profile, what="removal")
