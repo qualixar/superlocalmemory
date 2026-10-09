@@ -14,6 +14,7 @@ source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
     superlocalmemory.memory_core
+    superlocalmemory.cache
 forbidden_modules =
     torch
     transformers
@@ -38,6 +39,17 @@ name = The daemon services package never imports the server, CLI or MCP layers
 type = forbidden
 source_modules =
     superlocalmemory.daemon
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
+allow_indirect_imports = True
+
+[importlinter:contract:cache-no-upward]
+name = The cache package never imports the server, CLI or MCP layers
+type = forbidden
+source_modules =
+    superlocalmemory.cache
 forbidden_modules =
     superlocalmemory.server
     superlocalmemory.cli
