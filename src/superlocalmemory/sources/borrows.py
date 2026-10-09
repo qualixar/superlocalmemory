@@ -11,15 +11,6 @@ from typing import Any
 from superlocalmemory.sources.store import SourceStore, entries_of
 
 
-def _dead_documents(store: SourceStore, ids: list[str]) -> set[str]:
-    dead = set()
-    for doc_id in ids:
-        doc = store._m.get_document(doc_id)
-        if doc is None or doc["state"] == "tombstoned":
-            dead.add(doc_id)
-    return dead
-
-
 def reset_dead_borrows(store: SourceStore, runtime: Any, source_id: str) -> int:
     """Put back to ``pending`` every shared row whose borrowed item was hidden or erased since."""
     shared = [r for r in store.files(source_id, ("indexed",)) if r.get("reason") == "shared"]
@@ -27,7 +18,7 @@ def reset_dead_borrows(store: SourceStore, runtime: Any, source_id: str) -> int:
         return 0
     memories = sorted({e["shared_m"] for r in shared for e in entries_of(r) if e.get("shared_m")})
     docs = sorted({e["shared_doc"] for r in shared for e in entries_of(r) if e.get("shared_doc")})
-    dead = _dead_documents(store, docs)
+    dead = set(docs) - store._m.live_document_ids(docs)  # one batched query per chunk
     if memories:  # a picture borrow is dead only when its media item is no longer active
         dead |= set(memories) - store._m.active_anchor_ids(memories)
     count = 0
