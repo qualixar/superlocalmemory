@@ -124,14 +124,24 @@ def _recall_thumbs(ids: list[str], profile_id: str) -> list[bytes]:
     return thumbs
 
 
+def _without_media(payload: dict[str, Any]) -> dict[str, Any]:
+    """``payload`` with each result's ``media`` key removed. Nothing to remove: the same object."""
+    rows = payload.get("results")
+    if not isinstance(rows, list) or not any(isinstance(r, dict) and "media" in r for r in rows):
+        return payload
+    kept = [{k: v for k, v in r.items() if k != "media"} if isinstance(r, dict) else r for r in rows]
+    return {**payload, "results": kept}
+
+
 async def with_recall_images(payload: dict[str, Any], profile_id: str = "") -> Any:
     """What the recall tool returns: ``payload`` itself, untouched, unless a local caller's
     results include pictures and at least one thumbnail could be read. Then the same text the
     framework would have made from ``payload``, followed by up to three image blocks. The
-    payload (and so ``structuredContent``) never carries a thumbnail."""
+    payload (and so ``structuredContent``) never carries a thumbnail. A remote caller gets
+    the payload without any ``media`` block: picture ids and links are not for remote apps."""
+    if current_remote_key_id() is not None:
+        return _without_media(payload)
     try:
-        if current_remote_key_id() is not None:
-            return payload
         ids = _recall_media_ids(payload)
         if not ids:
             return payload
