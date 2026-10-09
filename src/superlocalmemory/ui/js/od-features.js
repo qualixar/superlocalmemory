@@ -210,8 +210,46 @@
     });
   }
 
+  // ------------------------------------------------------------- what's new
+  var WHATSNEW_KEY = 'slm.whatsnew.4.1.25';
+  var WHATSNEW_LINES = [
+    'Images & documents: off until you turn them on (about 1.5 GB of models). Run: slm media enable',
+    'Bots on the web can message each other through the mesh (remote access is still off).',
+    'See what is on and what you can turn on: slm features',
+  ];
+
+  // Storage can be missing or throw (private windows, blocked site data).
+  function seenWhatsNew() {
+    try { return window.localStorage.getItem(WHATSNEW_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function rememberWhatsNew() {
+    try { window.localStorage.setItem(WHATSNEW_KEY, '1'); } catch (e) { /* the card is still hidden this visit */ }
+  }
+
+  function mountWhatsNew(host) {
+    host.textContent = '';
+    if (seenWhatsNew()) return;
+    var card = cardShell("What's new in 4.1.25");
+    var ul = el('ul', 'od-media-list');
+    WHATSNEW_LINES.forEach(function (line) { ul.appendChild(el('li', null, line)); });
+    card.appendChild(ul);
+    card.appendChild(button('Dismiss', 'btn sm', function () {
+      rememberWhatsNew();
+      host.textContent = '';
+    }));
+    host.appendChild(card);
+  }
+
+  function autoMountWhatsNew() {
+    var host = document.getElementById('od-whatsnew');
+    if (host) mountWhatsNew(host);
+  }
+
   window.odFeatures = {
     el: el, button: button, api: api, failText: failText, notAvailable: notAvailable,
     confirmThen: confirmThen, mountMediaCard: mountMediaCard, isOn: isOn,
+    mountWhatsNew: mountWhatsNew,
   };
+  autoMountWhatsNew();
 })();
