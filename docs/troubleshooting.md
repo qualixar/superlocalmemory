@@ -37,6 +37,10 @@ source ~/.zshrc   # or source ~/.bashrc
 npx superlocalmemory status
 ```
 
+**Installed with `uv tool install`?** The command lives in uv's tool bin
+directory (`uv tool dir --bin`, usually `~/.local/bin`). Run
+`uv tool update-shell` and open a new shell.
+
 ### "Python not found" during setup
 
 SLM requires Python 3.12 or later, up to 3.14.

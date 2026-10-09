@@ -31,12 +31,12 @@ In Mode A, core remember and recall make no model-provider call unless you turn 
 
 
 ```bash
-npm install -g superlocalmemory   # primary route (Node 18+, Python 3.12+); or: pipx install superlocalmemory
+npm install -g superlocalmemory   # primary route (Node 18+, Python 3.12+); or: pipx install superlocalmemory, uv tool install superlocalmemory
 slm setup                         # pick Mode A to keep everything on this machine
 slm connect cursor                # or claude-code, codex, windsurf, zed ... 12 IDEs
 ```
 
-npm installs SLM into a package-owned virtual environment. The other primary route is pip in a Python virtual environment you activate: `python3 -m venv .venv`, activate it, then `python -m pip install superlocalmemory`. Repository clone: `./scripts/install.sh install` (macOS, Linux) or `.\scripts\install.ps1 -Action Install` (Windows); see [CONTRIBUTING.md](CONTRIBUTING.md).
+npm installs SLM into a package-owned virtual environment. The other primary route is pip in a Python virtual environment you activate: `python3 -m venv .venv`, activate it, then `python -m pip install superlocalmemory`. For an isolated `slm` command that needs no activation, install it as a tool with `uv tool install --python 3.12 superlocalmemory` (or `pipx install superlocalmemory`); see [Linux install](docs/install-linux.md#isolated-slm-command-with-uv). Repository clone: `./scripts/install.sh install` (macOS, Linux) or `.\scripts\install.ps1 -Action Install` (Windows); see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Runs on Windows, Linux and macOS ([platforms](#platform-support)). No Docker, no required graph database, no API key.
 
@@ -372,6 +372,7 @@ Cite the governed-memory paper with [CITATION.cff](CITATION.cff) or GitHub's "Ci
 
 ```bash
 npm update -g superlocalmemory    # or, in your activated venv: python -m pip install --upgrade superlocalmemory
+                                  # or, for a uv tool install: uv tool upgrade superlocalmemory
 slm restart && slm doctor
 slm upgrade-hosts                 # preview IDE and plugin updates; nothing changes until you --apply
 ```

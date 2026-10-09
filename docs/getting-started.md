@@ -46,6 +46,11 @@ cross-client behavior for every product that implements MCP.
 > python -m pip install superlocalmemory
 > ```
 > Then set `SLM_PYTHON=~/.slm-venv/bin/python` so `slm` uses that interpreter.
+>
+> If you use [uv](https://docs.astral.sh/uv/), you can instead install `slm` as
+> an isolated tool that needs no activation and no `SLM_PYTHON`:
+> `uv tool install --python 3.12 superlocalmemory`. See
+> [Isolated `slm` command with uv](install-linux.md#isolated-slm-command-with-uv).
 
 ## Install
 

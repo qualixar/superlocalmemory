@@ -86,6 +86,22 @@ slm doctor
 Keep the environment active whenever you run `slm` or import the SDK. Do not
 use global pip, `sudo pip`, or externally-managed-system-Python overrides.
 
+## Isolated `slm` command with uv
+
+If you use [uv](https://docs.astral.sh/uv/), install SLM as a uv tool. uv gives
+the package its own environment and puts only `slm` on your PATH; nothing needs
+activating and your system Python is left untouched.
+
+```bash
+uv tool install --python 3.12 superlocalmemory
+slm setup
+slm doctor
+```
+
+Upgrade with `slm serve stop`, then `uv tool upgrade superlocalmemory`, then
+`slm restart`. The Python SDK is not importable from a uv tool environment; use
+the activated virtual environment above for that.
+
 ## Repository clone (research and development)
 
 ```bash
@@ -232,6 +248,7 @@ See [Migration from V2](Migration-from-V2) for the full V2→V3 guide.
 ### `slm: command not found`
 - **npm install:** Make sure npm global bin is in your PATH. Run `npm bin -g` to find the location.
 - **pip install:** Make sure Python scripts directory is in your PATH.
+- **uv tool install:** Run `uv tool update-shell` and open a new shell; `uv tool dir --bin` shows where `slm` is installed.
 
 ### `ModuleNotFoundError: No module named 'superlocalmemory'`
 - Ensure Python 3.12+ is the default: `python3 --version`

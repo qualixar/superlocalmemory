@@ -35,6 +35,39 @@ python -m pip install superlocalmemory
 Do not use `sudo pip`, do not override an externally managed Python, and do not
 install the same `slm` command through multiple tool managers.
 
+## Isolated `slm` command with uv
+
+If you use [uv](https://docs.astral.sh/uv/), install SLM as a uv tool. uv gives
+the package its own environment and puts only the `slm` command on your PATH
+(in `~/.local/bin`). Your system Python is left untouched and there is nothing
+to activate before running `slm`.
+
+```bash
+uv tool install --python 3.12 superlocalmemory
+slm setup
+slm doctor
+```
+
+`--python 3.12` pins the tool environment to a supported interpreter; uv
+downloads a Python build when no matching one is installed. `slm doctor` checks
+that this interpreter can load the SQLite vector extension. If `slm` is not
+found afterwards, run `uv tool update-shell` and open a new shell.
+
+Upgrade and uninstall through uv as well. Stop the daemon before upgrading so
+it does not keep running on a mix of old and new package files:
+
+```bash
+slm serve stop
+uv tool upgrade superlocalmemory
+slm restart && slm doctor
+
+uv tool uninstall superlocalmemory   # removes code only; memory data is preserved
+```
+
+The uv tool environment is not an activated virtual environment, so the Python
+SDK (`import superlocalmemory`) is not available from your own scripts. Use the
+activated virtual environment above when you need the SDK.
+
 ## Repository clone
 
 Researchers and contributors can install the checked-out source through the
