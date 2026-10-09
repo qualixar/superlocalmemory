@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -52,6 +53,8 @@ class ScanStats:
     paused: bool = False
     waiting: bool = False
     removed: bool = False
+    offline_reason: str = ""
+    root_dev: int | None = None
 
     def summary(self) -> dict[str, Any]:
         out = asdict(self)
@@ -298,10 +301,33 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
     p.stats.purged = retire.purge_due(p.host, p.store, p.runtime, p.source)
 
 
+def _known_device(source: dict) -> int | None:
+    try:
+        found = json.loads(source.get("last_scan_stats_json") or "{}").get("root_dev")
+    except ValueError:
+        return None
+    return found if isinstance(found, int) else None
+
+
+def _device_problem(root: Path, stats: ScanStats) -> str:
+    """"disk_changed" when another disk is now at the folder's path (the disk is noted on the first scan)."""
+    current = os.stat(root).st_dev
+    if stats.root_dev is None:
+        stats.root_dev = current
+    return "disk_changed" if stats.root_dev != current else ""
+
+
+def _offline(store: SourceStore, source: dict, stats: ScanStats, reason: str) -> ScanStats:
+    """An unreachable, emptied or swapped folder: tombstone nothing, try again next pass."""
+    stats.offline, stats.offline_reason = True, reason
+    store.set_state(source["source_id"], "offline", stats=stats.summary(), scanned=True)
+    return stats
+
+
 def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
                 progress: Callable[[int, int], None] | None = None) -> ScanStats:
     """Reconcile one source with its folder; returns what happened."""
-    stats = ScanStats()
+    stats = ScanStats(root_dev=_known_device(source))
     if host.remote_on():
         return _pause(store, source, stats)
     runtime = host.runtime()
@@ -312,10 +338,11 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:
         walked = walk_tree(root, rules)
+        device = _device_problem(root, stats)
     except OSError:
-        stats.offline = True
-        store.set_state(source["source_id"], "offline", stats=stats.summary(), scanned=True)
-        return stats
+        return _offline(store, source, stats, "unreachable")
+    if device or (not walked.entries and not walked.capped and store.files(source["source_id"], ("indexed",))):
+        return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
     p = _Pass(host, store, source, runtime, root, stats, {})
     with background_work():

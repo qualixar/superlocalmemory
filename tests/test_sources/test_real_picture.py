@@ -94,6 +94,7 @@ def test_purging_a_deleted_picture_erases_its_row_and_file(pics):
 
     env.host.eraser = eraser
     path = env.write("p.png", png("a"))
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     stored = [p for p in (env.data / "media").rglob("*.png")]

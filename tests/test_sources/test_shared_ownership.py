@@ -41,6 +41,7 @@ def test_the_users_picture_memory_survives_delete_edit_and_purge(env, monkeypatc
         "superlocalmemory.media.ingest.remember_media",
         lambda inp, **kw: SimpleNamespace(status="duplicate", media_id="md1", memory_id="user-mem", reason=""))
     path = env.write("pic.png", PNG)
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     row = env.files(sid)["pic.png"]
@@ -66,6 +67,7 @@ def test_a_shared_document_is_never_removed_by_the_folder_copy(env, monkeypatch)
     monkeypatch.setattr("superlocalmemory.documents.remove_document",
                         lambda *a, **k: removed.append((a, k)) or True)
     path = env.write("a.pdf", PDF)
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     row = env.files(sid)["a.pdf"]
@@ -99,6 +101,7 @@ def test_identical_pdf_copies_the_second_becomes_the_owner_when_the_first_goes(e
     monkeypatch.setattr("superlocalmemory.documents.remove_document", remove)
     first = env.write("a.pdf", PDF)
     env.write("b.pdf", PDF)
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     files = env.files(sid)

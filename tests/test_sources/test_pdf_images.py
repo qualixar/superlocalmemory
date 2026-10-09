@@ -53,6 +53,7 @@ def test_deleted_pdf_is_soft_removed(env, monkeypatch):
     monkeypatch.setattr("superlocalmemory.documents.remove_document",
                         lambda *a, **k: removed.append((a, k.get("hard", False))))
     path = env.write("a.pdf", PDF)
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     path.unlink()

@@ -99,6 +99,7 @@ def test_picture_edited_back_to_earlier_content_is_saved_again(env, monkeypatch)
 
 def test_file_restored_after_a_purge_is_saved_fresh(env):
     path = env.write("a.md", "same words")
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     path.unlink()
@@ -117,6 +118,7 @@ def test_file_restored_after_a_purge_is_saved_fresh(env):
 def test_a_file_that_comes_back_after_delete_counts_on(env):
     for n in range(3):
         path = env.write("a.md", "same words")
+        env.write("keep.canvas", "{}")  # the folder is never empty
         sid = env.add_and_confirm() if n == 0 else sid
         env.scan(sid)
         path.unlink()

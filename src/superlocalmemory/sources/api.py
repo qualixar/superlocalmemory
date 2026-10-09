@@ -108,10 +108,26 @@ def confirm_source(source_id: str, *, via: str = "api") -> None:
     try:
         sid = store.create_source(pending.profile_id, pending.kind, str(real), real.name or str(real),
                                   pending.include_types, source_id=source_id)
+        _remember_device(store, sid, real)
         store.queue_scan(pending.profile_id, sid)
     finally:
         media.close()
     host.wake()
+
+
+def _remember_device(store: SourceStore, source_id: str, root: Path) -> None:
+    """Note which disk the folder is on, so a different disk mounted there later is noticed."""
+    import json
+    import os
+
+    source = store.get_source(source_id) or {}
+    try:
+        known = json.loads(source.get("last_scan_stats_json") or "{}")
+    except ValueError:
+        known = {}
+    if "root_dev" not in known:
+        store.set_state(source_id, source.get("state") or "active",
+                        stats={**known, "root_dev": os.stat(root).st_dev})
 
 
 def list_sources(profile_id: str) -> list[SourceInfo]:

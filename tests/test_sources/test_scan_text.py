@@ -75,6 +75,7 @@ def test_move_repoints_without_reingest(env):
 
 def test_delete_hides_now_and_purges_after_grace(env):
     path = env.write("a.md", "gone soon")
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     path.unlink()
@@ -277,6 +278,7 @@ def test_scan_yields_to_recalls(env, monkeypatch):
 
 def test_file_that_comes_back_after_delete_is_saved_again_as_visible_memories(env):
     path = env.write("a.md", "same words")
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     path.unlink()
@@ -321,6 +323,7 @@ def test_a_failed_archive_is_retried_on_the_next_pass(env):
 
 def test_a_failed_archive_of_a_deleted_file_is_retried(env):
     path = env.write("a.md", "bye")
+    env.write("keep.canvas", "{}")  # the folder is never empty
     sid = env.add_and_confirm()
     env.scan(sid)
     working = env.runtime.archive_fact
