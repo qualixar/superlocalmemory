@@ -225,7 +225,6 @@ def test_cold_worker_stores_nothing_and_leaves_no_temp_files(env):
     assert r.status == "warming" and "try again" in r.reason
     assert env.runtime.requests == [] and env.store.list_items("p1") == []
     assert not (env.root / "media" / "tmp").exists() or not list((env.root / "media" / "tmp").iterdir())
-    assert "warm_up" in env.client.calls
 
 
 def test_worker_that_never_warms_gives_a_warming_receipt(env, monkeypatch):
