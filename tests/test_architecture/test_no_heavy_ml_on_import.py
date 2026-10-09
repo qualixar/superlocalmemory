@@ -16,7 +16,7 @@ import pytest
 
 _SRC = Path(__file__).resolve().parents[2] / "src"
 
-PACKAGES = ["superlocalmemory.daemon", "superlocalmemory.mesh"]
+PACKAGES = ["superlocalmemory.daemon", "superlocalmemory.mesh", "superlocalmemory.cache"]
 
 _PROBE = (
     "import sys, importlib; importlib.import_module({module!r}); "
