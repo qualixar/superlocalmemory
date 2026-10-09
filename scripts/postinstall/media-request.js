@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const readline = require('readline');
 
 const FEATURES_FILE = 'features.json';
@@ -26,8 +27,17 @@ function printWhatsNew(log = console.log) {
   log('  + See what is on and what you can turn on: slm features');
 }
 
+// Same alias order as every other entry point.
+function resolveDataRoot(env = process.env) {
+  return env.SLM_DATA_DIR
+    || env.SL_MEMORY_PATH
+    || env.SLM_HOME
+    || path.join(env.HOME || os.homedir(), '.superlocalmemory');
+}
+
 function mediaRequested(args, env) {
-  return Boolean((args && args.media) || (env && env.SLM_ENABLE_MEDIA === '1'));
+  const viaNpm = env && ['true', '1'].includes(String(env.npm_config_media || '').toLowerCase());
+  return Boolean((args && args.media) || (env && env.SLM_ENABLE_MEDIA === '1') || viaNpm);
 }
 
 /**
@@ -107,4 +117,28 @@ async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesN
   return result.ok;
 }
 
-module.exports = { printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };
+/**
+ * The step npm's own postinstall runs: --media / npm_config_media /
+ * SLM_ENABLE_MEDIA=1 record a request; on a real terminal (never in CI) a
+ * default-No question is asked. Never downloads, never throws.
+ */
+async function runMediaStep({ argv = [], env = process.env, tty, ask, log = console.log } = {}) {
+  try {
+    const isTty = tty !== undefined ? tty
+      : Boolean(process.stdout.isTTY && process.stdin.isTTY);
+    const ci = env.CI === 'true' || env.CI === '1';
+    return await handleMediaChoice({
+      args: { media: argv.includes('--media'), dryRun: argv.includes('--dry-run') },
+      env,
+      slmDir: resolveDataRoot(env),
+      interactive: isTty && !ci,
+      ask: ask || askYesNo,
+      log,
+    });
+  } catch (e) {
+    log('SLM: could not record the images and documents choice (' + e.message + '). Run: slm media enable');
+    return false;
+  }
+}
+
+module.exports = { runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };

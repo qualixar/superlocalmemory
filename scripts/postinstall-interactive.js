@@ -796,7 +796,7 @@ module.exports = {
   LLM_MODEL_CHOICES,
   PROFILES,
   CUSTOM_KNOB_ENUMS, // UX-M3
-  printWhatsNew, // exposed for the test harness
+  printWhatsNew, // shared with scripts/postinstall.js (exposed for the test harness)
   // v3.8.0 — deployment
   DEPLOYMENT_PRESETS,
   DEFAULT_DEPLOYMENT_MODE,

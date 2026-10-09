@@ -230,6 +230,16 @@ def _reset_media_loaded() -> None:
     _media_loaded.clear()
 
 
+def note_started(*, env: ManagedEnv | None = None, data_root: str | Path | None = None) -> None:
+    """At daemon start: media on and its environment already ready means the media
+    components load from it in this process, so no restart is needed. Never raises."""
+    try:
+        if media_enabled(data_root) and _env(env, data_root).status().state == "ready":
+            mark_media_loaded()
+    except Exception:  # noqa: BLE001 - start-up must never fail on an optional feature
+        logger.warning("could not check the images and documents environment", exc_info=True)
+
+
 def restart_required(status: dict[str, Any]) -> bool:
     """On and ready, but this running process has not loaded the media components."""
     return bool(status.get("enabled")) and (status.get("env") or {}).get("state") == "ready" \

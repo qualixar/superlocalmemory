@@ -3350,8 +3350,9 @@ async def lifespan(application: FastAPI):
 
         # A request the installer recorded for images and documents is acted on
         # here, so the install runs in the daemon (never in npm). Never raises.
-        from superlocalmemory.runtimes import apply_requested
-        apply_requested(source="npm")
+        from superlocalmemory.runtimes import features as _features
+        _features.apply_requested(source="npm")
+        _features.note_started()
 
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims

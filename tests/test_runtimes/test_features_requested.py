@@ -83,3 +83,21 @@ def test_restart_is_required_only_for_a_ready_env_the_daemon_has_not_loaded(tmp_
 def test_restart_is_not_required_when_off_or_not_ready(fresh_flag):
     assert features.restart_required({"enabled": False, "env": {"state": "ready"}}) is False
     assert features.restart_required({"enabled": True, "env": {"state": "installing"}}) is False
+
+
+def test_a_daemon_that_starts_with_a_ready_env_needs_no_restart(tmp_path, fresh_flag):
+    (tmp_path / "features.json").write_text(json.dumps({"media": {"enabled": True}}))
+    env = FakeEnv("ready")
+    features.note_started(env=env, data_root=tmp_path)
+    assert features.restart_required({"enabled": True, "env": {"state": "ready"}}) is False
+
+
+def test_an_install_finishing_after_start_needs_a_restart(tmp_path, fresh_flag):
+    (tmp_path / "features.json").write_text(json.dumps({"media": {"enabled": True}}))
+    features.note_started(env=FakeEnv("installing"), data_root=tmp_path)
+    assert features.restart_required({"enabled": True, "env": {"state": "ready"}}) is True
+
+
+def test_a_ready_env_with_the_feature_off_marks_nothing(tmp_path, fresh_flag):
+    features.note_started(env=FakeEnv("ready"), data_root=tmp_path)
+    assert features.restart_required({"enabled": True, "env": {"state": "ready"}}) is True

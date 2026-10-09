@@ -155,3 +155,50 @@ test('preuninstall says nothing about media when there is none', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /remove-files/);
 });
+
+// ---- npm's real hook: scripts/postinstall.js ----
+const NPM_HOOK = path.join(REPO_ROOT, 'scripts', 'postinstall.js');
+
+test('the npm hook records a request for SLM_ENABLE_MEDIA=1, and for npm_config_media', async () => {
+  const hook = require(NPM_HOOK);
+  for (const env of [{ SLM_ENABLE_MEDIA: '1' }, { npm_config_media: 'true' }]) {
+    const dir = tmp();
+    const out = [];
+    const ok = await hook.runMediaStep({ argv: [], env: Object.assign({ SLM_DATA_DIR: dir }, env), tty: false, log: (l) => out.push(l) });
+    assert.equal(ok, true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
+  }
+});
+
+test('the npm hook honours --media in argv', async () => {
+  const dir = tmp();
+  const ok = await require(NPM_HOOK).runMediaStep({ argv: ['--media'], env: { SLM_DATA_DIR: dir }, tty: false, log: () => {} });
+  assert.equal(ok, true);
+});
+
+test('the npm hook writes nothing and never asks off a terminal or in CI', async () => {
+  const hook = require(NPM_HOOK);
+  for (const [tty, env] of [[false, {}], [true, { CI: 'true' }]]) {
+    const dir = tmp();
+    let asked = 0;
+    const ok = await hook.runMediaStep({ argv: [], env: Object.assign({ SLM_DATA_DIR: dir }, env), tty, ask: async () => { asked += 1; return true; }, log: () => {} });
+    assert.equal(ok, false);
+    assert.equal(asked, 0);
+    assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+  }
+});
+
+test('the npm hook asks on a terminal, default No', async () => {
+  const dir = tmp();
+  const hook = require(NPM_HOOK);
+  assert.equal(await hook.runMediaStep({ argv: [], env: { SLM_DATA_DIR: dir }, tty: true, ask: async () => false, log: () => {} }), false);
+  assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+  assert.equal(await hook.runMediaStep({ argv: [], env: { SLM_DATA_DIR: dir }, tty: true, ask: async () => true, log: () => {} }), true);
+});
+
+test('the npm hook prints the what is new banner, from the shared module', () => {
+  const source = fs.readFileSync(NPM_HOOK, 'utf8');
+  assert.match(source, /printWhatsNew\(\)/);
+  assert.match(source, /require\('\.\/postinstall\/media-request\.js'\)/);
+  assert.equal(require(INSTALLER).printWhatsNew, media.printWhatsNew);
+});
