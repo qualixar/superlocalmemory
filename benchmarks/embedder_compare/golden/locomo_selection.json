@@ -1,0 +1,392 @@
+[
+{
+"sample_id": "conv-42",
+"qa_index": 34,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 74,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 119,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 125,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 157,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 165,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 183,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 102,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 143,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 25,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 108,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 160,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 161,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 167,
+"stratum": "entity"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 2,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 72,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 77,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 20,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 31,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 40,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 54,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 55,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 60,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 10,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 12,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 21,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 26,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 50,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 65,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 66,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 76,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 78,
+"stratum": "temporal"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 27,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 30,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 49,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 75,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 17,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 29,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 30,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 35,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 8,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 13,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 20,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 73,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 79,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 88,
+"stratum": "text_multi_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 90,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 111,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 117,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 167,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 174,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 181,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 194,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 106,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 109,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 145,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 149,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 170,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 74,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 89,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 110,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 111,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 121,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 135,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 169,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 189,
+"stratum": "text_single_hop"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 200,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 227,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 243,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 253,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-42",
+"qa_index": 258,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 187,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 191,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 217,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 228,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 234,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-43",
+"qa_index": 236,
+"stratum": "unanswerable"
+},
+{
+"sample_id": "conv-48",
+"qa_index": 209,
+"stratum": "unanswerable"
+}
+]
