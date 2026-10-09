@@ -55,6 +55,16 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, field_validator
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.daemon.materializer import (
+    PassHooks,
+    PendingMaterializer,
+    PendingProfileMismatchError as _PendingProfileMismatchError,
+    ingestion_pass as _ingestion_pass,
+    legacy_item as _legacy_item,
+    run_operation as _run_operation,
+    should_idle as _materializer_idle_rule,
+)
+from superlocalmemory.daemon.services import ServiceRegistry
 from superlocalmemory.infra.daemon_identity import (
     DaemonDescriptor,
     build_descriptor,
@@ -647,6 +657,11 @@ def _publish_process_descriptor(
     return descriptor
 
 
+# Background services that run inside this process. Services are started and
+# stopped one by one at the points the lifecycle already chose; nothing here
+# calls start_all.
+_SERVICES = ServiceRegistry()
+_PENDING_MATERIALIZER: "PendingMaterializer | None" = None
 _RECORD_GUARDIAN: "RecordGuardian | None" = None
 
 
@@ -660,14 +675,16 @@ def _start_record_guardian() -> None:
         descriptor_provider=lambda: _ACTIVE_DAEMON_DESCRIPTOR,
         lock=get_instance_lock(),
     )
-    _RECORD_GUARDIAN.start()
+    _SERVICES.register(_RECORD_GUARDIAN)
+    _SERVICES.start(_RECORD_GUARDIAN.name)
 
 
 def _stop_record_guardian() -> None:
     global _RECORD_GUARDIAN
     guardian, _RECORD_GUARDIAN = _RECORD_GUARDIAN, None
     if guardian is not None:
-        guardian.stop()
+        _SERVICES.stop(guardian.name, 2.0)
+        _SERVICES.unregister(guardian.name)
 
 
 def _cleanup_process_descriptor(descriptor: DaemonDescriptor | None) -> None:
@@ -6195,12 +6212,8 @@ def _start_memory_watchdog() -> None:
     logger.info("Memory watchdog started (limit: %d MB per worker)", MAX_WORKER_MB)
 
 
-_materializer_stop = threading.Event()
-_materializer_thread: threading.Thread | None = None
 
 
-class _PendingProfileMismatchError(RuntimeError):
-    """A legacy pending row no longer matches the admitted profile lease."""
 
 
 def _version_integrity_payload() -> dict:
@@ -6234,55 +6247,7 @@ def _materializer_actor_id() -> str:
     return f"daemon-capability:{descriptor.capability_fingerprint}"
 
 
-def _run_materializer_operation(
-    runtime,
-    engine_supplier,
-    operation,
-    *,
-    expected_profile_id: str | None = None,
-):
-    """Run one bounded background unit against an admitted engine snapshot.
-
-    Cooperative preemption: if a profile transition is already in progress,
-    skip this materialization cycle entirely and return None.  The caller's
-    loop retries on the next iteration, by which time the switch has committed
-    and a clean admission is available.  This prevents the materializer from
-    holding the operation lease during the transition drain window.
-    """
-    # Writer-priority: don't acquire a new lease when a transition is draining.
-    if runtime is not None and (runtime.transitioning or runtime.background_paused):
-        if expected_profile_id is not None:
-            raise _PendingProfileMismatchError(
-                "pending materialization deferred during profile transition"
-            )
-        return None
-    with runtime.operation() as snapshot:
-        if (
-            expected_profile_id is not None
-            and snapshot.profile_id != expected_profile_id
-        ):
-            raise _PendingProfileMismatchError(
-                "pending profile changed before materializer admission"
-            )
-        # Resolve the engine only after admission. A concurrent mode/provider
-        # reconfiguration may have replaced the module-level engine while this
-        # worker was waiting at the transition barrier.
-        engine = engine_supplier()
-        if engine is None:
-            return None
-        engine_profile_id = getattr(engine, "_profile_id", None)
-        if (
-            expected_profile_id is not None
-            and engine_profile_id != expected_profile_id
-        ):
-            raise _PendingProfileMismatchError(
-                "resident engine does not match pending profile"
-            )
-        from superlocalmemory.core.recall_gate import background_work
-        with background_work(
-            preempt_requested=lambda: bool(runtime is not None and runtime.transitioning),
-        ):
-            return operation(engine)
+_run_materializer_operation = _run_operation
 
 
 def _reconcile_projection_manifest(
@@ -6542,14 +6507,8 @@ def _ops_failure_counts(engine, application) -> dict:
 def _materializer_should_idle(
     pending: object, durable_complete: int, durable_failed: int,
 ) -> bool:
-    """Whether the materializer pass earned a sleep before the next one.
-
-    ``durable_failed`` used to suppress the sleep. The pass runs one operation
-    at a time, so a single operation that cannot succeed kept this loop at full
-    speed indefinitely, re-reaping and re-listing on every iteration. A failure
-    is activity, not progress. GitHub #137.
-    """
-    return not pending and not durable_complete
+    """Whether the materializer pass earned a sleep before the next one."""
+    return _materializer_idle_rule(pending, durable_complete, durable_failed)
 
 
 def _reap_stuck_ingestion(db) -> list[str]:
@@ -6579,270 +6538,65 @@ def _materialize_ingestion_one_pass(
     min_queryable_age_seconds: float = 1.0,
 ) -> tuple[int, int]:
     """Materialize durable M018 work once; return ``(complete, failed)``."""
-    # Recovery first, unconditionally: terminalizing exhausted leases is
-    # pure SQL and must never wait on recall quiescence or embedder
-    # warmth — a cold embedder blocked the reap forever on one operator
-    # box, wedging the write pipeline until manual DB surgery (#131).
-    db = getattr(engine, "_db", None)
-    reaped = _reap_stuck_ingestion(db) if db is not None else []
-    if reaped:
-        logger.warning(
-            "Materializer terminalized %d exhausted ingestion operation(s)",
-            len(reaped),
-        )
-    # Yield while a recall may still need the embedder (question not embedded yet);
-    # later steps yield on their own: embeds per text, the local judge per recall.
-    if _recalls_needing_embedder() > 0:
-        return 0, 0
-
-    # A local sentence-transformers cold start can take minutes.  Remember's
-    # queryable projection is already durable, so defer enrichment until the
-    # daemon warmup/health monitor has proved the worker ready.  This preserves
-    # every enrichment layer while preventing a background cold load from
-    # monopolizing the same worker needed by foreground recall.
-    embedder = getattr(engine, "_embedder", None)
-    if embedder is not None and hasattr(embedder, "is_warm"):
-        try:
-            if not bool(embedder.is_warm):
-                return 0, 0
-        except Exception:
-            return 0, 0
-
-    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
-    from superlocalmemory.core.ingestion_command import IngestionState
-
-    command = build_engine_ingestion_command(engine)
-    completed = failed = 0
-    for operation in command.repository.list_materializable(
+    return _ingestion_pass(
+        engine,
+        hooks=_materializer_pass_hooks(),
+        emit_event=lambda *a, **k: _emit_event(*a, **k),
         limit=limit,
         min_queryable_age_seconds=min_queryable_age_seconds,
-    ):
-        try:
-            result = command.materialize(operation.operation_id)
-        except Exception as exc:
-            failed += 1
-            logger.warning(
-                "Ingestion operation %s could not be materialized: %s",
-                operation.operation_id,
-                exc,
-            )
-            continue
-        if result.state is IngestionState.COMPLETE:
-            completed += 1
-            _reconcile_projection_manifest(
-                engine,
-                result.operation_id,
-                getattr(operation, "profile_id", ""),
-                result.fact_ids,
-            )
-            _emit_event(
-                "memory.stored",
-                payload={
-                    "operation_id": result.operation_id,
-                    "fact_ids": list(result.fact_ids),
-                    "path": "canonical_materializer",
-                    "content_preview": result.raw_content[:120],
-                },
-                source_agent="materializer",
-            )
-        else:
-            failed += 1
-            logger.warning(
-                "Ingestion operation %s failed: %s",
-                result.operation_id,
-                result.last_error,
-            )
-    _reconcile_pending_projections(engine)
-    return completed, failed
+    )
 
 
 def _materialize_legacy_pending_item(engine, item: dict) -> str:
     """Backfill one pre-M018 pending.db row through canonical ingestion."""
-    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
-    from superlocalmemory.core.ingestion_command import (
-        IngestionRequest,
-        IngestionState,
+    return _legacy_item(engine, item, actor_id=_materializer_actor_id())
+
+
+def _materializer_pass_hooks() -> PassHooks:
+    # Call-time lookups: the names below stay patchable in this module.
+    return PassHooks(
+        reap=lambda db: _reap_stuck_ingestion(db),
+        reconcile_manifest=lambda *a: _reconcile_projection_manifest(*a),
+        reconcile_pending=lambda engine: _reconcile_pending_projections(engine),
+        recalls_needing_embedder=lambda: _recalls_needing_embedder(),
     )
 
-    expected_profile_id = str(item.get("profile_id") or "default")
-    if getattr(engine, "_profile_id", None) != expected_profile_id:
-        raise _PendingProfileMismatchError(
-            "legacy pending item does not match resident engine profile"
-        )
 
-    metadata_value = item.get("metadata") or "{}"
-    try:
-        metadata = (
-            json.loads(metadata_value)
-            if isinstance(metadata_value, str)
-            else dict(metadata_value)
+def _pending_materializer() -> PendingMaterializer:
+    """The process's materializer service, built and registered on first use."""
+    global _PENDING_MATERIALIZER
+    if _PENDING_MATERIALIZER is None:
+        from superlocalmemory.cli import pending_store
+
+        _PENDING_MATERIALIZER = PendingMaterializer(
+            engine_supplier=lambda: _engine,
+            runtime_supplier=lambda: _profile_runtime,
+            pending_store=pending_store,
+            emit_event=lambda *a, **k: _emit_event(*a, **k),
+            actor_id_supplier=lambda: _materializer_actor_id(),
+            recalls_in_flight=lambda: _recalls_in_flight(),
+            hooks=_materializer_pass_hooks(),
+            idle_predicate=lambda *a: _materializer_should_idle(*a),
+            ingestion_step=lambda engine, limit: _materialize_ingestion_one_pass(
+                engine, limit=limit,
+            ),
+            legacy_step=lambda engine, item: _materialize_legacy_pending_item(
+                engine, item,
+            ),
         )
-    except (TypeError, ValueError):
-        metadata = {}
-    if item.get("tags"):
-        metadata.setdefault("tags", item["tags"])
-    scope = metadata.pop("scope", None) or "personal"
-    shared_with = tuple(metadata.pop("shared_with", None) or ())
-    source_type = str(metadata.pop("_slm_source_type", "legacy-pending"))
-    idempotency_key = str(
-        metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
-    )
-    command = build_engine_ingestion_command(engine)
-    receipt = command.submit(IngestionRequest(
-        content=item["content"],
-        profile_id=expected_profile_id,
-        source_type=source_type,
-        idempotency_key=idempotency_key,
-        metadata=metadata,
-        scope=scope,
-        shared_with=shared_with,
-        trusted_actor_id=_materializer_actor_id(),
-        session_id=str(metadata.get("session_id") or ""),
-    ))
-    result = command.materialize(receipt.operation_id)
-    if result.state is not IngestionState.COMPLETE:
-        raise RuntimeError(result.last_error or "legacy pending materialization failed")
-    return result.operation_id
+        _SERVICES.register(_PENDING_MATERIALIZER)
+    return _PENDING_MATERIALIZER
 
 
 def _start_pending_materializer() -> None:
     """Drain M018 operations and backfill the legacy pending.db queue."""
-    global _materializer_thread
-
-    if _materializer_thread is not None and _materializer_thread.is_alive():
-        return
-    _materializer_stop.clear()
-
-    def _loop():
-        from superlocalmemory.cli.pending_store import (
-            get_pending,
-            mark_done,
-            mark_failed,
-        )
-        # v3.4.38: log first engine acquisition so we know materializer is alive
-        _engine_logged = False
-        _waiting_logged = False
-        while not _materializer_stop.is_set():
-            try:
-                # v3.4.38: Read fresh module global on every iteration so we
-                # pick up the engine after lifespan sets it. Use the import
-                # trick to ensure we're reading the live module attribute,
-                # not a stale local reference.
-                import superlocalmemory.server.unified_daemon as _ud
-                engine = _ud._engine
-                runtime = _ud._profile_runtime
-                if engine is None or runtime is None:
-                    if not _waiting_logged:
-                        logger.info(
-                            "Materializer: waiting for engine/runtime to init..."
-                        )
-                        _waiting_logged = True
-                    time.sleep(0.5)
-                    continue
-                if not _engine_logged:
-                    logger.info("Materializer: engine acquired, starting drain loop")
-                    _engine_logged = True
-
-                cycle_result = _run_materializer_operation(
-                    runtime,
-                    lambda: _ud._engine,
-                    lambda admitted_engine: _materialize_ingestion_one_pass(
-                        admitted_engine,
-                        # One operation per lease bounds profile-switch wait
-                        # time without allowing engine components to rebind
-                        # halfway through an enrichment pipeline.
-                        limit=1,
-                    ),
-                )
-                durable_complete, durable_failed = cycle_result or (0, 0)
-                if runtime.background_paused:  # a model switch is swapping: no spin
-                    time.sleep(0.25)
-                    continue
-                # Only backfill legacy pending items enqueued under the active
-                # profile — never materialize another profile's queued memory
-                # under whichever profile happens to be active now.
-                _active_profile = runtime.snapshot.profile_id
-                pending = get_pending(limit=50, profile_id=_active_profile)
-                if _materializer_should_idle(
-                    pending, durable_complete, durable_failed,
-                ):
-                    time.sleep(1.0)
-                    continue
-                if pending:
-                    logger.info(
-                        "Materializer: backfilling %d legacy pending memories",
-                        len(pending),
-                    )
-                for item in pending:
-                    if _materializer_stop.is_set():
-                        break
-                    waits = 0
-                    while _recalls_in_flight() > 0 and waits < 60:
-                        time.sleep(0.5)
-                        waits += 1
-                    try:
-                        pending_profile_id = str(
-                            item.get("profile_id") or "default"
-                        )
-                        operation_id = _run_materializer_operation(
-                            runtime,
-                            lambda: _ud._engine,
-                            lambda admitted_engine: _materialize_legacy_pending_item(
-                                admitted_engine, item,
-                            ),
-                            expected_profile_id=pending_profile_id,
-                        )
-                        if operation_id is None:
-                            raise RuntimeError("resident engine became unavailable")
-                        mark_done(item["id"])
-                        _emit_event(
-                            "memory.stored",
-                            payload={
-                                "pending_id": item["id"],
-                                "operation_id": operation_id,
-                                "path": "legacy_pending_backfill",
-                                "content_preview": item["content"][:120],
-                            },
-                            source_agent="materializer",
-                        )
-                    except _PendingProfileMismatchError:
-                        # A profile transition committed after this row was
-                        # fetched but before it obtained an operation lease.
-                        # Leave it pending, without consuming a retry, so the
-                        # owning profile can safely drain it later.
-                        logger.debug(
-                            "Pending %d deferred after profile switch",
-                            item["id"],
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Pending %d failed: %s", item["id"], exc,
-                        )
-                        mark_failed(item["id"], str(exc))
-            except Exception as exc:
-                logger.warning("materializer loop error: %s", exc)
-                time.sleep(5.0)
-
-    _materializer_thread = threading.Thread(
-        target=_loop, daemon=True, name="pending-materializer",
-    )
-    _materializer_thread.start()
-    logger.info("Pending materializer started (recall-priority)")
+    _pending_materializer()
+    _SERVICES.start("pending_materializer")
 
 
 def _stop_pending_materializer(timeout: float = 5.0) -> bool:
     """Stop and join the background writer before closing its engine."""
-    global _materializer_thread
-
-    _materializer_stop.set()
-    thread = _materializer_thread
-    if thread is not None and thread.is_alive():
-        thread.join(timeout=timeout)
-        if thread.is_alive():
-            logger.warning("Pending materializer did not stop within %.1fs", timeout)
-            return False
-    _materializer_thread = None
-    return True
+    return _SERVICES.stop("pending_materializer", timeout)
 
 
 _thread_dump_file = None

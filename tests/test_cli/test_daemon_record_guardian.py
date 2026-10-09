@@ -140,7 +140,8 @@ def test_guardian_thread_restores_a_deleted_record_and_stops(root, lock):
             time.sleep(0.05)
         assert read_descriptor().instance_id == ours.instance_id
     finally:
-        guardian.stop()
+        stopped = guardian.stop()
+    assert stopped is True
     assert guardian.health()["state"] == "stopped"
     assert not [t for t in threading.enumerate()
                 if t.name == "slm-record-guardian" and t.is_alive()]

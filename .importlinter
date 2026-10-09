@@ -1,0 +1,124 @@
+[importlinter]
+root_package = superlocalmemory
+include_external_packages = True
+
+# Direct imports only for the two rules below: a domain module that calls the
+# existing runtime reaches heavy packages transitively through core, and that is
+# fine. What must hold is checked at runtime by
+# tests/test_architecture/test_no_heavy_ml_on_import.py.
+
+[importlinter:contract:domain-no-heavy-ml]
+name = Domain modules never import torch/transformers directly (those live in worker processes)
+type = forbidden
+source_modules =
+    superlocalmemory.mesh
+    superlocalmemory.daemon
+forbidden_modules =
+    torch
+    transformers
+    sentence_transformers
+    lancedb
+    pycozo
+allow_indirect_imports = True
+
+[importlinter:contract:daemon-no-upward]
+name = The daemon services package never imports the server, CLI or MCP layers
+type = forbidden
+source_modules =
+    superlocalmemory.daemon
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
+allow_indirect_imports = True
+
+# Ratchets: the ignore_imports lists may shrink, never grow. They mirror the
+# baselines in tests/test_architecture/test_import_ratchet.py.
+
+[importlinter:contract:core-to-server-ratchet]
+name = core -> server upward imports (ratchet: list shrinks, never grows)
+type = forbidden
+source_modules = superlocalmemory.core
+forbidden_modules = superlocalmemory.server
+allow_indirect_imports = True
+ignore_imports =
+    superlocalmemory.core.admission -> superlocalmemory.server.profile_runtime
+    superlocalmemory.core.answer_check_state -> superlocalmemory.server.config_file
+    superlocalmemory.core.embedding_reindex -> superlocalmemory.server.profile_runtime
+    superlocalmemory.core.embedding_reindex_activate -> superlocalmemory.server.profile_runtime
+    superlocalmemory.core.ops_remediation -> superlocalmemory.server.unified_daemon
+    superlocalmemory.core.recall_worker -> superlocalmemory.server.recall_serializer
+    superlocalmemory.core.remote_mode -> superlocalmemory.server.loopback
+
+[importlinter:contract:core-to-cli-ratchet]
+name = core -> cli upward imports (ratchet: list shrinks, never grows)
+type = forbidden
+source_modules = superlocalmemory.core
+forbidden_modules = superlocalmemory.cli
+allow_indirect_imports = True
+ignore_imports =
+    superlocalmemory.core.component_healer -> superlocalmemory.cli.setup_wizard
+    superlocalmemory.core.component_registry -> superlocalmemory.cli.setup_wizard
+    superlocalmemory.core.config -> superlocalmemory.cli._lazy_init
+    superlocalmemory.core.engine -> superlocalmemory.cli.pending_store
+    superlocalmemory.core.maintenance_scheduler -> superlocalmemory.cli.pending_store
+    superlocalmemory.core.mcp_embedder_proxy -> superlocalmemory.cli.daemon
+
+[importlinter:contract:infra-to-server-ratchet]
+name = infra -> server upward imports (ratchet: list shrinks, never grows)
+type = forbidden
+source_modules = superlocalmemory.infra
+forbidden_modules = superlocalmemory.server
+allow_indirect_imports = True
+ignore_imports =
+    superlocalmemory.infra.auth_middleware -> superlocalmemory.server.loopback
+    superlocalmemory.infra.event_bus -> superlocalmemory.server.routes.helpers
+
+# Enable each contract below when its package exists (import-linter refuses
+# contracts that name a missing module). Each new package adds itself here in
+# the same change that creates it.
+#
+# [importlinter:contract:domain-no-heavy-ml-new]
+# name = New domain packages never import torch/transformers directly
+# type = forbidden
+# source_modules =
+#     superlocalmemory.memory_core
+#     superlocalmemory.media
+#     superlocalmemory.documents
+#     superlocalmemory.sources
+#     superlocalmemory.tagging
+#     superlocalmemory.cache
+# forbidden_modules =
+#     torch
+#     transformers
+#     sentence_transformers
+#     lancedb
+#     pycozo
+# allow_indirect_imports = True
+#
+# [importlinter:contract:new-modules-independent]
+# name = New domain packages do not import each other
+# type = independence
+# modules =
+#     superlocalmemory.memory_core
+#     superlocalmemory.media
+#     superlocalmemory.documents
+#     superlocalmemory.sources
+#     superlocalmemory.tagging
+#     superlocalmemory.cache
+#
+# [importlinter:contract:no-new-upward]
+# name = New domain packages never import the server, CLI or MCP layers
+# type = forbidden
+# source_modules =
+#     superlocalmemory.memory_core
+#     superlocalmemory.media
+#     superlocalmemory.documents
+#     superlocalmemory.sources
+#     superlocalmemory.tagging
+#     superlocalmemory.cache
+# forbidden_modules =
+#     superlocalmemory.server
+#     superlocalmemory.cli
+#     superlocalmemory.mcp
+# allow_indirect_imports = True

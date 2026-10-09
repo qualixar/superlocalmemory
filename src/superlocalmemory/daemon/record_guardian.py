@@ -114,12 +114,16 @@ class RecordGuardian:
         )
         self._thread.start()
 
-    def stop(self, timeout_s: float = 2.0) -> None:
+    def stop(self, timeout_s: float = 2.0) -> bool:
+        """Stop the thread; True when it joined (or never ran)."""
         self._stop.set()
         thread, self._thread = self._thread, None
+        joined = True
         if thread is not None:
             thread.join(timeout=timeout_s)
+            joined = not thread.is_alive()
         self._state = "stopped"
+        return joined
 
     def health(self) -> dict:
         return {"state": self._state, "detail": self._detail}
