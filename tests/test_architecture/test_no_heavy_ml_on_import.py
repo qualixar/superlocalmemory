@@ -21,6 +21,8 @@ PACKAGES = [
     "superlocalmemory.mesh",
     "superlocalmemory.memory_core",
     "superlocalmemory.cache",
+    "superlocalmemory.media",
+    "superlocalmemory.runtimes",
 ]
 
 _PROBE = (
