@@ -212,7 +212,7 @@ def _process(p: _Pass, e: Entry, sha: str) -> None:
         if again != sha or data is None:
             p.stats.deferred += 1
             return
-        hits = [] if (row and row.get("reason") == "released") else ingest.screen(data)
+        hits = [] if (row and row.get("reason") == f"released:{sha}") else ingest.screen(data)
         if hits:
             _quarantine(p, e, row, sha, hits)
             return

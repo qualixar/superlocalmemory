@@ -106,3 +106,35 @@ def test_a_raising_remote_check_counts_as_on(env):
     env.host.remote_check = boom
     stats = env.scan(sid)
     assert stats.paused and env.runtime.saved == []
+
+
+def test_release_covers_only_the_content_that_was_reviewed(env):
+    import os
+
+    path = env.write("k.md", "token ghp_" + "a" * 36)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    assert env.files(sid)["k.md"]["state"] == "quarantined"
+    assert sources.release_file(sid, "k.md")
+    path.write_text("new content with AKIAABCDEFGHIJKLMNOP and ghp_" + "b" * 36)
+    os.utime(path, ns=(2_000_000_000_000_000_000,) * 2)
+    env.scan(sid)
+    assert env.files(sid)["k.md"]["state"] == "quarantined" and env.runtime.saved == []
+
+
+def test_release_queues_a_scan_and_still_lets_the_reviewed_content_in(env):
+    env.write("k.md", "token ghp_" + "a" * 36)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    media = env.store()
+    from superlocalmemory.sources.store import SourceStore
+
+    SourceStore(media).cancel_scans(sid)
+    media.close()
+    assert sources.release_file(sid, "k.md")
+    media = env.store()
+    queued = media.list_jobs("default", ["queued"])
+    media.close()
+    assert len(queued) == 1
+    env.scan(sid)
+    assert env.files(sid)["k.md"]["state"] == "indexed"

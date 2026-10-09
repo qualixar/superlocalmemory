@@ -217,14 +217,15 @@ def source_report(source_id: str) -> SourceReport:
 
 
 def release_file(source_id: str, relpath: str) -> bool:
-    """Let a quarantined file be read on the next scan (its text is still redacted when saved)."""
+    """Let the quarantined content be read on the next scan; a later edit is screened again."""
     media, store, host = _open()
     try:
-        _source(store, source_id)
+        source = _source(store, source_id)
         row = store.get_file(source_id, relpath)
-        if row is None or row["state"] != "quarantined":
+        if row is None or row["state"] != "quarantined" or not row["sha256"]:
             return False
-        store.put_file(source_id, relpath, state="pending", reason="released")
+        store.put_file(source_id, relpath, state="pending", reason=f"released:{row['sha256']}")
+        store.queue_scan(source["profile_id"], source_id)
     finally:
         media.close()
     host.wake()
