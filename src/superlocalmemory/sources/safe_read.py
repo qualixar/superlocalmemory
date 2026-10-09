@@ -11,7 +11,12 @@ import stat
 from pathlib import Path
 from typing import BinaryIO
 
-_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+
+
+def _flags() -> int:
+    """Read-only, no link following, never blocking, and byte-exact on Windows (``O_BINARY``)."""
+    return (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_BINARY", 0))
 
 
 def open_regular(path: Path | str, file_id: str | None = None) -> BinaryIO:
@@ -19,7 +24,7 @@ def open_regular(path: Path | str, file_id: str | None = None) -> BinaryIO:
 
     ``file_id`` is ``"<st_dev>:<st_ino>"`` as the walk recorded it.
     """
-    fd = os.open(path, _FLAGS)
+    fd = os.open(path, _flags())
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):

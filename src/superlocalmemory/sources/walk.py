@@ -78,6 +78,8 @@ def _classify(root: Path, dirpath: str, item: os.DirEntry, rules: IgnoreRules,
             result.skip("symlink_dir")
             return "skip", None
         st = item.stat()
+        if not st.st_ino:  # Windows listings carry no file id; ask the file itself
+            st = os.stat(item.path)
     except OSError:
         result.skip("unreadable")
         return "skip", None
