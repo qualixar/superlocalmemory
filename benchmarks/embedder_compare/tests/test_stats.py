@@ -97,7 +97,7 @@ def test_abstention_threshold_uses_dev_only():
     dev_unans = [False, False, True, True]
     tau = stats.tune_threshold(dev_scores, dev_unans)
     assert 0.2 < tau <= 0.8
-    rep = stats.abstention_report([0.95, 0.15, 0.7], [False, True, True], tau)
+    rep = stats.abstention_report([0.95, 0.15, 0.85], [False, True, True], tau)
     assert rep["false_answer_rate"] == pytest.approx(0.5)
     assert rep["abstention_precision"] == pytest.approx(1.0)
     assert rep["abstention_recall"] == pytest.approx(0.5)
