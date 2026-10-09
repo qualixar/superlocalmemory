@@ -291,6 +291,20 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                 out[media_id] = found
         return out
 
+    def page_media_ids(self, pages: Sequence[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """``{(document_id, page_no): media_id}`` for the active page items, in one query per 300 pages."""
+        wanted = list(dict.fromkeys((str(d), int(n)) for d, n in pages))
+        out: dict[tuple[str, int], str] = {}
+        conn = self._read() if wanted else None
+        for i in range(0, len(wanted), 300):
+            part = wanted[i:i + 300]
+            rows = conn.execute(
+                "SELECT document_id, page_no, media_id FROM media_items WHERE kind = 'page'"
+                " AND state = 'active' AND (document_id, page_no) IN (VALUES "
+                + ",".join(["(?, ?)"] * len(part)) + ")", [x for pair in part for x in pair]).fetchall()
+            out.update({(r[0], r[1]): r[2] for r in rows})
+        return out
+
     def knn(self, vector: Sequence[float], profile_id: str, k: int,
             space_id: str | None = None) -> list[tuple[str, float]]:
         """Nearest items of one profile, closest first: [(media_id, cosine distance)]."""

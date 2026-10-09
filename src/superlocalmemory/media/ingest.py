@@ -54,6 +54,8 @@ class MediaInput:
     path: Path | None = None
     base64: str | None = None
     file_name: str = ""
+    download_url: str | None = None
+    remote: bool = False
 
 
 @dataclass(frozen=True)
@@ -109,7 +111,18 @@ def _cold_wait_s() -> float:
 
 # -- reading the input ---------------------------------------------------------
 
+def _download(inp: MediaInput) -> bytes:
+    from superlocalmemory.core.media_fetch import MediaFetchRefused, fetch_media
+
+    try:
+        return fetch_media(inp.download_url or "", remote=inp.remote, max_bytes=MAX_FILE_BYTES).data
+    except MediaFetchRefused as refused:
+        raise _refuse(refused.reason) from None
+
+
 def _read_input(inp: MediaInput) -> bytes:
+    if inp.download_url:
+        return _download(inp)
     if inp.base64 is not None:
         if len(inp.base64) * 3 // 4 > MAX_BASE64_BYTES + 3:
             raise _refuse("That image is too large (8 MB limit for pasted images).")

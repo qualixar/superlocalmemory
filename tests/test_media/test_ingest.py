@@ -319,3 +319,32 @@ def test_a_fifo_is_refused_without_blocking(env, tmp_path, monkeypatch):
     finally:
         os.close(fd)
     assert r.status == "refused" and env.client.calls == []
+
+
+def test_a_download_link_goes_through_the_same_checks(env, monkeypatch):
+    from superlocalmemory.core import media_fetch
+
+    seen = {}
+
+    def fake_fetch(link, **kw):
+        seen.update(link=link, **kw)
+        return media_fetch.FetchedMedia(png(), "https://img.example.com/a.png", "text/html")
+
+    monkeypatch.setattr(media_fetch, "fetch_media", fake_fetch)
+    r = save(env, inp=MediaInput(download_url="https://img.example.com/a.png?k=1"))
+    assert r.status == "stored" and seen["remote"] is False
+    monkeypatch.setattr(media_fetch, "fetch_media",
+                        lambda link, **kw: media_fetch.FetchedMedia(b"<html>nope</html>", "u", "image/png"))
+    assert "not supported" in save(env, inp=MediaInput(download_url="https://img.example.com/b")).reason
+
+
+def test_a_refused_download_is_a_refused_receipt_without_the_link(env, monkeypatch):
+    from superlocalmemory.core import media_fetch
+
+    def boom(link, **kw):
+        raise media_fetch.MediaFetchRefused("That link points to a private or reserved network address.")
+
+    monkeypatch.setattr(media_fetch, "fetch_media", boom)
+    r = save(env, inp=MediaInput(download_url="https://10.0.0.1/a.png?k=SECRET"))
+    assert r.status == "refused" and "private" in r.reason and "SECRET" not in r.reason
+    assert env.runtime.requests == []
