@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.media.store_jobs import utc_stamp
-from superlocalmemory.sources import ingest, locks, retire
+from superlocalmemory.sources import borrows, ingest, locks, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
@@ -268,6 +268,7 @@ def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
 
 def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | None) -> None:
     p.stats.errors += retire.retry_hides(p.host, p.store, p.runtime, p.source)
+    borrows.reset_dead_borrows(p.store, p.runtime, p.sid)
     p.rows = {r["relpath"]: r for r in p.store.files(p.sid)}
     candidates: list[Entry] = []
     for e in walked.entries:
