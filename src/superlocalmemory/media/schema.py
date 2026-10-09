@@ -58,6 +58,7 @@ _DDL = (
       page_count INTEGER NOT NULL DEFAULT 0,
       pages_text_layer INTEGER NOT NULL DEFAULT 0, pages_ocr INTEGER NOT NULL DEFAULT 0,
       pages_empty INTEGER NOT NULL DEFAULT 0, source_id TEXT, source_relpath TEXT,
+      origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user','folder')),
       memory_id TEXT, fact_ids_json TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL CHECK (state IN ('processing','ready','failed','tombstoned')),
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, tombstoned_at TEXT)""",

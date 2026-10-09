@@ -350,7 +350,7 @@ def remember_media(
         data = _read_input(inp)
         _check_kind(data)
         src_sha = hashlib.sha256(data).hexdigest()
-        known = store_ref.find_by_sha(profile_id, src_sha)
+        known = store_ref.find_by_sha(profile_id, src_sha, exclude_origin=None if folder else "folder")
         if known:
             return MediaReceipt("duplicate", media_id=known["media_id"], memory_id=known["anchor_memory_id"],
                                 duplicate_of=known["media_id"])

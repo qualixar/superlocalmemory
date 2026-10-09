@@ -159,7 +159,8 @@ def _document_id(profile_id: str, key: str) -> str:
     return secrets.token_hex(16)
 
 
-def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool) -> dict | None:
+def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool,
+              folder: bool = False) -> dict | None:
     """A document that makes this submit a repeat, or None; raises when a key names other content."""
     if keyed:
         row = store.get_document(doc_id)
@@ -167,7 +168,7 @@ def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool) -
             if row["sha256"] != sha:
                 raise _refuse("That key was already used for a different document.")
             return row
-    return store.find_document_by_sha(profile_id, sha)
+    return store.find_document_by_sha(profile_id, sha, exclude_origin=None if folder else "folder")
 
 
 def _repeat(store: Any, row: dict) -> DocumentReceipt | None:
@@ -195,7 +196,8 @@ def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str,
     relpath, placed_new = _place(root, tmp, sha)
     try:
         store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
-                              mime="application/pdf", bytes=size, source_relpath=relpath)
+                              mime="application/pdf", bytes=size, source_relpath=relpath,
+                              origin="folder" if "folder" in payload else "user")
         job_id = _queue(store, doc_id, profile_id, payload)
     except Exception as exc:  # noqa: BLE001 - nothing usable was stored; undo the file
         logger.warning("document was not queued (%s)", type(exc).__name__)
@@ -215,7 +217,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
     tmp, sha, size = _stage(inp, root)
     try:
         doc_id = _document_id(profile_id, key)
-        row = _existing(store, profile_id, doc_id, sha, bool(key))
+        row = _existing(store, profile_id, doc_id, sha, bool(key), "folder" in payload)
         if row:
             tmp.unlink(missing_ok=True)
             return _repeat(store, row) or _retry(store, row, payload)
