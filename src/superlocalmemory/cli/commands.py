@@ -527,6 +527,14 @@ def _cmd_kinds_dispatch(args: Namespace) -> None:
     cmd_kinds(args)
 
 
+def _cmd_sources_dispatch(args: Namespace) -> None:
+    """4.1.25: folder sources through the daemon (cli/sources_cmd.py)."""
+    from superlocalmemory.cli.sources_cmd import cmd_sources
+    rc = cmd_sources(args)
+    if rc:
+        sys.exit(rc)
+
+
 def _cmd_corrections_dispatch(args: Namespace) -> None:
     """4.1.22: corrections a user action overtook (cli/corrections_cmd.py)."""
     from superlocalmemory.cli.corrections_cmd import run
@@ -687,6 +695,7 @@ def dispatch(args: Namespace) -> None:
         "backup": _cmd_backup_dispatch,
         "summary": _cmd_summary_dispatch,
         "kinds": _cmd_kinds_dispatch,
+        "sources": _cmd_sources_dispatch,
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "models": _cmd_models_dispatch,
@@ -3015,6 +3024,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("summary", "Readable summaries: session, day, or project"),
         ("view", "Saved views: named recall queries you can re-run"),
         ("kinds", "Memory kinds: status, settings, classify (undoable)"),
+        ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove"),
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
