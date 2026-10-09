@@ -4,68 +4,271 @@
 """Every place that builds a durable write request must prepare its text.
 
 A new ``IngestionRequest(...)`` or ``RememberRequest(...)`` site fails here until
-its author either calls ``prepare_for_save`` or records why it is exempt.
+its author either calls the shared save step or records why it is exempt. The
+scan resolves import aliases, matches attribute calls, and flags any other use
+of the request classes as a value (``partial``, ``replace``) or a rebuild from a
+stored payload.
 """
 
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory"
+_CLASSES = {"IngestionRequest", "RememberRequest"}
+_REBUILD = {"from_payload", "from_dict"}
+_PREPARERS = {"prepare_for_save", "prepare_user_text"}
+
+_REPLAY = "exempt: replay of an already admitted request"
+_STORED = "exempt: repair of text that is already stored"
+_ROW = "exempt: reads a stored journal row"
 
 _SITES: dict[tuple[str, str], str] = {
-    ("server/unified_daemon.py", "remember"): "prepared",
-    ("server/unified_daemon.py", "enqueue"): "prepared",
+    ("server/unified_daemon.py", "ObserveBuffer.enqueue"): "prepared",
+    ("server/unified_daemon.py", "_register_daemon_routes.remember"): "prepared",
     ("server/routes/ingest.py", "ingest"): "prepared",
     ("server/routes/data_io.py", "import_memories"): "prepared",
     ("daemon/materializer.py", "legacy_item"): "prepared",
     ("core/engine_ingestion.py", "canonical_store"): "prepared",
     ("core/engine_ingestion.py", "canonical_store_fact"): "prepared",
-    ("core/remember_runtime.py", "_handle_admission"): "exempt: replay of an already admitted request",
-    ("storage/own_fact_repair.py", "_queue_enrichment"): "exempt: repair of text that is already stored",
+    ("core/remember_runtime.py", "CanonicalRememberRuntime._handle_admission"): _REPLAY,
+    ("storage/own_fact_repair.py", "_queue_enrichment"): _STORED,
+    ("storage/admission_journal.py", "AdmissionJournal.request_for"): _ROW,
 }
-_CALLS = {"IngestionRequest", "RememberRequest"}
 
 
-def _visit(node, fn, source, rel, found) -> None:
-    """Attribute each request call to its innermost enclosing function."""
-    for child in ast.iter_child_nodes(node):
-        inner = child if isinstance(
-            child, (ast.FunctionDef, ast.AsyncFunctionDef)
-        ) else fn
-        if (
-            isinstance(child, ast.Call)
-            and isinstance(child.func, ast.Name)
-            and child.func.id in _CALLS
-            and fn is not None
+@dataclass
+class Finding:
+    kind: str  # construct | reference | rebuild | replace
+    qualname: str
+    line: int
+    call: ast.Call | None = None
+    func: ast.AST | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+def _aliases(tree: ast.AST) -> set[str]:
+    names = set(_CLASSES)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for item in node.names:
+                if item.name in _CLASSES:
+                    names.add(item.asname or item.name)
+    return names
+
+
+def _type_use_ids(tree: ast.AST) -> set[int]:
+    """Node ids that are type positions: annotations, isinstance, subscripts."""
+    ids: set[int] = set()
+
+    def mark(node: ast.AST | None) -> None:
+        if node is not None:
+            ids.update(id(n) for n in ast.walk(node))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            mark(node.annotation)
+        elif isinstance(node, ast.AnnAssign):
+            mark(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            mark(node.returns)
+        elif isinstance(node, ast.Subscript):
+            mark(node.slice)
+        elif isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                mark(base)
+        elif (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in {"isinstance", "issubclass"}
         ):
-            found[(rel, fn.name)] = ast.get_source_segment(source, fn) or ""
-        _visit(child, inner, source, rel, found)
+            for arg in node.args[1:]:
+                mark(arg)
+    return ids
 
 
-def _found() -> dict[tuple[str, str], str]:
-    found: dict[tuple[str, str], str] = {}
-    for path in _SRC.rglob("*.py"):
-        source = path.read_text(encoding="utf-8")
-        if not any(name + "(" in source for name in _CALLS):
+def scan_source(source: str) -> list[Finding]:
+    tree = ast.parse(source)
+    names = _aliases(tree)
+    type_ids = _type_use_ids(tree)
+    findings: list[Finding] = []
+
+    def is_class(node: ast.AST) -> bool:
+        return (
+            (isinstance(node, ast.Name) and node.id in names)
+            or (isinstance(node, ast.Attribute) and node.attr in _CLASSES)
+        )
+
+    def visit(node: ast.AST, stack: list[str], func: ast.AST | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            sub, inner = stack, func
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                sub = stack + [child.name]
+                if not isinstance(child, ast.ClassDef):
+                    inner = child
+            qual = ".".join(stack) or "<module>"
+            if isinstance(child, ast.Call):
+                fn = child.func
+                if is_class(fn):
+                    findings.append(Finding("construct", qual, child.lineno, child, func))
+                elif (
+                    isinstance(fn, ast.Attribute) and fn.attr in _REBUILD
+                    and is_class(fn.value)
+                ):
+                    findings.append(Finding("rebuild", qual, child.lineno, child, func))
+                elif (
+                    (isinstance(fn, ast.Name) and fn.id == "replace")
+                    or (isinstance(fn, ast.Attribute) and fn.attr == "replace"
+                        and isinstance(fn.value, ast.Name) and fn.value.id == "dataclasses")
+                ) and any(kw.arg == "content" for kw in child.keywords):
+                    findings.append(Finding("replace", qual, child.lineno, child, func))
+            elif (
+                isinstance(child, (ast.Name, ast.Attribute))
+                and isinstance(getattr(child, "ctx", None), ast.Load)
+                and is_class(child)
+                and id(child) not in type_ids
+            ):
+                findings.append(Finding("reference", qual, child.lineno, None, func))
+            visit(child, sub, inner)
+
+    visit(tree, [], None)
+    # A construct's func node is also seen as a reference; drop those.
+    call_lines = {f.line for f in findings if f.kind == "construct"}
+    rebuild_lines = {f.line for f in findings if f.kind == "rebuild"}
+    return [
+        f for f in findings
+        if f.kind != "reference" or f.line not in call_lines | rebuild_lines
+    ]
+
+
+def _assigned_from_prepared(func: ast.AST | None, name: str) -> bool:
+    for node in ast.walk(func) if func is not None else []:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            return _is_prepared_value(node.value)
+    return False
+
+
+def _is_prepared_value(value: ast.AST) -> bool:
+    if isinstance(value, ast.Attribute) and value.attr == "text":
+        return True
+    return (
+        isinstance(value, ast.Call)
+        and ((isinstance(value.func, ast.Name) and value.func.id in _PREPARERS)
+             or (isinstance(value.func, ast.Attribute) and value.func.attr in _PREPARERS))
+    )
+
+
+def content_is_prepared(finding: Finding) -> bool:
+    call = finding.call
+    if call is None:
+        return False
+    for kw in call.keywords:
+        if kw.arg != "content":
             continue
-        tree = ast.parse(source)
-        rel = path.relative_to(_SRC).as_posix()
-        _visit(tree, None, source, rel, found)
-    return found
+        if isinstance(kw.value, ast.Attribute) and kw.value.attr == "text":
+            return True
+        if isinstance(kw.value, ast.Name):
+            return _assigned_from_prepared(finding.func, kw.value.id)
+    return False
+
+
+def violations(rel: str, source: str, sites: dict[tuple[str, str], str]) -> list[str]:
+    problems: list[str] = []
+    for f in scan_source(source):
+        kind = sites.get((rel, f.qualname))
+        where = f"{rel}:{f.line} ({f.qualname}, {f.kind})"
+        if kind is None:
+            problems.append(
+                f"{where} uses a write request: prepare the text with "
+                "prepare_for_save/prepare_user_text, then add the site to _SITES"
+            )
+        elif kind == "prepared":
+            if f.kind != "construct" or not content_is_prepared(f):
+                problems.append(
+                    f"{where} must pass content= the prepared text (.text of "
+                    "prepare_for_save/prepare_user_text)"
+                )
+    return problems
 
 
 def test_every_write_site_is_mapped_and_prepared() -> None:
-    found = _found()
-    for site, body in found.items():
-        assert site in _SITES, (
-            f"{site} builds a write request: call prepare_for_save on the "
-            "text first, then add the site to _SITES."
-        )
-    for site, kind in _SITES.items():
-        assert site in found, f"{site} no longer builds a write request; update _SITES"
-        if kind == "prepared":
-            assert "prepare_for_save" in found[site], (
-                f"{site} must call prepare_for_save before building the request"
-            )
+    problems: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for path in sorted(_SRC.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if not any(c in source for c in _CLASSES):
+            continue
+        rel = path.relative_to(_SRC).as_posix()
+        problems += violations(rel, source, _SITES)
+        seen |= {(rel, f.qualname) for f in scan_source(source)}
+    problems += [f"stale site {s}" for s in _SITES if s not in seen]
+    assert not problems, "\n".join(problems)
+
+
+# --- the guard itself ---------------------------------------------------------
+
+_SITE = {("m.py", "go"): "prepared"}
+
+
+def _bad(source: str) -> list[str]:
+    return violations("m.py", source, {})
+
+
+def test_guard_catches_an_aliased_import() -> None:
+    src = "from x import IngestionRequest as R\ndef go(t):\n    return R(content=t)\n"
+    assert _bad(src)
+
+
+def test_guard_catches_an_attribute_call() -> None:
+    src = "import x\ndef go(t):\n    return x.RememberRequest(content=t)\n"
+    assert _bad(src)
+
+
+def test_guard_catches_partial_and_replace() -> None:
+    partial = (
+        "from functools import partial\nfrom x import IngestionRequest\n"
+        "def go():\n    return partial(IngestionRequest, source_type='a')\n"
+    )
+    repl = (
+        "from dataclasses import replace\nfrom x import IngestionRequest\n"
+        "def go(r):\n    return replace(r, content='raw')\n"
+    )
+    assert _bad(partial) and _bad(repl)
+
+
+def test_guard_catches_a_rebuild_from_a_payload_and_module_level_use() -> None:
+    rebuild = "from x import RememberRequest\ndef go(p):\n    return RememberRequest.from_payload(p)\n"
+    module = "from x import IngestionRequest\nREQ = IngestionRequest(content='raw')\n"
+    assert _bad(rebuild) and _bad(module)
+
+
+def test_guard_ignores_annotations_and_isinstance() -> None:
+    src = (
+        "from x import IngestionRequest\n"
+        "def go(r: IngestionRequest) -> IngestionRequest | None:\n"
+        "    return r if isinstance(r, IngestionRequest) else None\n"
+    )
+    assert _bad(src) == []
+
+
+def test_guard_requires_content_to_come_from_the_prepare_step() -> None:
+    raw = "from x import IngestionRequest\ndef go(t):\n    return IngestionRequest(content=t)\n"
+    via_name = (
+        "from x import IngestionRequest\n"
+        "def go(t):\n    p = prepare_user_text(c, t)\n    return IngestionRequest(content=p.text)\n"
+    )
+    via_assign = (
+        "from x import IngestionRequest\n"
+        "def go(t):\n    t = prepare_for_save(t).text\n    return IngestionRequest(content=t)\n"
+    )
+    substring_only = (
+        "from x import IngestionRequest\n"
+        "def go(t):\n    # prepare_for_save\n    return IngestionRequest(content=t)\n"
+    )
+    assert violations("m.py", raw, _SITE)
+    assert violations("m.py", via_name, _SITE) == []
+    assert violations("m.py", via_assign, _SITE) == []
+    assert violations("m.py", substring_only, _SITE)

@@ -1196,7 +1196,14 @@ class ObserveBuffer:
         self._engine = engine
 
     def enqueue(self, content: str, *, trusted_actor_id: str = "") -> dict:
+        # The hash is only a duplicate-window and idempotency key; the text
+        # that is previewed, evented and stored is the prepared one.
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        from superlocalmemory.memory_core import prepare_user_text
+
+        content = prepare_user_text(
+            getattr(self._engine, "_config", None), content,
+        ).text
         with self._lock:
             if content_hash in self._seen:
                 return {"captured": False, "reason": "duplicate within debounce window"}
@@ -1230,18 +1237,6 @@ class ObserveBuffer:
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
             from superlocalmemory.hooks.auto_capture import AutoCapture
-            from superlocalmemory.memory_core import (
-                ContentOrigin,
-                pii_redaction_enabled,
-                prepare_for_save,
-            )
-
-            # The duplicate window and idempotency key keep the caller-derived
-            # hash above; the stored text and the events carry the prepared one.
-            content = prepare_for_save(
-                content, origin=ContentOrigin.USER_TEXT,
-                pii_redaction=pii_redaction_enabled(self._engine._config),
-            ).text
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
                 _emit_event(
@@ -5183,23 +5178,19 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 meta[METADATA_KEY] = declared_kind.value
 
             from superlocalmemory.memory_core import (
-                ContentOrigin,
                 pii_redaction_enabled,
-                prepare_for_save,
+                prepare_key,
+                prepare_metadata,
+                prepare_user_text,
             )
 
-            prepared = prepare_for_save(
-                req.content, origin=ContentOrigin.USER_TEXT,
-                pii_redaction=pii_redaction_enabled(engine._config),
-            )
-            if prepared.pii_count:
-                logger.info(
-                    "PII redaction: scrubbed %d identifier(s) on remember",
-                    prepared.pii_count,
-                )
+            prepared = prepare_user_text(engine._config, req.content)
+            redact = pii_redaction_enabled(engine._config)
+            meta, _ = prepare_metadata(meta, pii_redaction=redact)
             store_config = getattr(engine._config, "store", None)
+            # Length limits judge what the caller sent, as before.
             validate_deterministic_admission(
-                prepared.text,
+                req.content,
                 max_verbatim_chars=getattr(
                     store_config,
                     "max_verbatim_chars",
@@ -5299,7 +5290,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 content=prepared.text,
                 profile_id=write_profile,
                 source_type="http",
-                idempotency_key=req.idempotency_key or uuid.uuid4().hex,
+                idempotency_key=(
+                    prepare_key(req.idempotency_key, pii_redaction=redact)
+                    if req.idempotency_key else uuid.uuid4().hex
+                ),
                 metadata=meta,
                 scope=scope,
                 shared_with=tuple(shared_with or ()),

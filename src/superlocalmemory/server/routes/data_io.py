@@ -240,11 +240,18 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
             IngestionState,
         )
 
-        from superlocalmemory.memory_core import (
-            ContentOrigin,
-            pii_redaction_enabled,
-            prepare_for_save,
+        from superlocalmemory.core.ingestion_command import (
+            IdempotencyConflict,
+            IngestionOperationRepository,
         )
+        from superlocalmemory.memory_core import (
+            pii_redaction_enabled,
+            prepare_metadata,
+            prepare_user_text,
+            same_after_redaction,
+        )
+
+        redact = pii_redaction_enabled(engine._config)
 
         command = build_engine_ingestion_command(engine)
         from superlocalmemory.server.write_identity import (
@@ -280,11 +287,9 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 ):
                     if _field in memory:
                         metadata[_field] = memory[_field]
-                prepared = prepare_for_save(
-                    memory_content, origin=ContentOrigin.USER_TEXT,
-                    pii_redaction=pii_redaction_enabled(engine._config),
-                )
-                receipt, created = command.submit_with_status(IngestionRequest(
+                prepared = prepare_user_text(engine._config, memory_content)
+                metadata, _ = prepare_metadata(metadata, pii_redaction=redact)
+                request_obj = IngestionRequest(
                     content=prepared.text,
                     profile_id=engine._profile_id,
                     source_type="http-import",
@@ -297,7 +302,21 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                     session_date=memory.get('session_date') or "",
                     speaker=memory.get('speaker') or "",
                     role=memory.get('role') or "user",
-                ))
+                )
+                try:
+                    receipt, created = command.submit_with_status(request_obj)
+                except IdempotencyConflict:
+                    # Saved raw before redaction was on: the same text once
+                    # prepared is already present, not a failure.
+                    existing = IngestionOperationRepository(
+                        engine._db,
+                    ).find_for_request(request_obj)
+                    if existing is None or not same_after_redaction(
+                        existing.raw_content, prepared.text, redact,
+                    ):
+                        raise
+                    skipped += 1
+                    continue
                 completed = await asyncio.to_thread(command.materialize, receipt.operation_id)
                 if completed.state is not IngestionState.COMPLETE:
                     raise RuntimeError(

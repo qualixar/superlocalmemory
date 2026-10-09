@@ -26,6 +26,7 @@ from superlocalmemory.core.ingestion_command import (
 )
 
 if TYPE_CHECKING:
+    from superlocalmemory.memory_core import PreparedContent
     from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
@@ -118,6 +119,34 @@ def _prebuilt_fact_payload(fact: AtomicFact) -> dict:
         value = getattr(fact, name)
         payload[name] = value.value if name in enum_fields else value
     return payload
+
+
+def _prepared_prebuilt(engine: MemoryEngine, fact: AtomicFact) -> tuple["PreparedContent", dict]:
+    """The request text and payload of a prebuilt fact, personal data removed.
+
+    Both carry the same prepared text (background enrichment re-checks it); the
+    caller's fact is left untouched.
+    """
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        prepare_metadata,
+        prepare_user_text,
+    )
+
+    prepared = prepare_user_text(engine._config, fact.content)
+    payload = _prebuilt_fact_payload(fact)
+    payload["content"] = prepared.text
+    scrubbed = prepared.pii_count
+    if pii_redaction_enabled(engine._config):
+        for name in ("entities", "canonical_entities"):
+            payload[name], n_names = prepare_metadata(
+                list(payload[name] or []), pii_redaction=True,
+            )
+            scrubbed += n_names
+    if scrubbed:
+        # Anything derived from the old text must be recomputed.
+        payload["embedding"] = None
+    return prepared, payload
 
 
 def _prebuilt_fact_from_payload(payload: dict):
@@ -334,19 +363,9 @@ def canonical_store(
     # Opt-in PII redaction (config.pii_redaction or SLM_PII_REDACTION) runs in
     # the shared save step, before the content is extracted, embedded or
     # persisted; with it off the text is stored byte-identical.
-    from superlocalmemory.memory_core import (
-        ContentOrigin,
-        pii_redaction_enabled,
-        prepare_for_save,
-    )
+    from superlocalmemory.memory_core import prepare_user_text
 
-    prepared = prepare_for_save(
-        content, origin=ContentOrigin.USER_TEXT,
-        pii_redaction=pii_redaction_enabled(engine._config),
-    )
-    content = prepared.text
-    if prepared.pii_count:
-        logger.info("PII redaction: scrubbed %d identifier(s) on ingest", prepared.pii_count)
+    content = prepare_user_text(engine._config, content).text
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
@@ -438,23 +457,7 @@ def canonical_store_fact(
     _require_known_profile(engine, profile_id or engine._profile_id)
     if is_low_quality(fact.content):
         return fact.fact_id
-    from superlocalmemory.memory_core import (
-        ContentOrigin,
-        pii_redaction_enabled,
-        prepare_for_save,
-    )
-
-    # The request text and the prebuilt payload must stay equal (background
-    # enrichment re-checks it), so both carry the prepared text. The caller's
-    # fact object is left untouched.
-    prepared = prepare_for_save(
-        fact.content, origin=ContentOrigin.USER_TEXT,
-        pii_redaction=pii_redaction_enabled(engine._config),
-    )
-    if prepared.pii_count:
-        logger.info("PII redaction: scrubbed %d identifier(s) on ingest", prepared.pii_count)
-    payload = _prebuilt_fact_payload(fact)
-    payload["content"] = prepared.text
+    prepared, payload = _prepared_prebuilt(engine, fact)
     command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
         content=prepared.text,

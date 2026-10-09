@@ -194,6 +194,30 @@ def ingestion_pass(
     return completed, failed
 
 
+def _submit_tolerating_raw_duplicate(command, engine, request):
+    """Submit; an operation saved raw before redaction was on, whose text is the
+    same once prepared, is already present: return its id instead of failing."""
+    from superlocalmemory.core.ingestion_command import (
+        IdempotencyConflict,
+        IngestionOperationRepository,
+    )
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        same_after_redaction,
+    )
+
+    try:
+        return command.submit(request)
+    except IdempotencyConflict:
+        existing = IngestionOperationRepository(engine._db).find_for_request(request)
+        if existing is not None and same_after_redaction(
+            existing.raw_content, request.content,
+            pii_redaction_enabled(getattr(engine, "_config", None)),
+        ):
+            return existing.operation_id
+        raise
+
+
 def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     """Backfill one pre-M018 pending.db row through canonical ingestion."""
     from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
@@ -225,19 +249,13 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     idempotency_key = str(
         metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
     )
-    from superlocalmemory.memory_core import (
-        ContentOrigin,
-        pii_redaction_enabled,
-        prepare_for_save,
-    )
+    from superlocalmemory.memory_core import prepare_user_text
 
     # pending.db rows were written raw by the old fallback path.
-    prepared = prepare_for_save(
-        item["content"], origin=ContentOrigin.USER_TEXT,
-        pii_redaction=pii_redaction_enabled(getattr(engine, "_config", None)),
-    )
+    config = getattr(engine, "_config", None)
+    prepared = prepare_user_text(config, item["content"])
     command = build_engine_ingestion_command(engine)
-    receipt = command.submit(IngestionRequest(
+    request = IngestionRequest(
         content=prepared.text,
         profile_id=expected_profile_id,
         source_type=source_type,
@@ -247,7 +265,10 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
         shared_with=shared_with,
         trusted_actor_id=actor_id,
         session_id=str(metadata.get("session_id") or ""),
-    ))
+    )
+    receipt = _submit_tolerating_raw_duplicate(command, engine, request)
+    if isinstance(receipt, str):
+        return receipt
     result = command.materialize(receipt.operation_id)
     if result.state is not IngestionState.COMPLETE:
         raise RuntimeError(result.last_error or "legacy pending materialization failed")

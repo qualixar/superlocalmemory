@@ -8,6 +8,10 @@ from superlocalmemory.memory_core.save_path import (
     PreparedContent,
     pii_redaction_enabled,
     prepare_for_save,
+    prepare_key,
+    prepare_metadata,
+    prepare_user_text,
+    same_after_redaction,
 )
 
 __all__ = [
@@ -15,4 +19,8 @@ __all__ = [
     "PreparedContent",
     "pii_redaction_enabled",
     "prepare_for_save",
+    "prepare_key",
+    "prepare_metadata",
+    "prepare_user_text",
+    "same_after_redaction",
 ]
