@@ -27,8 +27,8 @@ README = REPO_ROOT / "README.md"
 # raw server, all tools). Pinned by
 # tests/test_mcp/test_mcp_exposure_contract.py
 # (`test_registration_exposure_is_exact_and_duplicate_free`, exposure
-# "whole", expected_count 105).
-_WHOLE_TOOLS_COUNT = 105
+# "whole", expected_count 107).
+_WHOLE_TOOLS_COUNT = 107
 
 # "| `core` | 18 |" and "| `full` (and unset) | 54 |".
 _ROW = re.compile(r"^\| `(\w+)`[^|`]*\| (\d+) \|", flags=re.MULTILINE)

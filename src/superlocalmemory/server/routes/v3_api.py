@@ -3052,7 +3052,7 @@ async def get_mcp_profiles(request: Request):
             # docstring above).
             current = "full"
         elif canonical == "whole" or canonical not in _PROFILE_DEFINITIONS:
-            # "whole" (all 105 tools) and any unrecognized value have no
+            # "whole" (all 107 tools) and any unrecognized value have no
             # single named profile that represents them exactly; fall back
             # to the smallest, safest documented profile for UI display.
             current = "core"
