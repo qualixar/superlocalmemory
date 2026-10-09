@@ -162,9 +162,9 @@ class SourceStore:
                 " WHERE kind = 'source_scan' AND state IN ('queued', 'running')"
                 " AND json_extract(payload_json, '$.source_id') = ?", (utc_stamp(), source_id)).rowcount
 
-    def queue_scan(self, profile_id: str, source_id: str) -> dict[str, Any]:
-        """Queue a scan unless one is already waiting or running for this source."""
-        for job in self._m.list_jobs(profile_id, ["queued", "running"]):
+    def queue_scan(self, profile_id: str, source_id: str, *, behind_running: bool = False) -> dict[str, Any]:
+        """Queue a scan unless one is already waiting (or running, unless ``behind_running``)."""
+        for job in self._m.list_jobs(profile_id, ["queued"] if behind_running else ["queued", "running"]):
             if job["kind"] == "source_scan" and json.loads(job["payload_json"]).get("source_id") == source_id:
                 return job
         job_id = self._m.enqueue_job(profile_id, "source_scan", 0, {"source_id": source_id})

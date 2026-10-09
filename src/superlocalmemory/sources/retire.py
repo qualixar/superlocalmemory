@@ -76,10 +76,21 @@ def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str,
         logger.warning("a folder document could not be hidden (%s)", type(exc).__name__)
 
 
+def hide_picture(store: SourceStore, row: dict[str, Any]) -> None:
+    """Take the picture a file owns out of the library's view, so the same bytes can be saved afresh."""
+    if not row.get("media_id") or row.get("reason") == "shared":
+        return
+    try:
+        store._m.set_state(row["media_id"], "tombstoned")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("a folder picture could not be hidden (%s)", type(exc).__name__)
+
+
 def release_copies(store: SourceStore, source: dict, row: dict[str, Any]) -> None:
     """The owner of a picture or document is going: identical copies in the folder take over next pass."""
     if row.get("reason") != "shared" and (row.get("document_id") or row.get("media_id")):
-        store.release_shared(source["source_id"], row.get("sha256"), row["relpath"])
+        if store.release_shared(source["source_id"], row.get("sha256"), row["relpath"]):
+            store.queue_scan(source["profile_id"], source["source_id"], behind_running=True)
 
 
 def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, row: dict[str, Any],
@@ -88,6 +99,7 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     entries = entries_of(row)
     failures = hide_entries(host, runtime, source, entries, row["relpath"])
     hide_document(store, runtime, source, row)
+    hide_picture(store, row)
     release_copies(store, source, row)
     fields: dict[str, Any] = {"entries": entries}
     if tombstone:

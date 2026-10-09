@@ -126,6 +126,7 @@ def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
     entries = entries_of(row)
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
     retire.hide_document(p.store, p.runtime, p.source, row)
+    retire.hide_picture(p.store, row)
     retire.release_copies(p.store, p.source, row)
     return entries
 

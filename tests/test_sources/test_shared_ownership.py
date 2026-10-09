@@ -7,6 +7,8 @@ import os
 import sqlite3
 from types import SimpleNamespace
 
+from superlocalmemory.sources.store import SourceStore
+
 PDF = b"%PDF-1.4\n" + b"0" * 100
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
 
@@ -102,9 +104,16 @@ def test_identical_pdf_copies_the_second_becomes_the_owner_when_the_first_goes(e
     files = env.files(sid)
     assert files["a.pdf"]["document_id"] == "d1" and files["b.pdf"]["reason"] == "shared"
 
+    media = env.store()
+    SourceStore(media).cancel_scans(sid)  # nothing waiting: only the hand-over may queue a scan
+    media.close()
     first.unlink()
     env.scan(sid)  # a.pdf is tombstoned and its document hidden; b.pdf is queued to take over
     assert env.files(sid)["b.pdf"]["state"] == "pending"
+    media = env.store()
+    queued = media.list_jobs("default", ["queued"])
+    media.close()
+    assert len(queued) == 1 and json.loads(queued[0]["payload_json"])["source_id"] == sid
     env.scan(sid)
     b = env.files(sid)["b.pdf"]
     assert b["state"] == "indexed" and b["reason"] is None and b["document_id"] == "d2"
