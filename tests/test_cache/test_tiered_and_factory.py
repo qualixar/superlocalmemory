@@ -135,3 +135,17 @@ def test_no_serializer_that_runs_code_is_imported():
 def test_backups_never_include_the_derive_cache(tmp_path):
     from superlocalmemory.infra.backup import MANAGED_DATABASES
     assert "derive_cache.db" not in MANAGED_DATABASES
+
+
+def test_invalidate_deriver_drops_one_kind_and_creates_nothing(tmp_path, monkeypatch):
+    from superlocalmemory.cache import factory
+    from superlocalmemory.cache.keys import CacheKey
+    from superlocalmemory.cache.sqlite_store import SqliteDeriveCache
+
+    assert factory.invalidate_deriver("doc.index", tmp_path) == 0
+    assert not (tmp_path / factory.FILE_NAME).exists()
+    disk = SqliteDeriveCache(tmp_path / factory.FILE_NAME)
+    disk.put(CacheKey("a" * 64, "doc.index", "1"), b"{}", kind="json")
+    disk.put(CacheKey("b" * 64, "ocr.auto", "1"), b"{}", kind="json")
+    assert factory.invalidate_deriver("doc.index", tmp_path) == 1
+    assert disk.get(CacheKey("b" * 64, "ocr.auto", "1")) is not None

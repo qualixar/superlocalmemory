@@ -54,15 +54,17 @@ _DDL = (
     "CREATE INDEX IF NOT EXISTS ix_mvr_media ON media_vector_rows(media_id)",
     """CREATE TABLE IF NOT EXISTS documents (
       document_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, sha256 TEXT NOT NULL,
-      title TEXT NOT NULL, mime TEXT NOT NULL, page_count INTEGER NOT NULL DEFAULT 0,
+      title TEXT NOT NULL, mime TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0,
+      page_count INTEGER NOT NULL DEFAULT 0,
       pages_text_layer INTEGER NOT NULL DEFAULT 0, pages_ocr INTEGER NOT NULL DEFAULT 0,
       pages_empty INTEGER NOT NULL DEFAULT 0, source_id TEXT, source_relpath TEXT,
+      memory_id TEXT, fact_ids_json TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL CHECK (state IN ('processing','ready','failed','tombstoned')),
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, tombstoned_at TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_documents_profile ON documents(profile_id, state)",
     """CREATE TABLE IF NOT EXISTS doc_pages (
       document_id TEXT NOT NULL, page_no INTEGER NOT NULL, media_id TEXT,
-      memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      memory_ids_json TEXT NOT NULL DEFAULT '[]', fact_ids_json TEXT NOT NULL DEFAULT '[]',
       text_origin TEXT NOT NULL CHECK (text_origin IN ('text_layer','ocr','none')),
       char_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (document_id, page_no))""",
     """CREATE TABLE IF NOT EXISTS jobs (
@@ -70,7 +72,7 @@ _DDL = (
       kind TEXT NOT NULL CHECK (kind IN ('document','source_scan','media_reembed','gc','env_install')),
       state TEXT NOT NULL CHECK (state IN ('queued','running','done','failed','cancelled')),
       done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, error TEXT,
-      lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+      payload_json TEXT NOT NULL DEFAULT '{}', lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_at)",
     """CREATE TABLE IF NOT EXISTS sources (
       source_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,

@@ -197,7 +197,8 @@ def _fill(store, profile, sha):
     store.put_vector(mid, sid, profile, vec(0))
     store.enqueue_job(profile, "gc")
     with store._write() as c:
-        c.execute("INSERT INTO documents VALUES (?,?,?,?,?,0,0,0,0,NULL,NULL,'ready','t','t',NULL)",
+        c.execute("INSERT INTO documents(document_id,profile_id,sha256,title,mime,state,created_at,updated_at)"
+                  " VALUES (?,?,?,?,?,'ready','t','t')",
                   (f"d-{profile}", profile, sha, "t", "application/pdf"))
         c.execute("INSERT INTO doc_pages(document_id,page_no,text_origin) VALUES (?,1,'none')",
                   (f"d-{profile}",))
