@@ -343,7 +343,8 @@ class TestTheHealthReportPromisesOnlyWhatHappens:
         )))
 
         assert "next time the service starts" not in text
-        assert "slm decay --execute" in text
+        assert "slm doctor --refile-hidden" in text
+        assert "decay" not in text
 
     def test_doctor_points_at_the_pass_that_re_files_them(self) -> None:
         import argparse
@@ -366,5 +367,5 @@ class TestTheHealthReportPromisesOnlyWhatHappens:
         check = next(
             c for c in captured[-1]["checks"] if c["name"] == "Memory answer-ability"
         )
-        assert check["status"] == "FAIL"
-        assert check["fix"] == "slm decay --execute", check
+        assert check["status"] == "WARN"
+        assert check["fix"] == "slm doctor --refile-hidden", check

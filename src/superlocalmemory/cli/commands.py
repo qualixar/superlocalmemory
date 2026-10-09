@@ -3825,7 +3825,7 @@ def cmd_doctor(args: Namespace) -> None:
     memory_health_data: dict | None = None
     try:
         from superlocalmemory.core.config import SLMConfig as _HealthCfg
-        from superlocalmemory.core.memory_health import describe, measure
+        from superlocalmemory.core.memory_health import classify, describe, measure
         _h = measure(_HealthCfg.load().db_path)
         memory_health_data = {
             "live_facts": _h.live_facts,
@@ -3843,22 +3843,19 @@ def cmd_doctor(args: Namespace) -> None:
         _detail = " ".join(describe(_h))
         if _h.healthy:
             _check("Memory answer-ability", "PASS", _detail)
-        elif _h.inconsistently_hidden or _h.reachability < 0.9:
-            # A start no longer re-files hidden memories once the store's own
-            # log records that repair complete; the forgetting pass does.
-            _check(
-                "Memory answer-ability", "FAIL", _detail,
-                fix=("slm decay --execute" if _h.inconsistently_hidden
-                     else "slm restart"),
-            )
         else:
-            _check("Memory answer-ability", "WARN", _detail,
-                   fix="slm db reembed --missing-only")
+            _st, _fix = classify(_h)
+            _check("Memory answer-ability", _st, _detail, fix=_fix)
     except Exception as _mh_exc:  # noqa: BLE001 — a report must not break doctor
         _check(
             "Memory answer-ability", "WARN",
             f"could not be measured: {_mh_exc}",
         )
+
+    refile_data = None
+    if getattr(args, "refile_hidden", False):
+        from superlocalmemory.cli.doctor_refile import run_refile
+        refile_data = run_refile(args, use_json)
 
     # Summary
     if use_json:
@@ -3871,6 +3868,7 @@ def cmd_doctor(args: Namespace) -> None:
             "checks": checks,
             "summary": {"passed": passed, "warned": warned, "failed": failed},
             "memory_health": memory_health_data,
+            "refile_hidden": refile_data,
         }, next_actions=next_actions)
     else:
         print(f"\nSummary: {passed} passed, {warned} warnings, {failed} failed")

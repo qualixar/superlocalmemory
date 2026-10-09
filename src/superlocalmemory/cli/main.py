@@ -683,6 +683,15 @@ def main() -> None:
         help="Auto-repair fixable components (re-download missing models, "
              "install sqlite-vec) before checking, then report",
     )
+    doctor_p.add_argument(
+        "--refile-hidden", action="store_true",
+        help="Show the memories hidden even though they are scored to keep "
+             "(dry run); with --yes, re-file exactly those",
+    )
+    doctor_p.add_argument(
+        "--yes", action="store_true",
+        help="Apply --refile-hidden instead of only showing what it would do",
+    )
 
     # v3.8.2 super-help — grouped overview of every command + focused topics.
     help_p = sub.add_parser(
