@@ -225,9 +225,20 @@ def legacy_item(engine, item: dict, *, actor_id: str) -> str:
     idempotency_key = str(
         metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
     )
+    from superlocalmemory.memory_core import (
+        ContentOrigin,
+        pii_redaction_enabled,
+        prepare_for_save,
+    )
+
+    # pending.db rows were written raw by the old fallback path.
+    prepared = prepare_for_save(
+        item["content"], origin=ContentOrigin.USER_TEXT,
+        pii_redaction=pii_redaction_enabled(getattr(engine, "_config", None)),
+    )
     command = build_engine_ingestion_command(engine)
     receipt = command.submit(IngestionRequest(
-        content=item["content"],
+        content=prepared.text,
         profile_id=expected_profile_id,
         source_type=source_type,
         idempotency_key=idempotency_key,

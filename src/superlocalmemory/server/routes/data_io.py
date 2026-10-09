@@ -240,6 +240,12 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
             IngestionState,
         )
 
+        from superlocalmemory.memory_core import (
+            ContentOrigin,
+            pii_redaction_enabled,
+            prepare_for_save,
+        )
+
         command = build_engine_ingestion_command(engine)
         from superlocalmemory.server.write_identity import (
             authenticated_request_actor,
@@ -274,8 +280,12 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
                 ):
                     if _field in memory:
                         metadata[_field] = memory[_field]
+                prepared = prepare_for_save(
+                    memory_content, origin=ContentOrigin.USER_TEXT,
+                    pii_redaction=pii_redaction_enabled(engine._config),
+                )
                 receipt, created = command.submit_with_status(IngestionRequest(
-                    content=memory_content,
+                    content=prepared.text,
                     profile_id=engine._profile_id,
                     source_type="http-import",
                     idempotency_key=f"import:{file_digest}:{idx}",

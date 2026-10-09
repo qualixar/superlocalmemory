@@ -13,12 +13,24 @@ type = forbidden
 source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
+    superlocalmemory.memory_core
 forbidden_modules =
     torch
     transformers
     sentence_transformers
     lancedb
     pycozo
+allow_indirect_imports = True
+
+[importlinter:contract:memory-core-no-upward]
+name = The shared save step never imports the server, CLI or MCP layers
+type = forbidden
+source_modules =
+    superlocalmemory.memory_core
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
 allow_indirect_imports = True
 
 [importlinter:contract:daemon-no-upward]

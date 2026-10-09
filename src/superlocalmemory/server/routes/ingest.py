@@ -89,9 +89,19 @@ async def ingest(req: IngestRequest, request: Request):
         from superlocalmemory.server.rbac_enforce import require_permission
 
         require_permission(request, Permission.WRITE, profile=engine._profile_id)
+        from superlocalmemory.memory_core import (
+            ContentOrigin,
+            pii_redaction_enabled,
+            prepare_for_save,
+        )
+
+        prepared = prepare_for_save(
+            req.content, origin=ContentOrigin.USER_TEXT,
+            pii_redaction=pii_redaction_enabled(engine._config),
+        )
         command = build_engine_ingestion_command(engine)
         receipt, created = command.submit_with_status(IngestionRequest(
-            content=req.content,
+            content=prepared.text,
             profile_id=engine._profile_id,
             source_type=req.source_type,
             idempotency_key=req.dedup_key,

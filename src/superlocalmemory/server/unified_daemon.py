@@ -1230,7 +1230,18 @@ class ObserveBuffer:
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
             from superlocalmemory.hooks.auto_capture import AutoCapture
+            from superlocalmemory.memory_core import (
+                ContentOrigin,
+                pii_redaction_enabled,
+                prepare_for_save,
+            )
 
+            # The duplicate window and idempotency key keep the caller-derived
+            # hash above; the stored text and the events carry the prepared one.
+            content = prepare_for_save(
+                content, origin=ContentOrigin.USER_TEXT,
+                pii_redaction=pii_redaction_enabled(self._engine._config),
+            ).text
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
                 _emit_event(
@@ -5171,9 +5182,24 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
                 meta[METADATA_KEY] = declared_kind.value
 
+            from superlocalmemory.memory_core import (
+                ContentOrigin,
+                pii_redaction_enabled,
+                prepare_for_save,
+            )
+
+            prepared = prepare_for_save(
+                req.content, origin=ContentOrigin.USER_TEXT,
+                pii_redaction=pii_redaction_enabled(engine._config),
+            )
+            if prepared.pii_count:
+                logger.info(
+                    "PII redaction: scrubbed %d identifier(s) on remember",
+                    prepared.pii_count,
+                )
             store_config = getattr(engine._config, "store", None)
             validate_deterministic_admission(
-                req.content,
+                prepared.text,
                 max_verbatim_chars=getattr(
                     store_config,
                     "max_verbatim_chars",
@@ -5193,7 +5219,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "operation": "store",
                 "agent_id": trusted_actor_id,
                 "profile_id": write_profile,
-                "content_preview": req.content[:100],
+                "content_preview": prepared.text[:100],
             })
 
             # V4 Phase 4: OperationPolicyRegistry evaluation.
@@ -5270,7 +5296,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     )
 
             admission = RememberRequest(
-                content=req.content,
+                content=prepared.text,
                 profile_id=write_profile,
                 source_type="http",
                 idempotency_key=req.idempotency_key or uuid.uuid4().hex,

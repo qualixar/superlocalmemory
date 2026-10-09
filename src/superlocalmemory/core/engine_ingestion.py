@@ -77,18 +77,10 @@ class _ImmediateAdmissionDatabase(Protocol):
 
 
 def _pii_redaction_enabled(engine: "MemoryEngine") -> bool:
-    """C4: opt-in PII redaction on ingest.
+    """Delegate to the shared save step (kept for existing importers)."""
+    from superlocalmemory.memory_core import pii_redaction_enabled
 
-    On when the engine config sets ``pii_redaction`` truthy OR the
-    ``SLM_PII_REDACTION`` env var is set (1/on/true/yes). Default OFF — personal
-    use is unchanged; team/company operators opt in.
-    """
-    cfg = getattr(engine, "_config", None)
-    if cfg is not None and getattr(cfg, "pii_redaction", False):
-        return True
-    return os.environ.get("SLM_PII_REDACTION", "").strip().lower() in (
-        "1", "on", "true", "yes",
-    )
+    return pii_redaction_enabled(getattr(engine, "_config", None))
 
 
 def content_passes_admission(content: str) -> bool:
@@ -339,16 +331,22 @@ def canonical_store(
         return []
     # Credentials are kept as written (see write_queryable); only text that
     # leaves this machine is screened (core/outbound_redaction.py).
-    # C4: opt-in PII redaction. When enabled (config.pii_redaction or
-    # SLM_PII_REDACTION), scrub personal identifiers BEFORE the content is
-    # extracted, embedded, or persisted — nothing sensitive ever reaches disk.
-    if _pii_redaction_enabled(engine):
-        from superlocalmemory.core.pii import redact_pii
+    # Opt-in PII redaction (config.pii_redaction or SLM_PII_REDACTION) runs in
+    # the shared save step, before the content is extracted, embedded or
+    # persisted; with it off the text is stored byte-identical.
+    from superlocalmemory.memory_core import (
+        ContentOrigin,
+        pii_redaction_enabled,
+        prepare_for_save,
+    )
 
-        scrubbed, n_pii = redact_pii(content)
-        if n_pii:
-            content = scrubbed
-            logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
+    prepared = prepare_for_save(
+        content, origin=ContentOrigin.USER_TEXT,
+        pii_redaction=pii_redaction_enabled(engine._config),
+    )
+    content = prepared.text
+    if prepared.pii_count:
+        logger.info("PII redaction: scrubbed %d identifier(s) on ingest", prepared.pii_count)
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
@@ -440,13 +438,30 @@ def canonical_store_fact(
     _require_known_profile(engine, profile_id or engine._profile_id)
     if is_low_quality(fact.content):
         return fact.fact_id
+    from superlocalmemory.memory_core import (
+        ContentOrigin,
+        pii_redaction_enabled,
+        prepare_for_save,
+    )
+
+    # The request text and the prebuilt payload must stay equal (background
+    # enrichment re-checks it), so both carry the prepared text. The caller's
+    # fact object is left untouched.
+    prepared = prepare_for_save(
+        fact.content, origin=ContentOrigin.USER_TEXT,
+        pii_redaction=pii_redaction_enabled(engine._config),
+    )
+    if prepared.pii_count:
+        logger.info("PII redaction: scrubbed %d identifier(s) on ingest", prepared.pii_count)
+    payload = _prebuilt_fact_payload(fact)
+    payload["content"] = prepared.text
     command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
-        content=fact.content,
+        content=prepared.text,
         profile_id=profile_id or engine._profile_id,
         source_type="python-api-prebuilt",
         idempotency_key=f"prebuilt:{fact.fact_id}",
-        metadata={_PREBUILT_FACT_KEY: _prebuilt_fact_payload(fact)},
+        metadata={_PREBUILT_FACT_KEY: payload},
         scope=fact.scope or "personal",
         shared_with=tuple(fact.shared_with or ()),
         trusted_actor_id=trusted_actor_id,
