@@ -75,6 +75,7 @@ class _Pass:
     rows: dict[str, dict[str, Any]]
     vanished: dict[str, list[str]] = field(default_factory=dict)
     names: links.NameIndex | None = None  # Obsidian sources: where embeds can point
+    only: frozenset[str] | None = None  # a targeted pass looks at these paths and nothing else
 
     @property
     def sid(self) -> str:
@@ -288,6 +289,14 @@ def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
     return stats
 
 
+def _narrow(p: _Pass, walked: WalkResult) -> list[Entry]:
+    """The entries this pass looks at; a targeted pass also keeps only the matching rows."""
+    if p.only is None:
+        return walked.entries
+    p.rows = {r: row for r, row in p.rows.items() if r in p.only}
+    return [e for e in walked.entries if e.relpath in p.only]
+
+
 def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | None) -> None:
     p.stats.errors += retire.retry_hides(p.host, p.store, p.runtime, p.source)
     borrows.reset_dead_borrows(p.store, p.runtime, p.sid)
@@ -296,7 +305,8 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
         p.names = links.NameIndex([e.relpath for e in walked.entries]
                                   + [r for r, row in p.rows.items() if row["state"] == "indexed"])
     candidates: list[Entry] = []
-    for e in walked.entries:
+    entries = _narrow(p, walked)
+    for e in entries:
         row = p.rows.get(e.relpath)
         if e.placeholder:
             _placeholder(p, e, row)
@@ -304,7 +314,7 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
             p.stats.unchanged += 1
         else:
             candidates.append(e)
-    seen = {e.relpath for e in walked.entries}
+    seen = {e.relpath for e in entries}
     _index_vanished(p, seen, walked)
     hashed = _hash_all(p, _stable(p, candidates))
     for i, (e, sha) in enumerate(hashed):
@@ -364,8 +374,13 @@ def _offline(store: SourceStore, source: dict, stats: ScanStats, reason: str) ->
 
 
 def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
-                progress: Callable[[int, int], None] | None = None) -> ScanStats:
-    """Reconcile one source with its folder; returns what happened."""
+                progress: Callable[[int, int], None] | None = None,
+                only: frozenset[str] | None = None) -> ScanStats:
+    """Reconcile one source with its folder; returns what happened.
+
+    ``only`` names the relpaths a watcher saw change. The tree is still walked, so every rule
+    (ignore, credential screen, links, remote access) applies; only those paths are read or hidden.
+    """
     stats = ScanStats(root_dev=_known_device(source))
     if host.remote_on():
         return _pause(store, source, stats)
@@ -388,13 +403,16 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     if device or (not walked.entries and not walked.capped and store.files(source["source_id"], ("indexed",))):
         return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
-    p = _Pass(host, store, source, runtime, root, stats, {})
+    p = _Pass(host, store, source, runtime, root, stats, {}, only=only)
     with background_work():
         _work(p, walked, progress)
     if stats.removed:
         return stats
     if stats.paused:
         return _pause(store, source, stats)
+    if only is not None:  # a partial look must not move the full-scan clock or its numbers
+        store.set_state(source["source_id"], "active")
+        return stats
     store.set_state(source["source_id"], "active", stats=stats.summary(), scanned=True)
     return stats
 
