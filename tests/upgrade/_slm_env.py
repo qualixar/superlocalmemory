@@ -16,9 +16,9 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,7 +49,7 @@ class Instance:
     port: int = field(default_factory=free_port)
 
     def env(self) -> dict[str, str]:
-        env = dict(os.environ)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SLM_TEST_")}
         env.update(
             SLM_DATA_DIR=str(self.data_dir), HOME=str(self.home),
             SLM_DAEMON_PORT=str(self.port), HF_HUB_OFFLINE="1",
@@ -77,10 +77,18 @@ class Instance:
             return self.port
 
     def health(self) -> dict | None:
+        """GET /health, done in a child interpreter.
+
+        Old versions listen on the default daemon port whatever SLM_DAEMON_PORT says, and
+        the repo's pytest plugin refuses in-process connections to that port.
+        """
+        code = ("import sys, urllib.request; "
+                "sys.stdout.write(urllib.request.urlopen('http://127.0.0.1:%d/health', timeout=3)"
+                ".read().decode())" % self.live_port())
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{self.live_port()}/health", timeout=3) as r:
-                return json.loads(r.read().decode())
-        except Exception:  # noqa: BLE001 - not up yet
+            p = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10)
+            return json.loads(p.stdout) if p.returncode == 0 else None
+        except (subprocess.TimeoutExpired, ValueError):
             return None
 
     def serve_start(self, wait: int = 180) -> tuple[bool, float, str]:

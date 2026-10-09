@@ -55,6 +55,11 @@ def recall_verdict(base_a: list[list[str]], base_b: list[list[str]], new: list[l
             "possible": sum(min(5, len(a)) for a in base_a)}
 
 
+def expected_hits(results: list[list[str]]) -> int:
+    """Queries whose expected corpus id is in the top 5 (of len(QUERIES))."""
+    return sum(1 for r, q in zip(results, corpus.QUERIES) if set(q.expected) <= set(r[:5]))
+
+
 def copy_fixture(fixture: Path, label: str, work: Path) -> Path:
     dest = work / label
     (dest / "home").mkdir(parents=True)
@@ -181,33 +186,44 @@ def snapshot_manifest(data: Path, snapshot: Path) -> dict:
     return {}
 
 
-def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, work: Path) -> dict:
-    """A snapshot made during the upgrade exists and restores the pre-upgrade store."""
+def restore_one(new_py: Path, root: Path, snap: Path, fixture: Path, work: Path) -> dict:
+    """Restore one snapshot over a copy of its database; compare with the fixture's."""
+    kind = "memory.db" if snap.name.startswith("memory-") else "learning.db"
     data = root / "home" / env.DATA_SUBDIR
-    snaps = new_snapshots(data, known)
-    mem = next((s for s in snaps if s.name.startswith("memory-")), None)
-    detail: dict = {"snapshots": [s.name for s in snaps], "passed": False, "errors": [],
-                    "fixture_schema_version": env.schema_version(fixture / "data" / "learning.db")}
-    if mem is None:
-        detail["errors"].append("no memory-*-pre-migration.db created by the upgrade")
-        return detail
-    entry = snapshot_manifest(data, mem)
-    detail["manifest_sha256_present"] = bool(entry.get("sha256"))
-    probe = work / "restore-probe"
+    entry = snapshot_manifest(data, snap)
+    probe = work / f"restore-{kind}"
     shutil.copytree(data, probe)
-    err = restore_in_copy(new_py, probe / SNAP_DIR / mem.name, probe / "memory.db", entry.get("sha256"))
+    err = restore_in_copy(new_py, probe / SNAP_DIR / snap.name, probe / kind, entry.get("sha256"))
+    out: dict = {"db": kind, "snapshot": snap.name, "manifest_sha256_present": bool(entry.get("sha256"))}
     if err:
-        detail["errors"].append(f"restore failed: {err}")
+        return {**out, "ok": False, "error": f"restore failed: {err}"}
+    want = env.table_counts(fixture / "data" / kind)
+    got = env.table_counts(probe / kind)
+    extra = {k: v for k, v in got.items() if k not in want}
+    rows_ok = all(got.get(k) == v for k, v in want.items()) and not any(extra.values())
+    contents_ok = (kind != "memory.db" or
+                   env.contents_by_ref(probe / kind) == env.contents_by_ref(fixture / "data" / kind))
+    return {**out, "ok": bool(rows_ok and contents_ok), "rows_identical": rows_ok, "contents_identical": contents_ok,
+            "bytes_identical": env.sha256_file(probe / kind) == env.sha256_file(fixture / "data" / kind),
+            "extra_tables": extra}
+
+
+def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, work: Path) -> dict:
+    """The upgrade left a snapshot, and restoring it gives back the pre-upgrade database."""
+    snaps = new_snapshots(root / "home" / env.DATA_SUBDIR, known)
+    detail: dict = {"snapshots": [s.name for s in snaps], "passed": False, "errors": [], "restores": [],
+                    "fixture_schema_version": env.schema_version(fixture / "data" / "learning.db")}
+    rc, out, _, _ = instance(new_py.parent, root).run("db", "restore-points", "--json", timeout=60)
+    detail["restore_points_rc"] = rc
+    if not snaps and detail["fixture_schema_version"] == TARGET_SCHEMA:
+        detail.update(passed=True, not_applicable="fixture already at the target schema; nothing to migrate, so no copy is taken")
         return detail
-    want_rows = env.table_counts(fixture / "data" / "memory.db")
-    got_rows = env.table_counts(probe / "memory.db")
-    detail["bytes_identical"] = env.sha256_file(probe / "memory.db") == env.sha256_file(fixture / "data" / "memory.db")
-    extra = {k: v for k, v in got_rows.items() if k not in want_rows}
-    detail["extra_tables"] = extra  # tables the new version created before the copy was taken
-    detail["rows_identical"] = (all(got_rows.get(k) == v for k, v in want_rows.items())
-                                and not any(extra.values()))
-    detail["contents_identical"] = env.contents_by_ref(probe / "memory.db") == env.contents_by_ref(fixture / "data" / "memory.db")
-    detail["passed"] = bool(detail["rows_identical"] and detail["contents_identical"])
+    if not snaps:
+        detail["errors"].append("no *-pre-migration.db was created by the upgrade start")
+        return detail
+    detail["restores"] = [restore_one(new_py, root, s, fixture, work) for s in snaps]
+    detail["errors"] += [r["error"] for r in detail["restores"] if r.get("error")]
+    detail["passed"] = all(r["ok"] for r in detail["restores"])
     return detail
 
 
@@ -259,6 +275,8 @@ def run_checks(fixture: Path, old_py: Path, new_py: Path, work: Path) -> dict:
     recall: dict = {"errors": base["errors"], "reference_status": base["status"], "new_status": status}
     if len(runs) == 2 and new_results:
         recall.update(recall_verdict(runs[0], runs[1], new_results))
+        recall["expected_in_top5"] = {"reference": [expected_hits(r) for r in runs],
+                                      "new": expected_hits(new_results), "of": len(corpus.QUERIES)}
         recall["passed"] = recall["verdict"] != "worse"
         down["recall_vs_baseline"] = recall_verdict(runs[0], runs[1], down_results) if down_results else None
     else:

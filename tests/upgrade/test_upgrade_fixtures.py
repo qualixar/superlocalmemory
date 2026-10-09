@@ -8,12 +8,14 @@ Environment:
                     (default: ``tests/upgrade/fixtures``)
   SLM_UPG_OLD_PY    python of a venv with superlocalmemory 4.1.24 installed
   SLM_UPG_NEW_PY    python of a venv running this checkout (default: this interpreter)
+  SLM_UPG_OUT       directory to write one verdict JSON per version (optional)
 
 Run with: ``pytest tests/upgrade -m slow``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -41,5 +43,9 @@ def test_fixture_upgrades_and_downgrades(version, tmp_path):
     new_py = Path(os.environ.get("SLM_UPG_NEW_PY", sys.executable))
     work = env.make_work_dir()
     verdict = uc.run_checks(FIXTURES / version, Path(old_py), new_py, work)
+    out = os.environ.get("SLM_UPG_OUT")
+    if out:
+        Path(out).mkdir(parents=True, exist_ok=True)
+        (Path(out) / f"verdict-{version}.json").write_text(json.dumps(verdict, indent=2, sort_keys=True))
     failed = {name: c.get("errors") for name, c in verdict["checks"].items() if not c.get("passed")}
     assert not failed, failed
