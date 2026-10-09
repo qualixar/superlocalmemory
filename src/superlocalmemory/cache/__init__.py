@@ -4,6 +4,8 @@
 """A local derivation cache: repeat work for the same content costs nothing."""
 
 from superlocalmemory.cache.factory import (
+    clear_derived_cache,
+    reconcile_redaction_policy,
     default_cache,
     derive_cache_path,
     get_or_compute,
@@ -17,6 +19,6 @@ from superlocalmemory.cache.tiered import TieredCache
 
 __all__ = [
     "CacheKey", "CachePort", "LruCache", "SqliteDeriveCache", "TieredCache",
-    "default_cache", "derive_cache_path", "get_or_compute", "invalidate_for_model",
-    "params_hash",
+    "clear_derived_cache", "default_cache", "derive_cache_path", "get_or_compute", "invalidate_for_model",
+    "params_hash", "reconcile_redaction_policy",
 ]

@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Callable
 
 from superlocalmemory.cache.keys import CacheKey
 from superlocalmemory.cache.port import CachePort
-from superlocalmemory.cache.sqlite_store import SqliteDeriveCache
+from superlocalmemory.cache.sqlite_store import SqliteDeriveCache, set_initial_meta
 from superlocalmemory.cache.tiered import TieredCache
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,62 @@ def invalidate_content(content_sha256: str, data_root: str | Path | None = None)
     return SqliteDeriveCache(path).invalidate_content(content_sha256)
 
 
+def clear_derived_cache(reason: str) -> bool:
+    """Delete the derivation cache file and drop every in-memory copy of it.
+
+    Returns True when a cache file was removed, False when there was none or the
+    removal failed. Never raises. The reason is logged; no cached content is.
+    """
+    try:
+        path = derive_cache_path()
+        if not path.exists():
+            return False
+        with _lock:
+            for cache in list(_instances.values()):
+                cache.clear()
+            _instances.clear()
+        SqliteDeriveCache(path).clear()  # covers a file no live instance owned
+        logger.info("derivation cache cleared: %s", reason)
+        return True
+    except Exception as exc:
+        logger.warning("derivation cache could not be cleared (%s): %s", reason, exc)
+        return False
+
+
+_POLICY_KEY = "redaction_policy"
+
+
+def reconcile_redaction_policy(enabled: bool) -> bool:
+    """Clear the cache when it was filled under a different redaction setting.
+
+    The setting in force is stored in the cache file's metadata. Creates no file;
+    a file created later starts with the current setting recorded. Never raises.
+    """
+    state = "on" if enabled else "off"
+    set_initial_meta(_POLICY_KEY, state)
+    try:
+        path = derive_cache_path()
+        if not path.exists():
+            return False
+        conn = sqlite3.connect(str(path), timeout=10.0)
+        try:
+            row = conn.execute("SELECT value FROM cache_meta WHERE key=?",
+                               (_POLICY_KEY,)).fetchone()
+            if row is None and not enabled:
+                conn.execute("INSERT OR REPLACE INTO cache_meta (key, value) VALUES (?, ?)",
+                             (_POLICY_KEY, state))
+                conn.commit()
+                return False
+        finally:
+            conn.close()
+        if row is not None and row[0] == state:
+            return False
+        return clear_derived_cache("redaction setting changed")
+    except Exception as exc:
+        logger.warning("redaction policy check of the derivation cache failed: %s", exc)
+        return False
+
+
 def get_or_compute(cache: CachePort, key: CacheKey, kind: str,
                    compute: Callable[[], bytes]) -> bytes:
     """Return the cached payload, or compute and store it. A cache fault only costs a recompute."""
@@ -89,5 +146,8 @@ def get_or_compute(cache: CachePort, key: CacheKey, kind: str,
 
 
 def _reset_for_tests() -> None:
+    from superlocalmemory.cache import sqlite_store
+
+    sqlite_store._initial_meta.clear()
     with _lock:
         _instances.clear()

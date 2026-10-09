@@ -44,7 +44,13 @@ class CacheKey:
 
 
 def params_hash(params: Mapping[str, Any]) -> str:
-    """A stable hash of JSON-safe parameters, independent of key order."""
+    """A stable hash of JSON-safe parameters, independent of key order.
+
+    A deriver that caches derived text must include the personal-data redaction
+    policy in its parameters (for example ``{"redaction": "on"}`` or
+    ``{"redaction": "off"}``), so text derived without redaction is never served
+    once redaction is on.
+    """
     try:
         text = json.dumps(dict(params), sort_keys=True, separators=(",", ":"))
     except (TypeError, ValueError) as exc:
