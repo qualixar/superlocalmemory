@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.sources import host as host_mod
-from superlocalmemory.sources import retire
+from superlocalmemory.sources import locks, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import DEFAULT_TYPES
 from superlocalmemory.sources.preview import SourcePreview, build_preview
@@ -138,25 +138,41 @@ def _source(store: SourceStore | None, source_id: str) -> dict[str, Any]:
 
 
 def remove_source(source_id: str, *, purge: bool = False) -> None:
-    """Disconnect a folder. Its memories are hidden (kept); with ``purge`` they are erased."""
+    """Disconnect a folder. Its memories are hidden (kept); with ``purge`` they are erased.
+
+    A scan that is running for the folder is told to stop and finishes its current file first;
+    queued scans are cancelled. Once removed, the folder is never set back by a scan.
+    """
     media, store, host = _open()
     try:
         source = _source(store, source_id)
         runtime = host.runtime()
         if runtime is None:
             raise SourceRefused("writer_not_ready", "The memory writer is not ready; try again shortly.")
-        for row in store.files(source_id):
-            if purge:
-                if not retire.erase_row(host, store, runtime, source, row):
-                    raise SourceRefused("erasure_incomplete", "The erasure was not complete; try again.")
-            elif row["state"] != "tombstoned":
-                retire.hide_file(host, store, runtime, source, row, tombstone=True)
-        if purge:
-            store.delete_source_rows(source_id)
-        else:
-            store.set_state(source_id, "removed")
+        locks.mark_removing(source_id)
+        try:
+            store.cancel_scans(source_id)
+            with locks.source_lock(source_id):
+                _clear_source(host, store, runtime, source, purge)
+        finally:
+            locks.clear_removing(source_id)
     finally:
         media.close()
+
+
+def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: dict[str, Any],
+                  purge: bool) -> None:
+    source_id = source["source_id"]
+    for row in store.files(source_id):
+        if purge:
+            if not retire.erase_row(host, store, runtime, source, row):
+                raise SourceRefused("erasure_incomplete", "The erasure was not complete; try again.")
+        elif row["state"] != "tombstoned":
+            retire.hide_file(host, store, runtime, source, row, tombstone=True)
+    if purge:
+        store.delete_source_rows(source_id)
+    else:
+        store.set_state(source_id, "removed")
 
 
 def rescan(source_id: str) -> dict[str, Any]:

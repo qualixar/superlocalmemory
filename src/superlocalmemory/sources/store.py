@@ -74,7 +74,8 @@ class SourceStore:
             sets.append("last_scan_at = ?")
             args.append(utc_stamp())
         with self._m._write() as conn:
-            conn.execute(f"UPDATE sources SET {', '.join(sets)} WHERE source_id = ?", (*args, source_id))
+            conn.execute(f"UPDATE sources SET {', '.join(sets)} WHERE source_id = ? AND state != 'removed'",
+                         (*args, source_id))
 
     # -- files -------------------------------------------------------------------
     def files(self, source_id: str, states: Sequence[str] | None = None) -> list[dict[str, Any]]:
@@ -153,6 +154,14 @@ class SourceStore:
         return {r[0]: r[1] for r in rows}
 
     # -- jobs --------------------------------------------------------------------
+    def cancel_scans(self, source_id: str) -> int:
+        """Cancel the queued and running scan jobs of a source (a removed source is not scanned)."""
+        with self._m._write() as conn:
+            return conn.execute(
+                "UPDATE jobs SET state = 'cancelled', lease_owner = NULL, lease_until = NULL, updated_at = ?"
+                " WHERE kind = 'source_scan' AND state IN ('queued', 'running')"
+                " AND json_extract(payload_json, '$.source_id') = ?", (utc_stamp(), source_id)).rowcount
+
     def queue_scan(self, profile_id: str, source_id: str) -> dict[str, Any]:
         """Queue a scan unless one is already waiting or running for this source."""
         for job in self._m.list_jobs(profile_id, ["queued", "running"]):

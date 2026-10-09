@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from superlocalmemory.media.store_jobs import utc_stamp
+from superlocalmemory.sources import locks
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.reconcile import scan_source
 from superlocalmemory.sources.store import SourceStore
@@ -123,11 +124,15 @@ class SourceScanService:
                 store.queue_scan(source["profile_id"], source["source_id"])
 
     def _run_job(self, store: SourceStore, media: Any, job: dict[str, Any]) -> bool:
-        source = store.get_source(json.loads(job["payload_json"]).get("source_id", ""))
-        if source is None or source["state"] == "removed":
-            media.finish_job(job["job_id"], self._owner, "cancelled")
-            return True
+        source_id = json.loads(job["payload_json"]).get("source_id", "")
+        with locks.source_lock(source_id):  # a removal waits for the scan, and the scan stops for it
+            source = store.get_source(source_id)
+            if source is None or source["state"] == "removed":
+                media.finish_job(job["job_id"], self._owner, "cancelled")
+                return True
+            return self._scan(store, media, job, source)
 
+    def _scan(self, store: SourceStore, media: Any, job: dict[str, Any], source: dict[str, Any]) -> bool:
         def progress(done: int, total: int) -> None:
             if self._stop.is_set():
                 raise InterruptedError
@@ -143,7 +148,7 @@ class SourceScanService:
             media.release_job(job["job_id"], self._owner)
             self._stop.wait(self._poll_s)
             return False
-        media.finish_job(job["job_id"], self._owner, "done")
+        media.finish_job(job["job_id"], self._owner, "cancelled" if stats.removed else "done")
         return True
 
 

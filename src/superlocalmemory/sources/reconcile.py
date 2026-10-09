@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.media.store_jobs import utc_stamp
-from superlocalmemory.sources import ingest, retire
+from superlocalmemory.sources import ingest, locks, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
@@ -51,6 +51,7 @@ class ScanStats:
     offline: bool = False
     paused: bool = False
     waiting: bool = False
+    removed: bool = False
 
     def summary(self) -> dict[str, Any]:
         out = asdict(self)
@@ -242,6 +243,14 @@ def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
             p.store.delete_file(p.sid, rel)
 
 
+def _gone(p: _Pass) -> bool:
+    """True once the source is being removed or is removed: the scan must write nothing more."""
+    if locks.is_removing(p.sid):
+        return True
+    current = p.store.get_source(p.sid)
+    return current is None or current["state"] == "removed"
+
+
 def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
     stats.paused = True
     store.set_state(source["source_id"], "paused", stats=stats.summary())
@@ -264,6 +273,9 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
     _index_vanished(p, seen, walked)
     hashed = _hash_all(p, _stable(p, candidates))
     for i, (e, sha) in enumerate(hashed):
+        if _gone(p):
+            p.stats.removed = True
+            return
         if i % _REMOTE_CHECK_EVERY == _REMOTE_CHECK_EVERY - 1 and p.host.remote_on():
             p.stats.paused = True
             return
@@ -277,6 +289,9 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
                              sha256=sha, **_stat_fields(e))
         if progress:
             progress(i + 1, len(hashed))
+    if _gone(p):
+        p.stats.removed = True
+        return
     if not walked.capped:
         _tombstone_missing(p, seen, walked)
     p.stats.purged = retire.purge_due(p.host, p.store, p.runtime, p.source)
@@ -304,6 +319,8 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     p = _Pass(host, store, source, runtime, root, stats, {})
     with background_work():
         _work(p, walked, progress)
+    if stats.removed:
+        return stats
     if stats.paused:
         return _pause(store, source, stats)
     store.set_state(source["source_id"], "active", stats=stats.summary(), scanned=True)
