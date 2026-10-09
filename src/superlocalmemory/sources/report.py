@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from superlocalmemory.sources.store import SourceStore
-from superlocalmemory.sources.watcher import is_watching
+from superlocalmemory.sources.folder_watch import is_watching
 
 
 @dataclass(frozen=True)
