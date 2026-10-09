@@ -81,11 +81,11 @@ def test_the_preview_never_blocks_on_a_pipe(tmp_path):
     assert done and box.get("value") == 0
 
 
-def test_a_scan_counts_a_swapped_in_link_as_an_error_and_does_not_read_it(env):
+def test_a_scan_skips_a_swapped_in_link_and_does_not_read_it(env):
     path = env.write("n.md", "a note")
     sid = env.add_and_confirm()
     path.unlink()
     path.symlink_to(env.write("elsewhere.txt", "other words"))
     stats = env.scan(sid)
-    assert stats.errors == 1 and "n.md" not in env.files(sid)
+    assert stats.errors == 0 and stats.skipped == {"symlink_file": 1} and "n.md" not in env.files(sid)
     assert env.runtime.contents() == ["other words"]  # only the real file was read

@@ -90,3 +90,16 @@ def test_a_url_with_a_password_is_found():
 
 def test_urls_without_a_password_are_not_credentials():
     assert detect_secrets("see https://example.com:8080/path and ssh://git@github.com/org/repo") == []
+
+
+def test_the_shared_redaction_patterns_keep_their_original_sk_shapes():
+    from superlocalmemory.core.security_primitives import _SECRET_PATTERNS, redact_secrets
+
+    sk = [p.pattern for p, kind in _SECRET_PATTERNS if kind in ("OPENAI", "ANTHROPIC")]
+    assert sk == [r"sk-ant-[A-Za-z0-9_\-]{20,}", r"sk-[A-Za-z0-9_\-]{20,}"]
+    assert "sk-" not in redact_secrets("key sk-" + "a" * 30)
+
+
+def test_detection_alone_ignores_kebab_case_words_but_still_finds_a_real_key():
+    assert detect_secrets("see risk-assessment-for-quarterly-review today") == []
+    assert [h.kind for h in detect_secrets("key sk-" + "a" * 30)] == ["OPENAI"]

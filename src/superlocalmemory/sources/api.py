@@ -64,6 +64,7 @@ class SourceInfo:
     include_types: tuple[str, ...]
     files: dict[str, int] = field(default_factory=dict)
     last_scan_at: str | None = None
+    offline_reason: str | None = None
 
 
 def _open(create: bool = False) -> tuple[Any, SourceStore | None, SourceHost]:
@@ -130,6 +131,17 @@ def _remember_device(store: SourceStore, source_id: str, root: Path) -> None:
                         stats={**known, "root_dev": os.stat(root).st_dev})
 
 
+def _offline_reason(source: dict[str, Any]) -> str | None:
+    import json
+
+    if source["state"] != "offline":
+        return None
+    try:
+        return json.loads(source.get("last_scan_stats_json") or "{}").get("offline_reason") or None
+    except ValueError:
+        return None
+
+
 def list_sources(profile_id: str) -> list[SourceInfo]:
     media, store, _ = _open()
     if media is None:
@@ -141,7 +153,8 @@ def list_sources(profile_id: str) -> list[SourceInfo]:
             source_id=s["source_id"], profile_id=s["profile_id"], kind=s["kind"], root_path=s["root_path"],
             display_name=s["display_name"], state=s["state"],
             include_types=tuple(json.loads(s["include_types_json"])), files=store.counts(s["source_id"]),
-            last_scan_at=s["last_scan_at"]) for s in store.list_sources(profile_id)]
+            last_scan_at=s["last_scan_at"], offline_reason=_offline_reason(s))
+            for s in store.list_sources(profile_id)]
     finally:
         media.close()
 

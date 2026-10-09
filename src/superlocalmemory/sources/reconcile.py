@@ -110,6 +110,8 @@ def _stable(p: _Pass, candidates: list[Entry]) -> list[Entry]:
     p.host.sleep(p.host.stability_s)
     steady = []
     for e in candidates:
+        if _gone(p):
+            return []
         again = stat_entry(p.root, e.relpath)
         if again is not None and again.signature() == e.signature() and not again.placeholder:
             steady.append(e)
@@ -229,6 +231,8 @@ def _process(p: _Pass, e: Entry, sha: str) -> None:
 def _hash_all(p: _Pass, entries: list[Entry]) -> list[tuple[Entry, str]]:
     out = []
     for e in entries:
+        if _gone(p):
+            break
         try:
             out.append((e, _digest(p.root / e.relpath, None, e.file_id)[0]))
         except OSError:
@@ -354,6 +358,8 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
         root = check_root(source["root_path"])  # the rules for a new folder hold on every scan
     except RootRefused as exc:
         return _offline(store, source, stats, exc.code)
+    if str(root) != source["root_path"]:  # the path now leads somewhere else than the folder confirmed
+        return _offline(store, source, stats, "root_moved")
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:
         walked = walk_tree(root, rules)

@@ -74,8 +74,8 @@ def _classify(root: Path, dirpath: str, item: os.DirEntry, rules: IgnoreRules,
             result.skip("symlink_escape")
             return "skip", None
         is_dir = item.is_dir(follow_symlinks=False)
-        if symlink and item.is_dir():
-            result.skip("symlink_dir")
+        if symlink:
+            result.skip("symlink_dir" if item.is_dir() else "symlink_file")
             return "skip", None
         st = item.stat()
         if not st.st_ino:  # Windows listings carry no file id; ask the file itself

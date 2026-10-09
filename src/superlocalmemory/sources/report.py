@@ -25,6 +25,7 @@ class SourceReport:
     last_scan_at: str | None = None
     paused_reason: str | None = None
     capped: bool = False
+    offline_reason: str | None = None
 
 
 def build_report(store: SourceStore, source: dict[str, Any]) -> SourceReport:
@@ -42,4 +43,5 @@ def build_report(store: SourceStore, source: dict[str, Any]) -> SourceReport:
         cloud_only=[r["relpath"] for r in pick("cloud_placeholder")],
         errors=[{"relpath": r["relpath"], "reason": r["reason"] or ""} for r in pick("error")],
         last_scan_at=source.get("last_scan_at"), paused_reason=stats.get("paused_reason"),
-        capped=bool(stats.get("capped")))
+        capped=bool(stats.get("capped")),
+        offline_reason=(stats.get("offline_reason") or None) if source["state"] == "offline" else None)

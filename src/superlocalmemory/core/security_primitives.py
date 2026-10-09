@@ -231,8 +231,8 @@ def verify_sha256(data: bytes, expected_hex: str) -> None:
 
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?<![A-Za-z0-9-])sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
-    (re.compile(r"(?<![A-Za-z0-9-])sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
+    (re.compile(r"sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
     (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "GITHUB"),
     (re.compile(r"AKIA[A-Z0-9]{16}"), "AWS"),
     (re.compile(r"xoxb-[A-Za-z0-9\-]{10,}"), "SLACK"),
@@ -242,7 +242,11 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 #: Shapes ``detect_secrets`` adds to the replaced ones above; ``redact_secrets`` does not use them.
+#: The two ``sk-`` shapes are anchored copies, so a word like ``risk-assessment-for-review`` is no key;
+#: ``detect_secrets`` uses these instead of the unanchored ones in ``_SECRET_PATTERNS``.
 _DETECT_ONLY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<![A-Za-z0-9-])sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
+    (re.compile(r"(?<![A-Za-z0-9-])sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"), "AWS"),
     (re.compile(r"(?i)\baws_secret_access_key\s*[=:]\s*\S{40}"), "AWS_SECRET"),
     (credential_shapes._URL_PASSWORD, "URL_PASSWORD"),
@@ -305,7 +309,8 @@ def detect_secrets(text: str) -> list[SecretHit]:
     if not isinstance(text, str) or not text:
         return []
     found: list[SecretHit] = []
-    for pattern, kind in (*_SECRET_PATTERNS, *credential_shapes.TOKEN_SHAPES, *_DETECT_ONLY_PATTERNS):
+    plain = tuple(item for item in _SECRET_PATTERNS if item[1] not in ("ANTHROPIC", "OPENAI"))
+    for pattern, kind in (*plain, *credential_shapes.TOKEN_SHAPES, *_DETECT_ONLY_PATTERNS):
         found.extend(SecretHit(kind, m.start(), m.end()) for m in pattern.finditer(text))
     found.sort(key=lambda h: (h.start, -(h.end - h.start)))
     hits: list[SecretHit] = []
