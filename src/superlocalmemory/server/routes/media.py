@@ -12,6 +12,7 @@ for the profile the picture belongs to.
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import re
 from pathlib import Path
@@ -26,6 +27,7 @@ from superlocalmemory.server.loopback import is_loopback
 
 router = APIRouter(prefix="/api/v3/media", tags=["media"])
 _ID = re.compile(r"[0-9a-f]{32}")
+MAX_JSON_THUMB_BYTES = 32 * 1024
 _CODES = {"stored": 200, "duplicate": 200, "warming": 202, "refused": 422}
 
 
@@ -114,13 +116,15 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
 
 
 @router.get("/{media_id}/thumb")
-async def thumbnail(media_id: str, request: Request, profile_id: str = ""):
+async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = ""):
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.media import open_media_store
     from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
+    if format not in ("", "json"):
+        raise HTTPException(422, detail="format must be empty or json.")
     engine = require_engine(request)
     profile = _profile(engine, profile_id)
     require_permission(request, Permission.READ, profile=profile)
@@ -133,5 +137,11 @@ async def thumbnail(media_id: str, request: Request, profile_id: str = ""):
         store.close()
     if not row or row["profile_id"] != profile or row["state"] != "active" or not row["thumb_webp"]:
         raise HTTPException(404, detail="Not found.")
+    if format == "json":
+        thumb = bytes(row["thumb_webp"])
+        if len(thumb) > MAX_JSON_THUMB_BYTES:
+            raise HTTPException(413, detail="Thumbnail is too large to send inline.")
+        return JSONResponse({"mime": "image/webp", "base64": base64.b64encode(thumb).decode("ascii")},
+                            headers={"Cache-Control": "private, max-age=3600"})
     return Response(bytes(row["thumb_webp"]), media_type="image/webp",
                     headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})

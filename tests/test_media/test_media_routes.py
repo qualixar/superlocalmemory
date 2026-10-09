@@ -203,3 +203,45 @@ def test_gc_route_defaults_to_a_dry_run_and_is_local_only(monkeypatch):
     assert c.post("/api/v3/media/gc", json={"dry_run": False}).json()["dry_run"] is False
     assert make(monkeypatch, client=REMOTE)[0].post("/api/v3/media/gc", json={}).status_code == 403
     assert make(monkeypatch, actor="")[0].post("/api/v3/media/gc", json={"dry_run": False}).status_code == 403
+
+
+def _one_thumb(tmp_path, monkeypatch, thumb=b"RIFFxxxxWEBP"):
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    s = open_media_store(create=True, data_root=tmp_path)
+    base = dict(kind="image", source_sha256="a" * 64, mime="image/png", bytes=1, origin="tool", thumb_webp=thumb)
+    mine = s.insert_item(profile_id="default", **base)
+    theirs = s.insert_item(profile_id="other", **{**base, "source_sha256": "b" * 64})
+    s.close()
+    return mine, theirs
+
+
+def test_thumbnail_json_form_carries_the_image_as_base64(monkeypatch, tmp_path):
+    mine, _ = _one_thumb(tmp_path, monkeypatch)
+    c, _ = make(monkeypatch)
+    r = c.get(f"/api/v3/media/{mine}/thumb?format=json")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
+    assert r.json() == {"mime": "image/webp", "base64": base64.b64encode(b"RIFFxxxxWEBP").decode()}
+    plain = c.get(f"/api/v3/media/{mine}/thumb")
+    assert plain.headers["content-type"] == "image/webp" and plain.content == b"RIFFxxxxWEBP"
+
+
+def test_thumbnail_json_form_keeps_the_local_and_profile_checks(monkeypatch, tmp_path):
+    mine, theirs = _one_thumb(tmp_path, monkeypatch)
+    c, _ = make(monkeypatch)
+    assert c.get(f"/api/v3/media/{theirs}/thumb?format=json").status_code == 404
+    remote, _ = make(monkeypatch, client=REMOTE)
+    assert remote.get(f"/api/v3/media/{mine}/thumb?format=json").status_code == 403
+
+
+def test_thumbnail_json_form_refuses_a_thumbnail_over_32kb(monkeypatch, tmp_path):
+    mine, _ = _one_thumb(tmp_path, monkeypatch, thumb=b"x" * (32 * 1024 + 1))
+    c, _ = make(monkeypatch)
+    r = c.get(f"/api/v3/media/{mine}/thumb?format=json")
+    assert r.status_code == 413 and "base64" not in r.text
+    assert c.get(f"/api/v3/media/{mine}/thumb").status_code == 200
+
+
+def test_an_unknown_thumbnail_format_is_422(monkeypatch, tmp_path):
+    mine, _ = _one_thumb(tmp_path, monkeypatch)
+    c, _ = make(monkeypatch)
+    assert c.get(f"/api/v3/media/{mine}/thumb?format=xml").status_code == 422
