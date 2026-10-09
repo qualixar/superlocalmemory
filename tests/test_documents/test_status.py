@@ -43,9 +43,3 @@ def test_soft_remove_hides_pages_and_archives_their_memories(store, tmp_path):
     assert store.list_items("p1", kind="page") == [] and len(store.list_items("p1", kind="page", state="tombstoned")) == 2
     assert sorted(f for _, f in runtime.archived) == ["fact1", "fact2", "fact3"]
     assert remove_document(r.document_id, "p1", runtime=runtime, store=store) is False   # already gone
-
-
-def test_hard_removal_is_not_available_yet(store):
-    r = submit_document(pdf_input(("a",)), profile_id="p1", actor_id="a", config=CFG, store=store)
-    with pytest.raises(NotImplementedError):
-        remove_document(r.document_id, "p1", hard=True, runtime=Runtime(), store=store)

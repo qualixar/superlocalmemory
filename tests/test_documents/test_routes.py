@@ -150,3 +150,55 @@ def test_delete_is_soft_and_profile_checked(monkeypatch, tmp_path):
     assert c.delete("/api/v3/documents/not-an-id").status_code == 404
     c2 = make(monkeypatch, runtime=None)
     assert c2.delete(f"/api/v3/documents/{mine.document_id}").status_code == 503
+
+
+def _document_get_client(monkeypatch, **kw):
+    c = make(monkeypatch, **kw)
+    seen = []
+    monkeypatch.setattr(routes, "document_index", lambda profile, limit, cursor, **k: seen.append(
+        (profile, limit, cursor)) or {"documents": [], "next_cursor": None})
+    monkeypatch.setattr(routes, "document_lint", lambda profile, **k: seen.append((profile,)) or {"empty_pages": []})
+    c.seen = seen
+    return c
+
+
+def test_index_and_lint_routes_are_profile_scoped_reads(monkeypatch):
+    c = _document_get_client(monkeypatch)
+    r = c.get("/api/v3/documents?cursor=abc&limit=7&profile_id=p2")
+    assert r.status_code == 200 and r.json() == {"documents": [], "next_cursor": None}
+    assert c.get("/api/v3/documents/lint").json() == {"empty_pages": []}
+    assert c.seen == [("p2", 7, "abc"), ("default",)]
+    assert c.get("/api/v3/documents?limit=0").status_code == 422
+    assert c.get("/api/v3/documents?profile_id=nope").status_code == 404
+
+
+def test_index_and_lint_are_local_only(monkeypatch):
+    c = _document_get_client(monkeypatch, client=REMOTE)
+    assert c.get("/api/v3/documents").status_code == 403
+    assert c.get("/api/v3/documents/lint").status_code == 403 and c.seen == []
+
+
+def test_hard_delete_runs_delete_permission_and_forget_policy_then_erases(monkeypatch):
+    c = make(monkeypatch)
+    calls = []
+    monkeypatch.setattr(routes, "remove_document", lambda *a, **k: calls.append((a, k)) or True)
+    r = c.delete("/api/v3/documents/" + "a" * 32 + "?hard=true")
+    assert r.status_code == 200 and r.json() == {"removed": True, "document_id": "a" * 32, "erased": True}
+    (args, kw) = calls[0]
+    assert args == ("a" * 32, "default") and kw["hard"] is True and callable(kw["eraser"])
+    assert write_governance._registry.calls[0][0].name == "FORGET"
+
+
+def test_hard_delete_is_refused_by_policy_credentials_and_loopback(monkeypatch):
+    calls = []
+    for kw in ({"allowed": False}, {"actor": ""}, {"client": REMOTE}):
+        c = make(monkeypatch, **kw)
+        monkeypatch.setattr(routes, "remove_document", lambda *a, **k: calls.append(1) or True)
+        assert c.delete("/api/v3/documents/" + "a" * 32 + "?hard=true").status_code == 403
+    assert calls == []
+
+
+def test_hard_delete_of_an_unknown_or_unerased_document_is_404(monkeypatch):
+    c = make(monkeypatch)
+    monkeypatch.setattr(routes, "remove_document", lambda *a, **k: False)
+    assert c.delete("/api/v3/documents/" + "a" * 32 + "?hard=true").status_code == 404

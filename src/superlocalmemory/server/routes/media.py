@@ -17,11 +17,13 @@ import dataclasses
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
-from superlocalmemory.documents import job_status, remove_document, submit_document
+from superlocalmemory.documents import (
+    document_index, document_lint, job_status, remove_document, submit_document,
+)
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
 from superlocalmemory.server.loopback import is_loopback
@@ -181,8 +183,46 @@ async def job(job_id: str, request: Request, profile_id: str = ""):
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
 
+@router.get("/documents")
+async def documents(request: Request, profile_id: str = "", cursor: str = Query("", max_length=200),
+                    limit: int = Query(50, ge=1, le=200)):
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import require_engine
+
+    _require_local(request)
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id)
+    require_permission(request, Permission.READ, profile=profile)
+    found = await asyncio.to_thread(document_index, profile, limit, cursor, db=engine._db)
+    return JSONResponse(found, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/documents/lint")
+async def lint(request: Request, profile_id: str = ""):
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import require_engine
+
+    _require_local(request)
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id)
+    require_permission(request, Permission.READ, profile=profile)
+    found = await asyncio.to_thread(document_lint, profile, db=engine._db)
+    return JSONResponse(found, headers={"Cache-Control": "no-store"})
+
+
+def _eraser(engine):
+    """Erase facts through the compliance path (erasure service, receipt, side tables, text scrub)."""
+    def erase(profile_id: str, fact_ids: list[str], document_id: str) -> dict:
+        from superlocalmemory.compliance.gdpr import GDPRCompliance
+
+        return GDPRCompliance(engine._db, engine=engine).forget_facts(fact_ids, profile_id, subject_id=document_id)
+    return erase
+
+
 @router.delete("/documents/{document_id}")
-async def remove(document_id: str, request: Request, profile_id: str = ""):
+async def remove(document_id: str, request: Request, profile_id: str = "", hard: bool = False):
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
@@ -197,6 +237,14 @@ async def remove(document_id: str, request: Request, profile_id: str = ""):
     if not _ID.fullmatch(document_id):
         raise HTTPException(404, detail="Not found.")
     enforce_forget_governance(request, engine, actor_id=actor_id, profile=profile, target=document_id)
+    if hard:
+        if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
+            raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
+        return {"removed": True, "document_id": document_id, "erased": True}
+    if hard:
+        if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
+            raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
+        return {"removed": True, "document_id": document_id, "erased": True}
     runtime = getattr(request.app.state, "canonical_remember_runtime", None)
     if runtime is None or not getattr(runtime, "ready", False):
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")

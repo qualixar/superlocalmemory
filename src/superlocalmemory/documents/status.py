@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -55,19 +56,30 @@ def _memory_facts(store: Any, document: dict[str, Any]) -> list[str]:
 
 
 def remove_document(document_id: str, profile_id: str, *, hard: bool = False, runtime: Any = None,
-                    store: Any = None) -> bool:
-    """Take a document out of view: the document and its page pictures are tombstoned and the
-    memories made from it are archived (kept, but hidden from recall). False when the document is
-    unknown, belongs to another profile, or is already removed. Erasing it for good is not built yet.
+                    eraser: Any = None, store: Any = None) -> bool:
+    """Take a document out of view, or (``hard=True``) erase it for good.
+
+    Soft: the document and its page pictures are tombstoned and the memories made from it are
+    archived (kept, but hidden from recall); False when the document is unknown, belongs to another
+    profile, or is already removed.
+
+    Hard: ``eraser(profile_id, fact_ids, document_id)`` erases every memory made from the document
+    through the erasure service and returns its counts; then the page pictures, vectors, rows and the
+    PDF go (the PDF stays while another document uses it). False when the document is unknown, belongs
+    to another profile, or the erasure was not complete (nothing more is dropped then).
     """
-    if hard:
-        raise NotImplementedError("erasing a document for good is not available yet")
+    if hard and eraser is None:
+        raise ValueError("a hard removal needs an eraser")
     store_ref, opened = _open(store)
     if store_ref is None:
         return False
     try:
         document = store_ref.get_document(document_id)
-        if not document or document["profile_id"] != profile_id or document["state"] == "tombstoned":
+        if not document or document["profile_id"] != profile_id:
+            return False
+        if hard:
+            return _erase(store_ref, document, eraser)
+        if document["state"] == "tombstoned":
             return False
         facts = _memory_facts(store_ref, document)
         store_ref.tombstone_document(document_id)
@@ -76,6 +88,19 @@ def remove_document(document_id: str, profile_id: str, *, hard: bool = False, ru
     finally:
         if opened:
             store_ref.close()
+
+
+def _erase(store: Any, document: dict[str, Any], eraser: Any) -> bool:
+    from superlocalmemory.media.erasure_documents import erase_document_rows
+
+    facts = sorted({f for f in _memory_facts(store, document) if f})
+    if facts:
+        counts = eraser(document["profile_id"], facts, document["document_id"]) or {}
+        if not counts.get("erasure_complete"):
+            logger.warning("a document erasure was not complete")
+            return False
+    out = erase_document_rows(store, Path(store.path).parent, [document["document_id"]])
+    return not out["residue"]
 
 
 def _archive(runtime: Any, profile_id: str, document_id: str, fact_ids: list[str]) -> None:
