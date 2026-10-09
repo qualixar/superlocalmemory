@@ -6585,6 +6585,17 @@ def _materializer_pass_hooks() -> PassHooks:
     )
 
 
+def _live_module():
+    """The module uvicorn imported by name, where the lifespan publishes state.
+
+    The daemon may run as ``__main__``; its own globals are then a different
+    copy from the ones the lifespan sets, so the engine must be read here.
+    """
+    import superlocalmemory.server.unified_daemon as live
+
+    return live
+
+
 def _pending_materializer() -> PendingMaterializer:
     """The process's materializer service, built and registered on first use."""
     global _PENDING_MATERIALIZER
@@ -6592,8 +6603,8 @@ def _pending_materializer() -> PendingMaterializer:
         from superlocalmemory.cli import pending_store
 
         _PENDING_MATERIALIZER = PendingMaterializer(
-            engine_supplier=lambda: _engine,
-            runtime_supplier=lambda: _profile_runtime,
+            engine_supplier=lambda: _live_module()._engine,
+            runtime_supplier=lambda: _live_module()._profile_runtime,
             pending_store=pending_store,
             emit_event=lambda *a, **k: _emit_event(*a, **k),
             actor_id_supplier=lambda: _materializer_actor_id(),
