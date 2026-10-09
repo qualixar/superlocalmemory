@@ -25,6 +25,7 @@ from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import ingest, locks, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
+from superlocalmemory.sources.safe_read import open_regular
 from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
@@ -78,10 +79,13 @@ class _Pass:
         return self.source["source_id"]
 
 
-def _digest(path: Path, limit: int | None = None) -> tuple[str, bytes | None]:
-    """sha256 of a file, read in chunks; the bytes too when ``limit`` allows keeping them."""
+def _digest(path: Path, limit: int | None = None, file_id: str | None = None) -> tuple[str, bytes | None]:
+    """sha256 of a file, read in chunks; the bytes too when ``limit`` allows keeping them.
+
+    Raises OSError for a link, a pipe, or a file that is not the one the walk listed (``file_id``).
+    """
     h, kept = hashlib.sha256(), bytearray()
-    with open(path, "rb") as fh:
+    with open_regular(path, file_id) as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
             if limit is not None and len(kept) <= limit:
@@ -208,7 +212,7 @@ def _process(p: _Pass, e: Entry, sha: str) -> None:
         return
     data = None
     if kind_of(e.relpath) == "text":
-        again, data = _digest(p.root / e.relpath, ingest.SCREEN_BYTES * 20)
+        again, data = _digest(p.root / e.relpath, ingest.SCREEN_BYTES * 20, e.file_id)
         if again != sha or data is None:
             p.stats.deferred += 1
             return
@@ -223,7 +227,7 @@ def _hash_all(p: _Pass, entries: list[Entry]) -> list[tuple[Entry, str]]:
     out = []
     for e in entries:
         try:
-            out.append((e, _digest(p.root / e.relpath)[0]))
+            out.append((e, _digest(p.root / e.relpath, None, e.file_id)[0]))
         except OSError:
             p.stats.errors += 1
     return out

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from superlocalmemory.sources import ingest, walk
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
+from superlocalmemory.sources.safe_read import read_bounded
 
 TEXT_SECONDS = 0.005
 PDF_PAGE_SECONDS = 1.0
@@ -53,8 +54,7 @@ def _quarantined(root: Path, entries: list[walk.Entry]) -> int:
         if kind_of(e.relpath) != "text" or e.placeholder:
             continue
         try:
-            with open(root / e.relpath, "rb") as fh:
-                head = fh.read(ingest.SCREEN_BYTES)
+            head = read_bounded(root / e.relpath, ingest.SCREEN_BYTES, e.file_id)
         except OSError:
             continue
         count += 1 if ingest.screen(head) else 0

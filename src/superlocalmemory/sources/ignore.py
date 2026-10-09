@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from superlocalmemory.sources.safe_read import read_bounded
+
 DEFAULT_TYPES: tuple[str, ...] = (
     ".md", ".markdown", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".canvas")
 MAX_FILES = 50_000
@@ -151,10 +153,11 @@ class IgnoreRules:
         for name in _IGNORE_FILES:
             try:
                 path = self._root / rel_dir / name if rel_dir else self._root / name
-                if path.is_symlink() or path.stat().st_size > _MAX_IGNORE_BYTES:
+                data = read_bounded(path, _MAX_IGNORE_BYTES + 1)
+                if len(data) > _MAX_IGNORE_BYTES:
                     continue
-                patterns += GitIgnore.parse(path.read_text(encoding="utf-8"))._patterns
-            except (OSError, ValueError):
+                patterns += GitIgnore.parse(data.decode("utf-8"))._patterns
+            except (OSError, ValueError):  # includes a link, a pipe, bytes that are not text
                 continue
         if patterns:
             self._layers = [x for x in self._layers if x[0] != rel_dir]
