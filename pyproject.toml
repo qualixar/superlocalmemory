@@ -197,7 +197,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json"]
+superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "runtimes/locks/*.txt"]
 
 [tool.setuptools.data-files]
 "share/superlocalmemory/codex/skills/slm-bot-memory" = ["plugin-src/skills/slm-bot-memory/SKILL.md"]

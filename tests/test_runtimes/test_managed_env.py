@@ -218,3 +218,22 @@ def test_real_venv_and_isolated_script(tmp_path, src):
     out = json.loads(r.stdout)
     assert out["isolated"] == 1 and out["pp"] is None and out["slm"] is False
     assert Path(out["cwd"]).resolve() == (tmp_path / "renv").resolve() and out["arg"] == ["x"]
+
+
+def test_lock_script_builds_commands_and_names():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "lock_media_env.py"
+    spec = importlib.util.spec_from_file_location("lock_media_env", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.lock_filename("darwin-arm64", "3.12") == "media-darwin-arm64-py312.txt"
+    mac = mod.build_command("darwin-arm64", "3.12", Path("r.in"), Path("o.txt"))
+    linux = mod.build_command("linux-x86_64", "3.13", Path("r.in"), Path("o.txt"))
+    assert "--generate-hashes" in mac and "--index-url" not in mac
+    assert "download.pytorch.org/whl/cpu" in " ".join(linux)
+
+
+def test_lock_header_index_lines_are_read_with_or_without_comment():
+    text = "# --index-url https://a\n--extra-index-url https://b\nfoo==1 --hash=sha256:00\n"
+    assert me._lock_index_args(text) == ["--index-url", "https://a", "--extra-index-url", "https://b"]

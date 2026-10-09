@@ -117,3 +117,19 @@ def test_read_only_root_returns_failed_status_without_raising(root, monkeypatch)
     monkeypatch.setattr(features, "_write_features", boom)
     out = features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=root)
     assert out["enabled"] is False and out.get("error")
+
+
+def test_doctor_line_is_read_only_and_says_off(root, capsys):
+    from argparse import Namespace
+
+    from superlocalmemory.cli.commands import cmd_doctor
+
+    (root / "memory.db").write_bytes(b"")
+    try:
+        cmd_doctor(Namespace(json=True, quick=True, fix=False))
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "Images & documents" in out and '"off"' in out
+    assert not features.features_path(root).exists()
+    assert not (root / "media.db").exists() and not (root / "runtimes").exists()
