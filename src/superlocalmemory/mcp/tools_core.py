@@ -24,6 +24,7 @@ from superlocalmemory.core.config import CANONICAL_LIST_LIMIT, CANONICAL_RECALL_
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
+from superlocalmemory.mcp.remote_visibility import visible_facts
 from superlocalmemory.mcp.shared import authorize_mcp_mutation, parse_id_list
 
 logger = logging.getLogger(__name__)
@@ -812,6 +813,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 display_min_confidence=_display_min_confidence,
                 truncated=_truncated, tag_filter=_tags,
             )
+            facts = visible_facts(engine._db, pid, facts)
             items = []
             for f in facts:
                 items.append({
@@ -863,7 +865,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
             pid, refused = await _call_profile(get_engine, profile_id)
             if refused:
                 return refused
-            facts = engine._db.get_facts_by_ids(ids, pid)
+            facts = visible_facts(engine._db, pid, engine._db.get_facts_by_ids(ids, pid))
             found = {f.fact_id for f in facts}
             # #150: the project each memory was saved under ("" when none).
             from superlocalmemory.retrieval.project_scope import stored_projects
@@ -955,6 +957,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 display_min_confidence=_display_min_confidence,
                 truncated=_truncated, tag_filter=_tags,
             )
+            facts = visible_facts(engine._db, pid, facts)
             items = []
             for f in facts:
                 items.append({

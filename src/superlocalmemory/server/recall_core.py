@@ -116,6 +116,8 @@ class RecallCall:
     #: A per-call budget in seconds. It can only SHORTEN ``recall_budget_s()``
     #: (see :func:`effective_budget_s`); ``None`` leaves the default untouched.
     budget_s: float | None = None
+    #: How a remote caller came in (see ``retrieval/remote_view``); ``""`` is a local caller.
+    caller_view: str = ""
 
 
 def effective_budget_s(call: RecallCall) -> float:
@@ -131,13 +133,22 @@ def effective_budget_s(call: RecallCall) -> float:
     return min(default, max(call.budget_s, RECALL_BUDGET_FLOOR_S))
 
 
+def _visibility_for(engine: Any, call: RecallCall) -> Any:
+    """What this caller may not see, for the thread that runs the recall (nothing for a local caller)."""
+    from superlocalmemory.retrieval import remote_view, visibility
+
+    ctx = remote_view.context_for(call.caller_view, engine._db, call.profile_id or engine.profile_id)
+    return visibility.use(ctx) if ctx is not None else nullcontext()
+
+
 def _engine_call(engine: Any, call: RecallCall) -> Any:
     """``engine.recall`` with the call's arguments, on the executor thread."""
     from superlocalmemory.core import answer_check_history as history
     from superlocalmemory.core.answer_check_scope import skip_answer_check
 
     with skip_answer_check() if call.skip_answer_check else nullcontext(), \
-            history.origin(call.origin) if call.origin else nullcontext():
+            history.origin(call.origin) if call.origin else nullcontext(), \
+            _visibility_for(engine, call):
         return engine.recall(
             call.query, limit=call.limit, session_id=call.session_id,
             agent_id=call.agent_id, fast=call.fast,
@@ -240,11 +251,12 @@ async def run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:
             logger.warning("recall: semantic recall exceeded %.0fs budget for %r — "
                            "serving keyword fallback", budget, call.query[:80])
             # The fallback honours the same facets the primary path was given.
-            return recall_keyword_fallback(
-                engine, call.query, call.limit, profile_id=call.profile_id or None,
-                profile=call.profile_id or snapshot.profile_id,
-                profile_generation=snapshot.generation, facets=call.facets,
-            )
+            with _visibility_for(engine, call):
+                return recall_keyword_fallback(
+                    engine, call.query, call.limit, profile_id=call.profile_id or None,
+                    profile=call.profile_id or snapshot.profile_id,
+                    profile_generation=snapshot.generation, facets=call.facets,
+                )
         # Reads memory text and serialises: on the executor, never the loop, which
         # every other request (and the next recall's answer) is waiting on.
         return await loop.run_in_executor(None, hold.run, _envelope, engine, call,

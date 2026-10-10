@@ -163,6 +163,14 @@ class DaemonPoolProxy:
             _params["valid_at"] = valid_at
         if include_unknown:
             _params["include_unknown"] = "true"
+        # A remote caller's recall tells the daemon so, to hide what a remote app
+        # may not see (pictures, pages, folders). Only ever added, never for a
+        # caller on this computer, so its query string is unchanged.
+        from superlocalmemory.mcp.remote_visibility import current_view
+        from superlocalmemory.retrieval.remote_view import VIEW_PARAM
+
+        if current_view():
+            _params[VIEW_PARAM] = current_view()
         # S-M2: a recall that loads context (session start, auto-injection) is
         # not a question, so the daemon must not judge it or send it anywhere.
         # Sent only when asked — explicitly, or from inside
