@@ -7159,7 +7159,8 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def _cli_main(argv: list[str]) -> None:
+    """Start the daemon from the command line (``--start [--port=N]``)."""
     # Rotate first, then configure logging, so the first log line lands in a
     # freshly-sized file.
     rotate_oversized_logs()
@@ -7167,10 +7168,20 @@ if __name__ == "__main__":
     # v3.6.9 (#33): honour SLM_DAEMON_PORT env so operators can configure the
     # port without changing the launch command. --port= arg takes precedence.
     port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
-    for arg in sys.argv:
+    for arg in argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
-    if "--start" in sys.argv:
+    if "--start" in argv:
         start_server(port=port)
     else:
         print("Usage: python -m superlocalmemory.server.unified_daemon --start [--port=8765]")
+
+
+if __name__ == "__main__":
+    # ``python -m`` loads this file as ``__main__``, and uvicorn later imports
+    # ``superlocalmemory.server.unified_daemon`` for the app: two copies of the
+    # module, each with its own record descriptor. Run everything through the
+    # importable module so the lifespan and the record guardian share one copy.
+    import importlib
+
+    importlib.import_module("superlocalmemory.server.unified_daemon")._cli_main(sys.argv)
