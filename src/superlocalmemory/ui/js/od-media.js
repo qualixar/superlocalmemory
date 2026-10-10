@@ -3,6 +3,7 @@
 // XSS-safe: file names, OCR previews, titles and server messages are untrusted and
 // are set with textContent only. Writes go through the page's fetch, which core.js
 // wraps with the local write credential.
+// The Folders section (od-sources.js) is rendered below the documents list.
 // Routes: POST /api/v3/media/remember   POST /api/v3/documents
 //         GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
 //         GET /api/v3/documents         GET /api/v3/documents/lint
@@ -233,7 +234,10 @@
     head.appendChild(el('p', 'muted', 'Remember pictures and read PDFs on this computer.'));
     var cardHost = el('div');
     var body = el('div');
-    [head, cardHost, body].forEach(function (n) { pane.appendChild(n); });
+    var folders = el('div', 'od-media-section');
+    [head, cardHost, body, folders].forEach(function (n) { pane.appendChild(n); });
+    // Folders have their own switch, so they show whether or not images are on; drawn once.
+    if (typeof window.odRenderSources === 'function') window.odRenderSources(folders);
     F().mountMediaCard(cardHost, {
       onReady: function () { if (!body.firstChild) buildBody(body); },
       onNotReady: function () { body.textContent = ''; },
