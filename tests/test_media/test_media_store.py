@@ -38,7 +38,7 @@ def store(root):
 
 
 def item(profile="default", sha="a" * 64, **kw):
-    base = dict(profile_id=profile, kind="image", sha256=sha, mime="image/png",
+    base = dict(profile_id=profile, kind="image", source_sha256=sha, mime="image/png",
                 bytes=10, origin="tool")
     base.update(kw)
     return base
@@ -96,7 +96,7 @@ def test_newer_schema_opens_read_only(root, caplog):
 def test_item_crud_and_sha_lookup(store):
     mid = store.insert_item(**item(width=3, height=4))
     got = store.get_item(mid)
-    assert got["sha256"] == "a" * 64 and got["state"] == "active" and got["width"] == 3
+    assert got["source_sha256"] == "a" * 64 and got["state"] == "active" and got["width"] == 3
     assert store.find_by_sha("default", "a" * 64)["media_id"] == mid
     assert store.find_by_sha("other", "a" * 64) is None
     store.insert_item(**item(sha="b" * 64, kind="page"))
@@ -200,7 +200,8 @@ def _fill(store, profile, sha):
     store.put_vector(mid, sid, profile, vec(0))
     store.enqueue_job(profile, "gc")
     with store._write() as c:
-        c.execute("INSERT INTO documents VALUES (?,?,?,?,?,0,0,0,0,NULL,NULL,'ready','t','t',NULL)",
+        c.execute("INSERT INTO documents(document_id,profile_id,sha256,title,mime,state,created_at,updated_at)"
+                  " VALUES (?,?,?,?,?,'ready','t','t')",
                   (f"d-{profile}", profile, sha, "t", "application/pdf"))
         c.execute("INSERT INTO doc_pages(document_id,page_no,text_origin) VALUES (?,1,'none')",
                   (f"d-{profile}",))
@@ -341,3 +342,45 @@ def test_sidecar_preflight_passes_when_absent_or_fine(root):
     sidecars.check_media(root)
     open_media_store(create=True, data_root=root).close()
     sidecars.check_media(root)
+
+
+def test_two_hashes_remote_flag_and_preassigned_id(store):
+    mid = "c" * 32
+    got_id = store.insert_item(**item(media_id=mid, stored_sha256="b" * 64))
+    assert got_id == mid
+    row = store.get_item(mid)
+    assert row["stored_sha256"] == "b" * 64 and row["remote_ok"] == 0
+    store.insert_item(**item(sha="d" * 64, remote_ok=1))
+    assert [r["remote_ok"] for r in store.list_items("default")] == [0, 1]
+
+
+def test_phash_candidates_are_per_profile_and_active_only(store):
+    a = store.insert_item(**item(sha="1" * 64, phash="f" * 16))
+    store.insert_item(**item(sha="2" * 64, phash=None))
+    store.insert_item(**item(profile="other", sha="3" * 64, phash="0" * 16))
+    gone = store.insert_item(**item(sha="4" * 64, phash="e" * 16))
+    store.set_state(gone, "tombstoned")
+    assert store.phash_candidates("default") == [(a, "f" * 16)]
+
+
+def test_vector_count_is_per_profile(store):
+    space = store.ensure_active_space("m", "r", DIM)
+    assert store.vector_count("default") == 0
+    store.insert_item(**item(media_id="1" * 32, sha="1" * 64))
+    store.put_vector("1" * 32, space, "default", vec(0))
+    assert store.vector_count("default") == 1
+    assert store.vector_count("other") == 0
+
+
+def test_memory_ids_of_gives_anchors_and_page_memories(store):
+    store.insert_item(**item(media_id="2" * 32, sha="2" * 64, anchor_memory_id="m-anchor"))
+    store.insert_item(**item(media_id="3" * 32, sha="3" * 64, kind="page", document_id="d", page_no=1,
+                             origin="document"))
+    store.insert_item(**item(media_id="4" * 32, sha="4" * 64, anchor_memory_id="m-gone"))
+    store.set_state("4" * 32, "tombstoned")
+    with store._write() as conn:
+        conn.execute("INSERT INTO doc_pages(document_id, page_no, media_id, memory_ids_json, text_origin)"
+                     " VALUES ('d', 1, ?, '[\"p1\",\"p2\"]', 'ocr')", ("3" * 32,))
+    assert store.memory_ids_of(["2" * 32, "3" * 32, "4" * 32, "5" * 32]) == {
+        "2" * 32: ["m-anchor"], "3" * 32: ["p1", "p2"]}
+    assert store.memory_ids_of([]) == {}

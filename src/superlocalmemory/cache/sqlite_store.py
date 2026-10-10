@@ -232,6 +232,23 @@ class SqliteDeriveCache:
             self._total = None
         return max(count, 0)
 
+    def invalidate_content(self, content_sha256: str) -> int:
+        """Drop every entry derived from one file (all derivers). Never creates the cache file."""
+        with self._write_lock:
+            try:
+                conn = self._open(False)
+                if conn is None:
+                    return 0
+                count = conn.execute("DELETE FROM derivations WHERE content_sha256=?",
+                                     (content_sha256,)).rowcount
+                conn.commit()
+            except sqlite3.DatabaseError as exc:
+                self._quarantine(exc)
+                return 0
+            self._total = None
+            self._touched = {k: v for k, v in self._touched.items() if k[0] != content_sha256}
+        return max(count, 0)
+
     def clear(self) -> None:
         with self._write_lock:
             self._drop_local()

@@ -25,6 +25,9 @@ from typing import Any, Iterator, Sequence
 from superlocalmemory.media.schema import (
     MEDIA_SCHEMA_VERSION, apply_schema, stored_version,
 )
+from superlocalmemory.media.store_doc_erase import DocumentEraseMixin
+from superlocalmemory.media.store_documents import DocumentsMixin
+from superlocalmemory.media.store_erase import EraseMixin
 from superlocalmemory.media.store_jobs import JobsMixin, utc_stamp
 
 logger = logging.getLogger(__name__)
@@ -33,11 +36,11 @@ DEFAULT_DIM = 768
 MAX_K = 200
 _SPACE_ID = re.compile(r"^[0-9a-f]{32}$")
 _ITEM_FIELDS = (
-    "profile_id", "kind", "sha256", "phash", "mime", "bytes", "width", "height",
-    "original_relpath", "exif_json", "captured_at", "anchor_memory_id", "document_id",
+    "media_id", "profile_id", "kind", "source_sha256", "stored_sha256", "phash", "mime", "bytes",
+    "remote_ok", "width", "height", "original_relpath", "exif_json", "captured_at", "anchor_memory_id", "document_id",
     "page_no", "source_id", "origin", "state", "thumb_webp",
 )
-_REQUIRED = ("profile_id", "kind", "sha256", "mime", "bytes", "origin")
+_REQUIRED = ("profile_id", "kind", "source_sha256", "mime", "bytes", "origin")
 
 
 class MediaStoreReadOnly(RuntimeError):
@@ -111,7 +114,7 @@ def _exif_text(raw: Any) -> str:
     return json.dumps(kept, sort_keys=True)
 
 
-class MediaStore(JobsMixin):
+class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._wlock = threading.RLock()
@@ -212,7 +215,9 @@ class MediaStore(JobsMixin):
         if unknown or missing:
             raise ValueError(f"unknown fields {sorted(unknown)}, missing fields {missing}")
         fields["exif_json"] = _exif_text(fields.get("exif_json", {}))
-        media_id = uuid.uuid4().hex
+        media_id = fields.pop("media_id", None) or uuid.uuid4().hex
+        if not _SPACE_ID.fullmatch(media_id):
+            raise ValueError("media_id must be 32 lowercase hex characters")
         cols = ["media_id", "created_at", *fields]
         with self._write() as conn:
             conn.execute(
@@ -224,11 +229,18 @@ class MediaStore(JobsMixin):
         row = self._read().execute("SELECT * FROM media_items WHERE media_id = ?", (media_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_by_sha(self, profile_id: str, sha256: str) -> dict[str, Any] | None:
+    def find_by_sha(self, profile_id: str, source_sha256: str) -> dict[str, Any] | None:
         row = self._read().execute(
-            "SELECT * FROM media_items WHERE profile_id = ? AND sha256 = ? AND state = 'active'"
-            " ORDER BY created_at LIMIT 1", (profile_id, sha256)).fetchone()
+            "SELECT * FROM media_items WHERE profile_id = ? AND source_sha256 = ? AND state = 'active'"
+            " ORDER BY created_at LIMIT 1", (profile_id, source_sha256)).fetchone()
         return dict(row) if row else None
+
+    def phash_candidates(self, profile_id: str) -> list[tuple[str, str]]:
+        """(media_id, phash) of the profile's active items that have a perceptual hash."""
+        rows = self._read().execute(
+            "SELECT media_id, phash FROM media_items WHERE profile_id = ? AND state = 'active'"
+            " AND phash IS NOT NULL ORDER BY created_at, media_id", (profile_id,)).fetchall()
+        return [(r[0], r[1]) for r in rows]
 
     def list_items(self, profile_id: str, *, kind: str | None = None, state: str = "active",
                    limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
@@ -265,6 +277,47 @@ class MediaStore(JobsMixin):
             cur = conn.execute(f"INSERT INTO {table}(profile_id, embedding) VALUES (?, ?)", (profile_id, blob))
             conn.execute("INSERT INTO media_vector_rows(space_id, vec_rowid, media_id, profile_id)"
                          " VALUES (?, ?, ?, ?)", (space_id, cur.lastrowid, media_id, profile_id))
+
+    def vector_count(self, profile_id: str) -> int:
+        """How many vectors this profile has (0 means searching by picture has nothing to find)."""
+        row = self._read().execute(
+            "SELECT COUNT(*) FROM media_vector_rows WHERE profile_id = ?", (profile_id,)).fetchone()
+        return int(row[0])
+
+    def memory_ids_of(self, media_ids: Sequence[str]) -> dict[str, list[str]]:
+        """The memories that stand for each active item: its anchor, or a page's own memories."""
+        ids = list(dict.fromkeys(media_ids))
+        if not ids:
+            return {}
+        conn = self._read()
+        rows = conn.execute(
+            "SELECT m.media_id, m.anchor_memory_id, p.memory_ids_json FROM media_items m"
+            " LEFT JOIN doc_pages p ON p.document_id = m.document_id AND p.page_no = m.page_no"
+            f" WHERE m.state = 'active' AND m.media_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        out: dict[str, list[str]] = {}
+        for media_id, anchor, pages in rows:
+            found = [anchor] if anchor else []
+            try:
+                found += [str(x) for x in json.loads(pages or "[]")]
+            except ValueError:
+                pass
+            if found:
+                out[media_id] = found
+        return out
+
+    def page_media_ids(self, pages: Sequence[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """``{(document_id, page_no): media_id}`` for the active page items, in one query per 300 pages."""
+        wanted = list(dict.fromkeys((str(d), int(n)) for d, n in pages))
+        out: dict[tuple[str, int], str] = {}
+        conn = self._read() if wanted else None
+        for i in range(0, len(wanted), 300):
+            part = wanted[i:i + 300]
+            rows = conn.execute(
+                "SELECT document_id, page_no, media_id FROM media_items WHERE kind = 'page'"
+                " AND state = 'active' AND (document_id, page_no) IN (VALUES "
+                + ",".join(["(?, ?)"] * len(part)) + ")", [x for pair in part for x in pair]).fetchall()
+            out.update({(r[0], r[1]): r[2] for r in rows})
+        return out
 
     def knn(self, vector: Sequence[float], profile_id: str, k: int,
             space_id: str | None = None) -> list[tuple[str, float]]:
