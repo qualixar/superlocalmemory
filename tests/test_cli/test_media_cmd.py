@@ -64,7 +64,7 @@ def test_enable_with_yes_posts_to_the_daemon(daemon, monkeypatch, capsys):
     seen, _ = daemon
     _tty(monkeypatch, False)
     media_cmd.cmd_media(_args(media_command="enable", yes=True))
-    assert ("POST", "/api/v3/features/media/enable", {"yes": True}) in seen
+    assert ("POST", "/api/v3/features/media/enable", {"yes": True, "source": "cli"}) in seen
     assert "1.5 GB" in capsys.readouterr().out
 
 
@@ -139,3 +139,40 @@ def test_doctor_asks_the_daemon_whether_a_restart_is_needed(daemon):
     assert features_cmd.running_daemon_media() == {"restart_required": True}
     state["reply"] = None
     assert features_cmd.running_daemon_media() == {}
+
+
+def _reply(state, step="Checking this computer"):
+    media = dict(STATUS["media"], enabled=True, env_state=state, step=step)
+    return {"media": media}
+
+
+def _enable_with_reply(daemon, monkeypatch, reply):
+    _, st = daemon
+    st["reply"] = reply
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
+
+
+def test_enable_unsupported_is_honest(daemon, monkeypatch, capsys):
+    _enable_with_reply(daemon, monkeypatch, _reply("unsupported"))
+    out = capsys.readouterr().out
+    assert "runs in the background" not in out
+    assert "can't be set up" in out and "Nothing is downloaded" in out
+
+
+def test_enable_failed_names_the_failure(daemon, monkeypatch, capsys):
+    _enable_with_reply(daemon, monkeypatch, _reply("failed"))
+    out = capsys.readouterr().out
+    assert "runs in the background" not in out
+    assert "set-up failed" in out and "slm doctor" in out
+
+
+def test_enable_installing_keeps_the_background_text(daemon, monkeypatch, capsys):
+    _enable_with_reply(daemon, monkeypatch, _reply("installing"))
+    assert "runs in the background" in capsys.readouterr().out
+
+
+def test_media_line_unsupported_and_failed():
+    assert "can't be set up on this computer yet" in features_cmd.media_line(_reply("unsupported")["media"])
+    line = features_cmd.media_line(_reply("failed")["media"])
+    assert "set-up failed" in line and "slm doctor" in line
