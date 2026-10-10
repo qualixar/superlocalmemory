@@ -267,3 +267,13 @@ def test_concurrent_web_senders_cannot_pass_the_unread_cap(broker) -> None:
         t.join(30)
     assert sum(outcomes) == 50 and len(outcomes) == 80
     assert len(rows(broker, "SELECT id FROM mesh_messages")) == 50
+
+
+def test_the_directory_a_web_app_sees_has_secrets_redacted_from_summaries(broker) -> None:
+    """Audit round 2 (MU-M5): a token a local agent put in its summary must not reach web apps raw."""
+    token = "ghp_" + "A1b2" * 9
+    local = broker.register_peer("sess-secret", summary=f"deploying with {token}",
+                                 agent_type="claude_code")["peer_id"]
+    listing = {p["peer_id"]: p for p in broker.list_peer_directory("default")}
+    assert token not in listing[local]["summary"]
+    assert "deploying with" in listing[local]["summary"]
