@@ -10,12 +10,21 @@ import pytest
 from superlocalmemory.runtimes.media_env import MEDIA_REQUIREMENTS
 
 LOCKS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "runtimes" / "locks"
-NAME = re.compile(r"media-(darwin-arm64|linux-x86_64|windows-amd64)-py3(12|13|14)\.txt")
+NAME = re.compile(r"media-(darwin-arm64|linux-x86_64|linux-aarch64|windows-amd64)-py3(12|13|14)\.txt")
 FILES = sorted(p for p in LOCKS.glob("media-*.txt"))
 
 
 def test_a_lock_exists_for_the_cloud_platform():
     assert (LOCKS / "media-linux-x86_64-py312.txt").is_file()
+
+
+SUPPORTED = ("darwin-arm64", "linux-x86_64", "linux-aarch64", "windows-amd64")
+
+
+@pytest.mark.parametrize("tag", SUPPORTED)
+@pytest.mark.parametrize("minor", (12, 13, 14))
+def test_every_supported_platform_has_a_lock_for_every_python(tag, minor):
+    assert (LOCKS / f"media-{tag}-py3{minor}.txt").is_file()
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
@@ -52,3 +61,18 @@ def test_lock_script_targets_macos_14_for_darwin():
     spec.loader.exec_module(mod)
     assert mod.build_env("darwin-arm64")["MACOSX_DEPLOYMENT_TARGET"] == "14.0"
     assert mod.build_env("linux-x86_64").get("MACOSX_DEPLOYMENT_TARGET") != "14.0"
+
+
+def test_lock_script_targets_linux_arm64_with_the_cpu_index():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "lock_media_env.py"
+    spec = importlib.util.spec_from_file_location("lock_media_env_arm", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.TARGETS["linux-aarch64"] == "aarch64-unknown-linux-gnu"
+    cmd = mod.build_command("linux-aarch64", "3.13", Path("r.in"), Path("o.txt"))
+    assert cmd[cmd.index("--python-platform") + 1] == "aarch64-unknown-linux-gnu"
+    assert "download.pytorch.org/whl/cpu" in " ".join(cmd)
+    assert mod.lock_filename("linux-aarch64", "3.13") == "media-linux-aarch64-py313.txt"
+    assert mod.build_env("linux-aarch64").get("MACOSX_DEPLOYMENT_TARGET") != "14.0"

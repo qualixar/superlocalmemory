@@ -77,12 +77,18 @@ async function choose(machine) {
   return { recorded, lines: lines.join('\n'), written: fs.existsSync(path.join(dir, 'features.json')) };
 }
 
-test('Linux ARM64 records nothing and says pictures are not supported yet', async () => {
+test('Linux ARM64 records the pictures request like any supported computer', async () => {
   const out = await choose({ platform: 'linux', arch: 'arm64', translated: false });
+  assert.equal(out.recorded, true);
+  assert.equal(out.written, true);
+  assert.doesNotMatch(out.lines, /not supported on this computer yet/);
+});
+
+test('32-bit ARM Linux still records nothing', async () => {
+  const out = await choose({ platform: 'linux', arch: 'arm', translated: false });
   assert.equal(out.recorded, false);
   assert.equal(out.written, false);
   assert.match(out.lines, /not supported on this computer yet/);
-  assert.doesNotMatch(out.lines, /will start setting up/);
 });
 
 test('an Intel Mac records nothing and says pictures are not supported yet', async () => {
@@ -110,6 +116,7 @@ test('supported computers still record the request', async () => {
   for (const machine of [
     { platform: 'darwin', arch: 'arm64', translated: false },
     { platform: 'linux', arch: 'x64', translated: false },
+    { platform: 'linux', arch: 'arm64', translated: false },
     { platform: 'win32', arch: 'x64', translated: false },
   ]) {
     const out = await choose(machine);
@@ -120,5 +127,7 @@ test('supported computers still record the request', async () => {
 
 test('mediaPlatformRefusal is empty for supported computers', () => {
   assert.equal(media.mediaPlatformRefusal({ platform: 'darwin', arch: 'arm64', translated: false }), '');
-  assert.notEqual(media.mediaPlatformRefusal({ platform: 'linux', arch: 'arm64', translated: false }), '');
+  assert.equal(media.mediaPlatformRefusal({ platform: 'linux', arch: 'arm64', translated: false }), '');
+  assert.notEqual(media.mediaPlatformRefusal({ platform: 'linux', arch: 'arm', translated: false }), '');
+  assert.notEqual(media.mediaPlatformRefusal({ platform: 'linux', arch: 'ia32', translated: false }), '');
 });

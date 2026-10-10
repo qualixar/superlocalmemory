@@ -10,8 +10,8 @@ The **Upgrade memory engine (preview)** card is a separate, optional step. It re
 |---|---|
 | Memory (RAM) | 16 GB. Computers sold as 16 GB report a little less, so the check passes from 15 GiB. |
 | Disk | About 1.5 GB for the models, plus what you save (up to 2 GB per profile). |
-| Systems | macOS on Apple Silicon, Windows x64, Linux x86_64. Python 3.12, 3.13 or 3.14. |
-| Not yet supported | Linux on ARM64 (Raspberry Pi, Graviton, Ampere), Windows on ARM and Intel Macs. Text memory works there as before. |
+| Systems | macOS on Apple Silicon, Windows x64, Linux x86_64 and Linux ARM64 (aarch64) with a glibc such as Debian, Ubuntu or Fedora. Python 3.12, 3.13 or 3.14. |
+| Not supported | Windows on ARM and Intel Macs. Text memory works there as before. |
 
 Below 16 GB the switch is refused with the reason, because the picture model and a large PDF together can push a smaller machine into swapping. If you understand that risk, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from and turn the feature on again; SLM logs that warning once per run of the daemon (or terminal command), not on every save, so look for it near the start of the log.
 

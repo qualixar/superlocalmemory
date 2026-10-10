@@ -39,7 +39,7 @@ function ramRefusal(totalBytes, env = process.env) {
 }
 
 // Where the managed picture and document environment has a build (the same list as
-// runtimes/locks): Apple Silicon Macs, x86_64 Linux and x64 Windows. `translated` is a
+// runtimes/locks): Apple Silicon Macs, x86_64 and ARM64 Linux, and x64 Windows. `translated` is a
 // Node that runs as an Intel program on an Apple Silicon Mac.
 const NOT_SUPPORTED = 'Images and documents are not supported on this computer yet. Your text memories keep working.';
 
@@ -51,7 +51,7 @@ function mediaPlatformRefusal({ platform, arch, translated } = {}) {
     }
     return NOT_SUPPORTED;
   }
-  if (platform === 'linux' && arch !== 'x64') return NOT_SUPPORTED;
+  if (platform === 'linux' && arch !== 'x64' && arch !== 'arm64') return NOT_SUPPORTED;
   if (platform === 'win32' && arch !== 'x64') return NOT_SUPPORTED;
   return '';
 }
