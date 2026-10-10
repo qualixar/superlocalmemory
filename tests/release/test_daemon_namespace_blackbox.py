@@ -34,6 +34,7 @@ _LIFECYCLE_NAMES = {
     "daemon.pid",
     "daemon.port",
     "daemon.lock",
+    "daemon.instance.lock",
     "daemon.log",
     "daemon-error.log",
 }

@@ -89,12 +89,11 @@ def _reimport_memories(engine: Any, rows: list[dict[str, Any]], db_path: Path,
                 continue
         meta = {k: v for k, v in metadata_of(row).items() if not str(k).startswith("_slm")}
         kind = parse_kind(row.get("memory_kind"))
-        if kind is not None:
-            meta[METADATA_KEY] = kind.value
+        trusted = {METADATA_KEY: kind.value} if kind is not None else None
         try:
             result = canonical_store(
                 engine, str(row.get("content") or ""), source_type=SOURCE_TYPE,
-                trusted_actor_id=actor, metadata=meta,
+                trusted_actor_id=actor, metadata=meta, trusted_metadata=trusted,
                 scope=str(row.get("scope") or "personal"),
                 shared_with=_shared_with(row.get("shared_with")),
                 session_id=str(row.get("session_id") or ""),

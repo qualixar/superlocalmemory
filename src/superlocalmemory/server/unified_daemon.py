@@ -55,12 +55,25 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, field_validator
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.daemon.materializer import (
+    PassHooks,
+    PendingMaterializer,
+    PendingProfileMismatchError as _PendingProfileMismatchError,
+    ingestion_pass as _ingestion_pass,
+    legacy_item as _legacy_item,
+    run_operation as _run_operation,
+    should_idle as _materializer_idle_rule,
+)
+from superlocalmemory.daemon.services import ServiceRegistry
 from superlocalmemory.infra.daemon_identity import (
     DaemonDescriptor,
     build_descriptor,
-    clear_descriptor,
-    descriptor_path,
-    write_descriptor,
+    clear_descriptor_if_owner,
+    publish_if_owner,
+)
+from superlocalmemory.infra.instance_lock import (
+    acquire_with_backoff,
+    get_instance_lock,
 )
 from superlocalmemory.infra.data_root import (
     assert_no_durable_root_conflict,
@@ -638,29 +651,51 @@ def _process_descriptor(port: int, version: str, state: str) -> DaemonDescriptor
 def _publish_process_descriptor(
     port: int, version: str, state: str,
 ) -> DaemonDescriptor:
-    """Atomically publish identity plus one-release PID/port mirrors."""
+    """Publish identity plus PID/port mirrors, only as the instance-lock owner."""
     descriptor = _process_descriptor(port, version, state)
-    write_descriptor(descriptor)
-    pid_file = descriptor_path().with_name("daemon.pid")
-    port_file = descriptor_path().with_name("daemon.port")
-    pid_file.write_text(str(descriptor.pid), encoding="utf-8")
-    port_file.write_text(str(descriptor.port), encoding="utf-8")
+    publish_if_owner(descriptor, get_instance_lock())
     return descriptor
 
 
+# Background services that run inside this process. Services are started and
+# stopped one by one at the points the lifecycle already chose; nothing here
+# calls start_all.
+_SERVICES = ServiceRegistry()
+_PENDING_MATERIALIZER: "PendingMaterializer | None" = None
+_RECORD_GUARDIAN: "RecordGuardian | None" = None
+
+
+def _start_record_guardian() -> None:
+    """Keep the record true while this process owns the data folder."""
+    global _RECORD_GUARDIAN
+    from superlocalmemory.daemon.record_guardian import RecordGuardian
+
+    _stop_record_guardian()
+    _RECORD_GUARDIAN = RecordGuardian(
+        descriptor_provider=lambda: _ACTIVE_DAEMON_DESCRIPTOR,
+        lock=get_instance_lock(),
+    )
+    _SERVICES.register(_RECORD_GUARDIAN)
+    _SERVICES.start(_RECORD_GUARDIAN.name)
+
+
+def _stop_record_guardian() -> None:
+    global _RECORD_GUARDIAN
+    guardian, _RECORD_GUARDIAN = _RECORD_GUARDIAN, None
+    if guardian is not None:
+        _SERVICES.stop(guardian.name, 2.0)
+        _SERVICES.unregister(guardian.name)
+
+
 def _cleanup_process_descriptor(descriptor: DaemonDescriptor | None) -> None:
-    """Remove lifecycle state only when this process still owns the instance."""
-    if descriptor is None or not clear_descriptor(descriptor.instance_id):
-        return
-    for path, expected in (
-        (descriptor_path().with_name("daemon.pid"), str(descriptor.pid)),
-        (descriptor_path().with_name("daemon.port"), str(descriptor.port)),
-    ):
-        try:
-            if path.read_text(encoding="utf-8").strip() == expected:
-                path.unlink()
-        except OSError:
-            pass
+    """Remove lifecycle state only when this process still owns the instance.
+
+    The guardian stops first so it cannot republish a record this call clears.
+    Safe to call twice (lifespan shutdown, then the start_server finally).
+    """
+    _stop_record_guardian()
+    if descriptor is not None:
+        clear_descriptor_if_owner(descriptor.instance_id, get_instance_lock())
 
 
 # ---------------------------------------------------------------------------
@@ -1161,7 +1196,14 @@ class ObserveBuffer:
         self._engine = engine
 
     def enqueue(self, content: str, *, trusted_actor_id: str = "") -> dict:
+        # The hash is only a duplicate-window and idempotency key; the text
+        # that is previewed, evented and stored is the prepared one.
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        from superlocalmemory.memory_core import prepare_user_text
+
+        content = prepare_user_text(
+            getattr(self._engine, "_config", None), content,
+        ).text
         with self._lock:
             if content_hash in self._seen:
                 return {"captured": False, "reason": "duplicate within debounce window"}
@@ -1195,7 +1237,6 @@ class ObserveBuffer:
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
             from superlocalmemory.hooks.auto_capture import AutoCapture
-
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
                 _emit_event(
@@ -2417,6 +2458,8 @@ async def lifespan(application: FastAPI):
             # serving (DaemonAlreadyServing), OR the bounded retry loop exhausted
             # (CanonicalRememberUnavailable).  Belt-and-suspenders: a lost writer
             # race must NEVER be a traceback for a non-technical user.
+            # With the instance lock this is reached only against a daemon of an
+            # older release (no lock) running on another port.
             logger.info(
                 "another SLM daemon holds the writer; this instance exits cleanly"
             )
@@ -5175,7 +5218,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
                 meta[METADATA_KEY] = declared_kind.value
 
+            from superlocalmemory.memory_core import (
+                pii_redaction_enabled,
+                prepare_key,
+                prepare_metadata,
+                prepare_user_text,
+            )
+
+            prepared = prepare_user_text(engine._config, req.content)
+            redact = pii_redaction_enabled(engine._config)
+            meta, _ = prepare_metadata(meta, pii_redaction=redact)
             store_config = getattr(engine._config, "store", None)
+            # Length limits judge what the caller sent, as before.
             validate_deterministic_admission(
                 req.content,
                 max_verbatim_chars=getattr(
@@ -5197,7 +5251,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "operation": "store",
                 "agent_id": trusted_actor_id,
                 "profile_id": write_profile,
-                "content_preview": req.content[:100],
+                "content_preview": prepared.text[:100],
             })
 
             # V4 Phase 4: OperationPolicyRegistry evaluation.
@@ -5274,10 +5328,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     )
 
             admission = RememberRequest(
-                content=req.content,
+                content=prepared.text,
                 profile_id=write_profile,
                 source_type="http",
-                idempotency_key=req.idempotency_key or uuid.uuid4().hex,
+                idempotency_key=(
+                    prepare_key(req.idempotency_key, pii_redaction=redact)
+                    if req.idempotency_key else uuid.uuid4().hex
+                ),
                 metadata=meta,
                 scope=scope,
                 shared_with=tuple(shared_with or ()),
@@ -5532,6 +5589,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 ) from exc
             if isinstance(exc, (AdmissionAuthorizationError, PermissionError)):
                 raise HTTPException(403, detail="remember admission is not authorized") from exc
+            # Known limit: a retry of a key saved before redaction was turned on
+            # conflicts here (422) and is not treated as a duplicate, unlike
+            # /ingest and /import. The journal compares the request as sent.
             if isinstance(
                 exc,
                 (AdmissionPayloadError, IdempotencyConflict),
@@ -6216,12 +6276,8 @@ def _start_memory_watchdog() -> None:
     logger.info("Memory watchdog started (limit: %d MB per worker)", MAX_WORKER_MB)
 
 
-_materializer_stop = threading.Event()
-_materializer_thread: threading.Thread | None = None
 
 
-class _PendingProfileMismatchError(RuntimeError):
-    """A legacy pending row no longer matches the admitted profile lease."""
 
 
 def _version_integrity_payload() -> dict:
@@ -6255,55 +6311,7 @@ def _materializer_actor_id() -> str:
     return f"daemon-capability:{descriptor.capability_fingerprint}"
 
 
-def _run_materializer_operation(
-    runtime,
-    engine_supplier,
-    operation,
-    *,
-    expected_profile_id: str | None = None,
-):
-    """Run one bounded background unit against an admitted engine snapshot.
-
-    Cooperative preemption: if a profile transition is already in progress,
-    skip this materialization cycle entirely and return None.  The caller's
-    loop retries on the next iteration, by which time the switch has committed
-    and a clean admission is available.  This prevents the materializer from
-    holding the operation lease during the transition drain window.
-    """
-    # Writer-priority: don't acquire a new lease when a transition is draining.
-    if runtime is not None and (runtime.transitioning or runtime.background_paused):
-        if expected_profile_id is not None:
-            raise _PendingProfileMismatchError(
-                "pending materialization deferred during profile transition"
-            )
-        return None
-    with runtime.operation() as snapshot:
-        if (
-            expected_profile_id is not None
-            and snapshot.profile_id != expected_profile_id
-        ):
-            raise _PendingProfileMismatchError(
-                "pending profile changed before materializer admission"
-            )
-        # Resolve the engine only after admission. A concurrent mode/provider
-        # reconfiguration may have replaced the module-level engine while this
-        # worker was waiting at the transition barrier.
-        engine = engine_supplier()
-        if engine is None:
-            return None
-        engine_profile_id = getattr(engine, "_profile_id", None)
-        if (
-            expected_profile_id is not None
-            and engine_profile_id != expected_profile_id
-        ):
-            raise _PendingProfileMismatchError(
-                "resident engine does not match pending profile"
-            )
-        from superlocalmemory.core.recall_gate import background_work
-        with background_work(
-            preempt_requested=lambda: bool(runtime is not None and runtime.transitioning),
-        ):
-            return operation(engine)
+_run_materializer_operation = _run_operation
 
 
 def _reconcile_projection_manifest(
@@ -6574,14 +6582,8 @@ def _ops_failure_counts(engine, application) -> dict:
 def _materializer_should_idle(
     pending: object, durable_complete: int, durable_failed: int,
 ) -> bool:
-    """Whether the materializer pass earned a sleep before the next one.
-
-    ``durable_failed`` used to suppress the sleep. The pass runs one operation
-    at a time, so a single operation that cannot succeed kept this loop at full
-    speed indefinitely, re-reaping and re-listing on every iteration. A failure
-    is activity, not progress. GitHub #137.
-    """
-    return not pending and not durable_complete
+    """Whether the materializer pass earned a sleep before the next one."""
+    return _materializer_idle_rule(pending, durable_complete, durable_failed)
 
 
 def _reap_stuck_ingestion(db) -> list[str]:
@@ -6611,270 +6613,76 @@ def _materialize_ingestion_one_pass(
     min_queryable_age_seconds: float = 1.0,
 ) -> tuple[int, int]:
     """Materialize durable M018 work once; return ``(complete, failed)``."""
-    # Recovery first, unconditionally: terminalizing exhausted leases is
-    # pure SQL and must never wait on recall quiescence or embedder
-    # warmth — a cold embedder blocked the reap forever on one operator
-    # box, wedging the write pipeline until manual DB surgery (#131).
-    db = getattr(engine, "_db", None)
-    reaped = _reap_stuck_ingestion(db) if db is not None else []
-    if reaped:
-        logger.warning(
-            "Materializer terminalized %d exhausted ingestion operation(s)",
-            len(reaped),
-        )
-    # Yield while a recall may still need the embedder (question not embedded yet);
-    # later steps yield on their own: embeds per text, the local judge per recall.
-    if _recalls_needing_embedder() > 0:
-        return 0, 0
-
-    # A local sentence-transformers cold start can take minutes.  Remember's
-    # queryable projection is already durable, so defer enrichment until the
-    # daemon warmup/health monitor has proved the worker ready.  This preserves
-    # every enrichment layer while preventing a background cold load from
-    # monopolizing the same worker needed by foreground recall.
-    embedder = getattr(engine, "_embedder", None)
-    if embedder is not None and hasattr(embedder, "is_warm"):
-        try:
-            if not bool(embedder.is_warm):
-                return 0, 0
-        except Exception:
-            return 0, 0
-
-    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
-    from superlocalmemory.core.ingestion_command import IngestionState
-
-    command = build_engine_ingestion_command(engine)
-    completed = failed = 0
-    for operation in command.repository.list_materializable(
+    return _ingestion_pass(
+        engine,
+        hooks=_materializer_pass_hooks(),
+        emit_event=lambda *a, **k: _emit_event(*a, **k),
         limit=limit,
         min_queryable_age_seconds=min_queryable_age_seconds,
-    ):
-        try:
-            result = command.materialize(operation.operation_id)
-        except Exception as exc:
-            failed += 1
-            logger.warning(
-                "Ingestion operation %s could not be materialized: %s",
-                operation.operation_id,
-                exc,
-            )
-            continue
-        if result.state is IngestionState.COMPLETE:
-            completed += 1
-            _reconcile_projection_manifest(
-                engine,
-                result.operation_id,
-                getattr(operation, "profile_id", ""),
-                result.fact_ids,
-            )
-            _emit_event(
-                "memory.stored",
-                payload={
-                    "operation_id": result.operation_id,
-                    "fact_ids": list(result.fact_ids),
-                    "path": "canonical_materializer",
-                    "content_preview": result.raw_content[:120],
-                },
-                source_agent="materializer",
-            )
-        else:
-            failed += 1
-            logger.warning(
-                "Ingestion operation %s failed: %s",
-                result.operation_id,
-                result.last_error,
-            )
-    _reconcile_pending_projections(engine)
-    return completed, failed
+    )
 
 
 def _materialize_legacy_pending_item(engine, item: dict) -> str:
     """Backfill one pre-M018 pending.db row through canonical ingestion."""
-    from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
-    from superlocalmemory.core.ingestion_command import (
-        IngestionRequest,
-        IngestionState,
+    return _legacy_item(engine, item, actor_id=_materializer_actor_id())
+
+
+def _materializer_pass_hooks() -> PassHooks:
+    # Call-time lookups: the names below stay patchable in this module.
+    return PassHooks(
+        reap=lambda db: _reap_stuck_ingestion(db),
+        reconcile_manifest=lambda *a: _reconcile_projection_manifest(*a),
+        reconcile_pending=lambda engine: _reconcile_pending_projections(engine),
+        recalls_needing_embedder=lambda: _recalls_needing_embedder(),
     )
 
-    expected_profile_id = str(item.get("profile_id") or "default")
-    if getattr(engine, "_profile_id", None) != expected_profile_id:
-        raise _PendingProfileMismatchError(
-            "legacy pending item does not match resident engine profile"
-        )
 
-    metadata_value = item.get("metadata") or "{}"
-    try:
-        metadata = (
-            json.loads(metadata_value)
-            if isinstance(metadata_value, str)
-            else dict(metadata_value)
+def _live_module():
+    """The module uvicorn imported by name, where the lifespan publishes state.
+
+    The daemon may run as ``__main__``; its own globals are then a different
+    copy from the ones the lifespan sets, so the engine must be read here.
+    """
+    import superlocalmemory.server.unified_daemon as live
+
+    return live
+
+
+def _pending_materializer() -> PendingMaterializer:
+    """The process's materializer service, built and registered on first use."""
+    global _PENDING_MATERIALIZER
+    if _PENDING_MATERIALIZER is None:
+        from superlocalmemory.cli import pending_store
+
+        _PENDING_MATERIALIZER = PendingMaterializer(
+            engine_supplier=lambda: _live_module()._engine,
+            runtime_supplier=lambda: _live_module()._profile_runtime,
+            pending_store=pending_store,
+            emit_event=lambda *a, **k: _emit_event(*a, **k),
+            actor_id_supplier=lambda: _materializer_actor_id(),
+            recalls_in_flight=lambda: _recalls_in_flight(),
+            hooks=_materializer_pass_hooks(),
+            idle_predicate=lambda *a: _materializer_should_idle(*a),
+            ingestion_step=lambda engine, limit: _materialize_ingestion_one_pass(
+                engine, limit=limit,
+            ),
+            legacy_step=lambda engine, item: _materialize_legacy_pending_item(
+                engine, item,
+            ),
         )
-    except (TypeError, ValueError):
-        metadata = {}
-    if item.get("tags"):
-        metadata.setdefault("tags", item["tags"])
-    scope = metadata.pop("scope", None) or "personal"
-    shared_with = tuple(metadata.pop("shared_with", None) or ())
-    source_type = str(metadata.pop("_slm_source_type", "legacy-pending"))
-    idempotency_key = str(
-        metadata.pop("_slm_idempotency_key", f"pending:{item['id']}")
-    )
-    command = build_engine_ingestion_command(engine)
-    receipt = command.submit(IngestionRequest(
-        content=item["content"],
-        profile_id=expected_profile_id,
-        source_type=source_type,
-        idempotency_key=idempotency_key,
-        metadata=metadata,
-        scope=scope,
-        shared_with=shared_with,
-        trusted_actor_id=_materializer_actor_id(),
-        session_id=str(metadata.get("session_id") or ""),
-    ))
-    result = command.materialize(receipt.operation_id)
-    if result.state is not IngestionState.COMPLETE:
-        raise RuntimeError(result.last_error or "legacy pending materialization failed")
-    return result.operation_id
+        _SERVICES.register(_PENDING_MATERIALIZER)
+    return _PENDING_MATERIALIZER
 
 
 def _start_pending_materializer() -> None:
     """Drain M018 operations and backfill the legacy pending.db queue."""
-    global _materializer_thread
-
-    if _materializer_thread is not None and _materializer_thread.is_alive():
-        return
-    _materializer_stop.clear()
-
-    def _loop():
-        from superlocalmemory.cli.pending_store import (
-            get_pending,
-            mark_done,
-            mark_failed,
-        )
-        # v3.4.38: log first engine acquisition so we know materializer is alive
-        _engine_logged = False
-        _waiting_logged = False
-        while not _materializer_stop.is_set():
-            try:
-                # v3.4.38: Read fresh module global on every iteration so we
-                # pick up the engine after lifespan sets it. Use the import
-                # trick to ensure we're reading the live module attribute,
-                # not a stale local reference.
-                import superlocalmemory.server.unified_daemon as _ud
-                engine = _ud._engine
-                runtime = _ud._profile_runtime
-                if engine is None or runtime is None:
-                    if not _waiting_logged:
-                        logger.info(
-                            "Materializer: waiting for engine/runtime to init..."
-                        )
-                        _waiting_logged = True
-                    time.sleep(0.5)
-                    continue
-                if not _engine_logged:
-                    logger.info("Materializer: engine acquired, starting drain loop")
-                    _engine_logged = True
-
-                cycle_result = _run_materializer_operation(
-                    runtime,
-                    lambda: _ud._engine,
-                    lambda admitted_engine: _materialize_ingestion_one_pass(
-                        admitted_engine,
-                        # One operation per lease bounds profile-switch wait
-                        # time without allowing engine components to rebind
-                        # halfway through an enrichment pipeline.
-                        limit=1,
-                    ),
-                )
-                durable_complete, durable_failed = cycle_result or (0, 0)
-                if runtime.background_paused:  # a model switch is swapping: no spin
-                    time.sleep(0.25)
-                    continue
-                # Only backfill legacy pending items enqueued under the active
-                # profile — never materialize another profile's queued memory
-                # under whichever profile happens to be active now.
-                _active_profile = runtime.snapshot.profile_id
-                pending = get_pending(limit=50, profile_id=_active_profile)
-                if _materializer_should_idle(
-                    pending, durable_complete, durable_failed,
-                ):
-                    time.sleep(1.0)
-                    continue
-                if pending:
-                    logger.info(
-                        "Materializer: backfilling %d legacy pending memories",
-                        len(pending),
-                    )
-                for item in pending:
-                    if _materializer_stop.is_set():
-                        break
-                    waits = 0
-                    while _recalls_in_flight() > 0 and waits < 60:
-                        time.sleep(0.5)
-                        waits += 1
-                    try:
-                        pending_profile_id = str(
-                            item.get("profile_id") or "default"
-                        )
-                        operation_id = _run_materializer_operation(
-                            runtime,
-                            lambda: _ud._engine,
-                            lambda admitted_engine: _materialize_legacy_pending_item(
-                                admitted_engine, item,
-                            ),
-                            expected_profile_id=pending_profile_id,
-                        )
-                        if operation_id is None:
-                            raise RuntimeError("resident engine became unavailable")
-                        mark_done(item["id"])
-                        _emit_event(
-                            "memory.stored",
-                            payload={
-                                "pending_id": item["id"],
-                                "operation_id": operation_id,
-                                "path": "legacy_pending_backfill",
-                                "content_preview": item["content"][:120],
-                            },
-                            source_agent="materializer",
-                        )
-                    except _PendingProfileMismatchError:
-                        # A profile transition committed after this row was
-                        # fetched but before it obtained an operation lease.
-                        # Leave it pending, without consuming a retry, so the
-                        # owning profile can safely drain it later.
-                        logger.debug(
-                            "Pending %d deferred after profile switch",
-                            item["id"],
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Pending %d failed: %s", item["id"], exc,
-                        )
-                        mark_failed(item["id"], str(exc))
-            except Exception as exc:
-                logger.warning("materializer loop error: %s", exc)
-                time.sleep(5.0)
-
-    _materializer_thread = threading.Thread(
-        target=_loop, daemon=True, name="pending-materializer",
-    )
-    _materializer_thread.start()
-    logger.info("Pending materializer started (recall-priority)")
+    _pending_materializer()
+    _SERVICES.start("pending_materializer")
 
 
 def _stop_pending_materializer(timeout: float = 5.0) -> bool:
     """Stop and join the background writer before closing its engine."""
-    global _materializer_thread
-
-    _materializer_stop.set()
-    thread = _materializer_thread
-    if thread is not None and thread.is_alive():
-        thread.join(timeout=timeout)
-        if thread.is_alive():
-            logger.warning("Pending materializer did not stop within %.1fs", timeout)
-            return False
-    _materializer_thread = None
-    return True
+    return _SERVICES.stop("pending_materializer", timeout)
 
 
 _thread_dump_file = None
@@ -6929,11 +6737,30 @@ def install_thread_dump_signal() -> "os.PathLike | str | None":
         return None
 
 
+def _instance_lock_wait_s() -> float:
+    """Seconds start_server may wait for a previous daemon to release the folder."""
+    try:
+        return max(0.0, float(os.environ.get("SLM_INSTANCE_LOCK_WAIT_S", "") or 20.0))
+    except ValueError:
+        return 20.0
+
+
 def start_server(port: int = _DEFAULT_PORT) -> None:
     """Start the unified daemon. Blocks until stopped."""
     global _start_time
     install_thread_dump_signal()
     assert_no_durable_root_conflict()
+    # The lock decides who the daemon is: nothing below (socket, logs, record)
+    # runs in a process that does not own this data folder. A restart overlaps
+    # with the old daemon letting go, so wait a bounded time before giving up;
+    # returning (not raising) keeps the exit code 0 so no service manager loops.
+    instance_lock = get_instance_lock()
+    if not acquire_with_backoff(instance_lock, _instance_lock_wait_s()):
+        logger.error(
+            "SLM daemon will not start: another SLM daemon owns this data "
+            "folder (%s)", instance_lock.path,
+        )
+        return
     import socket
 
     import uvicorn
@@ -6978,6 +6805,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         listener.listen(socket.SOMAXCONN)
     except OSError as exc:
         listener.close()
+        instance_lock.release()
         logger.error(
             "SLM daemon will not start: %s:%d is already unavailable (%s)",
             bind_host, port, exc,
@@ -6997,6 +6825,24 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     from superlocalmemory.server.routes.helpers import SLM_VERSION
 
     _publish_process_descriptor(port, SLM_VERSION, "starting")
+    _start_record_guardian()
+    try:
+        _serve_owned(port, bind_host, listener, instance_lock)
+    finally:
+        # Whatever happens after the record is published (including a failure
+        # before the server runs), stop the guardian, clear the record and
+        # let go of the data folder. Each step is safe to repeat.
+        listener.close()
+        _stop_record_guardian()
+        _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+        instance_lock.release()
+
+
+def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
+    """Run the daemon once this process owns the data folder and the port."""
+    global _start_time
+    import uvicorn
+
     _start_time = time.monotonic()
 
     try:
@@ -7059,6 +6905,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         finally:
             listener.close()
             _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+            instance_lock.release()
         return
 
     # Remote access on: one application, two listeners, one lifespan (owned by
@@ -7079,6 +6926,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         listener.close()
         remote_sock.close()
         _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
+        instance_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -7151,7 +6999,8 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def _cli_main(argv: list[str]) -> None:
+    """Start the daemon from the command line (``--start [--port=N]``)."""
     # Rotate first, then configure logging, so the first log line lands in a
     # freshly-sized file.
     rotate_oversized_logs()
@@ -7159,10 +7008,20 @@ if __name__ == "__main__":
     # v3.6.9 (#33): honour SLM_DAEMON_PORT env so operators can configure the
     # port without changing the launch command. --port= arg takes precedence.
     port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
-    for arg in sys.argv:
+    for arg in argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
-    if "--start" in sys.argv:
+    if "--start" in argv:
         start_server(port=port)
     else:
         print("Usage: python -m superlocalmemory.server.unified_daemon --start [--port=8765]")
+
+
+if __name__ == "__main__":
+    # ``python -m`` loads this file as ``__main__``, and uvicorn later imports
+    # ``superlocalmemory.server.unified_daemon`` for the app: two copies of the
+    # module, each with its own record descriptor. Run everything through the
+    # importable module so the lifespan and the record guardian share one copy.
+    import importlib
+
+    importlib.import_module("superlocalmemory.server.unified_daemon")._cli_main(sys.argv)

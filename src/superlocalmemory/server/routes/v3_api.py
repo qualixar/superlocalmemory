@@ -2249,6 +2249,13 @@ async def update_core_memory_block(block_id: str, request: Request):
         from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
         from superlocalmemory.storage.memory_write import memory_write
         from datetime import datetime, timezone
+        from superlocalmemory.memory_core import prepare_user_text
+
+        # An edited block is user text: prepared like a save.
+        content = prepare_user_text(
+            getattr(getattr(request.app.state, "engine", None), "_config", None),
+            str(content),
+        ).text
 
         if not DB_PATH.exists():
             return JSONResponse(

@@ -833,11 +833,24 @@ def register_active_tools(server, get_engine: Callable) -> None:
             if stored:
                 # The hash is the stored memory's source hash, so an erasure can
                 # find this event and blank its preview (core/erasure_scrub.py).
+                from superlocalmemory.core.config import SLMConfig
+                from superlocalmemory.memory_core import (
+                    effective_pii_redaction,
+                    prepare_user_text,
+                )
+
+                _config = SLMConfig.load()
+                # A plain loaded config does not carry the deployment policy.
+                if effective_pii_redaction(_config):
+                    _config.pii_redaction = True
+
                 _emit_event("memory.captured", {
                     "agent_id": agent_id,
                     "category": decision.category,
                     "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                    "content_preview": content[:80],
+                    "content_preview": prepare_user_text(
+                        _config, content,
+                    ).text[:80],
                     "source": "auto-observe",
                 }, source_agent=agent_id)
 
