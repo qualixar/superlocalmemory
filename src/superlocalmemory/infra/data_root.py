@@ -259,19 +259,33 @@ DATA_ROOT_REFUSAL = "That folder holds SuperLocalMemory's own data."
 def overlaps_data_root(path: str | Path, *extra_roots: str | Path | None) -> bool:
     """True when ``path`` is, is inside, or contains SuperLocalMemory's data folder.
 
-    Both sides go through ``realpath`` (after ``~`` expansion), so a link into the
-    data folder counts as the data folder, and a parent of it counts too: connecting
-    the parent would take the data folder along with it.
+    Folders are compared by identity on disk (device and inode), not by spelling, so
+    a link into the data folder, a different letter case on a case-insensitive disk
+    or a ``..`` detour all count as the data folder. A parent of it counts too:
+    connecting the parent would take the data folder along with it.
     """
-    target = os.path.realpath(os.path.expanduser(str(path)))
+    target = Path(os.path.realpath(os.path.expanduser(str(path))))
     roots = [canonical_data_root(), *(r for r in extra_roots if r)]
     for root in roots:
-        base = os.path.realpath(os.path.expanduser(str(root)))
+        base = Path(os.path.realpath(os.path.expanduser(str(root))))
         if _within(base, target) or _within(target, base):
             return True
     return False
 
 
-def _within(outer: str, inner: str) -> bool:
-    return inner == outer or inner.startswith(outer.rstrip(os.sep) + os.sep)
-
+def _within(outer: Path, inner: Path) -> bool:
+    """``inner`` is ``outer`` or below it, by spelling or by identity on disk."""
+    if str(inner) == str(outer) or str(inner).startswith(str(outer).rstrip(os.sep) + os.sep):
+        return True
+    try:
+        outer_id = os.stat(outer)
+    except OSError:
+        return False
+    for candidate in (inner, *inner.parents):
+        try:
+            found = os.stat(candidate)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == (outer_id.st_dev, outer_id.st_ino):
+            return True
+    return False
