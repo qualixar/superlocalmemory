@@ -107,13 +107,21 @@ class _Job:
     work: Path = field(default_factory=Path)
     placed: str = ""
     placed_new: bool = False
+    remote: bool = False
 
 
-def _cold_wait_s() -> float:
+#: Loading the picture model takes about 45 s on a Mac. Someone on this computer waits for it;
+#: a web app's call has a 25 s relay budget, so it gets a "starting up, ask again" answer in time.
+LOCAL_COLD_WAIT_S = 90.0
+REMOTE_COLD_WAIT_S = 20.0
+
+
+def _cold_wait_s(remote: bool = False) -> float:
+    default = REMOTE_COLD_WAIT_S if remote else LOCAL_COLD_WAIT_S
     try:
-        return min(60.0, max(1.0, float(os.environ.get("SLM_MEDIA_COLD_WAIT_S", "20"))))
+        return min(120.0, max(1.0, float(os.environ.get("SLM_MEDIA_COLD_WAIT_S", default))))
     except ValueError:
-        return 20.0
+        return default
 
 
 # -- reading the input ---------------------------------------------------------
@@ -208,11 +216,11 @@ def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
 
 # -- the worker steps ----------------------------------------------------------
 
-def _wait_for_warm(client: Any) -> None:
+def _wait_for_warm(client: Any, remote: bool = False) -> None:
     if client.is_warm():
         return
     client.warm_up()
-    deadline = time.monotonic() + _cold_wait_s()
+    deadline = time.monotonic() + _cold_wait_s(remote)
     while time.monotonic() < deadline:
         if client.is_warm():
             return
@@ -236,7 +244,7 @@ def _file_sha(path: Path) -> str:
 
 
 def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
-    _wait_for_warm(job.client)
+    _wait_for_warm(job.client, job.remote)
     fd = os.open(job.work / "source.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(data)
@@ -395,9 +403,13 @@ def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
     client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
-    scope: str | None = None, shared_with: tuple[str, ...] = (),
+    scope: str | None = None, shared_with: tuple[str, ...] = (), can_wait: bool | None = None,
 ) -> MediaReceipt:
-    """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
+    """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes.
+
+    ``can_wait``: whether the caller can wait out a cold picture model (about 45 s). Default: yes
+    for callers on this computer, no for a web app's live call (its relay answers within 25 s).
+    """
     opened = False
     store_ref = store
     try:
@@ -415,7 +427,7 @@ def remember_media(
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
             session_date=session_date, idempotency_key=idempotency_key, folder=folder,
-            scope=scope, shared_with=tuple(shared_with)))
+            scope=scope, shared_with=tuple(shared_with), remote=not (can_wait if can_wait is not None else not getattr(inp, "remote", False))))
     except _Stop as stop:
         return stop.receipt
     finally:
@@ -437,7 +449,8 @@ def _run(client: Any, store: Any, cache: Any, config: Any, data: bytes, src_sha:
         plan = current_space_plan(root)
     except ValueError:
         raise _refuse("That picture mode is not available in this build.") from None
-    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan)
+    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan,
+               remote=bool(args.get("remote")))
     job.work = Path(tempfile.mkdtemp(dir=files.tmp_dir(root)))
     try:
         return _store_it(job, data, src_sha, args)
