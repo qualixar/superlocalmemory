@@ -175,13 +175,19 @@ any browser, pick the file and press Save; the page says "Saved to your memory"
 when your computer has it. The file goes from your browser to your computer
 over the connection that is already open, and nothing is kept in the cloud on
 the way. Your computer must be awake and running SuperLocalMemory, and the app
-needs both boxes above and the `media` key permission. Pictures can be up to
+needs the **Allow images and documents** box, a write key and the pictures
+permission on your computer (below). Pictures can be up to
 25 MB (PNG, JPEG or WebP) and PDFs up to 100 MB; each connection can make 3
 open links at a time and 20 uploads a day.
 
 Ticking a box is not enough. You must also allow it for the connection on your
-computer. Each connection has a remote key named `web-<connection id>`. Find it
-with `slm remote keys list`, then run:
+computer. In the dashboard, open **Connected apps**; the **Web access** row has
+two switches, **Let these apps message your other bots** and **Let these apps
+save and read pictures and documents**. They apply to every app on that
+connection, on its next request.
+
+From a terminal, the same switches are on the connection's remote key, named
+`web-<connection id>` (find it with `slm remote keys list`):
 
 ```bash
 slm remote keys allow web-<connection id> mesh
@@ -190,7 +196,8 @@ slm remote keys disallow web-<connection id> mesh
 ```
 
 `allow` turns a permission on and `disallow` turns it off. Without both the box
-and the key, the app is refused.
+and the switch, the app is refused. Turning pictures off also ends any upload
+link the connection has not finished.
 
 What a web app can do with bot messages:
 

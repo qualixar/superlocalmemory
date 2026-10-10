@@ -211,7 +211,8 @@ describe('Bot messages pane', () => {
         assert.equal(steps.length, 3);
         assert.equal(steps[0], 'Connect an app in Connected apps.');
         assert.equal(steps[1], 'Tick "Allow talking to your other bots" when you approve it.');
-        assert.match(steps[2], /^On this computer, allow it for that connection: slm remote keys allow web-<connection id> mesh/);
+        // Package D: the second yes is a switch on the Web access row; the command stays as the alternative.
+        assert.match(steps[2], /^On this computer, switch on "Let these apps message your other bots" in Connected apps, or run: slm remote keys allow web-<connection id> mesh/);
         assert.match(steps[2], /slm remote keys list/);
         const code = [...h.pane.querySelectorAll('ol.od-botmsg-steps code')].map(c => c.textContent);
         assert.deepEqual(code, ['slm remote keys allow web-<connection id> mesh', 'slm remote keys list']);

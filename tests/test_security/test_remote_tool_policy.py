@@ -422,6 +422,7 @@ def test_mesh_denial_text_names_the_missing_pieces() -> None:
         _, body, _ = _run(_call("mesh_peers"), WEB_WRITE, key_store=_Keys(WEB_WRITE))
     text = body["result"]["content"][0]["text"]
     assert "other bots" in text and "slm remote keys allow web-" + CID + " mesh" in text
+    assert "Connected apps" in text  # package D: the dashboard switch is named first
     assert "[remote_tool_not_allowed]" in text
     _, body, _ = _run(_call("get_media"), WEB_WRITE, key_store=_Keys(WEB_WRITE))
     text = body["result"]["content"][0]["text"]
