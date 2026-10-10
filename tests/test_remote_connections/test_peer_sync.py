@@ -225,3 +225,53 @@ async def test_a_failed_read_does_not_end_the_timer(tmp_path, broker, monkeypatc
     await asyncio.gather(task, return_exceptions=True)
     assert ref not in alive(broker)
     peer_names.set_names(row.connection_id, {})
+
+
+@pytest.mark.asyncio
+async def test_removing_a_connection_whose_row_is_gone_still_retires_its_apps(tmp_path, broker):
+    runtime, row, _ = make(tmp_path, broker)
+    mine = join(broker, row.connection_id, "auth-1")
+    runtime.store.by_connection = lambda *a, **k: None
+    assert await runtime._cancel("owner", "profile", row.connection_id) is False
+    assert mine not in alive(broker)
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_saying_the_connection_is_gone_retires_all_its_apps(
+        tmp_path, broker, monkeypatch):
+    runtime, row, provider = make(tmp_path, broker)
+    mine, other = join(broker, row.connection_id, "auth-1"), join(broker, "f" * 32, "auth-9")
+
+    async def gone(value):
+        raise ValueError("connection_unavailable")
+
+    provider.list_apps_v2 = gone
+    await asyncio.wait_for(runtime._sync_peers_while_running(row), 5)   # ends by itself
+    assert mine not in alive(broker) and other in alive(broker)
+
+
+def test_apps_list_403_maps_to_connection_unavailable():
+    from superlocalmemory.remote_connections.gateway_provider import CloudGatewayProvider
+    assert CloudGatewayProvider._status_error("/owner/apps", 403) == "connection_unavailable"
+    assert CloudGatewayProvider._status_error("/owner/apps", 500) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call", ["refresh", "list", "rotate", "revoke"])
+async def test_owner_actions_wait_for_the_connection_lock(tmp_path, broker, call):
+    runtime, row, provider = make(tmp_path, broker)
+    provider.v1 = listed("auth-1", version2=False)
+    cid = row.connection_id
+    work = {
+        "refresh": lambda: runtime.refresh_peer_names("owner", "profile", cid),
+        "list": lambda: runtime.list_apps("owner", "profile", cid),
+        "rotate": lambda: runtime.rotate_grant_key("owner", "profile", cid),
+        "revoke": lambda: runtime.revoke_app("owner", "profile", cid, "auth-1", 1),
+    }[call]
+    lock = runtime._locks.setdefault(cid, asyncio.Lock())
+    async with lock:
+        task = asyncio.create_task(work())
+        await asyncio.sleep(0.05)
+        assert not task.done()
+    await asyncio.gather(task, return_exceptions=True)
+    peer_names.set_names(cid, {})

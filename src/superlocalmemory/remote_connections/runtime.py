@@ -409,6 +409,13 @@ class NativeConnectionRuntime:
             await self.verify(row, epoch, attempt)
 
     async def _owned_link(self, owner: str, profile: str, connection_id: str):
+        """:meth:`_owned_link_unlocked` under the connection's lock, like every other
+        exchange of the owner token."""
+        lock = self._locks.setdefault(connection_id, asyncio.Lock())
+        async with lock:
+            return await self._owned_link_unlocked(owner, profile, connection_id)
+
+    async def _owned_link_unlocked(self, owner: str, profile: str, connection_id: str):
         """The completed laptop link for a connection this owner/profile holds, with a
         fresh owner token. Anything else is reported as not_found (no existence leak)."""
         try:
@@ -484,6 +491,10 @@ class NativeConnectionRuntime:
             except Exception as error:
                 if isinstance(error, ValueError) and error.args[:1] == ("not_found",):
                     return  # the connection is gone
+                if isinstance(error, ValueError) and error.args[:1] == ("connection_unavailable",):
+                    await self._sync_peers_quietly(
+                        row.connection_id, [], [], peer_sync.started_at())
+                    return  # the gateway no longer knows it: no app can call
                 logger.debug("peer sync unavailable for %s", row.connection_id[:6])
             await asyncio.sleep(PEER_SYNC_INTERVAL_S)
 
@@ -508,10 +519,11 @@ class NativeConnectionRuntime:
 
     async def rotate_grant_key(self, owner: str, profile: str, connection_id: str) -> int:
         """Owner action: replace this connection's grant key. Returns the new version."""
-        latest = await self._owned_link(owner, profile, connection_id)
-        fetched = await self.provider.grant_key(latest)
-        await asyncio.to_thread(
-            self.grant_keys.store_new, connection_id, fetched["version"], fetched["key"])
+        async with self._locks.setdefault(connection_id, asyncio.Lock()):
+            latest = await self._owned_link_unlocked(owner, profile, connection_id)
+            fetched = await self.provider.grant_key(latest)
+            await asyncio.to_thread(
+                self.grant_keys.store_new, connection_id, fetched["version"], fetched["key"])
         return fetched["version"]
 
     def request_grant_refresh(self, connection_id: str) -> bool:
@@ -612,6 +624,7 @@ class NativeConnectionRuntime:
             if key.name == "web-" + connection and key.active:
                 await mutate(self.keys.revoke, key.key_id)
         if row is None:
+            await self._sync_peers_quietly(connection, [], [], peer_sync.started_at())
             return False
         if (row.owner, row.profile) != (owner, profile):
             raise ValueError("connection_binding_mismatch")

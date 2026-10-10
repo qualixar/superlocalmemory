@@ -325,7 +325,13 @@ class CloudGatewayProvider:
             CloudGatewayProvider._removal_error(path, status)
             or CloudGatewayProvider._renewal_error(path, status)
             or CloudGatewayProvider._grant_key_error(path, status)
+            or CloudGatewayProvider._apps_error(path, status)
         )
+
+    @staticmethod
+    def _apps_error(path: str, status: int) -> str | None:
+        """403 on the app list: the connection is gone."""
+        return "connection_unavailable" if path == "/owner/apps" and status == 403 else None
 
     @staticmethod
     def _grant_key_error(path: str, status: int) -> str | None:
