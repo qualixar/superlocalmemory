@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import random
 import shutil
 import signal
@@ -76,10 +77,28 @@ def require_version(python: Path, expected: str, package: str = "superlocalmemor
 
 
 def _proc_text(pid: int, name: str) -> bytes:
+    """``/proc/<pid>/<name>`` on Linux; on macOS the same fields from ``ps``.
+
+    Fields keep the /proc shape (NUL-separated cmdline and environ, a stat line ending in
+    ``") <state>"``) so callers do not branch. Anything unreadable is empty, so ``owns`` fails closed.
+    """
     try:
         return Path(f"/proc/{pid}/{name}").read_bytes()
     except OSError:
+        pass
+    if sys.platform != "darwin":
         return b""
+    flags = {"cmdline": ["-o", "command="], "environ": ["-E", "-ww", "-o", "command="],
+             "stat": ["-o", "stat="]}.get(name)
+    if flags is None:
+        return b""
+    try:
+        out = subprocess.run(["ps", *flags, "-p", str(pid)], capture_output=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return b""
+    if name == "stat":
+        return b"0 (ps) " + out if out else b""
+    return out.replace(b" ", b"\0")
 
 
 def _pid_alive(pid: int) -> bool:
