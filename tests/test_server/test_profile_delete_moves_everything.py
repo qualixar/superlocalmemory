@@ -25,6 +25,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.helpers.env_capabilities import (
+    NO_VECTOR_SEARCH_REASON,
+    vector_search_available,
+)
+
+# The fixtures build stores with sqlite-vec loaded. An interpreter whose sqlite3
+# cannot load extensions (the python.org builds on macOS) has the package but
+# cannot use it, which an import check does not see.
+pytestmark = pytest.mark.skipif(
+    not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON,
+)
+
 _X = "kestrelwork"
 _TEXT = "Brindlemoor Quayle keeps the synthetic pewter kettle in the Ostrava archive."
 _EDIT = "Brindlemoor Quayle keeps the synthetic pewter kettle in the Brno archive."

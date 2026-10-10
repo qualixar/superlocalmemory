@@ -35,7 +35,8 @@ _DDL = (
     """CREATE TABLE IF NOT EXISTS media_items (
       media_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('image','page')),
-      sha256 TEXT NOT NULL, phash TEXT, mime TEXT NOT NULL, bytes INTEGER NOT NULL,
+      source_sha256 TEXT NOT NULL, stored_sha256 TEXT, phash TEXT, mime TEXT NOT NULL,
+      bytes INTEGER NOT NULL, remote_ok INTEGER NOT NULL DEFAULT 0,
       width INTEGER, height INTEGER, original_relpath TEXT,
       exif_json TEXT NOT NULL DEFAULT '{}',
       captured_at TEXT, anchor_memory_id TEXT,
@@ -44,7 +45,7 @@ _DDL = (
       state TEXT NOT NULL DEFAULT 'active'
         CHECK (state IN ('active','tombstoned','quarantined','media_missing')),
       thumb_webp BLOB, created_at TEXT NOT NULL, tombstoned_at TEXT)""",
-    "CREATE INDEX IF NOT EXISTS ix_media_profile_sha ON media_items(profile_id, sha256)",
+    "CREATE INDEX IF NOT EXISTS ix_media_profile_sha ON media_items(profile_id, source_sha256)",
     "CREATE INDEX IF NOT EXISTS ix_media_anchor ON media_items(anchor_memory_id)",
     "CREATE INDEX IF NOT EXISTS ix_media_doc ON media_items(document_id, page_no)",
     """CREATE TABLE IF NOT EXISTS media_vector_rows (
@@ -53,15 +54,17 @@ _DDL = (
     "CREATE INDEX IF NOT EXISTS ix_mvr_media ON media_vector_rows(media_id)",
     """CREATE TABLE IF NOT EXISTS documents (
       document_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, sha256 TEXT NOT NULL,
-      title TEXT NOT NULL, mime TEXT NOT NULL, page_count INTEGER NOT NULL DEFAULT 0,
+      title TEXT NOT NULL, mime TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0,
+      page_count INTEGER NOT NULL DEFAULT 0,
       pages_text_layer INTEGER NOT NULL DEFAULT 0, pages_ocr INTEGER NOT NULL DEFAULT 0,
       pages_empty INTEGER NOT NULL DEFAULT 0, source_id TEXT, source_relpath TEXT,
+      memory_id TEXT, fact_ids_json TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL CHECK (state IN ('processing','ready','failed','tombstoned')),
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, tombstoned_at TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_documents_profile ON documents(profile_id, state)",
     """CREATE TABLE IF NOT EXISTS doc_pages (
       document_id TEXT NOT NULL, page_no INTEGER NOT NULL, media_id TEXT,
-      memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      memory_ids_json TEXT NOT NULL DEFAULT '[]', fact_ids_json TEXT NOT NULL DEFAULT '[]',
       text_origin TEXT NOT NULL CHECK (text_origin IN ('text_layer','ocr','none')),
       char_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (document_id, page_no))""",
     """CREATE TABLE IF NOT EXISTS jobs (
@@ -69,7 +72,7 @@ _DDL = (
       kind TEXT NOT NULL CHECK (kind IN ('document','source_scan','media_reembed','gc','env_install')),
       state TEXT NOT NULL CHECK (state IN ('queued','running','done','failed','cancelled')),
       done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, error TEXT,
-      lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+      payload_json TEXT NOT NULL DEFAULT '{}', lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_at)",
     """CREATE TABLE IF NOT EXISTS sources (
       source_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,

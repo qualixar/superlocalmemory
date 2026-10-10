@@ -59,6 +59,10 @@ class TieredCache:
         self.l1.clear()  # simple and always correct
         return self.l2.invalidate(deriver_id=deriver_id, model_id=model_id)
 
+    def invalidate_content(self, content_sha256: str) -> int:
+        self.l1.clear()
+        return self.l2.invalidate_content(content_sha256)
+
     def clear(self) -> None:
         self.l1.clear()
         self.l2.clear()

@@ -882,6 +882,7 @@ class EngineRecallAdapter:
             if memory_ids else {}
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
         from superlocalmemory.server.recall_serializer import (
             recall_response_metadata,
@@ -892,6 +893,7 @@ class EngineRecallAdapter:
             response,
             limit=limit,
             memory_map={k: _sanitize_json_text(v) for k, v in memory_map.items()},
+            source_map=memory_sources(self._engine._db, memory_ids),
             per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
             total_max=getattr(_rc, "recall_total_max_chars", 12000),
             # Option B: markers only on session-bearing recalls. A marker can
@@ -1987,6 +1989,41 @@ def _stop_deployment_retention(application) -> bool:
     return True
 
 
+_NO_MODEL_WARNING = (
+    "Embedding model not loaded (warm-up returned no vector); recall is "
+    "keyword-only until a model is available. Run 'slm warmup' or 'slm doctor'."
+)
+_NO_VECTOR_REASON = "the embedding model did not load (no vector returned)"
+
+
+def _is_real_vector(vector: object) -> bool:
+    """True when an embed call produced a non-empty vector (list or array)."""
+    if vector is None:
+        return False
+    try:
+        return len(vector) > 0  # type: ignore[arg-type]
+    except TypeError:
+        return False
+
+
+def _warm_embedder_once(engine: object, retrieval_eng: object) -> tuple[bool, str]:
+    """One warm-up attempt for the lifespan retry loop.
+
+    ``(True, "")`` the model produced a vector. ``(False, "")`` there is no
+    embedder object yet, so the caller should retry. ``(False, reason)`` the
+    embedder exists but returned no vector; retrying would only respawn
+    workers, so the caller stops and recall-health owns later attempts.
+    Exceptions from ``embed`` propagate to the caller's handler.
+    """
+    re_ = retrieval_eng or getattr(engine, "_retrieval_engine", None)
+    embedder = getattr(re_, "_embedder", None) if re_ else None
+    if embedder is None or not hasattr(embedder, "embed"):
+        return False, ""
+    if not _is_real_vector(embedder.embed("warmup")):
+        return False, _NO_VECTOR_REASON
+    return True, ""
+
+
 def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     """Load the embedding model in the background. Never blocks startup.
 
@@ -2009,9 +2046,12 @@ def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     def _warm() -> None:
         started = time.time()
         try:
-            embedder.embed("slm embedder warm-up")
+            vector = embedder.embed("slm embedder warm-up")
         except Exception as exc:  # pragma: no cover — warming is best effort
             logger.debug("embedder warm-up failed (%s) — writes will defer", exc)
+            return
+        if not _is_real_vector(vector):
+            logger.warning(_NO_MODEL_WARNING)
             return
         logger.info(
             "Embedding model warm and ready (%.1fs)", time.time() - started,
@@ -2601,10 +2641,13 @@ async def lifespan(application: FastAPI):
             last_error = ""
             for _attempt in range(240):  # ~120s max at 0.5s steps
                 try:
-                    _re = retrieval_eng or getattr(engine, '_retrieval_engine', None)
-                    embedder = getattr(_re, '_embedder', None) if _re else None
-                    if embedder is not None and hasattr(embedder, 'embed'):
-                        embedder.embed("warmup")
+                    warmed, reason = _warm_embedder_once(engine, retrieval_eng)
+                    if reason:
+                        _embedding_warm = False
+                        _embedding_warmup_error = reason
+                        logger.warning(_NO_MODEL_WARNING)
+                        return
+                    if warmed:
                         _embedding_warm = True
                         _embedding_warmup_error = None
                         logger.info(
@@ -3360,6 +3403,13 @@ async def lifespan(application: FastAPI):
         _features.apply_requested(source="npm")
         _features.note_started()
 
+        # Saved PDFs are read page by page in the background; idle while images and documents are off.
+        try:
+            from superlocalmemory.documents import start_document_jobs
+            start_document_jobs(application, _SERVICES)
+        except Exception as exc:  # pragma: no cover — optional feature
+            logger.warning("document job service not started: %s", type(exc).__name__)
+
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
         # them only once it cycles, and its reap used to sit behind the
@@ -3652,6 +3702,11 @@ async def lifespan(application: FastAPI):
         kind_runner_stopped = stop_backfill(application)
     except Exception:  # pragma: no cover — defensive
         kind_runner_stopped = True
+    try:
+        from superlocalmemory.documents import stop_document_jobs
+        kind_runner_stopped = stop_document_jobs(_SERVICES) and kind_runner_stopped
+    except Exception:  # pragma: no cover — defensive
+        pass
     materializer_stopped = _stop_pending_materializer() and kind_runner_stopped
     canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None
@@ -3833,6 +3888,11 @@ def create_app() -> FastAPI:
         application.include_router(mesh_router)
     except ImportError:
         pass
+    try:
+        from superlocalmemory.server.routes.mesh_owner import router as mesh_owner_router
+        application.include_router(mesh_owner_router)
+    except ImportError:
+        pass
 
     # -- Entity routes (Phase D) --
     try:
@@ -3845,6 +3905,13 @@ def create_app() -> FastAPI:
     try:
         from superlocalmemory.server.routes.ingest import router as ingest_router
         application.include_router(ingest_router)
+    except ImportError:
+        pass
+
+    # -- Image routes (local only) --
+    try:
+        from superlocalmemory.server.routes.media import router as media_router
+        application.include_router(media_router)
     except ImportError:
         pass
 
@@ -6458,6 +6525,21 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
         )
 
 
+def _add_projection_verdict(health: dict) -> None:
+    """Add ``behind`` and ``waiting_for_promotion`` to an outbox report.
+
+    ``behind`` is one boolean an alert can key on without knowing what a
+    healthy depth looks like: rows are queued AND a projection is open to take
+    them, or rows were refused. Queued rows with no projection open are not
+    behind; they wait for a promotion. A report without ``projection_open``
+    (an older orchestrator) is read as open.
+    """
+    depth = int(health.get("depth", 0) or 0)
+    is_open = bool(health.get("projection_open", True))
+    health["behind"] = (depth > 0 and is_open) or bool(health.get("stalled", 0))
+    health["waiting_for_promotion"] = depth > 0 and not is_open
+
+
 def _projection_health() -> dict:
     """Queue depth, stall count, and whether the worker is running.
 
@@ -6480,11 +6562,7 @@ def _projection_health() -> dict:
             return {"available": False}
         health = dict(orchestrator.outbox_health())
         health["available"] = True
-        # One boolean an alert can key on without knowing what a healthy depth
-        # looks like on this store.
-        health["behind"] = bool(health.get("depth", 0)) or bool(
-            health.get("stalled", 0)
-        )
+        _add_projection_verdict(health)
         return health
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "error": str(exc)[:120]}

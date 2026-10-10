@@ -212,6 +212,9 @@ def build_immediate_admission_handler(
 
         metadata = dict(request.metadata)
         metadata["ingestion_operation_id"] = operation_id
+        from superlocalmemory.tagging import add_extracted
+
+        add_extracted(metadata, content)
         if request.session_id:
             metadata.setdefault("session_id", request.session_id)
         gate = apply_ingest_gate(

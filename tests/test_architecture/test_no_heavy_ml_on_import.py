@@ -23,6 +23,8 @@ PACKAGES = [
     "superlocalmemory.memory_core",
     "superlocalmemory.media",
     "superlocalmemory.runtimes",
+    "superlocalmemory.tagging",
+    "superlocalmemory.documents",
 ]
 
 _PROBE = (

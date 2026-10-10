@@ -64,10 +64,12 @@ DETAIL_BUDGET = "budget"
 #: Judged: the verdict is the one the same judge gave a moment ago for the same
 #: question over the same memories (``core.answer_check_memo``), not a new ask.
 DETAIL_REUSED = "reused"
+#: Every result is a picture with no words of its own: a text check has nothing to read.
+DETAIL_MEDIA_UNJUDGED = "media_unjudged"
 
 ANSWER_CHECK_DETAILS = frozenset({
     DETAIL_NONE, DETAIL_NOT_A_QUESTION, DETAIL_NO_RESULTS, DETAIL_OTHER_PROFILE,
-    DETAIL_BUDGET, DETAIL_REUSED,
+    DETAIL_BUDGET, DETAIL_REUSED, DETAIL_MEDIA_UNJUDGED,
 })
 
 #: One plain sentence per way the check can end without a verdict. A recall
@@ -82,6 +84,8 @@ _SKIP_NOTES = {
     DETAIL_NO_RESULTS: f"{_NOT_CHECKED}: nothing was found to check.",
     DETAIL_OTHER_PROFILE: (f"{_NOT_CHECKED}: the online check would have read a memory "
                            "another profile owns."),
+    DETAIL_MEDIA_UNJUDGED: (f"{_NOT_CHECKED}: the results are pictures with no words, "
+                            "so there was no text to check."),
 }
 
 # -- what a caller asks for, per recall ------------------------------------------
@@ -202,6 +206,7 @@ __all__ = [
     "ANSWER_CHECK_STATUSES",
     "AnswerCheckTrace",
     "DETAIL_BUDGET",
+    "DETAIL_MEDIA_UNJUDGED",
     "DETAIL_NONE",
     "DETAIL_NOT_A_QUESTION",
     "DETAIL_NO_RESULTS",

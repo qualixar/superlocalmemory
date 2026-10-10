@@ -1,4 +1,4 @@
-# MCP Tools — V4.1.21 (103 whole)
+# MCP Tools — V4.1.21 (107 whole)
 
 SuperLocalMemory exposes profile-selected tools and resources through the Model
 Context Protocol (MCP). The installed profile registry (`src/superlocalmemory/mcp/profiles.py` and `src/superlocalmemory/mcp/server.py`) is the source of truth
@@ -6,7 +6,7 @@ for names and counts. An MCP-compatible client still decides when to call a
 tool.
 
 > **Current V4 profile counts (from `CHANGELOG.md` and the MCP exposure contract `tests/test_mcp/test_mcp_exposure_contract.py` / `tests/mcp/test_profile_selector.py`):**
-> `core` **18**, `code` **38** (installed coding agents), `full` **56**, `power` **68**, `whole` **103** (all registered), plus `mesh` **8**. The unrestricted default surface is the same **56** tools as `full`. See also `src/superlocalmemory/mcp/profiles.py`.
+> `core` **18**, `code` **38** (installed coding agents), `full` **57**, `power` **69**, `whole` **107** (all registered), plus `mesh` **9**. The unrestricted default surface is the same **57** tools as `full`. See also `src/superlocalmemory/mcp/profiles.py`.
 
 > **Optimize tools:** `slm_compress`, `slm_retrieve`, `slm_cache_set`,
 > `slm_cache_get`, and `slm_optimize_stats` provide explicit compression and
@@ -130,7 +130,7 @@ boundary.
 
 > **Hard constraint:** Surfaces B and C cache results you explicitly route through SLM — not the Claude conversation turn. Full-turn caching requires Surface A (proxy).
 
-## MCP Profiles (V4.1.21 — whole is 103)
+## MCP Profiles (V4.1.21 — whole is 107)
 
 A profile is a named, fixed subset of tools exposed to the connecting client.
 Set the active profile via the `SLM_MCP_PROFILE` environment variable (or `SLM_MCP_ALL_TOOLS`/`SLM_MCP_TOOLS` overrides — see `src/superlocalmemory/mcp/server.py` precedence: `ALL > TOOLS > PROFILE > default`). `whole` exposes the raw server with all registered tools; `switch_profile` tool switches the active workspace profile (separate concept).
@@ -139,12 +139,12 @@ Set the active profile via the `SLM_MCP_PROFILE` environment variable (or `SLM_M
 |---|---|---|
 | `core` | **18** | Store, recall, search, sessions, optimize, and correction review |
 | `code` | **38** | Core + portable Brain evidence + code graph + `switch_profile` + 3 bounded-loop tools + memory-kind management |
-| `full` | **56** | All everyday memory, portable Brain evidence, optimize, mesh, and memory-kind tools (also the no-profile default) |
-| `power` | **68** | Full + governance and behavioral analysis tools |
-| `mesh` | **8** | SLM-Mesh coordination only |
-| `whole` | **103** | All registered tools (raw server) — verified by `tests/test_mcp/test_mcp_exposure_contract.py` `whole == 103` |
+| `full` | **57** | All everyday memory, portable Brain evidence, optimize, mesh, and memory-kind tools (also the no-profile default) |
+| `power` | **69** | Full + governance and behavioral analysis tools |
+| `mesh` | **9** | SLM-Mesh coordination only |
+| `whole` | **107** | All registered tools (raw server) — verified by `tests/test_mcp/test_mcp_exposure_contract.py` `whole == 107` |
 
-> **Why 103:** 4.1.19 WP8 adds memory-kind management tools (`set_memory_kind`, `memory_kinds_status`, `review_memory_kinds`, `confirm_memory_kinds`) to `code`, `full`, and `power`; 4.1.21 adds saved views (`run_view`, `manage_view`) to `full` and `power`. Earlier `whole81`/`whole84`/`whole91`/`whole92`/`whole94` aliases still resolve to `whole`; `103` names the current registered surface.
+> **Why 107:** 4.1.19 WP8 adds memory-kind management tools (`set_memory_kind`, `memory_kinds_status`, `review_memory_kinds`, `confirm_memory_kinds`) to `code`, `full`, and `power`; 4.1.21 adds saved views (`run_view`, `manage_view`) to `full` and `power`; 4.1.25 adds the image tools `remember_media` and `get_media` and the document tools `remember_document` and `media_status` to `whole` only (they work for apps on this computer, never for remote apps). Earlier `whole81`/`whole84`/`whole91`/`whole92`/`whole94` aliases still resolve to `whole`; `107` names the current registered surface.
 
 Legacy count-suffixed aliases (`core14`/`core16`, `code20`/`code21`/`code24`/`code28`/`code29`/`code31`/`code34`, `full38`/`full39`/`full42`/`full46`/`full47`/`full49`/`full50`, `power50`/`power51`/`power54`/`power58`/`power59`/`power61`, `mesh8`, and `whole81`/`whole84`/`whole91`/`whole92`/`whole94`) resolve to their canonical name for backward compatibility and emit a migration warning.
 
