@@ -64,3 +64,22 @@ def test_session_init_pins_standing_rules_and_schedule(world, monkeypatch, who, 
         assert content not in text, content
     if key:
         assert len(calls) == 1, calls
+
+
+def test_lifecycle_status_checks_the_view_a_page_at_a_time(world, monkeypatch) -> None:
+    from superlocalmemory.mcp import remote_visibility
+    from superlocalmemory.mcp.tools_v28 import register_v28_tools
+
+    engine, ids = world
+    sizes: list[int] = []
+    real = remote_visibility.visible_facts
+    monkeypatch.setattr(remote_visibility, "visible_facts",
+                        lambda db, pid, facts: sizes.append(len(facts)) or real(db, pid, facts))
+    server = _Server()
+    register_v28_tools(server, lambda: engine)
+    with _as(True, False):
+        out = asyncio.run(server.tools["get_lifecycle_status"](limit=1))
+    assert out["success"], out
+    assert sizes and max(sizes) <= 1
+    shown = [s["content"] for rows in out["samples"].values() for s in rows]
+    assert shown == ["zebra plain note"]
