@@ -209,12 +209,21 @@ def remove_source(source_id: str, *, purge: bool = False) -> None:
 def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: dict[str, Any],
                   purge: bool) -> None:
     source_id = source["source_id"]
+    failures = 0
     for row in store.files(source_id):
         if purge:
             if not retire.erase_row(host, store, runtime, source, row):
                 raise SourceRefused("erasure_incomplete", "The erasure was not complete; try again.")
         elif row["state"] != "tombstoned":
-            retire.hide_file(host, store, runtime, source, row, tombstone=True)
+            failures += retire.hide_file(host, store, runtime, source, row, tombstone=True)
+    if not purge:
+        # Memories an earlier attempt could not hide (flagged ``old``) are tried again here.
+        failures += retire.retry_hides(host, store, runtime, source)
+    if failures:
+        # The source stays listed so the person can try again; a "removed" source is never
+        # scanned again, so nothing would ever hide what is still recallable.
+        raise SourceRefused("removal_incomplete",
+                            "Some memories from this folder could not be hidden yet; try again.")
     if purge:
         store.delete_source_rows(source_id)
     else:

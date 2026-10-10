@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ from typing import Any
 from superlocalmemory.core.security_primitives import SecretHit, detect_secrets
 from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.memory_core import ContentOrigin
-from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import size_cap
 from superlocalmemory.sources.safe_read import open_regular
@@ -41,6 +42,14 @@ class Ingested:
     skip_reason: str = ""
     retry: bool = False
     links: list | None = None  # Obsidian notes only: the links to record (None leaves them alone)
+
+
+class PartialSave(RuntimeError):
+    """A file failed part-way: ``entries`` are the parts already saved, kept so they stay owned."""
+
+    def __init__(self, entries: list[dict[str, Any]]):
+        super().__init__("a folder file was saved only in part")
+        self.entries = entries
 
 
 def screen(data: bytes) -> list[SecretHit]:
@@ -97,14 +106,46 @@ def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts
     """One memory per part; ``extra`` is server-prepared metadata added beside the provenance."""
     out = Ingested()
     for number, part in enumerate(parts, 1):
+        key = _key(source["source_id"], relpath, n, number)
         request = SaveRequest(
             segments=((part, ContentOrigin.DERIVED_TEXT),), profile_id=source["profile_id"],
             source_type="folder", trusted_actor_id=host.actor_id(), tags=tags, session_date=session_date,
             trusted_metadata={**(extra or {}), "_slm_source": provenance(source["source_id"], relpath, version)},
-            idempotency_key=_key(source["source_id"], relpath, n, number))
-        saved = submit_memory(runtime, request, config=host.config())
+            idempotency_key=key)
+        try:
+            saved = submit_memory_settled(runtime, request, config=host.config())
+        except SavePending:
+            # Durable and queued: owned by its key until it commits (see ``facts_of_keys``).
+            out.entries.append({"m": None, "f": [], "v": version, "k": key})
+            continue
+        except Exception as exc:
+            raise PartialSave(out.entries) from exc
         out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version})
     return out
+
+
+def facts_of_keys(runtime: Any, profile_id: str, keys: list[str]) -> list[str]:
+    """Fact ids of folder saves recorded only by their key (they were queued when saved).
+
+    Text parts are written as ``folder`` saves and pictures as ``media`` saves; folder keys
+    (``src:...``) are unique to the folder either way."""
+    db = getattr(runtime, "_db", None)
+    if db is None or not keys:
+        return []
+    found: list[str] = []
+    try:
+        for i in range(0, len(keys), 400):
+            part = keys[i:i + 400]
+            rows = db.execute(
+                "SELECT queryable_fact_ids_json, final_fact_ids_json FROM ingestion_operations"
+                " WHERE profile_id = ? AND source_type IN ('folder', 'media') AND idempotency_key IN ("
+                + ",".join("?" * len(part)) + ")", (profile_id, *part))
+            for row in rows:
+                for column in (row[0], row[1]):
+                    found += [str(f) for f in json.loads(column or "[]")]
+    except Exception as exc:  # noqa: BLE001 - what cannot be found cannot be hidden here
+        logger.warning("could not look up queued folder saves (%s)", type(exc).__name__)
+    return found
 
 
 def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
@@ -126,10 +167,29 @@ def load_verified(path: Path, file_id: str | None, sha: str, kind: str) -> bytes
     return data
 
 
+#: Skip reason for a PDF or picture skipped only because images & documents were off or not set up.
+#: Unlike other skips it is temporary: the file is read again once the feature is ready.
+MEDIA_NOT_READY = "media_not_ready"
+
+
+def media_ready() -> bool:
+    """Whether images & documents are on and their set-up has finished."""
+    try:
+        from superlocalmemory.runtimes.features import media_enabled
+        from superlocalmemory.runtimes.media_env import media_env
+
+        return bool(media_enabled()) and media_env().status().state == "ready"
+    except Exception as exc:  # noqa: BLE001 - unknown counts as not ready
+        logger.warning("could not read the images & documents state (%s)", type(exc).__name__)
+        return False
+
+
 def ingest_pdf(host: SourceHost, source: dict, relpath: str, data: bytes, version: str, n: int) -> Ingested:
     from superlocalmemory.documents import submit_document
     from superlocalmemory.media.ingest import MediaInput
 
+    if not media_ready():
+        return Ingested(skip_reason=MEDIA_NOT_READY)
     receipt = submit_document(
         MediaInput(data=data, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), config=host.config(),
@@ -147,10 +207,13 @@ def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, dat
                  version: str, n: int) -> Ingested:
     from superlocalmemory.media.ingest import MediaInput, remember_media
 
+    if not media_ready():
+        return Ingested(skip_reason=MEDIA_NOT_READY)
+    key = _key(source["source_id"], relpath, n, 0)
     receipt = remember_media(
         MediaInput(data=data, file_name=Path(relpath).name), profile_id=source["profile_id"],
         actor_id=host.actor_id(), runtime=runtime, config=host.config(),
-        idempotency_key=_key(source["source_id"], relpath, n, 0),
+        idempotency_key=key,
         folder=folder_tag(source["source_id"], relpath, version))
     if receipt.status == "warming":
         return Ingested(retry=True)
@@ -159,8 +222,10 @@ def ingest_image(host: SourceHost, runtime: Any, source: dict, relpath: str, dat
     if receipt.status == "duplicate":  # someone else's picture: borrowed, never owned
         entries = [{"shared_m": receipt.memory_id}] if receipt.memory_id else []
         return Ingested(entries=entries, shared=True)
-    entry = {"m": receipt.memory_id, "f": [], "v": version} if receipt.memory_id else None
-    return Ingested(entries=[entry] if entry else [], media_id=receipt.media_id)
+    # A picture whose memory was still queued is owned by its key until it commits.
+    entry = ({"m": receipt.memory_id, "f": [], "v": version} if receipt.memory_id
+             else {"m": None, "f": [], "v": version, "k": key})
+    return Ingested(entries=[entry], media_id=receipt.media_id)
 
 
 def facts_of(runtime: Any, memory_ids: list[str]) -> list[str]:
