@@ -3397,12 +3397,24 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("memory kind runner not started: %s", type(exc).__name__)
 
+        # A request the installer recorded for images and documents is acted on
+        # here, so the install runs in the daemon (never in npm). Never raises.
+        from superlocalmemory.runtimes import features as _features
+        _features.apply_requested(source="npm")
+        _features.note_started()
         # Saved PDFs are read page by page in the background; idle while images and documents are off.
         try:
             from superlocalmemory.documents import start_document_jobs
             start_document_jobs(application, _SERVICES)
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("document job service not started: %s", type(exc).__name__)
+
+        # Connected folders are scanned in the background; idle (no thread) until a folder is confirmed.
+        try:
+            from superlocalmemory.server.sources_wiring import start_source_scanner
+            start_source_scanner(application, _SERVICES)
+        except Exception as exc:  # pragma: no cover — optional feature
+            logger.warning("folder source service not started: %s", type(exc).__name__)
 
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
@@ -3701,6 +3713,11 @@ async def lifespan(application: FastAPI):
         kind_runner_stopped = stop_document_jobs(_SERVICES) and kind_runner_stopped
     except Exception:  # pragma: no cover — defensive
         pass
+    try:
+        from superlocalmemory.server.sources_wiring import stop_source_scanner
+        kind_runner_stopped = stop_source_scanner(_SERVICES) and kind_runner_stopped
+    except Exception:  # pragma: no cover — defensive
+        pass
     materializer_stopped = _stop_pending_materializer() and kind_runner_stopped
     canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None
@@ -3882,6 +3899,11 @@ def create_app() -> FastAPI:
         application.include_router(mesh_router)
     except ImportError:
         pass
+    try:
+        from superlocalmemory.server.routes.mesh_owner import router as mesh_owner_router
+        application.include_router(mesh_owner_router)
+    except ImportError:
+        pass
 
     # -- Entity routes (Phase D) --
     try:
@@ -3901,6 +3923,13 @@ def create_app() -> FastAPI:
     try:
         from superlocalmemory.server.routes.media import router as media_router
         application.include_router(media_router)
+    except ImportError:
+        pass
+
+    # -- Folder source routes (local only) --
+    try:
+        from superlocalmemory.server.routes.sources import router as sources_router
+        application.include_router(sources_router)
     except ImportError:
         pass
 
@@ -4533,6 +4562,10 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Memory kinds (4.1.19): status, settings, review, classification runs.
     from superlocalmemory.server.routes import memory_kinds as _memory_kinds_routes
     _memory_kinds_routes.register(application)
+
+    # Images and documents: the feature switch (GET/POST /api/v3/features).
+    from superlocalmemory.server.routes import features as _features_routes
+    _features_routes.register(application)
 
     # Task #47: dashboard-editable rate limits (GET/PUT /api/v3/ratelimit)
     from superlocalmemory.server.routes.ratelimit import router as ratelimit_router

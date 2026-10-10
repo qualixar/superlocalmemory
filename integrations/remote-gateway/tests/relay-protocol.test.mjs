@@ -51,3 +51,8 @@ test('gateway relay budget and the laptop companion budget never drift apart', a
   assert.equal(RELAY_DEADLINE_MS, 25000);
   assert.equal(laptop, RELAY_DEADLINE_MS);
 });
+
+test('a request frame may carry the per-request grant header', () => { const f={...request(),headers:[['Content-Type','application/json'],['x-slm-grant','v1.abc.def']]}; const r=decode(f); assert.equal(r.ok,true); assert.deepEqual(r.frame.headers.map(h=>h[0]),['Content-Type','x-slm-grant']); assert.equal(encodeRelayFrame(f).ok,true); });
+test('a response frame cannot carry the grant header', () => reject({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[['x-slm-grant','v1.abc.def']],bodyBase64:''}));
+test('only one grant header per request frame', () => reject({...request(),headers:[['x-slm-grant','a'],['X-SLM-Grant','b']]}));
+test('other x-slm headers stay refused on request frames', () => reject({...request(),headers:[['x-slm-peer','a']]}));

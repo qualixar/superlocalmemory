@@ -192,8 +192,31 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         row = self._read().execute("SELECT * FROM media_spaces WHERE state = 'active'").fetchone()
         return dict(row) if row else None
 
-    def ensure_active_space(self, model_id: str, model_revision: str, dim: int = DEFAULT_DIM) -> str:
-        """The active space for this model, created (and the old one retired) when it differs."""
+    def active_signature(self) -> dict[str, Any] | None:
+        """What the active space was built with, or None when there is no active space.
+
+        A space made before signatures were recorded is a ``separate`` space of its own model.
+        """
+        space = self.active_space()
+        if space is None:
+            return None
+        row = self._read().execute("SELECT value FROM media_schema WHERE key = ?",
+                                   (f"space_signature:{space['space_id']}",)).fetchone()
+        try:
+            found = json.loads(row[0]) if row else None
+        except ValueError:
+            found = None
+        if isinstance(found, dict):
+            return found
+        return {"mode": "separate", "image_model": space["model_id"], "image_revision": space["model_revision"],
+                "dim": space["dim"], "text_model": ""}
+
+    def ensure_active_space(self, model_id: str, model_revision: str, dim: int = DEFAULT_DIM,
+                            signature: dict[str, Any] | None = None) -> str:
+        """The active space for this model, created (and the old one retired) when it differs.
+
+        ``signature`` is recorded with a new space (a row in ``media_schema``; no table changes).
+        """
         with self._write() as conn:
             row = conn.execute("SELECT * FROM media_spaces WHERE state = 'active'").fetchone()
             if row and (row["model_id"], row["model_revision"], row["dim"]) == (model_id, model_revision, dim):
@@ -206,6 +229,9 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {vec_table(space_id)} USING vec0("
                 f"profile_id TEXT PARTITION KEY, embedding float[{int(dim)}] distance_metric=cosine)")
+            if signature is not None:
+                conn.execute("INSERT OR REPLACE INTO media_schema(key, value) VALUES (?, ?)",
+                             (f"space_signature:{space_id}", json.dumps(signature, sort_keys=True)))
             return space_id
 
     # -- items -------------------------------------------------------------
@@ -229,10 +255,13 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         row = self._read().execute("SELECT * FROM media_items WHERE media_id = ?", (media_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_by_sha(self, profile_id: str, source_sha256: str) -> dict[str, Any] | None:
+    def find_by_sha(self, profile_id: str, source_sha256: str, *,
+                    exclude_origin: str | None = None) -> dict[str, Any] | None:
+        """The oldest active item with this content; ``exclude_origin`` skips items made by that origin."""
         row = self._read().execute(
             "SELECT * FROM media_items WHERE profile_id = ? AND source_sha256 = ? AND state = 'active'"
-            " ORDER BY created_at LIMIT 1", (profile_id, source_sha256)).fetchone()
+            " AND origin != ? ORDER BY created_at LIMIT 1",
+            (profile_id, source_sha256, exclude_origin or "")).fetchone()
         return dict(row) if row else None
 
     def phash_candidates(self, profile_id: str) -> list[tuple[str, str]]:
@@ -251,6 +280,23 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         rows = self._read().execute(sql + " ORDER BY created_at, media_id LIMIT ? OFFSET ?",
                                     [*args, int(limit), int(offset)]).fetchall()
         return [dict(r) for r in rows]
+
+    def list_images(self, profile_id: str, *, limit: int = 60,
+                    after: tuple[str, str] | None = None) -> list[dict[str, Any]]:
+        """One page of saved images, newest first; ``after`` is the (created_at, media_id) of the last one seen.
+
+        Only fields that are safe to show: no file path, no camera data, no hashes, no picture bytes.
+        """
+        sql = ("SELECT media_id, origin, created_at, captured_at, width, height, bytes,"
+               " (thumb_webp IS NOT NULL) AS has_thumb, anchor_memory_id FROM media_items"
+               " WHERE profile_id = ? AND state = 'active' AND kind = 'image'")
+        args: list[Any] = [profile_id]
+        if after is not None:
+            sql += " AND (created_at, media_id) < (?, ?)"
+            args += [after[0], after[1]]
+        rows = self._read().execute(sql + " ORDER BY created_at DESC, media_id DESC LIMIT ?",
+                                    [*args, int(limit)]).fetchall()
+        return [{**dict(r), "has_thumb": bool(r["has_thumb"])} for r in rows]
 
     def set_state(self, media_id: str, state: str) -> None:
         stamp = utc_stamp() if state == "tombstoned" else None
@@ -303,6 +349,20 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                 pass
             if found:
                 out[media_id] = found
+        return out
+
+    def page_media_ids(self, pages: Sequence[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """``{(document_id, page_no): media_id}`` for the active page items, in one query per 300 pages."""
+        wanted = list(dict.fromkeys((str(d), int(n)) for d, n in pages))
+        out: dict[tuple[str, int], str] = {}
+        conn = self._read() if wanted else None
+        for i in range(0, len(wanted), 300):
+            part = wanted[i:i + 300]
+            rows = conn.execute(
+                "SELECT document_id, page_no, media_id FROM media_items WHERE kind = 'page'"
+                " AND state = 'active' AND (document_id, page_no) IN (VALUES "
+                + ",".join(["(?, ?)"] * len(part)) + ")", [x for pair in part for x in pair]).fetchall()
+            out.update({(r[0], r[1]): r[2] for r in rows})
         return out
 
     def knn(self, vector: Sequence[float], profile_id: str, k: int,

@@ -30,6 +30,30 @@ class EraseMixin:
             found.extend(r[0] for r in rows)
         return found
 
+    def active_anchor_ids(self, memory_ids: Sequence[str]) -> set[str]:
+        """Those of ``memory_ids`` that anchor at least one item still in the ``active`` state."""
+        ids = sorted({str(m) for m in memory_ids if m})
+        alive: set[str] = set()
+        for i in range(0, len(ids), _CHUNK):
+            chunk = ids[i:i + _CHUNK]
+            rows = self._read().execute(
+                "SELECT DISTINCT anchor_memory_id FROM media_items WHERE state = 'active'"
+                f" AND anchor_memory_id IN ({_marks(len(chunk))})", chunk).fetchall()
+            alive.update(r[0] for r in rows)
+        return alive
+
+    def live_document_ids(self, document_ids: Sequence[str]) -> set[str]:
+        """Those of ``document_ids`` that exist and are not tombstoned."""
+        ids = sorted({str(d) for d in document_ids if d})
+        live: set[str] = set()
+        for i in range(0, len(ids), _CHUNK):
+            chunk = ids[i:i + _CHUNK]
+            rows = self._read().execute(
+                f"SELECT document_id FROM documents WHERE state != 'tombstoned' AND document_id IN ({_marks(len(chunk))})",
+                chunk).fetchall()
+            live.update(r[0] for r in rows)
+        return live
+
     def anchors(self, profile_id: str) -> dict[str, str | None]:
         """media_id -> anchor memory id for every item of the profile, in any state."""
         rows = self._read().execute(

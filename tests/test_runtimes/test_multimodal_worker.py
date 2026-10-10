@@ -133,3 +133,22 @@ def test_eof_on_stdin_exits(worker):
 def test_real_model_ids_need_the_managed_env(worker):
     reply = worker.ask("load", model="some/not-installed-model")
     assert reply["ok"] is False and "traceback" not in json.dumps(reply).lower()
+
+
+def test_an_image_role_fake_model_does_images_and_text(worker, tmp_path):
+    assert worker.ask("load", model="fake:768", role="image")["ok"]
+    f = tmp_path / "x.bin"
+    f.write_bytes(b"abc")
+    assert len(worker.ask("embed_image", paths=[str(f)])["vectors"][0]) == 768
+    assert worker.ask("embed_text", texts=["hi"], prompt="SearchQuery")["ok"]
+
+
+def test_an_unknown_role_is_refused(worker):
+    reply = worker.ask("load", model="fake:768", role="audio")
+    assert reply["ok"] is False and "role" in reply["error"]
+
+
+def test_a_real_image_model_that_cannot_load_says_so_plainly(worker):
+    reply = worker.ask("load", model="nomic-ai/nomic-embed-vision-v1.5", role="image")
+    assert reply["ok"] is False and "image model" in reply["error"]
+    assert "traceback" not in json.dumps(reply).lower()

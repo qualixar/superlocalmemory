@@ -58,6 +58,7 @@ _DDL = (
       page_count INTEGER NOT NULL DEFAULT 0,
       pages_text_layer INTEGER NOT NULL DEFAULT 0, pages_ocr INTEGER NOT NULL DEFAULT 0,
       pages_empty INTEGER NOT NULL DEFAULT 0, source_id TEXT, source_relpath TEXT,
+      origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user','folder')),
       memory_id TEXT, fact_ids_json TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL CHECK (state IN ('processing','ready','failed','tombstoned')),
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, tombstoned_at TEXT)""",
@@ -89,6 +90,8 @@ _DDL = (
         'cloud_placeholder','tombstoned','error')),
       reason TEXT, memory_ids_json TEXT NOT NULL DEFAULT '[]', document_id TEXT, media_id TEXT,
       tombstoned_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (source_id, relpath))""",
+    """CREATE TABLE IF NOT EXISTS source_save_counters (
+      source_id TEXT NOT NULL, relpath TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (source_id, relpath))""",
     "CREATE INDEX IF NOT EXISTS ix_source_files_sha ON source_files(source_id, sha256)",
     "CREATE INDEX IF NOT EXISTS ix_source_files_state ON source_files(source_id, state)",
     """CREATE TABLE IF NOT EXISTS source_links (
@@ -98,10 +101,21 @@ _DDL = (
 )
 
 
+def _upgrade_columns(conn: sqlite3.Connection) -> None:
+    """Add columns that older layouts of this version lack (idempotent)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
+    if "origin" not in cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'user' "
+                     "CHECK (origin IN ('user','folder'))")
+        if "source_id" in cols:
+            conn.execute("UPDATE documents SET origin = 'folder' WHERE source_id IS NOT NULL")
+
+
 def apply_schema(conn: sqlite3.Connection, *, created_by: str) -> None:
     """Create every table (idempotent) and stamp the version once."""
     for statement in _DDL:
         conn.execute(statement)
+    _upgrade_columns(conn)
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('version', ?)",
                  (str(MEDIA_SCHEMA_VERSION),))
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('created_by', ?)",

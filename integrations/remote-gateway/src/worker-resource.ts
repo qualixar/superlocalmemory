@@ -52,7 +52,9 @@ async function handle(request:Request,env:ResourceEnv,context:OAuthResourceConte
       if(request.signal.aborted)return failure(499,'request_cancelled');
       response=await relay.forwardCurrent({v:1,kind:'request',id:identifier,deadlineAt:Date.now()+RELAY_DEADLINE_MS,
         headers:parsed.headers,bodyBase64:base64(parsed.envelope.originalBody)},
-        {requestParamHeaders:parsed.parameterHeaderNames});
+        {requestParamHeaders:parsed.parameterHeaderNames},
+        // Built only from the verified token and the registry's current grant, never from anything the client sent.
+        {grant:{aid:principal.authorizationId,ver:admission.grant.authorization.authorizationVersion,app:principal.clientId,scp:admission.grant.allowedScopes,fv:false},wait:parsed.envelope.toolName==='mesh_wait'});
     }finally{request.signal.removeEventListener('abort',abort);}
     if(response.status>=400){
       // Relay failure packets contain bounded non-secret codes; never expose
@@ -73,8 +75,9 @@ async function handle(request:Request,env:ResourceEnv,context:OAuthResourceConte
 }
 const protectedResource=new OAuthResourceServer<ResourceEnv,AuthProps>({
   // Every scope an app may be granted. Clients request exactly what is advertised, and the consent
-  // page offers saving and session tools, unticked, only when requested; slm:connect is owner-only.
-  resourceMetadata:{resource:RESOURCE,authorization_servers:[ISSUER]},requiredScopes:['slm:read','slm:write','slm:session'],
+  // page offers saving, session, bot and image access, unticked, only when requested. The provider only advertises this list (it
+  // never rejects a token for lacking one), so adding scopes here cannot lock out an existing app; slm:connect is owner-only.
+  resourceMetadata:{resource:RESOURCE,authorization_servers:[ISSUER]},requiredScopes:['slm:read','slm:write','slm:session','slm:mesh','slm:media'],
   validateToken:env=>(resource,token)=>env.AUTH_SERVER.validateToken(resource,token),handler:{fetch:handle},
 });
 export const resourceGateway={

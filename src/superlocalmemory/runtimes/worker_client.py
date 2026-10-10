@@ -62,10 +62,11 @@ def _test_mode() -> bool:
 class MediaWorkerClient(MediaEmbedderPort):
     def __init__(self, env: Any, *, model_id: str, revision: str, idle_s: float | None = None,
                  rss_limit_mb: int | None = None, request_timeout_s: float = 120.0,
-                 load_timeout_s: float = 600.0) -> None:
+                 load_timeout_s: float = 600.0, role: str = "") -> None:
         if model_id.startswith("fake:") and not _test_mode():
             raise ValueError("fake models are for tests only")
         self._env, self.model_id, self.revision = env, model_id, revision
+        self.role = role  # "image": a vision-only model that never embeds text
         self.idle_s = float(idle_s if idle_s is not None else _env_number("SLM_MEDIA_WORKER_IDLE_S", DEFAULT_IDLE_S))
         self.rss_limit_mb = int(rss_limit_mb if rss_limit_mb is not None
                                 else _env_number("SLM_MEDIA_WORKER_RSS_LIMIT_MB", DEFAULT_RSS_LIMIT_MB))
@@ -174,7 +175,7 @@ class MediaWorkerClient(MediaEmbedderPort):
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
                 reply = self._roundtrip({"cmd": "load", "model": self._model_arg(), "revision": self.revision,
-                                         "hf_home": str(self._env.weights_dir()), "device": "auto"},
+                                         "role": self.role, "hf_home": str(self._env.weights_dir()), "device": "auto"},
                                         self.load_timeout_s)
         except RuntimeError as exc:
             if isinstance(exc, MediaWorkerError):
@@ -348,16 +349,22 @@ def media_embedder(*, env: Any = None, data_root: str | Path | None = None, mode
     """
     if not media_enabled(data_root):
         return None
-    from superlocalmemory.runtimes.media_env import MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION, media_env
+    from superlocalmemory.runtimes.media_env import media_env
+    from superlocalmemory.runtimes.space_plan import current_space_plan
 
     managed = env or media_env(root=Path(data_root) / "runtimes" / "media" if data_root is not None else None)
     if managed.status().state != "ready":
         return None
-    key = (str(managed.root), model_id or MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION if revision is None else revision)
+    role = ""
+    if model_id is None:  # the image model is the plan's: the paired vision model or the separate one
+        plan = current_space_plan(data_root)
+        model_id, revision = plan.image_model, plan.image_revision if revision is None else revision
+        role = "image" if plan.mode == "paired" else ""
+    key = (str(managed.root), model_id, "" if revision is None else revision)
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
         if client is None:
-            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=key[1], revision=key[2])
+            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=key[1], revision=key[2], role=role)
             register_media_stop_hook(client.stop)
         return client
 

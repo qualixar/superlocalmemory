@@ -321,6 +321,61 @@ def test_a_fifo_is_refused_without_blocking(env, tmp_path, monkeypatch):
     assert r.status == "refused" and env.client.calls == []
 
 
+# -- picture index and the space plan ------------------------------------------------
+
+
+def test_ingest_records_the_space_signature(env, monkeypatch):
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    assert save(env).status == "stored"
+    sig = env.store.active_signature()
+    assert sig["mode"] == "paired" and sig["text_model"] == "nomic-ai/nomic-embed-text-v1.5"
+    assert (sig["image_model"], sig["image_revision"], sig["dim"]) == ("fake:test", "r1", DIM)
+
+
+def test_ingest_refuses_when_the_index_was_built_for_another_space(env, monkeypatch):
+    assert save(env).status == "stored"  # separate
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    receipt = save(env, png("b"))
+    assert receipt.status == "refused" and "different model" in receipt.reason and "rebuild" in receipt.reason
+    assert len(env.runtime.requests) == 1
+    assert env.store.count_and_bytes("p1")[0] == 1
+    assert not list((env.root / "media" / "tmp").iterdir())
+
+
+def test_ingest_accepts_when_the_space_matches(env, monkeypatch):
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    assert save(env).status == "stored" and save(env, png("b")).status == "stored"
+
+
+def test_a_download_link_goes_through_the_same_checks(env, monkeypatch):
+    from superlocalmemory.core import media_fetch
+
+    seen = {}
+
+    def fake_fetch(link, **kw):
+        seen.update(link=link, **kw)
+        return media_fetch.FetchedMedia(png(), "https://img.example.com/a.png", "text/html")
+
+    monkeypatch.setattr(media_fetch, "fetch_media", fake_fetch)
+    r = save(env, inp=MediaInput(download_url="https://img.example.com/a.png?k=1"))
+    assert r.status == "stored" and seen["remote"] is False
+    monkeypatch.setattr(media_fetch, "fetch_media",
+                        lambda link, **kw: media_fetch.FetchedMedia(b"<html>nope</html>", "u", "image/png"))
+    assert "not supported" in save(env, inp=MediaInput(download_url="https://img.example.com/b")).reason
+
+
+def test_a_refused_download_is_a_refused_receipt_without_the_link(env, monkeypatch):
+    from superlocalmemory.core import media_fetch
+
+    def boom(link, **kw):
+        raise media_fetch.MediaFetchRefused("That link points to a private or reserved network address.")
+
+    monkeypatch.setattr(media_fetch, "fetch_media", boom)
+    r = save(env, inp=MediaInput(download_url="https://10.0.0.1/a.png?k=SECRET"))
+    assert r.status == "refused" and "private" in r.reason and "SECRET" not in r.reason
+    assert env.runtime.requests == []
+
+
 # -- off is not the same as not ready ------------------------------------------
 
 def _turn_on(root):

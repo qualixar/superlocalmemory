@@ -27,8 +27,8 @@ README = REPO_ROOT / "README.md"
 # raw server, all tools). Pinned by
 # tests/test_mcp/test_mcp_exposure_contract.py
 # (`test_registration_exposure_is_exact_and_duplicate_free`, exposure
-# "whole", expected_count 103).
-_WHOLE_TOOLS_COUNT = 103
+# "whole", expected_count 107).
+_WHOLE_TOOLS_COUNT = 108
 
 # "| `core` | 18 |" and "| `full` (and unset) | 54 |".
 _ROW = re.compile(r"^\| `(\w+)`[^|`]*\| (\d+) \|", flags=re.MULTILINE)
@@ -74,7 +74,7 @@ def test_every_named_profile_plus_whole_appears_in_the_table() -> None:
 
 
 def test_the_row_for_an_unset_profile_is_full() -> None:
-    """Unset registers the same 56 tools as ``full`` (pinned by
+    """Unset registers the same 57 tools as ``full`` (pinned by
     tests/test_mcp/test_mcp_exposure_contract.py, "essential", "", 54)."""
     table = _table_text()
     unset_rows = [line for line in table.splitlines()

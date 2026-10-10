@@ -61,3 +61,17 @@ def test_invalid_curated_header_configuration_fails_closed(options):
 def test_non_string_kind_is_a_bounded_protocol_error(kind):
     with pytest.raises(FrameError,match='INVALID_FRAME'):
         decode_frame(wire(request(kind=kind)))
+
+
+def test_grant_header_is_accepted_on_request_frames_only():
+    assert decode_frame is not None
+    value = "v1." + "A" * 20 + "." + "B" * 43
+    frame = request(headers=[["content-type", "application/json"], ["x-slm-grant", value]])
+    assert decode_frame(wire(frame)) == frame
+    response = {"v": 1, "kind": "response", "id": "wire_1", "generation": 1, "status": 200,
+                "headers": [["x-slm-grant", value]], "bodyBase64": ""}
+    with pytest.raises(FrameError):
+        decode_frame(wire(response))
+    twice = request(headers=[["x-slm-grant", value], ["X-SLM-Grant", value]])
+    with pytest.raises(FrameError):
+        decode_frame(wire(twice))

@@ -160,3 +160,16 @@ async def test_a_broken_credential_is_still_a_configuration_error(harness):
     await wait_until(lambda:"configuration_error" in states)
     await companion.stop()
     assert calls==[]
+
+def test_the_dial_says_it_reads_grants(monkeypatch):
+    import websockets.asyncio.client as client
+    from superlocalmemory.remote_connections import companion as module
+    from superlocalmemory.remote_connections.proof import DeviceSigner
+    seen={}
+    class Fake:
+        def __init__(self,endpoint,**kwargs):seen.update(kwargs)
+    monkeypatch.setattr(client,"connect",Fake)
+    module._dial("wss://connect.superlocalmemory.com/connector","tok",DeviceSigner.generate().private_pem)
+    headers=seen["additional_headers"]
+    assert headers["x-slm-connector-features"]=="grant-v1"
+    assert headers["Authorization"]=="Bearer tok" and headers["DPoP"]
