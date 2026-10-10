@@ -22,6 +22,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
+from superlocalmemory.runtimes import media_models
+
 SpaceMode = Literal["paired", "separate"]
 DEFAULT_SPACE_MODE: SpaceMode = "separate"
 MODE_ENV = "SLM_MEDIA_SPACE_MODE"
@@ -96,9 +98,9 @@ def resolve_space_plan(text_model: str, text_dim: int, *, requested: str | None 
             vision, vision_rev, vision_dim = PAIRED_VISION[key]
             return SpacePlan("paired", vision, vision_rev, vision_dim, key, True,
                              "text model has a paired image model", _paired_floor())
-        return SpacePlan("separate", model, revision, dim, "", False, reason)
+        return SpacePlan("separate", model, revision, dim, "", False, reason, media_models.min_score_for(model))
     reason = "default" if requested is None and not os.environ.get(MODE_ENV) else "requested"
-    return SpacePlan("separate", model, revision, dim, "", False, reason)
+    return SpacePlan("separate", model, revision, dim, "", False, reason, media_models.min_score_for(model))
 
 
 def compatible(plan: SpacePlan, stored_signature: Mapping[str, Any] | None) -> bool:

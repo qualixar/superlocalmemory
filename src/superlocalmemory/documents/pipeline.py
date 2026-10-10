@@ -28,6 +28,7 @@ from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, ParseSession, ParseStopped
 from superlocalmemory.media import files
+from superlocalmemory.media.labels import DOCUMENT
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.runtimes.worker_client import MediaWorkerError
@@ -322,5 +323,9 @@ class JobRunner:
             segments.append((("\n\n" if title else "") + words, ContentOrigin.USER_TEXT))
         if not segments:
             return
+        if title:
+            segments.insert(1, ("\n" + DOCUMENT, ContentOrigin.DERIVED_TEXT))
+        else:
+            segments.insert(0, (DOCUMENT + "\n\n", ContentOrigin.DERIVED_TEXT))
         saved = self._save(tuple(segments), f"doc:{self.doc_id}:doc", {"type": "document", "document_id": self.doc_id})
         self.store.update_document(self.doc_id, memory_id=saved.memory_id, fact_ids_json=json.dumps(list(saved.fact_ids)))
