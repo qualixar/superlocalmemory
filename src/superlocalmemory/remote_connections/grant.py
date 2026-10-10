@@ -26,8 +26,8 @@ SCOPE_ORDER = ("slm:read", "slm:write", "slm:session", "slm:mesh", "slm:media")
 CLOCK_SKEW_TOLERANCE_MS = 5000
 MAX_SEEN_FRAMES = 4096
 _SAFE_INT_MAX = 2**53 - 1
-_SHAPE = re.compile(r"^v1\.([A-Za-z0-9_-]{1,8000})\.([A-Za-z0-9_-]{43})$")
-_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,256}$")
+_SHAPE = re.compile(r"v1\.([A-Za-z0-9_-]{1,8000})\.([A-Za-z0-9_-]{43})")
+_ID = re.compile(r"[A-Za-z0-9_.:-]{1,256}")
 _KEYS = ("v", "kid", "cid", "aid", "ver", "app", "scp", "fv", "fid", "gen", "dl")
 
 
@@ -119,7 +119,7 @@ def _parse(segment: str) -> dict:
         claims["v"] == 1 and type(claims["v"]) is int
         and _int(claims["kid"], 1) and _int(claims["ver"], 1)
         and _int(claims["gen"], 1) and _int(claims["dl"], 0)
-        and all(isinstance(claims[k], str) and _ID.match(claims[k]) for k in ("cid", "aid", "fid"))
+        and all(isinstance(claims[k], str) and _ID.fullmatch(claims[k]) for k in ("cid", "aid", "fid"))
         and isinstance(app, str) and 1 <= len(app) <= 2048
         and not any(ord(ch) < 32 or ord(ch) == 127 for ch in app)
         and isinstance(scopes, list) and len(set(scopes)) == len(scopes)
@@ -161,7 +161,7 @@ def verify_grant(
     value: str, *, keys: GrantKeys, connection_id: str, frame_id: str, generation: int,
     deadline_at_ms: int, now_ms: float, seen: ReplayGuard,
 ) -> RemoteGrant:
-    shape = _SHAPE.match(value) if isinstance(value, str) else None
+    shape = _SHAPE.fullmatch(value) if isinstance(value, str) else None
     if shape is None:
         raise GrantError("malformed")
     segment, mac = shape.groups()

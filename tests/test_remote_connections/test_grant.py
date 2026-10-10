@@ -245,3 +245,26 @@ def test_peer_ref_is_stable_and_shaped():
     assert peer_ref(CID, "auth-1") == peer_ref(CID, "auth-1")
     assert peer_ref(CID, "auth-2") != expected
     assert peer_ref("f" * 32, "auth-1") != expected
+
+
+def test_a_trailing_newline_is_not_a_valid_grant_or_id():
+    import pytest
+    from superlocalmemory.remote_connections import grant as g
+
+    key = bytes(range(1, 33))
+    value = g.sign_grant(
+        key, connection_id="c" * 32, authorization_id="auth-1\n", authorization_version=1,
+        app="client-1", scopes=["slm:read"], folders_visible=False, frame_id="frame-1",
+        generation=3, deadline_at_ms=1_700_000_000_000, key_version=1)
+    with pytest.raises(g.GrantError):
+        g.verify_grant(value, keys=g.GrantKeys(current=(1, key)), connection_id="c" * 32,
+                       frame_id="frame-1", generation=3, deadline_at_ms=1_700_000_000_000,
+                       now_ms=1_700_000_000_000, seen=g.ReplayGuard())
+    good = g.sign_grant(
+        key, connection_id="c" * 32, authorization_id="auth-1", authorization_version=1,
+        app="client-1", scopes=["slm:read"], folders_visible=False, frame_id="frame-1",
+        generation=3, deadline_at_ms=1_700_000_000_000, key_version=1)
+    with pytest.raises(g.GrantError):
+        g.verify_grant(good + "\n", keys=g.GrantKeys(current=(1, key)), connection_id="c" * 32,
+                       frame_id="frame-1", generation=3, deadline_at_ms=1_700_000_000_000,
+                       now_ms=1_700_000_000_000, seen=g.ReplayGuard())
