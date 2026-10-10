@@ -4969,6 +4969,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # for a SHORTER wait before the keyword fallback; it never lengthens
         # the default. Read leniently: an unusable value is ignored.
         budget_s: str = "",
+        # How a remote caller came in (set by the MCP side for remote keys);
+        # it can only hide more, so a local caller sending it hurts only itself.
+        caller_view: str = "",
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -5097,6 +5100,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         include_global, include_shared = enforce_read_scope(include_global, include_shared)
         # Everything from here to the response body is shared with saved views
         # (server/recall_core.py), so a view and this route cannot drift apart.
+        from superlocalmemory.retrieval.remote_view import parse_view
         from superlocalmemory.server.recall_core import (
             RecallCall,
             parse_budget_s,
@@ -5117,6 +5121,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             full=full, include_source=include_source,
             include_marker=bool(session_id),
             budget_s=parse_budget_s(budget_s),
+            caller_view=parse_view(caller_view),
         )
         try:
             return await run_recall(engine, call, app_state=application.state)
@@ -5165,8 +5170,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # v3.6.15 multi-scope: resolve the write scope. ``None`` (not specified
         # by the caller) → the configured default_scope (personal). Shared
         # memory is opt-in, so the default keeps every write private.
-        _scope_cfg = getattr(engine._config, "scope", None)
-        scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
+        from superlocalmemory.memory_core.save_scope import default_scope as _default_scope
+
+        scope = req.scope or _default_scope(engine._config)
         shared_with = req.shared_with
 
         # Keep the daemon compatibility route behind the exact RBAC/session

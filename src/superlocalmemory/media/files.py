@@ -2,11 +2,13 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Where original images live on disk: ``<data_root>/media/<sha[:2]>/<sha>.<ext>``.
+"""Where original images live on disk: ``<data_root>/media/<address[:2]>/<address>.<ext>``.
 
-The address is the hash of the stripped file that is kept, so the same picture
-saved twice is one file. Paths handed in from outside are checked to stay
-inside the media folder; nothing here follows a link out of it.
+The address is the hash of the profile id, a NUL byte and the stripped file that
+is kept, so the same picture saved twice in one profile is one file while two
+profiles never share a file: erasing one profile removes its bytes whatever
+another profile saved. Paths handed in from outside are checked to stay inside
+the media folder; nothing here follows a link out of it.
 """
 
 from __future__ import annotations
@@ -72,26 +74,33 @@ def _remove_tree(entry: Path) -> None:
         entry.unlink()
 
 
-def _file_sha(path: Path) -> str:
-    digest = hashlib.sha256()
+def content_address(profile_id: str, path: str | Path) -> str:
+    """The address of this profile's copy of the file: sha256(profile id, NUL, bytes)."""
+    digest = hashlib.sha256(profile_id.encode("utf-8") + b"\0")
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
 
-def place_original(data_root: str | Path, tmp_file: str | Path, stored_sha256: str, ext: str) -> str:
-    """Move a scratch file to its address (atomic, owner-only); returns the relative path.
+def planned_path(data_root: str | Path, profile_id: str, tmp_file: str | Path, ext: str) -> Path:
+    """Where ``place_original`` would put this profile's copy of the scratch file."""
+    return media_root(data_root) / original_relpath(content_address(profile_id, tmp_file), ext)
+
+
+def place_original(data_root: str | Path, tmp_file: str | Path, profile_id: str, ext: str) -> str:
+    """Move a scratch file to its profile's address (atomic, owner-only); returns the relative path.
 
     A file already at the address is kept when it really is the same content;
     a different one is never overwritten.
     """
-    rel = original_relpath(stored_sha256, ext)
+    address = content_address(profile_id, tmp_file)
+    rel = original_relpath(address, ext)
     dest = media_root(data_root) / rel
     src = Path(tmp_file)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() or dest.is_symlink():
-        if dest.is_symlink() or _file_sha(dest) != stored_sha256:
+        if dest.is_symlink() or content_address(profile_id, dest) != address:
             raise FileExistsError("a different file already has this address")
         src.unlink(missing_ok=True)
         return rel

@@ -398,6 +398,9 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
     defect), and anything a future table left behind must stay visible, never
     be deleted silently.
 
+    Pictures and documents (media.db) move last, after that transaction has
+    committed: if the memory move fails, nothing in media.db has moved.
+
     Sidecar stores first, as before: if one fails the profile row must survive
     for a retry rather than leave profile-scoped evidence orphaned. Raises
     ``ProfileFoldError`` / ``SidecarFoldError`` (nothing changed) when the
@@ -425,7 +428,6 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
     sidecars.purge_learned_state(root / "learning.db", name)
     sidecars.purge_context_cache(root, name)
     sidecars.move_pending(root / "pending.db", name, move_to)
-    sidecars.move_media(root, name, move_to)
     from superlocalmemory.storage.profile_fold import fold_profile
 
     with memory_write(DB_PATH) as conn:
@@ -433,6 +435,8 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
         conn.execute("BEGIN IMMEDIATE")
         counts = fold_profile(conn, name, move_to)
         conn.execute("DELETE FROM profiles WHERE profile_id = ?", (name,))
+    # Pictures and documents follow only once the memories have moved for good.
+    sidecars.move_media(root, name, move_to)
     _unproject_entities(counts.get("merged_entities") or [])
     return counts
 

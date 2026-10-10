@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from superlocalmemory.media import ingest, open_media_store
+from superlocalmemory.media import files, ingest, open_media_store
 from superlocalmemory.media.ingest import MediaInput, remember_media
 from superlocalmemory.runtimes.worker_client import MediaWorkerWarming
 
@@ -134,7 +134,8 @@ def test_happy_path(env):
     assert row["width"] == 3 and '"Make"' in row["exif_json"]
     orig = env.root / "media" / row["original_relpath"]
     assert orig.read_bytes() == b"STRIPPED" + png() and stat.S_IMODE(orig.stat().st_mode) == 0o600
-    assert row["original_relpath"] == f"{row['stored_sha256'][:2]}/{row['stored_sha256']}.png"
+    address = files.content_address("p1", orig)
+    assert row["original_relpath"] == f"{address[:2]}/{address}.png" and address != row["stored_sha256"]
     adm = env.runtime.requests[0]
     assert adm.content == "receipt from the cafe\n\n[Text in image]\nInvoice 42 total"
     assert adm.source_type == "media" and adm.profile_id == "p1"

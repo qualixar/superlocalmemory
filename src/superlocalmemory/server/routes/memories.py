@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from superlocalmemory.core.config import BROWSE_PAGE_SIZE
+from superlocalmemory.retrieval import remote_view
 from superlocalmemory.storage.database import (
     visible_fact_clause_for_connection,
 )
@@ -1792,7 +1793,8 @@ def _correction_store_for(engine, active_profile: str):
 
 
 @router.get("/api/corrections")
-def list_corrections(request: Request, limit: int = 100, profile_id: str = ""):
+def list_corrections(request: Request, limit: int = 100, profile_id: str = "",
+                     caller_view: str = ""):
     """List bounded review metadata for one profile: the routed one when
     ``profile_id`` names it (authorized like a routed review), else the active one."""
     try:
@@ -1803,8 +1805,17 @@ def list_corrections(request: Request, limit: int = 100, profile_id: str = ""):
         cases = _correction_store_for(engine, target_profile).list_cases(
             target_profile, limit=limit)
         from superlocalmemory.server.routes.overtaken import overtaken_for  # a user action closed
-        return {"success": True, "corrections": [_correction_case_response(case) for case in cases],
-                "overtaken": overtaken_for(engine, target_profile, limit)}
+        corrections = [_correction_case_response(case) for case in cases]
+        overtaken = overtaken_for(engine, target_profile, limit)
+        view = remote_view.parse_view(caller_view)
+        if view:  # a remote caller: no case that names a memory it may not see
+            named = [f for c in (*corrections, *overtaken)
+                     for f in (c.get("predecessor_fact_id"), c.get("successor_fact_id"))]
+            hidden = remote_view.hidden_among(view, engine._db, target_profile, named)
+            keep = lambda c: not {c.get("predecessor_fact_id"), c.get("successor_fact_id")} & hidden  # noqa: E731
+            corrections = [c for c in corrections if keep(c)]
+            overtaken = [c for c in overtaken if keep(c)]
+        return {"success": True, "corrections": corrections, "overtaken": overtaken}
     except HTTPException:
         raise
     except _UnknownRoutedProfile as exc:

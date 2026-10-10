@@ -32,6 +32,21 @@ slm gdpr export --profile <name> --output export.json   # subject access / porta
 slm gdpr erase --profile <name> --dry-run              # preview; --yes erases the profile irreversibly
 ```
 
+What the two exports carry for pictures and documents:
+
+- `slm gdpr export` (and the dashboard's compliance export) adds a `media`
+  section for the profile: a record for each picture (type, size, dimensions,
+  capture time, the camera details as stored, and the scope of its memory), each
+  document (title, pages, state), each connected folder (its root path and state)
+  and each background job. It holds records only: no picture or document bytes,
+  no thumbnails (a record says whether one exists), and nothing of another
+  profile. The section is absent when pictures and documents were never turned on.
+- The memory data export (`/api/export`, the dashboard Export button) carries the
+  text of pictures, document pages and folder files as ordinary memories, with a
+  `source` field naming where each came from (`media`, `document_page` or
+  `folder`, by id and never by file path). The pictures and documents themselves
+  are not exported. Importing that file saves the text as plain memories again.
+
 A complete erasure claim requires proof that deletion propagates through:
 
 - relational facts and raw evidence;

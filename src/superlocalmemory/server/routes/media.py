@@ -47,6 +47,9 @@ class MediaRememberRequest(BaseModel):
     idempotency_key: str = ""
     session_date: str = ""
     origin: str = Field(default="", max_length=16)
+    #: Who the memory is visible to; ``None`` takes the configured default, as for typed text.
+    scope: str | None = None
+    shared_with: list[str] | None = Field(default=None, max_length=256)
 
     @model_validator(mode="after")
     def _one_source(self) -> "MediaRememberRequest":
@@ -90,6 +93,23 @@ def _profile(engine, requested: str, request: Request, permission) -> str:
     return wanted
 
 
+def _save_scope(engine, req: "MediaRememberRequest", request: Request, profile: str) -> tuple[str, tuple[str, ...]]:
+    """The scope and sharing list for this save, checked as for typed text: shared and global need SHARE."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.memory_core.save_scope import BROAD_SCOPES, resolve_scope
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    if req.origin == "remote":
+        return "personal", ()  # a remote app saves to its own profile only
+    try:
+        scope = resolve_scope(engine._config, req.scope)
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from None
+    if scope in BROAD_SCOPES:
+        require_permission(request, Permission.SHARE, profile=profile)
+    return scope, tuple(req.shared_with or ())
+
+
 def _require_manage_if(request: Request, profile: str, needed: object) -> None:
     """MANAGE when ``needed``: reading a file off this computer, or deleting stray files, is an operator act."""
     if needed:
@@ -110,6 +130,7 @@ async def remember(req: MediaRememberRequest, request: Request):
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id, request, Permission.WRITE)
     _require_manage_if(request, profile, req.path)
+    scope, shared_with = _save_scope(engine, req, request, profile)
     from superlocalmemory.memory_core import prepare_user_text
     from superlocalmemory.server.write_governance import enforce_remember_governance
 
@@ -122,7 +143,8 @@ async def remember(req: MediaRememberRequest, request: Request):
                      download_url=req.download_url or None, remote=remote)
     receipt = await asyncio.to_thread(
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
-        config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
+        config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
+        scope=scope, shared_with=shared_with)
     body = dataclasses.asdict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason  # the 422 reader (daemon_request) shows this, not a generic line
@@ -199,6 +221,17 @@ async def list_images(request: Request, profile_id: str = "", cursor: str = Quer
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
 
+def _anchor_visible(engine, anchor_id: str | None, profile: str) -> bool:
+    """Whether the picture's memory is visible to ``profile`` under the rules typed text is shown by."""
+    if not anchor_id:
+        return False
+    from superlocalmemory.server.routes.memories import _scope_where_clause
+
+    where, params = _scope_where_clause("all", profile)
+    return bool(engine._db.execute(f"SELECT 1 AS one FROM memories WHERE memory_id = ? AND {where}",
+                                   (anchor_id, *params)))
+
+
 @router.get("/media/{media_id}/thumb")
 async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = ""):
     from superlocalmemory.access.rbac import Permission
@@ -217,7 +250,9 @@ async def thumbnail(media_id: str, request: Request, profile_id: str = "", forma
         row = store.get_item(media_id)
     finally:
         store.close()
-    if not row or row["profile_id"] != profile or row["state"] != "active" or not row["thumb_webp"]:
+    if not row or row["state"] != "active" or not row["thumb_webp"]:
+        raise HTTPException(404, detail="Not found.")
+    if row["profile_id"] != profile and not _anchor_visible(engine, row["anchor_memory_id"], profile):
         raise HTTPException(404, detail="Not found.")
     if format == "json":
         thumb = bytes(row["thumb_webp"])
@@ -250,12 +285,14 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id, request, Permission.WRITE)
     _require_manage_if(request, profile, req.path)
+    scope, shared_with = _save_scope(engine, req, request, profile)
     words = prepare_user_text(engine._config, req.content).text if req.content.strip() else ""
     enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview=words)
     inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64, file_name=req.file_name)
     receipt = await asyncio.to_thread(
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
-        tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
+        tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
+        scope=scope, shared_with=shared_with)
     body = dataclasses.asdict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason

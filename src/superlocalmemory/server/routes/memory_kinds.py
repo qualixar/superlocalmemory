@@ -44,6 +44,7 @@ from superlocalmemory.core.memory_kind_config import (
     settings_dict,
 )
 from superlocalmemory.core.kind_query import InvalidKind
+from superlocalmemory.retrieval import remote_view
 from superlocalmemory.server import write_identity
 from superlocalmemory.server.kind_error import invalid_kind_http
 from superlocalmemory.storage.memory_kind_store import MemoryKindStore
@@ -369,7 +370,9 @@ def post_backfill_action(request: Request, run_id: str,
 def get_suggestions(request: Request, kind: str | None = Query(None, max_length=64),
                     limit: int = Query(50, ge=1, le=100),
                     offset: int = Query(0, ge=0, le=1_000_000),
-                    profile_id: str = Query("", max_length=_MAX_PROFILE_CHARS)):
+                    profile_id: str = Query("", max_length=_MAX_PROFILE_CHARS),
+                    # How a remote caller came in; it can only hide more.
+                    caller_view: str = Query("", max_length=32)):
     from superlocalmemory.server.routes.memories import _UnknownRoutedProfile
 
     try:
@@ -386,6 +389,10 @@ def get_suggestions(request: Request, kind: str | None = Query(None, max_length=
         items = MemoryKindStore(db).suggestions(
             profile, kind=parsed, limit=limit, offset=offset,
             display_min_confidence=cfg.display_min_confidence)
+        view = remote_view.parse_view(caller_view)
+        if view:  # a remote caller: never a memory it may not see
+            hidden = remote_view.hidden_among(view, db, profile, [i["fact_id"] for i in items])
+            items = [i for i in items if i["fact_id"] not in hidden]
         return {"items": items}
     except HTTPException:
         raise

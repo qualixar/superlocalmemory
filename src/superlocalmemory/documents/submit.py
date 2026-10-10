@@ -206,17 +206,17 @@ def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) ->
     return store.enqueue_job(profile_id, "document", 0, {**payload, "document_id": doc_id})
 
 
-def _place(root: Path, tmp: Path, sha: str) -> tuple[str, bool]:
-    new = not files.original_path(root, sha, "pdf").exists()
+def _place(root: Path, tmp: Path, profile_id: str) -> tuple[str, bool]:
     try:
-        return files.place_original(root, tmp, sha, "pdf"), new
+        new = not files.planned_path(root, profile_id, tmp, "pdf").exists()
+        return files.place_original(root, tmp, profile_id, "pdf"), new
     except (OSError, ValueError):
         raise _refuse("The document could not be saved.") from None
 
 
 def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str, profile_id: str,
             title: str, payload: dict[str, Any]) -> DocumentReceipt:
-    relpath, placed_new = _place(root, tmp, sha)
+    relpath, placed_new = _place(root, tmp, profile_id)
     try:
         store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
                               mime="application/pdf", bytes=size, source_relpath=relpath,
@@ -255,7 +255,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
 def submit_document(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "", store: Any = None,
-    folder: dict[str, Any] | None = None,
+    folder: dict[str, Any] | None = None, scope: str | None = None, shared_with: tuple[str, ...] = (),
 ) -> DocumentReceipt:
     """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes.
 
@@ -266,6 +266,9 @@ def submit_document(
         store_ref, opened = _resolve(store)
         words = prepare_user_text(config, content).text if content.strip() else ""
         payload = {"user_words": words, "tags": tags, "session_date": session_date, "actor_id": actor_id}
+        if scope:
+            payload["scope"] = scope
+            payload["shared_with"] = list(shared_with)
         if folder:
             payload["folder"] = dict(folder)
         receipt = _submit(store_ref, inp, Path(store_ref.path).parent, profile_id, payload, idempotency_key)
