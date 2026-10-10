@@ -238,7 +238,7 @@ class RemoteKeyStore:
     def list(self) -> tuple[RemoteKey, ...]:
         return self._load()
 
-    def _file_signature(self) -> tuple[str, int, int] | None:
+    def _file_signature(self) -> tuple[str, int, int, int, int] | None:
         path = self.path
         if store_problem(path) is not None:
             return None
@@ -246,7 +246,7 @@ class RemoteKeyStore:
             info = path.stat()
         except OSError:
             return None
-        return (str(path), info.st_mtime_ns, info.st_size)
+        return (str(path), info.st_mtime_ns, info.st_size, info.st_ino, info.st_ctime_ns)
 
     def cached_extras(self, key_id: str) -> frozenset[str] | None:
         """The key's opt-ins when they are already known for the file as it is

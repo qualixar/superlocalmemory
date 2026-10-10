@@ -383,6 +383,19 @@ def ensure_db_healthy(db_path: str) -> bool:
         return True
 
 
+def _add_peer_profile_columns(conn: sqlite3.Connection) -> None:
+    """Add the profile columns a database lacks; only a duplicate column is ignored."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(mesh_peer_profiles)")}
+    for sql in _PEER_PROFILES_ALTERS:
+        if sql.rsplit(" ", 2)[-2] in have:
+            continue
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
 def apply_security_schema(conn: sqlite3.Connection) -> None:
     """Apply idempotent schema additions (fencing_token, revision, mesh_sent_ops, mesh_nonces, peer_key)."""
     for sql in _SCHEMA_ALTERS:
@@ -399,11 +412,7 @@ def apply_security_schema(conn: sqlite3.Connection) -> None:
             conn.executescript(ddl)
         except sqlite3.OperationalError:
             pass
-    for sql in _PEER_PROFILES_ALTERS:
-        try:
-            conn.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
+    _add_peer_profile_columns(conn)
     conn.commit()
 
 

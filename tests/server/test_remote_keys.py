@@ -290,3 +290,26 @@ def test_revoking_keeps_extras_off_a_replacement_key(store) -> None:
     store.revoke("a")
     record, _ = store.add("a", "write", profile="default")
     assert record.extras == frozenset()
+
+
+def test_the_extras_cache_is_dropped_when_the_file_is_replaced_in_place(store) -> None:
+    kid = store.add("a", "read", profile="default")[0].key_id
+    store.set_extras("a", {"mesh"})
+    assert store.extras_for(kid) == frozenset({"mesh"})
+    assert store.cached_extras(kid) == frozenset({"mesh"})
+    before = store.path.stat()
+    replacement = store.path.read_text(encoding="utf-8").replace("mesh", "meSh")
+    other = store.path.with_name("other.json")
+    other.write_text(replacement, encoding="utf-8")
+    os.chmod(other, 0o600)
+    os.utime(other, ns=(before.st_atime_ns, before.st_mtime_ns))
+    os.replace(other, store.path)
+    assert os.stat(store.path).st_mtime_ns == before.st_mtime_ns
+    assert store.cached_extras(kid) is None
+
+
+def test_the_file_signature_includes_inode_and_change_time(store) -> None:
+    store.add("a", "read", profile="default")
+    info = store.path.stat()
+    signature = store._file_signature()
+    assert info.st_ino in signature and info.st_ctime_ns in signature

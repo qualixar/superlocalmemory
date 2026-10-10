@@ -76,6 +76,16 @@ def query_inbox(conn: sqlite3.Connection, peer_id: str, project_path: str,
     return all_msgs[:100]
 
 
+def has_unread_direct(conn: sqlite3.Connection, peer_id: str, profile_id: str) -> bool:
+    """Whether any unexpired direct message waits for the peer (a plain read)."""
+    return conn.execute(
+        "SELECT 1 FROM mesh_messages WHERE profile_id=? AND to_peer=? "
+        "AND target_type='peer' AND COALESCE(read, 0)=0 "
+        "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+        (profile_id, peer_id, datetime.now(timezone.utc).isoformat()),
+    ).fetchone() is not None
+
+
 MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
 MAX_UNREAD_DIRECT = 50      # Max unread direct messages a web app may queue for one peer
 
@@ -95,8 +105,9 @@ def _web_target_refusal(conn: sqlite3.Connection, to_peer: str,
         conn.execute("BEGIN IMMEDIATE")
     unread = conn.execute(
         "SELECT COUNT(*) FROM mesh_messages WHERE profile_id=? AND to_peer=? "
-        "AND target_type='peer' AND COALESCE(read, 0)=0",
-        (profile_id, to_peer),
+        "AND target_type='peer' AND COALESCE(read, 0)=0 "
+        "AND (expires_at IS NULL OR expires_at > ?)",
+        (profile_id, to_peer, datetime.now(timezone.utc).isoformat()),
     ).fetchone()[0]
     if unread >= MAX_UNREAD_DIRECT:
         return {"ok": False, "error": "recipient inbox is full"}

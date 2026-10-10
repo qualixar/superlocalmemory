@@ -14,9 +14,12 @@ _names: dict[str, dict[str, str]] = {}
 
 def set_names(connection_id: str, names: dict[str, str]) -> None:
     """Replace the names known for one connection."""
+    from superlocalmemory.mesh.broker_profiles import clean_name
+
+    cleaned = {k: n for k, v in names.items() if (n := clean_name(v))}
     with _lock:
-        if names:
-            _names[connection_id] = dict(names)
+        if cleaned:
+            _names[connection_id] = cleaned
         else:
             _names.pop(connection_id, None)
 

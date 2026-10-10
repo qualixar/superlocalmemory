@@ -15,6 +15,7 @@ broker's ``_conn``, ``_write_with_retry``, ``_log_event``, ``_waiter``,
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from collections.abc import Collection, Sequence
 from datetime import datetime, timezone
 
@@ -24,6 +25,34 @@ from .envelope import Origin
 FALLBACK_NAME = "Web app "
 DIRECTORY_LIMIT = 100
 SUMMARY_LIMIT = 200
+CLAIM_MAX_MESSAGES = 20
+CLAIM_MAX_BYTES = 256 * 1024
+
+
+def _has_control(text: str) -> bool:
+    return any(unicodedata.category(c) == "Cc" and c not in "\n\t" for c in text)
+
+
+def _redact_view(msg: dict) -> None:
+    """Secret-redact what a web app is shown: ``content`` and the envelope's copy."""
+    from superlocalmemory.core.security_primitives import redact_secrets
+
+    msg["content"] = redact_secrets(msg["content"], aggression="high")
+    env = msg.get("envelope")
+    if isinstance(env, dict) and isinstance(env.get("content"), str):
+        env["content"] = redact_secrets(env["content"], aggression="high")
+
+
+def _within_budget(msgs: list[dict]) -> list[dict]:
+    """The oldest messages that fit one claim: at most 20 and 256 KB, never none."""
+    taken: list[dict] = []
+    size = 0
+    for msg in sorted(msgs, key=lambda m: m["id"])[:CLAIM_MAX_MESSAGES]:
+        size += len(msg["content"].encode("utf-8"))
+        if taken and size > CLAIM_MAX_BYTES:
+            break
+        taken.append(msg)
+    return taken
 
 
 def fallback_name(peer_ref: str) -> str:
@@ -46,6 +75,7 @@ def register_web_peer(conn: sqlite3.Connection, peer_ref: str, *, app: str,
     ).fetchone()
     if prof is not None and prof["retired_at"]:
         return {"ok": False, "error": "peer is retired"}, False
+    display_name = broker_profiles.clean_name(display_name) or fallback_name(peer_ref)
     now = datetime.now(timezone.utc).isoformat()
     row = conn.execute("SELECT profile_id FROM mesh_peers WHERE peer_id=?",
                        (peer_ref,)).fetchone()
@@ -124,6 +154,8 @@ class WebPeersMixin:
                  refs: Sequence[str] = (), reply_to: int | None = None,
                  profile_id: str = "default") -> dict:
         """A send made for a web app: it addresses one peer of this computer."""
+        if _has_control(content):
+            return {"ok": False, "error": "message has control characters"}
         with self._remote_peers_lock:
             if to in self._remote_peers:
                 return {"ok": False, "error": "recipient peer not found"}
@@ -137,7 +169,8 @@ class WebPeersMixin:
         transaction, so two readers never receive the same message."""
         def _claim(conn: sqlite3.Connection) -> list[dict]:
             conn.execute("BEGIN IMMEDIATE")
-            msgs = broker_inbox.query_inbox(conn, peer_id, "", profile_id, direct_only=True)
+            msgs = _within_budget(
+                broker_inbox.query_inbox(conn, peer_id, "", profile_id, direct_only=True))
             if msgs:
                 marks = ",".join("?" * len(msgs))
                 conn.execute(
@@ -147,6 +180,8 @@ class WebPeersMixin:
                 )
             broker_inbox.attach_envelopes(conn, msgs, remote_view=True)
             conn.commit()
+            for msg in msgs:
+                _redact_view(msg)
             return msgs
 
         return self._write_with_retry(_claim)
@@ -157,8 +192,16 @@ class WebPeersMixin:
 
         Raises ``RuntimeError("too many waits")`` past the concurrent-wait cap.
         """
-        return self._waiter.wait(
-            lambda: self.claim_web_inbox(peer_id, profile_id), timeout_s)
+        def poll() -> list[dict]:
+            conn = self._conn()
+            try:
+                if not broker_inbox.has_unread_direct(conn, peer_id, profile_id):
+                    return []
+            finally:
+                conn.close()
+            return self.claim_web_inbox(peer_id, profile_id)
+
+        return self._waiter.wait(poll, timeout_s)
 
     def retire_missing_web_peers(self, connection_id: str, listed: Collection[str], *,
                                  registered_before: str | None = None) -> list[str]:

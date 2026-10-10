@@ -172,7 +172,7 @@ def test_the_cap_frees_up_once_the_recipient_reads(broker) -> None:
     broker._send_limiter = SendRateLimiter(limit=1000)
     for n in range(50):
         assert broker.web_send(other, "x", ref, f"m{n}", profile_id="default")["ok"]
-    assert len(broker.claim_web_inbox(ref, "default")) == 50
+    assert len(broker.claim_web_inbox(ref, "default")) == 20       # one claim is capped
     assert broker.web_send(other, "x", ref, "again", profile_id="default")["ok"]
 
 

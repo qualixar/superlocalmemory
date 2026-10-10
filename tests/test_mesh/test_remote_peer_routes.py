@@ -111,3 +111,10 @@ def test_http_state_write_naming_a_web_peer_is_refused(client, broker, web_ref) 
     r = client.post("/mesh/state", headers=HEADERS,
                     json={"key": "k", "value": "v", "set_by": web_ref})
     assert r.status_code == 403
+
+
+def test_http_register_naming_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/register", headers=HEADERS,
+                    json={"session_id": web_ref, "summary": "takeover", "port": 1})
+    assert r.status_code == 403
+    assert rows(broker, "SELECT summary FROM mesh_peers WHERE peer_id=?", (web_ref,))[0][0] != "takeover"

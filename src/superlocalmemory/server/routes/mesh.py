@@ -185,6 +185,7 @@ def register(req: RegisterRequest, request: Request):
     broker = _get_broker(request)
     if not req.session_id:
         raise HTTPException(400, detail="session_id required")
+    _refuse_web_peer(broker, req.session_id)
     result = broker.register_peer(
         req.session_id, req.summary, req.host, req.port,
         req.project_path, req.agent_type, profile_id=_active_profile(),

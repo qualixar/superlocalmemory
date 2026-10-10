@@ -14,6 +14,7 @@ import json
 import sqlite3
 import threading
 import time
+import unicodedata
 from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -100,6 +101,15 @@ def _ensure_profile(conn: sqlite3.Connection, peer_id: str) -> None:
         "VALUES (?, 'local', ?)",
         (peer_id, _now()),
     )
+
+
+def clean_name(name: object) -> str:
+    """A display name from outside: Unicode format characters (direction
+    overrides, zero-width marks) and control characters dropped, 64 characters at most."""
+    if not isinstance(name, str):
+        return ""
+    kept = "".join(c for c in name if unicodedata.category(c) not in ("Cf", "Cc"))
+    return kept.strip()[:MAX_DISPLAY_NAME]
 
 
 def set_muted(conn: sqlite3.Connection, peer_id: str, muted: bool,
