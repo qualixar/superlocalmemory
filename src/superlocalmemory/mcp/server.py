@@ -83,7 +83,7 @@ def reset_engine():
 # Antigravity, Windsurf) and a maximal SLM registration crowds out
 # other MCP servers the user may have installed.
 # Admin/diagnostics tools remain available via CLI (`slm <command>`).
-# Set SLM_MCP_ALL_TOOLS=1 to enable all 105 tools (power users).
+# Set SLM_MCP_ALL_TOOLS=1 to enable all 107 tools (power users).
 
 import os as _os_reg
 
@@ -305,8 +305,11 @@ from superlocalmemory.mcp.tools_views import register_view_tools
 register_view_tools(_target, get_engine)  # 4.1.21 issue #113 saved views
 from superlocalmemory.mcp.tools_kinds import register_kind_tools
 register_kind_tools(_target, get_engine)  # 4.1.19 WP8: memory-kind management (ships in every profile, not only power)
-from superlocalmemory.mcp.tools_media import register_media_resources, register_media_tools
+from superlocalmemory.mcp.tools_media import (
+    register_document_tools, register_media_resources, register_media_tools,
+)
 register_media_tools(_target)  # image tools for local AI apps (host-only)
+register_document_tools(_target)  # document tools for local AI apps (host-only)
 register_media_resources(server)
 from superlocalmemory.mcp.tools_context import register_prestage_tool
 

@@ -272,7 +272,7 @@ def test_the_mcp_app_sees_which_remote_key_is_calling() -> None:
     assert current_remote_key_id() is None
 
 
-@pytest.mark.parametrize("tool", ["remember_media", "get_media"])
+@pytest.mark.parametrize("tool", ["remember_media", "get_media", "remember_document", "media_status"])
 def test_image_tools_are_host_only_and_denied_for_read_and_write_keys(tool) -> None:
     assert tool in policy.HOST_ONLY_TOOLS and tool in policy.MEDIA_TOOLS
     assert not policy.tool_allowed("read", tool) and not policy.tool_allowed("write", tool)

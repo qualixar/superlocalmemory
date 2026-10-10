@@ -2,10 +2,11 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V4 | https://qualixar.com | https://varunpratap.com
 
-"""Image tools for AI apps on this computer: ``remember_media`` and ``get_media``.
+"""Image and document tools for AI apps on this computer: ``remember_media``, ``get_media``,
+``remember_document`` and ``media_status``.
 
-Both go through the local daemon's image routes, so the profile, permission and
-governance checks live in one place. Both are host-only: a caller on another
+All go through the local daemon's routes, so the profile, permission and
+governance checks live in one place. All are host-only: a caller on another
 computer is refused here, before any daemon call, as well as by the remote tool
 policy. A thumbnail goes back only as an MCP ``image`` content block, never
 inside ``structuredContent``. An error never repeats a link's query string.
@@ -31,9 +32,11 @@ logger = logging.getLogger("slm.mcp.tools_media")
 
 MAX_THUMB_BYTES = 32 * 1024
 NOT_FOR_REMOTE = "Images are not available to remote apps."
+NOT_FOR_REMOTE_DOCS = "Documents are not available to remote apps."
 _ID = re.compile(r"[0-9a-f]{32}")
 _LINK = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
 _SOURCES = ("path", "download_url", "base64")
+_DOC_SOURCES = ("path", "base64")
 
 
 def _clean(text: object) -> str:
@@ -67,6 +70,42 @@ def _remember_via_daemon(body: dict[str, Any]) -> dict[str, Any]:
     if data.get("media_id"):
         data = {**data, "resource": f"slm://media/{data['media_id']}"}
     return {k: (_clean(v) if k in ("reason", "error") else v) for k, v in data.items()}
+
+
+def _document_via_daemon(body: dict[str, Any]) -> dict[str, Any]:
+    from superlocalmemory.cli import daemon
+    from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
+
+    try:
+        data = daemon.daemon_request("POST", "/api/v3/documents", body,
+                                     timeout_seconds=60.0, preserve_unprocessable=True)
+    except daemon.DaemonUnprocessable as exc:
+        return _fail("refused", exc.message)
+    except daemon.DaemonRefused:
+        return _fail("not_allowed", "The daemon did not allow this document to be saved.")
+    if not isinstance(data, dict):
+        return {"success": False, "status": "unavailable", "retryable": True,
+                "code": "DAEMON_UNAVAILABLE", "error": daemon_unavailable_error()}
+    return {k: (_clean(v) if k in ("reason", "error", "detail") else v) for k, v in data.items()}
+
+
+def _job_via_daemon(job_id: str, profile_id: str) -> dict[str, Any]:
+    from superlocalmemory.cli import daemon
+    from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
+
+    path = f"/api/v3/jobs/{job_id}"
+    if profile_id:
+        path += f"?profile_id={quote(profile_id, safe='')}"
+    try:
+        data = daemon.daemon_request("GET", path, timeout_seconds=30.0, preserve_not_found=True)
+    except daemon.DaemonNotFound:
+        return _fail("not_found", "Job not found.")
+    except daemon.DaemonRefused:
+        return _fail("not_allowed", "The daemon did not allow this job to be read.")
+    if not isinstance(data, dict):
+        return {"success": False, "status": "unavailable", "retryable": True,
+                "code": "DAEMON_UNAVAILABLE", "error": daemon_unavailable_error()}
+    return {k: (_clean(v) if k == "error" and v else v) for k, v in data.items()}
 
 
 def thumb_via_daemon(media_id: str, profile_id: str = "") -> tuple[bytes | None, str]:
@@ -175,6 +214,31 @@ async def _remember(args: dict[str, Any]) -> dict[str, Any]:
         return _fail("error", "The image could not be saved.", retryable=True)
 
 
+async def _remember_document(args: dict[str, Any]) -> dict[str, Any]:
+    if current_remote_key_id() is not None:
+        return _fail("not_for_remote", NOT_FOR_REMOTE_DOCS)
+    if sum(bool(args[k]) for k in _DOC_SOURCES) != 1:
+        return _fail("invalid_request", "Give exactly one of path or base64.")
+    body = {k: v for k, v in args.items() if v}
+    try:
+        return await asyncio.to_thread(_document_via_daemon, body)
+    except Exception as exc:  # noqa: BLE001 - a tool answer, never a traceback
+        logger.warning("remember_document failed: %s", type(exc).__name__)
+        return _fail("error", "The document could not be saved.", retryable=True)
+
+
+async def _status(job_id: str, profile_id: str) -> dict[str, Any]:
+    if current_remote_key_id() is not None:
+        return _fail("not_for_remote", NOT_FOR_REMOTE_DOCS)
+    if not _ID.fullmatch(job_id or ""):
+        return _fail("invalid_request", "That is not a valid job id.")
+    try:
+        return await asyncio.to_thread(_job_via_daemon, job_id, (profile_id or "").strip())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("media_status failed: %s", type(exc).__name__)
+        return _fail("error", "The job could not be read.", retryable=True)
+
+
 async def _get(media_id: str, variant: str, profile_id: str) -> CallToolResult:
     if current_remote_key_id() is not None:
         return _error_result(NOT_FOR_REMOTE)
@@ -215,6 +279,32 @@ def register_media_tools(server: Any) -> None:
         return await _get(media_id, variant, profile_id)
 
 
+def register_document_tools(server: Any) -> None:
+    """Register ``remember_document`` and ``media_status`` on *server*."""
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    @admits(OperationKind.REMEMBER)
+    async def remember_document(
+        path: str = "", base64: str = "", file_name: str = "",
+        content: str = "", tags: str = "", profile_id: str = "",
+        idempotency_key: str = "",
+    ) -> dict:
+        """Save a PDF as a memory, from a file on this computer or base64. Work continues in the
+        background: the answer has a job_id to follow with media_status.
+
+        Give exactly one of path or base64. Only for apps on this computer.
+        """
+        return await _remember_document({
+            "path": path, "base64": base64, "file_name": file_name, "content": content,
+            "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key})
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+    @admits(OperationKind.RECALL)
+    async def media_status(job_id: str, profile_id: str = "") -> dict:
+        """How far a saved document's background work has got. Only for apps on this computer."""
+        return await _status(job_id, profile_id)
+
+
 def register_media_resources(server: Any) -> None:
     """Register the ``slm://media/{media_id}`` and ``.../thumb`` resource templates."""
 
@@ -239,4 +329,4 @@ def register_media_resources(server: Any) -> None:
         return f"Image {media_id}. Thumbnail: slm://media/{media_id}/thumb"
 
 
-__all__ = ["register_media_tools", "register_media_resources", "thumb_via_daemon"]
+__all__ = ["register_media_tools", "register_document_tools", "register_media_resources", "thumb_via_daemon"]

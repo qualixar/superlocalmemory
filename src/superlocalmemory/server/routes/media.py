@@ -4,10 +4,10 @@
 
 """Image and document routes (local only).
 
-``POST /api/v3/media/remember`` saves an image (a file path on this machine, base64
-data or an https download link) and ``POST /api/v3/documents`` queues a PDF; neither
-is part of any remote tool list. The thumbnail, job-status and document-removal
-routes answer only for the profile the item belongs to.
+``POST /api/v3/media/remember`` saves an image (a file path on this machine, base64 data or an
+https download link) and ``POST /api/v3/documents`` queues a PDF (a file path or base64 data); neither is part of any
+remote tool list. The thumbnail, job-status and document-removal routes answer only for the profile the item
+belongs to.
 """
 
 from __future__ import annotations
@@ -169,6 +169,8 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
     _require_local(request)
+    if req.download_url:
+        raise HTTPException(422, detail="Links are accepted for images only.")
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id)
@@ -179,7 +181,10 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     receipt = await asyncio.to_thread(
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
         tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
-    return JSONResponse(dataclasses.asdict(receipt), status_code=_CODES.get(receipt.status, 200))
+    body = dataclasses.asdict(receipt)
+    if receipt.status == "refused":
+        body["detail"] = receipt.reason
+    return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
 
 
 @router.get("/jobs/{job_id}")

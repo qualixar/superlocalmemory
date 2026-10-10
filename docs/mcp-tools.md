@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-SuperLocalMemory exposes 106 tools and 7 resources through the Model Context
+SuperLocalMemory exposes 108 tools and 7 resources through the Model Context
 Protocol (MCP). A client sees only the tools its tool set allows (see
 [Which tools a client sees](#which-tools-a-client-sees)); the registered
 function signatures are the source of truth for names and parameters, and a
@@ -50,11 +50,11 @@ changes. The tool set is fixed when the MCP server starts.
 | `full` | 57 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
 | `power` | 69 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | 9 | the mesh tools only |
-| `whole` | 106 | every registered tool |
+| `whole` | 108 | every registered tool |
 
 With no `SLM_MCP_PROFILE`, a client gets the same 57 tools as `full` (the mesh
 tools are included while mesh is enabled, which is the default).
-`SLM_MCP_ALL_TOOLS=1` exposes all 106. `SLM_MCP_TOOLS=name1,name2` exposes
+`SLM_MCP_ALL_TOOLS=1` exposes all 108. `SLM_MCP_TOOLS=name1,name2` exposes
 exactly the names listed. An unknown `SLM_MCP_PROFILE` value is an error, not a
 silent fallback.
 
@@ -473,7 +473,7 @@ MCP resources are read-only data a client can read passively.
 
 ---
 
-## Image tools
+## Image and document tools
 
 Only registered in the `whole` tool set. They work for AI apps on this computer
 and are refused for any app on another computer.
@@ -482,6 +482,8 @@ and are refused for any app on another computer.
 |------|-----------|-------|
 | `remember_media` | exactly one of `path`, `download_url` (https) or `base64`; `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
 | `get_media` | `media_id`, `variant` (`thumb`), `profile_id` | Returns the thumbnail as an image, never as text data |
+| `remember_document` | exactly one of `path` or `base64` (a PDF); `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF; returns `status`, `document_id` and `job_id`. Links are not accepted |
+| `media_status` | `job_id` (32 hex characters), `profile_id` | Progress of a document's background work |
 
 ---
 
