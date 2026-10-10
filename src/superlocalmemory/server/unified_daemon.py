@@ -2093,6 +2093,15 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover - startup remains fail-soft
         logger.warning("install-token bootstrap failed: %s", exc)
 
+    # Pictures of a profile deleted in an earlier run that did not finish moving.
+    try:
+        from superlocalmemory.server.routes.helpers import DB_PATH as _memory_db
+        from superlocalmemory.storage.pending_media_moves import retry as _retry_picture_moves
+
+        await asyncio.to_thread(_retry_picture_moves, Path(_memory_db).parent)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("pending picture moves not retried: %s", exc)
+
     # Register the SSE bridge inside the application lifespan.  FastAPI's
     # legacy ``on_event`` hook is deprecated and, more importantly, made a
     # second startup mechanism compete with the daemon's existing lifespan.
