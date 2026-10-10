@@ -3097,6 +3097,10 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Automation", [
         ("loop", "Run gate-verified bounded agent loops"),
     ]),
+    ("Images, documents & bots", [
+        ("features", "See what is on: images & documents, bot mesh"),
+        ("media", "Images & documents: enable | disable | status"),
+    ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),
     ]),
@@ -3667,8 +3671,9 @@ def cmd_doctor(args: Namespace) -> None:
             elif depth:
                 _check(
                     "Projection queue", "PASS",
-                    f"{depth} memory/memories queued — the worker drains these "
-                    "in the background",
+                    f"{depth} memory/memories queued for the graph/vector "
+                    "projections — drained in the background once one is open "
+                    "(until then they are the catch-up record for a promotion)",
                 )
             else:
                 _check("Projection queue", "PASS", "empty (graph is up to date)")

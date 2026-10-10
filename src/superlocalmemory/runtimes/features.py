@@ -136,12 +136,16 @@ def _start_install(managed: ManagedEnv) -> None:
         _install_thread.start()
 
 
+_NO_EXTENSIONS = ("Images and documents need a Python that can load SQLite extensions, and this one "
+                  "can't. Run SLM on a Python built with them (Homebrew, python.org or uv-managed).")
+
+
 def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | None = None,
                  data_root: str | Path | None = None) -> dict[str, Any]:
     """Turn images and documents on: save the choice, create media.db, start the install."""
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    from superlocalmemory.media import open_media_store
+    from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
     try:
         data = read_features(data_root)
@@ -151,6 +155,11 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
         store = open_media_store(create=True, data_root=_root(data_root))
         if store is not None:
             store.close()
+    except MediaVectorsUnavailable as exc:
+        logger.warning("could not turn on images and documents: %s", exc)
+        _roll_back_enable(data_root)
+        return {**media_feature_status(data_root, env=env), "enabled": False,
+                "error": _NO_EXTENSIONS}
     except (OSError, sqlite3.Error, ImportError) as exc:
         logger.warning("could not turn on images and documents: %s", exc)
         _roll_back_enable(data_root)

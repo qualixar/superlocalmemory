@@ -202,3 +202,23 @@ def test_hard_delete_of_an_unknown_or_unerased_document_is_404(monkeypatch):
     c = make(monkeypatch)
     monkeypatch.setattr(routes, "remove_document", lambda *a, **k: False)
     assert c.delete("/api/v3/documents/" + "a" * 32 + "?hard=true").status_code == 404
+
+
+def test_a_download_link_is_refused_for_documents_with_a_422(monkeypatch):
+    c = make(monkeypatch)
+    for body in ({"download_url": "https://x.example.com/a.pdf?token=SECRET123"},
+                 {"download_url": "https://x.example.com/a.pdf", "content": "x"}):
+        r = c.post("/api/v3/documents", json=body)
+        assert r.status_code == 422
+        assert "SECRET123" not in r.text
+    assert "images only" in r.text
+    assert c.calls == []
+
+
+def test_a_refused_document_receipt_carries_its_reason_as_detail(monkeypatch):
+    c = make(monkeypatch)
+    monkeypatch.setattr(routes, "submit_document", lambda inp, **kw: DocumentReceipt("refused", reason="Not a PDF."))
+    r = c.post("/api/v3/documents", json=BODY)
+    assert r.status_code == 422 and r.json()["detail"] == "Not a PDF." and r.json()["reason"] == "Not a PDF."
+    monkeypatch.setattr(routes, "submit_document", lambda inp, **kw: DocumentReceipt("processing", job_id="j" * 32))
+    assert "detail" not in c.post("/api/v3/documents", json=BODY).json()

@@ -12,6 +12,9 @@ import pytest
 
 from superlocalmemory.media import MediaStoreReadOnly, media_db_exists, media_db_path, open_media_store
 from superlocalmemory.media.schema import MEDIA_SCHEMA_VERSION
+from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
+
+pytestmark = pytest.mark.skipif(not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON)
 
 DIM = 768
 
@@ -358,3 +361,26 @@ def test_phash_candidates_are_per_profile_and_active_only(store):
     gone = store.insert_item(**item(sha="4" * 64, phash="e" * 16))
     store.set_state(gone, "tombstoned")
     assert store.phash_candidates("default") == [(a, "f" * 16)]
+
+
+def test_vector_count_is_per_profile(store):
+    space = store.ensure_active_space("m", "r", DIM)
+    assert store.vector_count("default") == 0
+    store.insert_item(**item(media_id="1" * 32, sha="1" * 64))
+    store.put_vector("1" * 32, space, "default", vec(0))
+    assert store.vector_count("default") == 1
+    assert store.vector_count("other") == 0
+
+
+def test_memory_ids_of_gives_anchors_and_page_memories(store):
+    store.insert_item(**item(media_id="2" * 32, sha="2" * 64, anchor_memory_id="m-anchor"))
+    store.insert_item(**item(media_id="3" * 32, sha="3" * 64, kind="page", document_id="d", page_no=1,
+                             origin="document"))
+    store.insert_item(**item(media_id="4" * 32, sha="4" * 64, anchor_memory_id="m-gone"))
+    store.set_state("4" * 32, "tombstoned")
+    with store._write() as conn:
+        conn.execute("INSERT INTO doc_pages(document_id, page_no, media_id, memory_ids_json, text_origin)"
+                     " VALUES ('d', 1, ?, '[\"p1\",\"p2\"]', 'ocr')", ("3" * 32,))
+    assert store.memory_ids_of(["2" * 32, "3" * 32, "4" * 32, "5" * 32]) == {
+        "2" * 32: ["m-anchor"], "3" * 32: ["p1", "p2"]}
+    assert store.memory_ids_of([]) == {}

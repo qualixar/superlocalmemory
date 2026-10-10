@@ -53,7 +53,21 @@ def vec_table(space_id: str) -> str:
     return f"media_vec_{space_id}"
 
 
+class MediaVectorsUnavailable(sqlite3.NotSupportedError):
+    """This Python's sqlite3 was built without extension loading, so sqlite-vec cannot load."""
+
+
+def extensions_supported() -> bool:
+    return hasattr(sqlite3.Connection, "enable_load_extension")
+
+
+def require_extensions() -> None:
+    if not extensions_supported():
+        raise MediaVectorsUnavailable("this Python cannot load SQLite extensions")
+
+
 def _load_vec(conn: sqlite3.Connection) -> None:
+    require_extensions()
     import sqlite_vec
 
     conn.enable_load_extension(True)
@@ -263,6 +277,47 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
             cur = conn.execute(f"INSERT INTO {table}(profile_id, embedding) VALUES (?, ?)", (profile_id, blob))
             conn.execute("INSERT INTO media_vector_rows(space_id, vec_rowid, media_id, profile_id)"
                          " VALUES (?, ?, ?, ?)", (space_id, cur.lastrowid, media_id, profile_id))
+
+    def vector_count(self, profile_id: str) -> int:
+        """How many vectors this profile has (0 means searching by picture has nothing to find)."""
+        row = self._read().execute(
+            "SELECT COUNT(*) FROM media_vector_rows WHERE profile_id = ?", (profile_id,)).fetchone()
+        return int(row[0])
+
+    def memory_ids_of(self, media_ids: Sequence[str]) -> dict[str, list[str]]:
+        """The memories that stand for each active item: its anchor, or a page's own memories."""
+        ids = list(dict.fromkeys(media_ids))
+        if not ids:
+            return {}
+        conn = self._read()
+        rows = conn.execute(
+            "SELECT m.media_id, m.anchor_memory_id, p.memory_ids_json FROM media_items m"
+            " LEFT JOIN doc_pages p ON p.document_id = m.document_id AND p.page_no = m.page_no"
+            f" WHERE m.state = 'active' AND m.media_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        out: dict[str, list[str]] = {}
+        for media_id, anchor, pages in rows:
+            found = [anchor] if anchor else []
+            try:
+                found += [str(x) for x in json.loads(pages or "[]")]
+            except ValueError:
+                pass
+            if found:
+                out[media_id] = found
+        return out
+
+    def page_media_ids(self, pages: Sequence[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """``{(document_id, page_no): media_id}`` for the active page items, in one query per 300 pages."""
+        wanted = list(dict.fromkeys((str(d), int(n)) for d, n in pages))
+        out: dict[tuple[str, int], str] = {}
+        conn = self._read() if wanted else None
+        for i in range(0, len(wanted), 300):
+            part = wanted[i:i + 300]
+            rows = conn.execute(
+                "SELECT document_id, page_no, media_id FROM media_items WHERE kind = 'page'"
+                " AND state = 'active' AND (document_id, page_no) IN (VALUES "
+                + ",".join(["(?, ?)"] * len(part)) + ")", [x for pair in part for x in pair]).fetchall()
+            out.update({(r[0], r[1]): r[2] for r in rows})
+        return out
 
     def knn(self, vector: Sequence[float], profile_id: str, k: int,
             space_id: str | None = None) -> list[tuple[str, float]]:

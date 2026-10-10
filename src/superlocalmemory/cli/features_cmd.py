@@ -34,6 +34,11 @@ def media_line(media: dict[str, Any]) -> str:
             return "on, ready - restart to start using it (slm restart)"
         if state == "ready":
             return "on"
+        step = str(media.get("step") or "").strip()
+        if state == "unsupported":
+            return "on, but images & documents can't be set up on this computer yet" + (f" ({step})" if step else "")
+        if state == "failed":
+            return "on, but set-up failed" + (f" ({step})" if step else "") + " - see: slm doctor"
         pct = int(float(media.get("progress") or 0) * 100)
         return f"on, setting up ({state}, {pct}%) {media.get('step', '')}".rstrip()
     if media.get("requested"):

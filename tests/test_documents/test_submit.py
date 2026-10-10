@@ -137,3 +137,17 @@ def test_a_failed_insert_removes_a_new_original(store, root, monkeypatch):
     r = go(store)
     assert r.status == "refused"
     assert not list((root / "media").glob("*/*.pdf"))
+
+
+@pytest.mark.parametrize("state,words", [("unsupported", "can't be set up"), ("installing", "still being set up"),
+                                         ("failed", "did not finish")])
+def test_on_but_not_ready_says_set_up_is_not_finished(root, monkeypatch, state, words):
+    import importlib
+
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "features.json").write_text('{"schema": 1, "media": {"enabled": true}}', encoding="utf-8")
+    module = importlib.import_module("superlocalmemory.runtimes.media_env")
+    fake = SimpleNamespace(root=root, status=lambda: SimpleNamespace(state=state, step="x"))
+    monkeypatch.setattr(module, "media_env", lambda root=None: fake)
+    r = submit_document(pdf_input(("x",)), profile_id="p1", actor_id="a", config=CFG)
+    assert r.status == "refused" and words in r.reason and "not installed" not in r.reason

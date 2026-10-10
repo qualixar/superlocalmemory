@@ -180,6 +180,9 @@ class ChannelWeights:
     temporal: float = 1.0
     spreading_activation: float = 1.0  # Phase 3: 5th channel (BC-08: default value)
     hopfield: float = 0.8  # Phase G: 6th channel (Hopfield associative memory)
+    # Pictures and pages. Not in as_dict(): the weight joins a recall only when
+    # the picture channel ran, so a recall without pictures is unchanged.
+    media: float = 1.0
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -459,6 +462,7 @@ class RetrievalConfig:
     # Env kill-switch: SLM_RECALL_NO_FLOOR=1 disables without release.
     evidence_floor_enabled: bool = True
     min_semantic_evidence: float = 0.60   # Minimum cosine similarity to keep a result
+    media_min_score: float = 0.30   # Picture similarity that counts as evidence
 
     # v3.6.6: Recall output budget — protect consuming agents from 585KB responses.
     recall_per_fact_max_chars: int = 2400  # ~600 tokens; head 70% + tail 30%

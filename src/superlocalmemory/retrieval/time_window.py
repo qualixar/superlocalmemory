@@ -200,10 +200,11 @@ def in_window(
 
 
 def has_primary_evidence(channel_scores: Mapping[str, float] | None,
-                         min_semantic: float) -> bool:
+                         min_semantic: float, min_media: float = 0.30) -> bool:
     """The evidence floor's test (``RetrievalEngine._apply_evidence_floor``):
     meaning at or above ``min_semantic``, or any keyword, entity or time
-    evidence. Associative channels (Hopfield, spreading activation) do not count.
+    evidence, or a picture match at or above ``min_media``. Associative channels
+    (Hopfield, spreading activation) do not count.
     """
     cs = channel_scores or {}
     return (
@@ -211,11 +212,13 @@ def has_primary_evidence(channel_scores: Mapping[str, float] | None,
         or cs.get("bm25", 0.0) > 0.0
         or cs.get("entity_graph", 0.0) > 0.0
         or cs.get("temporal", 0.0) > 0.0
+        or ("media" in cs and cs["media"] >= min_media)
     )
 
 
 def windowed_candidates(fused: Sequence[Any], inside: Callable[[str], bool], *,
-                        explicit: bool, min_semantic: float) -> list[Any]:
+                        explicit: bool, min_semantic: float,
+                        min_media: float = 0.30) -> list[Any]:
     """The candidates a time window keeps.
 
     An explicit window is the caller's instruction and is honoured even when it
@@ -230,7 +233,7 @@ def windowed_candidates(fused: Sequence[Any], inside: Callable[[str], bool], *,
     kept = [fr for fr in fused if inside(fr.fact_id)]
     if explicit:
         return kept
-    if any(has_primary_evidence(getattr(fr, "channel_scores", None), min_semantic)
+    if any(has_primary_evidence(getattr(fr, "channel_scores", None), min_semantic, min_media)
            for fr in kept):
         return kept
     return list(fused)

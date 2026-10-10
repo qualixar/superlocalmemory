@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.media import files
+from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
@@ -42,7 +43,7 @@ MAX_OCR_CHARS = 8_000
 PREVIEW_CHARS = 200
 NEAR_DUPLICATE_BITS = 4
 MAX_THUMB_BYTES = 262_144
-MARKER = "[Text in image]\n"
+MARKER = TEXT_MARKER
 _MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 _EXT = re.compile(r"[a-z0-9]{1,8}")
 _EXIF_DATE = re.compile(r"(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})")
@@ -53,6 +54,8 @@ class MediaInput:
     path: Path | None = None
     base64: str | None = None
     file_name: str = ""
+    download_url: str | None = None
+    remote: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,7 +111,18 @@ def _cold_wait_s() -> float:
 
 # -- reading the input ---------------------------------------------------------
 
+def _download(inp: MediaInput) -> bytes:
+    from superlocalmemory.core.media_fetch import MediaFetchRefused, fetch_media
+
+    try:
+        return fetch_media(inp.download_url or "", remote=inp.remote, max_bytes=MAX_FILE_BYTES).data
+    except MediaFetchRefused as refused:
+        raise _refuse(refused.reason) from None
+
+
 def _read_input(inp: MediaInput) -> bytes:
+    if inp.download_url:
+        return _download(inp)
     if inp.base64 is not None:
         if len(inp.base64) * 3 // 4 > MAX_BASE64_BYTES + 3:
             raise _refuse("That image is too large (8 MB limit for pasted images).")
@@ -145,20 +159,29 @@ def _check_kind(data: bytes) -> None:
         raise _refuse("That file type is not supported (PNG, JPEG, GIF and WEBP only).")
 
 
+_OFF = "Images are turned off. Turn them on in settings to save images."
+
+
+def _unavailable() -> _Stop:
+    from superlocalmemory.media.readiness import media_refusal
+
+    return _refuse(media_refusal() or _OFF)
+
+
 def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
     if client is None:
         from superlocalmemory.runtimes.worker_client import media_embedder
 
         client = media_embedder()
     if client is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     opened = store is None
     if store is None:
         from superlocalmemory.media import open_media_store
 
         store = open_media_store()
     if store is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     return client, store, opened
 
 
@@ -272,7 +295,7 @@ def _segments(content: str, ocr_text: str) -> tuple[tuple[str, ContentOrigin], .
         lead = "\n\n" if parts else ""
         parts.append((f"{lead}{MARKER}{ocr_text}", ContentOrigin.DERIVED_TEXT))
     if not parts:
-        parts.append(("[Image without text]", ContentOrigin.DERIVED_TEXT))
+        parts.append((NO_TEXT, ContentOrigin.DERIVED_TEXT))
     return tuple(parts)
 
 
@@ -343,9 +366,9 @@ def remember_media(
     opened = False
     store_ref = store
     try:
-        client, store_ref, opened = _resolve(client, store)
         data = _read_input(inp)
         _check_kind(data)
+        client, store_ref, opened = _resolve(client, store)
         src_sha = hashlib.sha256(data).hexdigest()
         known = store_ref.find_by_sha(profile_id, src_sha)
         if known:
