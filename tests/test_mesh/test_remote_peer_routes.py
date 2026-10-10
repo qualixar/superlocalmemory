@@ -82,3 +82,32 @@ def test_http_pending_for_a_web_peer_is_refused(client, broker, web_ref) -> None
 def test_http_pending_for_a_local_peer_is_unchanged(client, broker) -> None:
     local = make_peer(broker, "sess-2")
     assert client.get(f"/mesh/pending/{local}", headers=HEADERS).status_code == 200
+
+
+def test_http_deregister_of_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/deregister", headers=HEADERS, json={"peer_id": web_ref})
+    assert r.status_code == 403
+    assert broker.is_web_peer(web_ref)
+
+
+def test_http_heartbeat_of_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/heartbeat", headers=HEADERS, json={"peer_id": web_ref})
+    assert r.status_code == 403
+
+
+def test_http_summary_of_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/summary", headers=HEADERS,
+                    json={"peer_id": web_ref, "summary": "forged"})
+    assert r.status_code == 403
+
+
+def test_http_lock_naming_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/lock", headers=HEADERS,
+                    json={"file_path": "a.py", "locked_by": web_ref, "action": "acquire"})
+    assert r.status_code == 403
+
+
+def test_http_state_write_naming_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.post("/mesh/state", headers=HEADERS,
+                    json={"key": "k", "value": "v", "set_by": web_ref})
+    assert r.status_code == 403

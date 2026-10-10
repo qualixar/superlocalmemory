@@ -197,6 +197,7 @@ def register(req: RegisterRequest, request: Request):
 @router.post("/deregister")
 def deregister(req: DeregisterRequest, request: Request):
     broker = _get_broker(request)
+    _refuse_web_peer(broker, req.peer_id)
     result = broker.deregister_peer(req.peer_id, profile_id=_active_profile())
     if not result.get("ok"):
         raise HTTPException(404, detail=result.get("error", "peer not found"))
@@ -347,6 +348,7 @@ def peers(request: Request, view: str = "all"):
 def heartbeat(req: HeartbeatRequest, request: Request):
     """Update peer liveness without blocking the daemon's async event loop."""
     broker = _get_broker(request)
+    _refuse_web_peer(broker, req.peer_id)
     result = broker.heartbeat(req.peer_id, profile_id=_active_profile())
     if not result.get("ok"):
         raise HTTPException(404, detail=result.get("error", "peer not found"))
@@ -356,6 +358,7 @@ def heartbeat(req: HeartbeatRequest, request: Request):
 @router.post("/summary")
 def summary(req: SummaryRequest, request: Request):
     broker = _get_broker(request)
+    _refuse_web_peer(broker, req.peer_id)
     result = broker.update_summary(req.peer_id, req.summary,
                                    profile_id=_active_profile())
     if not result.get("ok"):
@@ -505,6 +508,7 @@ def state_set(req: StateSetRequest, request: Request):
     if not req.key:
         raise HTTPException(400, detail="key required")
     _reject_secret_state(req.key, req.value)
+    _refuse_web_peer(broker, req.set_by)
     return broker.set_state(req.key, req.value, req.set_by,
                             profile_id=_active_profile())
 
@@ -525,6 +529,7 @@ def lock(req: LockRequest, request: Request):
         raise HTTPException(400, detail="file_path and locked_by required")
     if req.action not in ("acquire", "release", "query"):
         raise HTTPException(400, detail="action must be acquire, release, or query")
+    _refuse_web_peer(broker, req.locked_by)
     return broker.lock_action(req.file_path, req.locked_by, req.action,
                               profile_id=_active_profile())
 
