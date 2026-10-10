@@ -178,6 +178,63 @@ describe('Folders section', () => {
     });
 });
 
+describe('Folders section: forget the files of an emptied folder', () => {
+    const empty = (over = {}) => src(Object.assign({ state: 'offline', offline_reason: 'empty_folder' }, over));
+    const forgetUrl = `/api/v3/sources/${SID}/forget-empty`;
+    const labels = h => Array.from(h.host.querySelectorAll('button')).map(b => b.textContent);
+    const okRoute = ['POST', /\/forget-empty$/, () => ({ json: { source_id: SID, forgotten: 5, state: 'active' } })];
+
+    it('the button shows only for an offline folder that is empty', async () => {
+        const h = setup({ sources: [empty()] });
+        await h.open();
+        assert.ok(labels(h).includes('Forget its files'));
+        assert.match(h.host.textContent, /If you emptied it on purpose, use Forget its files\./);
+        for (const s of [src(), src({ state: 'offline', offline_reason: 'unreachable' }),
+            src({ state: 'offline', offline_reason: 'disk_changed' })]) {
+            const g = setup({ sources: [s] });
+            await g.open();
+            assert.equal(labels(g).includes('Forget its files'), false);
+        }
+    });
+
+    it('click asks first, then posts to the forget route, and says how many were forgotten', async () => {
+        const h = setup({ sources: [empty()], routes: [okRoute] });
+        await h.open();
+        await h.click('Forget its files');
+        assert.equal(h.confirms.length, 1);
+        assert.equal(h.confirms[0].title, 'Forget the files of this folder');
+        assert.equal(h.confirms[0].confirmLabel, 'Forget');
+        assert.equal(writes(h).length, 1);
+        assert.equal(writes(h)[0].method, 'POST');
+        assert.equal(writes(h)[0].url, forgetUrl);
+        assert.match(h.host.textContent, /Forgot 5 file\(s\); the folder is active again\./);
+    });
+
+    it('cancelling the confirmation sends nothing', async () => {
+        const h = setup({ sources: [empty()], routes: [okRoute] });
+        h.confirmAnswer = false;
+        await h.open(); await h.click('Forget its files');
+        assert.equal(writes(h).length, 0);
+    });
+
+    it('the daemon message is shown when it refuses', async () => {
+        const h = setup({ sources: [empty()], routes: [['POST', /\/forget-empty$/, () => ({ status: 409,
+            json: { detail: { code: 'folder_not_empty', message: 'The folder has files again; they are read on the next scan.' } } })]] });
+        await h.open(); await h.click('Forget its files');
+        assert.match(h.host.textContent, /The folder has files again/);
+    });
+
+    it('a hostile folder name and message stay text', async () => {
+        const h = setup({ sources: [empty({ display_name: XSS })], routes: [['POST', /\/forget-empty$/, () => ({ status: 409,
+            json: { detail: { code: 'x', message: XSS } } })]] });
+        await h.open(); await h.click('Forget its files');
+        assert.equal(h.host.querySelectorAll('img').length, 0);
+        assert.equal(h.window.__pwn, undefined);
+        assert.ok(h.host.textContent.includes(XSS));
+        assert.equal(h.confirms[0].target, XSS.slice(0, 80));
+    });
+});
+
 describe('Folders section XSS', () => {
     function hostile() {
         return setup({

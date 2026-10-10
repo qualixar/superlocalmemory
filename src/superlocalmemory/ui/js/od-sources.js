@@ -1,10 +1,11 @@
 // od-sources.js — "Folders" section of the Documents & Images pane: connected folders,
-// add with a preview, rescan, report, release a held file, remove.
+// add with a preview, rescan, report, release a held file, remove, forget the files of an emptied folder.
 // Public: window.odRenderSources(host)
 // XSS-safe: folder names, paths, relpaths and reasons are untrusted and go in with textContent
 // only. Writes go through the page's fetch, which core.js wraps with the local write credential.
 // Routes: GET/POST /api/v3/sources   POST /api/v3/sources/{id}/confirm|rescan|quarantine/release
 //         GET /api/v3/sources/{id}/report   DELETE /api/v3/sources/{id}[?purge=1]
+//         POST /api/v3/sources/{id}/forget-empty
 (function () {
   'use strict';
 
@@ -13,7 +14,7 @@
   var OFFLINE = {
     unreachable: 'The folder cannot be reached.',
     disk_changed: 'The folder is now on a different disk, so it was left alone.',
-    empty_folder: 'The folder is empty now, so nothing was removed.',
+    empty_folder: 'The folder is empty now, so nothing was removed. If you emptied it on purpose, use Forget its files.',
     root_moved: 'The folder has moved.',
   };
   var REMOTE_SENTENCE = 'Turn remote access off first, then connect the folder. ' +
@@ -116,6 +117,23 @@
     });
   }
 
+  function forgetFiles(ctx, s, msg) {
+    F().confirmThen({
+      title: 'Forget the files of this folder', target: String(s.display_name || 'folder').slice(0, 80),
+      consequence: 'The folder is empty. Hide the memories of every file it held? They are kept, not erased.',
+      confirmLabel: 'Forget',
+    }, function () {
+      F().api('POST', BASE + '/' + s.source_id + '/forget-empty').then(function (res) {
+        if (!res.ok) {
+          msg.textContent = res.status === 404 ? 'Not available in this build.' : F().failText(res, 'Could not forget the files.');
+          return;
+        }
+        var done = 'Forgot ' + Number((res.data || {}).forgotten || 0) + ' file(s); the folder is active again.';
+        load(ctx).then(function () { var p = el('p', 'muted', done); p.setAttribute('role', 'status'); ctx.list.insertBefore(p, ctx.list.firstChild); });
+      });
+    });
+  }
+
   function actions(ctx, s, panel, msg) {
     var bar = el('div', 'od-sources-actions');
     var purge = el('input');
@@ -126,6 +144,9 @@
     bar.appendChild(F().button('Rescan', 'btn sm', function () { rescan(msg, s.source_id); }));
     bar.appendChild(F().button('Report', 'btn sm', function () { toggleReport(panel, s.source_id); }));
     bar.appendChild(label);
+    if (s.state === 'offline' && s.offline_reason === 'empty_folder') {
+      bar.appendChild(F().button('Forget its files', 'btn sm', function () { forgetFiles(ctx, s, msg); }));
+    }
     bar.appendChild(F().button('Remove', 'btn sm', function () { removeFolder(ctx, s, msg, purge); }));
     return bar;
   }
