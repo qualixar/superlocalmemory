@@ -23,6 +23,10 @@ def incomplete_line(result: dict) -> str:
         return ""
     status = result.get("channel_status") or {}
     warming = any(status.get(c) == "warming" for c in skipped)
+    if any(status.get(c) == "needs_service" for c in skipped):
+        from superlocalmemory.core.daemon_text_embedder import NEEDS_SERVICE
+
+        return f"Incomplete search: {NEEDS_SERVICE}"
     reason = (
         "the embedding model is still loading"
         if warming else "part of the search did not finish"

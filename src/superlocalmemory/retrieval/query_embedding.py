@@ -165,6 +165,8 @@ class QueryEmbedder:
         cached = self._cache.get(query)
         if cached is not None:
             return cached, None
+        if getattr(self._provider(), "needs_service", False) is True:
+            return None, chstat.NEEDS_SERVICE  # no point waiting: nothing is loading
         from superlocalmemory.core.recall_gate import is_background_work
 
         if is_background_work() or not self._not_ready():
