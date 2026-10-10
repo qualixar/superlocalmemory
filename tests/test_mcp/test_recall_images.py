@@ -60,6 +60,17 @@ def _payload(answer):
     return json.loads(res.content[0].text)
 
 
+@pytest.fixture(autouse=True)
+def steady_clock(monkeypatch):
+    """A recall's answer carries ``temporal_frame`` ("Now: <time to the second>"), so two
+    recalls of one answer differ whenever a second ticks between them; most of these tests
+    compare two recalls. Hold that one line still. The tests below are about pictures."""
+    from superlocalmemory.server import recall_serializer
+
+    monkeypatch.setattr(recall_serializer, "temporal_frame",
+                        lambda timestamps, now=None: "Now: 2026-01-01T00:00:00+00:00.")
+
+
 @pytest.fixture
 def tools_media():
     """The module as the recall tool imports it now (other tests may have reloaded it)."""
@@ -157,3 +168,21 @@ def test_every_thumbnail_failing_returns_the_plain_output(monkeypatch, tools_med
     got = _recall(answer)
     assert got.model_dump_json(by_alias=True) == \
         _baseline(json.loads(got.content[0].text)).model_dump_json(by_alias=True)
+
+
+def test_a_second_ticking_between_two_recalls_does_not_change_the_comparison(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from superlocalmemory.retrieval import temporal_frame as tf
+
+    class Ticking(datetime):
+        t = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            cls.t += timedelta(seconds=1)
+            return cls.t
+
+    monkeypatch.setattr(tf, "datetime", Ticking)
+    answer = _answer(_hit("f1"), _hit("f2"))
+    assert _recall(answer).model_dump_json() == _recall(answer).model_dump_json()

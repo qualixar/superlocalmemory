@@ -30,8 +30,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from dateutil import parser as _date_parser
-
 from superlocalmemory.encoding.typed_values import (
     ISO_DATE_TOKEN_RE,
     bare_numbers,
@@ -107,6 +105,19 @@ def _sentences(text: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
 
 
+def _date_parser():
+    """dateutil's parser, imported on first use.
+
+    The CLI registers its ``db fidelity`` command (which imports this module)
+    while building the parser for every command, so a module-level import made
+    ``slm --help`` and ``slm --version`` need dateutil. The installer contract
+    runs those from source before any dependency is installed.
+    """
+    from dateutil import parser
+
+    return parser
+
+
 def _source_dates(source: str) -> tuple[set[str], set[int], set[tuple[int, int]]]:
     """Dates the source states: full ISO forms, month numbers, and (month, day) pairs."""
     full: set[str] = set()
@@ -115,7 +126,7 @@ def _source_dates(source: str) -> tuple[set[str], set[int], set[tuple[int, int]]
     for match in _NUMERIC_DATE_RE.finditer(source):
         for dayfirst in (False, True):
             try:
-                parsed = _date_parser.parse(match.group(1), dayfirst=dayfirst)
+                parsed = _date_parser().parse(match.group(1), dayfirst=dayfirst)
             except (ValueError, OverflowError):
                 continue
             full.update({parsed.strftime("%Y-%m-%d"), parsed.strftime("%Y-%m")})
@@ -164,7 +175,7 @@ def _fact_dates(fact: str) -> list[tuple[str, int, int, int | None]]:
         text = match.group(0)
         has_day = bool(re.search(r"\d{1,2}(?:st|nd|rd|th)?\b(?!\d)", text[: -4]))
         try:
-            parsed = _date_parser.parse(text, fuzzy=True)
+            parsed = _date_parser().parse(text, fuzzy=True)
         except (ValueError, OverflowError):
             continue
         found.append((text, parsed.year, parsed.month, parsed.day if has_day else None))

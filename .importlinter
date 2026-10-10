@@ -14,10 +14,11 @@ source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
     superlocalmemory.cache
+    superlocalmemory.memory_core
     superlocalmemory.media
     superlocalmemory.documents
     superlocalmemory.runtimes
-    superlocalmemory.memory_core
+    superlocalmemory.tagging
 forbidden_modules =
     torch
     transformers
@@ -35,6 +36,18 @@ forbidden_modules =
     superlocalmemory.server
     superlocalmemory.cli
     superlocalmemory.mcp
+allow_indirect_imports = True
+
+[importlinter:contract:tagging-no-upward]
+name = The tagging package never imports the server, CLI, MCP or daemon layers
+type = forbidden
+source_modules =
+    superlocalmemory.tagging
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
+    superlocalmemory.daemon
 allow_indirect_imports = True
 
 [importlinter:contract:daemon-no-upward]
