@@ -43,6 +43,7 @@ class VisibilityContext:
 
 
 _EMPTY = VisibilityContext()
+_BAD = object()  # metadata that could not be read
 _current: contextvars.ContextVar[VisibilityContext] = contextvars.ContextVar(
     "slm_recall_visibility", default=_EMPTY)
 
@@ -110,12 +111,17 @@ def _hidden_source_memories(db: Any, memory_ids: Iterable[str], ctx: VisibilityC
         rows = db.execute(
             "SELECT memory_id, metadata_json FROM memories WHERE memory_id IN ("
             + ",".join("?" * len(part)) + ")", tuple(part))
+        parsed: list[tuple[Any, Any]] = []
         for row in rows:
             try:
-                source = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
-                hidden = _is_hidden_source(source, ctx)
+                parsed.append((row, (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")))
             except (ValueError, AttributeError):
-                hidden = True
+                parsed.append((row, _BAD))
+        prime = getattr(ctx.vetted_media, "prime", None)
+        if callable(prime):  # ask the media store about these candidates only, in one go
+            prime(media_token(src) for _, src in parsed if src is not _BAD)
+        for row, source in parsed:
+            hidden = True if source is _BAD else _is_hidden_source(source, ctx)
             if hidden:
                 found.add(row["memory_id"])
     return found

@@ -8,6 +8,12 @@ right-of-access export.
 Read straight from ``media.db`` (opened read-only, never created) and limited to
 the one profile. Records only: no picture or file bytes, no thumbnails (the
 record says whether one exists), no stored-file locations and no job input.
+
+A connected folder's ``root_path`` is kept: it is the folder the person chose
+themselves, their own setting, not a location SLM stored a file at. When
+``media.db`` exists but cannot be read, the section says so
+(``{"error": "unavailable"}``) instead of being absent, so an export never
+looks complete when it is not.
 """
 
 from __future__ import annotations
@@ -88,8 +94,9 @@ def _scopes_from(db: Any, profile_id: str) -> Callable[[list[str]], dict[str, st
     return lookup
 
 
-def export_media(data_root: Path, profile_id: str, db: Any) -> dict[str, list[dict[str, Any]]] | None:
-    """The profile's media records, or ``None`` when there is no ``media.db`` (or it cannot be read)."""
+def export_media(data_root: Path, profile_id: str, db: Any) -> dict[str, Any] | None:
+    """The profile's media records; ``None`` when there is no ``media.db``;
+    ``{"error": "unavailable"}`` when there is one and it cannot be read."""
     path = Path(data_root) / "media.db"
     if not path.is_file():
         return None
@@ -110,7 +117,7 @@ def export_media(data_root: Path, profile_id: str, db: Any) -> dict[str, list[di
             conn.close()
     except Exception as exc:  # noqa: BLE001 - the rest of the export still goes out
         logger.warning("GDPR export: media.db read failed: %s", type(exc).__name__)
-        return None
+        return {"error": "unavailable"}
 
 
 __all__ = ["export_media"]

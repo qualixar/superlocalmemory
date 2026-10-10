@@ -387,6 +387,9 @@ def set_active_profile_everywhere(name: str) -> None:
     persist_active_profile(name)
 
 
+PICTURES_PENDING = "pictures_pending"
+
+
 def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
     """Move a profile's memories to ``move_to``, then delete the profile.
 
@@ -399,7 +402,10 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
     be deleted silently.
 
     Pictures and documents (media.db) move last, after that transaction has
-    committed: if the memory move fails, nothing in media.db has moved.
+    committed: if the memory move fails, nothing in media.db has moved. If the
+    picture move itself fails the delete still stands: the move is recorded
+    (storage/pending_media_moves.py), the counts carry ``pictures_pending``,
+    and it is finished at daemon start or before the next profile is created.
 
     Sidecar stores first, as before: if one fails the profile row must survive
     for a retry rather than leave profile-scoped evidence orphaned. Raises
@@ -436,7 +442,16 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
         counts = fold_profile(conn, name, move_to)
         conn.execute("DELETE FROM profiles WHERE profile_id = ?", (name,))
     # Pictures and documents follow only once the memories have moved for good.
-    sidecars.move_media(root, name, move_to)
+    # The delete is done by now, so a failure here is recorded and finished
+    # later instead of being reported as a failed delete.
+    try:
+        sidecars.move_media(root, name, move_to)
+    except Exception as exc:  # noqa: BLE001 -- the memories already moved; finish this later
+        from superlocalmemory.storage import pending_media_moves
+
+        _log.warning("pictures of '%s' did not move yet: %s", name, exc)
+        pending_media_moves.record(root, name, move_to)
+        counts = {**counts, PICTURES_PENDING: True}
     _unproject_entities(counts.get("merged_entities") or [])
     return counts
 

@@ -261,3 +261,26 @@ def test_the_arguments_are_accepted_by_the_remote_binding(broker) -> None:
     out, bad = _run(scenario())
     assert "not accepted" not in json.dumps(out)
     assert bad["isError"] is True
+
+
+def test_a_local_agent_messages_a_web_app_and_the_web_app_reads_it(broker) -> None:
+    """The other direction: an agent on this computer writes to a connected web app."""
+    local = make_peer(broker, "sess-local", "codex")
+    keys = _Keys((KEY, ("mesh",)))
+    web_b = peer_ref(CID, "auth-b")
+
+    async def scenario():
+        async with _daemon(broker, keys) as d:
+            seen = _data(await d.call("mesh_peers", grant=_grant("auth-b", "app-b", *MESH)))
+            broker.send_message(local, web_b, "please review the release notes")
+            inbox = _data(await d.call("mesh_inbox", grant=_grant("auth-b", "app-b", *MESH)))
+            other = _data(await d.call("mesh_inbox", grant=_grant("auth-a", "app-a", *MESH)))
+            return seen, inbox, other
+
+    seen, inbox, other = _run(scenario())
+    assert seen["my_peer_id"] == web_b
+    assert local in {p["peer_id"] for p in seen["peers"]}
+    assert [m["content"] for m in inbox["messages"]] == ["please review the release notes"]
+    sender = inbox["messages"][0]["envelope"]["from"]
+    assert sender["peer_id"] == local and sender["kind"] == "local"
+    assert other["messages"] == []  # only the addressed web app receives it
