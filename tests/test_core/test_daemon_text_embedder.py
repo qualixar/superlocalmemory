@@ -118,6 +118,7 @@ def test_no_daemon_means_unavailable_and_no_vectors_ever():
 def test_a_vector_of_the_wrong_width_is_refused(daemon):
     from superlocalmemory.core.embeddings import DimensionMismatchError
 
+    daemon.embedder = {"available": True, "warm": True, "model": MODEL, "dimension": 8}  # says 8, sends 4
     emb = DaemonTextEmbedder(EmbeddingConfig(model_name=MODEL, dimension=8, provider="slm-media"))
     with pytest.raises(DimensionMismatchError):
         emb.embed("x")

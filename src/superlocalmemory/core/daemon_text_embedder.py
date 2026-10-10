@@ -13,6 +13,7 @@ keyword-only: vectors from another model would be in the wrong space.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -28,28 +29,33 @@ _PING_PATH = "/api/v3/embed/ping"
 _EMBED_PATH = "/api/v3/embed"
 
 
+def embedder_identity(embedder: Any) -> tuple[str, int]:
+    """``(model name, vector size)`` of an embedder."""
+    config = getattr(embedder, "_config", None)
+    model = getattr(embedder, "model_name", None) or getattr(config, "model_name", "")
+    dimension = getattr(embedder, "dimension", None) or getattr(config, "dimension", 0)
+    return str(model), int(dimension or 0)
+
+
 def describe_embedder(embedder: Any) -> dict[str, Any]:
     """What the daemon tells other processes about its embedder (the ping's ``embedder`` field)."""
     if embedder is None:
         return {"available": False, "warm": False, "model": "", "dimension": 0}
-    available = getattr(embedder, "is_available", False)
-    available = available() if callable(available) else available
-    config = getattr(embedder, "_config", None)
-    model = getattr(embedder, "model_name", None) or getattr(config, "model_name", "")
-    dimension = getattr(embedder, "dimension", None) or getattr(config, "dimension", 0)
+    # The cached answer only: some embedders probe a server when asked ``is_available``,
+    # and this runs on the daemon's event loop.
+    available = getattr(embedder, "_available", None) is True
+    model, dimension = embedder_identity(embedder)
     warm = getattr(embedder, "is_warm", None)
     warm = warm() if callable(warm) else warm
     return {"available": bool(available), "warm": bool(warm) if warm is not None else bool(available),
-            "model": str(model), "dimension": int(dimension or 0)}
+            "model": model, "dimension": dimension}
 
 
 def embed_with_prompt(embedder: Any, texts: list[str], prompt: str) -> list[Any]:
     """Vectors for ``texts`` as documents or as questions; embedders without a question prompt embed alike."""
-    if prompt != "query":
+    if prompt != "query" or inspect.getattr_static(embedder, "embed_query", None) is None:
         return embedder.embed_batch(texts)
-    from superlocalmemory.retrieval.query_embedding import embed_as_query
-
-    return [embed_as_query(embedder, text) for text in texts]
+    return [embedder.embed_query(text) for text in texts]
 
 
 class DaemonTextEmbedder:
@@ -59,6 +65,7 @@ class DaemonTextEmbedder:
         self._lock = threading.Lock()
         self._ping_at = float("-inf")
         self._ok, self._warm, self._loaded_once, self._closed = False, False, False, False
+        self._unreachable = False  # the last ping got no answer at all (daemon down, not loading)
 
     @property
     def dimension(self) -> int:
@@ -79,6 +86,7 @@ class DaemonTextEmbedder:
                 return
             self._ping_at = time.monotonic()
         data = _owned_daemon_request("GET", _PING_PATH, None, 2.0)
+        self._unreachable = not isinstance(data, dict)
         info = data.get("embedder") if isinstance(data, dict) and data.get("ok") is True else None
         ok = (isinstance(info, dict) and info.get("available") is True
               and info.get("model") == self.model_name and info.get("dimension") == self.dimension)
@@ -111,14 +119,24 @@ class DaemonTextEmbedder:
     def has_loaded_once(self) -> bool:
         return self._loaded_once
 
+    @property
+    def needs_service(self) -> bool:
+        """The daemon did not answer the last look (it is not running), as opposed to loading."""
+        if self._closed:
+            return False
+        self._refresh()
+        return self._unreachable
+
     # -- the embedder interface ---------------------------------------------------
     def _ask(self, texts: list[str], prompt: str) -> list[list[float] | None]:
-        if self._closed:
+        if not self.is_available:  # the daemon is down, or serves another model
             return [None] * len(texts)
-        data = _owned_daemon_request("POST", _EMBED_PATH, {"texts": texts, "prompt": prompt}, self._timeout_s)
+        body = {"texts": texts, "prompt": prompt, "model": self.model_name, "dimension": self.dimension}
+        data = _owned_daemon_request("POST", _EMBED_PATH, body, self._timeout_s)
         rows = data.get("embeddings") if isinstance(data, dict) else None
-        if not isinstance(rows, list):
+        if not isinstance(rows, list):  # no answer, or "model_mismatch": look again next time
             self._ok = self._warm = False
+            self._ping_at = float("-inf")
             return [None] * len(texts)
         rows = list(rows[:len(texts)]) + [None] * max(0, len(texts) - len(rows))
         from superlocalmemory.core.embeddings import DimensionMismatchError
@@ -126,7 +144,6 @@ class DaemonTextEmbedder:
         for vec in rows:
             if vec is not None and len(vec) != self.dimension:
                 raise DimensionMismatchError(f"Embedding dimension {len(vec)} != expected {self.dimension}")
-        self._ok = self._warm = self._loaded_once = True
         return rows
 
     def embed(self, text: str) -> list[float] | None:
@@ -156,4 +173,4 @@ class DaemonTextEmbedder:
         self._closed = True
 
 
-__all__ = ["DaemonTextEmbedder", "NEEDS_SERVICE", "describe_embedder", "embed_with_prompt"]
+__all__ = ["DaemonTextEmbedder", "NEEDS_SERVICE", "describe_embedder", "embed_with_prompt", "embedder_identity"]

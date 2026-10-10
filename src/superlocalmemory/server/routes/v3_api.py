@@ -973,6 +973,12 @@ async def embed_texts(request: Request):
                 {"error": "Embedder not available in daemon"},
                 status_code=503,
             )
+        # A caller that names its model and vector size gets vectors only from that model.
+        if body.get("model") and body.get("dimension"):
+            from superlocalmemory.core.daemon_text_embedder import embedder_identity
+
+            if (str(body["model"]), int(body["dimension"])) != embedder_identity(engine._embedder):
+                return JSONResponse({"error": "model_mismatch"}, status_code=409)
 
         loop = asyncio.get_event_loop()
         from superlocalmemory.core.daemon_text_embedder import embed_with_prompt
