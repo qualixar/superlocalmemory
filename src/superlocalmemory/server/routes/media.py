@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
 from superlocalmemory.documents import job_status, remove_document, submit_document
+from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
 from superlocalmemory.server.loopback import is_loopback
 
@@ -86,6 +87,30 @@ async def remember(req: MediaRememberRequest, request: Request):
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
     return JSONResponse(dataclasses.asdict(receipt), status_code=_CODES.get(receipt.status, 200))
+
+
+class MediaGcRequest(BaseModel):
+    profile_id: str = ""
+    dry_run: bool = True
+
+
+@router.post("/media/gc")
+async def collect_garbage(req: MediaGcRequest, request: Request):
+    """Report (default) or remove image leftovers: rows without a memory, files without a row."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import require_engine
+
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    if not req.dry_run:
+        authenticated_request_actor(request, actor_kind="http-media")  # removing needs credentials
+    engine = require_engine(request)
+    profile = _profile(engine, req.profile_id)
+    require_permission(request, Permission.DELETE, profile=profile)
+    report = await asyncio.to_thread(run_gc, profile, req.dry_run)
+    return JSONResponse(dataclasses.asdict(report))
 
 
 @router.get("/media/{media_id}/thumb")
