@@ -111,6 +111,9 @@ class SourceScanService:
             self._sync_watch([])
             self._stop.wait(self._poll_s)
             return False
+        if self._host.background_paused():
+            self._stop.wait(self._poll_s)
+            return False
         from superlocalmemory.media import open_media_store
 
         media = open_media_store(data_root=self._host.data_root)
@@ -175,7 +178,7 @@ class SourceScanService:
 
     def _scan(self, store: SourceStore, media: Any, job: dict[str, Any], source: dict[str, Any]) -> bool:
         def progress(done: int, total: int) -> None:
-            if self._stop.is_set():
+            if self._stop.is_set() or self._host.background_paused():
                 raise InterruptedError
             media.progress_job(job["job_id"], self._owner, done, total)
             media.renew_lease(job["job_id"], self._owner, _LEASE_S)

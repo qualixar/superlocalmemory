@@ -80,10 +80,11 @@
   // the pane, and the pane's next "off" card starts that flow (with its confirmation).
   var enableRequested = false;
 
-  function startEnable(host, opts, msg) {
+  function startEnable(host, opts, msg, m) {
+    var warning = m && m.ram_warning ? ' ' + m.ram_warning : '';
     confirmThen({
       title: 'Turn on images and documents', target: 'Images and documents',
-      consequence: 'Downloads ' + SIZE_NOTE + ' of models. Everything stays on this computer.',
+      consequence: 'Downloads ' + SIZE_NOTE + ' of models. Everything stays on this computer.' + warning,
       confirmLabel: 'Turn on',
     }, function () {
       msg.textContent = 'Starting…';
@@ -99,12 +100,13 @@
       'Remember pictures and read PDFs: ' + SIZE_NOTE + ' of models, and it stays on this computer.');
     var msg = messageLine(card);
     if (m.env_state === 'unsupported' && m.step) msg.textContent = m.step;
-    var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg); });
+    if (m.ram_warning) card.insertBefore(el('p', 'muted', m.ram_warning), msg);
+    var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg, m); });
     go.disabled = m.env_state === 'unsupported';
     card.appendChild(go);
     if (enableRequested && !go.disabled) {
       enableRequested = false;
-      window.setTimeout(function () { startEnable(host, opts, msg); }, 0);
+      window.setTimeout(function () { startEnable(host, opts, msg, m); }, 0);
     }
     return card;
   }
@@ -133,7 +135,7 @@
     var card = cardShell('Setup did not finish');
     card.appendChild(el('p', null, m.step || m.error || 'Setup did not finish.'));
     var msg = messageLine(card);
-    card.appendChild(button('Try again', 'btn sm primary', function () { startEnable(host, opts, msg); }));
+    card.appendChild(button('Try again', 'btn sm primary', function () { startEnable(host, opts, msg, m); }));
     return card;
   }
 

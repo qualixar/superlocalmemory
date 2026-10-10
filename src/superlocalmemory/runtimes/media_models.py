@@ -17,6 +17,8 @@ from typing import Mapping
 
 #: Cap for models without a profile (the fake models used in tests).
 DEFAULT_RSS_LIMIT_MB = 1600
+#: Free memory wanted before loading a model that has no profile (text models).
+DEFAULT_LOAD_MB = 1500
 
 #: Commit of google/embeddinggemma-2 on the hub, verified on 2026-10-10.
 EG2_REPO = "google/embeddinggemma-2"
@@ -31,14 +33,15 @@ class ModelProfile:
     rss_limit_mb: int        # the worker is stopped above this resident size
     media_min_score: float   # picture similarity that counts as evidence
     image_max_pixels: int    # larger pictures are shrunk before embedding; 0 = no cap
+    load_mb: int = 1500      # free memory wanted before this model loads (peak while loading)
 
 
 #: The EG2 numbers are provisional until the Mac memory check; the floor comes from
 #: n=7 unanswerable test queries.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
-    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
+    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
-        "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0),
+        "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0, 1500),
 })
 
 
@@ -50,6 +53,20 @@ def profile_for(model: str) -> ModelProfile | None:
 def rss_limit_mb_for(model: str) -> int:
     profile = profile_for(model)
     return profile.rss_limit_mb if profile is not None else DEFAULT_RSS_LIMIT_MB
+
+
+def effective_rss_limit_mb(model: str) -> int:
+    """The cap the worker applies to ``model``: the environment override, else the table."""
+    try:
+        return int(float(os.environ["SLM_MEDIA_WORKER_RSS_LIMIT_MB"]))
+    except (KeyError, ValueError):
+        return rss_limit_mb_for(model)
+
+
+def load_mb_for(model: str) -> int:
+    """Free memory to ask for before loading ``model`` (the default covers text and fake models)."""
+    profile = profile_for(model)
+    return profile.load_mb if profile is not None else DEFAULT_LOAD_MB
 
 
 def min_score_for(model: str) -> float | None:
@@ -71,5 +88,5 @@ def watchdog_limit_mb(default: int) -> int:
     return max(wanted, 0)
 
 
-__all__ = ["DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "MODEL_PROFILES", "ModelProfile",
-           "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]
+__all__ = ["DEFAULT_LOAD_MB", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
+           "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]

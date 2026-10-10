@@ -34,7 +34,6 @@ DEFAULT_IDLE_S = 1800.0
 DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0
-_LOAD_RAM_MB = 1500
 
 
 class MediaWorkerError(RuntimeError):
@@ -176,7 +175,7 @@ class MediaWorkerClient(MediaEmbedderPort):
         if self.pid is not None and self._loaded:
             return
         self._kill()
-        need = 0 if self.model_id.startswith("fake:") else _LOAD_RAM_MB
+        need = 0 if self.model_id.startswith("fake:") else media_models.load_mb_for(self.model_id)
         try:
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
@@ -347,6 +346,12 @@ _CLIENTS: dict[tuple[str, str, str], MediaWorkerClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
+def live_clients() -> list[MediaWorkerClient]:
+    """The clients that already exist in this process; creates nothing and starts nothing."""
+    with _CLIENTS_LOCK:
+        return list(_CLIENTS.values())
+
+
 def media_embedder(*, env: Any = None, data_root: str | Path | None = None, model_id: str | None = None,
                    revision: str | None = None) -> MediaWorkerClient | None:
     """The shared client, or None unless images and documents are on and the environment is ready.
@@ -375,4 +380,4 @@ def media_embedder(*, env: Any = None, data_root: str | Path | None = None, mode
         return client
 
 
-__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "media_embedder"]
+__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder"]

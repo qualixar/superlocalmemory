@@ -125,12 +125,12 @@ def pdf_input(pages=("one",), *, file_name="", **kw) -> MediaInput:
     return MediaInput(base64=base64.b64encode(make_pdf(list(pages), **kw)).decode(), file_name=file_name)
 
 
-def make_service(store, runtime, client, script, *, config=None, enabled=True, **limits) -> DocumentJobService:
+def make_service(store, runtime, client, script, *, config=None, enabled=True, deps=None, **limits) -> DocumentJobService:
     lim = dict(page_timeout_s=30.0, job_timeout_s=120.0, rss_limit_mb=0, max_pages=500, lease_s=60.0, poll_s=0.1, idle_s=0.1)
     lim.update(limits)
-    deps = RunnerDeps(
+    deps_obj = RunnerDeps(
         store_factory=lambda: store, client_supplier=lambda: client, runtime_supplier=lambda: runtime,
         config_supplier=lambda: config or SimpleNamespace(pii_redaction=False),
         python_supplier=lambda: Path(sys.executable), enabled=lambda: enabled, script=script,
-        limits=Limits(**lim), owns_store=False)
-    return DocumentJobService(deps)
+        limits=Limits(**lim), owns_store=False, **(deps or {}))
+    return DocumentJobService(deps_obj)

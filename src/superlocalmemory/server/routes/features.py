@@ -37,6 +37,21 @@ def _media_env():
     return media_env(root=_data_root() / "runtimes" / "media")
 
 
+def _ram_view() -> dict[str, Any]:
+    from superlocalmemory.runtimes.media_ram import ram_view
+
+    return ram_view()
+
+
+def _ram_warning(precheck: dict[str, Any]) -> str:
+    """A small-machine warning for every turn-on entry point; never a reason to refuse."""
+    if not precheck.get("ram_warn"):
+        return ""
+    from superlocalmemory.runtimes.media_env import ram_warning_text
+
+    return ram_warning_text(int(precheck.get("ram_bytes") or 0))
+
+
 def _media_view(status: dict[str, Any], root: Path) -> dict[str, Any]:
     env = status.get("env") or {}
     view = {
@@ -48,6 +63,10 @@ def _media_view(status: dict[str, Any], root: Path) -> dict[str, Any]:
         "restart_required": feat.restart_required(status),
         "precheck": status.get("precheck", {}),
     }
+    view["ram"] = _ram_view()
+    warning = _ram_warning(status.get("precheck") or {})
+    if warning:
+        view["ram_warning"] = warning
     if env.get("error_kind"):
         view["error"] = env["error_kind"]
     if status.get("error"):

@@ -71,6 +71,8 @@ def _enable(args: Namespace) -> None:
     if not getattr(args, "json", False):
         print(f"Images & documents download {SIZE_TEXT} of models.")
         print(_disk_text(media.get("precheck", {})))
+        if media.get("ram_warning"):
+            print(f"Memory check: {media['ram_warning']}")
     if not _confirmed(args):
         print("Nothing changed.")
         return

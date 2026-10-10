@@ -22,10 +22,12 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from contextlib import ExitStack
+from typing import Any, Callable, ContextManager
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.documents.chunking import chunk_text
+from superlocalmemory.documents.heavy import parse_reservation
 from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, ParseSession, ParseStopped
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import DOCUMENT
@@ -64,6 +66,10 @@ class Cancelled(_End):
     pass
 
 
+class Deferred(_End):
+    """Not now (memory is short, or a model swap is under way): the job goes back to the queue."""
+
+
 @dataclass(frozen=True)
 class JobContext:
     store: Any
@@ -75,6 +81,10 @@ class JobContext:
     limits: Any
     owner: str
     should_stop: Callable[[], bool]
+    #: A context manager held around each parse step (the shared RAM reservation).
+    heavy: Callable[[], ContextManager[None]] = parse_reservation
+    #: True while a model swap asks background work to stand aside.
+    paused: Callable[[], bool] = lambda: False
 
 
 @dataclass
@@ -105,11 +115,12 @@ class JobRunner:
         self._last_renew = time.monotonic()
 
     # -- the run ----------------------------------------------------------------
-    def run(self) -> None:
+    def run(self) -> bool:
+        """Run the job; False when it was put back in the queue to wait."""
         self.doc = self.store.get_document(self.doc_id) or {}
         if not self.doc or self.doc["state"] == "tombstoned" or self.doc["profile_id"] != self.profile_id:
             self._finish("cancelled")
-            return
+            return True
         root = Path(self.store.path).parent
         self.work = Path(tempfile.mkdtemp(dir=files.tmp_dir(root)))
         try:
@@ -119,6 +130,9 @@ class JobRunner:
             self._fail(exc.reason)
         except Stopped:
             self.store.release_job(self.job["job_id"], self.ctx.owner)
+        except Deferred:
+            self.store.release_job(self.job["job_id"], self.ctx.owner)
+            return False
         except LeaseLost:
             logger.info("document job lost its lease; leaving it to its new owner")
         except Cancelled:
@@ -130,6 +144,7 @@ class JobRunner:
             self._fail("failed")
         finally:
             shutil.rmtree(self.work, ignore_errors=True)
+        return True
 
     def _process(self, root: Path) -> None:
         total = self._read_pages(root)
@@ -168,7 +183,7 @@ class JobRunner:
         try:
             with session:
                 while True:
-                    event = session.next_event()
+                    event = self._next_event(session)
                     if event.get("done"):
                         self._apply_meta(event)
                         return total
@@ -186,6 +201,15 @@ class JobRunner:
             raise Failed(exc.reason) from None
         except ParseStopped:
             raise Stopped() from None
+
+    def _next_event(self, session: ParseSession) -> dict[str, Any]:
+        """One parse step, under the shared RAM reservation; a refused reservation defers the job."""
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(self.ctx.heavy())
+            except RuntimeError:
+                raise Deferred() from None
+            return session.next_event()
 
     def _apply_meta(self, event: dict[str, Any]) -> None:
         title = str(event.get("title") or "").strip()
@@ -212,6 +236,8 @@ class JobRunner:
         self._renew()
         if self.ctx.should_stop():
             raise Stopped()
+        if self.ctx.paused():
+            raise Deferred()
         current = self.store.get_document(self.doc_id)
         if not current or current["state"] == "tombstoned":
             raise Cancelled()

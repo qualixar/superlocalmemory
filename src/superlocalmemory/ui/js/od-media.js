@@ -262,20 +262,41 @@
     loadImages(ui, '');
   }
 
+  var GB = 1000; // MB per GB in the memory line
+
+  function gb(mb) { return (mb / GB).toFixed(1) + ' GB'; }
+
+  // One muted line: what the picture model uses right now. Drawn from the features read
+  // the pane already makes, so it adds no polling.
+  function ramText(ram) {
+    if (!ram) return '';
+    if (ram.worker_rss_mb == null) return 'Picture model: not running';
+    return 'Picture model: ' + gb(ram.worker_rss_mb) + ' in use'
+      + (ram.worker_cap_mb ? ', limit ' + gb(ram.worker_cap_mb) : '');
+  }
+
   function odRenderMedia(pane) {
     pane.textContent = '';
     var head = el('div', 'page-head');
     head.appendChild(el('h2', null, 'Documents & Images'));
     head.appendChild(el('p', 'muted', 'Remember pictures and read PDFs on this computer.'));
     var cardHost = el('div');
+    var ramLine = el('p', 'muted');
+    ramLine.setAttribute('data-od-ram', '');
+    ramLine.hidden = true;
     var body = el('div');
     var folders = el('div', 'od-media-section');
-    [head, cardHost, body, folders].forEach(function (n) { pane.appendChild(n); });
+    [head, cardHost, ramLine, body, folders].forEach(function (n) { pane.appendChild(n); });
     // Folders have their own switch, so they show whether or not images are on; drawn once.
     if (typeof window.odRenderSources === 'function') window.odRenderSources(folders);
     F().mountMediaCard(cardHost, {
-      onReady: function () { if (!body.firstChild) buildBody(body); },
-      onNotReady: function () { body.textContent = ''; },
+      onReady: function (m) {
+        var text = ramText(m && m.ram);
+        ramLine.textContent = text;
+        ramLine.hidden = !text;
+        if (!body.firstChild) buildBody(body);
+      },
+      onNotReady: function () { body.textContent = ''; ramLine.hidden = true; },
     });
   }
 

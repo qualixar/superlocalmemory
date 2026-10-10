@@ -36,10 +36,15 @@ def build_host(application: Any) -> sources.SourceHost:
 
         return unified_daemon._materializer_actor_id()
 
+    def paused() -> bool:
+        runtime = getattr(state, "profile_runtime", None)
+        return bool(runtime is not None and runtime.background_paused)
+
     return sources.SourceHost(
         remote_check=remote_access_configured, runtime=runtime,
         config=lambda: getattr(_engine(state), "_config", None), eraser=eraser,
-        profile=lambda: _engine(state)._profile_id, actor_id=actor_id)
+        profile=lambda: _engine(state)._profile_id, actor_id=actor_id,
+        background_paused=paused)
 
 
 def start_source_scanner(application: Any, registry: Any) -> None:

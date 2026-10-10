@@ -139,3 +139,66 @@ def test_restart_required_follows_the_env_and_the_loaded_flag(ctx):
     feat.mark_media_loaded()
     assert client.get("/api/v3/features").json()["media"]["restart_required"] is False
     feat._reset_media_loaded()
+
+
+# -- memory: the warning on small machines and the picture model's use -------------
+
+class _Worker:
+    """Stands in for a running picture worker: this very process is the 'worker'."""
+
+    def __init__(self, pid, model="google/embeddinggemma-2", cap=4500):
+        self.pid, self.model_id, self.rss_limit_mb = pid, model, cap
+
+
+def test_ram_block_shape_when_the_worker_is_not_running(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert set(ram) == {"system_total_mb", "worker_rss_mb", "worker_cap_mb", "model"}
+    assert ram["system_total_mb"] > 0 and ram["worker_rss_mb"] is None
+
+
+def test_ram_block_with_a_running_worker_reports_its_size_and_cap(ctx, monkeypatch):
+    import os
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {("r", "m", ""): _Worker(os.getpid())})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert ram["worker_rss_mb"] > 0
+    assert ram["worker_cap_mb"] == 4500 and ram["model"] == "google/embeddinggemma-2"
+
+
+def test_ram_block_with_a_dead_pid_counts_as_not_running(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {("r", "m", ""): _Worker(None)})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert ram["worker_rss_mb"] is None and ram["worker_cap_mb"] == 4500
+
+
+def test_reading_the_ram_block_creates_nothing(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {})
+    client.get("/api/v3/features")
+    assert list(root.iterdir()) == [] and worker_client._CLIENTS == {}
+
+
+def test_a_small_machine_gets_a_warning_in_the_features_reply(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    monkeypatch.setattr(env, "precheck", lambda: {"disk_ok": True, "free_bytes": 10 * 1024 ** 3,
+                                                   "ram_bytes": 4 * 1024 ** 3, "ram_warn": True})
+    media = client.get("/api/v3/features").json()["media"]
+    assert "4.0 GB" in media["ram_warning"] and "8 GB" in media["ram_warning"]
+
+
+def test_a_big_machine_has_no_warning(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    monkeypatch.setattr(env, "precheck", lambda: {"disk_ok": True, "free_bytes": 10 * 1024 ** 3,
+                                                   "ram_bytes": 16 * 1024 ** 3, "ram_warn": False})
+    assert client.get("/api/v3/features").json()["media"].get("ram_warning", "") == ""

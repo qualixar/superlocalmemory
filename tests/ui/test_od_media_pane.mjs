@@ -13,8 +13,8 @@ const MB = 1024 * 1024;
 import { readFileSync } from 'node:fs';
 const require_sources = () => readFileSync(new URL('../../src/superlocalmemory/ui/js/od-sources.js', import.meta.url), 'utf8');
 
-function setup({ on = true, routes = [], docs = [] } = {}) {
-    const media = on ? { enabled: true, env_state: 'ready', restart_required: false }
+function setup({ on = true, routes = [], docs = [], ram } = {}) {
+    const media = on ? { enabled: true, env_state: 'ready', restart_required: false, ...(ram ? { ram } : {}) }
                      : { enabled: false, env_state: 'not_installed' };
     const state = { docs, jobs: [] };
     const base = [
@@ -274,5 +274,35 @@ describe('Saved images grid', () => {
         assert.equal(thumbs(h).length, 0);
         assert.equal(h.window.__pwn, undefined);
         assert.ok(!h.pane.innerHTML.includes('onerror'));
+    });
+});
+
+describe('Documents & Images pane: picture model memory line', () => {
+    const line = h => h.pane.querySelector('[data-od-ram]');
+
+    it('shows what the picture model uses and its limit', async () => {
+        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: 2400, worker_cap_mb: 4500, model: 'google/embeddinggemma-2' } });
+        await h.open();
+        assert.equal(line(h).textContent, 'Picture model: 2.4 GB in use, limit 4.5 GB');
+        assert.ok(line(h).className.includes('muted'));
+    });
+
+    it('says not running when the worker is idle', async () => {
+        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: null, worker_cap_mb: 4500, model: 'google/embeddinggemma-2' } });
+        await h.open();
+        assert.equal(line(h).textContent, 'Picture model: not running');
+    });
+
+    it('shows no line when the daemon sends no memory block', async () => {
+        const h = setup({});
+        await h.open();
+        assert.equal(line(h).textContent, '');
+        assert.equal(line(h).hidden, true);
+    });
+
+    it('asks nothing extra: one features read to draw the pane', async () => {
+        const h = setup({ ram: { system_total_mb: 1, worker_rss_mb: null, worker_cap_mb: 1, model: '' } });
+        await h.open();
+        assert.equal(h.calls.filter(c => c.url === '/api/v3/features').length, 1);
     });
 });

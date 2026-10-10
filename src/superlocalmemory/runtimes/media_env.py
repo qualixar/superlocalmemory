@@ -39,6 +39,17 @@ MEDIA_DOWNLOAD_BYTES = int(1.5 * GIB)
 MEDIA_RAM_WARN_BYTES = int(7.5 * GIB)
 
 
+def ram_warning_text(ram_bytes: int) -> str:
+    """One plain sentence for a small machine, or "" when memory is enough or unknown.
+
+    Shown wherever images and documents can be turned on. It informs; it never blocks.
+    """
+    if not 0 < ram_bytes < MEDIA_RAM_WARN_BYTES:
+        return ""
+    return (f"This computer has {ram_bytes / GIB:.1f} GB of memory. Images and documents work best "
+            "with 8 GB or more and may slow other apps while they work. You can still turn them on.")
+
+
 def _min_free_disk() -> int:
     # Estimates; re-measure on real installs.
     return 4 * GIB if _env._platform_tag() == "darwin-arm64" else 8 * GIB
