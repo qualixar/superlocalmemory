@@ -39,6 +39,7 @@ from superlocalmemory.remote_connections.grant import (
     verify_grant,
 )
 from superlocalmemory.remote_connections.session import OriginResponse, recall_deadline_ms
+from superlocalmemory.remote_connections.upload_relay import UploadRelay, upload_op
 from superlocalmemory.server.remote_listener import RemoteListenerASGI
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class CanonicalMcpOrigin:
         self._grant_keys = grant_keys
         self._on_unknown_kid = on_unknown_kid
         self._replays: dict[str, ReplayGuard] = {}
+        self._uploads = UploadRelay()
 
     async def _verified_grant(
         self, request: dict, credential: ConnectorCredential,
@@ -145,6 +147,9 @@ class CanonicalMcpOrigin:
         )
         if request["kind"] != "request":
             raise ValueError("invalid_origin_request")
+        if upload_op(request) is not None:
+            # A file chunk for a one-time upload link: the token decides, not the MCP app.
+            return await self._uploads.handle(request, credential)
         grant = await self._verified_grant(request, credential)
         bounded_app = _bounded(self._app)
         # These are virtual transport parameters, never an outbound HTTP URL.
