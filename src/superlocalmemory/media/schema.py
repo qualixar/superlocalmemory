@@ -112,11 +112,36 @@ def _upgrade_columns(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE documents SET origin = 'folder' WHERE source_id IS NOT NULL")
 
 
+#: Stamp of the remote-vetting rule. Up to 4.1.24 a picture counted as clean when nothing had been
+#: *counted* (personal data was only counted while redaction was on, and credentials only in the
+#: first 8,000 characters). From 4.1.25 the whole text is scanned whatever the setting.
+REMOTE_VETTING_KEY = "remote_vetting"
+REMOTE_VETTING_VERSION = "2"
+
+
+def _revet_remote_once(conn: sqlite3.Connection) -> None:
+    """Hold back, once, every picture or page an older build marked ``remote_ok``.
+
+    The text they were vetted on is not kept here, so they cannot be re-scanned: they stay local-only
+    until the picture or document is saved again. Rows written after the stamp are never touched.
+    """
+    stamped = conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES (?, ?)",
+                           (REMOTE_VETTING_KEY, REMOTE_VETTING_VERSION)).rowcount
+    if stamped:
+        conn.execute("UPDATE media_items SET remote_ok = 0 WHERE remote_ok != 0")
+
+
 def apply_schema(conn: sqlite3.Connection, *, created_by: str) -> None:
     """Create every table (idempotent) and stamp the version once."""
     for statement in _DDL:
         conn.execute(statement)
     _upgrade_columns(conn)
+    fresh = conn.execute("SELECT 1 FROM media_schema WHERE key = 'version'").fetchone() is None
+    if fresh:  # a new file has nothing an older build vetted
+        conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES (?, ?)",
+                     (REMOTE_VETTING_KEY, REMOTE_VETTING_VERSION))
+    else:
+        _revet_remote_once(conn)
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('version', ?)",
                  (str(MEDIA_SCHEMA_VERSION),))
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('created_by', ?)",
