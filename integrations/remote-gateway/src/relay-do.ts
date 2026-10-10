@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { GRANT_HEADER, importGrantKey, signGrant, toBase64Url, unwrapGrantKey, wrapGrantKey, type GrantInput, type StoredGrantKey } from "./grant.ts";
 import { decodeRelayFrame, encodeRelayFrame, RELAY_DEADLINE_MS, type RelayFrame, type RelayCodecOptions } from "./relay-protocol.ts";
 export interface RelayBinding {
   ownerId: string; connectionId: string; installationId: string; profileId: string;
@@ -9,7 +10,11 @@ export interface RelayBinding {
 export const CONNECTOR_SILENCE_MS = 45000;
 interface StoredState { binding: RelayBinding | null; generation: number; revoked: boolean; }
 interface Attachment { generation: number; connectionId: string; connectedAt?: number; }
-interface Pending { callerId: string; socket: WebSocket; generation: number; settle: (response: Response) => void; timer: ReturnType<typeof setTimeout>; }
+/** What the resource Worker passes with a forwarded call: who is calling (signed for the laptop) and whether it parks on the laptop. */
+export interface ForwardContext { grant?: GrantInput; wait?: boolean; }
+/** A laptop holds one slot per long wait; more than this many at once would starve ordinary calls. */
+const MAX_CONCURRENT_WAITS = 2;
+interface Pending { callerId: string; wait: boolean; socket: WebSocket; generation: number; settle: (response: Response) => void; timer: ReturnType<typeof setTimeout>; }
 function failure(status: number, code: string): Response {
   return Response.json({ error: code }, { status, headers: { "Cache-Control": "no-store" } });
 }
@@ -33,6 +38,9 @@ export class RelayDO extends DurableObject {
   private heard=new Map<WebSocket,number>();
   /** Sockets accepted before connection times were recorded count from here. */
   private readonly startedAt=Date.now();
+  private signing:{version:number;key:CryptoKey}|null=null;
+  /** True once storage was read and held no key, so older laptops cost no read per call. */
+  private unkeyed=false;
   constructor(ctx: DurableObjectState,env: Cloudflare.Env) {
     super(ctx,env);
     this.ctx.blockConcurrencyWhile(async()=>{
@@ -63,13 +71,47 @@ export class RelayDO extends DurableObject {
       if(this.state.generation>=Number.MAX_SAFE_INTEGER)throw new Error("generation_exhausted");
       const next={...this.state,revoked:true,generation:this.state.generation+1};
       await this.ctx.storage.put("relay-state",next);this.state=next;
+      await this.ctx.storage.delete("grant-key");this.signing=null;this.unkeyed=true;
       for(const socket of this.ctx.getWebSockets("connector"))this.closeSocket(socket,403,"connection_revoked");
     });
   }
-  async forwardCurrent(request: Omit<Extract<RelayFrame,{kind:'request'}>,'generation'>, options: RelayCodecOptions = {}): Promise<Response> {
+  private wrapSecret(): string|null {
+    const secret=(this.env as {GRANT_WRAP_KEY?:unknown}).GRANT_WRAP_KEY;
+    return typeof secret==="string"&&/^[a-fA-F0-9]{64}$/.test(secret)?secret:null;
+  }
+  /** Mints the connection's grant key and returns it in clear exactly once, to the owner's own authenticated channel. Every call replaces the key. */
+  async rotateGrantKey(ownerId: string): Promise<{version:number;key:string}> {
+    const result=await this.ctx.blockConcurrencyWhile(async():Promise<{value:{version:number;key:string}}|{error:string}>=>{
+      if(this.state.revoked)return {error:"connection_revoked"};
+      const binding=this.state.binding;
+      if(!binding)return {error:"connection_unconfigured"};
+      if(binding.ownerId!==ownerId)return {error:"owner_mismatch"};
+      const secret=this.wrapSecret();
+      if(!secret)return {error:"grant_unavailable"};
+      const previous=await this.ctx.storage.get<StoredGrantKey>("grant-key");
+      const version=(Number.isSafeInteger(previous?.version)?previous!.version:0)+1;
+      const raw=crypto.getRandomValues(new Uint8Array(32));
+      await this.ctx.storage.put("grant-key",await wrapGrantKey(raw,secret,version));
+      this.signing={version,key:await importGrantKey(raw)};this.unkeyed=false;
+      return {value:{version,key:toBase64Url(raw)}};
+    });
+    if("error" in result)throw new Error(result.error);
+    return result.value;
+  }
+  /** The key in force, or null when none was ever minted or it cannot be read: callers then send no grant at all. */
+  private async signingKey(): Promise<{version:number;key:CryptoKey}|null> {
+    if(this.signing)return this.signing;
+    if(this.unkeyed)return null;
+    const secret=this.wrapSecret();const stored=await this.ctx.storage.get<StoredGrantKey>("grant-key");
+    if(!stored){this.unkeyed=true;return null;}
+    if(!secret)return null;
+    try{this.signing={version:stored.version,key:await importGrantKey(await unwrapGrantKey(stored,secret))};}catch{return null;}
+    return this.signing;
+  }
+  async forwardCurrent(request: Omit<Extract<RelayFrame,{kind:'request'}>,'generation'>, options: RelayCodecOptions = {}, context: ForwardContext = {}): Promise<Response> {
     // Only the authenticated resource Worker calls this. Client metadata cannot
     // choose a socket generation; forward() still checks current attachment.
-    return this.forward({...request,generation:Math.max(1,this.state.generation)},options);
+    return this.forward({...request,generation:Math.max(1,this.state.generation)},options,context);
   }
   async cancelCaller(identifier:string):Promise<void> {
     for(const [wireId,pending] of this.pending){
@@ -104,7 +146,9 @@ export class RelayDO extends DurableObject {
       return new Response(null,{status:101,webSocket:client});
     });
   }
-  async forward(frame: RelayFrame,options: RelayCodecOptions={}): Promise<Response> {
+  async forward(callerFrame: RelayFrame,options: RelayCodecOptions={},context: ForwardContext={}): Promise<Response> {
+    // The grant header is the relay's alone: whatever a caller put there is discarded.
+    const frame=callerFrame.kind==="request"?{...callerFrame,headers:callerFrame.headers.filter(pair=>pair[0].toLowerCase()!==GRANT_HEADER)}:callerFrame;
     if(this.state.revoked)return failure(403,"connection_revoked");
     if(!this.state.binding||this.state.binding.deviceExpiresAt<=Date.now())return failure(503,"connector_unavailable");
     const encoded=encodeRelayFrame(frame,options);
@@ -117,12 +161,18 @@ export class RelayDO extends DurableObject {
     if(!socket)return failure(503,"connector_offline");
     if(frame.generation!==this.state.generation)return failure(409,"stale_generation");
     if(Date.now()-this.lastHeard(socket)>CONNECTOR_SILENCE_MS)return failure(503,"connector_asleep");
-    if(this.pending.size>=8)return failure(429,"relay_busy");
-    if([...this.pending.values()].some(p=>p.callerId===frame.id))return failure(409,"duplicate_request");
     // Fresh wire nonce even if a caller reuses its ID after timeout. A late reply
     // can never complete a later operation that happens to reuse that caller ID.
-    const wireId=crypto.randomUUID();const outbound=encodeRelayFrame({...frame,id:wireId},options);
+    const wireId=crypto.randomUUID();
+    // Signing may wait on storage, so it happens before the capacity checks below, which must run without an await in between.
+    const binding=this.state.binding;const key=context.grant?await this.signingKey():null;
+    const headers=key&&context.grant?[...frame.headers,[GRANT_HEADER,await signGrant(key.key,key.version,context.grant,{cid:binding.connectionId,fid:wireId,gen:frame.generation,dl:frame.deadlineAt})] as const]:frame.headers;
+    const outbound=encodeRelayFrame({...frame,id:wireId,headers},options);
     if(!outbound.ok)return failure(400,"invalid_relay_request");
+    if(this.state.revoked||!this.state.binding||this.currentSocket()!==socket)return failure(503,"connector_offline");
+    const wait=context.wait===true;
+    if(this.pending.size>=8||(wait&&[...this.pending.values()].filter(p=>p.wait).length>=MAX_CONCURRENT_WAITS))return failure(429,"relay_busy");
+    if([...this.pending.values()].some(p=>p.callerId===frame.id))return failure(409,"duplicate_request");
     return new Promise<Response>(resolve=>{
       const timer=setTimeout(()=>{
         const entry=this.pending.get(wireId);if(!entry)return;
@@ -131,7 +181,7 @@ export class RelayDO extends DurableObject {
         try{if(cancel.ok)socket.send(cancel.text);}catch{/* transport already gone; do not claim cancellation reached the origin */}
         resolve(failure(504,"relay_timeout"));
       },remaining);
-      this.pending.set(wireId,{callerId:frame.id,socket,generation:frame.generation,settle:resolve,timer});
+      this.pending.set(wireId,{callerId:frame.id,wait,socket,generation:frame.generation,settle:resolve,timer});
       try{socket.send(outbound.text);}catch{this.finish(wireId,failure(503,"connector_offline"));}
     });
   }
