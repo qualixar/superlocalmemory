@@ -97,6 +97,12 @@ def add_source(root: Path | str, *, profile_id: str, kind: Literal["folder", "ob
     return preview
 
 
+def refuse_while_remote() -> None:
+    """Folders cannot be chosen or connected while remote access is set up."""
+    if host_mod.current_host().remote_on():
+        raise SourceRefused("remote_access_on", REMOTE_MESSAGE)
+
+
 def confirm_source(source_id: str, *, via: str = "api", profile_id: str | None = None) -> None:
     """Connect a previewed folder: turn the feature on, record the source and queue its first scan.
 

@@ -6,6 +6,7 @@
 // Routes: GET/POST /api/v3/sources   POST /api/v3/sources/{id}/confirm|rescan|quarantine/release
 //         GET /api/v3/sources/{id}/report   DELETE /api/v3/sources/{id}[?purge=1]
 //         POST /api/v3/sources/{id}/forget-empty
+//         POST /api/v3/sources/pick-folder   GET /api/v3/sources/suggestions
 (function () {
   'use strict';
 
@@ -229,14 +230,63 @@
     });
   }
 
+  function errCode(res) { return (res.data && res.data.detail && res.data.detail.code) || ''; }
+
+  function useFolder(ctx, path) {
+    ctx.input.value = path;
+    check(ctx);
+  }
+
+  function chooseFolder(ctx) {
+    ctx.preview.textContent = '';
+    F().api('POST', BASE + '/pick-folder').then(function (res) {
+      if (res.ok) {
+        if (res.data && res.data.path) useFolder(ctx, String(res.data.path));
+        return;
+      }
+      if (errCode(res) === 'picker_unavailable' && ctx.chooseBtn) {
+        ctx.chooseBtn.remove();
+        ctx.chooseBtn = null;
+        return;
+      }
+      note(ctx.preview, errCode(res) === 'remote_access_on' ? REMOTE_SENTENCE
+        : F().failText(res, 'Could not open the folder picker.'));
+    });
+  }
+
+  function showSuggestions(ctx, items) {
+    items.slice(0, 30).forEach(function (it) {
+      if (!it || !it.path) return;
+      var chip = F().button(String(it.name || it.path), 'btn sm od-folder-chip', function () { useFolder(ctx, String(it.path)); });
+      chip.setAttribute('title', String(it.path));
+      ctx.chips.appendChild(chip);
+    });
+  }
+
+  function loadSuggestions(ctx) {
+    F().api('GET', BASE + '/suggestions').then(function (res) {
+      ctx.chips.textContent = '';
+      if (res.ok && res.data && res.data.suggestions && res.data.suggestions.length) {
+        ctx.chips.appendChild(el('p', 'muted', 'Suggested folders:'));
+        showSuggestions(ctx, res.data.suggestions);
+      }
+    });
+  }
+
   function buildForm(ctx) {
     ctx.form.appendChild(el('p', 'muted', 'Connect a folder of notes, PDFs or pictures. Files stay where they are and are only read.'));
+    ctx.chooseBtn = F().button('Choose folder', 'btn sm primary', function () { chooseFolder(ctx); });
+    ctx.form.appendChild(ctx.chooseBtn);
+    ctx.chips = el('div', 'od-folder-chips');
+    ctx.form.appendChild(ctx.chips);
+    ctx.form.appendChild(el('p', 'muted', 'or type a path'));
     ctx.input = el('input');
     ctx.input.type = 'text';
     ctx.input.setAttribute('placeholder', '/path/to/folder');
     ctx.input.setAttribute('aria-label', 'Folder path');
     ctx.form.appendChild(ctx.input);
     ctx.form.appendChild(F().button('Check folder', 'btn sm', function () { check(ctx); }));
+    loadSuggestions(ctx);
   }
 
   function odRenderSources(host) {
