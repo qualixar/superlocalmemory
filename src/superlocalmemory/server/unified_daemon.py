@@ -486,6 +486,10 @@ from superlocalmemory.server.read_gates import (  # noqa: E402
     is_sensitive_dashboard_read as _is_sensitive_dashboard_read,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
+    _capability_ok,
+    is_cli_status_read,
+)
+from superlocalmemory.server.read_gates import (  # noqa: E402
     mesh_read_gate as _mesh_read_gate,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
@@ -4431,7 +4435,13 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             if _is_sensitive_dashboard_read(
                 request.method, request.url.path,
             ):
-                _resp = _rbac_read_gate(request, application.state)
+                _resp = _rbac_read_gate(
+                    request, application.state,
+                    machine_principal=(
+                        is_cli_status_read(request.method, request.url.path)
+                        and _capability_ok(request, application.state)
+                    ),
+                )
                 if _resp is not None:
                     return _resp
             _resp = _mesh_read_gate(request, application.state)
