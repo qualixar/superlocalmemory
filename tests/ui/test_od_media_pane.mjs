@@ -188,6 +188,44 @@ describe('Documents & Images pane', () => {
         assert.ok(h.calls.some(c => c.url === `/api/v3/jobs/${JID}`));
     });
 
+    it('a PDF dropped again while it is still being read follows its job instead of saying Already saved', async () => {
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
+            status: 202, json: { status: 'processing', document_id: DID, job_id: JID } })]] });
+        h.state.jobs = [{ job_id: JID, state: 'running', done: 2, total: 9 }];
+        await h.open();
+        await h.pick(h.file('paper.pdf', 'application/pdf'));
+        assert.doesNotMatch(h.pane.textContent, /Already saved/);
+        await h.tick();
+        assert.match(h.pane.textContent, /Reading page 2 of 9/);
+    });
+
+    it('a finished PDF dropped again says Already saved', async () => {
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
+            json: { status: 'duplicate', document_id: DID, job_id: JID } })]] });
+        await h.open();
+        await h.pick(h.file('paper.pdf', 'application/pdf'));
+        assert.match(h.pane.textContent, /Already saved/);
+    });
+
+    for (const [code, words] of [
+        ['encrypted', /password/], ['too_many_pages', /500/], ['page_timeout', /one page took too long/i],
+        ['time_limit', /took too long/], ['memory_limit', /more memory/], ['parse_ended', /stopped early/],
+        ['save_failed', /could not be saved/], ['image_tools', /picture tools/], ['failed', /damaged/],
+        ['something_new', /could not be finished/],
+    ]) {
+        it(`a failed job with the code ${code} is explained in plain words, never as the raw code`, async () => {
+            const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
+                status: 202, json: { status: 'processing', document_id: DID, job_id: JID } })]] });
+            h.state.jobs = [{ job_id: JID, state: 'failed', error: code }];
+            await h.open();
+            await h.pick(h.file('paper.pdf', 'application/pdf'));
+            await h.tick();
+            assert.match(h.pane.textContent, /Did not finish\./);
+            assert.match(h.pane.textContent, words);
+            assert.ok(!h.pane.textContent.includes('(' + code + ')'));
+        });
+    }
+
     it('document titles are text, and removing one confirms then DELETEs', async () => {
         const h = setup({ docs: [{ document_id: DID, title: XSS, state: 'ready', page_count: 3,
             pages_text_layer: 3, pages_ocr: 0, pages_empty: 0, created_at: 1, entities: [{ name: XSS, facts: 2 }] }],
@@ -330,9 +368,15 @@ describe('Documents & Images pane: picture model memory line', () => {
     const line = h => h.pane.querySelector('[data-od-ram]');
 
     it('shows what the picture model uses and its limit', async () => {
-        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: 2400, worker_cap_mb: 4500, model: 'google/embeddinggemma-2' } });
+        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: 2458, worker_cap_mb: 4608, model: 'google/embeddinggemma-2' } });
         await h.open();
         assert.equal(line(h).textContent, 'Picture model: 2.4 GB in use, limit 4.5 GB');
+    });
+
+    it('counts a GB as 1024 MB, like the MB limits on the same pane', async () => {
+        const h = setup({ ram: { system_total_mb: 16384, worker_rss_mb: 2048, worker_cap_mb: 1024, model: 'm' } });
+        await h.open();
+        assert.equal(line(h).textContent, 'Picture model: 2.0 GB in use, limit 1.0 GB');
         assert.ok(line(h).className.includes('muted'));
     });
 
