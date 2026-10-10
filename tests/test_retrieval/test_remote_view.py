@@ -68,7 +68,7 @@ def _shown(db: MemoryDb, view: str, sources: dict) -> set[str]:
 def test_a_local_caller_has_no_context(tmp_path: Path) -> None:
     db, _ = _world(tmp_path)
     assert remote_view.context_for("", db, "default") is None
-    assert remote_view.parse_view("anything else") == ""
+    assert remote_view.parse_view("") == "" and remote_view.parse_view(None) == ""
     assert remote_view.parse_view(" Remote ") == remote_view.REMOTE
 
 
@@ -126,3 +126,17 @@ def test_hidden_among_matches_the_fact_filter(tmp_path: Path, view: str) -> None
     with visibility.use(remote_view.context_for(view, db, "default")):
         hidden = visibility.hidden_among(db, "default", ids)
     assert {i[2:] for i in ids} - {i[2:] for i in hidden} == _shown(db, view, sources)
+
+
+@pytest.mark.parametrize("raw", ["anything else", "remote-media", "LOCAL", "0"])
+def test_a_view_name_it_does_not_know_gets_the_strictest_remote_view(raw: str) -> None:
+    assert remote_view.parse_view(raw) == remote_view.REMOTE
+
+
+def test_the_media_lookup_asks_only_about_the_pictures_in_play(tmp_path: Path) -> None:
+    db, sources = _world(tmp_path)
+    ctx = remote_view.context_for(remote_view.REMOTE_MEDIA, db, "default")
+    with visibility.use(ctx):
+        visibility.hidden_among(db, "default", ["f-pic-good", "f-plain"])
+    asked = set(ctx.vetted_media._known)
+    assert len(asked) == 1 and next(iter(asked)).startswith("m:")

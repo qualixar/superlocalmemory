@@ -65,7 +65,7 @@ def lock(tmp_path, monkeypatch):
 def make(tmp_path, src, runner=None, canary=lambda p: True, source=None, **kw):
     spec = EnvSpec(name="t", requirements=("foo==1.0",),
                    model_source=source or LocalDirSource(src, model_id="m", revision="r1"),
-                   min_free_disk_bytes=1, min_ram_bytes_warn=1, canary=canary,
+                   min_free_disk_bytes=1, canary=canary,
                    expected_download_bytes=10, **kw)
     return ManagedEnv(spec, root=tmp_path / "env", runner=runner or Runner())
 
@@ -188,8 +188,9 @@ def test_python_change_needs_repair(tmp_path, src, lock, monkeypatch):
 
 def test_precheck_reports_vector_extension(tmp_path, src):
     pre = make(tmp_path, src).precheck()
-    for k in ("disk_ok", "free_bytes", "ram_bytes", "ram_warn", "python_ok", "python", "sqlite_vec_ok"):
+    for k in ("disk_ok", "free_bytes", "ram_bytes", "python_ok", "python", "sqlite_vec_ok"):
         assert k in pre
+    assert "ram_warn" not in pre  # the decision is media_env.media_ram_refusal's alone
 
 
 def test_no_vector_extension_is_unsupported(tmp_path, src, lock, monkeypatch):
@@ -198,17 +199,16 @@ def test_no_vector_extension_is_unsupported(tmp_path, src, lock, monkeypatch):
     assert st.state == "unsupported" and "vector extension" in st.step
 
 
-def test_ram_threshold_is_7_5_gib():
+def test_the_media_env_pins_a_full_model_revision():
     from superlocalmemory.runtimes.media_env import MEDIA_ENV
 
-    assert MEDIA_ENV.min_ram_bytes_warn == int(7.5 * 1024 ** 3)
     assert len(MEDIA_ENV.model_source.revision) == 40
 
 
 def test_real_venv_and_isolated_script(tmp_path, src):
     """Real stdlib venv, no packages, no network; proves run_script is isolated."""
     spec = EnvSpec(name="real", requirements=(), model_source=LocalDirSource(src, "m", "r"),
-                   min_free_disk_bytes=1, min_ram_bytes_warn=1)
+                   min_free_disk_bytes=1)
     env = ManagedEnv(spec, root=tmp_path / "renv")
     assert env._create_venv()[0]
     script = tmp_path / "probe.py"

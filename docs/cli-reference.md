@@ -365,6 +365,37 @@ view removes the saved query only.
 
 ---
 
+## Pictures, documents and folders
+
+### `slm features`
+
+What is on and what you can turn on: images and documents, folder sources and bot messages.
+
+### `slm media enable|disable|status|gc`
+
+```bash
+slm media enable              # shows the download size (about 1.5 GB) and a disk check, then asks; --yes skips the question
+slm media status              # what is on and how set-up is going
+slm media disable             # off again; memories are kept (--remove-files also deletes the downloaded models)
+slm media gc                  # report picture records without a memory and files without a record; removes nothing
+slm media gc --apply          # remove them (owner or admin)
+```
+
+Images and documents need a computer with at least 16 GB of memory. On a smaller computer `enable` refuses with a plain reason and exits with code 4; your text memories keep working. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
+
+### `slm sources ...`
+
+```bash
+slm sources add ~/Notes --kind obsidian   # or --kind folder; shows what would be read and asks first
+slm sources list
+slm sources report <id>
+slm sources rescan <id>
+slm sources remove <id> [--purge]         # --purge also erases the memories it gave
+slm sources forget-empty <id>             # forget the files of a folder you emptied on purpose
+```
+
+Sources are read-only: SLM mirrors Markdown, text, canvas files, PDFs and PNG, JPEG and WebP images into memory and never writes to the folder. SLM's own data folder can never be added. Pictures and PDFs in a folder need images and documents turned on.
+
 ## Migration
 
 ### `slm migrate`

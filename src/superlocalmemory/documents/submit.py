@@ -208,8 +208,7 @@ def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) ->
 
 def _place(root: Path, tmp: Path, profile_id: str) -> tuple[str, bool]:
     try:
-        new = not files.planned_path(root, profile_id, tmp, "pdf").exists()
-        return files.place_original(root, tmp, profile_id, "pdf"), new
+        return files.place_original_noting_new(root, tmp, profile_id, "pdf")
     except (OSError, ValueError):
         raise _refuse("The document could not be saved.") from None
 

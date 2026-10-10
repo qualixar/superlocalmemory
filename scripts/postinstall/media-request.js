@@ -20,14 +20,21 @@ const readline = require('readline');
 const FEATURES_FILE = 'features.json';
 
 const GIB = 1024 ** 3;
-// Same threshold as the Python side (MEDIA_RAM_WARN_BYTES in runtimes/media_env.py).
-const RAM_WARN_BYTES = 7.5 * GIB;
+// Same threshold and override as the Python side (MEDIA_MIN_RAM_BYTES and
+// LOW_RAM_OVERRIDE_ENV in runtimes/media_env.py): 15 GiB, because machines sold as
+// 16 GB report a little less.
+const MIN_RAM_BYTES = 15 * GIB;
+const LOW_RAM_OVERRIDE_ENV = 'SLM_MEDIA_ALLOW_LOW_RAM';
 
-/** One plain sentence for a small machine, or '' when memory is enough or unknown. Never blocks. */
-function ramWarning(totalBytes) {
-  if (!(totalBytes > 0 && totalBytes < RAM_WARN_BYTES)) return '';
-  return 'This computer has ' + (totalBytes / GIB).toFixed(1) + ' GB of memory. Images and documents work best '
-    + 'with 8 GB or more and may slow other apps while they work. You can still turn them on.';
+/**
+ * Why images and documents cannot be turned on here, or '' when they can.
+ * Unknown memory (0) is allowed; SLM_MEDIA_ALLOW_LOW_RAM=1 is the developer override.
+ */
+function ramRefusal(totalBytes, env = process.env) {
+  if (!(totalBytes > 0 && totalBytes < MIN_RAM_BYTES)) return '';
+  if (env && env[LOW_RAM_OVERRIDE_ENV] === '1') return '';
+  return 'Images and documents need a computer with at least 16 GB of memory; this one has '
+    + (totalBytes / GIB).toFixed(1) + ' GB. Your text memories keep working.';
 }
 
 function printWhatsNew(log = console.log) {
@@ -106,15 +113,21 @@ function askYesNo(question) {
 
 /**
  * Decide and (unless dry-run) record. `interactive` allows the question,
- * which defaults to No. Returns true when a request was recorded.
+ * which defaults to No. Returns true when a request was recorded. On a computer
+ * with less than 16 GB of memory it says so once and neither asks nor records.
  */
 async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesNo, log = console.log,
   totalMem = os.totalmem() }) {
   let wanted = mediaRequested(args, env);
-  const warning = ramWarning(totalMem);
-  if ((wanted || interactive) && warning) {
+  const refusal = ramRefusal(totalMem, env);
+  if ((wanted || interactive) && refusal) {
     log('');
-    log('SLM: ' + warning);
+    log('SLM: ' + refusal);
+    return false;  // not asked, nothing recorded: the daemon would refuse it anyway
+  }
+  if ((wanted || interactive) && totalMem > 0 && totalMem < MIN_RAM_BYTES) {
+    log('SLM: ' + LOW_RAM_OVERRIDE_ENV + '=1 is set; allowing images and documents on '
+      + (totalMem / GIB).toFixed(1) + ' GB of memory (16 GB needed).');
   }
   if (!wanted && interactive) {
     log('');
@@ -158,4 +171,4 @@ async function runMediaStep({ argv = [], env = process.env, tty, ask, log = cons
   }
 }
 
-module.exports = { ramWarning, runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };
+module.exports = { ramRefusal, MIN_RAM_BYTES, runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };

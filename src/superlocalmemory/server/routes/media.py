@@ -29,6 +29,7 @@ from superlocalmemory.documents import (
 )
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.retrieval.remote_view import parse_view
 from superlocalmemory.server.loopback import is_loopback
 
 router = APIRouter(prefix="/api/v3", tags=["media"])
@@ -232,8 +233,20 @@ def _anchor_visible(engine, anchor_id: str | None, profile: str) -> bool:
                                    (anchor_id, *params)))
 
 
+def _remote_may_see(engine, view: str, row: dict, profile: str) -> bool:
+    """A remote app sees its own profile's pictures only, and only those that held nothing private."""
+    from superlocalmemory.retrieval.remote_view import REMOTE_MEDIA, _vetted
+
+    if view != REMOTE_MEDIA or row["profile_id"] != profile:
+        return False
+    token = (f"m:{row['media_id']}" if row["kind"] == "image"
+             else f"p:{row['document_id']}:{row['page_no']}")
+    return token in _vetted(engine._db, profile)
+
+
 @router.get("/media/{media_id}/thumb")
-async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = ""):
+async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = "",
+                    caller_view: str = ""):
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.media import open_media_store
     from superlocalmemory.server.routes.helpers import require_engine
@@ -251,6 +264,9 @@ async def thumbnail(media_id: str, request: Request, profile_id: str = "", forma
     finally:
         store.close()
     if not row or row["state"] != "active" or not row["thumb_webp"]:
+        raise HTTPException(404, detail="Not found.")
+    view = parse_view(caller_view)
+    if view and not _remote_may_see(engine, view, row, profile):
         raise HTTPException(404, detail="Not found.")
     if row["profile_id"] != profile and not _anchor_visible(engine, row["anchor_memory_id"], profile):
         raise HTTPException(404, detail="Not found.")

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 FEATURES_FILE = "features.json"
 SOURCES = ("cli", "dashboard", "npm", "api")
 INSTALL_THREAD_NAME = "media-env-install"
+LOW_RAM_REFUSED = "low_ram"
 
 _stop_hook: Callable[[], None] | None = None
 _install_thread: threading.Thread | None = None
@@ -150,9 +151,20 @@ _NO_EXTENSIONS = ("Images and documents need a Python that can load SQLite exten
 
 def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | None = None,
                  data_root: str | Path | None = None) -> dict[str, Any]:
-    """Turn images and documents on: save the choice, create media.db, start the install."""
+    """Turn images and documents on: save the choice, create media.db, start the install.
+
+    Refused on a computer with less than 16 GB of memory (``media_env.media_ram_refusal``):
+    nothing is written or created, and the status carries ``refused: "low_ram"`` and the
+    plain-language reason in ``error``.
+    """
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
+    from superlocalmemory.runtimes.media_env import media_ram_message
+
+    refusal = media_ram_message()
+    if refusal:
+        return {**media_feature_status(data_root, env=env), "enabled": False,
+                "error": refusal, "refused": LOW_RAM_REFUSED}
     from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
     try:
@@ -263,10 +275,27 @@ def apply_requested(*, source: str = "npm", env: ManagedEnv | None = None,
     try:
         if not media_requested(data_root):
             return None
-        return enable_media(source=source, env=env, data_root=data_root)
+        status = enable_media(source=source, env=env, data_root=data_root)
+        if status.get("refused"):
+            _clear_refused_request(data_root, status)
+        return status
     except Exception:  # noqa: BLE001 - start-up must never fail on an optional feature
         logger.warning("could not act on the saved request for images and documents", exc_info=True)
         return None
+
+
+def _clear_refused_request(data_root: str | Path | None, status: dict[str, Any]) -> None:
+    """A request the computer cannot honour is recorded as refused and withdrawn, so the
+    next start does not try (or log) again. The file already exists: the installer wrote it."""
+    logger.warning("images and documents were requested but not turned on: %s", status.get("error", ""))
+    try:
+        data = read_features(data_root)
+        data["media"].pop("requested", None)
+        data["media"].update({"enabled": False, "refused": status["refused"],
+                              "refused_at": datetime.now(timezone.utc).isoformat()})
+        _write_features(data_root, data)
+    except OSError as exc:
+        logger.warning("could not record the refused request: %s", exc)
 
 
 # -- has this process picked the feature up? ----------------------------------

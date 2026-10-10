@@ -2094,6 +2094,15 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover - startup remains fail-soft
         logger.warning("install-token bootstrap failed: %s", exc)
 
+    # Pictures of a profile deleted in an earlier run that did not finish moving.
+    try:
+        from superlocalmemory.server.routes.helpers import DB_PATH as _memory_db
+        from superlocalmemory.storage.pending_media_moves import retry as _retry_picture_moves
+
+        await asyncio.to_thread(_retry_picture_moves, Path(_memory_db).parent)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("pending picture moves not retried: %s", exc)
+
     # Register the SSE bridge inside the application lifespan.  FastAPI's
     # legacy ``on_event`` hook is deprecated and, more importantly, made a
     # second startup mechanism compete with the daemon's existing lifespan.
@@ -6308,12 +6317,37 @@ def _worker_limit_mb(cmdline: list[str], default: int) -> int:
     return default
 
 
+def _watchdog_pass(parent_pid: int, max_worker_mb: int) -> None:
+    """One sweep: kill each child of ``parent_pid`` that holds more than its limit.
+
+    Memory is the physical footprint on macOS (RSS under-reports there), via
+    ``infra.proc_memory``.
+    """
+    import psutil
+
+    from superlocalmemory.infra import proc_memory
+
+    for child in psutil.Process(parent_pid).children(recursive=True):
+        try:
+            held_mb = proc_memory.process_memory_mb(child.pid)
+            limit_mb = _worker_limit_mb(child.cmdline(), max_worker_mb)
+            if 0 < limit_mb < held_mb:
+                logger.warning(
+                    "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
+                    child.name(), child.pid, held_mb, limit_mb,
+                )
+                child.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
 def _start_memory_watchdog() -> None:
     """v3.4.7: Background watchdog that kills child workers exceeding memory limit.
 
     Prevents the orphan worker memory explosion that caused 16GB+ RAM usage.
-    Checks every 60 seconds. Kills workers over 2GB RSS. Auto-restarts them
-    on next request (workers are lazy-spawned).
+    Checks every 15 seconds. Kills workers over their memory limit (2.5 GB, more
+    for the picture worker). Auto-restarts them on next request (workers are
+    lazy-spawned).
     """
     import threading
 
@@ -6323,20 +6357,7 @@ def _start_memory_watchdog() -> None:
         while True:
             time.sleep(15)  # V3.4.37: 15s (was 60s) — catch spikes faster
             try:
-                import psutil
-                parent = psutil.Process(os.getpid())
-                for child in parent.children(recursive=True):
-                    try:
-                        rss_mb = child.memory_info().rss / (1024 * 1024)
-                        limit_mb = _worker_limit_mb(child.cmdline(), MAX_WORKER_MB)
-                        if 0 < limit_mb < rss_mb:
-                            logger.warning(
-                                "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
-                                child.name(), child.pid, rss_mb, limit_mb,
-                            )
-                            child.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                _watchdog_pass(os.getpid(), MAX_WORKER_MB)
             except ImportError:
                 pass  # psutil not available — watchdog disabled
             except Exception as exc:

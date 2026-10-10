@@ -36,44 +36,80 @@ _VIEWS = (REMOTE, REMOTE_MEDIA)
 
 
 def parse_view(raw: Any) -> str:
-    """``raw`` as a view name, or ``""`` (a local caller)."""
+    """``raw`` as a view name; ``""`` (a local caller) only when nothing was sent."""
     value = str(raw or "").strip().lower()
-    return value if value in _VIEWS else ""
+    if not value:
+        return ""
+    # A value this version does not know is still a remote caller: the strictest view.
+    return value if value in _VIEWS else REMOTE
 
 
-def _vetted(db: Any, profile_id: str) -> frozenset[str]:
-    """Tokens (see ``visibility.media_token``) of this profile's pictures and pages that may be shown."""
-    path = getattr(db, "db_path", None)
-    if not isinstance(path, (str, Path)):
-        return frozenset()
-    media_db = Path(path).parent / "media.db"
-    if not media_db.is_file():
-        return frozenset()
-    try:
-        conn = sqlite3.connect(f"file:{media_db}?mode=ro", uri=True, timeout=5)
+class VettedMedia:
+    """Which pictures and pages of one profile may be shown, asked for only the ones in play.
+
+    ``token in vetted`` (see ``visibility.media_token``) looks up that picture, page or document
+    and nothing else; :meth:`prime` does it for a batch in one connection. A lookup that fails
+    answers no, so nothing is shown.
+    """
+
+    def __init__(self, media_db: Path | None, profile_id: str) -> None:
+        self._media_db = media_db
+        self._profile_id = profile_id
+        self._known: dict[str, bool] = {}
+
+    def prime(self, tokens: Any) -> None:
+        todo = [t for t in dict.fromkeys(tokens) if t and t not in self._known]
+        if not todo:
+            return
+        if self._media_db is None:
+            self._known.update(dict.fromkeys(todo, False))
+            return
         try:
-            ok: set[str] = set()
-            for media_id, document_id, page_no, remote_ok, kind in conn.execute(
-                    "SELECT media_id, document_id, page_no, remote_ok, kind FROM media_items"
-                    " WHERE profile_id = ?", (profile_id,)):
-                if remote_ok and kind == "image":
-                    ok.add(f"m:{media_id}")
-                elif remote_ok and document_id is not None:
-                    ok.add(f"p:{document_id}:{page_no}")
-            held_back = {r[0] for r in conn.execute(
-                "SELECT DISTINCT i.document_id FROM media_items i JOIN doc_pages p"
+            conn = sqlite3.connect(f"file:{self._media_db}?mode=ro", uri=True, timeout=5)
+            try:
+                for token in todo:
+                    self._known[token] = self._ask(conn, token)
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - fail closed: nothing is vetted
+            logger.warning("media visibility lookup failed, hiding media (%s)", type(exc).__name__)
+            self._known.update(dict.fromkeys(todo, False))
+
+    def _ask(self, conn: sqlite3.Connection, token: str) -> bool:
+        kind, _, rest = token.partition(":")
+        pid = self._profile_id
+        if kind == "m":
+            return conn.execute(
+                "SELECT 1 FROM media_items WHERE media_id = ? AND profile_id = ? AND remote_ok"
+                " AND kind = 'image'", (rest, pid)).fetchone() is not None
+        if kind == "p":
+            doc, _, page = rest.rpartition(":")
+            return conn.execute(
+                "SELECT 1 FROM media_items WHERE document_id = ? AND page_no = ? AND profile_id = ?"
+                " AND remote_ok", (doc, page, pid)).fetchone() is not None
+        if kind == "d":
+            if conn.execute("SELECT 1 FROM documents WHERE document_id = ? AND profile_id = ?",
+                            (rest, pid)).fetchone() is None:
+                return False
+            return conn.execute(
+                "SELECT 1 FROM media_items i JOIN doc_pages p"
                 " ON p.document_id = i.document_id AND p.page_no = i.page_no"
-                " WHERE i.profile_id = ? AND i.remote_ok = 0 AND p.text_origin != 'none'",
-                (profile_id,))}
-            ok |= {f"d:{r[0]}" for r in conn.execute(
-                "SELECT document_id FROM documents WHERE profile_id = ?", (profile_id,))
-                if r[0] not in held_back}
-            return frozenset(ok)
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001 - fail closed: nothing is vetted
-        logger.warning("media visibility lookup failed, hiding media (%s)", type(exc).__name__)
-        return frozenset()
+                " WHERE i.document_id = ? AND i.profile_id = ? AND i.remote_ok = 0"
+                " AND p.text_origin != 'none' LIMIT 1", (rest, pid)).fetchone() is None
+        return False
+
+    def __contains__(self, token: object) -> bool:
+        if not isinstance(token, str):
+            return False
+        self.prime([token])
+        return self._known.get(token, False)
+
+
+def _vetted(db: Any, profile_id: str) -> VettedMedia:
+    """The pictures and pages of ``profile_id`` that may be shown, looked up as they come up."""
+    path = getattr(db, "db_path", None)
+    media_db = Path(path).parent / "media.db" if isinstance(path, (str, Path)) else None
+    return VettedMedia(media_db if media_db is not None and media_db.is_file() else None, profile_id)
 
 
 def context_for(view: str, db: Any, profile_id: str) -> VisibilityContext | None:
@@ -95,4 +131,4 @@ def hidden_among(view: str, db: Any, profile_id: str, fact_ids: Any) -> set[str]
         return visibility.hidden_among(db, profile_id, ids)
 
 
-__all__ = ["REMOTE", "REMOTE_MEDIA", "VIEW_PARAM", "context_for", "hidden_among", "parse_view"]
+__all__ = ["REMOTE", "REMOTE_MEDIA", "VIEW_PARAM", "VettedMedia", "context_for", "hidden_among", "parse_view"]

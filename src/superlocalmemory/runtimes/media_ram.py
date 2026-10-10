@@ -8,20 +8,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from superlocalmemory.infra import proc_memory
 from superlocalmemory.runtimes import media_models
 
 _MB = 1024 * 1024
 
 
 def _rss_mb(pid: int | None) -> float | None:
+    """What the worker holds in MB (physical footprint on macOS); None when it is not running."""
     if pid is None:
         return None
-    try:
-        import psutil
-
-        return round(psutil.Process(pid).memory_info().rss / _MB, 1)
-    except Exception:  # noqa: BLE001 - a process that is gone is "not running"
-        return None
+    held = proc_memory.process_memory_mb(pid)
+    return round(held, 1) if held > 0 else None  # a process that is gone is "not running"
 
 
 def _system_total_mb() -> int:
