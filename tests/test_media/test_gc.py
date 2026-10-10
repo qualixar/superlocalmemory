@@ -77,3 +77,22 @@ def test_a_real_run_keeps_the_stored_pdf_of_a_document(tmp_path):
     assert rep.files_without_row == []
     assert (files.media_root(root) / relpath).exists()
     store.close()
+
+
+def test_operational_files_under_media_are_never_collected(tmp_path):
+    """Audit round 2 (CX7): uploads.db lives in media/ and is not an original; gc must never touch it."""
+    import os, time
+    root, db, store, *_rest, stray = _setup(tmp_path)
+    base = files.media_root(root)
+    kept = [base / "uploads.db", base / "uploads.db-wal", base / "uploads.db-shm",
+            base / "ab" / "notes.txt", base / "zz" / ("ab" + "0" * 62 + ".png")]
+    old = time.time() - 3600
+    for path in kept:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"keep")
+        os.utime(path, (old, old))
+    rep = gc("p1", dry_run=False, data_root=root)
+    assert rep.files_without_row == [stray.name]
+    assert all(p.exists() for p in kept)
+    assert not stray.exists()
+    store.close()

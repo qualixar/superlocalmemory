@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 YOUNG_FILE_S = 600.0
 _SKIP_DIRS = ("tmp",)
+#: Only a content-addressed original (``ab/ab<62 hex>.ext``) can be a stray. Everything else
+#: under media/ (uploads.db and its sidecars, anything a later release adds) is never collected.
+_ORIGINAL = re.compile(r"([0-9a-f]{2})/\1[0-9a-f]{62}\.[a-z0-9]{1,8}")
 
 
 @dataclass
@@ -89,7 +93,7 @@ def _stray_files(store, root: Path, now: float) -> tuple[list[Path], int]:
         rel = path.relative_to(base)
         if rel.parts[0] in _SKIP_DIRS or path.is_symlink() or not path.is_file():
             continue
-        if rel.as_posix() in known:
+        if not _ORIGINAL.fullmatch(rel.as_posix()) or rel.as_posix() in known:
             continue
         if now - path.stat().st_mtime < YOUNG_FILE_S:
             young += 1
