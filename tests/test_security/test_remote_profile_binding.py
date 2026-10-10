@@ -75,7 +75,7 @@ def test_no_profile_or_scope_like_argument_is_filed_as_neutral(registry) -> None
 
 def test_every_remote_tool_that_takes_scope_is_pinned_to_personal(registry) -> None:
     takes_scope = {t for t, args in registry.items()
-                   if t in policy.WRITE_TOOLS and "scope" in args}
+                   if t in policy.WRITE_TOOLS | policy.MEDIA_TOOLS and "scope" in args}
     assert takes_scope == binding.SCOPED_WRITE_TOOLS
 
 
@@ -471,3 +471,9 @@ def test_a_remote_app_cannot_name_a_file_even_for_a_media_tool():
         with pytest.raises(BindingRefusal):
             bind_arguments(tool, {"path": "/Users/me/photo.jpg"}, key_name="k", bound="default")
         assert "path" in bind_arguments(tool, {"path": ""}, key_name="k", bound="default")
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "remember_document"])
+def test_a_remote_picture_or_document_save_without_scope_is_pinned_to_personal(tool) -> None:
+    out = binding.bind_arguments(tool, {"base64": "x"}, key_name="k", bound="p")
+    assert out["scope"] == "personal"

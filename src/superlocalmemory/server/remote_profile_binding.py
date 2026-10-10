@@ -83,7 +83,7 @@ WRITE_SCOPE_ARGUMENTS: frozenset[str] = frozenset({"scope", "shared_with"})
 
 #: The remote-callable tools that take ``scope``; each remote save through them
 #: is pinned to ``personal``. The registry test keeps this list complete.
-SCOPED_WRITE_TOOLS: frozenset[str] = frozenset({"remember"})
+SCOPED_WRITE_TOOLS: frozenset[str] = frozenset({"remember", "remember_media", "remember_document"})
 
 #: Served for the key's profile by the per-request profile path (4.1.19), with
 #: the host's active profile untouched.
