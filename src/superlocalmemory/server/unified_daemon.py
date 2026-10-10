@@ -3378,6 +3378,15 @@ async def lifespan(application: FastAPI):
             upload_housekeeping.run(), name="upload-housekeeping"
         )
 
+    # Pictures saved while their memory was queued are linked to it once it commits.
+    _media_hk_task = getattr(application.state, "_media_housekeeping_task", None)
+    if _media_hk_task is None or _media_hk_task.done():
+        from superlocalmemory.server import media_housekeeping
+
+        application.state._media_housekeeping_task = asyncio.create_task(
+            media_housekeeping.run(), name="media-housekeeping"
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3536,6 +3545,13 @@ async def lifespan(application: FastAPI):
         _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
         if _upload_hk is not None and not _upload_hk.done():
             _upload_hk.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _media_hk = getattr(application.state, "_media_housekeeping_task", None)
+        if _media_hk is not None and not _media_hk.done():
+            _media_hk.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 

@@ -60,6 +60,16 @@ class EraseMixin:
             "SELECT media_id, anchor_memory_id FROM media_items WHERE profile_id = ?", (profile_id,))
         return {r[0]: r[1] for r in rows.fetchall()}
 
+    def profiles_missing_anchor(self) -> list[str]:
+        """Profiles with a picture that has no anchor memory yet (its save was still queued).
+
+        Only pictures: a document page without text has no memory by design, and a memory never names it.
+        """
+        rows = self._read().execute(
+            "SELECT DISTINCT profile_id FROM media_items WHERE anchor_memory_id IS NULL AND kind = 'image'"
+            " ORDER BY profile_id")
+        return [r[0] for r in rows.fetchall()]
+
     def fill_anchor(self, media_id: str, memory_id: str) -> bool:
         """Set the anchor of an item saved while its memory was still queued; never overwrites one."""
         with self._write() as conn:

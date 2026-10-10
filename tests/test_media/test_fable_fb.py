@@ -79,3 +79,73 @@ def test_a_copy_of_the_upload_database_left_in_the_mirror_by_an_older_backup_is_
         (mirror / name).write_bytes(b"old copy")
     backup_media.sync_originals(root, backup)
     assert sorted(p.relative_to(mirror).as_posix() for p in mirror.rglob("*") if p.is_file()) == [rel]
+
+
+# -- CX1 residual: a picture saved while its memory was queued is linked to it without a manual gc ----
+
+import asyncio  # noqa: E402
+
+from superlocalmemory.media.gc import fill_anchors  # noqa: E402
+from tests.test_media._erase_support import add_image, make_root  # noqa: E402
+
+
+def _queued_picture_library(tmp_path):
+    """One picture still without an anchor (its memory exists now), plus an orphan row and a stray file."""
+    root, db, store = make_root(tmp_path)
+    add_image(root, store, media_id="d" * 32, memory_id=None, data=b"queued")
+    db.add_memory("m7", media_id="d" * 32)
+    add_image(root, store, media_id="e" * 32, memory_id="deleted", data=b"orphan")  # rows without a memory
+    stray = files.media_root(root) / "ab" / ("ab" + "0" * 62 + ".png")
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"x")
+    import os
+    import time
+
+    os.utime(stray, (time.time() - 3600, time.time() - 3600))
+    return root, store, stray
+
+
+def test_fill_anchors_links_the_queued_pictures_of_every_profile_and_deletes_nothing(tmp_path):
+    root, store, stray = _queued_picture_library(tmp_path)
+    assert fill_anchors(data_root=root) == 1
+    assert store.anchors("p1")["d" * 32] == "m7"
+    assert "e" * 32 in store.anchors("p1") and stray.exists()  # gc's deletions are never done here
+    assert fill_anchors(data_root=root) == 0  # nothing left to link: a no-op
+    store.close()
+
+
+def test_fill_anchors_without_a_library_is_a_no_op(tmp_path):
+    assert fill_anchors(data_root=tmp_path / "nothing") == 0
+
+
+def test_the_housekeeping_pass_links_queued_pictures_and_survives_a_failure(tmp_path):
+    from superlocalmemory.server import media_housekeeping as hk
+
+    root, store, _ = _queued_picture_library(tmp_path)
+    calls = {"n": 0}
+
+    def fill(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk busy")
+        return fill_anchors(**kw)
+
+    async def drive():
+        task = asyncio.create_task(hk.run(root, fill=fill, interval_s=0.01, first_delay_s=0.0))
+        await asyncio.sleep(0.3)
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(drive())
+    assert calls["n"] >= 2 and store.anchors("p1")["d" * 32] == "m7"
+    store.close()
+
+
+def test_the_daemon_starts_and_stops_the_media_housekeeping_loop():
+    from superlocalmemory.server import media_housekeeping as hk
+
+    assert 0 < hk.INTERVAL_S <= 3600
+    source = (Path(hk.__file__).parent / "unified_daemon.py").read_text()
+    assert "media_housekeeping" in source and source.count("_media_housekeeping_task") >= 3
