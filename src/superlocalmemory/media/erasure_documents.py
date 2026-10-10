@@ -47,7 +47,7 @@ def erase_document_rows(store: Any, root: Path, document_ids: Iterable[str]) -> 
     out["documents"] = len(removed)
     for doc in removed:
         rel, sha = doc["source_relpath"], doc["sha256"]
-        if not rel or store.file_in_use(sha, rel) or not (files.media_root(root) / rel).exists():
+        if not rel or store.file_in_use(rel) or not (files.media_root(root) / rel).exists():
             continue
         files.remove_original(root, rel)
         if (files.media_root(root) / rel).exists():

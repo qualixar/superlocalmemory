@@ -171,6 +171,11 @@ def recall_keyword_fallback(
 
         pool_limit = overfetch_limit(limit) if has_facets else limit
         candidates = _fetch_candidates(db, pid, query, pool_limit)
+        from superlocalmemory.retrieval import visibility
+
+        if not visibility.is_empty():  # a remote caller: never what it may not see
+            hidden = visibility.hidden_among(db, pid, [d.get("fact_id") for d in candidates])
+            candidates = [d for d in candidates if d.get("fact_id") not in hidden]
         if has_facets:
             candidates, facet_filter_error, project_scope, tag_scope = _apply_facets(
                 engine, db, pid, candidates, facets)

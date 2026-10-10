@@ -53,16 +53,16 @@ def erase_items(store: Any, root: Path, media_ids: Iterable[str]) -> dict[str, A
     seen: set[tuple[Any, Any]] = set()
     for item in removed:
         sha, rel = item["stored_sha256"], item["original_relpath"]
-        if (sha, rel) in seen or store.file_in_use(sha, rel):
+        if (sha, rel) in seen:
             continue
         seen.add((sha, rel))
-        if rel and not _gone(root, rel):
+        if rel and not store.file_in_use(rel) and not _gone(root, rel):
             files.remove_original(root, rel)
             if _gone(root, rel):
                 out["files"] += 1
             else:
                 out["residue"].append(f"file:{(sha or '')[:12]}")
-        if sha:
+        if sha and not store.content_in_use(sha):
             try:
                 from superlocalmemory.cache.factory import invalidate_content
 
@@ -206,7 +206,7 @@ class MediaErasureOwner:
                     residue.extend(f"media:{i}" for i in pictures if store.get_item(i))
                     residue.extend(f"document:{d}" for d in store.documents_left_empty(touched))
                     for sha, rel in self._left.get(context.operation_id, []):
-                        if not store.file_in_use(sha, rel) and not _gone(root, rel):
+                        if not store.file_in_use(rel) and not _gone(root, rel):
                             residue.append(f"file:{sha[:12]}")
                 finally:
                     store.close()
@@ -245,7 +245,7 @@ def scrub_snapshot(db_path: str | Path, profile_id: str) -> dict[str, int]:
         store.delete_profile_rows(profile_id)
         removed_files = 0
         for sha, rel in {(r[0], r[1]) for r in rows}:
-            if not store.file_in_use(sha, rel) and rel and files.remove_original(db_path.parent, rel):
+            if not store.file_in_use(rel) and rel and files.remove_original(db_path.parent, rel):
                 removed_files += 1
         store._w.execute("PRAGMA secure_delete=ON")
         store._w.execute("VACUUM")

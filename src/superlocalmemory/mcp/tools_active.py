@@ -140,6 +140,22 @@ def _sqlite_emergency_recall(
         return PoolRecallResponse()
 
 
+def _emergency_or_nothing(query: str, limit: int, profile_id: str, max_age_days: int) -> "PoolRecallResponse":
+    """The direct-database fallback, for callers on this computer only.
+
+    It reads memories without the visibility rules recall applies, so a caller
+    on another computer gets an empty answer instead (its call came through the
+    running service, which is the path that applies those rules).
+    """
+    from superlocalmemory.mcp.remote_caller import current_remote_key_id
+
+    if current_remote_key_id() is not None:
+        from superlocalmemory.mcp._pool_adapter import PoolRecallResponse
+
+        return PoolRecallResponse()
+    return _sqlite_emergency_recall(query, limit, profile_id=profile_id, max_age_days=max_age_days)
+
+
 def _get_agent_id(default: str = "mcp_client") -> str:
     """Resolve the calling agent's ID for attribution.
 
@@ -476,11 +492,7 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     "Memory system is in DEGRADED MODE: semantic/graph channels unavailable.",
                     exc,
                 )
-                response = _sqlite_emergency_recall(
-                    search_query, max_results,
-                    profile_id=pid,
-                    max_age_days=max_age_days,
-                )
+                response = _emergency_or_nothing(search_query, max_results, pid, max_age_days)
                 degraded_mode = True
 
             # Age gate: suppress stale memories at session start.

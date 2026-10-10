@@ -46,21 +46,21 @@ def test_the_obligation_scan_sees_media_in_a_backup_set(tmp_path):
 
 def test_the_scrub_removes_rows_vectors_and_the_erased_original(tmp_path):
     root, db, store = make_root(tmp_path)
-    sha1, _ = add_image(root, store, media_id="a" * 32, profile="p1", memory_id="m1", data=b"one")
-    sha2, _ = add_image(root, store, media_id="b" * 32, profile="p2", memory_id="m2", data=b"two")
+    _, rel1 = add_image(root, store, media_id="a" * 32, profile="p1", memory_id="m1", data=b"one")
+    _, rel2 = add_image(root, store, media_id="b" * 32, profile="p2", memory_id="m2", data=b"two")
     backups, snap = _snapshot(root, store)
     store.close()
     setdir = backups / "backup_0001"
     (setdir / "media").mkdir(parents=True)
-    for sha in (sha1, sha2):  # the snapshot holds a copy of the originals folder
-        dest = setdir / "media" / sha[:2] / f"{sha}.png"
+    for rel in (rel1, rel2):  # the snapshot holds a copy of the originals folder
+        dest = setdir / "media" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"copy")
     shutil.move(snap, setdir / "media.db")
     out = erase_profile_from_snapshot(setdir / "media.db", "p1")
     assert out.get("media_items") == 1
-    assert not (setdir / "media" / sha1[:2] / f"{sha1}.png").exists()
-    assert (setdir / "media" / sha2[:2] / f"{sha2}.png").exists()
+    assert not (setdir / "media" / rel1).exists()
+    assert (setdir / "media" / rel2).exists()
     conn = sqlite3.connect(setdir / "media.db")
     assert [r[0] for r in conn.execute("SELECT media_id FROM media_items")] == ["b" * 32]
     assert conn.execute("SELECT COUNT(*) FROM media_vector_rows").fetchone()[0] == 1

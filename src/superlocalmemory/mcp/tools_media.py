@@ -62,6 +62,11 @@ def _remote_source_refusal(args: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _profiles(text: str) -> list[str]:
+    """The profile ids in a comma-separated ``shared_with``, as ``remember`` reads it."""
+    return [p.strip() for p in (text or "").split(",") if p.strip()]
+
+
 def _clean(text: object) -> str:
     """Short error text with any link removed (a link can carry a secret query)."""
     return _LINK.sub("[link]", str(text))[:300]
@@ -293,15 +298,18 @@ def register_media_tools(server: Any) -> None:
     async def remember_media(
         path: str = "", download_url: str = "", base64: str = "",
         content: str = "", tags: str = "", profile_id: str = "",
-        idempotency_key: str = "",
+        idempotency_key: str = "", scope: str = "", shared_with: str = "",
     ) -> dict:
         """Save an image as a memory, from a file on this computer, an https link or base64.
 
-        Give exactly one of path, download_url or base64. Apps on other computers need the owner's permission.
+        Give exactly one of path, download_url or base64. ``scope`` (personal, project, shared or
+        global) and ``shared_with`` (comma-separated profile ids) work as they do for remember. Apps on other computers need the
+        owner's permission.
         """
         return await _remember({
             "path": path, "download_url": download_url, "base64": base64, "content": content,
-            "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key})
+            "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key,
+            "scope": scope, "shared_with": _profiles(shared_with)})
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
     @admits(OperationKind.RECALL)
@@ -318,16 +326,18 @@ def register_document_tools(server: Any) -> None:
     async def remember_document(
         path: str = "", base64: str = "", file_name: str = "",
         content: str = "", tags: str = "", profile_id: str = "",
-        idempotency_key: str = "",
+        idempotency_key: str = "", scope: str = "", shared_with: str = "",
     ) -> dict:
         """Save a PDF as a memory, from a file on this computer or base64. Work continues in the
         background: the answer has a job_id to follow with media_status.
 
-        Give exactly one of path or base64. Apps on other computers need the owner's permission.
+        Give exactly one of path or base64. ``scope`` and ``shared_with`` (comma-separated profile ids) work as they do for remember.
+        Apps on other computers need the owner's permission.
         """
         return await _remember_document({
             "path": path, "base64": base64, "file_name": file_name, "content": content,
-            "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key})
+            "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key,
+            "scope": scope, "shared_with": _profiles(shared_with)})
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
     @admits(OperationKind.RECALL)

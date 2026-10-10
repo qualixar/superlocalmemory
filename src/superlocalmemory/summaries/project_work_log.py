@@ -51,7 +51,9 @@ from .base import (
     GENERATED_BY_EXTRACTIVE,
     GENERATED_BY_LLM_B,
     GENERATED_BY_LLM_C,
+    HiddenOf,
     SummaryResult,
+    without_hidden,
     get_mode_str,
 )
 
@@ -69,6 +71,8 @@ def generate_project_work_log(
     project_path: str,
     profile_id: str = "default",
     config: object | None = None,
+    *,
+    hidden_of: HiddenOf | None = None,
 ) -> SummaryResult:
     """Generate a Project Work Log for a specific project.
 
@@ -93,6 +97,8 @@ def generate_project_work_log(
     tool_rows, facts_rows, query_error = _query_project_data(
         db_path, project_path, profile_id
     )
+
+    facts_rows = without_hidden(facts_rows, hidden_of)
 
     if query_error:
         return SummaryResult(

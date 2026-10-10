@@ -362,7 +362,16 @@ def _prestage_recall(query: str, limit: int, profile_id: str, as_of: str | None 
     kwargs = {"profile_id": target, "limit": limit}
     if as_of is not None:
         kwargs["as_of"] = as_of
-    return _memories_from(engine.recall(query, **kwargs))
+    # A remote caller never gets what it may not see (pictures, pages, folder files).
+    from superlocalmemory.mcp.remote_visibility import current_view
+    from superlocalmemory.retrieval import remote_view, visibility
+
+    ctx = remote_view.context_for(current_view(), getattr(engine, "_db", None),
+                                  target or getattr(engine, "profile_id", "default"))
+    if ctx is None:
+        return _memories_from(engine.recall(query, **kwargs))
+    with visibility.use(ctx):
+        return _memories_from(engine.recall(query, **kwargs))
 
 
 register_prestage_tool(_target, _prestage_recall)

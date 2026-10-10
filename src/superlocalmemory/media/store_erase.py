@@ -92,16 +92,17 @@ class EraseMixin:
                 pass
         return removed
 
-    def file_in_use(self, stored_sha256: str | None, original_relpath: str | None) -> bool:
+    def file_in_use(self, original_relpath: str | None) -> bool:
         """Whether any remaining item or document (any profile, any state) still points at this file."""
-        conn = self._read()
-        if stored_sha256 and conn.execute(
-                "SELECT 1 FROM media_items WHERE stored_sha256 = ? LIMIT 1", (stored_sha256,)).fetchone():
-            return True
-        if original_relpath and conn.execute(
+        if original_relpath and self._read().execute(
                 "SELECT 1 FROM media_items WHERE original_relpath = ? LIMIT 1", (original_relpath,)).fetchone():
             return True
         return self.document_file_in_use(original_relpath)
+
+    def content_in_use(self, stored_sha256: str | None) -> bool:
+        """Whether any remaining item (any profile) has this stored content; cached results are keyed by it."""
+        return bool(stored_sha256 and self._read().execute(
+            "SELECT 1 FROM media_items WHERE stored_sha256 = ? LIMIT 1", (stored_sha256,)).fetchone())
 
     def known_relpaths(self) -> set[str]:
         """Every file the store points at: image originals and the stored PDF of each document."""

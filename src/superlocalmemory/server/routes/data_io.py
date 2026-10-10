@@ -115,6 +115,8 @@ async def export_memories(
 
         cursor.execute(query, params)
         memories = cursor.fetchall()
+        if use_v3:
+            _mark_sources(cursor, memories, active_profile)
         conn.close()
 
         if format == "jsonl":
@@ -167,6 +169,40 @@ async def export_memories(
 
     except Exception:
         raise _internal_error("Export error")
+
+
+# What a marker may say in an export: ids only, never a path or a file name.
+_SOURCE_KEYS = ("media_id", "document_id", "page", "part", "source_id")
+_SOURCE_TYPES = {"media": "media", "document": "document_page", "folder": "folder"}
+
+
+def _mark_sources(cursor: Any, facts: list, profile_id: str) -> None:
+    """Tag the facts that came from a picture, a document page or a connected folder.
+
+    Only their text is exported (never the picture, the document or the folder),
+    so the record says where the text came from. Other facts are left untouched.
+    """
+    try:
+        cursor.execute(
+            "SELECT memory_id, metadata_json FROM memories WHERE profile_id = ?"
+            " AND metadata_json LIKE '%_slm_source%'", (profile_id,))
+        marks: dict[str, dict] = {}
+        for row in cursor.fetchall():
+            try:
+                raw = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
+            except ValueError:
+                continue
+            kind = _SOURCE_TYPES.get(raw.get("type")) if isinstance(raw, dict) else None
+            if kind:
+                marks[row["memory_id"]] = {
+                    "type": kind, **{k: raw[k] for k in _SOURCE_KEYS if k in raw}}
+    except Exception:  # noqa: BLE001 -- an export must not fail over a marker
+        logger.warning("export: source markers unavailable")
+        return
+    for fact in facts:
+        mark = marks.get(fact.get("memory_id"))
+        if mark:
+            fact["source"] = dict(mark)
 
 
 def _has_column(cursor: Any, table: str, column: str) -> bool:
