@@ -1946,6 +1946,41 @@ def _stop_deployment_retention(application) -> bool:
     return True
 
 
+_NO_MODEL_WARNING = (
+    "Embedding model not loaded (warm-up returned no vector); recall is "
+    "keyword-only until a model is available. Run 'slm warmup' or 'slm doctor'."
+)
+_NO_VECTOR_REASON = "the embedding model did not load (no vector returned)"
+
+
+def _is_real_vector(vector: object) -> bool:
+    """True when an embed call produced a non-empty vector (list or array)."""
+    if vector is None:
+        return False
+    try:
+        return len(vector) > 0  # type: ignore[arg-type]
+    except TypeError:
+        return False
+
+
+def _warm_embedder_once(engine: object, retrieval_eng: object) -> tuple[bool, str]:
+    """One warm-up attempt for the lifespan retry loop.
+
+    ``(True, "")`` the model produced a vector. ``(False, "")`` there is no
+    embedder object yet, so the caller should retry. ``(False, reason)`` the
+    embedder exists but returned no vector; retrying would only respawn
+    workers, so the caller stops and recall-health owns later attempts.
+    Exceptions from ``embed`` propagate to the caller's handler.
+    """
+    re_ = retrieval_eng or getattr(engine, "_retrieval_engine", None)
+    embedder = getattr(re_, "_embedder", None) if re_ else None
+    if embedder is None or not hasattr(embedder, "embed"):
+        return False, ""
+    if not _is_real_vector(embedder.embed("warmup")):
+        return False, _NO_VECTOR_REASON
+    return True, ""
+
+
 def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     """Load the embedding model in the background. Never blocks startup.
 
@@ -1968,9 +2003,12 @@ def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     def _warm() -> None:
         started = time.time()
         try:
-            embedder.embed("slm embedder warm-up")
+            vector = embedder.embed("slm embedder warm-up")
         except Exception as exc:  # pragma: no cover — warming is best effort
             logger.debug("embedder warm-up failed (%s) — writes will defer", exc)
+            return
+        if not _is_real_vector(vector):
+            logger.warning(_NO_MODEL_WARNING)
             return
         logger.info(
             "Embedding model warm and ready (%.1fs)", time.time() - started,
@@ -2558,10 +2596,13 @@ async def lifespan(application: FastAPI):
             last_error = ""
             for _attempt in range(240):  # ~120s max at 0.5s steps
                 try:
-                    _re = retrieval_eng or getattr(engine, '_retrieval_engine', None)
-                    embedder = getattr(_re, '_embedder', None) if _re else None
-                    if embedder is not None and hasattr(embedder, 'embed'):
-                        embedder.embed("warmup")
+                    warmed, reason = _warm_embedder_once(engine, retrieval_eng)
+                    if reason:
+                        _embedding_warm = False
+                        _embedding_warmup_error = reason
+                        logger.warning(_NO_MODEL_WARNING)
+                        return
+                    if warmed:
                         _embedding_warm = True
                         _embedding_warmup_error = None
                         logger.info(
