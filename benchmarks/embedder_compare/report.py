@@ -10,19 +10,23 @@ import json
 import sys
 from pathlib import Path
 
+import candidates
 import stats
 from build_dataset import HERE, bench_home, dataset_hash, manifest_hash
 
 TEXT = ("text_single_hop", "text_multi_hop", "entity", "temporal")
-GROUPS = {**{s: (s,) for s in (*TEXT, "image", "pdf_page")},
-          "text_overall": TEXT, "media_overall": ("image", "pdf_page")}
+GROUPS = {**{s: (s,) for s in (*TEXT, "image", "photo", "pdf_page")},
+          "text_overall": TEXT, "temporal_entity": ("entity", "temporal"),
+          "media_overall": ("image", "photo", "pdf_page")}
 METRICS = ("recall@5", "mrr@10", "ndcg@10")
 MIN_STRATUM_N = 30
 FROZEN_DEFAULT = HERE / "golden" / "test_manifest.sha256"
 SYSTEM_LABELS = {"bm25": "bm25 (smoke, never a verdict)",
                  "s1": "S1 nomic as SLM ships it (no task prefixes), media via OCR",
                  "s1p": "S1p nomic with task prefixes (reference only)",
-                 "s2": "S2 EmbeddingGemma 2 one-model", "s3": "S3 nomic text + EmbeddingGemma 2 media (weighted RRF)"}
+                 "s2": "S2 EmbeddingGemma 2 one-model", "s3": "S3 nomic text + EmbeddingGemma 2 media (weighted RRF)",
+                 **candidates.LABELS}
+VS_S1 = ("s2", "s3", *candidates.SYSTEMS)
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -126,7 +130,7 @@ def fisher_p(run_a: dict, run_b: dict, qrels: dict, qids: list[str]) -> float | 
 
 def paired(res_a: dict, res_b: dict, runs: tuple, qrels: dict) -> dict:
     out = {}
-    for group in ("text_overall", "image", "pdf_page"):
+    for group in ("text_overall", "temporal_entity", "image", "photo", "pdf_page", "media_overall"):
         va, vb = res_a[group]["recall@5"]["values"], res_b[group]["recall@5"]["values"]
         ids = sorted(set(va) & set(vb))
         d, lo, hi = stats.paired_delta_ci([va[i] for i in ids], [vb[i] for i in ids])
@@ -143,6 +147,31 @@ def one_model(results: dict) -> dict:
     ids = sorted(set(a) & set(b))
     bm25 = results.get("bm25", {}).get("text_overall", {}).get("recall@5", {}).get("mean")
     return stats.one_model_rule([a[i] for i in ids], [b[i] for i in ids], bm25_point=bm25)
+
+
+def text_vs_s1(results: dict) -> dict:
+    """The one-model text rule applied to every candidate against shipped S1."""
+    if "s1" not in results:
+        return {}
+    a = results["s1"]["text_overall"]["recall@5"]["values"]
+    bm25 = results.get("bm25", {}).get("text_overall", {}).get("recall@5", {}).get("mean")
+    out = {}
+    for name in VS_S1:
+        if name in results:
+            b = results[name]["text_overall"]["recall@5"]["values"]
+            ids = sorted(set(a) & set(b))
+            out[name] = stats.one_model_rule([a[i] for i in ids], [b[i] for i in ids], bm25_point=bm25)
+    return out
+
+
+def _text_rule_lines(rules: dict) -> list[str]:
+    out = ["## Text non-inferiority against S1 (every candidate)", "",
+           "Same rule as the one-model rule: 95% CI lower bound of text recall@5 (candidate minus S1) >= -0.03.", "",
+           "| system | verdict | delta | 95% CI | n |", "|---|---|---|---|---|"]
+    for name, r in rules.items():
+        out.append(f"| {name} | {r['verdict']} | {r['delta']:+.3f} | [{r['delta_ci'][0]:+.3f}, "
+                   f"{r['delta_ci'][1]:+.3f}] | {r['n']} |")
+    return out
 
 
 def _fmt(cell: dict) -> str:
@@ -256,6 +285,7 @@ def render(ctx: dict) -> str:
     out += ["", "## Latency and memory", ""] + _latency_lines(ctx["timings"])
     out += [""] + _extra_timing_lines(ctx["timings"])
     out += ["", "## One-model rule", "", _one_model_text(ctx["one_model"]), ""]
+    out += _text_rule_lines(ctx["text_vs_s1"]) + [""]
     return "\n".join(out)
 
 
@@ -286,11 +316,12 @@ def build_context(home: Path, runs_dir: Path) -> dict:
         ctx["results"][name] = evaluate(run, qrels, queries["test"])
         ctx["abstention"][name] = abstention(queries, json.loads((runs_dir / f"{name}.abstain.json").read_text()))
         ctx["timings"][name] = json.loads((runs_dir / f"{name}.timings.json").read_text())
-    for a, b in (("s1", "s2"), ("s1", "s3"), ("s2", "s3")):
+    for a, b in (*(("s1", x) for x in VS_S1), ("s2", "s3")):
         if a in ctx["results"] and b in ctx["results"]:
             ctx["paired"][f"{a} -> {b}"] = paired(ctx["results"][a], ctx["results"][b],
                                                   (ctx["runs"][a], ctx["runs"][b]), all_qrels)
     ctx["one_model"] = one_model(ctx["results"])
+    ctx["text_vs_s1"] = text_vs_s1(ctx["results"])
     return ctx
 
 
@@ -316,7 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     ctx = build_context(args.home, runs_dir)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "RESULTS.md").write_text(render(ctx))
-    summary = {k: ctx[k] for k in ("status", "abstention", "paired", "one_model", "timings", "manifest")}
+    summary = {k: ctx[k] for k in ("status", "abstention", "paired", "one_model", "text_vs_s1",
+                                   "timings", "manifest")}
     summary["results"] = _strip_values(ctx["results"])
     (args.out / "RESULTS.json").write_text(json.dumps(summary, indent=1))
     return 0
