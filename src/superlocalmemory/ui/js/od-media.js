@@ -7,7 +7,7 @@
 // Routes: POST /api/v3/media/upload?kind=image|pdf (the file itself as the body, streamed)
 //         GET /api/v3/media (saved images)  GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
 //         GET /api/v3/documents         GET /api/v3/documents/lint
-//         DELETE /api/v3/documents/{id}
+//         DELETE /api/v3/documents/{id}  POST /api/v3/documents/{id}/retry (a failed document, from its stored copy)
 (function () {
   'use strict';
 
@@ -241,6 +241,25 @@
     });
   }
 
+  // A failed document is read again from the copy already saved: nothing is dropped again.
+  function retryDocument(ui, d, li, button) {
+    button.disabled = true;
+    var row = { status: el('span', 'muted', ' Trying again…') };
+    li.appendChild(row.status);
+    F().api('POST', '/api/v3/documents/' + d.document_id + '/retry').then(function (res) {
+      if (!res.ok) {
+        button.disabled = false;
+        return setStatus(row, F().failText(res, 'Could not try again.'));
+      }
+      var jobId = String((res.data && res.data.job_id) || '');
+      if (res.data && res.data.status === 'processing' && ID_RE.test(jobId)) {
+        setStatus(row, 'Reading…');
+        return pollJob(ui, row, jobId);
+      }
+      loadDocuments(ui);
+    });
+  }
+
   function documentRow(ui, d) {
     var li = el('li');
     li.appendChild(el('strong', null, d.title || 'Untitled'));
@@ -248,6 +267,9 @@
     var names = (d.entities || []).map(function (e) { return e.name; }).join(', ');
     if (names) li.appendChild(el('div', 'muted', names));
     if (ID_RE.test(String(d.document_id || ''))) {
+      if (d.state === 'failed') {
+        li.appendChild(F().button('Try again', 'btn sm primary', function (b) { retryDocument(ui, d, li, b); }));
+      }
       li.appendChild(F().button('Remove', 'btn sm', function () { removeDocument(ui, d); }));
     }
     return li;

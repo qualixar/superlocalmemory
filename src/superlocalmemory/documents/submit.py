@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -312,6 +313,73 @@ def _retry(store: Any, row: dict, payload: dict[str, Any]) -> DocumentReceipt:
     store.update_document(row["document_id"], state="processing")
     return DocumentReceipt("processing", document_id=row["document_id"],
                            job_id=_queue(store, row["document_id"], row["profile_id"], payload))
+
+
+_GONE = "The saved copy of this document is missing. Add the document again."
+_RETRY_UNSAVED = "The document could not be queued again right now. Try again."
+
+
+def _job_payload(job: dict | None, document_id: str, actor_id: str) -> dict[str, Any]:
+    """The words, tags and date the document was first saved with (the job's own input)."""
+    try:
+        saved = json.loads((job or {}).get("payload_json") or "{}")
+    except ValueError:
+        saved = {}
+    payload = {k: v for k, v in saved.items() if k != "document_id"} if isinstance(saved, dict) else {}
+    payload.setdefault("user_words", "")
+    payload.setdefault("tags", "")
+    payload.setdefault("session_date", "")
+    payload.setdefault("actor_id", actor_id)
+    return payload
+
+
+def _retry_receipt(store: Any, row: dict, actor_id: str) -> DocumentReceipt:
+    """Re-queue one failed (or stuck) document from its stored original, with its first payload."""
+    doc_id = row["document_id"]
+    job = store.job_for_document(doc_id)
+    if not (files.media_root(Path(store.path).parent) / str(row["source_relpath"])).is_file():
+        return DocumentReceipt("refused", document_id=doc_id, reason=_GONE)
+    if row["state"] == "failed" and not store.claim_failed_document(doc_id):
+        # Another try got there first: follow the job it queued.
+        job = store.job_for_document(doc_id)
+        return DocumentReceipt("processing", document_id=doc_id, job_id=job["job_id"] if job else None)
+    payload = _job_payload(job, doc_id, actor_id)
+    try:
+        return _retry(store, row, payload)
+    except Exception as exc:  # noqa: BLE001 - nothing was queued; the document stays failed so the person can try again
+        logger.warning("document was not queued again (%s)", type(exc).__name__)
+        try:
+            store.update_document(doc_id, state="failed")
+        except Exception as inner:  # noqa: BLE001
+            logger.warning("document state was not restored (%s)", type(inner).__name__)
+        return DocumentReceipt("refused", document_id=doc_id, reason=_RETRY_UNSAVED)
+
+
+def retry_document(document_id: str, *, profile_id: str, actor_id: str, store: Any = None) -> DocumentReceipt | None:
+    """Try a failed document again from the original already stored; the file is never sent twice.
+
+    None when the document is unknown, belongs to another profile or was removed. A document that
+    is still being read answers ``processing`` with its job; a finished one answers ``duplicate``.
+    """
+    opened, store_ref = False, store
+    try:
+        store_ref, opened = _resolve(store)
+        row = store_ref.get_document(document_id)
+        if not row or row["profile_id"] != profile_id or row["state"] == "tombstoned":
+            return None
+        receipt = _repeat(store_ref, row) if row["state"] in _HOLD_STATES else None
+        if receipt is None:
+            receipt = _retry_receipt(store_ref, row, actor_id)
+    except _Stop as stop:
+        return stop.receipt
+    finally:
+        if opened and store_ref is not None:
+            store_ref.close()
+    if receipt.status == "processing":
+        from superlocalmemory.documents.runner import wake_active
+
+        wake_active()
+    return receipt
 
 
 def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: dict, key: str) -> DocumentReceipt:

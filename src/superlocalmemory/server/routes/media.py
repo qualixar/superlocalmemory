@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from superlocalmemory.core.media_fetch import too_large_for_remote
 from superlocalmemory.documents import (
-    document_index, document_lint, job_status, remove_document, submit_document,
+    document_index, document_lint, job_status, remove_document, retry_document, submit_document,
 )
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
@@ -340,6 +340,30 @@ async def submit(req: DocumentSubmitRequest, request: Request):
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
         tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
         scope=scope, shared_with=shared_with)
+    body = dataclasses.asdict(receipt)
+    if receipt.status == "refused":
+        body["detail"] = receipt.reason
+    return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
+
+
+@router.post("/documents/{document_id}/retry")
+async def retry(document_id: str, request: Request, profile_id: str = ""):
+    """Try a failed document again from the original already stored (no file is dropped again)."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import require_engine
+    from superlocalmemory.server.write_governance import enforce_remember_governance
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    actor_id = authenticated_request_actor(request, actor_kind="http-media")
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id, request, Permission.WRITE)
+    if not _ID.fullmatch(document_id):
+        raise HTTPException(404, detail="Not found.")
+    enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview="")
+    receipt = await asyncio.to_thread(retry_document, document_id, profile_id=profile, actor_id=actor_id)
+    if receipt is None:
+        raise HTTPException(404, detail="Not found.")
     body = dataclasses.asdict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason
