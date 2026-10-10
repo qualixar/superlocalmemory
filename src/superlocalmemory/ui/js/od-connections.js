@@ -89,6 +89,48 @@
     return 'Renews automatically.';
   }
 
+  // The second yes (4.1.25): every app on a connection may use bots (mesh) or pictures and
+  // documents (media) only when the connection's key is allowed here AND the app was approved
+  // for it at sign-in. Same switch as `slm remote keys allow web-<id> mesh|media`.
+  var ABILITIES = [
+    ['mesh', 'Let these apps message your other bots (SLM Mesh)'],
+    ['media', 'Let these apps save and read pictures and documents']
+  ];
+  function buildAbilities(connectionId, profile) {
+    var h = window.odAppsUi.h;
+    var path = '/api/v3/connections/' + encodeURIComponent(connectionId) + '/abilities';
+    var box = h('div', { className: 'apps-abilities', 'data-abilities': '', hidden: true });
+    var note = h('p', { className: 'apps-note', text: 'Each app must also be approved for this when it signs in. Changes apply on its next request.' });
+    var inputs = {};
+    function show(state) {
+      ABILITIES.forEach(function (item) { inputs[item[0]].checked = state[item[0]] === true; });
+    }
+    ABILITIES.forEach(function (item) {
+      var input = h('input', { type: 'checkbox', 'data-ability': item[0] });
+      inputs[item[0]] = input;
+      input.addEventListener('change', function () {
+        var wanted = input.checked;
+        input.disabled = true; note.textContent = 'Saving…';
+        call(path, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile_id: profile, ability: item[0], allow: wanted })
+        }).then(function (state) {
+          if (!state || state.connection_id !== connectionId) throw new Error('unconfirmed change');
+          show(state); note.textContent = 'Saved. Each app must also be approved for this when it signs in.';
+        }).catch(function () {
+          input.checked = !wanted; note.textContent = 'That could not be changed. Nothing was changed; try again.';
+        }).finally(function () { input.disabled = false; });
+      });
+      box.appendChild(h('label', { className: 'apps-ability' }, [input, h('span', { text: ' ' + item[1] })]));
+    });
+    box.appendChild(note);
+    call(path).then(function (state) {
+      if (!state || state.connection_id !== connectionId) return;
+      show(state); box.hidden = false;
+    }).catch(function () { /* unknown state: show no switch rather than a wrong one */ });
+    return box;
+  }
+
   window.odCreateAiConnectionsCard = function () {
     var ui = window.odAppsUi; var h = ui.h;
     var card = h('div', { id: 'od-ai-connections', className: 'apps-stack' });
@@ -421,6 +463,9 @@
             var show = h('button', { type: 'button', className: 'btn secondary sm', text: 'How to add an app' });
             show.addEventListener('click', function () { flowOpen = true; flowDismissed = false; selectedHost = connection.host; form.hidden = true; syncFlow(); flowTitle.focus({ preventScroll: true }); if (typeof flow.scrollIntoView === 'function') flow.scrollIntoView({ block: 'start' }); });
             actions.appendChild(show);
+          }
+          if ((ready || active) && CONNECTION_ID.test(connection.connection_id)) {
+            row.querySelector('.apps-row-main').appendChild(buildAbilities(connection.connection_id, rowProfile));
           }
           if (connection.state === 'pending' && connection.sign_in_state === 'required' && CONNECTION_ID.test(connection.connection_id)) {
             var continuation = safeSignIn('https://auth.superlocalmemory.com/owner-login?connection_id=' + connection.connection_id, connection.connection_id);

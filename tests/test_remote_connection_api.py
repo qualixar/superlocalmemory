@@ -349,3 +349,60 @@ def test_connected_apps_without_runtime_is_unavailable(configured):
     client, _, app = configured
     app.state.remote_connection_runtime = None
     assert client.get("/api/v3/connections/" + "c" * 32 + "/apps").status_code == 503
+
+
+class AbilitiesRuntime(AppsRuntime):
+    """Synthetic runtime for the second yes: the connection key's mesh and media opt-ins."""
+    def __init__(self, error=None):
+        super().__init__(error)
+        self.extras: set[str] = set()
+        self.changes: list = []
+    async def key_abilities(self, owner, profile, connection_id):
+        if self.error:
+            raise ValueError(self.error)
+        return {"connection_id": connection_id, "mesh": "mesh" in self.extras, "media": "media" in self.extras}
+    async def set_key_ability(self, owner, profile, connection_id, extra, allow):
+        if self.error:
+            raise ValueError(self.error)
+        (self.extras.add if allow else self.extras.discard)(extra)
+        self.changes.append((profile, connection_id, extra, allow))
+        return await self.key_abilities(owner, profile, connection_id)
+
+
+def test_the_dashboard_reads_and_sets_the_second_yes(configured):
+    """Package D: the mesh/media opt-in is a dashboard click, not only a terminal command."""
+    client, _, app = configured
+    runtime = AbilitiesRuntime(); app.state.remote_connection_runtime = runtime
+    url = "/api/v3/connections/" + "c" * 32 + "/abilities"
+    got = client.get(url)
+    assert got.status_code == 200 and got.json() == {"connection_id": "c" * 32, "mesh": False, "media": False}
+    body = {"profile_id": "default", "ability": "mesh", "allow": True}
+    assert client.post(url, json=body).status_code == 403                        # needs the install credential
+    assert client.post(url, headers=headers(), json={**body, "profile_id": "work"}).status_code == 409
+    assert client.post(url, headers=headers(), json={**body, "ability": "admin"}).status_code == 422
+    assert client.post(url, headers=headers(), json={**body, "allow": "yes"}).status_code == 422
+    ok = client.post(url, headers=headers(), json=body)
+    assert ok.status_code == 200 and ok.json()["mesh"] is True and ok.json()["media"] is False
+    off = client.post(url, headers=headers(), json={**body, "allow": False})
+    assert off.json()["mesh"] is False
+    assert runtime.changes == [("default", "c" * 32, "mesh", True), ("default", "c" * 32, "mesh", False)]
+
+
+def test_the_second_yes_is_refused_from_another_site(configured):
+    client, _, app = configured
+    app.state.remote_connection_runtime = AbilitiesRuntime()
+    url = "/api/v3/connections/" + "c" * 32 + "/abilities"
+    body = {"profile_id": "default", "ability": "media", "allow": True}
+    assert client.post(url, headers=headers(Origin="https://evil.example"), json=body).status_code == 403
+    assert client.post(url, headers=headers(**{"Sec-Fetch-Site": "cross-site"}), json=body).status_code == 403
+
+
+@pytest.mark.parametrize("code,status", [("not_found", 404), ("SECRET gateway text", 503)])
+def test_second_yes_errors_are_mapped_and_sanitized(configured, code, status):
+    client, _, app = configured
+    app.state.remote_connection_runtime = AbilitiesRuntime(code)
+    url = "/api/v3/connections/" + "c" * 32 + "/abilities"
+    got = client.get(url)
+    put = client.post(url, headers=headers(), json={"profile_id": "default", "ability": "mesh", "allow": True})
+    assert got.status_code == status and put.status_code == status
+    assert "SECRET" not in got.text and "SECRET" not in put.text

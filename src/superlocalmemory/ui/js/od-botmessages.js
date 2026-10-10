@@ -108,7 +108,7 @@
     var ol = el('ol', 'od-botmsg-steps');
     ol.appendChild(el('li', null, 'Connect an app in Connected apps.'));
     ol.appendChild(el('li', null, 'Tick "Allow talking to your other bots" when you approve it.'));
-    var third = el('li', null, 'On this computer, allow it for that connection: ');
+    var third = el('li', null, 'On this computer, switch on "Let these apps message your other bots" in Connected apps, or run: ');
     third.appendChild(el('code', null, 'slm remote keys allow web-<connection id> mesh'));
     third.appendChild(el('span', null, ' (find the name with '));
     third.appendChild(el('code', null, 'slm remote keys list'));

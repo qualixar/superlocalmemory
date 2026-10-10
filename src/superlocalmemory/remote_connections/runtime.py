@@ -558,6 +558,43 @@ class NativeConnectionRuntime:
         self._grant_tasks[row.connection_id] = asyncio.create_task(
             self._quietly(self.ensure_grant_key(row, force=force)), name="slm-remote-grant-key")
 
+    # -- the second yes: the connection key's mesh and media opt-ins ------------------
+    async def _web_key(self, owner: str, profile: str, connection_id: str):
+        """This owner's connection key on this profile; anything else is not_found (no leak).
+
+        Local only: the journal says the owner holds the connection, and the key store holds
+        its key. No gateway call, so the switch works while the service is unreachable."""
+        try:
+            await asyncio.to_thread(self.journal.get, owner, profile, connection_id)
+        except (JournalConflict, ValueError):
+            raise ValueError("not_found") from None
+        name = "web-" + connection_id
+        for key in await asyncio.to_thread(self.keys.list):
+            if key.name == name and key.active and key.profile == profile:
+                return key
+        raise ValueError("not_found")
+
+    async def key_abilities(self, owner: str, profile: str, connection_id: str) -> dict:
+        key = await self._web_key(owner, profile, connection_id)
+        return {"connection_id": connection_id, "mesh": "mesh" in key.extras,
+                "media": "media" in key.extras}
+
+    async def set_key_ability(self, owner: str, profile: str, connection_id: str,
+                              ability: str, allow: bool) -> dict:
+        """Allow or stop mesh or media for every app on the connection; takes effect on the
+        next request (each tool call re-reads the key)."""
+        if ability not in ("mesh", "media"):
+            raise ValueError("invalid_request")
+        lock = self._locks.setdefault(connection_id, asyncio.Lock())
+        async with lock:
+            key = await self._web_key(owner, profile, connection_id)
+            extras = set(key.extras)
+            (extras.add if allow else extras.discard)(ability)
+            await mutate(self.keys.set_extras, key.key_id, extras)
+            if ability == "media" and not allow:
+                await self._end_upload_links(connection_id)
+        return await self.key_abilities(owner, profile, connection_id)
+
     async def revoke_app(
         self,
         owner: str,
