@@ -157,6 +157,18 @@ def _capability_ok(request, app_state) -> bool:
                                     str(getattr(descriptor, "instance_id", ""))))
 
 
+def status_details_allowed(request, app_state) -> bool:
+    """Whether ``GET /status`` may carry paths and counts for this caller.
+
+    Where every person must sign in, a caller with no session (and without the
+    daemon's private capability, which the command line and MCP send) gets the
+    discovery fields only. Everywhere else the answer is unchanged.
+    """
+    return rbac_read_gate(
+        request, app_state, machine_principal=_capability_ok(request, app_state),
+    ) is None
+
+
 def mesh_read_gate(request, app_state):
     """READ for ``GET /mesh/*``. ``None`` allows; else the refusal response.
 
@@ -189,4 +201,5 @@ __all__ = [
     "is_sensitive_dashboard_read",
     "mesh_read_gate",
     "rbac_read_gate",
+    "status_details_allowed",
 ]

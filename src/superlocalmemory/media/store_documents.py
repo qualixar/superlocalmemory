@@ -79,6 +79,14 @@ class DocumentsMixin:
             conn.execute(f"UPDATE documents SET {sets}, updated_at = ? WHERE document_id = ?",
                          [*fields.values(), utc_stamp(), document_id])
 
+    def claim_failed_document(self, document_id: str) -> bool:
+        """failed -> processing in one statement; False when it was not failed (someone else got there first)."""
+        with self._write() as conn:
+            return conn.execute(
+                "UPDATE documents SET state = 'processing', updated_at = ?"
+                " WHERE document_id = ? AND state = 'failed'",
+                (utc_stamp(), document_id)).rowcount == 1
+
     def mark_document_ready(self, document_id: str, page_count: int) -> bool:
         """processing -> ready in one statement; False when it was removed meanwhile (stays removed)."""
         with self._write() as conn:

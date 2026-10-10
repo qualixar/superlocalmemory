@@ -168,6 +168,11 @@ class UploadRelay:
         return await self._finish(links, token, credential.connection_id, nonce)
 
     def _authorize(self, credential: ConnectorCredential, row: UploadRow) -> None:
+        if not row.authorization_id:
+            # Made before apps were recorded: no app can be held to its own consent, so it is
+            # refused here rather than honoured for "any consenting app". The gateway's own
+            # fallback for an unnamed link stays in place and logs, but never gets this far.
+            raise UploadError("outdated")
         key = self._key_store().verify(credential.origin_key)
         if (key is None or key.name != "web-" + credential.connection_id or key.key_id != row.key_id
                 or key.scope != "write" or "media" not in key.extras or key.profile != row.profile_id):

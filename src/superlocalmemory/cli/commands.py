@@ -465,6 +465,12 @@ def _cmd_escape_rotate_token(args: Namespace) -> None:
     cmd_rotate_token(args)
 
 
+def _cmd_token(args: Namespace) -> None:
+    """`slm token show`: print the key the dashboard asks for in strict mode."""
+    from superlocalmemory.cli.escape_hatch import cmd_token
+    cmd_token(args)
+
+
 # ---- SLM v3.6 Optimize dispatch functions (additive) ----
 
 def _cmd_optimize(args: Namespace) -> None:
@@ -690,6 +696,7 @@ def dispatch(args: Namespace) -> None:
         "reconfigure": _cmd_escape_reconfigure,
         "benchmark": _cmd_escape_benchmark,
         "rotate-token": _cmd_escape_rotate_token,
+        "token": _cmd_token,
         "remote": _cmd_remote,
         "evidence": _cmd_evidence,
         "diagnostics": _cmd_diagnostics,
@@ -860,7 +867,10 @@ def cmd_serve(args: Namespace) -> None:
         if is_daemon_running():
             from superlocalmemory.cli.daemon import daemon_request
             status = daemon_request("GET", "/status")
-            if status:
+            if status and status.get("details_hidden"):
+                print(f"Daemon: RUNNING (PID {status.get('pid', '?')}). "
+                      "Sign in to see more (set SLM_USER_SESSION).")
+            elif status:
                 print(f"Daemon: RUNNING (PID {status['pid']}, "
                       f"mode={status['mode']}, facts={status['fact_count']}, "
                       f"uptime={status['uptime_s']}s, idle={status['idle_s']}s)")
@@ -3075,6 +3085,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("diagnostics", "Export a local diagnostics bundle"),
         ("evidence", "Build/inspect evidence bundles"),
         ("rotate-token", "Rotate the local dashboard install token"),
+        ("token", "Show the key the dashboard asks for when a key is required (slm token show)"),
     ]),
     ("Configuration", [
         ("config", "View/set configuration (see: slm help config)"),

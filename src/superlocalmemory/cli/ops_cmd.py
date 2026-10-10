@@ -295,11 +295,29 @@ def _cmd_ops_resolve(args: Namespace) -> None:
         sys.exit(1)
 
 
+def _status_with_key() -> dict | None:
+    """/status asked through the daemon client, which sends this computer's key."""
+    try:
+        from superlocalmemory.cli.daemon import daemon_request
+
+        found = daemon_request("GET", "/status")
+    except Exception:  # noqa: BLE001 - the caller reports a plain message
+        return None
+    return found if isinstance(found, dict) else None
+
+
 def _cmd_ops_status(args: Namespace) -> None:
     """Quick ops-focused health status from the daemon."""
     data = _daemon_get("/status")
     if data is None:
         return
+    if data.get("details_hidden"):
+        # Where everyone must sign in, a bare request gets the short answer and
+        # its zeros would read as "healthy". Ask again with this computer's key.
+        data = _status_with_key() or data
+        if data.get("details_hidden"):
+            _die("This workspace requires sign-in to show operations status. "
+                 "Sign in, or set SLM_USER_SESSION, then run it again.")
 
     fields = {
         "dead_letter_count": data.get("dead_letter_count", 0),

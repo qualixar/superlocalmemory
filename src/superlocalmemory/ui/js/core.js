@@ -26,18 +26,122 @@ window.SLM_INSTALL_TOKEN_KEY = 'slm_install_token';
 // script (sessionStorage.getItem), which was the theft leg of the XSS chain.
 window.slmInstallToken = (function () {
     var _cache = null;  // in-memory only; not on window, not in storage
-    return async function (forceRefresh) {
+    var _asking = null; // one prompt at a time, shared by every waiting caller
+    var _declinedAt = 0;
+    var DECLINE_QUIET_MS = 30000;
+
+    // Strict mode (SLM_REQUIRE_CREDENTIALS=1): the daemon will not hand the key
+    // to the page, so the person pastes it once. The pasted key lives in this
+    // closure only (B2): never localStorage, never sessionStorage.
+    function buildPrompt(message, finish) {
+        var doc = window.document;
+        var overlay = doc.createElement('div');
+        overlay.setAttribute('data-slm-key-prompt', '1');
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'slm-key-prompt-text');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;' +
+            'display:flex;align-items:center;justify-content:center;' +
+            'background:rgba(0,0,0,0.45);';
+        var card = doc.createElement('div');
+        card.style.cssText = 'max-width:30rem;width:90%;padding:1.25rem;' +
+            'border-radius:12px;background:#fff;color:#1a1a1a;' +
+            'box-shadow:0 10px 40px rgba(0,0,0,0.3);font:14px/1.5 system-ui,sans-serif;';
+        var text = doc.createElement('p');
+        text.id = 'slm-key-prompt-text';
+        text.style.cssText = 'margin:0 0 0.75rem 0;';
+        text.textContent = message;
+        var input = doc.createElement('input');
+        input.type = 'password';
+        input.autocomplete = 'off';
+        input.setAttribute('aria-label', 'SuperLocalMemory key');
+        input.style.cssText = 'width:100%;box-sizing:border-box;padding:0.5rem;' +
+            'margin-bottom:0.75rem;border:1px solid #888;border-radius:6px;';
+        var row = doc.createElement('div');
+        row.style.cssText = 'display:flex;gap:0.5rem;justify-content:flex-end;';
+        var cancel = doc.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = 'Not now';
+        var ok = doc.createElement('button');
+        ok.type = 'button';
+        ok.textContent = 'Use this key';
+        ok.setAttribute('data-slm-key-submit', '1');
+        function done(value) {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            finish(value);
+        }
+        ok.addEventListener('click', function () { done(input.value); });
+        cancel.addEventListener('click', function () { done(''); });
+        input.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter') done(input.value);
+            else if (ev.key === 'Escape') done('');
+        });
+        row.appendChild(cancel);
+        row.appendChild(ok);
+        card.appendChild(text);
+        card.appendChild(input);
+        card.appendChild(row);
+        overlay.appendChild(card);
+        (doc.body || doc.documentElement).appendChild(overlay);
+        input.focus();
+    }
+
+    function askForKey(message) {
+        if (_asking) return _asking;
+        if (_declinedAt && Date.now() - _declinedAt < DECLINE_QUIET_MS) {
+            return Promise.resolve('');
+        }
+        var text = message || 'This computer requires the SuperLocalMemory key. ' +
+            'Run `slm token show` and paste it here.';
+        _asking = new Promise(function (resolve) {
+            buildPrompt(text, resolve);
+        }).then(function (value) {
+            _asking = null;
+            var key = String(value || '').trim();
+            if (key) {
+                _cache = key;
+                _declinedAt = 0;
+            } else {
+                _declinedAt = Date.now();
+            }
+            return key;
+        });
+        return _asking;
+    }
+
+    async function refusalMessage(response) {
+        // Only the daemon's own "key required" answer opens the prompt.
+        if (!response || response.status !== 403) return null;
+        try {
+            var body = await response.clone().json();
+            if (body && body.error === 'key_required') {
+                return body.message || '';
+            }
+        } catch (e) { /* not the strict-mode answer */ }
+        return null;
+    }
+
+    var load = async function (forceRefresh) {
         if (!forceRefresh && _cache) return _cache;
         var response = await window.__slmOriginalFetch(
             '/internal/token',
             {credentials: 'same-origin'}
         );
-        if (!response.ok) return '';
+        if (!response.ok) {
+            var refused = await refusalMessage(response);
+            return refused === null ? '' : askForKey(refused);
+        }
         var payload = await response.json();
         var token = payload && payload.token ? payload.token : '';
         if (token) _cache = token;
         return token;
     };
+    // The patched fetch uses this for pages that read /internal/token directly.
+    load.keyFromRefusal = async function (response) {
+        var refused = await refusalMessage(response);
+        return refused === null ? '' : askForKey(refused);
+    };
+    return load;
 })();
 
 // Global fetch patch: apply the abort timeout to every same-origin request
@@ -97,17 +201,44 @@ window.slmInstallToken = (function () {
             });
         }
 
+        // Strict mode: a page that reads /internal/token itself gets the same
+        // one-time "paste your key" prompt, and then a normal-looking answer.
+        var readsToken = isSameOrigin && !mutating && requestUrl &&
+            requestUrl.pathname === '/internal/token';
+        function withKeyPrompt(request) {
+            if (!readsToken) return request;
+            return request.then(function (response) {
+                return window.slmInstallToken.keyFromRefusal(response).then(
+                    function (key) {
+                        if (!key) return response;
+                        var text = JSON.stringify({token: key});
+                        if (typeof window.Response === 'function') {
+                            return new window.Response(text, {
+                                status: 200,
+                                headers: {'Content-Type': 'application/json'},
+                            });
+                        }
+                        return {
+                            ok: true, status: 200,
+                            json: function () { return Promise.resolve({token: key}); },
+                            text: function () { return Promise.resolve(text); },
+                        };
+                    }
+                );
+            });
+        }
+
         function send() {
             if (!isSameOrigin || init.signal) {
-                return invalidateAfterMutation(_origFetch(input, init));
+                return withKeyPrompt(invalidateAfterMutation(_origFetch(input, init)));
             }
             var controller = new AbortController();
             var timeoutMs = init.timeoutMs || window.SLM_FETCH_TIMEOUT_MS;
             var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
             init.signal = controller.signal;
-            return invalidateAfterMutation(
+            return withKeyPrompt(invalidateAfterMutation(
                 _origFetch(input, init).finally(function () { clearTimeout(timer); })
-            );
+            ));
         }
 
         // Company mode (require_login) refuses credential-less RBAC calls, reads

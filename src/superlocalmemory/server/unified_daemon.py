@@ -5892,8 +5892,23 @@ def _register_daemon_routes(application: FastAPI) -> None:
         return out
 
     @application.get("/status")
-    async def status():
+    async def status(request: Request):
         _update_activity()
+        from superlocalmemory.server.read_gates import status_details_allowed
+
+        if not status_details_allowed(request, application.state):
+            # Company mode, no session: only what finding the daemon needs.
+            from superlocalmemory.server.routes.helpers import SLM_VERSION
+
+            descriptor = application.state.daemon_descriptor
+            return {
+                "status": "running",
+                "version": SLM_VERSION,
+                "port": descriptor.port,
+                "pid": os.getpid(),
+                "instance_id": descriptor.instance_id,
+                "details_hidden": True,
+            }
         # Non-blocking peek — status must never force a re-init.
         engine = getattr(application.state, "engine", None)
         from superlocalmemory.server.profile_runtime import get_profile_runtime

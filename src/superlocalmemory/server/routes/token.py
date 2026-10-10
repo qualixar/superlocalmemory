@@ -14,6 +14,11 @@ Gates (narrower than prewarm's 4):
   2. Origin header, if present, must be a loopback URL.
   3. No install-token requirement — this endpoint PROVIDES the token.
 
+Strict mode: with ``SLM_REQUIRE_CREDENTIALS=1`` the operator has said that
+even a local process must present a key, so this route no longer hands the
+token to whoever asks. It answers 403 with a plain reason, and the dashboard
+asks the person to paste the key shown by ``slm token show``.
+
 On gate failure or unreadable token file, responds with a fixed-tag
 error and non-200 status. Never echoes attacker-supplied material.
 """
@@ -21,6 +26,7 @@ error and non-200 status. Never echoes attacker-supplied material.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -29,6 +35,17 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["internal"])
+
+
+STRICT_MODE_MESSAGE = (
+    "This computer requires the SuperLocalMemory key. "
+    "Run `slm token show` and paste it here."
+)
+
+
+def _strict_mode() -> bool:
+    """True when the operator asked that even local callers hold a key."""
+    return os.environ.get("SLM_REQUIRE_CREDENTIALS") == "1"
 
 
 def _origin_is_loopback(origin: str) -> bool:
@@ -41,6 +58,12 @@ def _origin_is_loopback(origin: str) -> bool:
 @router.get("/internal/token")
 async def get_token(request: Request) -> JSONResponse:
     """Return the install token for browser-based local dashboard use."""
+    if _strict_mode():
+        return JSONResponse(
+            {"error": "key_required", "message": STRICT_MODE_MESSAGE},
+            status_code=403,
+        )
+
     try:
         from superlocalmemory.core.security_primitives import (
             _install_token_path,
