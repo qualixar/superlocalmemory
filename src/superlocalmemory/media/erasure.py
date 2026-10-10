@@ -95,7 +95,12 @@ def erase_profile(root: str | Path, profile_id: str) -> dict[str, Any]:
     if store is None:
         return out
     try:
+        from superlocalmemory.media.erasure_documents import erase_document_rows
+
         out = erase_items(store, root, store.all_item_ids(profile_id))
+        docs = erase_document_rows(store, root, store.all_document_ids(profile_id))
+        out["files"] += docs["files"]
+        out["residue"].extend(docs["residue"])
         store.delete_profile_rows(profile_id)
         return out
     finally:
@@ -128,6 +133,7 @@ class MediaErasureOwner:
         self._root = Path(data_root) if data_root is not None else None
         self._memories: dict[str, set[str]] = {}
         self._left: dict[str, list[tuple[str, str]]] = {}
+        self._pages: dict[str, tuple[list[str], list[str]]] = {}
 
     def _data_root(self) -> Path | None:
         if self._root is not None:
@@ -165,9 +171,13 @@ class MediaErasureOwner:
             store = open_media_store(data_root=root)
             if store is not None:
                 try:
+                    from superlocalmemory.media.erasure_documents import erase_pages_of_memories
+
                     ids = store.item_ids_for_anchors(context.profile_id, sorted(memories))
                     rows = store.items_by_id(ids)
-                    out = erase_items(store, root, ids)
+                    out = erase_pages_of_memories(store, root, context.profile_id, memories,
+                                                  context.fact_ids, anchor_ids=ids)
+                    self._pages[context.operation_id] = (out["picture_ids"], out["touched"])
                 finally:
                     store.close()
                 residue = list(out["residue"])
@@ -192,6 +202,9 @@ class MediaErasureOwner:
                 try:
                     ids = store.item_ids_for_anchors(context.profile_id, sorted(self._memory_ids(context)))
                     residue.extend(f"media:{i}" for i in ids)
+                    pictures, touched = self._pages.get(context.operation_id, ([], []))
+                    residue.extend(f"media:{i}" for i in pictures if store.get_item(i))
+                    residue.extend(f"document:{d}" for d in store.documents_left_empty(touched))
                     for sha, rel in self._left.get(context.operation_id, []):
                         if not store.file_in_use(sha, rel) and not _gone(root, rel):
                             residue.append(f"file:{sha[:12]}")
@@ -227,6 +240,8 @@ def scrub_snapshot(db_path: str | Path, profile_id: str) -> dict[str, int]:
         rows = store._read().execute(
             "SELECT stored_sha256, original_relpath FROM media_items WHERE profile_id = ?",
             (profile_id,)).fetchall()
+        rows += [(r[0], r[1]) for r in store._read().execute(
+            "SELECT sha256, source_relpath FROM documents WHERE profile_id = ?", (profile_id,)).fetchall()]
         store.delete_profile_rows(profile_id)
         removed_files = 0
         for sha, rel in {(r[0], r[1]) for r in rows}:

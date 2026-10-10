@@ -9,7 +9,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from superlocalmemory.media.store import MediaStore, MediaStoreReadOnly
+from superlocalmemory.media import store as _store
+from superlocalmemory.media.store import MediaStore, MediaStoreReadOnly, MediaVectorsUnavailable
 
 MEDIA_DB_NAME = "media.db"
 
@@ -35,10 +36,11 @@ def open_media_store(*, create: bool = False, data_root: str | Path | None = Non
     if not path.is_file():
         if not create:
             return None
+        _store.require_extensions()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))
     return MediaStore(path)
 
 
-__all__ = ["MEDIA_DB_NAME", "MediaStore", "MediaStoreReadOnly", "media_db_exists",
-           "media_db_path", "open_media_store"]
+__all__ = ["MEDIA_DB_NAME", "MediaStore", "MediaStoreReadOnly", "MediaVectorsUnavailable",
+           "media_db_exists", "media_db_path", "open_media_store"]

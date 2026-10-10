@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
@@ -22,15 +23,32 @@ def utc_stamp(offset_s: float = 0.0) -> str:
 class JobsMixin:
     """Mixed into MediaStore; needs its ``_write()`` and ``_read()`` helpers."""
 
-    def enqueue_job(self, profile_id: str, kind: str, total: int = 0) -> str:
+    def enqueue_job(self, profile_id: str, kind: str, total: int = 0,
+                    payload: dict[str, Any] | None = None) -> str:
+        """Queue a job; ``payload`` is the job's input (kept as JSON, never logged)."""
         job_id, now = uuid.uuid4().hex, utc_stamp()
         with self._write() as conn:
             conn.execute(
-                "INSERT INTO jobs(job_id, profile_id, kind, state, done, total, created_at, updated_at)"
-                " VALUES (?, ?, ?, 'queued', 0, ?, ?, ?)",
-                (job_id, profile_id, kind, int(total), now, now),
+                "INSERT INTO jobs(job_id, profile_id, kind, state, done, total, payload_json, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'queued', 0, ?, ?, ?, ?)",
+                (job_id, profile_id, kind, int(total), json.dumps(payload or {}), now, now),
             )
         return job_id
+
+    def release_job(self, job_id: str, owner: str) -> bool:
+        """Give a running job back to the queue (this owner stops early); False if it is not this owner's."""
+        with self._write() as conn:
+            return conn.execute(
+                "UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_until = NULL, updated_at = ?"
+                " WHERE job_id = ? AND lease_owner = ? AND state = 'running'",
+                (utc_stamp(), job_id, owner)).rowcount == 1
+
+    def job_for_document(self, document_id: str) -> dict[str, Any] | None:
+        """The newest job whose input names this document."""
+        row = self._read().execute(
+            "SELECT * FROM jobs WHERE kind = 'document' AND json_extract(payload_json, '$.document_id') = ?"
+            " ORDER BY created_at DESC LIMIT 1", (document_id,)).fetchone()
+        return dict(row) if row else None
 
     def claim_job(self, owner: str, lease_s: float = 60,
                   kinds: Sequence[str] | None = None) -> dict[str, Any] | None:

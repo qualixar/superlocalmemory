@@ -25,6 +25,8 @@ from typing import Any, Iterator, Sequence
 from superlocalmemory.media.schema import (
     MEDIA_SCHEMA_VERSION, apply_schema, stored_version,
 )
+from superlocalmemory.media.store_doc_erase import DocumentEraseMixin
+from superlocalmemory.media.store_documents import DocumentsMixin
 from superlocalmemory.media.store_erase import EraseMixin
 from superlocalmemory.media.store_jobs import JobsMixin, utc_stamp
 
@@ -51,7 +53,21 @@ def vec_table(space_id: str) -> str:
     return f"media_vec_{space_id}"
 
 
+class MediaVectorsUnavailable(sqlite3.NotSupportedError):
+    """This Python's sqlite3 was built without extension loading, so sqlite-vec cannot load."""
+
+
+def extensions_supported() -> bool:
+    return hasattr(sqlite3.Connection, "enable_load_extension")
+
+
+def require_extensions() -> None:
+    if not extensions_supported():
+        raise MediaVectorsUnavailable("this Python cannot load SQLite extensions")
+
+
 def _load_vec(conn: sqlite3.Connection) -> None:
+    require_extensions()
     import sqlite_vec
 
     conn.enable_load_extension(True)
@@ -98,7 +114,7 @@ def _exif_text(raw: Any) -> str:
     return json.dumps(kept, sort_keys=True)
 
 
-class MediaStore(JobsMixin, EraseMixin):
+class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._wlock = threading.RLock()

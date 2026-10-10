@@ -23,6 +23,8 @@ import sqlite3
 
 import pytest
 
+from tests.helpers.env_capabilities import purge_keyword_index_on_old_sqlite
+
 _NAME = "Quorvantel Brask"
 _FIRST = f"{_NAME} stores the synthetic copper compass in the attic chest."
 _SECOND = f"{_NAME} walks the synthetic hound along the canal at dawn."
@@ -143,6 +145,7 @@ def test_gdpr_entity_erasure_closes_the_cases_and_erases_everything(
     assert not any(_live_index_has(engine, f) for f in targets)
     assert _n(engine, "SELECT COUNT(*) AS n FROM canonical_entities WHERE profile_id = ? "
               "AND canonical_name = ?", (engine._profile_id, _NAME)) == 0
+    purge_keyword_index_on_old_sqlite(engine._db.db_path)
     for needle in ("copper compass", "cellar chest", "canal at dawn", "attic chest"):
         assert _text_copies(engine, needle) == {}, needle
     # The erased person's name survives only where the erasure request itself is

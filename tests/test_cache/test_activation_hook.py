@@ -5,7 +5,10 @@
 
 import pytest
 
-pytest.importorskip("sqlite_vec")
+from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
+
+if not vector_search_available():
+    pytest.skip(NO_VECTOR_SEARCH_REASON, allow_module_level=True)
 
 from tests.test_storage.test_embedding_reindex_units import (  # noqa: E402,F401
     FakeEmbedder, _run, store,
