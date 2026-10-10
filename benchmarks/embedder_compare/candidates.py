@@ -42,7 +42,7 @@ def _split(corpus: list[dict], ds) -> tuple[list[dict], list[dict], list[str]]:
     return text, media, [str(ds / d["path"]) for d in media]
 
 
-def _vectors(name: str, corpus, queries, pythons: dict, ds, rt) -> dict:
+def _vectors(name: str, corpus, queries, pythons: dict, ds, rt, docs: bool = True) -> dict:
     """Embed once per candidate; returns q (text-channel queries), all_docs (every item's
     text, in corpus order), mq (media-channel queries), img, and per-process timings."""
     qt = [q["text"] for q in queries]
@@ -59,11 +59,11 @@ def _vectors(name: str, corpus, queries, pythons: dict, ds, rt) -> dict:
         mq, img, s_full, r2 = rt.eg2_full_media(queries, paths, pythons["eg2"])
         procs.update({"eg2_text loadout": s, "eg2_full loadout": s_full})
         out, reused = {"q": v["queries"], "all_docs": v["docs"], "mq": mq, "img": img}, r1 and r2
-    elif name == "c3":
-        v, s, reused = _proc(rt.spawn, rt.summarise, "qwen3vl", pythons["eg2"],
-                             queries=qt, docs=texts, images=paths)
+    elif name == "c3":  # image-channel-only runs skip the text docs (slow on CPU)
+        kinds = {"queries": qt, "images": paths, **({"docs": texts} if docs else {})}
+        v, s, reused = _proc(rt.spawn, rt.summarise, "qwen3vl", pythons["eg2"], **kinds)
         procs["qwen3vl loadout"] = s
-        out = {"q": v["queries"], "all_docs": v["docs"], "mq": v["queries"], "img": v["images"]}
+        out = {"q": v["queries"], "all_docs": v.get("docs"), "mq": v["queries"], "img": v["images"]}
     else:
         raise RuntimeError(f"unknown candidate {name!r}")
     return {**out, "processes": procs, "reused": reused, "media": media}
@@ -72,7 +72,7 @@ def _vectors(name: str, corpus, queries, pythons: dict, ds, rt) -> dict:
 def run(system: str, corpus, queries, pythons: dict, ds, dev_qrels: dict, rt):
     """Return (tops, abstain|None, timings) for c1/c1f/c1m and the c2, c3 forms."""
     base, fused, media_only = system[:2], system.endswith("f"), system.endswith("m")
-    v = _vectors(base, corpus, queries, pythons, ds, rt)
+    v = _vectors(base, corpus, queries, pythons, ds, rt, docs=not media_only)
     text_idx = [i for i, d in enumerate(corpus) if d["kind"] == "text"]
     media_ids = [d["doc_id"] for d in v["media"]]
     timings = {"processes": v["processes"], "vectors_reused": v["reused"]}
