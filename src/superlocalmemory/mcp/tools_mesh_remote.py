@@ -108,7 +108,13 @@ def _state(target: RemoteMeshTarget, peer: RemotePeer, key: str, action: str) ->
     entry = target.broker.get_state_key(key, profile_id=target.profile)
     if entry is None:
         return {"key": key, "value": None}
-    return {k: entry[k] for k in ("key", "value", "set_by", "updated_at")}
+    out = {k: entry[k] for k in ("key", "value", "set_by", "updated_at")}
+    if isinstance(out["value"], str):
+        # Writes already refuse secrets (reject_secret_state); this covers older rows.
+        from superlocalmemory.core.security_primitives import redact_secrets
+
+        out["value"] = redact_secrets(out["value"], aggression="high")
+    return out
 
 
 async def _run(work: Callable[[RemoteMeshTarget], Any]) -> Any:

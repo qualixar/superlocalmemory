@@ -60,6 +60,13 @@ class EraseMixin:
             "SELECT media_id, anchor_memory_id FROM media_items WHERE profile_id = ?", (profile_id,))
         return {r[0]: r[1] for r in rows.fetchall()}
 
+    def fill_anchor(self, media_id: str, memory_id: str) -> bool:
+        """Set the anchor of an item saved while its memory was still queued; never overwrites one."""
+        with self._write() as conn:
+            return conn.execute(
+                "UPDATE media_items SET anchor_memory_id = ? WHERE media_id = ? AND anchor_memory_id IS NULL",
+                (memory_id, media_id)).rowcount == 1
+
     def all_item_ids(self, profile_id: str) -> list[str]:
         rows = self._read().execute("SELECT media_id FROM media_items WHERE profile_id = ?", (profile_id,))
         return [r[0] for r in rows.fetchall()]

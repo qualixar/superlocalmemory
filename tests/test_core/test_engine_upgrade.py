@@ -76,6 +76,7 @@ def test_the_time_estimate_is_labelled_provisional_and_about():
     p = _plan(memories=600)
     assert p["minutes_label"].startswith("about ")
     assert "minute" in p["minutes_label"]
+    assert p["minutes_label"].endswith("(a rough estimate)")  # audit round 2 (MU-L2): never shown as measured
 
 
 def test_the_plan_promises_recall_and_rollback_in_plain_words():

@@ -144,7 +144,8 @@ def test_feature_off_refuses_and_creates_nothing(root):
 
 
 def test_a_failed_insert_removes_a_new_original(store, root, monkeypatch):
-    monkeypatch.setattr(store, "insert_document", lambda **kw: (_ for _ in ()).throw(RuntimeError("disk")))
+    monkeypatch.setattr(store, "insert_document_with_job",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("disk")))
     r = go(store)
     assert r.status == "refused"
     assert not list((root / "media").glob("*/*.pdf"))
@@ -251,3 +252,56 @@ def test_a_link_together_with_another_source_is_refused(store, root, monkeypatch
     linked(monkeypatch, [make_pdf(["x"])])
     r = go(store, MediaInput(download_url=LINK, base64=base64.b64encode(make_pdf(["x"])).decode()))
     assert r.status == "refused" and "Give a document" in r.reason
+
+
+def test_a_failed_queue_write_leaves_nothing_behind_so_the_next_upload_works(store, root):
+    """Audit round 2 (CX3): the document and its job commit together, or neither does."""
+    with store._write() as conn:
+        conn.execute("CREATE TRIGGER full BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    assert go(store).status == "refused"
+    assert not list((root / "media").glob("*/*.pdf"))
+    assert store._read().execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+    with store._write() as conn:
+        conn.execute("DROP TRIGGER full")
+    again = go(store)
+    assert again.status == "processing" and store.get_job(again.job_id)["state"] == "queued"
+
+
+def test_a_stuck_document_from_an_older_release_is_repaired_by_the_next_upload(store, root):
+    """Audit round 2 (CX3): a processing row with no job and no original is re-queued, not 'duplicate'."""
+    first = go(store)
+    doc = store.get_document(first.document_id)
+    with store._write() as conn:
+        conn.execute("DELETE FROM jobs WHERE job_id = ?", (first.job_id,))
+    (root / "media" / doc["source_relpath"]).unlink()
+    again = go(store)
+    assert again.status == "processing" and again.document_id == first.document_id
+    assert store.get_job(again.job_id)["state"] == "queued"
+    assert (root / "media" / doc["source_relpath"]).is_file()
+
+
+@pytest.mark.parametrize("given", ["base64", "path"])
+def test_a_full_disk_is_named_plainly_never_a_crash_or_a_wrong_reason(store, root, tmp_path, monkeypatch, given):
+    """Audit round 2 (MU-M2): ENOSPC while staging says the disk is full."""
+    import errno as _errno
+
+    class Full:
+        def write(self, _b):
+            raise OSError(_errno.ENOSPC, "No space left on device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(submit_mod, "_new_tmp", lambda d: (d / "doc-full", Full()))
+    data = make_pdf(["hello"])
+    if given == "base64":
+        inp = MediaInput(base64=base64.b64encode(data).decode(), file_name="a.pdf")
+    else:
+        src = tmp_path / "a.pdf"
+        src.write_bytes(data)
+        inp = MediaInput(path=str(src))
+    r = go(store, inp)
+    assert r.status == "refused" and r.reason == files.DISK_FULL

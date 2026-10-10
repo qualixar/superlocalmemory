@@ -39,6 +39,7 @@ def daemon(monkeypatch):
 
     for mod in (media_cmd, features_cmd):
         monkeypatch.setattr(mod, "daemon_request", fake)
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: True)  # the fake daemon is up
     return seen, state
 
 
@@ -89,9 +90,31 @@ def test_enable_on_a_terminal_asks_and_defaults_to_no(daemon, monkeypatch):
     assert any(m == "POST" for m, *_ in seen)
 
 
+def test_enable_starts_slm_when_it_is_not_running(daemon, monkeypatch, capsys):
+    """First run: `slm media enable` starts the daemon itself instead of saying 'run slm restart'."""
+    seen, state = daemon
+    state["reply"] = None
+    started = []
+
+    def start():
+        started.append(True)
+        state["reply"] = STATUS
+        return True
+
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(media_cmd, "ensure_daemon", start)
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
+    assert started == [True]
+    assert "Starting SuperLocalMemory" in capsys.readouterr().out
+    assert ("POST", "/api/v3/features/media/enable", {"yes": True, "source": "cli"}) in seen
+
+
 def test_daemon_down_exits_3_with_a_restart_hint(daemon, monkeypatch, capsys):
     _, state = daemon
     state["reply"] = None
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(media_cmd, "ensure_daemon", lambda: False)  # could not start it
     _tty(monkeypatch, False)
     with pytest.raises(SystemExit) as exc:
         media_cmd.cmd_media(_args(media_command="enable", yes=True))

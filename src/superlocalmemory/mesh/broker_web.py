@@ -151,10 +151,15 @@ class WebPeersMixin:
             ).fetchall()
         finally:
             conn.close()
+        from superlocalmemory.core.security_primitives import redact_secrets
+
+        # Summaries are free text a local agent wrote; web apps see them secret-redacted,
+        # the same as the inbox (``_redact_view``).
         return [{
             "peer_id": r["peer_id"], "name": r["display_name"] or r["agent_type"] or "",
             "kind": r["kind"], "app": r["app_name"], "agent_type": r["agent_type"] or "",
-            "summary": (r["summary"] or "")[:SUMMARY_LIMIT], "status": r["status"],
+            "summary": redact_secrets((r["summary"] or "")[:SUMMARY_LIMIT], aggression="high"),
+            "status": r["status"],
         } for r in found]
 
     def web_send(self, peer_ref: str, app: str, to: str, content: str, *,

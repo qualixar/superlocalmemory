@@ -178,10 +178,14 @@ async def test_generic_cli_clients_can_use_the_standard_stdio_mcp_contract(
         cwd=ROOT,
     )
 
-    async with stdio_client(params) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            initialized = await asyncio.wait_for(session.initialize(), timeout=15)
-            listed = await asyncio.wait_for(session.list_tools(), timeout=15)
+    # A real file for the server's stderr. stdio_client's default (errlog=sys.stderr)
+    # is bound when mcp.client.stdio is first imported; if an earlier test imported it
+    # under capsys, that default is a dead in-memory buffer with no fileno.
+    with open(tmp_path / f"mcp-server-{client_id}.err", "w", encoding="utf-8") as errlog:
+        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                initialized = await asyncio.wait_for(session.initialize(), timeout=15)
+                listed = await asyncio.wait_for(session.list_tools(), timeout=15)
 
     protocol_version = getattr(
         initialized, "protocol_version", getattr(initialized, "protocolVersion", None)

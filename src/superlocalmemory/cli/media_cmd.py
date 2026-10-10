@@ -4,8 +4,9 @@
 
 """``slm media`` - turn images and documents on or off through the running daemon.
 
-The install runs in the daemon, never in this process: when the daemon is not
-running this says so and points at ``slm restart``.
+The install runs in the daemon, never in this process. ``enable`` starts the
+daemon when it is not running (first run); if it cannot, it says so and points at
+``slm restart``.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import sys
 from argparse import Namespace
 from typing import Any
 
-from superlocalmemory.cli.daemon import DaemonConflict, daemon_request
+from superlocalmemory.cli.daemon import DaemonConflict, daemon_request, ensure_daemon, is_daemon_running
 from superlocalmemory.cli.features_cmd import (
     EXIT_DAEMON_DOWN, FEATURES_PATH, NOT_RUNNING, die, media_line,
 )
@@ -68,7 +69,18 @@ def _confirmed(args: Namespace) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
+def _running(args: Namespace) -> None:
+    """Start SLM when it is not running, so turning images on works on a first run."""
+    if is_daemon_running():
+        return
+    if not getattr(args, "json", False):
+        print("Starting SuperLocalMemory first…")
+    if not ensure_daemon():
+        die(args, NOT_RUNNING, EXIT_DAEMON_DOWN)
+
+
 def _enable(args: Namespace) -> None:
+    _running(args)
     media = _call(args, "GET", FEATURES_PATH)["media"]
     if media.get("ram_ok") is False:  # refused here: say so plainly, ask nothing
         die(args, str(media.get("ram_message") or ""), EXIT_LOW_RAM)
@@ -113,15 +125,18 @@ def _plural(n: int, word: str) -> str:
 
 
 def _gc_text(report: dict[str, Any]) -> str:
+    linked = int(report.get("anchors_filled", 0))
     if not report.get("dry_run", True):
-        return (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
+        text = (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
                 f"{_plural(int(report.get('files_removed', 0)), 'file')}. Your memories are untouched.")
+        return text + (f" Linked {_plural(linked, 'picture')} to its memory." if linked else "")
     rows = len(report.get("rows_without_memory") or [])
     files = len(report.get("files_without_row") or [])
-    if not rows and not files:
+    if not rows and not files and not linked:
         return "Nothing to clean up."
-    return (f"Found {_plural(rows, 'picture record')} without a memory and {_plural(files, 'file')} "
-            "without a record. Nothing was removed; to remove them run: slm media gc --apply")
+    return (f"Found {_plural(rows, 'picture record')} without a memory, {_plural(files, 'file')} "
+            f"without a record and {_plural(linked, 'picture')} not yet linked to its memory. "
+            "Nothing was changed; to fix them run: slm media gc --apply")
 
 
 def _gc(args: Namespace) -> None:

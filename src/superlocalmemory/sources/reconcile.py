@@ -76,6 +76,7 @@ class _Pass:
     vanished: dict[str, list[str]] = field(default_factory=dict)
     names: links.NameIndex | None = None  # Obsidian sources: where embeds can point
     only: frozenset[str] | None = None  # a targeted pass looks at these paths and nothing else
+    media_ready: bool = False  # read once per pass: files skipped while media was off are read again
 
     @property
     def sid(self) -> str:
@@ -96,7 +97,9 @@ def _digest(path: Path, limit: int | None = None, file_id: str | None = None) ->
     return h.hexdigest(), (bytes(kept) if limit is not None and len(kept) <= limit else None)
 
 
-def _unchanged(row: dict[str, Any] | None, e: Entry) -> bool:
+def _unchanged(row: dict[str, Any] | None, e: Entry, media_ready: bool = False) -> bool:
+    if row and row["state"] == "skipped" and row["reason"] == ingest.MEDIA_NOT_READY and media_ready:
+        return False  # skipped only because images & documents were off; they are ready now
     return bool(row and row["state"] in _QUIET_STATES
                 and (row["size"], row["mtime_ns"], row["file_id"]) == e.signature())
 
@@ -137,7 +140,7 @@ def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
         return []
     entries = entries_of(row)
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
-    retire.hide_document(p.store, p.runtime, p.source, row)
+    p.stats.errors += retire.hide_document(p.store, p.runtime, p.source, row)
     retire.hide_picture(p.store, row)
     retire.release_copies(p.store, p.source, row)
     return entries
@@ -312,7 +315,7 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
         row = p.rows.get(e.relpath)
         if e.placeholder:
             _placeholder(p, e, row)
-        elif _unchanged(row, e):
+        elif _unchanged(row, e, p.media_ready):
             p.stats.unchanged += 1
         else:
             candidates.append(e)
@@ -330,10 +333,17 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
         try:
             _process(p, e, sha)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the pass
-            logger.warning("a folder file could not be saved (%s)", type(exc).__name__)
+            cause = exc.__cause__ if isinstance(exc, ingest.PartialSave) and exc.__cause__ else exc
+            logger.warning("a folder file could not be saved (%s)", type(cause).__name__)
             p.stats.errors += 1
-            p.store.put_file(p.sid, e.relpath, state="error", reason=type(exc).__name__[:60],
-                             sha256=sha, **_stat_fields(e))
+            fields: dict[str, Any] = {}
+            if isinstance(exc, ingest.PartialSave) and exc.entries:
+                # The parts saved before the failure stay owned by the row, so the next save
+                # (which supersedes the row) and any removal or purge also reach them.
+                kept = p.store.get_file(p.sid, e.relpath)
+                fields["entries"] = (entries_of(kept) if kept else []) + exc.entries
+            p.store.put_file(p.sid, e.relpath, state="error", reason=type(cause).__name__[:60],
+                             sha256=sha, **_stat_fields(e), **fields)
         if progress:
             progress(i + 1, len(hashed))
     if _gone(p):
@@ -415,7 +425,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     if device or (not walked.entries and not walked.capped and _holders(store, source["source_id"])):
         return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
-    p = _Pass(host, store, source, runtime, root, stats, {}, only=only)
+    p = _Pass(host, store, source, runtime, root, stats, {}, only=only, media_ready=ingest.media_ready())
     with background_work():
         _work(p, walked, progress)
     if stats.removed:

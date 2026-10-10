@@ -139,7 +139,8 @@ describe('Find a picture', () => {
         assert.equal(rows[0].querySelector('img').getAttribute('src'), `/api/v3/media/${MID}/thumb`);
         assert.match(rows[0].textContent, /^Quarterly numbers/);
         assert.ok(!rows[0].textContent.includes('Revenue up 12%'), 'first line only');
-        assert.match(rows[0].textContent, /91%/);
+        // Scores rank; they are not probabilities (docs/retrieval-score-contract.md): no '% match'.
+        assert.ok(!/%\s*match/.test(h.pane.querySelector('.od-find-results').textContent));
         assert.ok(!h.pane.textContent.includes('plain text note'));
     });
 
