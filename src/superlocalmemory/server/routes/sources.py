@@ -51,18 +51,21 @@ async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 
 
 async def _context(request: Request, *, write: bool = False, delete: bool = False,
-                   profile_id: str = "") -> tuple[str, str]:
+                   manage: bool = False, profile_id: str = "") -> tuple[str, str]:
+    """The profile and actor of a call. ``manage`` is for connecting a folder: reading
+    the host's files is an operator act, so it needs MANAGE as well as WRITE."""
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.rbac_enforce import require_manage
     from superlocalmemory.server.routes.helpers import require_engine
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
     _require_local(request)
     actor = authenticated_request_actor(request, actor_kind="http-sources") if (write or delete) else ""
     engine = require_engine(request)
-    profile = _profile(engine, profile_id or request.query_params.get("profile_id", ""))
     perm = Permission.DELETE if delete else Permission.WRITE if write else Permission.READ
-    require_permission(request, perm, profile=profile)
+    profile = _profile(engine, profile_id or request.query_params.get("profile_id", ""), request, perm)
+    if manage:
+        require_manage(request, profile=profile)
     return profile, actor
 
 
@@ -81,15 +84,15 @@ async def list_all(request: Request, profile_id: str = ""):
 
 @router.post("")
 async def add(req: AddRequest, request: Request):
-    profile, _ = await _context(request, write=True, profile_id=req.profile_id)
+    profile, _ = await _context(request, write=True, manage=True, profile_id=req.profile_id)
     preview = await _call(sources.add_source, req.path, profile_id=profile, kind=req.kind)
     return JSONResponse(dataclasses.asdict(preview), headers=_NO_STORE)
 
 
 @router.post("/{source_id}/confirm")
 async def confirm(source_id: str, request: Request):
-    await _context(request, write=True)
-    await _call(sources.confirm_source, source_id, via="dashboard")
+    profile, _ = await _context(request, write=True, manage=True)
+    await _call(sources.confirm_source, source_id, via="dashboard", profile_id=profile)
     return JSONResponse({"confirmed": True, "source_id": source_id}, status_code=202)
 
 

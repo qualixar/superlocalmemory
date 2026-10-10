@@ -73,19 +73,34 @@ def _stricter_for_remote(req: "MediaRememberRequest") -> bool:
     return True
 
 
-def _profile(engine, requested: str) -> str:
-    wanted = (requested or "").strip()
-    if not wanted or wanted == engine._profile_id:
-        return engine._profile_id
-    if not engine._db.execute("SELECT 1 AS one FROM profiles WHERE profile_id = ?", (wanted,)):
+def _profile(engine, requested: str, request: Request, permission) -> str:
+    """The profile a call is about, once the caller holds ``permission`` on it.
+
+    The permission is checked first: a caller without it gets the same answer for a
+    profile that exists and one that does not, so names cannot be probed.
+    """
+
+    from superlocalmemory.server.rbac_enforce import require_permission
+
+    wanted = (requested or "").strip() or engine._profile_id
+    require_permission(request, permission, profile=wanted)
+    if wanted != engine._profile_id and not engine._db.execute(
+            "SELECT 1 AS one FROM profiles WHERE profile_id = ?", (wanted,)):
         raise HTTPException(404, detail="Unknown profile.")
     return wanted
+
+
+def _require_manage_if(request: Request, profile: str, needed: object) -> None:
+    """MANAGE when ``needed``: reading a file off this computer, or deleting stray files, is an operator act."""
+    if needed:
+        from superlocalmemory.server.rbac_enforce import require_manage
+
+        require_manage(request, profile=profile)
 
 
 @router.post("/media/remember")
 async def remember(req: MediaRememberRequest, request: Request):
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
@@ -93,8 +108,8 @@ async def remember(req: MediaRememberRequest, request: Request):
     remote = _stricter_for_remote(req)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
-    profile = _profile(engine, req.profile_id)
-    require_permission(request, Permission.WRITE, profile=profile)
+    profile = _profile(engine, req.profile_id, request, Permission.WRITE)
+    _require_manage_if(request, profile, req.path)
     from superlocalmemory.memory_core import prepare_user_text
     from superlocalmemory.server.write_governance import enforce_remember_governance
 
@@ -123,7 +138,6 @@ class MediaGcRequest(BaseModel):
 async def collect_garbage(req: MediaGcRequest, request: Request):
     """Report (default) or remove image leftovers: rows without a memory, files without a row."""
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     from superlocalmemory.server.write_identity import authenticated_request_actor
@@ -132,8 +146,9 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
     if not req.dry_run:
         authenticated_request_actor(request, actor_kind="http-media")  # removing needs credentials
     engine = require_engine(request)
-    profile = _profile(engine, req.profile_id)
-    require_permission(request, Permission.DELETE, profile=profile)
+    profile = _profile(engine, req.profile_id, request, Permission.DELETE)
+    if not req.dry_run:  # removing stray files takes more than removing one's own leftovers
+        _require_manage_if(request, profile, True)
     report = await asyncio.to_thread(run_gc, profile, req.dry_run)
     return JSONResponse(dataclasses.asdict(report))
 
@@ -174,13 +189,11 @@ async def list_images(request: Request, profile_id: str = "", cursor: str = Quer
                       limit: int = Query(60, ge=1, le=200)):
     """Saved images of this profile, newest first, a page at a time."""
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.READ, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.READ)
     after = _decode_cursor(cursor)
     found = await asyncio.to_thread(_list_page, profile, limit, after)
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
@@ -190,15 +203,13 @@ async def list_images(request: Request, profile_id: str = "", cursor: str = Quer
 async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = ""):
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.media import open_media_store
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
     if format not in ("", "json"):
         raise HTTPException(422, detail="format must be empty or json.")
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.READ, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.READ)
     store = open_media_store() if _ID.fullmatch(media_id) else None
     if store is None:
         raise HTTPException(404, detail="Not found.")
@@ -227,7 +238,6 @@ class DocumentSubmitRequest(MediaRememberRequest):
 async def submit(req: DocumentSubmitRequest, request: Request):
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.memory_core import prepare_user_text
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
     from superlocalmemory.server.write_governance import enforce_remember_governance
     from superlocalmemory.server.write_identity import authenticated_request_actor
@@ -238,8 +248,8 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     _stricter_for_remote(req)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
-    profile = _profile(engine, req.profile_id)
-    require_permission(request, Permission.WRITE, profile=profile)
+    profile = _profile(engine, req.profile_id, request, Permission.WRITE)
+    _require_manage_if(request, profile, req.path)
     words = prepare_user_text(engine._config, req.content).text if req.content.strip() else ""
     enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview=words)
     inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64, file_name=req.file_name)
@@ -255,13 +265,11 @@ async def submit(req: DocumentSubmitRequest, request: Request):
 @router.get("/jobs/{job_id}")
 async def job(job_id: str, request: Request, profile_id: str = ""):
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.READ, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.READ)
     found = await asyncio.to_thread(job_status, job_id, profile) if _ID.fullmatch(job_id) else None
     if found is None:
         raise HTTPException(404, detail="Not found.")
@@ -272,13 +280,11 @@ async def job(job_id: str, request: Request, profile_id: str = ""):
 async def documents(request: Request, profile_id: str = "", cursor: str = Query("", max_length=200),
                     limit: int = Query(50, ge=1, le=200)):
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.READ, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.READ)
     found = await asyncio.to_thread(document_index, profile, limit, cursor, db=engine._db)
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
@@ -286,13 +292,11 @@ async def documents(request: Request, profile_id: str = "", cursor: str = Query(
 @router.get("/documents/lint")
 async def lint(request: Request, profile_id: str = ""):
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
 
     _require_local(request)
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.READ, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.READ)
     found = await asyncio.to_thread(document_lint, profile, db=engine._db)
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
@@ -309,7 +313,6 @@ def _eraser(engine):
 @router.delete("/documents/{document_id}")
 async def remove(document_id: str, request: Request, profile_id: str = "", hard: bool = False):
     from superlocalmemory.access.rbac import Permission
-    from superlocalmemory.server.rbac_enforce import require_permission
     from superlocalmemory.server.routes.helpers import require_engine
     from superlocalmemory.server.write_governance import enforce_forget_governance
     from superlocalmemory.server.write_identity import authenticated_request_actor
@@ -317,8 +320,7 @@ async def remove(document_id: str, request: Request, profile_id: str = "", hard:
     _require_local(request)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
-    profile = _profile(engine, profile_id)
-    require_permission(request, Permission.DELETE, profile=profile)
+    profile = _profile(engine, profile_id, request, Permission.DELETE)
     if not _ID.fullmatch(document_id):
         raise HTTPException(404, detail="Not found.")
     enforce_forget_governance(request, engine, actor_id=actor_id, profile=profile, target=document_id)

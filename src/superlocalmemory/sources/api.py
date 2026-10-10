@@ -84,7 +84,7 @@ def _open(create: bool = False) -> tuple[Any, SourceStore | None, SourceHost]:
 def add_source(root: Path | str, *, profile_id: str, kind: Literal["folder", "obsidian"] | None = None,
                include_types: tuple[str, ...] = DEFAULT_TYPES) -> SourcePreview:
     """Check the folder and describe what connecting it would do. Saves nothing."""
-    real = check_root(root)
+    real = check_root(root, data_root=host_mod.current_host().data_root)
     kind = kind or ("obsidian" if (real / ".obsidian").is_dir() else "folder")
     source_id = uuid.uuid4().hex
     types = tuple(t.lower() for t in include_types)
@@ -97,16 +97,19 @@ def add_source(root: Path | str, *, profile_id: str, kind: Literal["folder", "ob
     return preview
 
 
-def confirm_source(source_id: str, *, via: str = "api") -> None:
-    """Connect a previewed folder: turn the feature on, record the source and queue its first scan."""
+def confirm_source(source_id: str, *, via: str = "api", profile_id: str | None = None) -> None:
+    """Connect a previewed folder: turn the feature on, record the source and queue its first scan.
+
+    With ``profile_id``, only a preview that profile asked for can be confirmed.
+    """
     host = host_mod.current_host()
     with _pending_lock:
         pending = _pending.get(source_id)
-    if pending is None:
+    if pending is None or (profile_id is not None and pending.profile_id != profile_id):
         raise SourceRefused("unknown_source", "That folder preview has expired. Add the folder again.")
     if host.remote_on():
         raise SourceRefused("remote_access_on", REMOTE_MESSAGE)
-    real = check_root(pending.root)
+    real = check_root(pending.root, data_root=host.data_root)
     from superlocalmemory.runtimes.features import enable_sources
 
     if not enable_sources(source=via, data_root=host.data_root):
