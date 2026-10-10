@@ -78,8 +78,10 @@ class EraseMixin:
             "SELECT 1 FROM media_items WHERE original_relpath = ? LIMIT 1", (original_relpath,)).fetchone())
 
     def known_relpaths(self) -> set[str]:
+        """Every file the store points at: image originals and the stored PDF of each document."""
         rows = self._read().execute(
-            "SELECT original_relpath FROM media_items WHERE original_relpath IS NOT NULL").fetchall()
+            "SELECT original_relpath FROM media_items WHERE original_relpath IS NOT NULL"
+            " UNION SELECT source_relpath FROM documents WHERE source_relpath IS NOT NULL").fetchall()
         return {r[0] for r in rows}
 
     def items_by_id(self, media_ids: Sequence[str]) -> list[dict[str, Any]]:
