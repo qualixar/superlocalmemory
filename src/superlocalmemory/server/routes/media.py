@@ -99,6 +99,8 @@ def _save_scope(engine, req: "MediaRememberRequest", request: Request, profile: 
     from superlocalmemory.memory_core.save_scope import BROAD_SCOPES, resolve_scope
     from superlocalmemory.server.rbac_enforce import require_permission
 
+    if req.origin == "remote":
+        return "personal", ()  # a remote app saves to its own profile only
     try:
         scope = resolve_scope(engine._config, req.scope)
     except ValueError as exc:

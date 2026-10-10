@@ -118,3 +118,13 @@ def test_a_member_without_share_cannot_save_shared_or_global(roles, sent, url, s
 def test_an_unknown_scope_is_refused(roles, sent, url):
     assert _post(roles, "owner", url, scope="everyone").status_code == 422
     assert sent == []
+
+
+@pytest.mark.parametrize("url", URLS)
+def test_a_remote_save_is_personal_even_when_the_host_default_is_global(roles, sent, url):
+    roles.client.app.state.engine._config = _config("global")
+    assert _post(roles, "member", url, origin="remote", scope="shared", shared_with=["p2"]).status_code == 200
+    assert sent[-1]["scope"] == "personal" and not sent[-1]["shared_with"]
+    sent.clear()
+    assert _post(roles, "member", url, origin="remote").status_code == 200
+    assert sent[-1]["scope"] == "personal"
