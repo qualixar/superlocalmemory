@@ -352,6 +352,11 @@ class MemoryEngine:
         skips if the daemon is not running — keyword recall still works.
         """
         try:
+            from superlocalmemory.core.text_provider import init_light_mode_embedder
+            managed = init_light_mode_embedder(self._config)
+            if managed is not None:  # checks the daemon's model, recovers when it starts
+                self._embedder = managed
+                return
             from superlocalmemory.core.mcp_embedder_proxy import McpEmbedderProxy
             # Bound to the daemon that owns this data root, never to whatever
             # answers on the configured port.

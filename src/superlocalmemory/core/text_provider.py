@@ -43,4 +43,17 @@ def init_slm_media_embedder(config: Any) -> Any:
     return emb
 
 
-__all__ = ["PROVIDER", "init_slm_media_embedder"]
+def init_light_mode_embedder(config: Any) -> Any | None:
+    """The managed provider's embedder for a light (MCP) engine, else None (the caller's proxy).
+
+    The daemon-side embedder checks the daemon's model on every call and recovers when the
+    daemon starts, which the plain proxy does not.
+    """
+    if config.embedding.provider != PROVIDER:
+        return None
+    from superlocalmemory.core.daemon_text_embedder import DaemonTextEmbedder
+
+    return DaemonTextEmbedder(config.embedding)
+
+
+__all__ = ["PROVIDER", "init_light_mode_embedder", "init_slm_media_embedder"]
