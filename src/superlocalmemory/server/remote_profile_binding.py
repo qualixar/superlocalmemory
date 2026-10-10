@@ -124,6 +124,8 @@ ACTIVE_ONLY_TOOLS: dict[str, str] = {}
 
 #: Every other argument of a remote-callable tool. None selects a profile.
 NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
+    # ack: message ids a web app received; the broker acknowledges only the caller's own mail.
+    "ack",
     "about", "action", "agent_id", "as_of", "assertion_id", "case_id", "category",
     "ccr_id", "content", "context", "correction", "duration_ms", "event_type",
     "event_valid_until", "expected_version", "fact_id", "fact_ids", "fast", "feedback",
