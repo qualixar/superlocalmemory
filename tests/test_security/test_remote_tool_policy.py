@@ -270,3 +270,21 @@ def test_the_mcp_app_sees_which_remote_key_is_calling() -> None:
          stub=_Recording())
     assert seen == [READ_KEY.key_id, WRITE_KEY.key_id]
     assert current_remote_key_id() is None
+
+
+def test_mesh_wait_is_host_only_while_remote_mesh_is_off() -> None:
+    assert policy.REMOTE_MESH_TOOLS_ENABLED is False
+    assert "mesh_wait" in policy.HOST_ONLY_TOOLS
+    assert not policy.tool_allowed("read", "mesh_wait")
+    assert not policy.tool_allowed("write", "mesh_wait")
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "get_media", "remember_document", "media_status"])
+def test_image_tools_are_host_only_and_denied_for_read_and_write_keys(tool) -> None:
+    assert tool in policy.HOST_ONLY_TOOLS and tool in policy.MEDIA_TOOLS
+    assert not policy.tool_allowed("read", tool) and not policy.tool_allowed("write", tool)
+    assert tool not in policy.READ_TOOLS | policy.WRITE_ONLY_TOOLS
+
+
+def test_remote_image_rights_stay_off_in_this_build() -> None:
+    assert policy.REMOTE_MEDIA_TOOLS_ENABLED is False

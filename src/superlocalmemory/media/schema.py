@@ -54,15 +54,18 @@ _DDL = (
     "CREATE INDEX IF NOT EXISTS ix_mvr_media ON media_vector_rows(media_id)",
     """CREATE TABLE IF NOT EXISTS documents (
       document_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, sha256 TEXT NOT NULL,
-      title TEXT NOT NULL, mime TEXT NOT NULL, page_count INTEGER NOT NULL DEFAULT 0,
+      title TEXT NOT NULL, mime TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0,
+      page_count INTEGER NOT NULL DEFAULT 0,
       pages_text_layer INTEGER NOT NULL DEFAULT 0, pages_ocr INTEGER NOT NULL DEFAULT 0,
       pages_empty INTEGER NOT NULL DEFAULT 0, source_id TEXT, source_relpath TEXT,
+      origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user','folder')),
+      memory_id TEXT, fact_ids_json TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL CHECK (state IN ('processing','ready','failed','tombstoned')),
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, tombstoned_at TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_documents_profile ON documents(profile_id, state)",
     """CREATE TABLE IF NOT EXISTS doc_pages (
       document_id TEXT NOT NULL, page_no INTEGER NOT NULL, media_id TEXT,
-      memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      memory_ids_json TEXT NOT NULL DEFAULT '[]', fact_ids_json TEXT NOT NULL DEFAULT '[]',
       text_origin TEXT NOT NULL CHECK (text_origin IN ('text_layer','ocr','none')),
       char_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (document_id, page_no))""",
     """CREATE TABLE IF NOT EXISTS jobs (
@@ -70,7 +73,7 @@ _DDL = (
       kind TEXT NOT NULL CHECK (kind IN ('document','source_scan','media_reembed','gc','env_install')),
       state TEXT NOT NULL CHECK (state IN ('queued','running','done','failed','cancelled')),
       done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, error TEXT,
-      lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+      payload_json TEXT NOT NULL DEFAULT '{}', lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_at)",
     """CREATE TABLE IF NOT EXISTS sources (
       source_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
@@ -87,6 +90,8 @@ _DDL = (
         'cloud_placeholder','tombstoned','error')),
       reason TEXT, memory_ids_json TEXT NOT NULL DEFAULT '[]', document_id TEXT, media_id TEXT,
       tombstoned_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (source_id, relpath))""",
+    """CREATE TABLE IF NOT EXISTS source_save_counters (
+      source_id TEXT NOT NULL, relpath TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (source_id, relpath))""",
     "CREATE INDEX IF NOT EXISTS ix_source_files_sha ON source_files(source_id, sha256)",
     "CREATE INDEX IF NOT EXISTS ix_source_files_state ON source_files(source_id, state)",
     """CREATE TABLE IF NOT EXISTS source_links (
@@ -96,10 +101,21 @@ _DDL = (
 )
 
 
+def _upgrade_columns(conn: sqlite3.Connection) -> None:
+    """Add columns that older layouts of this version lack (idempotent)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
+    if "origin" not in cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'user' "
+                     "CHECK (origin IN ('user','folder'))")
+        if "source_id" in cols:
+            conn.execute("UPDATE documents SET origin = 'folder' WHERE source_id IS NOT NULL")
+
+
 def apply_schema(conn: sqlite3.Connection, *, created_by: str) -> None:
     """Create every table (idempotent) and stamp the version once."""
     for statement in _DDL:
         conn.execute(statement)
+    _upgrade_columns(conn)
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('version', ?)",
                  (str(MEDIA_SCHEMA_VERSION),))
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('created_by', ?)",

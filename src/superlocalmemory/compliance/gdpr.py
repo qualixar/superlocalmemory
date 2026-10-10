@@ -1032,6 +1032,13 @@ class GDPRCompliance:
         logger.info("Entity erasure '%s' in '%s': %s", entity_name, profile_id, counts)
         return counts
 
+    @clears_derived_cache
+    def forget_facts(self, fact_ids, profile_id: str, *, subject_id: str) -> dict:
+        """Erase a chosen set of facts of one profile, with a receipt. See ``compliance.erase_facts``."""
+        from superlocalmemory.compliance.erase_facts import erase_facts
+
+        return erase_facts(self, list(fact_ids), profile_id, subject_id)
+
     # -- C2: code_graph helpers --------------------------------------------
 
     #: Tables that hold a person's text but are keyed on a fact, not a profile.

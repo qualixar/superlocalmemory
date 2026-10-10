@@ -71,6 +71,16 @@ def invalidate_content(content_sha256: str, data_root: str | Path | None = None)
     return SqliteDeriveCache(path).invalidate_content(content_sha256)
 
 
+def invalidate_deriver(deriver_id: str, data_root: str | Path | None = None) -> int:
+    """Drop everything one deriver cached. Does nothing (and creates nothing) without a cache file."""
+    path = derive_cache_path(data_root)
+    if not deriver_id or not path.exists():
+        return 0
+    if data_root is None or path == derive_cache_path():
+        return default_cache().invalidate(deriver_id=deriver_id)
+    return SqliteDeriveCache(path).invalidate(deriver_id=deriver_id)
+
+
 def clear_derived_cache(reason: str) -> bool:
     """Delete the derivation cache file and drop every in-memory copy of it.
 

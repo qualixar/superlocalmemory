@@ -593,19 +593,16 @@
    * detached `slm restart`), then polls /health until the fresh daemon is back
    * and reloads the dashboard. Wired via addEventListener — never auto-fired.
    */
-  function wireRestartBtn() {
-    var btn = document.getElementById('od-restart-daemon-btn');
-    var summary = document.getElementById('od-restart-summary');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      window.confirmDestructive({
-        title: 'Restart memory daemon',
-        target: 'Memory daemon',
-        consequence: 'Will be unavailable for a few seconds. Your memories are not affected.',
-        confirmLabel: 'Restart',
-      }).then(function(confirmed) {
-        if (!confirmed) return;
-        btn.disabled = true;
+  function restartDaemon(btn, summary) {
+    var label = btn.textContent;
+    window.confirmDestructive({
+      title: 'Restart memory daemon',
+      target: 'Memory daemon',
+      consequence: 'Will be unavailable for a few seconds. Your memories are not affected.',
+      confirmLabel: 'Restart',
+    }).then(function(confirmed) {
+      if (!confirmed) return;
+      btn.disabled = true;
       btn.textContent = 'Restarting…';
       if (summary) summary.textContent = 'Restart requested — waiting for the daemon to come back…';
 
@@ -618,7 +615,7 @@
         .then(function (data) {
           if (data && data.success === false) {
             if (summary) summary.textContent = 'Restart failed: ' + (data.error || 'unknown error');
-            btn.disabled = false; btn.textContent = 'Restart daemon';
+            btn.disabled = false; btn.textContent = label;
             return;
           }
           // Poll /health until the fresh daemon reports ready, then reload.
@@ -639,7 +636,7 @@
               clearInterval(poll);
               if (summary) summary.textContent =
                 'Daemon is taking longer than expected. Refresh the page in a moment.';
-              btn.disabled = false; btn.textContent = 'Restart daemon';
+              btn.disabled = false; btn.textContent = label;
             }
           }, 1000);
         })
@@ -659,12 +656,21 @@
                 }
               })
               .catch(function () {});
-            if (tries > 30) { clearInterval(poll); btn.disabled = false; btn.textContent = 'Restart daemon'; }
+            if (tries > 30) { clearInterval(poll); btn.disabled = false; btn.textContent = label; }
           }, 1000);
         });
-      });
     });
   }
+
+  function wireRestartBtn() {
+    var btn = document.getElementById('od-restart-daemon-btn');
+    var summary = document.getElementById('od-restart-summary');
+    if (!btn) return;
+    btn.addEventListener('click', function () { restartDaemon(btn, summary); });
+  }
+
+  // Shared with the images-and-documents card (od-features.js).
+  window.odRestartDaemon = restartDaemon;
 
   // ─── Trust ────────────────────────────────────────────────────────────────
   /**
