@@ -101,10 +101,21 @@ _DDL = (
 )
 
 
+def _upgrade_columns(conn: sqlite3.Connection) -> None:
+    """Add columns that older layouts of this version lack (idempotent)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
+    if "origin" not in cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'user' "
+                     "CHECK (origin IN ('user','folder'))")
+        if "source_id" in cols:
+            conn.execute("UPDATE documents SET origin = 'folder' WHERE source_id IS NOT NULL")
+
+
 def apply_schema(conn: sqlite3.Connection, *, created_by: str) -> None:
     """Create every table (idempotent) and stamp the version once."""
     for statement in _DDL:
         conn.execute(statement)
+    _upgrade_columns(conn)
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('version', ?)",
                  (str(MEDIA_SCHEMA_VERSION),))
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('created_by', ?)",

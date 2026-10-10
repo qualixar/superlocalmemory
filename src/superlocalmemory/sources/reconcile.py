@@ -161,7 +161,9 @@ def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested
     """One save of the file; each call takes the next save number of its path."""
     version, kind = sha[:12], kind_of(e.relpath)
     if kind != "text":  # pictures and PDFs are handed over as bytes, never re-opened by path
-        data = ingest.load_verified(p.root / e.relpath, e.file_id, sha)
+        data = ingest.load_verified(p.root / e.relpath, e.file_id, sha, kind)
+        if data is None:  # edited since the hash: look again next pass
+            return ingest.Ingested(retry=True)
     n = p.store.next_save_n(p.sid, e.relpath)
     if kind == "text" and _is_note(p, e.relpath):
         return obsidian.ingest_note(p.host, p.runtime, p.source, e.relpath, data or b"", version, n, p.names)
@@ -350,6 +352,11 @@ def _known_device(source: dict) -> int | None:
     return found if isinstance(found, int) else None
 
 
+def _holders(store: SourceStore, sid: str) -> list[dict[str, Any]]:
+    """Every row, in any state, that holds a memory, a document or a picture."""
+    return [r for r in store.files(sid) if entries_of(r) or r.get("document_id") or r.get("media_id")]
+
+
 def _device_problem(root: Path, stats: ScanStats, store: SourceStore, sid: str, walked: WalkResult) -> str:
     """"disk_changed" when another disk is now at the folder's path (the disk is noted on the first scan).
 
@@ -359,9 +366,10 @@ def _device_problem(root: Path, stats: ScanStats, store: SourceStore, sid: str, 
     if stats.root_dev is None or stats.root_dev == current:
         stats.root_dev = current
         return ""
-    known = {r["relpath"] for r in store.files(sid, ("indexed",))}
-    if known and not any(e.relpath in known for e in walked.entries):
-        return "disk_changed"
+    held = _holders(store, sid)
+    seen = {(e.relpath, e.size) for e in walked.entries}
+    if held and 2 * sum((r["relpath"], r["size"]) in seen for r in held) < len(held):
+        return "disk_changed"  # under half of what the folder held is here: another disk
     stats.root_dev = current
     return ""
 
@@ -392,7 +400,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
         root = check_root(source["root_path"])  # the rules for a new folder hold on every scan
     except RootRefused as exc:
         return _offline(store, source, stats, exc.code)
-    if str(root) != source["root_path"]:  # the path now leads somewhere else than the folder confirmed
+    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):  # the path now leads somewhere else than the folder confirmed
         return _offline(store, source, stats, "root_moved")
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:
@@ -400,7 +408,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
         device = _device_problem(root, stats, store, source["source_id"], walked)
     except OSError:
         return _offline(store, source, stats, "unreachable")
-    if device or (not walked.entries and not walked.capped and store.files(source["source_id"], ("indexed",))):
+    if device or (not walked.entries and not walked.capped and _holders(store, source["source_id"])):
         return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
     p = _Pass(host, store, source, runtime, root, stats, {}, only=only)

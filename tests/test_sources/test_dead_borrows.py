@@ -32,3 +32,57 @@ def test_a_copy_in_another_source_becomes_its_own_owner(pics, tmp_path):
     assert row["state"] == "indexed" and row["reason"] is None and row["media_id"]
     assert own and not set(own) & archived
     assert media_rows(env)[row["media_id"]] == "active"
+
+
+def test_borrow_of_a_retention_archived_user_memory_stays_put(pics, tmp_path):
+    env = pics
+    from superlocalmemory.media.ingest import MediaInput, remember_media
+    env.write("keep.canvas", "{}")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    mine = tmp_path / "mine.png"
+    mine.write_bytes(png("a"))
+    rec = remember_media(MediaInput(path=mine, file_name="mine.png"), profile_id="default",
+                         actor_id="user", runtime=env.runtime, config=None)
+    env.write("p.png", png("a"))
+    env.scan(sid)
+    assert env.files(sid)["p.png"]["reason"] == "shared"
+    env.db.execute("UPDATE atomic_facts SET lifecycle='archived' WHERE memory_id=?", (rec.memory_id,))
+    saves_before = len(env.runtime.saved)
+    outs = [env.scan(sid) for _ in range(3)]
+    m = env.store()
+    n = m._read().execute("SELECT n FROM source_save_counters WHERE relpath='p.png'").fetchone()
+    m.close()
+    row = env.files(sid)["p.png"]
+    assert row["reason"] == "shared" and row["state"] == "indexed"
+    assert [o.changed for o in outs] == [0, 0, 0]
+    assert len(env.runtime.saved) == saves_before
+    assert n is None or n[0] == 1
+
+
+def test_borrowed_documents_are_checked_in_batches_not_one_by_one(env, monkeypatch):
+    from superlocalmemory.media.store import MediaStore
+    from superlocalmemory.sources import borrows
+    from superlocalmemory.sources.store import SourceStore
+
+    sid = env.add_and_confirm()
+    media = env.store()
+    try:
+        for i in range(3):
+            media.insert_document(document_id=f"d{i}", profile_id="default", sha256=f"{i:064x}", title="t",
+                                  mime="application/pdf", bytes=1, source_relpath=None)
+        media.tombstone_document("d1")
+        store = SourceStore(media)
+        for i in range(3):
+            store.put_file(sid, f"f{i}.pdf", state="indexed", reason="shared", entries=[{"shared_doc": f"d{i}"}])
+        store.put_file(sid, "gone.pdf", state="indexed", reason="shared", entries=[{"shared_doc": "missing"}])
+
+        def one_by_one(self, document_id):
+            raise AssertionError("documents must be checked in one batched query")
+
+        monkeypatch.setattr(MediaStore, "get_document", one_by_one)
+        assert borrows.reset_dead_borrows(store, env.runtime, sid) == 2
+        rows = {r["relpath"]: r["state"] for r in store.files(sid)}
+        assert rows == {"f0.pdf": "indexed", "f1.pdf": "pending", "f2.pdf": "indexed", "gone.pdf": "pending"}
+    finally:
+        media.close()

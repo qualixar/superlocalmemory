@@ -55,3 +55,50 @@ def test_a_different_disk_with_none_of_the_files_is_offline(env):
     stats = env.scan(sid)
     assert stats.offline and stats.offline_reason == "disk_changed"
     assert env.runtime.archived == [] and len(env.runtime.saved) == 2
+
+
+def test_a_new_disk_that_matches_one_name_out_of_three_is_offline(env):
+    for name in ("README.md", "a.md", "b.md"):
+        env.write(name, f"note {name}")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    for name in ("a.md", "b.md"):
+        (env.root / name).unlink()
+    env.write("README.md", "another disk's readme")
+    _bump_dev(env, sid)
+    stats = env.scan(sid)
+    assert stats.offline and stats.offline_reason == "disk_changed"
+    assert env.runtime.archived == []
+    assert {r["state"] for r in env.files(sid).values()} == {"indexed"}
+
+
+def test_a_disk_with_only_placeholder_rows_is_checked_too(env):
+    env.write("a.md", "note a")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    media = env.store()
+    try:
+        SourceStore(media).put_file(sid, "a.md", state="cloud_placeholder", reason="cloud_only")
+    finally:
+        media.close()
+    _bump_dev(env, sid)
+    (env.root / "a.md").unlink()
+    env.write("other.md", "other disk")
+    stats = env.scan(sid)
+    assert stats.offline and stats.offline_reason == "disk_changed"
+    assert env.runtime.archived == [] and "other.md" not in env.files(sid)
+
+
+def test_an_empty_walk_with_only_placeholder_rows_is_offline(env):
+    env.write("a.md", "note a")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    media = env.store()
+    try:
+        SourceStore(media).put_file(sid, "a.md", state="cloud_placeholder", reason="cloud_only")
+    finally:
+        media.close()
+    (env.root / "a.md").unlink()
+    stats = env.scan(sid)
+    assert stats.offline and stats.offline_reason == "empty_folder"
+    assert env.files(sid)["a.md"]["state"] == "cloud_placeholder"
