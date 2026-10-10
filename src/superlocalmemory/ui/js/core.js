@@ -110,9 +110,14 @@ window.slmInstallToken = (function () {
             );
         }
 
+        // Company mode (require_login) refuses credential-less RBAC calls, reads
+        // included: the login gate asks /api/rbac/status and /whoami before any
+        // user has a session, so those GETs carry the install token too.
+        var rbacRead = !mutating && isSameOrigin && requestUrl &&
+            requestUrl.pathname.indexOf('/api/rbac/') === 0;
         if (
             isSameOrigin &&
-            mutating &&
+            (mutating || rbacRead) &&
             requiresWriteAuth &&
             (!requestUrl || requestUrl.pathname !== '/internal/token')
         ) {

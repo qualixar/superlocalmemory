@@ -121,9 +121,18 @@ class PolicyRequest(BaseModel):
 # -- helpers --
 
 def _machine_guard(request: Request) -> None:
-    """Prove machine auth (operator / dashboard) before any RBAC route."""
+    """Prove machine auth (operator / dashboard) before any RBAC route.
+
+    In company mode (require_login on) a credential is mandatory: the loopback
+    shortcut for credential-less callers is off.
+    """
+    from superlocalmemory.server.rbac_enforce import require_machine_credential
     from superlocalmemory.server.write_identity import require_http_mutation_actor
 
+    rbac = get_rbac_engine(request.app.state)
+    if rbac is not None and rbac.require_login():
+        require_machine_credential(request)
+        return
     broker = getattr(request.app.state, "mesh_broker", None)
     require_http_mutation_actor(
         request,
