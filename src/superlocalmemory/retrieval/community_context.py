@@ -87,6 +87,17 @@ def build_community_context(
         return None
 
     row = summ_by_cid[best_cid]
+    from superlocalmemory.retrieval import visibility
+
+    if not visibility.is_empty():
+        # The summary was written from every member, so one the caller may not
+        # see taints it: say nothing rather than echo what it drew from.
+        try:
+            members = [str(f) for f in json.loads(row.get("fact_ids_json") or "[]")]
+        except (ValueError, TypeError):
+            return None
+        if visibility.hidden_among(db, profile_id, members):
+            return None
     member_count = int(row.get("fact_count") or 0)
     sample = [fid for fid in top_ids if fact_to_cid.get(fid) == best_cid]
     sample = sample[:MAX_MEMBER_SAMPLE]

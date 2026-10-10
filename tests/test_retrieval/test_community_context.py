@@ -187,3 +187,26 @@ class TestSerializerPassthrough:
         resp = types.SimpleNamespace(results=[])
         md = recall_response_metadata(resp)
         assert md["thematic_context"] is None
+
+
+class TestCommunityContextUnderAView:
+    def _db(self) -> MagicMock:
+        db = MagicMock()
+        db.execute.return_value = _summary_rows()
+        return db
+
+    def test_a_hidden_member_withholds_the_summary(self) -> None:
+        from superlocalmemory.retrieval import visibility
+
+        results = [_result("f1"), _result("f2"), _result("zz")]
+        ctx = visibility.VisibilityContext(hidden_fact_ids=frozenset({"f3"}))
+        with visibility.use(ctx):
+            assert _engine(self._db())._community_context(results, "default") is None
+
+    def test_a_view_that_hides_none_of_the_members_keeps_it(self) -> None:
+        from superlocalmemory.retrieval import visibility
+
+        results = [_result("f1"), _result("f2"), _result("zz")]
+        ctx = visibility.VisibilityContext(hidden_fact_ids=frozenset({"other"}))
+        with visibility.use(ctx):
+            assert _engine(self._db())._community_context(results, "default")["community_id"] == 0
