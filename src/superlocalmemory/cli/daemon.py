@@ -616,8 +616,8 @@ def daemon_request(
     preserve_conflict: bool = False,
     preserve_not_found: bool = False,
     preserve_unprocessable: bool = False,
-    preserve_rate_limited: bool = False,
     preserve_server_error: bool = False,
+    preserve_rate_limited: bool = False,
     start_wait_seconds: float | None = None,
 ) -> dict | None:
     """Send a request only after validating the owned daemon identity.

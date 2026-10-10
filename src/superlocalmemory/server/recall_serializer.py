@@ -169,7 +169,7 @@ def media_object(source: dict) -> dict | None:
         "thumbnail_uri": f"slm://media/{media_id}/thumb" if media_id else None,
         "page": source.get("page"),
         "document_id": source.get("document_id"),
-        "citation": source.get("citation") or "",
+        "citation": f"page {source.get('page')}" if kind == "page" and source.get("page") is not None else "",
     }
 
 

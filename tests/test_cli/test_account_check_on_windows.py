@@ -48,7 +48,9 @@ def test_a_process_of_this_account_is_ours(windows_account):
 
 @pytest.mark.parametrize("other", ["OFFICE-PC\\someone-else", "OTHER-PC\\{me}"])
 def test_another_accounts_process_is_not_ours(windows_account, other):
-    other = other.format(me=getpass.getuser())
+    # The user name comes from the fixture: with os.getuid removed,
+    # getpass.getuser() fails where no USER/LOGNAME is set.
+    other = other.format(me=windows_account.split("\\", 1)[1])
     assert cli_daemon._process_is_this_account(_Process(other)) is False
 
 

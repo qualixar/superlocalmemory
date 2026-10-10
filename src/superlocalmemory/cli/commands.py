@@ -527,6 +527,14 @@ def _cmd_kinds_dispatch(args: Namespace) -> None:
     cmd_kinds(args)
 
 
+def _cmd_sources_dispatch(args: Namespace) -> None:
+    """4.1.25: folder sources through the daemon (cli/sources_cmd.py)."""
+    from superlocalmemory.cli.sources_cmd import cmd_sources
+    rc = cmd_sources(args)
+    if rc:
+        sys.exit(rc)
+
+
 def _cmd_media_dispatch(args: Namespace) -> None:
     """4.1.25: images and documents through the daemon (cli/media_cmd.py)."""
     from superlocalmemory.cli.media_cmd import cmd_media
@@ -536,14 +544,6 @@ def _cmd_media_dispatch(args: Namespace) -> None:
 def _cmd_features_dispatch(args: Namespace) -> None:
     from superlocalmemory.cli.features_cmd import cmd_features
     cmd_features(args)
-
-
-def _cmd_sources_dispatch(args: Namespace) -> None:
-    """4.1.25: folder sources through the daemon (cli/sources_cmd.py)."""
-    from superlocalmemory.cli.sources_cmd import cmd_sources
-    rc = cmd_sources(args)
-    if rc:
-        sys.exit(rc)
 
 
 def _cmd_corrections_dispatch(args: Namespace) -> None:
@@ -706,9 +706,9 @@ def dispatch(args: Namespace) -> None:
         "backup": _cmd_backup_dispatch,
         "summary": _cmd_summary_dispatch,
         "kinds": _cmd_kinds_dispatch,
+        "sources": _cmd_sources_dispatch,
         "media": _cmd_media_dispatch,
         "features": _cmd_features_dispatch,
-        "sources": _cmd_sources_dispatch,
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "models": _cmd_models_dispatch,
@@ -3107,6 +3107,10 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Automation", [
         ("loop", "Run gate-verified bounded agent loops"),
     ]),
+    ("Images, documents & bots", [
+        ("features", "See what is on: images & documents, bot mesh"),
+        ("media", "Images & documents: enable | disable | status"),
+    ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),
     ]),
@@ -3677,8 +3681,9 @@ def cmd_doctor(args: Namespace) -> None:
             elif depth:
                 _check(
                     "Projection queue", "PASS",
-                    f"{depth} memory/memories queued — the worker drains these "
-                    "in the background",
+                    f"{depth} memory/memories queued for the graph/vector "
+                    "projections — drained in the background once one is open "
+                    "(until then they are the catch-up record for a promotion)",
                 )
             else:
                 _check("Projection queue", "PASS", "empty (graph is up to date)")

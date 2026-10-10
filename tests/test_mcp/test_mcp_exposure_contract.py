@@ -94,6 +94,7 @@ def _register_every_tool(target) -> None:
     from superlocalmemory.mcp.tools_mesh import register_mesh_tools
     from superlocalmemory.mcp.tools_optimize import register_optimize_tools
     from superlocalmemory.mcp.tools_loops import register_loop_tools
+    from superlocalmemory.mcp.tools_media import register_document_tools, register_media_tools
     from superlocalmemory.mcp.tools_ops import register_ops_tools
     from superlocalmemory.mcp.tools_brain import register_brain_tools
     from superlocalmemory.mcp.tools_kinds import register_kind_tools
@@ -120,6 +121,8 @@ def _register_every_tool(target) -> None:
     register_summary_tools(target, get_engine)
     register_view_tools(target, get_engine)
     register_kind_tools(target, get_engine)
+    register_media_tools(target)
+    register_document_tools(target)
     from superlocalmemory.mcp.tools_context import register_prestage_tool
     register_prestage_tool(target, lambda *a, **k: [])
 
@@ -140,7 +143,7 @@ def _register_every_tool(target) -> None:
         # v4.1.12: +settle_session_outcomes and
         # +observe_bounded_loop_execution_learning. Both are whole-profile
         # tools; smaller profiles retain their explicit allowlists.
-        ("whole", "whole", 104),
+        ("whole", "whole", 108),
     ),
 )
 def test_registration_exposure_is_exact_and_duplicate_free(
@@ -268,14 +271,14 @@ async def test_attribution_reports_current_product_identity(
 def test_imported_server_exposes_product_name_and_whole_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Imported MCP server keeps product identity and whole surface at 104."""
+    """Imported MCP server keeps product identity and whole surface at 108."""
     mod = _fresh_server(monkeypatch, "whole")
     # Public SLMFastMCP/MCPServer attribute — do not assert private internals.
     assert mod.server.name == "SuperLocalMemory V4"
     strict = _StrictToolServer()
     _register_every_tool(strict)
-    assert len(strict.tools) == 104
+    assert len(strict.tools) == 108
     actual_names = [tool.name for tool in mod.server._tool_manager.list_tools()]
-    assert len(actual_names) == 104
+    assert len(actual_names) == 108
     assert len(actual_names) == len(set(actual_names))
     assert set(actual_names) == set(strict.tools)

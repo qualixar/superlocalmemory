@@ -14,6 +14,13 @@ Two fixes, both idempotent:
   persistent setting stored in the index itself, so it covers every connection
   and process. On an older SQLite the option is unknown; that is reported, not
   raised, and the repair's ``optimize`` remains the way to purge.
+  It is also left off on SQLite 3.44.0 up to (not including) 3.46.1, where
+  ``secure-delete`` corrupts the index: after a content update (an FTS
+  'delete' plus insert) ``PRAGMA quick_check`` reports "malformed inverted
+  index for FTS5 table main.atomic_facts_fts" and later SQLite versions read
+  it as real corruption. Upgrade SQLite or Python to get the immediate purge.
+  An index that already has the option on is reported "unsupported" and not
+  touched here.
 * ``purge_deleted_terms``: ``optimize`` rewrites the index without the words of
   rows deleted before ``secure-delete`` was on (the existing-store repair).
 """
@@ -31,7 +38,34 @@ FTS_TABLES: tuple[str, ...] = ("atomic_facts_fts", "fact_expansion_fts")
 #: FTS5 learned ``secure-delete`` in SQLite 3.42. Older builds (Ubuntu 22.04: 3.37.2)
 #: answer the attempt with a bare "SQL logic error" (GitHub #153).
 SECURE_DELETE_MIN_SQLITE = (3, 42, 0)
+#: Half-open range ``[first broken, first fixed)``. 3.44.0 and 3.44.1 are untested
+#: and treated as broken to be safe; 3.43.1 and 3.46.1 were measured clean.
+SECURE_DELETE_BROKEN_SQLITE = ((3, 44, 0), (3, 46, 1))
 _old_sqlite_reported = False
+
+
+def secure_delete_supported(version: tuple[int, int, int] | None = None) -> bool:
+    """True when FTS5 ``secure-delete`` exists and is safe in this SQLite."""
+    version = tuple(sqlite3.sqlite_version_info if version is None else version)
+    if version < SECURE_DELETE_MIN_SQLITE:
+        return False
+    first_broken, first_fixed = SECURE_DELETE_BROKEN_SQLITE
+    return not first_broken <= version < first_fixed
+
+
+def _report_unsupported_once() -> None:
+    """One INFO line naming why, with the fallback; never a warning."""
+    global _old_sqlite_reported
+    if _old_sqlite_reported:
+        return
+    _old_sqlite_reported = True
+    if sqlite3.sqlite_version_info < SECURE_DELETE_MIN_SQLITE:
+        why = "is older than 3.42"
+    else:
+        why = ("has a known FTS5 secure-delete corruption (3.44.0 to 3.46.0); "
+               "upgrade SQLite or Python")
+    logger.info("SQLite %s %s: deleted words leave the keyword index at the next "
+                "'slm db repair' instead of at once", sqlite3.sqlite_version, why)
 
 
 def _run(target: Any, sql: str, params: tuple = ()) -> list:
@@ -55,20 +89,15 @@ def ensure_secure_delete(target: Any) -> dict[str, str]:
     ``target`` is a ``sqlite3.Connection`` or a ``DatabaseManager``. Returns
     ``{table: "on" | "enabled" | "absent" | "unsupported"}``.
     """
-    global _old_sqlite_reported
     state: dict[str, str] = {}
-    old_sqlite = sqlite3.sqlite_version_info < SECURE_DELETE_MIN_SQLITE
+    supported = secure_delete_supported()
     for table in FTS_TABLES:
         if not _exists(target, table):
             state[table] = "absent"
             continue
-        if old_sqlite:
+        if not supported:
             # A known limit with a fallback: ``slm db repair`` purges deleted words.
-            if not _old_sqlite_reported:
-                _old_sqlite_reported = True
-                logger.info("SQLite %s is older than 3.42: deleted words leave the keyword "
-                            "index at the next 'slm db repair' instead of at once",
-                            sqlite3.sqlite_version)
+            _report_unsupported_once()
             state[table] = "unsupported"
             continue
         if secure_delete_on(target, table):
@@ -100,4 +129,8 @@ def purge_deleted_terms(conn: Any, table: str) -> None:
     _run(conn, f"INSERT INTO {table}({table}) VALUES('optimize')")  # noqa: S608
 
 
-__all__ = ["FTS_TABLES", "enable_quietly", "ensure_secure_delete", "purge_deleted_terms", "secure_delete_on"]
+__all__ = [
+    "FTS_TABLES", "SECURE_DELETE_BROKEN_SQLITE", "enable_quietly",
+    "ensure_secure_delete", "purge_deleted_terms", "secure_delete_on",
+    "secure_delete_supported",
+]
