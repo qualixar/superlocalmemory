@@ -18,8 +18,9 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ContextManager
 
+from superlocalmemory.documents.heavy import parse_reservation
 from superlocalmemory.documents.pipeline import JobContext, JobRunner
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,9 @@ class RunnerDeps:
     script: Path = PARSE_SCRIPT
     limits: Limits = Limits()
     owns_store: bool = True
+    heavy: Callable[[], ContextManager[None]] = parse_reservation
+    #: True while a model swap asks background work to stand aside (no new job, no next page).
+    background_paused: Callable[[], bool] = lambda: False
 
 
 class DocumentJobService:
@@ -152,6 +156,8 @@ class DocumentJobService:
 
     def process_next(self) -> bool:
         """Run one queued job to its end (or to a stop); False when there was nothing to run."""
+        if self._deps.background_paused():
+            return False
         runtime, config = self._deps.runtime_supplier(), self._deps.config_supplier()
         store = self._store_ref()
         if runtime is None or config is None or store is None:
@@ -165,9 +171,9 @@ class DocumentJobService:
             return False
         ctx = JobContext(store=store, client=client, runtime=runtime, config=config, python=python,
                          script=self._deps.script, limits=self._deps.limits, owner=self._owner,
-                         should_stop=self._stop.is_set)
-        JobRunner(ctx, job).run()
-        return True
+                         should_stop=self._stop.is_set, heavy=self._deps.heavy,
+                         paused=self._deps.background_paused)
+        return JobRunner(ctx, job).run()
 
 
 # -- daemon wiring ---------------------------------------------------------------------
@@ -181,6 +187,10 @@ def default_service(application: Any) -> DocumentJobService:
 
     state = application.state
 
+    def paused() -> bool:
+        runtime = getattr(state, "profile_runtime", None)
+        return bool(runtime is not None and runtime.background_paused)
+
     def runtime() -> Any:
         found = getattr(state, "canonical_remember_runtime", None)
         return found if found is not None and getattr(found, "ready", False) else None
@@ -192,7 +202,8 @@ def default_service(application: Any) -> DocumentJobService:
     return DocumentJobService(RunnerDeps(
         store_factory=open_media_store, client_supplier=media_embedder, runtime_supplier=runtime,
         config_supplier=lambda: getattr(getattr(state, "engine", None), "_config", None),
-        python_supplier=python, enabled=media_enabled, limits=Limits.from_env()))
+        python_supplier=python, enabled=media_enabled, limits=Limits.from_env(),
+        background_paused=paused))
 
 
 def wake_active() -> None:
