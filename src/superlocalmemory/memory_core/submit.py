@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from superlocalmemory.memory_core.save_scope import resolve_scope
 from superlocalmemory.memory_core.save_path import (
     ContentOrigin,
     effective_pii_redaction,
@@ -44,7 +45,9 @@ class SaveRequest:
     trusted_metadata: Mapping[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
     session_date: str = ""
-    scope: str = "personal"
+    #: ``None`` takes the configured default scope, as typed text does.
+    scope: str | None = None
+    shared_with: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,18 +111,20 @@ def submit_memory(
     if not joined.strip():
         raise ValueError("there is nothing to save")
     meta, meta_pii = _metadata(request, redact)
+    scope = resolve_scope(config, request.scope)
     # The parts are already prepared; this identity pass (user text, redaction off)
     # gives the writer one prepared value without changing a character.
     final = prepare_for_save(joined, origin=ContentOrigin.USER_TEXT, pii_redaction=False)
     key = prepare_key(request.idempotency_key, pii_redaction=redact) if request.idempotency_key else uuid.uuid4().hex
     admission = RememberRequest(
         content=final.text, profile_id=request.profile_id, source_type=request.source_type,
-        idempotency_key=key, metadata=meta, scope=request.scope,
+        idempotency_key=key, metadata=meta, scope=scope,
+        shared_with=tuple(request.shared_with),
         trusted_actor_id=request.trusted_actor_id, session_date=request.session_date,
     )
     actor = Actor(principal_id=request.trusted_actor_id,
                   allowed_profiles=frozenset({request.profile_id}),
-                  allowed_scopes=frozenset({request.scope}))
+                  allowed_scopes=frozenset({scope}))
     receipt = runtime.remember(admission, actor, deadline_ms=deadline_ms, accept_after_ms=accept_after_ms)
     payload = dict(receipt.payload)
     fact_ids = tuple(str(f) for f in payload.get("fact_ids") or ())

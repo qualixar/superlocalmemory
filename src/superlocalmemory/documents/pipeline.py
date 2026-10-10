@@ -267,7 +267,8 @@ class JobRunner:
             trusted_actor_id=str(self.payload.get("actor_id") or ""), tags=str(self.payload.get("tags") or ""),
             session_date=str(self.payload.get("session_date") or ""),
             trusted_metadata={"_slm_source": {**source, **(self.payload.get("folder") or {})}},
-            idempotency_key=key)
+            idempotency_key=key, scope=self.payload.get("scope") or None,
+            shared_with=tuple(self.payload.get("shared_with") or ()))
         try:
             return submit_memory(self.ctx.runtime, request, config=self.ctx.config)
         except Exception as exc:  # noqa: BLE001 - nothing for this key was stored

@@ -26,7 +26,7 @@ class FakeRuntime:
             n = len(self.saved) + 1
             row = dict(content=admission.content, metadata=dict(admission.metadata), key=key,
                        mid=f"m{n}", fid=f"f{n}", profile=admission.profile_id,
-                       source_type=admission.source_type, actor=admission.trusted_actor_id,
+                       source_type=admission.source_type, actor=admission.trusted_actor_id, scope=admission.scope,
                        session_date=admission.session_date)
             self.saved.append(row)
             self._by_key[key] = row

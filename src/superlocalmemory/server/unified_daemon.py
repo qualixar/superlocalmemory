@@ -5165,8 +5165,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # v3.6.15 multi-scope: resolve the write scope. ``None`` (not specified
         # by the caller) → the configured default_scope (personal). Shared
         # memory is opt-in, so the default keeps every write private.
-        _scope_cfg = getattr(engine._config, "scope", None)
-        scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
+        from superlocalmemory.memory_core.save_scope import default_scope as _default_scope
+
+        scope = req.scope or _default_scope(engine._config)
         shared_with = req.shared_with
 
         # Keep the daemon compatibility route behind the exact RBAC/session

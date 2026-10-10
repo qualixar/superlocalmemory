@@ -360,7 +360,8 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         trusted_actor_id=args["actor_id"], tags=args["tags"], session_date=args["session_date"],
         trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool",
                                           **(args.get("folder") or {})}},
-        idempotency_key=args["idempotency_key"])
+        idempotency_key=args["idempotency_key"], scope=args.get("scope"),
+        shared_with=tuple(args.get("shared_with") or ()))
     try:
         saved = submit_memory(args["runtime"], request, config=job.config)
     except Exception as exc:  # noqa: BLE001 - nothing was stored; undo the file
@@ -390,6 +391,7 @@ def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
     client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
+    scope: str | None = None, shared_with: tuple[str, ...] = (),
 ) -> MediaReceipt:
     """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
     opened = False
@@ -408,7 +410,8 @@ def remember_media(
             raise _refuse("The image library is full (2 GB limit). Remove some images first.")
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
-            session_date=session_date, idempotency_key=idempotency_key, folder=folder))
+            session_date=session_date, idempotency_key=idempotency_key, folder=folder,
+            scope=scope, shared_with=tuple(shared_with)))
     except _Stop as stop:
         return stop.receipt
     finally:

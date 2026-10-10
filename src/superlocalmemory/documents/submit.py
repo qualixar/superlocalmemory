@@ -255,7 +255,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
 def submit_document(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "", store: Any = None,
-    folder: dict[str, Any] | None = None,
+    folder: dict[str, Any] | None = None, scope: str | None = None, shared_with: tuple[str, ...] = (),
 ) -> DocumentReceipt:
     """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes.
 
@@ -266,6 +266,9 @@ def submit_document(
         store_ref, opened = _resolve(store)
         words = prepare_user_text(config, content).text if content.strip() else ""
         payload = {"user_words": words, "tags": tags, "session_date": session_date, "actor_id": actor_id}
+        if scope:
+            payload["scope"] = scope
+            payload["shared_with"] = list(shared_with)
         if folder:
             payload["folder"] = dict(folder)
         receipt = _submit(store_ref, inp, Path(store_ref.path).parent, profile_id, payload, idempotency_key)

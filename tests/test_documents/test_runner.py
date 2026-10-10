@@ -170,3 +170,23 @@ def test_real_pdf_end_to_end(store, tmp_path, pdf_python):
     assert doc["state"] == "ready" and doc["page_count"] == 2 and doc["title"] == "Real"
     assert any("quick brown fox" in r.content for r in runtime.requests)
     assert (doc["pages_text_layer"], doc["pages_empty"]) == (1, 1)
+
+
+def _scoped_config(default):
+    return SimpleNamespace(pii_redaction=False, scope=SimpleNamespace(default_scope=default))
+
+
+def test_pages_are_saved_with_the_scope_the_document_was_sent_with(store, tmp_path, root):
+    submit(store, scope="shared", shared_with=("p2",))
+    service, _client, runtime = run(store, tmp_path, ["alpha text", "beta text", "gamma text"])
+    assert service.process_next() is True
+    sent = [r for r in runtime.requests if "page" in r.metadata["_slm_source"]]
+    assert sent and all(r.scope == "shared" and tuple(r.shared_with) == ("p2",) for r in sent)
+
+
+def test_pages_use_the_configured_default_scope_when_none_was_sent(store, tmp_path, root):
+    cfg = _scoped_config("global")
+    submit(store, config=cfg)
+    service, _client, runtime = run(store, tmp_path, ["alpha text", "beta text", "gamma text"], config=cfg)
+    assert service.process_next() is True
+    assert runtime.requests and all(r.scope == "global" for r in runtime.requests)
