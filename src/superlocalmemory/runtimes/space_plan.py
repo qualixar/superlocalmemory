@@ -27,6 +27,12 @@ DEFAULT_SPACE_MODE: SpaceMode = "separate"
 MODE_ENV = "SLM_MEDIA_SPACE_MODE"
 _MODES = ("paired", "separate")
 
+#: Picture evidence floor in the paired space. Provisional until calibrated on the
+#: evaluation dev split: measured text-to-image cosines there sit near 0.08, far
+#: below the separate model's floor.
+PAIRED_MIN_SCORE = 0.05
+MIN_SCORE_ENV = "SLM_MEDIA_PAIRED_MIN_SCORE"
+
 #: text model id -> (vision model id, revision, width). Revisions are pinned with the lock files.
 PAIRED_VISION: Mapping[str, tuple[str, str, int]] = MappingProxyType({
     "nomic-ai/nomic-embed-text-v1.5": ("nomic-ai/nomic-embed-vision-v1.5", "", 768),
@@ -43,10 +49,21 @@ class SpacePlan:
     text_model: str  # "" for separate
     query_from_text: bool  # True only for paired
     reason: str
+    min_score: float | None = None  # None: the caller keeps its configured floor
 
     def signature(self) -> dict[str, str | int]:
         return {"mode": self.mode, "image_model": self.image_model,
                 "image_revision": self.image_revision, "dim": self.dim, "text_model": self.text_model}
+
+
+def _paired_floor() -> float:
+    """``SLM_MEDIA_PAIRED_MIN_SCORE`` when it is a number in [0, 1], else the constant."""
+    raw = os.environ.get(MIN_SCORE_ENV, "")
+    try:
+        value = float(raw)
+    except ValueError:
+        return PAIRED_MIN_SCORE
+    return value if 0.0 <= value <= 1.0 else PAIRED_MIN_SCORE
 
 
 def _pair_key(text_model: str) -> str | None:
@@ -78,7 +95,7 @@ def resolve_space_plan(text_model: str, text_dim: int, *, requested: str | None 
         else:
             vision, vision_rev, vision_dim = PAIRED_VISION[key]
             return SpacePlan("paired", vision, vision_rev, vision_dim, key, True,
-                             "text model has a paired image model")
+                             "text model has a paired image model", _paired_floor())
         return SpacePlan("separate", model, revision, dim, "", False, reason)
     reason = "default" if requested is None and not os.environ.get(MODE_ENV) else "requested"
     return SpacePlan("separate", model, revision, dim, "", False, reason)
@@ -133,5 +150,5 @@ def current_space_plan(data_root: str | Path | None = None, *, requested: str | 
                               separate_model=(MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION, 768))
 
 
-__all__ = ["DEFAULT_SPACE_MODE", "MODE_ENV", "PAIRED_VISION", "SpaceMode", "SpacePlan",
+__all__ = ["DEFAULT_SPACE_MODE", "MIN_SCORE_ENV", "MODE_ENV", "PAIRED_MIN_SCORE", "PAIRED_VISION", "SpaceMode", "SpacePlan",
            "compatible", "current_space_plan", "resolve_space_plan"]

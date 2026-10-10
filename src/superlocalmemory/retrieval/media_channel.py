@@ -80,6 +80,15 @@ class MediaChannel:
     def _plan(self) -> SpacePlan | None:
         return self._plan_factory() if self._plan_factory is not None else None
 
+    def min_score(self, default: float) -> float:
+        """The picture evidence floor: the paired plan's own, else ``default``."""
+        try:
+            plan = self._plan()
+        except Exception:  # noqa: BLE001 - a broken plan lookup keeps the configured floor
+            return default
+        floor = getattr(plan, "min_score", None)
+        return default if floor is None else float(floor)
+
     def _on(self, plan: SpacePlan | None) -> bool:
         """Media on and, outside paired mode, the worker's environment ready."""
         if plan is not None and plan.query_from_text:

@@ -567,7 +567,7 @@ class RetrievalEngine:
                     fused, lambda fid: in_window(etimes.get(fid), bounds),
                     explicit=_explicit_window,
                     min_semantic=getattr(self._config, "min_semantic_evidence", 0.60),
-                    min_media=getattr(self._config, "media_min_score", 0.30),
+                    min_media=self._media_floor(),
                 )
                 _em("time_window")
 
@@ -646,7 +646,7 @@ class RetrievalEngine:
             # removed by the floor, producing a false abstention even though a
             # qualified candidate was immediately below the slice.
             top = self._apply_evidence_floor(
-                top, facts, min_sem, getattr(self._config, "media_min_score", 0.30))
+                top, facts, min_sem, self._media_floor())
 
         # 5. Cross-encoder rerank (optional, on the evidence-qualified pool)
         # Bug 4 fix: reduced alpha for multi-hop/temporal to preserve diversity
@@ -764,6 +764,12 @@ class RetrievalEngine:
             return None
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
+
+    def _media_floor(self) -> float:
+        """Picture evidence floor: the live paired plan's, else the configured one."""
+        default = getattr(self._config, "media_min_score", 0.30)
+        channel = getattr(self, "_media_channel", None)
+        return default if channel is None else channel.min_score(default)
 
     @staticmethod
     def _apply_evidence_floor(

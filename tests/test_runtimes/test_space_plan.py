@@ -106,3 +106,36 @@ def test_current_plan_reads_the_live_text_space(tmp_path, monkeypatch):
 def test_current_plan_with_nothing_on_disk_uses_the_shipped_text_model(tmp_path, monkeypatch):
     monkeypatch.setenv(sp.MODE_ENV, "paired")
     assert sp.current_space_plan(tmp_path).mode == "paired"
+
+
+# -- picture evidence floor -------------------------------------------------------
+
+FLOOR_ENV = "SLM_MEDIA_PAIRED_MIN_SCORE"
+
+
+def test_paired_plan_carries_its_own_floor_and_separate_has_none(monkeypatch):
+    monkeypatch.delenv(FLOOR_ENV, raising=False)
+    assert sp.PAIRED_MIN_SCORE == 0.05
+    assert plan(requested="paired").min_score == 0.05
+    assert plan(requested="separate").min_score is None
+    assert plan(requested="paired", text="other/model").min_score is None  # fell back to separate
+
+
+def test_floor_env_override_valid_and_invalid(monkeypatch):
+    monkeypatch.setenv(FLOOR_ENV, "0.12")
+    assert plan(requested="paired").min_score == 0.12
+    monkeypatch.setenv(FLOOR_ENV, "0")
+    assert plan(requested="paired").min_score == 0.0
+    for bad in ("", "abc", "-0.1", "1.5", "nan"):
+        monkeypatch.setenv(FLOOR_ENV, bad)
+        assert plan(requested="paired").min_score == sp.PAIRED_MIN_SCORE
+    monkeypatch.setenv(FLOOR_ENV, "0.9")
+    assert plan(requested="separate").min_score is None
+
+
+def test_floor_is_not_part_of_the_space_identity(monkeypatch):
+    monkeypatch.delenv(FLOOR_ENV, raising=False)
+    a = plan(requested="paired").signature()
+    monkeypatch.setenv(FLOOR_ENV, "0.2")
+    assert plan(requested="paired").signature() == a
+    assert "min_score" not in a

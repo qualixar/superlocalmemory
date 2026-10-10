@@ -131,3 +131,37 @@ def test_for_engine_passes_the_text_function(tmp_path):
 
     ch = media_channel.for_engine(MemoryDb(), text_query_vector=lambda q: unit(0))
     assert ch._text_query_vector("x") == unit(0)
+
+
+def test_channel_floor_is_the_paired_plan_floor_else_the_default():
+    def ch(plan):
+        return MediaChannel(lambda: None, lambda: None, None, plan_factory=lambda: plan)
+
+    p = paired()
+    p = SpacePlan(p.mode, p.image_model, p.image_revision, p.dim, p.text_model,
+                  p.query_from_text, p.reason, 0.05)
+    assert ch(p).min_score(0.30) == 0.05
+    assert ch(separate()).min_score(0.30) == 0.30
+    assert MediaChannel(lambda: None, lambda: None, None).min_score(0.30) == 0.30
+
+
+def test_a_paired_match_of_0_08_survives_the_floor_and_a_separate_one_does_not():
+    from types import SimpleNamespace
+
+    from superlocalmemory.core.config import RetrievalConfig
+    from superlocalmemory.retrieval.engine import RetrievalEngine
+    from superlocalmemory.retrieval.fusion import FusionResult
+
+    def floor_for(plan):
+        eng = SimpleNamespace(_config=RetrievalConfig(),
+                              _media_channel=MediaChannel(lambda: None, lambda: None, None,
+                                                          plan_factory=lambda: plan))
+        return RetrievalEngine._media_floor(eng)
+
+    pp = SpacePlan("paired", "v", "", 4, NOMIC, True, "t", 0.05)
+    hit = FusionResult(fact_id="f", fused_score=0.5, channel_scores={"media": 0.08})
+    keep = lambda fl: RetrievalEngine._apply_evidence_floor([hit], {}, 0.60, fl)
+    assert keep(floor_for(pp)) == [hit]
+    assert keep(floor_for(separate())) == []
+    assert RetrievalEngine._media_floor(SimpleNamespace(_config=RetrievalConfig(),
+                                                        _media_channel=None)) == 0.30
