@@ -320,7 +320,9 @@ def test_daemon_reserves_listener_before_engine_or_migration_work() -> None:
 
     from superlocalmemory.server import unified_daemon
 
-    source = inspect.getsource(unified_daemon.start_server)
+    source = inspect.getsource(unified_daemon.start_server) + inspect.getsource(
+        unified_daemon._serve_owned
+    )
     assert source.index("listener.bind") < source.index("_publish_process_descriptor")
     assert source.index("listener.bind") < source.index("_start_memory_watchdog")
     assert "server.run(sockets=[listener])" in source

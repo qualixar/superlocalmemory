@@ -45,12 +45,17 @@ def registered() -> dict[str, dict]:
 def test_every_registered_tool_is_classified_exactly_once(registered) -> None:
     names = set(registered)
     read, write_only, host = policy.READ_TOOLS, policy.WRITE_ONLY_TOOLS, policy.HOST_ONLY_TOOLS
-    assert not read & write_only and not read & host and not write_only & host
-    classified = read | write_only | host
+    mesh, media = policy.MESH_TOOLS, policy.MEDIA_TOOLS
+    groups = [read, write_only, host, mesh, media]
+    for i, left in enumerate(groups):
+        for right in groups[i + 1:]:
+            assert not left & right
+    classified = read | write_only | host | mesh | media
     assert names - classified == set(), (
         f"Classify new MCP tools in server/remote_tool_policy.py: {sorted(names - classified)}")
-    assert classified - names == set(), f"Stale policy entries: {sorted(classified - names)}"
-    assert len(names) == len(read) + len(write_only) + len(host)
+    # Media tools may be classified before the tools that serve them are registered.
+    assert (classified - names) - media == set(), (
+        f"Stale policy entries: {sorted((classified - names) - media)}")
 
 
 def test_no_destructive_tool_is_readable_with_a_read_key(registered) -> None:
@@ -64,7 +69,7 @@ def test_host_only_tools_are_refused_for_every_scope() -> None:
         assert not policy.tool_allowed("read", name)
         assert not policy.tool_allowed("write", name)
     for name in ("switch_profile", "build_code_graph", "forget", "run_maintenance",
-                 "set_mode", "mesh_send", "slm_loop_run"):
+                 "set_mode", "mesh_lock", "slm_loop_run"):
         assert name in policy.HOST_ONLY_TOOLS
 
 
@@ -76,6 +81,7 @@ class _StubMcp:
 
     def __init__(self, tools: list[str] | None = None) -> None:
         self.reached: list[dict] = []
+        self.peers: list = []
         self._tools = tools or sorted(policy.WRITE_TOOLS | policy.HOST_ONLY_TOOLS)
 
     async def __call__(self, scope, receive, send) -> None:
@@ -87,6 +93,9 @@ class _StubMcp:
                 break
         request = json.loads(body)
         self.reached.append(request)
+        from superlocalmemory.mcp.remote_caller import current_remote_peer
+
+        self.peers.append(current_remote_peer())
         if request["method"] == "tools/list":
             result = {"tools": [{"name": n, "inputSchema": {}} for n in self._tools]}
         else:
@@ -99,12 +108,13 @@ class _StubMcp:
 
 
 def _run(body: bytes, principal=WRITE_KEY, stub: _StubMcp | None = None, chunks: int = 1,
-         method: str = "POST", sent_out: list | None = None):
+         method: str = "POST", sent_out: list | None = None, key_store=None):
     from superlocalmemory.server.profile_runtime import ProfileRuntime
 
     stub = stub or _StubMcp()
     runtime = ProfileRuntime("default")
-    app = policy.RemoteToolScopeASGI(stub, runtime_for=lambda _scope: runtime)
+    app = policy.RemoteToolScopeASGI(stub, runtime_for=lambda _scope: runtime,
+                                     key_store=key_store)
     scope = {"type": "http", "method": method, "path": "/mcp/hermes", "root_path": "/mcp",
              "headers": [], "client": ("remote-listener-peer", 1),
              "slm_remote_listener": True}
@@ -270,3 +280,246 @@ def test_the_mcp_app_sees_which_remote_key_is_calling() -> None:
          stub=_Recording())
     assert seen == [READ_KEY.key_id, WRITE_KEY.key_id]
     assert current_remote_key_id() is None
+
+
+# -- mesh and media tools: signed grant x key opt-in ----------------------------------------
+
+from superlocalmemory.mcp.remote_caller import remote_grant  # noqa: E402
+from superlocalmemory.remote_connections.grant import RemoteGrant, peer_ref  # noqa: E402
+
+CID = "a" * 32
+WEB_WRITE = RemotePrincipal("remote-key", "rk_00000003", "web-" + CID, "write", "default")
+WEB_READ = RemotePrincipal("remote-key", "rk_00000004", "web-" + CID, "read", "default")
+
+
+def _grant(*scopes: str, cid: str = CID) -> RemoteGrant:
+    return RemoteGrant(connection_id=cid, authorization_id="auth-1", authorization_version=1,
+                       app="client-1", scopes=frozenset({"slm:read", *scopes}),
+                       folders_visible=False, key_version=1)
+
+
+class _Keys:
+    def __init__(self, principal: RemotePrincipal, extras=()) -> None:
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class Row:
+            key_id: str
+            extras: frozenset
+
+        self._rows = (Row(principal.key_id, frozenset(extras)),)
+
+    def list(self):
+        return self._rows
+
+
+MESH_ALL = sorted(policy.MESH_TOOLS)
+MEDIA_ALL = sorted(policy.MEDIA_TOOLS)
+
+
+def test_mesh_and_media_sets_match_the_design() -> None:
+    assert policy.MESH_TOOLS == {"mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
+                                 "mesh_state"}
+    assert policy.MEDIA_TOOLS == {"remember_media", "get_media", "remember_document",
+                                  "media_status"}
+    assert not hasattr(policy, "REMOTE_MESH_TOOLS_ENABLED")
+    for host_only in ("mesh_lock", "mesh_events", "mesh_status", "mesh_summary"):
+        assert host_only in policy.HOST_ONLY_TOOLS
+
+
+@pytest.mark.parametrize("tool", MESH_ALL)
+def test_mesh_tool_needs_grant_scope_and_key_opt_in(tool) -> None:
+    mesh = _grant("slm:mesh")
+    for scope in ("read", "write"):
+        assert policy.tool_allowed(scope, tool, mesh, frozenset({"mesh"}))
+        assert not policy.tool_allowed(scope, tool)                      # no grant
+        assert not policy.tool_allowed(scope, tool, mesh)                # key not opted in
+        assert not policy.tool_allowed(scope, tool, mesh, frozenset({"media"}))
+        assert not policy.tool_allowed(scope, tool, _grant(), frozenset({"mesh"}))
+        assert not policy.tool_allowed(scope, tool, _grant("slm:media"), frozenset({"mesh"}))
+
+
+@pytest.mark.parametrize("tool", ["get_media", "media_status"])
+def test_media_read_tools_need_media_scope_and_opt_in(tool) -> None:
+    media = _grant("slm:media")
+    assert policy.tool_allowed("read", tool, media, frozenset({"media"}))
+    assert policy.tool_allowed("write", tool, media, frozenset({"media"}))
+    assert not policy.tool_allowed("read", tool, media)
+    assert not policy.tool_allowed("read", tool, _grant("slm:mesh"), frozenset({"media"}))
+    assert not policy.tool_allowed("read", tool, None, frozenset({"media"}))
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "remember_document"])
+def test_media_save_tools_also_need_a_write_key_and_write_scope(tool) -> None:
+    full = _grant("slm:write", "slm:media")
+    extras = frozenset({"media"})
+    assert policy.tool_allowed("write", tool, full, extras)
+    assert not policy.tool_allowed("read", tool, full, extras)
+    assert not policy.tool_allowed("write", tool, _grant("slm:media"), extras)
+    assert not policy.tool_allowed("write", tool, _grant("slm:write"), extras)
+    assert not policy.tool_allowed("write", tool, full)
+
+
+def test_unknown_scope_or_name_type_is_refused_with_a_grant() -> None:
+    assert not policy.tool_allowed("admin", "mesh_peers", _grant("slm:mesh"), frozenset({"mesh"}))
+    assert not policy.tool_allowed("write", ["mesh_peers"], _grant("slm:mesh"),
+                                   frozenset({"mesh"}))
+
+
+def _tools_list(principal, keys, stub_tools):
+    body = json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}).encode()
+    _, answer, _ = _run(body, principal, stub=_StubMcp(stub_tools), key_store=keys)
+    return {t["name"] for t in answer["result"]["tools"]}
+
+
+def test_tools_list_matches_tools_call_for_every_combination() -> None:
+    every = sorted(policy.MESH_TOOLS | policy.MEDIA_TOOLS
+                   | {"recall", "remember", "switch_profile", "mesh_lock"})
+    for principal in (WEB_READ, WEB_WRITE):
+        for scopes in ((), ("slm:mesh",), ("slm:media",), ("slm:write", "slm:media", "slm:mesh")):
+            for extras in ((), ("mesh",), ("media",), ("mesh", "media")):
+                keys = _Keys(principal, extras)
+                with remote_grant(_grant(*scopes)):
+                    listed = _tools_list(principal, keys, every)
+                    for tool in every:
+                        _, body, stub = _run(_call(tool, arguments=_ok_args(tool)),
+                                             principal, key_store=keys)
+                        ran = bool(stub.reached)
+                        assert ran == (tool in listed), (tool, principal.scope, scopes, extras)
+
+
+def _ok_args(tool: str) -> dict:
+    return {"mesh_state": {"key": "k"}}.get(tool, {})
+
+
+def test_listing_without_a_grant_is_exactly_today() -> None:
+    every = sorted(policy.WRITE_TOOLS | policy.MESH_TOOLS | policy.MEDIA_TOOLS)
+    assert _tools_list(WEB_WRITE, _Keys(WEB_WRITE, ("mesh", "media")), every) == set(
+        policy.WRITE_TOOLS)
+    assert _tools_list(WEB_READ, _Keys(WEB_READ, ("mesh",)), every) == set(policy.READ_TOOLS)
+
+
+def test_a_grant_for_another_connection_is_ignored(caplog) -> None:
+    import logging
+
+    caplog.set_level(logging.INFO, logger="superlocalmemory.remote.audit")
+    keys = _Keys(WEB_WRITE, ("mesh",))
+    with remote_grant(_grant("slm:mesh", cid="b" * 32)):
+        _, body, stub = _run(_call("mesh_peers"), WEB_WRITE, key_store=keys)
+    assert stub.reached == [] and body["result"]["isError"] is True
+    assert "grant_mismatch" in caplog.text
+
+
+def test_a_grant_is_ignored_for_a_key_that_is_not_a_web_connection_key() -> None:
+    keys = _Keys(WRITE_KEY, ("mesh",))
+    with remote_grant(_grant("slm:mesh")):
+        _, body, stub = _run(_call("mesh_peers"), WRITE_KEY, key_store=keys)
+    assert stub.reached == []
+
+
+def test_mesh_denial_text_names_the_missing_pieces() -> None:
+    with remote_grant(_grant()):
+        _, body, _ = _run(_call("mesh_peers"), WEB_WRITE, key_store=_Keys(WEB_WRITE))
+    text = body["result"]["content"][0]["text"]
+    assert "other bots" in text and "slm remote keys allow web-" + CID + " mesh" in text
+    assert "[remote_tool_not_allowed]" in text
+    _, body, _ = _run(_call("get_media"), WEB_WRITE, key_store=_Keys(WEB_WRITE))
+    text = body["result"]["content"][0]["text"]
+    assert "images and documents" in text and "keys allow web-" + CID + " media" in text
+
+
+def test_a_mesh_call_runs_as_the_web_peer_and_the_audit_names_it(caplog) -> None:
+    import logging
+
+    from superlocalmemory.remote_connections import peer_names
+
+    caplog.set_level(logging.INFO, logger="superlocalmemory.remote.audit")
+    keys = _Keys(WEB_WRITE, ("mesh",))
+    ref = peer_ref(CID, "auth-1")
+    peer_names.set_names(CID, {})
+    with remote_grant(_grant("slm:mesh")):
+        _, _, stub = _run(_call("mesh_peers"), WEB_WRITE, key_store=keys)
+        peer_names.set_names(CID, {"auth-1": "ChatGPT"})
+        _, _, named = _run(_call("mesh_peers"), WEB_WRITE, key_store=keys)
+        _, _, plain = _run(_call("recall"), WEB_WRITE, key_store=keys)
+    assert stub.peers[0].peer_ref == ref and stub.peers[0].app == "client-1"
+    assert stub.peers[0].display_name == "Web app " + ref[2:8]
+    assert named.peers[0].display_name == "ChatGPT"
+    assert plain.peers == [None]
+    assert f"app={ref}" in caplog.text
+    peer_names.set_names(CID, {})
+
+
+@pytest.mark.parametrize("arguments", [
+    {"key": "k", "action": "set", "value": "v"}, {"key": "k", "action": "delete"},
+    {"key": ""}, {}, {"key": 5}, {"key": "x" * 257}, {"action": "get"},
+])
+def test_remote_mesh_state_is_get_only_with_a_real_key(arguments) -> None:
+    keys = _Keys(WEB_WRITE, ("mesh",))
+    with remote_grant(_grant("slm:mesh")):
+        _, body, stub = _run(_call("mesh_state", arguments=arguments), WEB_WRITE, key_store=keys)
+    assert stub.reached == [] and body["result"]["isError"] is True
+    assert "remote_argument_not_allowed" in body["result"]["content"][0]["text"]
+
+
+def test_remote_mesh_state_get_is_allowed() -> None:
+    keys = _Keys(WEB_WRITE, ("mesh",))
+    with remote_grant(_grant("slm:mesh")):
+        for arguments in ({"key": "k"}, {"key": "k", "action": "get"}):
+            _, _, stub = _run(_call("mesh_state", arguments=arguments), WEB_WRITE,
+                              key_store=keys)
+            assert stub.reached
+
+
+def test_key_extras_are_read_from_the_file_once_until_it_changes(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from superlocalmemory.server.remote_keys import RemoteKeyStore
+
+    store = RemoteKeyStore(tmp_path / "remote_keys.json")
+    record, _ = store.add("web-" + "a" * 32, "write", profile="default")
+    reads = []
+    original = Path.read_text
+
+    def counting(self, *args, **kwargs):
+        if self.name == "remote_keys.json":
+            reads.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting)
+    fresh = RemoteKeyStore(store.path)
+    assert fresh.extras_for(record.key_id) == frozenset()
+    assert fresh.extras_for(record.key_id) == frozenset()
+    assert len(reads) == 1
+    store.set_extras(record.name, ["mesh"])
+    del reads[:]
+    assert fresh.extras_for(record.key_id) == frozenset({"mesh"})
+    assert fresh.extras_for("missing") == frozenset()
+    assert len(reads) == 1
+
+
+def test_two_granted_requests_read_the_key_file_once(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from superlocalmemory.server.remote_keys import RemoteKeyStore
+
+    seed = RemoteKeyStore(tmp_path / "remote_keys.json")
+    record, _ = seed.add("web-" + "a" * 32, "write", profile="default")
+    seed.set_extras(record.name, ["mesh"])
+    store = RemoteKeyStore(seed.path)
+    reads = []
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: (
+        reads.append(1) if self.name == "remote_keys.json" else None) or original(self, *a, **k))
+    app = policy.RemoteToolScopeASGI(_StubMcp(), runtime_for=lambda _s: None, key_store=store)
+    principal = type("P", (), {"name": record.name, "key_id": record.key_id})()
+    grant = type("G", (), {"connection_id": "a" * 32})()
+    from superlocalmemory.mcp.remote_caller import remote_grant
+
+    async def go():
+        with remote_grant(grant):
+            return [await app._grant_and_extras(principal) for _ in range(2)]
+
+    out = asyncio.run(go())
+    assert [extras for _, extras in out] == [frozenset({"mesh"})] * 2
+    assert len(reads) == 1

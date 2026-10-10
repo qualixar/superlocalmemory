@@ -19,6 +19,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from superlocalmemory.core.derived_cache_policy import clears_derived_cache
+
 logger = logging.getLogger(__name__)
 
 # C1 — Backup residue obligations
@@ -417,6 +419,7 @@ class GDPRCompliance:
 
     # -- Right to Erasure (Art. 17) ----------------------------------------
 
+    @clears_derived_cache
     def forget_profile(self, profile_id: str) -> dict:
         """Delete ALL data for a profile (right to be forgotten, Art. 17).
 
@@ -596,7 +599,7 @@ class GDPRCompliance:
             )
             from superlocalmemory.core.transactions.owners import OperationContext
 
-            _erasure_svc = build_erasure_service_for_db(self._db, self._engine)
+            _erasure_svc = build_erasure_service_for_db(self._db, self._engine, data_root)
             _ctx = OperationContext(
                 operation_id=_uuid.uuid4().hex,
                 profile_id=profile_id,
@@ -620,6 +623,10 @@ class GDPRCompliance:
         except Exception as exc:
             counts["receipt_error"] = str(exc)
             raise
+
+        from superlocalmemory.media.erasure import erase_profile_into  # images and their cached text
+
+        erase_profile_into(counts, data_root, profile_id)
 
         # C2 — erase this profile's share of code_graph.db before the main
         # profile rows. How much of it is "this profile's share" depends on
@@ -807,6 +814,7 @@ class GDPRCompliance:
                 # that could not reach the projection is not complete.
                 and not counts.get("graph_projection_failures")
                 and not counts.get("context_cache_failed")
+                and not counts.get("media_failed")
                 and not counts.get("owner_erasure_incomplete")
                 and not counts.get("backup_obligations_pending")
                 and not counts.get("backup_scan_failed")
@@ -860,6 +868,7 @@ class GDPRCompliance:
         logger.info("GDPR erasure for '%s': %d tables, %s", profile_id, len(tables), counts)
         return counts
 
+    @clears_derived_cache
     def forget_entity(self, entity_name: str, profile_id: str) -> dict:
         """Delete all data related to a specific entity.
 
@@ -926,7 +935,7 @@ class GDPRCompliance:
             )
             from superlocalmemory.core.transactions.owners import OperationContext
 
-            erasure_svc = build_erasure_service_for_db(self._db, self._engine)
+            erasure_svc = build_erasure_service_for_db(self._db, self._engine, self._data_root)
             op_id = _uuid.uuid4().hex
             ctx = OperationContext(
                 operation_id=op_id,
@@ -1022,6 +1031,13 @@ class GDPRCompliance:
 
         logger.info("Entity erasure '%s' in '%s': %s", entity_name, profile_id, counts)
         return counts
+
+    @clears_derived_cache
+    def forget_facts(self, fact_ids, profile_id: str, *, subject_id: str) -> dict:
+        """Erase a chosen set of facts of one profile, with a receipt. See ``compliance.erase_facts``."""
+        from superlocalmemory.compliance.erase_facts import erase_facts
+
+        return erase_facts(self, list(fact_ids), profile_id, subject_id)
 
     # -- C2: code_graph helpers --------------------------------------------
 

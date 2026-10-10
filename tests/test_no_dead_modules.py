@@ -88,8 +88,13 @@ _KNOWN_DEAD: dict[str, str] = {
     "core/reranker_worker.py": "ALIVE — subprocess reranker backend",
     "core/laya_worker.py": "ALIVE — run by file path in Laya's own Python, which cannot "
                            "import this package (retrieval/sufficiency.py, core/laya_runtime.py)",
+    "runtimes/multimodal_worker.py": "ALIVE — run by file path inside the managed media environment, "
+                                     "which cannot import this package (runtimes/worker_client.py)",
+    "runtimes/media_image_ops.py": "ALIVE — run by path inside the managed environment, "
+                                   "loaded by runtimes/multimodal_worker.py",
+    "runtimes/pdf_parse.py": "ALIVE — run by path inside the managed environment, "
+                             "which cannot import this package (documents/runner.py)",
     "dynamics/activation_guided_quantization.py": "seeded 4.0.6 — triage",
-    "infra/cache_manager.py": "seeded 4.0.6 — triage",
     "ingestion/calendar_adapter.py": "seeded 4.0.6 — triage",
     "ingestion/gmail_adapter.py": "seeded 4.0.6 — triage",
     "ingestion/transcript_adapter.py": "seeded 4.0.6 — triage",

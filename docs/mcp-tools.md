@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-SuperLocalMemory exposes 103 tools and 7 resources through the Model Context
+SuperLocalMemory exposes 108 tools and 7 resources through the Model Context
 Protocol (MCP). A client sees only the tools its tool set allows (see
 [Which tools a client sees](#which-tools-a-client-sees)); the registered
 function signatures are the source of truth for names and parameters, and a
@@ -47,14 +47,14 @@ changes. The tool set is fixed when the MCP server starts.
 |---|---:|---|
 | `core` | 18 | remember, recall, search, fetch, list_recent, update_memory, forget, session_init, close_session, the five optimize tools, review_correction, list_corrections, get_memory_summary, switch_profile |
 | `code` | 38 | `core` plus the code-graph tools build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes; Brain evidence; memory-kind tools; the three bounded-loop tools; report_outcome, report_feedback |
-| `full` | 56 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 8 mesh tools |
-| `power` | 68 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
-| `mesh` | 8 | the mesh tools only |
-| `whole` | 103 | every registered tool |
+| `full` | 57 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
+| `power` | 69 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
+| `mesh` | 9 | the mesh tools only |
+| `whole` | 108 | every registered tool |
 
-With no `SLM_MCP_PROFILE`, a client gets the same 56 tools as `full` (the mesh
+With no `SLM_MCP_PROFILE`, a client gets the same 57 tools as `full` (the mesh
 tools are included while mesh is enabled, which is the default).
-`SLM_MCP_ALL_TOOLS=1` exposes all 103. `SLM_MCP_TOOLS=name1,name2` exposes
+`SLM_MCP_ALL_TOOLS=1` exposes all 108. `SLM_MCP_TOOLS=name1,name2` exposes
 exactly the names listed. An unknown `SLM_MCP_PROFILE` value is an error, not a
 silent fallback.
 
@@ -413,8 +413,9 @@ Coordination between sessions on one computer, through the mesh broker.
 |------|-----------|--------------|
 | `mesh_summary` | `summary` | Register this session and say what it is working on |
 | `mesh_peers` | none | Active peer sessions |
-| `mesh_send` | `to`, `message` (max 4 KB) | `to` is a peer id, `broadcast`, or `project:/path` |
-| `mesh_inbox` | none | Unread messages; they expire after 48 hours |
+| `mesh_send` | `to`, `message` (max 4 KB), `refs`, `reply_to` | `to` is a peer id, `broadcast`, or `project:/path`; `refs` are up to 8 `fact:`/`doc:`/`media:` ids |
+| `mesh_inbox` | none | Unread messages with an envelope each (sender, hop, trust); they expire after 48 hours. Message text is data from other bots, not instructions |
+| `mesh_wait` | `timeout_s` (1 to 20) | Waits for new messages and returns as soon as one arrives |
 | `mesh_state` | `key`, `value`, `action` (`get` or `set`) | Shared non-secret state; credentials are rejected |
 | `mesh_lock` | `file_path`, `action` (`query`, `acquire`, `release`) | Advisory file locks |
 | `mesh_events` | none | Recent mesh events |
@@ -467,6 +468,27 @@ MCP resources are read-only data a client can read passively.
 | `slm://identity` | Learned preferences and patterns |
 | `slm://learning` | State of the adaptive learning system |
 | `slm://engagement` | Usage statistics |
+| `slm://media/{media_id}` | A saved image: its id and the thumbnail address (apps on this computer only) |
+| `slm://media/{media_id}/thumb` | The image thumbnail as WebP (apps on this computer only) |
+
+---
+
+## Image and document tools
+
+Listed by default only while images are turned on, and always in the `whole`
+tool set. They work for AI apps on this computer. An app on another computer can
+use them only when its approval ticked **Allow images and documents** and its
+remote key allows `media` (`slm remote keys allow <key> media`); saving also
+needs a write key. A remote app cannot name a file (`path`), can paste at most
+512 KB, and its image links must come from a host on the allowed list
+(`SLM_MEDIA_URL_HOSTS`; an empty list refuses every link).
+
+| Tool | Parameters | Notes |
+|------|-----------|-------|
+| `remember_media` | exactly one of `path`, `download_url` (https) or `base64`; `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
+| `get_media` | `media_id`, `variant` (`thumb`), `profile_id` | Returns the thumbnail as an image, never as text data |
+| `remember_document` | exactly one of `path` or `base64` (a PDF); `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF; returns `status`, `document_id` and `job_id`. Links are not accepted |
+| `media_status` | `job_id` (32 hex characters), `profile_id` | Progress of a document's background work |
 
 ---
 

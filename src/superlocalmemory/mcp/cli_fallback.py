@@ -300,7 +300,7 @@ TOOL_CLI_MAP: dict[str, CliVerb] = {
 #   - observe: lacks --json output (argparse exit or no structured output)
 #   - evolve_skill/skill_health/skill_lineage: learning tools, no CLI equivalent
 #   - get_version: --version is plain text, not --json envelope
-#   - all 8 mesh: P2P daemon-backed, no CLI equivalent
+#   - all 9 mesh: P2P daemon-backed, no CLI equivalent
 #   - learning/assertion: no CLI equivalent
 #   - session_init/close_session/run_maintenance: daemon-implicit lifecycle
 #   - report_feedback/report_outcome: no CLI equivalent
@@ -350,6 +350,7 @@ NON_BACKED_TOOLS: frozenset[str] = frozenset({
     "mesh_peers",
     "mesh_send",
     "mesh_inbox",
+    "mesh_wait",
     "mesh_state",
     "mesh_lock",
     "mesh_events",

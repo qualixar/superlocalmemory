@@ -26,6 +26,7 @@ from superlocalmemory.core.ingestion_command import (
 )
 
 if TYPE_CHECKING:
+    from superlocalmemory.memory_core import PreparedContent
     from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
@@ -77,18 +78,10 @@ class _ImmediateAdmissionDatabase(Protocol):
 
 
 def _pii_redaction_enabled(engine: "MemoryEngine") -> bool:
-    """C4: opt-in PII redaction on ingest.
+    """Delegate to the shared save step (kept for existing importers)."""
+    from superlocalmemory.memory_core import pii_redaction_enabled
 
-    On when the engine config sets ``pii_redaction`` truthy OR the
-    ``SLM_PII_REDACTION`` env var is set (1/on/true/yes). Default OFF — personal
-    use is unchanged; team/company operators opt in.
-    """
-    cfg = getattr(engine, "_config", None)
-    if cfg is not None and getattr(cfg, "pii_redaction", False):
-        return True
-    return os.environ.get("SLM_PII_REDACTION", "").strip().lower() in (
-        "1", "on", "true", "yes",
-    )
+    return pii_redaction_enabled(getattr(engine, "_config", None))
 
 
 def content_passes_admission(content: str) -> bool:
@@ -126,6 +119,40 @@ def _prebuilt_fact_payload(fact: AtomicFact) -> dict:
         value = getattr(fact, name)
         payload[name] = value.value if name in enum_fields else value
     return payload
+
+
+_TEXT_DERIVED_VECTORS = (
+    "embedding", "fisher_mean", "fisher_variance", "langevin_position",
+)
+
+
+def _prepared_prebuilt(engine: MemoryEngine, fact: AtomicFact) -> tuple["PreparedContent", dict]:
+    """The request text and payload of a prebuilt fact, personal data removed.
+
+    Both carry the same prepared text (background enrichment re-checks it); the
+    caller's fact is left untouched.
+    """
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        prepare_metadata,
+        prepare_user_text,
+    )
+
+    prepared = prepare_user_text(engine._config, fact.content)
+    payload = _prebuilt_fact_payload(fact)
+    payload["content"] = prepared.text
+    scrubbed = prepared.pii_count
+    if pii_redaction_enabled(engine._config):
+        for name in ("entities", "canonical_entities"):
+            payload[name], n_names = prepare_metadata(
+                list(payload[name] or []), pii_redaction=True,
+            )
+            scrubbed += n_names
+    if scrubbed:
+        # Everything derived from the old text must be recomputed.
+        for name in _TEXT_DERIVED_VECTORS:
+            payload[name] = None
+    return prepared, payload
 
 
 def _prebuilt_fact_from_payload(payload: dict):
@@ -185,6 +212,9 @@ def build_immediate_admission_handler(
 
         metadata = dict(request.metadata)
         metadata["ingestion_operation_id"] = operation_id
+        from superlocalmemory.tagging import add_extracted
+
+        add_extracted(metadata, content)
         if request.session_id:
             metadata.setdefault("session_id", request.session_id)
         gate = apply_ingest_gate(
@@ -298,6 +328,7 @@ def canonical_store(
     require_complete: bool = True,
     return_receipt: bool = False,
     profile_id: str | None = None,
+    trusted_metadata: dict | None = None,
 ) -> list[str] | IngestionOperation:
     """Submit canonical evidence, optionally waiting for enrichment completion.
 
@@ -306,6 +337,8 @@ def canonical_store(
     durable receipt without invoking any LLM, embedding, or graph work.  The
     daemon materializer owns that expensive, retryable enrichment.  Explicit
     complete callers retain the historical synchronous contract.
+
+    ``trusted_metadata`` carries server-set reserved keys (never caller input).
 
     ``profile_id`` follows the ``engine.recall`` convention: ``None``/``""``
     targets the engine's active profile; an explicit value routes this one
@@ -339,16 +372,32 @@ def canonical_store(
         return []
     # Credentials are kept as written (see write_queryable); only text that
     # leaves this machine is screened (core/outbound_redaction.py).
-    # C4: opt-in PII redaction. When enabled (config.pii_redaction or
-    # SLM_PII_REDACTION), scrub personal identifiers BEFORE the content is
-    # extracted, embedded, or persisted — nothing sensitive ever reaches disk.
-    if _pii_redaction_enabled(engine):
-        from superlocalmemory.core.pii import redact_pii
+    # Opt-in PII redaction (config.pii_redaction or SLM_PII_REDACTION) runs in
+    # the shared save step, before the content is extracted, embedded or
+    # persisted; with it off the text is stored byte-identical.
+    from superlocalmemory.memory_core import (
+        pii_redaction_enabled,
+        prepare_key,
+        prepare_metadata,
+        prepare_user_text,
+    )
 
-        scrubbed, n_pii = redact_pii(content)
-        if n_pii:
-            content = scrubbed
-            logger.info("PII redaction: scrubbed %d identifier(s) on ingest", n_pii)
+    content = prepare_user_text(engine._config, content).text
+    # A caller's metadata never sets a reserved ``_slm_*`` key; the ones the
+    # server itself sets arrive in ``trusted_metadata``, after redaction.
+    from superlocalmemory.core.metadata_guard import strip_reserved_metadata
+
+    metadata, _ = prepare_metadata(
+        strip_reserved_metadata(metadata),
+        pii_redaction=pii_redaction_enabled(engine._config),
+    )
+    metadata.update(trusted_metadata or {})
+    if idempotency_key:
+        idempotency_key = prepare_key(
+            idempotency_key, pii_redaction=pii_redaction_enabled(engine._config),
+        )
+    # Known limit: a retry of a key saved before redaction was turned on raises
+    # IdempotencyConflict to the caller; it is not tolerated as a duplicate here.
     try:
         # Anchor already normalized and validated at function top.
         command = build_engine_ingestion_command(engine, profile_id=profile_id)
@@ -357,7 +406,7 @@ def canonical_store(
             profile_id=profile_id or engine._profile_id,
             source_type=source_type,
             idempotency_key=idempotency_key or uuid.uuid4().hex,
-            metadata=dict(metadata or {}),
+            metadata=metadata,
             scope=scope,
             shared_with=tuple(shared_with or ()),
             trusted_actor_id=trusted_actor_id,
@@ -440,13 +489,14 @@ def canonical_store_fact(
     _require_known_profile(engine, profile_id or engine._profile_id)
     if is_low_quality(fact.content):
         return fact.fact_id
+    prepared, payload = _prepared_prebuilt(engine, fact)
     command = build_engine_ingestion_command(engine, profile_id=profile_id)
     receipt = command.submit(IngestionRequest(
-        content=fact.content,
+        content=prepared.text,
         profile_id=profile_id or engine._profile_id,
         source_type="python-api-prebuilt",
         idempotency_key=f"prebuilt:{fact.fact_id}",
-        metadata={_PREBUILT_FACT_KEY: _prebuilt_fact_payload(fact)},
+        metadata={_PREBUILT_FACT_KEY: payload},
         scope=fact.scope or "personal",
         shared_with=tuple(fact.shared_with or ()),
         trusted_actor_id=trusted_actor_id,

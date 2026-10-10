@@ -304,7 +304,7 @@ def _snapshot_db_contains_profile(db_path: Path, profile_id: str) -> bool:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
-            for table in ("profiles", "atomic_facts", "memories", "graph_nodes"):
+            for table in ("profiles", "atomic_facts", "memories", "graph_nodes", "media_items"):
                 if table not in tables:
                     continue
                 cols = {
@@ -336,6 +336,21 @@ def _snapshot_db_contains_profile(db_path: Path, profile_id: str) -> bool:
     return False
 
 
+def _is_media_snapshot(db_path: Path) -> bool:
+    """True for a copy of media.db (images and documents)."""
+    if not Path(db_path).name.startswith("media"):
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        try:
+            return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                "AND name='media_items'").fetchone() is not None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
 def erase_profile_from_snapshot(db_path: Path, profile_id: str) -> dict[str, int]:
     """Delete all *profile_id* rows from a snapshot SQLite file.
 
@@ -343,6 +358,10 @@ def erase_profile_from_snapshot(db_path: Path, profile_id: str) -> dict[str, int
     refuse to mark the restore complete when personal data cannot be purged.
     """
     deleted: dict[str, int] = {}
+    if _is_media_snapshot(db_path):  # vectors and originals need the media store's own scrub
+        from superlocalmemory.media.erasure import scrub_snapshot
+
+        return scrub_snapshot(db_path, profile_id)
     # isolation_level=None → autocommit so VACUUM can run outside any transaction.
     conn = sqlite3.connect(str(db_path))
     conn.isolation_level = None
