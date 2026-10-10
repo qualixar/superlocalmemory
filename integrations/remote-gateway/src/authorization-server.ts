@@ -48,7 +48,7 @@ export const authorizationServer=new OAuthAuthorizationServer<AuthorizationEnv>(
  defaultResource:MCP_RESOURCE,
  authorizeEndpoint:AUTH_ISSUER+'/authorize',tokenEndpoint:AUTH_ISSUER+'/oauth/token',
  clientRegistrationEndpoint:AUTH_ISSUER+'/oauth/register',
- scopesSupported:['slm:read','slm:write','slm:session','slm:connect'],
+ scopesSupported:['slm:read','slm:write','slm:session','slm:mesh','slm:media','slm:connect'],
  accessTokenTTL:3600,refreshTokenTTL:GRANT_IDLE_TTL_S,
  // A grant in use slides forward on every refresh; one left unused for 30 days expires.
  refreshTokenIdleTTL:GRANT_IDLE_TTL_S,

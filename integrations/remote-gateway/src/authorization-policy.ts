@@ -1,8 +1,9 @@
 import type {AuthRequest} from '@cloudflare/workers-oauth-provider';
+import {GRANT_SCOPE_ORDER} from './grant.ts';
 export const AUTH_ISSUER='https://auth.superlocalmemory.com';
 export const MCP_RESOURCE='https://mcp.superlocalmemory.com/mcp';
 export const OWNER_RESOURCE=AUTH_ISSUER+'/owner';
-const MEMORY_SCOPES=new Set(['slm:read','slm:write','slm:session']);
+const MEMORY_SCOPES=new Set<string>(GRANT_SCOPE_ORDER);
 /** Resource-bound checks after the maintained provider has validated client and callback. */
 export function validateAuthorizationRequest(request:AuthRequest):boolean {
  if(!request||request.issuer!==AUTH_ISSUER||request.responseType!=='code'||request.codeChallengeMethod!=='S256'||typeof request.codeChallenge!=='string'||!/^[-A-Za-z0-9_]{43}$/.test(request.codeChallenge)||typeof request.state!=='string'||!request.state||request.state.length>1024||!Array.isArray(request.scope)||new Set(request.scope).size!==request.scope.length)return false;
@@ -18,7 +19,13 @@ export function memoryAuthorizationRequest(request:AuthRequest):AuthRequest|null
 }
 export function selectedScopes(requested:readonly string[],ceiling:{read:boolean;write:boolean;session:boolean}):string[]{
  if(!ceiling.read||!requested.includes('slm:read'))return [];
- return requested.filter(s=>s==='slm:read'||s==='slm:write'&&ceiling.write||s==='slm:session'&&ceiling.session);
+ // Mesh and media have no connection-level flag: the laptop's own key decides, so they pass through when requested.
+ return requested.filter(s=>s==='slm:read'||s==='slm:write'&&ceiling.write||s==='slm:session'&&ceiling.session||s==='slm:mesh'||s==='slm:media');
+}
+/** What the owner ticked on the consent page: read is always on, every other scope only by its own box. */
+export function ticked(requested:readonly string[],field:(name:string)=>string|null):string[]{
+ const boxes:Record<string,string>={'slm:write':'write','slm:session':'session','slm:mesh':'mesh','slm:media':'media'};
+ return requested.filter(s=>s==='slm:read'||(s in boxes&&field(boxes[s]!)==='yes'));
 }
 /** Fetch exactly GitHub's identity endpoint: never trust caller names or token payloads. */
 export async function verifyGithubIdentity(accessToken:string,fetcher:typeof fetch=fetch):Promise<string>{

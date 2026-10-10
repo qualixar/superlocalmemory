@@ -46,9 +46,9 @@ def test_images_off_lists_no_media_tool_and_keeps_the_counts(monkeypatch):
     server, profiles = _load(monkeypatch, False)
     assert not (MEDIA_TOOLS & server._ESSENTIAL_TOOLS)
     assert not (MEDIA_TOOLS & profiles._PROFILE_DEFINITIONS["full"])
-    assert len(server._ESSENTIAL_TOOLS) == 56
-    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 56
-    assert len(profiles._PROFILE_DEFINITIONS["power"]) == 68
+    assert len(server._ESSENTIAL_TOOLS) == 57
+    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 57
+    assert len(profiles._PROFILE_DEFINITIONS["power"]) == 69
     assert server._ESSENTIAL_TOOLS == profiles._PROFILE_DEFINITIONS["full"]
 
 
@@ -56,8 +56,8 @@ def test_images_on_lists_the_four_tools_in_default_and_full(monkeypatch):
     server, profiles = _load(monkeypatch, True)
     assert MEDIA_TOOLS <= server._ESSENTIAL_TOOLS
     assert MEDIA_TOOLS <= profiles._PROFILE_DEFINITIONS["full"]
-    assert len(server._ESSENTIAL_TOOLS) == 60
-    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 60
+    assert len(server._ESSENTIAL_TOOLS) == 61
+    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 61
     assert server._ESSENTIAL_TOOLS == profiles._PROFILE_DEFINITIONS["full"]
 
 

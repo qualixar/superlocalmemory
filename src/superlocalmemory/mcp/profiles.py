@@ -75,8 +75,8 @@ _PROFILE_CODE: frozenset[str] = _PROFILE_CORE | _PROFILE_BRAIN | _PROFILE_KINDS 
     "report_outcome", "report_feedback",
 })
 
-_PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 8
-    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
+_PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 9
+    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
 })
 
@@ -118,9 +118,9 @@ _PROFILE_FULL: frozenset[str] = frozenset({
     # and a view is a convenience over recall, which core already has.
     "run_view", "manage_view",
     # prestage_context remains registered but deliberately raw-server-only.
-}) | _PROFILE_FULL_MESH | _PROFILE_KINDS | _media_tools_if_enabled()  # 56 (+4 while images are on)
+}) | _PROFILE_FULL_MESH | _PROFILE_KINDS | _media_tools_if_enabled()  # 57 (+4 while images are on)
 
-_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 68
+_PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 69
     "get_version", "get_mode", "health", "consistency_check", "recall_trace",
     "get_lifecycle_status", "set_retention_policy", "compact_memories",
     "get_behavioral_patterns", "audit_trail", "quantize", "get_retention_stats",
@@ -128,7 +128,7 @@ _PROFILE_POWER: frozenset[str] = _PROFILE_FULL | frozenset({  # 68
     # now that it is a default-visibility surface, not a power-only one.
 })
 
-_PROFILE_MESH: frozenset[str] = _PROFILE_FULL_MESH  # 8
+_PROFILE_MESH: frozenset[str] = _PROFILE_FULL_MESH  # 9
 
 # Canonical name → frozenset mapping.  "whole" is intentionally absent —
 # it maps to the raw server (all tools, D-2 LOCKED).
