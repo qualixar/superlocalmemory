@@ -15,9 +15,9 @@ def test_the_link_is_never_rewritten_even_when_a_host_string_occurs_inside_it(mo
 
 
 def test_text_around_the_link_is_still_redacted(monkeypatch):
-    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("secretuser",))
-    out = remote_redaction.redact_text(f"secretuser /Users/secretuser/a/b.png {LINK} secretuser")
-    assert LINK in out and "secretuser" not in out.replace(LINK, "") and "/Users" not in out
+    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("alice",))
+    out = remote_redaction.redact_text(f"alice /Users/alice/a/b.png {LINK} alice")
+    assert LINK in out and "alice" not in out.replace(LINK, "") and "/Users" not in out
 
 
 def test_other_links_and_malformed_tokens_are_not_exempt(monkeypatch):
