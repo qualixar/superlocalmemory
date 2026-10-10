@@ -70,8 +70,11 @@ def _resolve(store: Any) -> tuple[Any, bool]:
         raise _refuse(_OFF)
     from superlocalmemory.runtimes.media_env import media_env
 
-    if media_env().status().state != "ready":
-        raise _refuse("The document tools are not installed yet.")
+    state = media_env().status().state
+    if state != "ready":
+        from superlocalmemory.media.readiness import setup_message
+
+        raise _refuse(setup_message(state))
     opened = open_media_store()
     if opened is None:
         raise _refuse(_OFF)

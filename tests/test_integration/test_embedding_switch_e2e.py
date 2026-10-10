@@ -43,6 +43,18 @@ from tests.test_integration.test_per_request_profile_e2e import (
 
 pytest.importorskip("sqlite_vec")
 
+from tests.helpers.env_capabilities import (
+    NO_VECTOR_SEARCH_REASON,
+    vector_search_available,
+)
+
+# The fixtures build stores with sqlite-vec loaded. An interpreter whose sqlite3
+# cannot load extensions (the python.org builds on macOS) has the package but
+# cannot use it, which an import check does not see.
+pytestmark = pytest.mark.skipif(
+    not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON,
+)
+
 RUN = uuid.uuid4().hex[:6].upper()
 #: model -> (dimension, which marker the probe query lands on)
 MODELS = {"stub-old": (768, "ALPHAMARK"), "stub-new": (384, "BETAMARK"),

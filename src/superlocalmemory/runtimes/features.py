@@ -144,12 +144,16 @@ def _start_install(managed: ManagedEnv) -> None:
         _install_thread.start()
 
 
+_NO_EXTENSIONS = ("Images and documents need a Python that can load SQLite extensions, and this one "
+                  "can't. Run SLM on a Python built with them (Homebrew, python.org or uv-managed).")
+
+
 def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | None = None,
                  data_root: str | Path | None = None) -> dict[str, Any]:
     """Turn images and documents on: save the choice, create media.db, start the install."""
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    from superlocalmemory.media import open_media_store
+    from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
     try:
         data = read_features(data_root)
@@ -159,6 +163,11 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
         store = open_media_store(create=True, data_root=_root(data_root))
         if store is not None:
             store.close()
+    except MediaVectorsUnavailable as exc:
+        logger.warning("could not turn on images and documents: %s", exc)
+        _roll_back_enable(data_root)
+        return {**media_feature_status(data_root, env=env), "enabled": False,
+                "error": _NO_EXTENSIONS}
     except (OSError, sqlite3.Error, ImportError) as exc:
         logger.warning("could not turn on images and documents: %s", exc)
         _roll_back_enable(data_root)
@@ -209,6 +218,41 @@ def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
     return media_feature_status(data_root, env=managed)
 
 
+def enable_sources(*, source: str, data_root: str | Path | None = None) -> bool:
+    """Turn folder sources on and create media.db (where the folder tables live).
+
+    Called only when a person confirms a folder; returns False when it could not be saved.
+    """
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {SOURCES}")
+    from superlocalmemory.media import open_media_store
+
+    try:
+        data = read_features(data_root)
+        data["sources"] = {"enabled": True, "enabled_at": datetime.now(timezone.utc).isoformat(),
+                           "choice_source": source}
+        _write_features(data_root, data)
+        store = open_media_store(create=True, data_root=_root(data_root))
+        if store is not None:
+            store.close()
+    except (OSError, sqlite3.Error, ImportError) as exc:
+        logger.warning("could not turn on folder sources: %s", exc)
+        return False
+    return True
+
+
+def disable_sources(*, data_root: str | Path | None = None) -> None:
+    """Turn folder sources off. Nothing already saved is removed."""
+    if not features_path(data_root).exists():
+        return
+    data = read_features(data_root)
+    data["sources"]["enabled"] = False
+    try:
+        _write_features(data_root, data)
+    except OSError as exc:
+        logger.warning("could not save the switch: %s", exc)
+
+
 def apply_requested(*, source: str = "npm", env: ManagedEnv | None = None,
                     data_root: str | Path | None = None) -> dict[str, Any] | None:
     """Act once on a request the installer recorded; the install runs in this process.
@@ -252,38 +296,3 @@ def restart_required(status: dict[str, Any]) -> bool:
     """On and ready, but this running process has not loaded the media components."""
     return bool(status.get("enabled")) and (status.get("env") or {}).get("state") == "ready" \
         and not _media_loaded.is_set()
-
-
-def enable_sources(*, source: str, data_root: str | Path | None = None) -> bool:
-    """Turn folder sources on and create media.db (where the folder tables live).
-
-    Called only when a person confirms a folder; returns False when it could not be saved.
-    """
-    if source not in SOURCES:
-        raise ValueError(f"source must be one of {SOURCES}")
-    from superlocalmemory.media import open_media_store
-
-    try:
-        data = read_features(data_root)
-        data["sources"] = {"enabled": True, "enabled_at": datetime.now(timezone.utc).isoformat(),
-                           "choice_source": source}
-        _write_features(data_root, data)
-        store = open_media_store(create=True, data_root=_root(data_root))
-        if store is not None:
-            store.close()
-    except (OSError, sqlite3.Error, ImportError) as exc:
-        logger.warning("could not turn on folder sources: %s", exc)
-        return False
-    return True
-
-
-def disable_sources(*, data_root: str | Path | None = None) -> None:
-    """Turn folder sources off. Nothing already saved is removed."""
-    if not features_path(data_root).exists():
-        return
-    data = read_features(data_root)
-    data["sources"]["enabled"] = False
-    try:
-        _write_features(data_root, data)
-    except OSError as exc:
-        logger.warning("could not save the switch: %s", exc)

@@ -16,10 +16,18 @@ import superlocalmemory.cli.setup_wizard as sw
 def test_ollama_available_when_server_responds(monkeypatch):
     import httpx
 
+    # A running server answers /api/tags with its installed models; the
+    # probe reads that list, so a fake without json() was a server that
+    # answered garbage and correctly counted as unreachable.
     class _Resp:
         status_code = 200
 
+        @staticmethod
+        def json():
+            return {"models": [{"name": "llama3.2:latest"}]}
+
     monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(sw.shutil, "which", lambda name: None)
     assert sw._ollama_available() is True
 
 

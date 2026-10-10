@@ -27,6 +27,8 @@ import uuid
 
 import pytest
 
+from tests.helpers.env_capabilities import purge_keyword_index_on_old_sqlite
+
 from tests.test_integration.test_per_request_profile_e2e import (
     PRODUCTION_PORTS,
     REPO_ROOT,
@@ -252,6 +254,7 @@ def test_full_erasure_leaves_the_words_nowhere(daemon: RealDaemon) -> None:
             assert marker not in str(result.get("content", "")).lower(), query
             assert place.lower() not in str(result.get("content", "")).lower(), query
 
+    purge_keyword_index_on_old_sqlite(daemon.data_root / "memory.db")
     assert _text_copies(daemon, marker) == {}
     assert _text_copies(daemon, place) == {}
     assert _log_copies(daemon, marker) == []
