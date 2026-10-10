@@ -55,40 +55,90 @@ describe('Bot messages pane', () => {
         assert.equal(h.window.__pwn, undefined);
     });
 
-    it('mute and unmute POST {muted} with the write credential', async () => {
-        const h = setup({ routes: [['POST', '/api/v3/mesh/peers/p-web/mute', () => ({ json: { ok: true, muted: true } })]] });
+    it('mute and unmute POST {muted} with the write credential, through one toggle button', async () => {
+        const h = setup({ routes: [['POST', '/api/v3/mesh/peers/p-web/mute', () => ({ json: { ok: true } })]] });
         await h.open();
-        h.btn('Mute', h.row('p-web')).click();
+        const row = h.row('p-web');
+        assert.equal(h.btn('Unmute', row), undefined);
+        h.btn('Mute', row).click();
         await flushPromises();
-        h.btn('Unmute', h.row('p-web')).click();
+        assert.equal(h.btn('Mute', row), undefined);
+        h.btn('Unmute', row).click();
         await flushPromises();
         const w = writes(h);
         assert.equal(w[0].url, '/api/v3/mesh/peers/p-web/mute');
         assert.deepEqual(JSON.parse(w[0].body), { muted: true });
         assert.deepEqual(JSON.parse(w[1].body), { muted: false });
         assert.equal(w[0].headers.get('x-install-token'), TOKEN);
+        assert.ok(h.btn('Mute', row));
     });
 
-    it('rename: validates 1-64 printable characters before any request', async () => {
+    it('rename: no input until Rename is clicked, then validates 1-64 printable characters before any request', async () => {
         const h = setup({ routes: [['PATCH', '/api/v3/mesh/peers/p-web', () => ({ json: { ok: true, display_name: 'Ops bot' } })]] });
         await h.open();
         const row = h.row('p-web');
+        assert.equal(row.querySelector('input'), null);
+        h.btn('Rename', row).click();
         const input = row.querySelector('input[type=text]');
+        assert.ok(input);
         for (const bad of ['', '   ', 'x'.repeat(65), 'bell\u0007', 'tab\there']) {
             input.value = bad;
-            h.btn('Rename', row).click();
+            h.btn('Save', row).click();
             await flushPromises();
         }
         assert.equal(writes(h).length, 0);
         assert.match(row.textContent, /1 to 64/);
+        assert.ok(row.querySelector('input'), 'stays in edit mode after a validation error');
         input.value = 'Ops bot';
-        h.btn('Rename', row).click();
+        h.btn('Save', row).click();
         await flushPromises();
         const w = writes(h);
         assert.equal(w.length, 1);
         assert.equal(w[0].method, 'PATCH');
         assert.deepEqual(JSON.parse(w[0].body), { display_name: 'Ops bot' });
-        assert.match(row.textContent, /Ops bot/);
+        assert.equal(row.querySelector('input'), null);
+        assert.equal(row.querySelector('strong').textContent, 'Ops bot');
+        assert.ok(h.btn('Rename', row));
+        assert.ok([...h.pane.querySelectorAll('.od-msg strong')].some(x => x.textContent === 'Ops bot'));
+        assert.ok([...h.pane.querySelectorAll('option')].some(x => x.textContent === 'Ops bot'));
+    });
+
+    it('rename inline: starts with the current name, Enter saves, Escape and Cancel restore without a request', async () => {
+        const h = setup({ routes: [['PATCH', '/api/v3/mesh/peers/p-web', () => ({ json: { ok: true, display_name: 'Via enter' } })]] });
+        await h.open();
+        const row = h.row('p-web');
+        const key = (input, k) => input.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: k, bubbles: true }));
+        h.btn('Rename', row).click();
+        let input = row.querySelector('input[type=text]');
+        assert.equal(input.value, 'app-p-web');
+        assert.equal(h.btn('Rename', row), undefined);
+        input.value = 'Typed';
+        key(input, 'Escape');
+        assert.equal(row.querySelector('input'), null);
+        assert.equal(row.querySelector('strong').textContent, 'app-p-web');
+        h.btn('Rename', row).click();
+        h.btn('Cancel', row).click();
+        assert.equal(row.querySelector('input'), null);
+        assert.equal(writes(h).length, 0);
+        h.btn('Rename', row).click();
+        input = row.querySelector('input[type=text]');
+        input.value = 'Via enter';
+        key(input, 'Enter');
+        await flushPromises();
+        assert.equal(writes(h).length, 1);
+        assert.equal(row.querySelector('strong').textContent, 'Via enter');
+    });
+
+    it('a failed rename keeps the field open and says why', async () => {
+        const h = setup({ routes: [['PATCH', '/api/v3/mesh/peers/p-web', () => ({ status: 422, json: { detail: 'taken' } })]] });
+        await h.open();
+        const row = h.row('p-web');
+        h.btn('Rename', row).click();
+        row.querySelector('input').value = 'Dup';
+        h.btn('Save', row).click();
+        await flushPromises();
+        assert.ok(row.querySelector('input'));
+        assert.match(row.textContent, /taken/);
     });
 
     it('retire confirms, DELETEs, then reloads the list; declining sends nothing', async () => {
@@ -123,6 +173,7 @@ describe('Bot messages pane', () => {
         await h.open();
         h.btn('Mute', h.row('p-web')).click();
         await flushPromises();
+        assert.ok(h.btn('Mute', h.row('p-web')), 'a failed mute leaves the button as it was');
         assert.ok(h.pane.textContent.includes('nope ' + XSS));
         assert.equal(h.pane.querySelectorAll('img').length, 0);
     });
@@ -195,6 +246,12 @@ describe('Bot messages pane', () => {
         assert.match(h.row('0123456789abcdef').querySelector('strong').textContent, /^01234567$/);
     });
 
+    it('a retire button is a quiet danger style, not a plain button', async () => {
+        const h = setup();
+        await h.open();
+        assert.ok(h.btn('Retire', h.row('p-web')).classList.contains('od-peer-retire'));
+    });
+
     it('a hostile peer display name is text, never markup', async () => {
         const m = msg(1, 'p-x', 'web', 'hi'); m.from.display_name = XSS;
         const h = setup({ messages: [m] });
@@ -248,5 +305,157 @@ describe('Bot messages pane', () => {
         const g = setup({ routes: [['GET', '/api/v3/mesh/peers', () => ({ status: 500, json: { detail: 'boom' } })]] });
         await g.open();
         assert.equal(g.pane.querySelectorAll('.od-msg').length, 2);
+    });
+
+    const ago = ms => new Date(Date.now() - ms).toISOString();
+    const named = [
+        peer('id-hermes-0001', { app: 'hermes', display_name: '' }),
+        peer('id-codex-0002', { app: 'codex' }),
+        peer('id-web-0003', { app: 'chat', display_name: 'Browser chat', kind: 'web' })];
+
+    it('message headers show display names, never raw ids, and never an id twice', async () => {
+        const m = msg(1, 'id-codex-0002', 'local', 'ship it', { to: 'id-hermes-0001', sent_at: ago(120000) });
+        const h = setup({ messages: [m], peers: named });
+        await h.open();
+        const head = h.pane.querySelector('.od-msg-head');
+        assert.match(head.textContent, /codex/);
+        assert.match(head.textContent, /hermes/);
+        assert.match(head.textContent, /→/);
+        assert.ok(!/id-codex|id-hermes/.test(head.textContent));
+        assert.equal(head.querySelector('strong').textContent, 'codex');
+    });
+
+    it('receiver falls back to everyone for a broadcast and to a short id for an unknown peer', async () => {
+        const a = msg(2, 'id-codex-0002', 'local', 'all hands', { to: null });
+        const b = msg(1, 'id-codex-0002', 'local', 'who', { to: 'zzzzzzzz-9999-aaaa' });
+        const h = setup({ messages: [a, b], peers: named });
+        await h.open();
+        const heads = [...h.pane.querySelectorAll('.od-msg-head')].map(x => x.textContent);
+        assert.match(heads[0], /everyone/);
+        assert.match(heads[1], /zzzzzzzz/);
+        assert.ok(!/zzzzzzzz-9999/.test(heads[1]));
+    });
+
+    it('a sender chip says this computer or web app', async () => {
+        const w = msg(2, 'id-web-0003', 'web', 'hi', { to: 'id-codex-0002' });
+        const l = msg(1, 'id-codex-0002', 'local', 'yo', { to: 'id-web-0003' });
+        const h = setup({ messages: [w, l], peers: named });
+        await h.open();
+        const [web, loc] = [...h.pane.querySelectorAll('.od-msg-head')];
+        assert.match(web.textContent, /Browser chat/);
+        assert.match(web.querySelector('.od-kind').textContent, /web app/);
+        assert.match(loc.querySelector('.od-kind').textContent, /this computer/);
+    });
+
+    it('sent time is relative, with the full local time in the title', async () => {
+        const cases = [[5000, 'just now'], [120000, '2 min ago'], [3 * 3600000, '3 hours ago'], [2 * 86400000, '2 days ago']];
+        for (const [ms, text] of cases) {
+            const iso = ago(ms);
+            const h = setup({ messages: [msg(1, 'id-codex-0002', 'local', 'x', { sent_at: iso })], peers: named });
+            await h.open();
+            const t = h.pane.querySelector('.od-msg time');
+            assert.equal(t.textContent, text);
+            assert.equal(t.getAttribute('title'), new Date(iso).toLocaleString());
+            assert.ok(!h.pane.querySelector('.od-msg').textContent.includes(iso));
+        }
+    });
+
+    it('long fractional timestamps with an offset still parse, and a junk time degrades to its text', async () => {
+        const base = new Date(Date.now() - 120000).toISOString().replace('Z', '');
+        const h = setup({ messages: [msg(2, 'id-codex-0002', 'local', 'x', { sent_at: base + '948+00:00' }),
+            msg(1, 'id-codex-0002', 'local', 'y', { sent_at: 'not a time' })], peers: named });
+        await h.open();
+        const times = [...h.pane.querySelectorAll('.od-msg time')].map(t => t.textContent);
+        assert.equal(times[0], '2 min ago');
+        assert.equal(times[1], 'not a time');
+    });
+
+    it('the body is the main text and the sender name is bold', async () => {
+        const h = setup({ messages: [msg(1, 'id-codex-0002', 'local', 'the body')], peers: named });
+        await h.open();
+        const card = h.pane.querySelector('.od-msg');
+        assert.equal(card.querySelector('.od-msg-body').textContent, 'the body');
+        assert.equal(card.querySelector('.od-msg-head strong').textContent, 'codex');
+    });
+
+    it('the untrusted-text notice stays at the top, above the filter and messages', async () => {
+        const h = setup({ peers: named });
+        await h.open();
+        const kids = [...h.pane.children];
+        assert.match(kids[0].textContent, /untrusted text/);
+        assert.ok(kids[0].compareDocumentPosition(h.pane.querySelector('.od-msg')) & 4);
+    });
+
+    it('each peer has exactly one of Mute or Unmute, matching what the API says', async () => {
+        const h = setup({ messages: [], peers: [peer('p-a', { app: 'a' }), peer('p-b', { app: 'b', muted: true })] });
+        await h.open();
+        const a = h.row('p-a'); const b = h.row('p-b');
+        assert.ok(h.btn('Mute', a)); assert.equal(h.btn('Unmute', a), undefined);
+        assert.ok(h.btn('Unmute', b)); assert.equal(h.btn('Mute', b), undefined);
+        assert.match(b.textContent, /muted/);
+        assert.ok(!/muted/.test(a.textContent.replace(/Mute/g, '')));
+    });
+
+    it('toggling mute updates the muted tag and label', async () => {
+        const h = setup({ messages: [], peers: [peer('p-a', { app: 'a' })],
+            routes: [['POST', '/api/v3/mesh/peers/p-a/mute', () => ({ json: { ok: true } })]] });
+        await h.open();
+        const a = h.row('p-a');
+        h.btn('Mute', a).click();
+        await flushPromises();
+        assert.ok(a.querySelector('.od-peer-muted'));
+        h.btn('Unmute', a).click();
+        await flushPromises();
+        assert.equal(a.querySelector('.od-peer-muted'), null);
+    });
+
+    it('a peer card shows name, kind chip, a short id and last seen', async () => {
+        const h = setup({ messages: [], peers: [peer('0123456789abcdef-long', { app: 'a', kind: 'web', last_seen: ago(180000) })] });
+        await h.open();
+        const r = h.row('0123456789abcdef-long');
+        assert.match(r.querySelector('.od-kind').textContent, /web app/);
+        assert.match(r.textContent, /0123456789ab/);
+        assert.ok(!r.textContent.includes('0123456789abcdef-long'));
+        const seen = r.querySelector('time');
+        assert.match(r.textContent, /Last seen 3 min ago/);
+        assert.ok(seen.getAttribute('title'));
+    });
+
+    it('retire confirms with the peer name and a consequence, then removes the card', async () => {
+        const h = setup({ messages: [], peers: [peer('p-a', { app: 'a' })],
+            routes: [['DELETE', '/api/v3/mesh/peers/p-a', () => { h.state.peers = []; return { json: { ok: true } }; }]] });
+        await h.open();
+        h.btn('Retire', h.row('p-a')).click();
+        await flushPromises();
+        assert.equal(h.confirms.length, 1);
+        assert.equal(h.confirms[0].confirmLabel, 'Retire');
+        assert.equal(h.row('p-a'), null);
+    });
+
+    it('the filter is a labelled, design-system select', async () => {
+        const h = setup({ peers: named });
+        await h.open();
+        const sel = h.pane.querySelector('select');
+        assert.ok(sel.classList.contains('od-select'));
+        const label = h.pane.querySelector(`label[for="${sel.id}"]`);
+        assert.ok(sel.id);
+        assert.equal(label.textContent, 'Show messages from');
+        assert.equal(sel.options[0].textContent, 'All peers');
+        assert.ok([...sel.options].some(o => o.textContent === 'codex'));
+    });
+
+    it('Refresh keeps the chosen filter and picks up new names and mute state', async () => {
+        const h = setup({ peers: [peer('p-a', { app: 'a' })] });
+        await h.open();
+        const sel = h.pane.querySelector('select');
+        sel.value = 'p-a';
+        sel.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+        await flushPromises();
+        h.state.peers = [peer('p-a', { app: 'a', display_name: 'Fresh', muted: true })];
+        h.btn('Refresh').click();
+        await flushPromises();
+        assert.equal(h.pane.querySelector('select').value, 'p-a');
+        assert.equal(h.row('p-a').querySelector('strong').textContent, 'Fresh');
+        assert.ok(h.btn('Unmute', h.row('p-a')));
     });
 });

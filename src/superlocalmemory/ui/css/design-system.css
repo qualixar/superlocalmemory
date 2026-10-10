@@ -807,10 +807,44 @@ button { font-family: inherit; }
 .od-media-section { margin-top: 16px; }
 .od-media-list { list-style: none; padding: 0; margin: 8px 0; }
 .od-media-list li { padding: 8px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-.od-msg { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.od-msg { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 10px; background: var(--card); }
 .od-msg.untrusted { border-style: dashed; background: var(--warn-soft); }
-.od-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.od-msg-list { list-style: none; padding: 0; margin: 12px 0; }
+.od-msg-head { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.od-msg-from { font-weight: 700; font-size: 14.5px; color: var(--fg); }
+.od-msg-to { font-weight: 600; color: var(--fg-2); }
+.od-msg-time { margin-left: auto; font-size: 12.5px; white-space: nowrap; }
+.od-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; font-size: 15px; line-height: 1.55; color: var(--fg); }
 .od-peer-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; }
+/* Bot messages: filter bar, styled select, peer cards */
+.od-botmsg-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 20px 0 8px; }
+.od-botmsg-label { font-size: 13px; font-weight: 600; }
+.od-select {
+  appearance: none; -webkit-appearance: none; height: 32px; min-width: 160px;
+  padding: 0 32px 0 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--fg);
+  background-color: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-2) 50%), linear-gradient(135deg, var(--fg-2) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 13px, calc(100% - 12px) 13px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  transition: border-color .15s;
+}
+.od-select:hover { border-color: var(--border-strong); }
+.od-select:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.od-peer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 10px; }
+.od-peer-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; }
+.od-peer-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.od-peer-name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.od-peer-meta { font-size: 12.5px; }
+.od-peer-id { font-family: var(--font-mono, ui-monospace, monospace); }
+.od-peer-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.od-peer-edit { display: block; flex: 1 1 100%; min-width: 0; }
+.od-peer-head .od-peer-edit { flex: 1 1 180px; }
+.od-peer-input { width: 100%; padding: 6px 10px; font: inherit; font-size: 14px; color: var(--fg); background: var(--card-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+.od-peer-input:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+.od-peer-note { font-size: 12.5px; }
+.od-peer-note:empty { display: none; }
+.od-peer-retire { margin-left: auto; background: transparent; border-color: transparent; color: var(--danger-text); }
+.od-peer-retire:hover { border-color: var(--danger-text); }
+.od-kind { font-size: 11.5px; }
 
 /* 4.1.25 launch polish: what's-new card (two equal tiles), drop zone, Find a picture, bot steps */
 .od-whatsnew { position: relative; }
