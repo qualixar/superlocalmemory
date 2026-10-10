@@ -45,7 +45,7 @@ In Mode A, core remember and recall make no model-provider call unless you turn 
 ```bash
 npm install -g superlocalmemory   # primary route (Node 18+, Python 3.12+); or: pipx install superlocalmemory
 slm setup                         # pick Mode A to keep everything on this machine
-slm connect cursor                # or claude-code, codex, windsurf, zed ... 12 IDEs
+slm connect cursor                # or codex, windsurf, zed, claude-desktop ... (11 MCP configs; Claude Code uses the plugin)
 ```
 
 npm installs SLM into a package-owned virtual environment. The other primary route is pip in a Python virtual environment you activate: `python3 -m venv .venv`, activate it, then `python -m pip install superlocalmemory`. Repository clone: `./scripts/install.sh install` (macOS, Linux) or `.\scripts\install.ps1 -Action Install` (Windows); see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -108,11 +108,11 @@ A vector store answers "what is similar". AI agent memory must also answer: is t
 
 **1. Governed memory, not a vector store.** Roles per workspace, personal / shared / global scopes with default-deny cross-profile recall, GDPR erasure with HMAC-verifiable receipts, retention rules and a hash-chained audit log. The [governed-memory paper](https://arxiv.org/abs/2608.08253) measures what the governed write path costs. Code: `src/superlocalmemory/access/`, `compliance/`.
 
-**2. A zero-LLM core built on published math.** Five retrieval channels, fusion and the learned ranker run without a language model; the published architecture scored 60.4% on LoCoMo with no LLM anywhere ([benchmarks](#benchmarks)). Fisher-information scoring, sheaf contradiction detection and Langevin lifecycle dynamics added 12.7 points ([architecture paper](https://arxiv.org/abs/2603.14588)).
+**2. A zero-LLM core built on published math.** Six retrieval channels and fusion run without a language model; the published architecture scored 60.4% on LoCoMo with no LLM anywhere ([benchmarks](#benchmarks)). Fisher-information scoring, sheaf contradiction detection and Langevin lifecycle dynamics added 12.7 points ([architecture paper](https://arxiv.org/abs/2603.14588)).
 
 **3. It says "I don't have that."** The [answer check](docs/answer-check.md) decides whether the top results answer the question, on your Mac (Laya) or online (Jev), and recall reports `abstained` instead of a confident wrong answer.
 
-**4. Memory that learns, and cannot quietly get worse.** A Thompson-sampling bandit tunes channel weights and a LightGBM ranker learns from reported outcomes. A retrained ranker is promoted only after a shadow A/B test on live recalls, and rolled back automatically if NDCG@10 drops 2% or more. Code: `learning/shadow_test.py`, `learning/model_rollback.py`.
+**4. Memory that learns, and cannot quietly get worse (opt-in).** With `SLM_RANKING` set, a Thompson-sampling bandit tunes channel weights and a LightGBM ranker learns from reported outcomes. A retrained ranker is promoted only after a shadow A/B test on live recalls, and rolled back automatically if NDCG@10 drops 2% or more over a 200-recall watch window. Off by default, so a fresh install ranks the same way every time. Code: `learning/shadow_test.py`, `learning/model_rollback.py`.
 
 **5. Memory with a sense of time.** Every fact records when it happened and when SLM learned it. Ask what was true last month (`--valid-at`) or what SLM knew before a date (`--known-as-of`). Unused memories fade and lose vector precision ([lifecycle paper](https://arxiv.org/abs/2604.04514)).
 
@@ -132,7 +132,7 @@ SLM is part of Qualixar's AI Reliability Engineering work: agent memory that is 
 |---|---|---|
 | Editor plugins | Claude Code, Codex, VS Code / Copilot, Antigravity, Hermes. Each ships 15 skills, 4 sub-agents and session hooks; the npm package carries every plugin folder | [Plugins](docs/plugins.md), [IDE setup](docs/ide-setup.md), [Hermes](docs/hermes.md) |
 | Any other agent | The universal agent rules: one file that teaches any agent when to recall, what to save and how to keep memory clean. Paste it into `AGENTS.md`, `CLAUDE.md`, `.cursorrules` or the agent's system prompt | [Universal agent rules](plugin-src/rules/AGENTS.md) |
-| `slm connect <ide>` | Writes the MCP config for 12 IDEs, including Cursor, Windsurf, Zed, JetBrains, Gemini CLI and Claude Desktop | [IDE setup](docs/ide-setup.md) |
+| `slm connect <ide>` | Writes the MCP config for 11 editors and apps, including Cursor, Windsurf, Zed, JetBrains, Gemini CLI and Claude Desktop; `slm connect claude-code` points you to the plugin | [IDE setup](docs/ide-setup.md) |
 | MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 9 to 109 tools | [MCP tools](docs/mcp-tools.md) |
 | Framework adapters | LangGraph, LangChain, LlamaIndex, CrewAI, AutoGen, Semantic Kernel, Microsoft Agent Framework, Google ADK, OpenAI Agents | [Framework adapters](docs/framework-adapters.md) |
 | Python SDK and HTTP API | `MemoryEngine` in your code; the local REST API | [API reference](docs/api-reference.md) |
@@ -229,7 +229,7 @@ Connecting an app gives it the tools, not the judgment to use them well. The qui
 
 | Capability | What you get | Docs |
 |---|---|---|
-| Hybrid recall | Semantic, keyword (BM25), temporal, associative (Hopfield) and spreading-activation channels, fused by reciprocal rank and reranked. `slm trace` shows each channel's score | [Recall](docs/recall.md) |
+| Hybrid recall | Semantic, keyword (BM25), entity graph, temporal, associative (Hopfield) and spreading-activation channels, plus a picture channel when pictures are on, fused by reciprocal rank and reranked. `slm trace` shows each channel's score | [Recall](docs/recall.md) |
 | Memory kinds | Nine kinds: fact, event, status, opinion, rule, decision, how-to, plan, correction. "What did we decide" favours decisions | [Memory kinds](docs/memory-kinds.md) |
 | Standing rules | Confirmed rules (up to 10) and decisions (up to 5) load into every new agent session | [Memory kinds](docs/memory-kinds.md#standing-rules-at-session-start) |
 | Replace and correct | `--replaces <id>` retires an old fact, kept and undoable. Edits go through reviewed corrections with rollback | [Corrections](docs/reviewed-corrections.md) |
@@ -241,6 +241,7 @@ Connecting an app gives it the tools, not the judgment to use them well. The qui
 | Code graph | Index a repo, then ask for blast radius, callers, review context and code search by meaning | [MCP tools](docs/mcp-tools.md) |
 | Modes and providers | A: no model calls. B: a model on this machine (Ollama by default, or another local OpenAI-compatible server). C: your own endpoint or a cloud provider. Multilingual embedders work. `slm models` recommends models that fit this computer | [Configuration](docs/configuration.md) |
 | Switch the embedding model | `slm embedder switch MODEL` re-indexes every memory in the background while recall keeps working, then changes over in one step; `status`, `cancel` and `rollback` | [CLI reference](docs/cli-reference.md#embedding-models-and-store-health) |
+| Upgrade memory engine (preview) | With pictures and documents on, `slm embedder upgrade` or the card in Settings moves your memories onto the same on-device model that reads pictures, in the background, with recall working throughout and one-click rollback (the previous engine's vectors stay until you free them). Its similarity thresholds are still being calibrated, so it is opt-in and existing users are never switched automatically | [CLI reference](docs/cli-reference.md#embedding-models-and-store-health) |
 
 Recalled text is untrusted evidence: before it reaches a prompt, secrets are redacted, forged boundary markers neutralised and provenance attached, a defence against prompt injection through memory.
 
@@ -286,7 +287,7 @@ Engineering controls that support a compliance program, not a certification.
 
 **Shared memory with attribution.** Claude Code, Codex, Cursor and Hermes share one store; each memory records its agent (`SLM_AGENT_ID`) and the dashboard shows per-agent activity.
 
-**SLM-Mesh** coordinates sessions on one machine, or several machines with a shared secret: `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`, `mesh_summary`. Messages route across machines; locks and state are per machine. [Multi-machine](docs/multi-machine.md)
+**SLM-Mesh** coordinates sessions on one machine, or several machines with a shared secret: `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`, `mesh_summary`. Messages route across machines; locks and state are per machine. [Multi-machine](docs/multi-machine.md)
 
 <a id="bot-to-bot-messaging"></a>**Bot-to-bot messaging.** Web apps and bots connected through Web access join the same mesh. A web app can list peers (`mesh_peers`), send one named bot a message of up to 4 KB (`mesh_send`), check its inbox (`mesh_inbox`), wait up to 20 seconds for a reply within a turn (`mesh_wait`) and read shared state (`mesh_state`). Locks, events and mesh status stay with the agents on your computer. Each app needs the `slm:mesh` permission ticked when you connect it and `slm remote keys allow <key> mesh` on your computer; a web app may send 200 messages a day, secrets are stripped from what it sends, and every message reaches the receiver labelled as data from another bot, never as instructions. The **Bot messages** tab lists every bot by name, and you can rename, mute or remove any of them. [Host guides and permissions](docs/remote-access/hosts.md#bot-messages-and-the-two-new-permissions)
 
@@ -322,7 +323,7 @@ All of it fails open. [Optimize](docs/optimize-overview.md), [Proxy setup](docs/
 
 - **[Scale Engine](docs/scale-engine.md):** SQLite stays canonical. Optional CozoDB graph and LanceDB vector copies go through prepare, verify, promote and rollback, and serve recall only once they match SQLite.
 - **[Dashboard](docs/DASHBOARD-COVERAGE.md):** `slm dashboard`, with panes including Answer Check, Brain, Knowledge Graph, Governance, Optimize, Mesh Peers, Documents & Images and Bot messages.
-- **Durable writes:** each save moves raw → queryable → enriching → complete with a receipt; a failed step keeps the raw evidence and retries. Saves under heavy load are queued, never refused.
+- **Durable writes:** each save moves raw → queryable → enriching → complete with a receipt; a failed step keeps the raw evidence and retries. Text saves under heavy load are queued, never refused (pictures and documents have their own size and daily limits).
 - **[Operations](docs/troubleshooting.md):** `slm doctor`, `status`, `health`, `restart`, `ops`; stuck operations are listed and resolved.
 - **Store health:** `slm db integrity` reports the store's health; `slm db repair` previews fixes for leftover rows, erased words, unfinished deletes and memories that lost their searchable fact, applies them with `--apply`, and undoes a run with `--undo`. It never brings back anything erased, deleted or withheld. [CLI reference](docs/cli-reference.md#embedding-models-and-store-health)
 
@@ -360,7 +361,7 @@ For stdio clients use `{"command": "slm", "args": ["mcp"]}`.
 | Pictures and documents | Never, for saving and recall: the picture model, OCR and `media.db` are on your computer. A web app gets picture results only with `slm:media` |
 | Remote tool requests and their results | You turn on Web access and add an app. They pass through SLM's connection gateway and that app; the memory database stays on your laptop |
 
-Model downloads, including the picture model when you turn pictures and documents on, send no memory content. Credentials in memory text are redacted on every outbound path. Outbound requests never follow redirects, and forwarded-for headers count only from a proxy you name. See [Security policy](SECURITY.md) and [encryption at rest](docs/SECURITY-encryption-at-rest.md).
+Model downloads, including the picture model when you turn pictures and documents on, send no memory content. Credentials in memory text are redacted on every outbound path. Outbound requests never follow redirects, except a picture or PDF download by link, which follows at most three redirects and checks each one for a public address, and forwarded-for headers count only from a proxy you name. See [Security policy](SECURITY.md) and [encryption at rest](docs/SECURITY-encryption-at-rest.md).
 
 ## Benchmarks
 

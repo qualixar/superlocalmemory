@@ -19,8 +19,10 @@ tools:
   outcomes can inform local ranking, which is off unless you enable it with
   `SLM_RANKING`. Exposure alone is not a positive signal.
 
-SuperLocalMemory is built for **one developer, one laptop, many tools.**
-Team and multi-user memory is a different product (SLM-Mesh).
+SuperLocalMemory is built for **one person's computer and many tools**. On that
+computer it can also serve a small team: roles, company mode with sign-in and scoped
+sharing are built in, and SLM-Mesh lets agents and connected bots message each other.
+It is not a hosted, multi-tenant service.
 
 **Integration surface:** SLM exposes MCP and CLI contracts. Protocol
 compatibility does not by itself prove install, lifecycle, identity, and
